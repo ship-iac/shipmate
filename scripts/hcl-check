@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Check that the checkout's HCL is formatted and its generated code current.
+
+Runs `terramate fmt --check`, then `terramate generate --detailed-exit-code`, always both, from
+the checkout root. Each file `fmt` lists, and each file `generate` reports stale, gets an
+`::error file=<path>::` annotation naming its remedy; then each failing command gets one
+`::error::` summary naming the remedy and the files: `fmt`'s first, so the step output `refusal`
+is the first failing command's summary. A tool exit this cannot read is the generic
+`terramate <subcommand> exited <code>` error with the tool's output under it, and a `terramate`
+that does not start is `terramate <subcommand> did not start` with the OS error under it: never
+exit 0 and never a traceback. Exits 1 when either command failed.
+
+GitHub keeps 10 error annotations per step, so the per-file annotations stop at 10 less the
+summaries, `fmt`'s files first, and every summary keeps its annotation.
+
+`generate` rewrites stale files in the checkout. `detect` uploads nothing from the tree, so that
+is harmless there.
+"""
+
+import posixpath
+import re
+import subprocess
+import sys
+
+from _shipmate import command_data, command_property, named, run_annotated
+
+#: GitHub keeps at most 10 error annotations per step (`doctor`'s `ANNOTATION_CAP`).
+ANNOTATION_CAP = 10
+FMT = ["terramate", "fmt", "--check"]
+GENERATE = ["terramate", "generate", "--detailed-exit-code"]
+_STACK = re.compile(r"- (/.*)")
+_FILE = re.compile(r"\t\[[+~-]\] (.+)")
+_ERROR = "\terror: "
+
+
+def _fmt(code, out):
+    """(summary, [(path, message)]) for `fmt --check`'s file list, or None when it lists none."""
+    paths = [ln for ln in out.splitlines() if ln]
+    if code != 1 or not paths:
+        return None
+    summary = f"{len(paths)} file(s) not formatted; run terramate fmt and commit the result: "
+    return summary + named(paths, 10), [(p, "not formatted; run terramate fmt") for p in paths]
+
+
+def _stale_files(lines):
+    """The repository-relative files of a `generate` report, or [] when a file line comes before
+    any stack line."""
+    stack, files = None, []
+    for line in lines:
+        if m := _STACK.fullmatch(line):
+            stack = m.group(1)
+        elif m := _FILE.fullmatch(line):
+            if stack is None:
+                return []
+            files.append(posixpath.join(stack.lstrip("/"), m.group(1)))
+    return files
+
+
+def _generate(code, out):
+    """(summary, [(path, message)]) for a stale or failed `generate` report, or None when the
+    report holds nothing this reads."""
+    lines = out.splitlines()
+    if code == 2:
+        files = _stale_files(lines)
+        if files:
+            summary = f"{len(files)} generated file(s) stale; run terramate generate and commit "
+            return (
+                summary + f"the result: {named(files, 10)}",
+                [(f, "generated code is stale; run terramate generate") for f in files],
+            )
+    if code == 1:
+        first = next((ln for ln in lines if ln.startswith(_ERROR)), None)
+        if first is not None:
+            reason = first.removeprefix(_ERROR)
+            return f"terramate generate failed; fix the first error it reports: {reason}", []
+    return None
+
+
+def _check(argv, read):
+    """(summary or None, [(path, message)]) of one command."""
+    try:
+        # A fixed argv with no input, run with shell=False.
+        p = subprocess.run(argv, capture_output=True)  # noqa: S603
+    except OSError as e:
+        return f"terramate {argv[1]} did not start; run it locally to see why\n{e}", []
+    if p.returncode == 0:
+        return None, []
+    out = p.stdout.decode("utf-8", "replace")
+    err = p.stderr.decode("utf-8", "replace")
+    found = read(p.returncode, out)
+    if found:
+        return found
+    detail = (err or out).rstrip("\n")
+    summary = f"terramate {argv[1]} exited {p.returncode}; run it locally to see why"
+    return summary + (f"\n{detail}" if detail else ""), []
+
+
+def main():
+    checks = [_check(FMT, _fmt), _check(GENERATE, _generate)]
+    errors = [summary for summary, _ in checks if summary]
+    files = [f for _, found in checks for f in found]
+    for path, message in files[: ANNOTATION_CAP - len(errors)]:
+        sys.stderr.write(f"::error file={command_property(path)}::{command_data(message)}\n")
+    sys.stderr.flush()
+    if errors:
+        raise SystemExit("\n".join("::error::" + e for e in errors))
+
+
+if __name__ == "__main__":
+    run_annotated(main, refusal_output=True)

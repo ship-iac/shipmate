@@ -1147,6 +1147,30 @@ the cause: the backend, credentials or the configuration.
 3. Re-run the failed jobs. The cells download their providers, and the next
    drift or apply cell saves a fresh entry.
 
+### `detect failed: <n> file(s) not formatted`, or `<n> generated file(s) stale`
+
+The held plan comment reads one of these, and the gate's description its first
+140 characters:
+
+```text
+detect failed: 2 file(s) not formatted; run terramate fmt and commit the result: stacks/app/globals.tm.hcl, stacks/dns/globals.tm.hcl
+detect failed: 2 generated file(s) stale; run terramate generate and commit the result: stacks/app/_variables.tf, stacks/dns/_variables.tf
+```
+
+The plan's `detect` job runs `terramate fmt --check` and
+`terramate generate --detailed-exit-code` over the whole repository, unmanaged
+stacks included, and the pull request's head failed one or both. The message
+names the first ten files. Each file also carries its own annotation on the
+`detect` job, up to the ten GitHub keeps per step.
+
+1. Run `terramate fmt` or `terramate generate` (or both) at the repository root.
+2. Commit the result and push. The push re-plans.
+
+When `terramate` itself fails, the message is `terramate fmt exited <code>` or
+`terramate generate exited <code>` with the tool's output, `terramate generate
+failed` with its first error, or `terramate <command> did not start` with the
+error that stopped it. Run the command locally to see the whole output.
+
 ### `shipmate / gate` never goes green
 
 Five distinct causes, in the order worth checking.

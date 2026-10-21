@@ -50,7 +50,7 @@ jobs:
       max_parallel: ${{ steps.matrix.outputs.max_parallel }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
       lost: ${{ steps.matrix.outputs.lost }}
-      refusal: ${{ steps.matrix.outputs.refusal }}
+      refusal: ${{ steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}
       cells: ${{ steps.matrix.outputs.cells }}
       env_order: ${{ steps.matrix.outputs.env_order }}
     steps:
@@ -66,7 +66,7 @@ jobs:
           filter: blob:none
       - uses: $/actions/setup
         with: { tofu: "false" }
-      # Before the two terramate steps, not after: this step is where a fork's pull request is
+      # Before the `hcl-check` step, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
         uses: $/actions/build-matrix
@@ -75,10 +75,8 @@ jobs:
           head-repo: ${{ needs.facts.outputs.head-repo }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
           github-vars: ${{ toJSON(vars) }}
-      - name: fmt check
-        run: terramate fmt --check
-      - name: stale codegen check
-        run: terramate generate --detailed-exit-code
+      - id: checks
+        uses: $/actions/hcl-check
 
   plan:
     needs: [facts, detect]

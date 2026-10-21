@@ -1,0 +1,11 @@
+Code generation report
+
+Successes:
+
+- /stacks/app
+	[~] _variables.tf
+
+- /stacks/dns
+	[~] _variables.tf
+
+Hint: '+', '~' and '-' mean the file was created, changed and deleted, respectively.

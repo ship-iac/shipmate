@@ -6,15 +6,15 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build-matrix``.
 
 Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
-scripts, the workflow-command escaper and the annotated scripts' refusal printer, the secret
-scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
-switch for their console output. It also holds the pull-request number check that ``pr-facts``,
-``reply-comment`` and ``upsert-comment`` share, the head-SHA check and the one check-runs
-listing every reader of a head's checks uses, the ruleset, environment and ``CODEOWNERS``
-readers and the names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json``
-summaries, builds this run's page link, joins a capped list of names and parses a list of cell
-names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
-importing PyYAML only when first called.
+scripts, the workflow-command data and property escapers and the annotated scripts' refusal
+printer, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
+share, and the UTF-8 switch for their console output. It also holds the pull-request number
+check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the head-SHA check and
+the one check-runs listing every reader of a head's checks uses, the ruleset, environment and
+``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
+``cell.json`` summaries, builds this run's page link, joins a capped list of names and parses a
+list of cell names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow
+loader, both importing PyYAML only when first called.
 """
 
 import functools
@@ -182,6 +182,12 @@ def command_data(s):
     """`s` escaped as workflow-command data (`%`, CR, LF): a raw newline in an author-controlled
     name would start a second workflow command."""
     return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def command_property(s):
+    """`s` escaped as a workflow-command property value, such as `file=`: properties escape `:`
+    and `,` too, unlike data, because `,` separates properties and `::` ends them."""
+    return command_data(s).replace(":", "%3A").replace(",", "%2C")
 
 
 #: A refusal output and a fenced reason are cut here: a comment carrying one stays far under its

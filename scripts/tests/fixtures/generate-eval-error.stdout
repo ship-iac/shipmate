@@ -1,0 +1,29 @@
+Code generation report
+
+Failures:
+
+- /stacks/app
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/auth
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/dns
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/platform
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/sandbox/box
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/tenant-a
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/tenant-b
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+- /stacks/workers
+	error: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,17-28: evaluating content: generate_hcl "_variables.tf": partial evaluation failed: /home/runner/work/ex/ex/stacks/root.tm.hcl:34,23-28: eval expression: This object does not have an attribute named "nope".
+
+Hint: '+', '~' and '-' mean the file was created, changed and deleted, respectively.

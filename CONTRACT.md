@@ -1117,8 +1117,8 @@ pair.
 
 Every plan's `detect` still runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
-stacks included. Keep an unmanaged stack formatted and its generated code
-current, or every plan's `detect` fails.
+stacks included, in its `hcl-check` step. Keep an unmanaged stack formatted and
+its generated code current, or every plan's `detect` fails, naming each file.
 
 The stack's open drift Issues close on the next sweep that plans at least one
 cell and planned the default branch's current head, as Issues of a cell no

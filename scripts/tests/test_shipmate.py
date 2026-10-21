@@ -13,6 +13,7 @@ from _shipmate import (
     cell_names,
     check_runs,
     command_data,
+    command_property,
     gate_check,
     is_head_sha,
     is_pr_number,
@@ -275,6 +276,11 @@ def test_check_runs_refuses_a_bad_sha_before_any_call(sha):
 def test_command_data_escapes_percent_cr_and_lf():
     """Mutations: drop any one `replace`; or replace `%` last, which double-escapes `%0D`."""
     assert command_data("a%0Ab\r\nc%") == "a%250Ab%0D%0Ac%25"
+
+
+def test_command_property_also_escapes_colon_and_comma():
+    """Mutation: drop the `,` replacement -- red."""
+    assert command_property("a%b\r\nc:d,e") == "a%25b%0D%0Ac%3Ad%2Ce"
 
 
 def _raising(code):
