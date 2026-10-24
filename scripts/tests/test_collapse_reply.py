@@ -114,8 +114,8 @@ def test_a_failed_listing_warns_and_minimizes_nothing(monkeypatch, capsys, env):
     (`50%` unescaped); drop the one-line join (a second raw line)."""
     assert _main(monkeypatch, fail=(_LIST,)) == (0, [_LIST])
     assert capsys.readouterr().out == (
-        "::warning::could not list the comments of pull request #42; the reply stays: "
-        "command failed (1): gh api | HTTP 502 (50%25)\n"
+        "::warning::could not list the comments of pull request #42; the started reply was not "
+        "collapsed: command failed (1): gh api | HTTP 502 (50%25)\n"
     )
 
 
@@ -138,8 +138,9 @@ def test_a_failed_minimize_warns_and_the_next_match_is_still_minimized(monkeypat
     code, calls = _main(monkeypatch, listing=listing, fail=(_minimize("first"),))
     assert (code, calls) == (0, [_LIST, _minimize("first"), _minimize("second")])
     assert capsys.readouterr().out == (
-        "::warning::could not collapse a started reply on pull request #42: command failed (1): "
-        "gh api | HTTP 502 (50%25)\ncollapsed 1 started reply(ies)\n"
+        "::warning::could not minimize a comment of pull request #42; the started reply was not "
+        "collapsed: command failed (1): gh api | HTTP 502 (50%25)\ncollapsed 1 started "
+        "reply(ies)\n"
     )
 
 

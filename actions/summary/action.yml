@@ -391,7 +391,7 @@ runs:
         elif [ "$result" = "moved" ]; then
           echo "$moved"
         elif [ "$result" = "skipped" ]; then
-          echo "nothing changed, no existing plan comment, no doctor findings, no unmanaged or lost pairs line, not a shipmate plan command; nothing to post"
+          echo "nothing changed, no existing plan comment, no doctor warning outside the settings probes, no unmanaged or lost pairs line, not a shipmate plan command; nothing to post"
         fi
 
     - name: Create apply checks (pending / no-changes)

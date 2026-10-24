@@ -73,7 +73,7 @@ def main():
     try:
         out = run([*listing, "--jq", JQ])
     except SystemExit as exc:
-        _warn(f"could not list the comments of pull request #{pr}; the reply stays: {exc.code}")
+        _warn(f"could not list the comments of pull request #{pr}; {NOT_COLLAPSED}: {exc.code}")
         return
     try:
         ids = matches(
@@ -89,7 +89,9 @@ def main():
         try:
             run(["gh", "api", "graphql", "-f", f"query={MINIMIZE}", "-f", f"id={node}"])
         except SystemExit as exc:
-            _warn(f"could not collapse a started reply on pull request #{pr}: {exc.code}")
+            _warn(
+                f"could not minimize a comment of pull request #{pr}; {NOT_COLLAPSED}: {exc.code}"
+            )
             continue
         collapsed += 1
     print(f"collapsed {collapsed} started reply(ies)")
