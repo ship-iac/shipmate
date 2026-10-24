@@ -2070,8 +2070,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   The way past it is to split the change across several pull requests: the
   matrix is built over `terramate list --changed` from the merge base of the
   pull request's base and head, so a narrower diff is a smaller matrix. A
-  branch behind its base plans only its own changes; it does not plan the
-  base's newer commits. Splitting cannot help when the fan-out comes from a one-line
+  branch behind its base plans only the stacks its own commits change, not
+  stacks only the base changed. A stack both changed still plans the head's
+  tree against state holding the base's applied change, so its plan shows
+  that change reverted: update the branch from the base before applying it.
+  Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
   reduce the number of environments in play. A drift sweep's limit counts the

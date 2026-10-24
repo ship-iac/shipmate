@@ -14,8 +14,9 @@ import json
 import os
 import posixpath
 import re
+import subprocess
 
-from _shipmate import _load, _run, command_data, named, run, run_annotated, write_outputs
+from _shipmate import _load, _run, command_data, named, run_annotated, write_outputs
 
 ec = _load("env-config")
 wv = _load("waves")
@@ -233,21 +234,30 @@ def _list_stacks(all_stacks, base):
 
 def merge_base(base):
     """The merge base of `base` and `HEAD`, which plan detect diffs from, so a branch behind its
-    base plans only its own changes, not the base's newer commits as reverts. A failing
-    `git merge-base`, as when the two share no history, refuses with that cause and its remedy.
+    base plans only the stacks its own commits change. Refuses when the two share no history
+    (exit 1, no output) with that cause and its remedy, and on any other git failure, such as a
+    base missing from the clone, with git's error on one line.
     """
-    try:
-        return run(["git", "merge-base", base, "HEAD"]).strip()
-    except SystemExit:
-        head = _run(["git", "rev-parse", "--short", "HEAD"]).strip()
-        raise SystemExit(
-            "::error::"
-            + command_data(
-                f"the pull request's head {head} shares no history with its base {base}, so "
-                "shipmate cannot tell which stacks the pull request changes. Rebase the branch "
-                "onto the base, or recreate it from the base, and push."
-            )
-        ) from None
+    # Not `_run`: the refusal depends on git's exit status, which `run` folds into its message.
+    # S603/S607: a fixed argv, git from PATH as every other call here.
+    args = ["git", "merge-base", base, "HEAD"]  # noqa: S607
+    p = subprocess.run(args, capture_output=True, encoding="utf-8", errors="replace")  # noqa: S603
+    if p.returncode == 0:
+        return p.stdout.strip()
+    if p.returncode == 1 and not p.stdout.strip():
+        message = (
+            f"the pull request's head shares no history with its base {base}, so shipmate "
+            "cannot tell which stacks the pull request changes. Rebase the branch onto the "
+            "base, or recreate it from the base, and push."
+        )
+    else:
+        error = " ".join(line.strip() for line in p.stderr.splitlines() if line.strip())
+        message = (
+            f"could not resolve the merge base of the pull request's base {base} and its head: "
+            f"{error}. Re-run the workflow; if it fails again, the base commit is not reachable "
+            "from this checkout."
+        )
+    raise SystemExit("::error::" + command_data(message))
 
 
 _METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')
@@ -340,8 +350,9 @@ def lost_env_tags(base, head_envs):
     false positive, which only warns about a stack or a stack / environment pair, never
     refuses.
 
-    A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
-    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs.
+    Plan detect passes a merge base `merge_base` already resolved, and that refuses first when
+    there is none. A direct caller whose `base` shares no merge base with `HEAD` still exits
+    fail-closed: the nonzero `git diff` raises through `_run`'s `::error::`.
 
     One tree-wide `git diff` covers every stack, because a blobless checkout fetches each
     call's blobs lazily, and per-stack pathspecs would grow the command line with the tree. A

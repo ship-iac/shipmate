@@ -523,6 +523,24 @@ def _fake_run(head_sha, diffs, diff_calls, dot=None):
     return fake_run if dot is None else answering_run_graph(fake_run, dot)
 
 
+def _answer_stack_list(monkeypatch, stacks, list_calls):
+    """The changed set answered with `stacks`' paths: by a `_list_stacks` double, or, given
+    `list_calls`, by `_run` answering `terramate list` and appending its argv there while every
+    other argv goes to the `_run` already in place."""
+    if list_calls is None:
+        monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
+        return
+    inner = bm._run
+
+    def list_run(args):
+        if args[:2] != ["terramate", "list"]:
+            return inner(args)
+        list_calls.append(args)
+        return "\n".join(stacks)
+
+    monkeypatch.setattr(bm, "_run", list_run)
+
+
 def _run_main(
     monkeypatch,
     tmp_path,
@@ -543,6 +561,7 @@ def _run_main(
     tag_reads=None,
     dot=None,
     merge_base=None,
+    list_calls=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -568,7 +587,9 @@ def _run_main(
     Each `all_tags` call appends the map it answers to `tag_reads` when one is given.
 
     `merge_base` replaces the merge-base resolution, by default the identity, so a stated
-    base reaches `compute_cells` and the `git diff` unchanged."""
+    base reaches `compute_cells` and the `git diff` unchanged. `list_calls`, with `stacks`,
+    keeps `_list_stacks` real: its `terramate list` argv is appended there and answered with
+    `stacks`' paths."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -622,7 +643,7 @@ def _run_main(
     if stacks is None:
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
     else:
-        monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
+        _answer_stack_list(monkeypatch, stacks, list_calls)
     fallback = bm.run_graph_deps if dot is not None else lambda: {}
     monkeypatch.setattr(bm, "run_graph_deps", graph or fallback)
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
@@ -2687,19 +2708,57 @@ def test_merge_base_is_the_branch_point_of_a_branch_behind_its_base(git_repo):
 
 
 def test_merge_base_refuses_a_head_with_no_common_history(git_repo):
-    """`base` is an orphan commit. Mutation: let `run`'s generic failure through -- red."""
+    """`base` is an orphan commit: `git merge-base` exits 1 with no output. Mutation: answer
+    exit 1 with the other refusal -- red."""
     _commit({"s/stack.tm.hcl": _stack("[]")}, "head")
-    head = _git("rev-parse", "--short", "HEAD").strip()
     _git("checkout", "-q", "--orphan", "other")
     base = _commit({"t/stack.tm.hcl": _stack("[]", "t")}, "orphan")
     _git("checkout", "-q", "main")
     with pytest.raises(SystemExit) as exc_info:
         bm.merge_base(base)
     assert str(exc_info.value) == (
-        f"::error::the pull request's head {head} shares no history with its base {base}, so "
-        "shipmate cannot tell which stacks the pull request changes. Rebase the branch onto the "
-        "base, or recreate it from the base, and push."
+        f"::error::the pull request's head shares no history with its base {base}, so shipmate "
+        "cannot tell which stacks the pull request changes. Rebase the branch onto the base, or "
+        "recreate it from the base, and push."
     )
+
+
+def test_merge_base_names_gits_error_for_a_base_missing_from_the_clone(git_repo):
+    """`git merge-base` exits 128 for an unknown object. Mutation: answer every failure with the
+    no-history refusal -- red."""
+    _commit({"s/stack.tm.hcl": _stack("[]")}, "head")
+    base = "1" * 40
+    with pytest.raises(SystemExit) as exc_info:
+        bm.merge_base(base)
+    assert str(exc_info.value) == (
+        f"::error::could not resolve the merge base of the pull request's base {base} and its "
+        f"head: fatal: Not a valid commit name {base}. Re-run the workflow; if it fails again, "
+        "the base commit is not reachable from this checkout."
+    )
+
+
+def test_detect_lists_changed_stacks_from_the_branch_point(git_repo, monkeypatch):
+    """A branch behind its base, through `main()` with the real `merge_base` and `_list_stacks`:
+    `main` changed `b` after the branch point, the branch changed `a`. Mutation: pass the raw
+    base to `compute_cells` -- `-B` names the base tip."""
+    _commit({"a/stack.tm.hcl": _stack('["env/dev"]', "a")}, "a")
+    point = _commit({"b/stack.tm.hcl": _stack('["env/dev"]', "b")}, "b")
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"a/stack.tm.hcl": _stack('["env/dev"]', "a2")}, "edit a")
+    _git("checkout", "-q", "main")
+    base = _commit({"b/stack.tm.hcl": _stack('["env/dev"]', "b2")}, "edit b")
+    _git("checkout", "-q", "pr")
+    list_calls = []
+    _run_main(
+        monkeypatch,
+        git_repo,
+        {**_PR_ENV, "SHIPMATE_BASE_SHA": base},
+        head_sha=head,
+        stacks={"a": ["env/dev"]},
+        list_calls=list_calls,
+        merge_base=bm.merge_base,
+    )
+    assert list_calls == [["terramate", "list", "--changed", "-B", point]]
 
 
 _LOST_ENV_WARNING = (

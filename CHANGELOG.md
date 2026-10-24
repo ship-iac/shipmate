@@ -8,11 +8,11 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## [Unreleased]
+## Unreleased
 
 ### Fixed
 
-- Plan detect diffs from the merge base of the pull request's base and head, so a branch behind its base no longer plans the base's newer changes as reverts.
+- **A branch behind its base plans only the stacks its own commits change, not stacks only the base changed.** Plan detect diffs from the merge base of the pull request's base and head. A stack both changed still plans against the base's applied state, so its plan shows the base's change reverted: update the branch from the base before applying it.
 
 ## [0.51.0] — 2026-10-21
 
