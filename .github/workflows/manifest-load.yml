@@ -53,6 +53,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/hcl-check@main
       - if: false
+        uses: ship-iac/shipmate/actions/lock-acquire@main
+      - if: false
         uses: ship-iac/shipmate/actions/plan-cell@main
       - if: false
         uses: ship-iac/shipmate/actions/pr-facts@main

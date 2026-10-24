@@ -123,3 +123,29 @@ def test_every_mint_identifies_the_app_with_client_id():
         "every mint must identify the App via `client-id`, threading an "
         f"App-identity value from {sorted(_IDENTITY_VALUES)}: {offenders}"
     )
+
+
+def test_every_mint_names_a_permission():
+    """A mint naming no `permission-*` input is granted every permission the installation holds.
+
+    Mutation: delete every `permission-*` from `actions/dispatch`."""
+    offenders = [
+        label
+        for label, step in _mint_steps()
+        if not any(k.startswith("permission-") for k in step.get("with") or {})
+    ]
+    assert offenders == []
+
+
+#: Every `(file[:job], step id)` mint requesting `contents: write`, which can write refs.
+_CONTENTS_WRITERS = {("actions/lock-acquire/action.yml", "token")}
+
+
+def test_only_the_lock_writers_mint_contents_write():
+    """Mutation: add `permission-contents: write` to `actions/gate-refresh`."""
+    writers = {
+        (label, step.get("id"))
+        for label, step in _mint_steps()
+        if (step.get("with") or {}).get("permission-contents") == "write"
+    }
+    assert writers == _CONTENTS_WRITERS

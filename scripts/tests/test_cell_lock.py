@@ -647,6 +647,27 @@ def test_acquire_locks_every_wave_cell_then_fences(monkeypatch, tmp_path):
     assert gh.drained()
 
 
+def test_acquire_locks_the_union_of_every_level_and_wave(monkeypatch, tmp_path):
+    """Mutation: read only `SHIPMATE_ENVLEVEL0_WAVES` (the other levels' cells stay unlocked)."""
+    cells = [
+        (0, "wave0", AUTH),
+        (1, "wave2", {"stack": "stacks/app", "environment": "stage"}),
+        (2, "wave0", {"stack": "stacks/dns", "environment": "prod"}),
+        (3, "wave7", {"stack": "stacks/edge", "environment": "qa"}),
+    ]
+    gh = Gh().on(TREE_WRITE, json.dumps({"sha": TREE}))
+    env = _waves()
+    for n, wave, cell in cells:
+        sha = str(n + 1) * 40
+        msg = message(PR, cell["environment"], cell["stack"])
+        gh.on(commit_write(cell), commit(sha, msg, LATE))
+        gh.on(ref_write(cl.ref_name(cell["environment"], cell["stack"]), sha), "{}")
+        env[f"SHIPMATE_ENVLEVEL{n}_WAVES"] = json.dumps({wave: [cell]})
+    gh.on(PR_STATE_READ, _pr_state("OPEN"))
+    _main(monkeypatch, tmp_path, "acquire", gh, env)
+    assert gh.drained()
+
+
 @pytest.mark.parametrize(
     ("env", "refusal"),
     [

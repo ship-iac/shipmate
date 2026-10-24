@@ -1,0 +1,59 @@
+name: shipmate lock-acquire
+description: >-
+  Lock every cell of the four env-level wave maps for the pull request through scripts/cell-lock,
+  re-entering locks it already holds, then refuse unless the pull request stayed open while the
+  locks were taken. A refusal releases the locks this run created. Mints its own App token with
+  contents:write and pull-requests:read.
+inputs:
+  envlevel0-waves:
+    description: JSON wave0..wave7 map for env-level 0, from apply-detect.
+    required: true
+  envlevel1-waves:
+    description: JSON wave0..wave7 map for env-level 1, from apply-detect.
+    required: true
+  envlevel2-waves:
+    description: JSON wave0..wave7 map for env-level 2, from apply-detect.
+    required: true
+  envlevel3-waves:
+    description: JSON wave0..wave7 map for env-level 3, from apply-detect.
+    required: true
+  pr-number:
+    description: The pull request the locks are taken for.
+    required: true
+  app-id:
+    description: shipmate App id (repo/org variable).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+outputs:
+  refusal: { description: "The first error of the `::error::` message that failed the step (a refusal or a failed API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.", value: "${{ steps.a.outputs.refusal }}" }
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-contents: write
+        permission-pull-requests: read
+    - name: Acquire the cell locks
+      id: a
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}
+        SHIPMATE_ENVLEVEL1_WAVES: ${{ inputs.envlevel1-waves }}
+        SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
+        SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" acquire

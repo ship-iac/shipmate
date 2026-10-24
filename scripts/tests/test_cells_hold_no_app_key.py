@@ -116,6 +116,7 @@ def test_the_completer_is_the_only_job_naming_the_engine_environment():
 ENGINE_BOUND_JOBS = {
     ("apply-env-level.yml", "complete"),
     ("apply.yml", "review"),
+    ("apply.yml", "lock"),
     ("apply.yml", "summary"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),
