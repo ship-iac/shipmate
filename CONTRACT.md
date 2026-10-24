@@ -1334,8 +1334,8 @@ the report (below), and untitled `::warning::` annotations on its own degrade
 paths, which `docs/troubleshooting.md` §shipmate doctor lists. `shipmate doctor`
 never affects `shipmate / gate`.
 
-Because the report enumerates the guardrails a repository is *missing* — an
-unprotected default branch, an apply environment with no approval rule, an App
+Because the report enumerates the guardrails a repository is *missing* — a
+default branch no ruleset gates, an apply environment with no approval rule, an App
 installation short of the manifest's permissions — the `doctor` route requires
 the commenter's write access (above). A refused commenter gets the refusal
 reply and nothing else happens — no App token is minted, no probe runs, no
