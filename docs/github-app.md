@@ -271,7 +271,9 @@ as above, and step 5 runs in every consumer repository.
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
   `shipmate doctor` sticky report, the apply result comments, and drift
-  issues. The plan matrix job's own `plan / <env> / <stack>` auto check-run stays
+  issues. With the same `pull_requests: write` token it minimizes (collapses
+  as outdated, GraphQL `minimizeComment`) the `github-actions[bot]` started
+  reply once a dispatched plan or apply run posts its result. The plan matrix job's own `plan / <env> / <stack>` auto check-run stays
   on the `github-actions` identity — it's the job's own check-run, not
   something a separate API call creates, so there's nothing for the App to
   author there. On an on-demand plan the App does author a copy of it: a

@@ -1514,8 +1514,9 @@ record's pull request.
 No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
 posted — unless there is already a plan comment to keep current, `doctor`
 raised a warning on that run outside the repository-settings probes, the
-pull request changes a stack with no `env/*` tag, or a `shipmate plan` command
-started the run, any of which still posts one, headlined `⚪ nothing planned` —
+pull request changes a stack with no `env/*` tag, it removes one `env/*` tag
+from a stack that keeps another (the lost pairs line), or a `shipmate plan`
+command started the run, any of which still posts one, headlined `⚪ nothing planned` —
 and the gate goes green over no work.
 The skipped plan job's one check shows its name expression literally,
 `plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped; GitHub

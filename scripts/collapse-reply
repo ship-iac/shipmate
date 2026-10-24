@@ -6,11 +6,11 @@ and `GITHUB_RUN_ID`. Lists the pull request's `github-actions[bot]` comments and
 classifier `OUTDATED`, each one holding a line equal to the started verdict `reply-comment`
 writes for this verb and this run (`matches`). A reply that links no run never matches and stays.
 
-The collapse only decides what a reader sees, so it never fails the caller: a failed listing,
-an unparsable listing line or a failed minimize prints one `::warning::` line naming the pull
-request and exits 0, and a failed minimize still attempts the remaining matches. Prints
-`collapsed N started reply(ies)` once the matches were attempted. Any argument, or a
-`PR_NUMBER` that is not a pull-request number, exits 1 with `::error::` before any `gh` call.
+The collapse only decides what a reader sees, so it never fails the caller: any argument, a
+`PR_NUMBER` that is not a pull-request number (both before any `gh` call), a failed listing, an
+unparsable listing line (quoted, cut to 200 characters) or a failed minimize prints one
+`::warning::` line and exits 0, and a failed minimize still attempts the remaining matches.
+Prints `collapsed N started reply(ies)` once the matches were attempted.
 """
 
 import json
@@ -27,13 +27,15 @@ MINIMIZE = (
     "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) "
     "{ minimizedComment { isMinimized } } }"
 )
+LINE_CUT = 200
+NOT_COLLAPSED = "the started reply was not collapsed"
 
 
 def matches(lines: Iterable[str], verb: str, run_id: str) -> list[str]:
     """The `node_id` of each `{node_id, body}` JSON line whose body has a line equal to the
     started verdict linking run `run_id`, in listing order. A `run_id` that is not a run id
-    matches nothing, because its verdict would be the link-less one. Raises SystemExit on a line
-    that is not such an object."""
+    matches nothing, because its verdict would be the link-less one. Raises ValueError, naming
+    the line cut to `LINE_CUT` characters, on a line that is not such an object."""
     if not is_run_id(run_id):
         return []
     expected = rc.VERDICTS["started"] + rc.started_text(verb, run_id)
@@ -46,7 +48,7 @@ def matches(lines: Iterable[str], verb: str, run_id: str) -> list[str]:
             node, body = comment["node_id"], comment["body"] or ""
             found = expected in body.splitlines()
         except (ValueError, LookupError, TypeError, AttributeError) as exc:
-            raise SystemExit(f"unparseable comment listing line: {line!r}") from exc
+            raise ValueError(repr(line[:LINE_CUT])) from exc
         if found:
             ids.append(node)
     return ids
@@ -59,22 +61,28 @@ def _warn(text):
 
 def main():
     if sys.argv[1:]:
-        sys.exit("::error::usage: collapse-reply")
+        _warn(f"usage: collapse-reply; {NOT_COLLAPSED}")
+        return
     pr = os.environ.get("PR_NUMBER", "")
     # Bound into the API path.
     if not is_pr_number(pr):
-        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr})")
+        _warn(f"PR_NUMBER must be a pull request number (got: {pr}); {NOT_COLLAPSED}")
+        return
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     listing = ["gh", "api", "--paginate", f"repos/{repo}/issues/{pr}/comments?per_page=100"]
     try:
         out = run([*listing, "--jq", JQ])
+    except SystemExit as exc:
+        _warn(f"could not list the comments of pull request #{pr}; the reply stays: {exc.code}")
+        return
+    try:
         ids = matches(
             out.splitlines(),
             os.environ.get("SHIPMATE_REPLY_VERB", ""),
             os.environ.get("GITHUB_RUN_ID", ""),
         )
-    except SystemExit as exc:
-        _warn(f"could not list the comments of pull request #{pr}; the reply stays: {exc.code}")
+    except ValueError as exc:
+        _warn(f"could not parse a comment of pull request #{pr}; {NOT_COLLAPSED}: {exc}")
         return
     collapsed = 0
     for node in ids:

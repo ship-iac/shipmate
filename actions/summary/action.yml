@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. Once an on-demand plan's comment is written, it collapses the started reply that links this run.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an on-demand plan whose comment was created or updated collapses the started reply that links this run.
 inputs:
   pr-number:
     description: Pull request number.
@@ -41,8 +41,8 @@ inputs:
       under a pull-request event those checks are already on the head, and a second copy would
       put two producers behind one check name. gate-state also reads it, with is-draft, to tell
       an autoplan of a draft from a requested plan. "true" also posts the sticky comment when no
-      cell changed, and collapses the started reply that links this run once the comment is
-      written.
+      cell changed, and collapses the started reply that links this run after the gate is
+      written, when the comment was created or updated.
     required: false
     default: ""
   is-draft:
@@ -391,7 +391,7 @@ runs:
         elif [ "$result" = "moved" ]; then
           echo "$moved"
         elif [ "$result" = "skipped" ]; then
-          echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
+          echo "nothing changed, no existing plan comment, no doctor findings, no unmanaged or lost pairs line, not a shipmate plan command; nothing to post"
         fi
 
     - name: Create apply checks (pending / no-changes)

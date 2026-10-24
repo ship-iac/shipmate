@@ -119,13 +119,16 @@ def test_a_failed_listing_warns_and_minimizes_nothing(monkeypatch, capsys, env):
     )
 
 
-def test_an_unparsable_listing_line_warns_and_minimizes_nothing(monkeypatch, capsys, env):
-    """Mutation: skip an unparsable line instead of raising (`this` is minimized)."""
-    listing = _reply("this", "plan", "7777") + "\nnot json\n"
+def test_an_unparsable_listing_line_warns_with_the_line_cut_and_minimizes_nothing(
+    monkeypatch, capsys, env
+):
+    """Mutations: skip an unparsable line instead of raising (`this` is minimized); report it
+    with the listing-failed text; `LINE_CUT = 300` (the whole line is quoted)."""
+    listing = _reply("this", "plan", "7777") + "\nnot json " + "x" * 300 + "\n"
     assert _main(monkeypatch, listing=listing) == (0, [_LIST])
     assert capsys.readouterr().out == (
-        "::warning::could not list the comments of pull request #42; the reply stays: "
-        "unparseable comment listing line: 'not json'\n"
+        "::warning::could not parse a comment of pull request #42; the started reply was not "
+        "collapsed: 'not json " + "x" * 191 + "'\n"
     )
 
 
@@ -140,15 +143,27 @@ def test_a_failed_minimize_warns_and_the_next_match_is_still_minimized(monkeypat
     )
 
 
-@pytest.mark.parametrize("pr", ["abc", "", "0", "1/x"])
-def test_a_value_that_is_not_a_pull_request_number_calls_nothing(monkeypatch, env, pr):
-    """`PR_NUMBER` is bound into the API path. Mutation: drop the check."""
-    assert _main(monkeypatch, pr=pr) == (
-        f"::error::PR_NUMBER must be a pull request number (got: {pr})",
-        [],
+@pytest.mark.parametrize(
+    ("pr", "shown"),
+    [("abc", "abc"), ("", ""), ("0", "0"), ("1/x", "1/x"), ("4\n::error::x", "4 | ::error::x")],
+)
+def test_a_value_that_is_not_a_pull_request_number_warns_and_calls_nothing(
+    monkeypatch, capsys, env, pr, shown
+):
+    """`PR_NUMBER` is bound into the API path; a failed collapse is a warning, never a failed
+    step. Mutations: drop the check (a listing call); `sys.exit` with `::error::` instead of the
+    warning (a nonzero exit); print the value raw (the newline case starts a second command)."""
+    assert _main(monkeypatch, pr=pr) == (0, [])
+    assert capsys.readouterr().out == (
+        f"::warning::PR_NUMBER must be a pull request number (got: {shown}); the started reply "
+        "was not collapsed\n"
     )
 
 
-def test_any_argument_is_refused_before_any_call(monkeypatch, env):
-    """Mutation: delete the argv check."""
-    assert _main(monkeypatch, "x") == ("::error::usage: collapse-reply", [])
+def test_any_argument_warns_before_any_call(monkeypatch, capsys, env):
+    """Mutations: delete the argv check (a listing call); `sys.exit` with `::error::` instead of
+    the warning."""
+    assert _main(monkeypatch, "x") == (0, [])
+    assert capsys.readouterr().out == (
+        "::warning::usage: collapse-reply; the started reply was not collapsed\n"
+    )
