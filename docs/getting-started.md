@@ -481,7 +481,7 @@ on:
         options: [plan, apply, unlock]
         required: true
       environment:
-        description: Target environment (apply and unlock; empty apply = every environment not targeted)
+        description: "Target environment (apply and unlock; empty apply = every environment without apply_mode: targeted)"
         required: false
         default: ''
       ref:

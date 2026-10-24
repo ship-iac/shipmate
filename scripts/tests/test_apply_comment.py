@@ -485,7 +485,7 @@ _EXEMPT_NOTICE = (
     "(review: false in .github/shipmate-config.yml)"
 )
 _NO_REVIEW_NOTICE = (
-    ": no approving review was required, so the review requirement had nothing to enforce"
+    ": no approving review was required, so the default review: true had nothing to enforce"
 )
 
 

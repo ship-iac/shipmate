@@ -2637,14 +2637,15 @@ log text holds every line:
   failed wave or a skipped env-level leaves an environment named here that
   never applied, and the text carries no completion verb.
 - **no review required** — `<env>: no approving review was required, so the
-  review requirement had nothing to enforce`, one per `review: true` environment a `NONE`
-  decision authorized. It has its own cause, so it has its own detect output
-  (`review_not_required_envs`, from both detects) rather than widening
-  `applied_exempt_envs`. It prints in the targeted and the all-environments form, and names
-  only environments with an applied, failed or not-recorded row — apply ran
-  there, so infrastructure may have changed — so a run with no rows never
-  prints it. It states the authorization fact and never that nobody reviewed:
-  a code-owner review can still be required at an approval count of 0.
+  default review: true had nothing to enforce`, one per `review: true`
+  environment a `NONE` decision authorized. It has its own cause, so it has its
+  own detect output (`review_not_required_envs`, from both detects) rather than
+  widening `applied_exempt_envs`. It prints in the targeted and the
+  all-environments form, and names only environments with an applied, failed
+  or not-recorded row — apply ran there, so infrastructure may have changed —
+  so a run with no rows never prints it. It states the authorization fact and
+  never that nobody reviewed: a code-owner review can still be required at an
+  approval count of 0.
 
 Row status is derived from both the per-cell artifact and the real state of
 that cell's `apply / <stack> / <env>` check on the head SHA, which
