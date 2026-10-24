@@ -1520,8 +1520,9 @@ the pull request's head shares no history with its base <sha>, so shipmate canno
 Plan detect diffs from the merge base of the pull request's base and head, and
 `git merge-base` found no common ancestor: the branch was created without the
 base's history, for example from an orphan branch or an unrelated repository.
-The plan refuses before any cell starts and holds the gate with the message,
-cut to 140 characters, as its description.
+The plan refuses before any cell starts. The gate's description is
+`detect failed: ` followed by the start of this refusal, cut to the 140
+characters a commit status holds.
 
 1. Rebase the branch onto the base, or recreate it from the base and re-apply
    its changes.
@@ -1535,14 +1536,17 @@ The `detect` annotation reads:
 could not resolve the merge base of the pull request's base <sha> and its head: <git's error>. Re-run the workflow; if it fails again, the base commit is not reachable from this checkout.
 ```
 
-`git merge-base` failed for a reason other than unrelated histories; git's own
-error follows the colon. The plan refuses before any cell starts and holds the
-gate with the message, cut to 140 characters, as its description.
+`git merge-base` failed for a reason other than unrelated histories. The plan
+refuses before any cell starts. The gate's description is `detect failed: `
+followed by the start of this refusal, cut to the 140 characters a commit status
+holds; git's own error is in the `detect` annotation after the colon.
 
-1. Re-run the workflow, or comment `shipmate plan`.
-2. If it fails again, the base commit is not reachable from the checkout; it
-   may have been force-pushed away from the base branch. Update the branch from
-   the base and push, which re-plans against the current base.
+1. Comment `shipmate plan`, or push. Either starts a run that reads the pull
+   request's current base. Re-running the failed run reuses its event's base
+   SHA, so it helps only against a transient git failure.
+2. If the new plan refuses again, the base commit is not reachable from the
+   checkout; it may have been force-pushed away from the base branch. Update the
+   branch from the base and push.
 
 ### A pull request planned zero cells
 

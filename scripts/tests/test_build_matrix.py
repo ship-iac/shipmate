@@ -57,9 +57,7 @@ def test_raises_above_256_cells():
     assert str(exc_info.value) == (
         "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. "
         "Split the change across several pull requests -- the matrix is built over "
-        "`terramate list --changed`, on a plan from the merge base of the base and head, so "
-        "only the pull request's own commits count. A one-line edit to a shared local module "
-        "correctly "
+        "`terramate list --changed`. A one-line edit to a shared local module correctly "
         "marks every dependent stack changed and is one atomic change by nature; there the "
         "only lever is to reduce the number of environments in play."
     )
