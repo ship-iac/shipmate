@@ -28,7 +28,7 @@ Probes:
 - GitHub Environments exist for every planned env: the <env>-plan/<env>-apply
   pair, or a single shared <env>.
 - protection shape of those: plan envs open, apply envs reviewed, a shared env
-  open and therefore ungated; an apply or shared env without a deployment branch
+  open and therefore unreviewed; an apply or shared env without a deployment branch
   policy warns.
 - `shipmate-engine`: exists, with a branch policy naming the default branch.
 - secrets held by each declared plan environment.
@@ -129,10 +129,10 @@ _SOLE_MAINTAINER_REVIEW = (
 )
 _NO_REQUIRED_REVIEW = (
     "the `pull_request` rule on `{branch}` requires 0 approving reviews, so "
-    "these gated environments can apply without an approving review: {envs}. One is held "
-    "only where a code-owner review is required for the changed files. `gated` can "
+    "these environments under review can apply without an approving review: {envs}. One is "
+    "held only where a code-owner review is required for the changed files. `review` can "
     "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
-    "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
+    "`required_approving_review_count` to 1 or more, or set `review: false` on the "
     "environments meant to apply unreviewed."
 )
 _LAST_PUSH_AT_ZERO = (
@@ -246,13 +246,13 @@ def _review_rule_warnings(ctx):
     configuration with no unforgeable merge-time control at all, so it must not
     read as the sole-maintainer note.
 
-    Count 0 is a finding in its own right while any environment is gated: `gated` only
-    relaxes a review the ruleset requires, so with no count required a gated environment
-    is held only where a code-owner review is required for the changed files. With
-    code-owner review on it is a notice naming the gated environments, since a
+    Count 0 is a finding in its own right while any environment is under review: `review`
+    only relaxes a review the ruleset requires, so with no count required an environment
+    under review is held only where a code-owner review is required for the changed files.
+    With code-owner review on it is a notice naming the environments under review, since a
     non-owner's pull request changing owned files still needs an owner's review; with it
     off it is a warning beside the code-owner warning. It is the sole-maintainer note
-    only when no environment is gated or the default branch's table cannot be read
+    only when no environment is under review or the default branch's table cannot be read
     (`_no_review_findings`). Count 0 with `require_last_push_approval` on is a warning
     whatever else is set: a sole maintainer cannot approve their own last push, so
     cannot merge, and the sole-maintainer note is then omitted.
@@ -342,27 +342,28 @@ _codeowners_warnings.settings = True
 
 
 def _no_review_findings(ctx, branch, code_owner, last_push):
-    """The count-0 finding. Gated environments are every one the default branch's table lists
-    or a cell declares, less its `gated: false` entries.
+    """The count-0 finding. The environments under review are every one the default branch's
+    table lists or a cell declares, less its `review: false` entries.
 
     None are named when that table cannot be read or is invalid: which environments are
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
 
     A NOTICE while code-owner review is on: count 0 with code-owner review is the documented
     sole-maintainer posture (docs/branch-protection.md), not a misconfiguration. A WARNING
-    while it is off. With no gated
-    environment, the sole-maintainer note is omitted while code-owner review is off or
+    while it is off. With no environment under
+    review, the sole-maintainer note is omitted while code-owner review is off or
     last-push approval is on. The names are not escaped here: `_finding_row` escapes the
     whole finding.
     """
     table = _default_branch_table(ctx)
-    gated = []
+    under_review = []
     if table is not None:
         listed = set(table.get("environments", {})) | set(ctx["envs"])
-        gated = sorted(listed - ec.exempt_envs(table))
-    if gated:
+        under_review = sorted(listed - ec.exempt_envs(table))
+    if under_review:
         level = NOTICE if code_owner else WARNING
-        return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
+        envs = _code_spans(under_review)
+        return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=envs))]
     if not code_owner or last_push:
         return []
     return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
@@ -426,7 +427,7 @@ def _bound_names(ctx):
 def _shared_intro(env):
     """Opening clause of a shared-role finding."""
     return (
-        f"GitHub Environment `{env}` (shared between plan and apply by `shared: true` in "
+        f"GitHub Environment `{env}` (shared between plan and apply by `split: false` in "
         f"its `environments.{env}` entry)"
     )
 
@@ -574,7 +575,7 @@ def _env_shape_findings(name, env, data, role):
                     "job that binds the environment and GitHub offers no per-job filter, so "
                     "the plan cells and every drift sweep covering it will not start immediately "
                     f"either. To gate applies only, split it into `{env}-plan` and "
-                    f"`{env}-apply` and remove `shared: true` from its `environments.{env}` entry."
+                    f"`{env}-apply` and remove `split: false` from its `environments.{env}` entry."
                 ),
             )
         )
@@ -1821,14 +1822,14 @@ def _budgeted(groups, head, sep, budget, overflow):
 def _config_defaults(table):
     """The three tolerant defaults, echoed whether they are set or not.
 
-    No absence here is invalid, so no validator can report any of them. `needs` and `explicit`
-    decide what a comment can do, and `max_parallel` how many plan and drift cell jobs run
-    at once.
-    An `explicit` set on no entry applies every environment, including the one a consumer
-    meant to hold back. This is the last moment before the merge at which
+    No absence here is invalid, so no validator can report any of them. `needs` and
+    `apply_mode` decide what a comment can do, and `max_parallel` how many plan and drift cell
+    jobs run at once.
+    An `apply_mode: targeted` set on no entry applies every environment, including the one a
+    consumer meant to hold back. This is the last moment before the merge at which
     reading them costs nothing.
 
-    `gated` gets no line: its absence exempts nothing, which is the safe direction and the
+    `review` gets no line: its absence exempts nothing, which is the safe direction and the
     one a reader already assumes.
     """
     order = ec.env_order(table)
@@ -1854,12 +1855,12 @@ def _config_defaults(table):
         (
             NOTICE,
             _Rendered(
-                f"`explicit: true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
+                f"`apply_mode: targeted` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
                 "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             )
             if envs
-            else "`explicit`: set on no environment, so every environment applies on a bare "
-            "`shipmate apply`, production included.",
+            else "`apply_mode`: no environment is `targeted`, so every environment applies on a "
+            "bare `shipmate apply`, production included.",
         ),
         (
             NOTICE,

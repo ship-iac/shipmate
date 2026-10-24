@@ -243,7 +243,7 @@ def write_table(root, entry):
 
 
 def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, capsys):
-    """A `shared: true` entry is provisioned like any other, tagged or not: its bare
+    """A `split: false` entry is provisioned like any other, tagged or not: its bare
     environment exists before the first pull request tagging a stack into it merges.
 
     Mutation: restore the loop refusing a shared name outside the tag-derived environments.
@@ -725,7 +725,7 @@ def test_repository_level_key_is_deleted(monkeypatch):
 
 
 def test_shared_mode_binds_one_bare_environment(monkeypatch):
-    """An environment whose table entry holds `shared: true` is one bare
+    """An environment whose table entry holds `split: false` is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
     The two suffixed reads are the naming-conflict probe, which in shared mode looks for
@@ -865,12 +865,12 @@ PLAN_RULES_WARNING = (
     "reviewers on `dev-eu-apply` instead."
 )
 SHARED_RULES_WARNING = (
-    "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+    "GitHub Environment `dev-eu` (shared between plan and apply by `split: false` in its "
     "`environments.dev-eu` entry) has protection rules (required_reviewers, wait_timer). A "
     "protection rule gates every job that binds the environment and GitHub offers no per-job "
     "filter, so the plan cells and every drift sweep covering it will not start immediately "
     "either. To gate applies only, split it into `dev-eu-plan` and `dev-eu-apply` and remove "
-    "`shared: true` from its `environments.dev-eu` entry."
+    "`split: false` from its `environments.dev-eu` entry."
 )
 
 
@@ -916,7 +916,7 @@ SPLIT_CONFLICT = (
     (
         "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
         "present. Nothing binds `dev-eu`, so nothing was created or changed for `dev-eu`. "
-        "Delete `dev-eu`, or set `shared: true` in `environments.dev-eu` so the engine "
+        "Delete `dev-eu`, or set `split: false` in `environments.dev-eu` so the engine "
         "binds the bare `dev-eu` instead."
     ),
 )
@@ -927,13 +927,13 @@ SHARED_CONFLICT = (
         "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
         "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, so nothing was created "
         "or changed for `dev-eu`. Delete `dev-eu-plan` and `dev-eu-apply`, or drop "
-        "`shared: true` from `environments.dev-eu`."
+        "`split: false` from `environments.dev-eu`."
     ),
 )
 
 
 def test_a_bare_env_alongside_an_apply_env_is_reported_as_unused(monkeypatch):
-    """Which naming the engine binds depends on the table's `shared` key, so a repository
+    """Which naming the engine binds depends on the table's `split` key, so a repository
     holding both is a state the script must not resolve by guessing: it reports and
     writes nothing.
 
@@ -989,7 +989,7 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
 
 def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypatch):
     """The mirror of the case above, reached by marking a split repository's environment
-    `shared: true`: creating the bare `dev-eu` beside the pair leaves the same unused
+    `split: false`: creating the bare `dev-eu` beside the pair leaves the same unused
     naming behind, so it is refused rather than written.
 
     Mutation: `_unused_naming` returning `[env]` unconditionally, which reads the bare
@@ -1361,7 +1361,7 @@ def _variable_sets(fake):
 
 def test_the_table_decides_which_naming_is_created(monkeypatch, tmp_path):
     """The checkout's `.github/shipmate-config.yml` is the only source of the shared set: an
-    entry holding `shared: true` gets the bare environment and no split pair, and no run
+    entry holding `split: false` gets the bare environment and no split pair, and no run
     writes a variable naming it.
 
     Mutations: `_resolve_shared` returning `set()` without reading the file reddens the
@@ -2843,7 +2843,7 @@ def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(monkeypatch
     reviewers, and the `pull_request` rule is the only apply gate left to judge.
 
     Mutations, each proven: select the reviewer names on `role == "apply"` alone, which a
-    bare shared environment satisfies; drop the `if gated` arm, omitting the item; compare
+    bare shared environment satisfies; drop the `if under_review` arm, omitting the item; compare
     `review_count > 1` in `_review_item`.
     """
     monkeypatch.setattr(onboard, "_run", make_gh(ACTIONS_OK_ROUTES))
@@ -2898,11 +2898,11 @@ def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(
     )
 
 
-def test_an_ungated_environment_is_not_asked_for_reviewers(monkeypatch, capsys, tmp_path):
-    """`gated: false` exempts an environment from the review requirement, so asking for
+def test_a_review_exempt_environment_is_not_asked_for_reviewers(monkeypatch, capsys, tmp_path):
+    """`review: false` exempts an environment from the review requirement, so asking for
     reviewers on it contradicts the table.
 
-    Mutation: drop the `env not in ungated` filter from `_checklist`.
+    Mutation: drop the `e not in exempt` filter from `_checklist`.
     """
     monkeypatch.setattr(onboard, "_run", make_gh(ACTIONS_OK_ROUTES))
     onboard._checklist(
@@ -3413,7 +3413,7 @@ def test_a_table_whose_entries_are_all_tagged_has_no_detail():
 
 def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_path, capsys):
     """It is provisioned before the first pull request tagging a stack into it merges.
-    Otherwise that merge's deploy refuses on a missing `<env>-apply`, or, for a `shared: true`
+    Otherwise that merge's deploy refuses on a missing `<env>-apply`, or, for a `split: false`
     entry, applies in the bare `<env>` its plan auto-created, with no default-branch policy.
 
     Mutation: derive `envs` from `stacks_by_env` alone.
@@ -3432,10 +3432,12 @@ def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_
 
 
 def test_no_tagged_stack_and_no_table_binds_nothing(monkeypatch, tmp_path, capsys):
-    """Mutation: print the empty join, `environments: `."""
+    """Mutations: print the empty join, `environments: `; label the second line `shared:`."""
     _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=({}, {"a": []}))
     assert exc.code == 0
-    assert "environments: (none)" in capsys.readouterr().out.splitlines()
+    lines = capsys.readouterr().out.splitlines()
+    assert "environments: (none)" in lines
+    assert "split false: (none)" in lines
 
 
 UNMANAGED_ITEM = "unmanaged stacks"
@@ -3706,7 +3708,7 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch)
 
 
 def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
-    """Running once without `shared: true` and once with it produces all three environments.
+    """Running once without `split: false` and once with it produces all three environments.
     The second run must not silently bind the bare one: nothing binds the pair in shared
     mode, so the probe runs in shared mode as well.
 

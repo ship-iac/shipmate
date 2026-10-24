@@ -209,7 +209,7 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_a_shared_environment_resolves_the_apply_tier_on_the_plan_path(monkeypatch, tmp_path):
-    """The plan detect passes `plan`, and an entry holding `shared: true` still resolves
+    """The plan detect passes `plan`, and an entry holding `split: false` still resolves
     `aws.apply` and binds the bare environment: one GitHub Environment on both paths means one
     credential on both paths.
 

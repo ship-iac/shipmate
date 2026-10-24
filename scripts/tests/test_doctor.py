@@ -388,7 +388,7 @@ _MISSING_SHARED = (
 _SHARED_UNREVIEWED = (
     doctor.NOTICE,
     (
-        "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+        "GitHub Environment `dev-eu` (shared between plan and apply by `split: false` in its "
         "`environments.dev-eu` entry) has no approval rules (required reviewers or a wait "
         "timer), so pre-merge applies to it are unreviewed, and no reviewer gate is available "
         "while it is shared: a reviewer here would stall the plan cells and every drift sweep "
@@ -428,9 +428,9 @@ def _env_findings(monkeypatch, table, *envs):
 
 
 def test_the_table_selects_the_mode(monkeypatch):
-    """The mode comes from `shared: true` in the environment's table entry, never from
+    """The mode comes from `split: false` in the environment's table entry, never from
     which environments exist: the same bare `dev-eu` is a healthy shared environment under
-    the key and two missing halves without it. `shared: false` reads as absent.
+    the key and two missing halves without it. `split: true` reads as absent.
 
     Mutation: make env-config's `env_names` ignore `shared` and always return the split
     pair -- the shared case reddens; always return the bare shared name -- the other two
@@ -575,11 +575,11 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
 @pytest.mark.parametrize(
     "at_head",
     [CANONICAL, _UNSHARED_TABLE],
-    ids=["key-absent-at-head", "shared-false-at-head"],
+    ids=["key-absent-at-head", "split-true-at-head"],
 )
 def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head):
     """Execution binds from the default branch's table, so on a pull request that removes
-    `shared: true` every run until merge still binds the bare `dev-eu`: that is the
+    `split: false` every run until merge still binds the bare `dev-eu`: that is the
     environment the probes inspect. The table is read with no ref, as `read_table` reads it,
     whatever the event payload names as the default branch.
 
@@ -654,7 +654,7 @@ def test_both_namings_present_report_only_the_selected_namings_gaps(monkeypatch)
 
 
 def test_shared_environment_produces_no_existence_finding(monkeypatch):
-    """The bare name alone under `shared: true` is a supported configuration --
+    """The bare name alone under `split: false` is a supported configuration --
     not a half-created split pair."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", table=_SHARED_TABLE))
     assert doctor._environment_warnings(_ctx()) == []
@@ -935,7 +935,7 @@ def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(
     assert [lvl for lvl, _ in out] == [doctor.NOTICE, doctor.NOTICE]
     policy = next(t for _, t in out if "branch policy" in t)
     assert policy == (
-        "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+        "GitHub Environment `dev-eu` (shared between plan and apply by `split: false` in its "
         "`environments.dev-eu` entry) has a deployment branch policy. On a shared environment "
         "that policy is what scopes which branches may claim its secrets, and it is also what "
         "refuses plan cells whose base ref it does not name. Correct while every pull request "
@@ -1005,13 +1005,13 @@ def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
         (
             doctor.WARNING,
             (
-                "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
+                "GitHub Environment `dev-eu` (shared between plan and apply by `split: false` "
                 "in its `environments.dev-eu` entry) has protection rules "
                 "(required_reviewers). A protection rule gates every job that binds the "
                 "environment and GitHub offers no per-job filter, so the plan cells and "
                 "every drift sweep covering it will not start immediately either. To gate applies "
                 "only, split "
-                "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared: true` from its "
+                "it into `dev-eu-plan` and `dev-eu-apply` and remove `split: false` from its "
                 "`environments.dev-eu` entry."
             ),
         ),
@@ -2805,7 +2805,7 @@ def test_report_escapes_a_hostile_settings_finding():
     assert body.count(doctor.DOCTOR_MARKER) == 1
 
 
-def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
+def test_the_targeted_row_escapes_the_names_and_keeps_the_engine_placeholder():
     """The env names are repository data; `<env>` is the engine's own placeholder, inside a
     code span where an entity shows as written.
 
@@ -2815,7 +2815,7 @@ def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
         {"environments": {"a<b": {"apply_mode": "targeted"}}}
     )
     assert doctor._finding_row(level, text) == (
-        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit: true` on a&lt;b: a bare "
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `apply_mode: targeted` on a&lt;b: a bare "
         "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
     )
 
@@ -3757,17 +3757,17 @@ def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(mon
 
 
 def test_a_runner_without_pyyaml_skips_the_count_zero_review_finding(monkeypatch):
-    """At count 0 the review probe names the gated environments from the default branch's
+    """At count 0 the review probe names the environments under review from the default branch's
     table, which this runner cannot parse: the one PyYAML NOTICE stands in for it.
 
     Mutation: drop `_review_rule_warnings.parses_yaml` -- the unreadable table reads as no
-    gated environment and the sole-maintainer NOTICE follows."""
+    environment under review and the sole-maintainer NOTICE follows."""
     responses = _healthy_responses()
     responses[f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100"] = [
         _gate_rule()[0],
         _pull_request_rule(code_owner=True, count=0),
     ]
-    responses[_CONFIG_ON_DEFAULT] = _wf_file(_GATED_AND_UNGATED_TABLE)
+    responses[_CONFIG_ON_DEFAULT] = _wf_file(_REVIEWED_AND_EXEMPT_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     monkeypatch.setitem(sys.modules, "yaml", None)
     assert doctor.warnings(_ctx()) == [
@@ -4934,7 +4934,7 @@ def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
     assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
 
 
-_GATED_AND_UNGATED_TABLE = """\
+_REVIEWED_AND_EXEMPT_TABLE = """\
 layout: tf_vars
 
 environments:
@@ -4944,7 +4944,7 @@ environments:
     region: eu-west-1
     review: false
 """
-_ALL_UNGATED_TABLE = """\
+_ALL_EXEMPT_TABLE = """\
 layout: tf_vars
 
 environments:
@@ -4960,11 +4960,11 @@ def _no_required_review(envs, level=doctor.NOTICE):
         level,
         (
             f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
-            f"these gated environments can apply without an approving review: {envs}. One is held "
-            "only where a code-owner review is required for the changed files. `gated` can "
-            "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
-            "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
-            "environments meant to apply unreviewed."
+            f"these environments under review can apply without an approving review: {envs}. "
+            "One is held only where a code-owner review is required for the changed files. "
+            "`review` can only relax a review requirement the ruleset sets (docs/hardening.md #3 "
+            "to #5); set `required_approving_review_count` to 1 or more, or set `review: false` "
+            "on the environments meant to apply unreviewed."
         ),
     )
 
@@ -4977,14 +4977,14 @@ def _review_probe(monkeypatch, rules, table, envs=_ENVS):
     return doctor._review_rule_warnings(_ctx(envs=set(envs)))
 
 
-def test_review_rule_count_zero_names_only_the_gated_environments(monkeypatch):
-    """Count 0 with code-owner review on is a notice naming the gated environments only: they
-    are still held on a non-owner's pull request changing owned files.
+def test_review_rule_count_zero_names_only_the_environments_under_review(monkeypatch):
+    """Count 0 with code-owner review on is a notice naming the environments under review only:
+    they are still held on a non-owner's pull request changing owned files.
 
-    Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too.
-    Mutation: emit the gated finding as WARNING unconditionally -- the level differs."""
+    Mutation: drop the `exempt_envs` subtraction -- `sandbox` is named too.
+    Mutation: emit the count finding as WARNING unconditionally -- the level differs."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
-    out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
+    out = _review_probe(monkeypatch, rules, _REVIEWED_AND_EXEMPT_TABLE)
     assert out == [_no_required_review("`dev-eu`")]
 
 
@@ -4992,29 +4992,29 @@ def test_review_rule_count_zero_without_code_owner_review_reports_both(monkeypat
     """Code-owner review off and count 0 are two warnings, in that order.
 
     Mutation: restore the early `return` on `not code_owner` -- the count finding is lost.
-    Mutation: emit the gated finding as NOTICE unconditionally -- the level differs."""
+    Mutation: emit the count finding as NOTICE unconditionally -- the level differs."""
     rules = [_pull_request_rule(code_owner=False, count=0)]
-    out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
+    out = _review_probe(monkeypatch, rules, _REVIEWED_AND_EXEMPT_TABLE)
     assert out == [
         (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
         _no_required_review("`dev-eu`", doctor.WARNING),
     ]
 
 
-def test_review_rule_count_zero_with_every_environment_ungated_is_the_notice(monkeypatch):
-    """No gated environment leaves count 0 the supported sole-maintainer mode.
+def test_review_rule_count_zero_with_every_environment_review_exempt_is_the_notice(monkeypatch):
+    """No environment under review leaves count 0 the supported sole-maintainer mode.
 
-    Mutation: emit the count finding for an empty gated set -- a warning naming nothing."""
+    Mutation: emit the count finding for an empty set under review -- a warning naming nothing."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
-    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE)
+    out = _review_probe(monkeypatch, rules, _ALL_EXEMPT_TABLE)
     assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
 
 
 def test_review_rule_count_zero_with_an_unreadable_table_is_the_notice(monkeypatch):
-    """An unreadable default-branch table names no environment: which are gated is unknown.
+    """An unreadable default-branch table names no environment: which are under review is unknown.
 
     Mutation: treat an unreadable table as an empty one, so every `ctx["envs"]` entry
-    reads as gated -- `dev-eu` is warned about."""
+    reads as under review -- `dev-eu` is warned about."""
 
     def gh(path):
         if path == _CONFIG_ON_DEFAULT:
@@ -5038,22 +5038,23 @@ def test_review_rule_count_zero_with_an_invalid_table_is_the_notice(monkeypatch,
 
 
 def test_review_rule_count_zero_names_a_declared_environment_the_table_lacks(monkeypatch):
-    """An environment only a cell declares is gated: no entry holds `gated: false` for it.
+    """An environment only a cell declares is under review: no entry holds `review: false` for it.
 
     Mutation: drop the union with `ctx["envs"]` -- `prod-us` is not named."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
-    out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE, {"dev-eu", "prod-us"})
+    out = _review_probe(monkeypatch, rules, _REVIEWED_AND_EXEMPT_TABLE, {"dev-eu", "prod-us"})
     assert out == [_no_required_review("`dev-eu`, `prod-us`")]
 
 
 def test_review_rule_count_zero_names_at_most_ten_environments(monkeypatch):
-    """Twelve gated environments: the first ten by name, then a count, so no code span is cut.
+    """Twelve environments under review: the first ten by name, then a count, so no code span
+    is cut.
 
     Mutation: show every name (drop the `[:_ENV_NAME_CAP]` slice) -- all twelve are named.
     Mutation: drop the "and N more" suffix -- the count is missing."""
     envs = {f"env-{i:02}" for i in range(12)}
     rules = [_pull_request_rule(code_owner=True, count=0)]
-    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, envs)
+    out = _review_probe(monkeypatch, rules, _ALL_EXEMPT_TABLE, envs)
     shown = ", ".join(f"`env-{i:02}`" for i in range(10)) + " and 2 more"
     assert out == [_no_required_review(shown)]
 
@@ -5064,14 +5065,14 @@ def test_review_rule_count_zero_escapes_an_environment_name(monkeypatch):
     Mutation: drop `_md_escape` from `_finding_row` -- the `<` renders raw.
     Mutation: escape `|` as `&#124;` in `_md_escape` -- red."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
-    [(level, text)] = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, {"a|b<c"})
+    [(level, text)] = _review_probe(monkeypatch, rules, _ALL_EXEMPT_TABLE, {"a|b<c"})
     assert doctor._finding_row(level, text) == (
         f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} the `pull_request` rule on `{_BRANCH}` requires "
-        "0 approving reviews, so these gated environments can apply without an approving "
+        "0 approving reviews, so these environments under review can apply without an approving "
         "review: `a|b&lt;c`. One is held only where a code-owner review is required for the "
-        "changed files. `gated` can only relax a review requirement the ruleset sets "
+        "changed files. `review` can only relax a review requirement the ruleset sets "
         "(docs/hardening.md #3 to #5); set `required_approving_review_count` to 1 or more, or set "
-        "`gated: false` on the environments meant to apply unreviewed."
+        "`review: false` on the environments meant to apply unreviewed."
     )
 
 
@@ -5083,7 +5084,7 @@ def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):
         _pull_request_rule(code_owner=True, count=0),
         _pull_request_rule(code_owner=True, count=1),
     ]
-    assert _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE) == []
+    assert _review_probe(monkeypatch, rules, _REVIEWED_AND_EXEMPT_TABLE) == []
 
 
 _LAST_PUSH_WARNING = (
@@ -5108,7 +5109,7 @@ def test_review_rule_count_zero_with_last_push_approval_warns(monkeypatch):
     review is on.
 
     Mutation: warn only when code-owner review is also on -- the warning is missing."""
-    out = _review_probe(monkeypatch, [_last_push_rule(False, 0)], _ALL_UNGATED_TABLE)
+    out = _review_probe(monkeypatch, [_last_push_rule(False, 0)], _ALL_EXEMPT_TABLE)
     assert out == [
         (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
         _LAST_PUSH_WARNING,
@@ -5119,10 +5120,10 @@ def test_review_rule_last_push_approval_replaces_the_sole_maintainer_note(monkey
     """The sole-maintainer note calls count 0 supported; with last-push on it is not.
 
     Mutation: keep the sole-maintainer note while last-push fires -- the note is listed."""
-    out = _review_probe(monkeypatch, [_last_push_rule(True, 0)], _ALL_UNGATED_TABLE)
+    out = _review_probe(monkeypatch, [_last_push_rule(True, 0)], _ALL_EXEMPT_TABLE)
     assert out == [_LAST_PUSH_WARNING]
     rules = [_pull_request_rule(code_owner=True, count=0)]
-    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE)
+    out = _review_probe(monkeypatch, rules, _ALL_EXEMPT_TABLE)
     assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
 
 
@@ -5130,7 +5131,7 @@ def test_review_rule_last_push_approval_with_a_required_review_is_silent(monkeyp
     """At count 1 another person approves the last push anyway.
 
     Mutation: drop the count check -- the last-push warning fires."""
-    assert _review_probe(monkeypatch, [_last_push_rule(True, 1)], _ALL_UNGATED_TABLE) == []
+    assert _review_probe(monkeypatch, [_last_push_rule(True, 1)], _ALL_EXEMPT_TABLE) == []
 
 
 _COUNT_WORDS = {
@@ -5341,7 +5342,7 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
         (
             doctor.NOTICE,
             (
-                "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
+                "GitHub Environment `dev-eu` (shared between plan and apply by `split: false` "
                 "in its `environments.dev-eu` entry) holds 1 secret(s) (`AWS_ROLE_ARN`). "
                 "It is the apply environment too, so a plan cell runs the pull request "
                 "branch's own code with everything it releases: any credential held there for "
@@ -5976,7 +5977,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         (
             doctor.NOTICE,
             (
-                "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
+                "`apply_mode: targeted` on prod: a bare `shipmate apply` skips those, and each "
                 "needs its own `shipmate apply <env>`."
             ),
         ),
@@ -6007,14 +6008,14 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     """The report names the values the file does not hold, sorted by key path, beside the
     verdict and never as a finding: in `_config_warnings` the notice would annotate every
     plan run and displace the settings-probe all-clear. The `needs` line shows the resolved
-    predecessor, and the explicit line reads the entry's flag.
+    predecessor, and the targeted line reads the entry's flag.
 
     The roles line reads the plan role from the variable, where `CONFIG_REFERENCES` says a
     run reads it.
 
     Mutations: omit the references notice from `config_status`; stop `_replace` recursing
     into lists -- the `needs` line renders the mapping; or read the old top-level list in
-    `_config_defaults` -- the explicit line reports none.
+    `_config_defaults` -- the targeted line reports none.
     """
     monkeypatch.setenv(
         "SHIPMATE_GITHUB_VARS",
@@ -6064,7 +6065,7 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         (
             doctor.NOTICE,
             (
-                "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
+                "`apply_mode: targeted` on prod: a bare `shipmate apply` skips those, and each "
                 "needs its own `shipmate apply <env>`."
             ),
         ),
@@ -6072,11 +6073,11 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     ]
 
 
-def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
+def test_a_long_needs_or_targeted_list_is_cut_between_env_names():
     """Each defaults line shows the whole env names that fit 400 characters with the count of
     the rest, never part of a name.
 
-    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` -- the last
+    Mutations: render `shown` or the targeted list through `_one_line(..., 400)` -- the last
     name shown is cut mid-text; drop the count from the tail -- the line ends ` …`.
     """
     name = "environment-with-a-long-name-{:02d}".format
@@ -6103,7 +6104,7 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
         (
             doctor.NOTICE,
             (
-                "`explicit: true` on "
+                "`apply_mode: targeted` on "
                 "environment-with-a-long-name-00, environment-with-a-long-name-01, "
                 "environment-with-a-long-name-02, environment-with-a-long-name-03, "
                 "environment-with-a-long-name-04, environment-with-a-long-name-05, "
@@ -6298,8 +6299,8 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
         (
             doctor.NOTICE,
             (
-                "`explicit`: set on no environment, so every environment applies on a bare "
-                "`shipmate apply`, production included."
+                "`apply_mode`: no environment is `targeted`, so every environment applies on a "
+                "bare `shipmate apply`, production included."
             ),
         ),
         _MAX_PARALLEL_UNSET,
@@ -6632,7 +6633,7 @@ _MAX_PARALLEL_UNSET = (
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `needs`, `explicit` and `max_parallel` is valid and takes the default for
+    """A table omitting `needs`, `apply_mode` and `max_parallel` is valid and takes the default for
     each: a bare `shipmate apply` applies every environment -- including the one a consumer
     meant to exclude -- and each matrix runs at most 10 cell jobs at once. Nothing refuses and
     no validator can, so the report says it.
@@ -6653,8 +6654,8 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
         (
             doctor.NOTICE,
             (
-                "`explicit`: set on no environment, so every environment applies on a bare "
-                "`shipmate apply`, production included."
+                "`apply_mode`: no environment is `targeted`, so every environment applies on a "
+                "bare `shipmate apply`, production included."
             ),
         ),
         _MAX_PARALLEL_UNSET,
@@ -6719,12 +6720,12 @@ def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
     # The status section renders too, and below the all-clear rather than instead of it.
     assert doctor.CONFIG_HEADING in body
     assert body.index("no problems found") < body.index(doctor.CONFIG_HEADING)
-    assert "`explicit: true` on prod" in body
+    assert "`apply_mode: targeted` on prod" in body
 
 
 def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     """A repository with a settings problem still gets the table's status: the two sections
-    are independent, and a reader fixing a gate ruleset must not lose the `explicit`
+    are independent, and a reader fixing a gate ruleset must not lose the `apply_mode`
     line because of it. Mutation: render the status only in the `else` branch."""
     responses = _config_responses(CANONICAL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -6734,7 +6735,7 @@ def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     )
     assert "gate rule missing" in body
     assert "no problems found" not in body
-    assert "`explicit: true` on prod" in body
+    assert "`apply_mode: targeted` on prod" in body
 
 
 def test_no_status_section_beside_a_refusal(monkeypatch):
