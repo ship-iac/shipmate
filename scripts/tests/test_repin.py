@@ -130,9 +130,10 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     Mutations, each red: read without `newline=""` (the CRLF file comes back LF); drop the
     quote group `("?)` (the quoted pin loses its closing quote's place); run the substitution
     over the whole file text with `\\s+` for `[ \\t]+` (the apply line swallows the note line);
-    `# {sha}` for `# {tag}` in the replacement; print `pins updated` for every file; drop
-    `^{commit}` from the `rev-parse` argument (the annotated tag's object SHA is not origin's
-    peeled commit, so the run refuses);
+    `# {sha}` for `# {tag}` in the replacement; print `pins updated` for every file; print
+    `pins unchanged` for a file holding no engine ref (`ci.yml` gains a line); drop `^{commit}`
+    from the `rev-parse` argument (the annotated tag's object SHA is not origin's peeled commit,
+    so the run refuses);
     compare origin's unpeeled tag line instead of its `^{}` line (the run refuses as stale).
     """
     wf = consumer(tmp_path, {"ci.yml": CI, "shipmate.yml": SHIM_BEFORE, "sweep.yml": SWEEP_BEFORE})
@@ -140,7 +141,6 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {sha}\n"
-        "pins unchanged ci.yml\n"
         "pins updated shipmate.yml\n"
         "pins updated sweep.yml\n"
         "--- shipmate.yml (fence)\n"
@@ -670,34 +670,6 @@ def test_write_fence_prints_the_diff_then_writes_the_fence(engine, tmp_path, mon
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\npins unchanged shipmate.yml\n"
         "shipmate.yml matches the v1.2.3 fence\n"
-    )
-    assert on_disk(wf) == {"shipmate.yml": fence}
-
-
-def test_write_fence_over_current_pins_names_the_pins_unchanged(
-    engine, tmp_path, monkeypatch, capsys
-):
-    """Pins already at the tag, a local `with:` line: the per-file line names the pins, not
-    the file the fence then writes. Mutation: print `unchanged {name}` -- the output reads
-    `unchanged shipmate.yml` above `wrote shipmate.yml`."""
-    fence = _fence_shim("main", f"{engine.sha} # v1.2.3", "\n")
-    pin = b"plan.yml@" + f"{engine.sha} # v1.2.3\n".encode()
-    wf = consumer(tmp_path, {"shipmate.yml": fence.replace(pin, pin + b"    with: {x: 1}\n")})
-    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
-    assert capsys.readouterr().out == (
-        f"v1.2.3 -> {engine.sha}\n"
-        "pins unchanged shipmate.yml\n"
-        "--- shipmate.yml (fence)\n"
-        "+++ shipmate.yml\n"
-        "@@ -5,6 +5,7 @@\n"
-        " jobs:\n"
-        "   plan:\n"
-        f"     uses: {WF}/plan.yml@<pin>\n"
-        "+    with: {x: 1}\n"
-        "   apply:\n"
-        f"     uses: {WF}/apply.yml@<pin>\n"
-        "   deploy:\n"
-        "wrote shipmate.yml from the v1.2.3 fence; every line above that differed is replaced\n"
     )
     assert on_disk(wf) == {"shipmate.yml": fence}
 

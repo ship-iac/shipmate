@@ -32,7 +32,8 @@ every file as it was:
    is `onboard`'s to report, not this script's.
 
 It then writes each changed file, prints `pins updated <file>` or `pins unchanged <file>` for
-every file it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
+every file holding an engine ref, and prints the diff from the rendered fence to `shipmate.yml`,
+pins masked.
 It does not commit.
 
 `--write-fence`, in any position, then writes the rendered fence over a differing
@@ -218,6 +219,16 @@ def _args():
     return *args, _FLAG in flags
 
 
+def _write_pins(wf, texts, new):
+    """Write each file `new` changed; print a per-file line for each file holding an engine ref."""
+    for name, text in new.items():
+        if text != texts[name]:
+            (wf / name).write_text(text, encoding="utf-8", newline="")
+            print(f"pins updated {name}")
+        elif any(_REF.search(b) for b, _ in _lines(text)):
+            print(f"pins unchanged {name}")
+
+
 def main():
     consumer, tag, write = _args()
     sha, on_origin = _resolve(tag)
@@ -229,12 +240,7 @@ def main():
     _check_refs(wf, texts, new, sha, tag)
     _check_callees(new, sha, tag)
     rendered, plain = _render(new, sha, tag)
-    for name, text in new.items():
-        if text == texts[name]:
-            print(f"pins unchanged {name}")
-        else:
-            (wf / name).write_text(text, encoding="utf-8", newline="")
-            print(f"pins updated {name}")
+    _write_pins(wf, texts, new)
     if SHIM not in new:
         if write:
             print(f"not writing {SHIM}: it is absent")
