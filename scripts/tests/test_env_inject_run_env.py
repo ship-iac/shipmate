@@ -96,8 +96,8 @@ def test_an_absent_name_refuses_saying_unset(report):
     )
 
 
-def test_a_tf_vars_only_name_is_checked():
-    """The table's own `tf_vars` are in the checked set, not only the layout's derived names.
+def test_a_vars_only_name_is_checked():
+    """The environment's own `vars` are in the checked set, not only the layout's derived names.
 
     Mutation: loop over `("TF_VAR_env", "TF_VAR_region", "TF_WORKSPACE")` instead of the table.
     """
@@ -152,7 +152,7 @@ def test_a_name_outside_the_table_is_neither_asked_for_nor_checked():
 
 
 def test_an_empty_table_runs_nothing_even_without_a_stack():
-    """`layout: folder` with no `tf_vars` has nothing to check.
+    """`layout: folder` with no `vars` has nothing to check.
 
     Mutation: delete the `if not table: return`, which refuses on the empty `STACK`.
     """

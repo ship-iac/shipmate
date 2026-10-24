@@ -1587,7 +1587,7 @@ def test_a_plan_passes_no_workload_map(monkeypatch, tmp_path):
 
 def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):
     """`table=` exists to spare a second read, not to skip the checks. `validate_structure`
-    alone does not supply `_check_dry_coverage`, so a supplied `tf_vars`
+    alone does not supply `_check_dry_coverage`, so a supplied `layout: tf_vars`
     table with no entry for a cell's environment would derive neither identity variable and
     the cell would plan undistinguished from every other environment's.
 

@@ -326,7 +326,7 @@ def test_no_line_of_the_apply_comment_is_itself_a_shipmate_command():
     """A line matching the command grammar would make the comment a shipmate command; every
     command it names sits inside backticks.
 
-    Mutation: start the explicit footer line with `shipmate apply <env>` outside backticks --
+    Mutation: start the targeted footer line with `shipmate apply <env>` outside backticks --
     red."""
     cp = load_script("comment-parse")
     rows = [_row(status="not_attempted", apply_text=None), _row(environment="prod")]
@@ -423,8 +423,8 @@ def test_the_short_form_of_an_all_held_run_says_nothing_applied():
     )
 
 
-def test_the_short_form_of_an_empty_queue_keeps_the_explicit_and_skipped_lines():
-    """The bare apply drops explicit envs from `runnable`, so an explicit-only-pending
+def test_the_short_form_of_an_empty_queue_keeps_the_targeted_and_skipped_lines():
+    """The bare apply drops targeted envs from `runnable`, so a targeted-only-pending
     repository is all-levels-empty and carries `excluded_envs` at once: the lines are the only
     sign of it.
 
@@ -434,22 +434,22 @@ def test_the_short_form_of_an_empty_queue_keeps_the_explicit_and_skipped_lines()
     )
     assert body == (
         f"### shipmate apply\n\n🟢 no pending applies {AT}\n\n"
-        "🟡 prod: left pending (explicit), comment `shipmate apply prod`\n"
+        "🟡 prod: left pending (targeted), comment `shipmate apply prod`\n"
         "⚪ staging: skipped, ordered after an environment not fully applying this run"
     )
 
 
 def test_the_footer_lines_of_the_all_environments_form():
-    """One line per environment, in order: explicit, skipped, held, then the `held:` remedy. A
-    held explicit env is listed once, on its held line, with the targeted command a bare apply
-    never replaces; a held env that is not explicit names none. The held line names no single
+    """One line per environment, in order: targeted, skipped, held, then the `held:` remedy. A
+    held targeted env is listed once, on its held line, with the targeted command a bare apply
+    never replaces; a held env that is not targeted names none. The held line names no single
     cause (three decisions hold). No gate line: the `shipmate / gate` status shows that.
 
     Mutation: `needs an approving review` in the held line -- red.
-    Mutation: list every `excluded` env on an explicit line -- `sbx` appears twice, red.
+    Mutation: list every `excluded` env on a targeted line -- `sbx` appears twice, red.
     Mutation: append a `gate: pending until every environment is applied` line -- red."""
     assert ac._footer_parts(["prod", "sbx"], ["stg"], ["dev", "sbx"]) == [
-        "🟡 prod: left pending (explicit), comment `shipmate apply prod`",
+        "🟡 prod: left pending (targeted), comment `shipmate apply prod`",
         "⚪ stg: skipped, ordered after an environment not fully applying this run",
         "⚪ dev: held, the review state does not permit applying",
         (
@@ -480,22 +480,24 @@ def test_the_footer_lines_escape_every_env_name():
     ]
 
 
-_UNGATED_NOTICE = (
-    ": ungated, permitted to apply without an approving review "
-    "(gated: false in .github/shipmate-config.yml)"
+_EXEMPT_NOTICE = (
+    ": review-exempt, permitted to apply without an approving review "
+    "(review: false in .github/shipmate-config.yml)"
 )
-_NO_REVIEW_NOTICE = ": no approving review was required, so gated had nothing to enforce"
+_NO_REVIEW_NOTICE = (
+    ": no approving review was required, so the default review: true had nothing to enforce"
+)
 
 
-def test_the_notices_name_ungated_then_no_review_envs():
-    """The ungated text carries no completion verb: detect derives the set before any wave runs.
-    The no-review text states the authorization fact and never that nobody reviewed.
+def test_the_notices_name_exempt_then_no_review_envs():
+    """The review-exempt text carries no completion verb: detect derives the set before any wave
+    runs. The no-review text states the authorization fact and never that nobody reviewed.
 
-    Mutation: `applied without an approving review` in `_UNGATED` -- red.
+    Mutation: `applied without an approving review` in `_EXEMPT` -- red.
     Mutation: list the no-review envs first -- red."""
     rows = [_row(environment="qa")]
     assert ac.notices(rows, ["dev-eu"], ["qa"]) == [
-        "::notice::dev-eu" + _UNGATED_NOTICE,
+        "::notice::dev-eu" + _EXEMPT_NOTICE,
         "::notice::qa" + _NO_REVIEW_NOTICE,
     ]
 
@@ -518,7 +520,7 @@ def test_no_review_notice_names_an_env_whose_apply_ran(status):
 
 
 def test_the_not_attempted_note_names_the_targeted_env_escaped():
-    """A bare `shipmate apply` cannot retry an explicit env, so a targeted run names its env.
+    """A bare `shipmate apply` cannot retry a targeted env, so a targeted run names its env.
 
     Mutation: build the command without `_md_escape` -- red.
     Mutation: drop the lost-save pointer the note appends without a `state not saved:` note, which a
@@ -865,22 +867,22 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
 
 
 def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
-    """256 applied cells, one per environment, and 256 explicit environments left pending: one
-    explicit line per environment pushes the body past HARD_CAP with no blocked row, and the
+    """256 applied cells, one per environment, and 256 targeted environments left pending: one
+    targeted line per environment pushes the body past HARD_CAP with no blocked row, and the
     compact form names them all on one line. The verdict is 🟢, so no hint follows.
 
     Mutation: restore `and any(r["status"] == "blocked" for r in rows)` on the `_compact` branch
     in `build_comment` -- SystemExit, red.
     Mutation: append a `gate: complete` line to `_footer_parts` -- red."""
     envs = [f"env-{i}" for i in range(256)]
-    explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
+    targeted = [f"targeted-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
         _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     body = ac.build_comment(
-        rows, jobs, RUN_URL, explicit, [], "", "success", head_sha=SHA, order=envs
+        rows, jobs, RUN_URL, targeted, [], "", "success", head_sha=SHA, order=envs
     )
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
@@ -891,22 +893,22 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     ]
     assert lines[260:] == [
         "",
-        "🟡 left pending (explicit): "
-        + ", ".join(explicit)
+        "🟡 left pending (targeted): "
+        + ", ".join(targeted)
         + "; comment `shipmate apply <env>` for each",
     ]
 
 
 def test_the_compact_footer_lines_group_every_disposition():
     """One line per disposition, environments comma-separated, in the per-environment order; the
-    held line names no single cause and lists the explicit held envs for their command.
+    held line names no single cause and lists the targeted held envs for their command.
 
-    Mutation: delete the `held_explicit` clause in `_grouped_lines` -- red.
+    Mutation: delete the `held_targeted` clause in `_grouped_lines` -- red.
     Mutation: append a `gate: pending until every environment is applied` line -- red."""
     assert ac._footer_parts(
         ["prod", "prod-us", "sbx"], ["stg", "uat"], ["dev", "sbx"], compact=True
     ) == [
-        "🟡 left pending (explicit): prod, prod-us; comment `shipmate apply <env>` for each",
+        "🟡 left pending (targeted): prod, prod-us; comment `shipmate apply <env>` for each",
         "⚪ skipped, ordered after an environment not fully applying this run: stg, uat",
         (
             "⚪ held, the review state does not permit applying: dev, sbx; once the hold clears, "
@@ -1590,7 +1592,7 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
     for i in range(1, wv.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
-    for kind in ("EXCLUDED", "SKIPPED", "REVIEW_HELD", "APPLIED_UNGATED", "REVIEW_NOT_REQUIRED"):
+    for kind in ("EXCLUDED", "SKIPPED", "REVIEW_HELD", "APPLIED_EXEMPT", "REVIEW_NOT_REQUIRED"):
         monkeypatch.setenv(f"SHIPMATE_{kind}_ENVS", "")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
@@ -1874,10 +1876,10 @@ def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
     ]
 
 
-def _all_envs_main_env(monkeypatch, tmp_path, row_env, ungated, no_review):
+def _all_envs_main_env(monkeypatch, tmp_path, row_env, exempt, no_review):
     """`_main_env` for the all-environments form with one applied `stacks/app` cell in `row_env`, an
     empty (readable) checks file so stdout holds only what `main` prints, and the five env sets:
-    `sbx` explicit, `stg` skipped, `prod` held, then `ungated` and `no_review`."""
+    `sbx` targeted, `stg` skipped, `prod` held, then `exempt` and `no_review`."""
     cells = tmp_path / "cells"
     _write_cell(cells, "x", "stacks-app", _cell(environment=row_env))
     checks = tmp_path / "checks.jsonl"
@@ -1887,7 +1889,7 @@ def _all_envs_main_env(monkeypatch, tmp_path, row_env, ungated, no_review):
     monkeypatch.setenv("SHIPMATE_EXCLUDED_ENVS", json.dumps(["sbx"]))
     monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", json.dumps(["stg"]))
     monkeypatch.setenv("SHIPMATE_REVIEW_HELD_ENVS", json.dumps(["prod"]))
-    monkeypatch.setenv("SHIPMATE_APPLIED_UNGATED_ENVS", json.dumps(ungated))
+    monkeypatch.setenv("SHIPMATE_APPLIED_EXEMPT_ENVS", json.dumps(exempt))
     monkeypatch.setenv("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS", json.dumps(no_review))
 
 
@@ -1895,7 +1897,7 @@ def _all_envs_body(row_env):
     return (
         f"### shipmate apply\n\n🟢 1 applied {_MAIN_AT}\n\n#### {row_env}: 1 cell, 1 applied\n\n"
         f'🟢 stacks/app: applied <a href="{_MAIN_RUN}">logs</a>\n\n'
-        "🟡 sbx: left pending (explicit), comment `shipmate apply sbx`\n"
+        "🟡 sbx: left pending (targeted), comment `shipmate apply sbx`\n"
         "⚪ stg: skipped, ordered after an environment not fully applying this run\n"
         "⚪ prod: held, the review state does not permit applying\n"
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
@@ -1907,32 +1909,32 @@ def test_main_reads_every_env_set_under_its_own_name(monkeypatch, tmp_path, caps
     """Five inputs are JSON arrays of env names with one shape, so a crossed read in main renders
     a plausible comment, or notice, naming the wrong environments for the wrong reason.
 
-    Mutation: swap the `SHIPMATE_REVIEW_HELD_ENVS` and `SHIPMATE_APPLIED_UNGATED_ENVS` reads in
+    Mutation: swap the `SHIPMATE_REVIEW_HELD_ENVS` and `SHIPMATE_APPLIED_EXEMPT_ENVS` reads in
     main -- red.
     Mutation: read `SHIPMATE_REVIEW_NOT_REQUIRED_ENVS` under another name -- the qa notice is
     gone, red."""
     _all_envs_main_env(monkeypatch, tmp_path, "qa", ["dev-eu"], ["qa"])
     assert _main_body(tmp_path) == _all_envs_body("qa")
     assert capsys.readouterr().out == (
-        f"::notice::dev-eu{_UNGATED_NOTICE}\n::notice::qa{_NO_REVIEW_NOTICE}\n"
+        f"::notice::dev-eu{_EXEMPT_NOTICE}\n::notice::qa{_NO_REVIEW_NOTICE}\n"
     )
 
 
 def test_main_prints_the_audit_notices_escaped_and_the_comment_carries_neither(
     monkeypatch, tmp_path, capsys
 ):
-    """The ungated and no-review environments go to the step log as `::notice::` workflow
+    """The review-exempt and no-review environments go to the step log as `::notice::` workflow
     commands, not into the comment, and the comment carries no gate line either. Env names are
     author-controlled, so a `%`, CR or LF in one is escaped as workflow-command data: raw, a
     newline would start a second workflow command.
 
-    Mutation: drop `command_data` from the ungated notice in `notices` -- red.
+    Mutation: drop `command_data` from the review-exempt notice in `notices` -- red.
     Mutation: drop `command_data` from the no-review notice in `notices` -- red.
     Mutation: append a `gate: complete` line to `_footer_parts` -- red."""
     _all_envs_main_env(monkeypatch, tmp_path, "q%2\r", ["u%1\n::error::x"], ["q%2\r"])
     assert _main_body(tmp_path) == _all_envs_body("q%2 ")
     assert capsys.readouterr().out == (
-        f"::notice::u%251%0A::error::x{_UNGATED_NOTICE}\n::notice::q%252%0D{_NO_REVIEW_NOTICE}\n"
+        f"::notice::u%251%0A::error::x{_EXEMPT_NOTICE}\n::notice::q%252%0D{_NO_REVIEW_NOTICE}\n"
     )
 
 
@@ -1974,10 +1976,10 @@ def test_a_partly_applied_run_with_waiting_cells_is_never_green():
 
 
 def test_each_waiting_cell_names_the_remedy_its_blocker_needs():
-    """A held blocker clears with a review, and a held explicit one then names its
+    """A held blocker clears with a review, and a held targeted one then names its
     `shipmate apply`; a blocker in a `needs`-skipped environment never names its
     `shipmate apply`, since a targeted apply would bypass `needs`, and its remedy holds whether a
-    predecessor is held or not applied; any other blocker, an explicit one included, names it.
+    predecessor is held or not applied; any other blocker, a targeted one included, names it.
     Waiting cells keep their own lines below the dispositions.
 
     Mutation: render waiting under `skipped` (add the waiting envs to `skipped` in
@@ -1986,7 +1988,7 @@ def test_each_waiting_cell_names_the_remedy_its_blocker_needs():
     `shipmate apply dev`, red.
     Mutation: drop the `skipped` test from it -- the skipped blocker names `shipmate apply stg`,
     red.
-    Mutation: drop the held-and-explicit test from it -- the `ops` blocker names no command,
+    Mutation: drop the held-and-targeted test from it -- the `ops` blocker names no command,
     red."""
     waiting = [
         _waits("stacks/a", "qa", "stacks/dns", "dev"),
@@ -1999,7 +2001,7 @@ def test_each_waiting_cell_names_the_remedy_its_blocker_needs():
     )
     assert body == (
         f"### shipmate apply\n\n⚪ nothing applied, environments are held for review {AT}\n\n"
-        "🟡 prod: left pending (explicit), comment `shipmate apply prod`\n"
+        "🟡 prod: left pending (targeted), comment `shipmate apply prod`\n"
         "⚪ stg: skipped, ordered after an environment not fully applying this run\n"
         "⚪ dev: held, the review state does not permit applying\n"
         "⚪ ops: held, the review state does not permit applying; once it clears, comment "
@@ -2039,14 +2041,14 @@ def test_the_waiting_lines_escape_every_name():
 
 
 def test_the_compact_form_keeps_every_blocker_and_its_remedy():
-    """256 explicit environments push the body past HARD_CAP, as in the 256-environment test;
+    """256 targeted environments push the body past HARD_CAP, as in the 256-environment test;
     the waiting cells over three blockers group to one line per blocker, each with its remedy,
     the cells waiting on it in order.
 
     Mutation: drop the blocker from the compact line (`⚪ waiting ({remedy}): ...`) -- red.
     Mutation: leave `waiting` out of `dispositions` in `build_comment` -- red."""
     envs = [f"env-{i}" for i in range(256)]
-    explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
+    targeted = [f"targeted-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
         _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
@@ -2056,18 +2058,18 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
         _waits("stacks/a", "qa", "stacks/dns", "dev"),
         _waits("stacks/b", "qa", "stacks/net", "stg"),
         _waits("stacks/c", "qa", "stacks/dns", "dev"),
-        _waits("stacks/d", "uat", "stacks/edge", explicit[0]),
+        _waits("stacks/d", "uat", "stacks/edge", targeted[0]),
     ]
     body = ac.build_comment(
-        rows, jobs, RUN_URL, explicit, ["stg"], "", "success", ["dev"], SHA, waiting
+        rows, jobs, RUN_URL, targeted, ["stg"], "", "success", ["dev"], SHA, waiting
     )
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
     assert lines[:4] == ["### shipmate apply", "", f"⚪ 256 applied, 4 waiting {AT}", ""]
     assert lines[260:] == [
         "",
-        "🟡 left pending (explicit): "
-        + ", ".join(explicit)
+        "🟡 left pending (targeted): "
+        + ", ".join(targeted)
         + "; comment `shipmate apply <env>` for each",
         "⚪ skipped, ordered after an environment not fully applying this run: stg",
         "⚪ held, the review state does not permit applying: dev",
@@ -2084,8 +2086,8 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
             "which must apply first, including any held for review): stacks/b / qa"
         ),
         (
-            "⚪ waiting on stacks/edge / explicit-environment-000-eu-west-1-prod (apply it first "
-            "with `shipmate apply explicit-environment-000-eu-west-1-prod`): stacks/d / uat"
+            "⚪ waiting on stacks/edge / targeted-environment-000-eu-west-1-prod (apply it first "
+            "with `shipmate apply targeted-environment-000-eu-west-1-prod`): stacks/d / uat"
         ),
         "",
         HINT,

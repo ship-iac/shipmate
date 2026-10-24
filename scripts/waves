@@ -130,7 +130,7 @@ def pad_waves(waves):
 def blocked_envs(order, unavailable, envs):
     """Envs in `envs` with an unavailable env among their transitive
     predecessors (per `order`). The bare-apply path skips these with a notice:
-    their ordering precondition cannot be met this run (an explicit env
+    their ordering precondition cannot be met this run (a targeted env
     upstream was excluded), exactly like a failed predecessor level.
 
     `order` comes from `env-config`'s `env_order` on a table that passed `validate`."""

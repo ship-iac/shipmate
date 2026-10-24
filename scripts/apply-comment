@@ -6,8 +6,8 @@ keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
 the expected-cell set (per-env-level waves JSON), the head SHA,
 the excluded/skipped/held envs (bare form only), the waiting cells (both forms)
-and the ungated and no-review envs, and writes a fresh comment.md -- this comment is
-never upserted, unlike the plan sticky comment. The ungated and no-review envs go to
+and the review-exempt and no-review envs, and writes a fresh comment.md -- this comment is
+never upserted, unlike the plan sticky comment. The review-exempt and no-review envs go to
 stdout, the step log, as `notices` annotations, not into the comment.
 
 DO NOT refactor this and summary-comment into one renderer with a
@@ -69,9 +69,9 @@ def _bold_cell(row):
 
 def _not_attempted_note(rows, env_name):
     """The 'apply checks stay pending' note when a row is not attempted, parameterized on the
-    targeted environment: a bare `shipmate apply` excludes explicit envs
-    (`explicit: true` in `.github/shipmate-config.yml`), so it cannot retry one — the note must
-    name the targeted form. env_name is author-controlled and escaped.
+    named environment: a bare `shipmate apply` excludes targeted envs
+    (`apply_mode: targeted` in `.github/shipmate-config.yml`), so it cannot retry one — the note
+    must name the targeted form. env_name is author-controlled and escaped.
 
     The retry applies every pending cell it covers, a cell whose state was not saved
     included. With a `state not saved:` note the retry waits for those cells' recovery. The
@@ -510,38 +510,38 @@ def _esc(envs):
     return [sc._md_escape(e) for e in envs]
 
 
-def _held_line(env, explicit):
+def _held_line(env, targeted):
     line = f"⚪ {env}: held, the review state does not permit applying"
-    return f"{line}; once it clears, comment `shipmate apply {env}`" if explicit else line
+    return f"{line}; once it clears, comment `shipmate apply {env}`" if targeted else line
 
 
-_UNGATED = (
-    "ungated, permitted to apply without an approving review "
-    "(gated: false in .github/shipmate-config.yml)"
+_EXEMPT = (
+    "review-exempt, permitted to apply without an approving review "
+    "(review: false in .github/shipmate-config.yml)"
 )
-_NO_REVIEW = "no approving review was required, so gated had nothing to enforce"
+_NO_REVIEW = "no approving review was required, so the default review: true had nothing to enforce"
 
 
-def notices(rows, applied_ungated, review_not_required):
-    """One `::notice::` workflow command per environment in `applied_ungated` (an all-environments
+def notices(rows, applied_exempt, review_not_required):
+    """One `::notice::` workflow command per environment in `applied_exempt` (an all-environments
     set: the caller passes it empty in the targeted form, as apply.yml reads it from the
     bare-apply detector only) and per environment in `review_not_required` that has an applied,
     failed or unrecorded row, where infrastructure may have changed, so a run with no rows
     names none. Env names are author-controlled, so `command_data`-escaped.
 
-    An ungated notice is the audit trail an apply permitted by `gated: false` under a
+    A review-exempt notice is the audit trail an apply permitted by `review: false` under a
     REVIEW_REQUIRED decision leaves: `reviewDecision` is a live value with no history, so once
     the review lands nothing in the run tells an apply that waited for it from one that did not.
     It carries no completion verb for the named env -- detect derives the set from `runnable`,
     before any wave runs, so a failed wave or a skipped env-level leaves an env named there that
     never applied.
 
-    `review_not_required` names gated envs a null (`NONE`) decision authorized: the pull
-    request's review state required none, so `gated` enforced nothing. It is a different cause
-    from `applied_ungated`, so it gets its own text, which states the authorization fact and
+    `review_not_required` names `review: true` envs a null (`NONE`) decision authorized: the pull
+    request's review state required none, so `review` enforced nothing. It is a different cause
+    from `applied_exempt`, so it gets its own text, which states the authorization fact and
     never that nobody reviewed -- a code-owner review can still be required at count 0."""
     ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
-    lines = [f"::notice::{command_data(e)}: {_UNGATED}" for e in applied_ungated]
+    lines = [f"::notice::{command_data(e)}: {_EXEMPT}" for e in applied_exempt]
     return lines + [
         f"::notice::{command_data(e)}: {_NO_REVIEW}" for e in review_not_required if e in ran
     ]
@@ -551,7 +551,7 @@ def _waiting_remedy(env, held, skipped, excluded):
     """What clears a waiting cell's blocker in `env`. A targeted apply ignores `needs`, so a
     blocker in a `needs`-skipped environment never gets its `shipmate apply` command; a
     predecessor it waits on may itself be held, so that remedy names both causes. A held
-    explicit blocker needs the approval and then its command. The targeted form passes
+    targeted blocker needs the approval and then its command. The targeted form passes
     `held`, `skipped` and `excluded` empty, so its remedy is always `shipmate apply <env>`."""
     if env in held and env in excluded:
         return f"it is held until the pull request is approved, then comment `shipmate apply {env}`"
@@ -571,7 +571,7 @@ def _dispositions(excluded, skipped, held, waiting=()):
     the targeted form, because apply.yml reads them from the bare-apply detector only.
     `waiting` comes from both forms: each cell becomes an escaped
     `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`. A held env
-    that is also explicit is listed under `held` only, and under `held_explicit` for its
+    that is also targeted is listed under `held` only, and under `held_targeted` for its
     command."""
     excluded, skipped, held = _esc(excluded), _esc(skipped), _esc(held)
     cells = [
@@ -584,23 +584,23 @@ def _dispositions(excluded, skipped, held, waiting=()):
         for w in waiting
     ]
     return {
-        "explicit": [e for e in excluded if e not in held],
+        "targeted": [e for e in excluded if e not in held],
         "skipped": skipped,
         "held": held,
-        "held_explicit": [e for e in held if e in excluded],
+        "held_targeted": [e for e in held if e in excluded],
         "waiting": [(*c, _waiting_remedy(c[3], held, skipped, excluded)) for c in cells],
     }
 
 
 def _per_env_lines(d):
     lines = [
-        f"🟡 {e}: left pending (explicit), comment `shipmate apply {e}`" for e in d["explicit"]
+        f"🟡 {e}: left pending (targeted), comment `shipmate apply {e}`" for e in d["targeted"]
     ]
     lines += [
         f"⚪ {e}: skipped, ordered after an environment not fully applying this run"
         for e in d["skipped"]
     ]
-    lines += [_held_line(e, e in d["held_explicit"]) for e in d["held"]]
+    lines += [_held_line(e, e in d["held_targeted"]) for e in d["held"]]
     if d["held"]:
         lines.append(_HELD_REMEDY)
     return lines + [
@@ -625,9 +625,9 @@ def _grouped_lines(d):
     then one per blocker of the waiting cells."""
     g = {k: ", ".join(v) for k, v in d.items() if k != "waiting"}
     lines = []
-    if g["explicit"]:
+    if g["targeted"]:
         lines.append(
-            f"🟡 left pending (explicit): {g['explicit']}; comment `shipmate apply <env>` for each"
+            f"🟡 left pending (targeted): {g['targeted']}; comment `shipmate apply <env>` for each"
         )
     if g["skipped"]:
         lines.append(
@@ -635,9 +635,9 @@ def _grouped_lines(d):
         )
     if g["held"]:
         line = f"⚪ held, the review state does not permit applying: {g['held']}"
-        if g["held_explicit"]:
+        if g["held_targeted"]:
             line += (
-                f"; once the hold clears, comment `shipmate apply <env>` for {g['held_explicit']}"
+                f"; once the hold clears, comment `shipmate apply <env>` for {g['held_targeted']}"
             )
         lines += [line, _HELD_REMEDY]
     return lines + _grouped_waiting(d["waiting"])
@@ -645,21 +645,21 @@ def _grouped_lines(d):
 
 def _footer_parts(excluded, skipped, held=(), waiting=(), compact=False):
     """The lines above the footer: one line per environment for each disposition this run
-    produced (explicit left pending, skipped, held for review) and a `held:` remedy line when
+    produced (targeted left pending, skipped, held for review) and a `held:` remedy line when
     any is held, then one line per waiting cell naming its blocker and the blocker's remedy.
     Only `waiting` comes from both forms; apply.yml reads the other sets from the bare-apply
     detector only. Stack and env names are author-controlled, so `_md_escape`d, a stack
     through `_md_name`. `compact` renders each disposition as one line naming its
     environments comma-separated, and the waiting cells as one line per blocker, with the
     same meanings, for the hard-cap fallback.
-    Applied-ungated and no-review environments are not comment lines: `notices` reports them
+    Applied review-exempt and no-review environments are not comment lines: `notices` reports them
     in the run log, and the `shipmate / gate` status shows the gate's state.
 
     `excluded` can overlap `held`. A held env that is also in `excluded` is
     listed once, on its held line, with its `shipmate apply <env>` command: once
     reviewed, a bare `shipmate apply` still leaves it pending. A held env that
-    is not explicit names no command. The held lines are also cause-agnostic --
-    three decisions hold (REVIEW_REQUIRED on a gated env, CHANGES_REQUESTED,
+    is not targeted names no command. The held lines are also cause-agnostic --
+    three decisions hold (REVIEW_REQUIRED on a `review: true` env, CHANGES_REQUESTED,
     and an unknown or absent decision) and only the run's own detect notice
     carries which one, since the decision never reaches this renderer; the
     `held:` line names every remedy and points there."""
@@ -800,7 +800,7 @@ def main():
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
     for line in notices(
         rows,
-        json.loads(os.environ.get("SHIPMATE_APPLIED_UNGATED_ENVS") or "[]"),
+        json.loads(os.environ.get("SHIPMATE_APPLIED_EXEMPT_ENVS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS") or "[]"),
     ):
         print(line)

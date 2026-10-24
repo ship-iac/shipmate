@@ -51,8 +51,8 @@ def test_a_failure_says_failed_not_refused():
 
 def test_a_notice_carries_the_white_circle_and_no_hint():
     """Mutations: give `notice` the 🔴 circle; pass `hint=True` for every outcome."""
-    assert rc.body("apply", "dev-eu", "notice", "dev-eu: ungated", _RUN_URL) == (
-        f"### shipmate apply dev-eu\n\n⚪ dev-eu: ungated\n\n[comment run]({_RUN_URL})"
+    assert rc.body("apply", "dev-eu", "notice", "dev-eu: review-exempt", _RUN_URL) == (
+        f"### shipmate apply dev-eu\n\n⚪ dev-eu: review-exempt\n\n[comment run]({_RUN_URL})"
     )
 
 

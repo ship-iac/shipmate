@@ -97,7 +97,7 @@ nothing.
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
 organization and repository ids embedded, captured from that sample repository.
 Under the split naming the environment segment reads `dev-us-plan` or
-`dev-us-apply`; an environment with `shared: true` binds the bare `dev-us`, the
+`dev-us-apply`; an environment with `split: false` binds the bare `dev-us`, the
 form this capture shows:
 
 ```
@@ -172,8 +172,8 @@ Beyond the schema:
 - **Workloads in one repository share one OIDC subject per environment**, even
   when their roles sit in different accounts. Every apply cell of `dev-eu` can
   assume every listed workload's apply role, and every plan cell every plan role;
-  in a `shared` environment every cell, plan or apply, can assume every apply
-  role, since a shared identity holds no `aws.plan`. Isolation between
+  in a `split: false` environment every cell, plan or apply, can assume every
+  apply role, since its identity holds no `aws.plan`. Isolation between
   workloads inside one repository rests on review and `CODEOWNERS`; across
   repositories the subject's repository part separates them. `shipmate doctor`
   names the AWS accounts each environment's subject reaches
@@ -223,7 +223,7 @@ runs a cell carries `aws-actions/configure-aws-credentials` itself — after
 `actions/setup`, before the cell action, gated on a role resolving non-empty. It
 reads the role and the region the detect resolved onto the row. That is the
 wave jobs of `apply-env-level.yml` and `unlock.yml`'s unlock job on the apply
-side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
+side, reading `<env>-apply` (or the bare `<env>` under `split: false`), and
 `plan.yml`'s `plan` job and `drift.yml`'s `drift` job on the plan side, reading
 `<env>-plan` (or that same bare `<env>`). A consumer job's only obligation is
 `id-token: write` on itself (see

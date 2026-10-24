@@ -88,7 +88,7 @@ def main():
             "policy, so the apply would run outside every control that environment "
             "is meant to carry. Two ways to fix it: create each environment named "
             "above, or correct the environment's entry in `.github/shipmate-config.yml` so "
-            "the apply binds the environments you did create (`shared: true` binds "
+            "the apply binds the environments you did create (`split: false` binds "
             "the bare <env>, anything else binds <env>-apply)."
         )
     unscoped = [b for b in bindings if existing[b] is None]

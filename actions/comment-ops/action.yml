@@ -32,7 +32,7 @@ outputs:
     # React on accept repeats this expression: a composite step cannot read its action's outputs.
     value: ${{ steps.authz.outputs.authorized == 'true' || steps.planauthz.outputs.authorized == 'true' }}
   environment:
-    description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments) and on the plan route, whose dispatched run carries no environment.
+    description: Parsed target environment; empty for a bare `shipmate apply` (every environment not `targeted`) and on the plan route, whose dispatched run carries no environment.
     value: ${{ steps.authz.outputs.environment }}
   head-sha:
     description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.
@@ -381,7 +381,7 @@ runs:
     - name: Resolve gate configuration
       id: gate
       # Byte-identical to `Gather authorization inputs` below. `Authorize` reads
-      # `ungated_envs` from this step, and a resolve that skips while authorization runs
+      # `exempt_envs` from this step, and a resolve that skips while authorization runs
       # hands it an empty list, which exempts nothing.
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
       # Fatal, deferred: every later step is `success()`-gated, so a hard failure here would
@@ -476,7 +476,7 @@ runs:
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
-        SHIPMATE_GATE_UNGATED_ENVS: ${{ steps.gate.outputs.ungated_envs }}
+        SHIPMATE_GATE_EXEMPT_ENVS: ${{ steps.gate.outputs.exempt_envs }}
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 
@@ -497,7 +497,7 @@ runs:
     # this apply was permitted without a review. It claims permission, never completion: nothing
     # has applied at comment time.
     - name: Report the review exemption
-      if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
+      if: ${{ steps.authz.outputs.review_exemption == 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -505,7 +505,7 @@ runs:
         SHIPMATE_REPLY_VERB: apply
         SHIPMATE_REPLY_ENV: ${{ steps.authz.outputs.environment }}
         SHIPMATE_REPLY_OUTCOME: notice
-        SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what applied."
+        SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: review-exempt, permitted to apply without an approving review (`review: false` in `.github/shipmate-config.yml`). The apply result comment shows what applied."
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"

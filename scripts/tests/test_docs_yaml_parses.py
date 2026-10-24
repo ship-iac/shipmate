@@ -15,6 +15,7 @@ Config fences (`_loader.is_config_fence`) are discovered here and checked by
 """
 
 import re
+from collections import Counter
 
 import pytest
 import yaml
@@ -388,3 +389,56 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
             ("plan", "apply", "unlock"),
         ),
     ], f"documented workflow_dispatch inputs changed: {found}"
+
+
+def test_each_page_holds_its_fences():
+    """Every fence opener on `CONTRACT.md`, `README.md` and `docs/*.md`, counted per page and
+    label, is exactly this.
+
+    The fence guards select by label, so a fence relabelled away from ```yaml leaves both their
+    numerator and their denominator and they stay green over an example nothing checks any more.
+    Here a relabel moves one count from one label to another, so the whole-value comparison
+    fails.
+
+    Threat model: an ordinary reformat that drops or changes a fence label. A deliberate edit
+    that also updates this dict is out of scope. The label is the opener's first word, "" for a
+    bare opener; closers are the bare ``` lines that alternate with openers on each page.
+
+    Mutations: relabel one ```yaml in `docs/getting-started.md` to ```, and to ```text.
+    """
+    found = Counter()
+    for page in [ENGINE / "CONTRACT.md", *_PAGES]:
+        inside = False
+        for line in page.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"[ \t]*```(\S*)", line)
+            if m:
+                if not inside:
+                    found[(page.relative_to(ENGINE).as_posix(), m[1])] += 1
+                inside = not inside
+    assert dict(found) == {
+        ("CONTRACT.md", ""): 2,
+        ("CONTRACT.md", "text"): 1,
+        ("CONTRACT.md", "yaml"): 4,
+        ("README.md", "bash"): 1,
+        ("docs/aws.md", ""): 1,
+        ("docs/aws.md", "bash"): 1,
+        ("docs/aws.md", "hcl"): 1,
+        ("docs/aws.md", "yaml"): 2,
+        ("docs/branch-protection.md", "bash"): 5,
+        ("docs/development.md", "bash"): 1,
+        ("docs/drift.md", "yaml"): 1,
+        ("docs/getting-started.md", "bash"): 1,
+        ("docs/getting-started.md", "json"): 2,
+        ("docs/getting-started.md", "yaml"): 4,
+        ("docs/github-app.md", ""): 2,
+        ("docs/github-app.md", "bash"): 7,
+        ("docs/hardening.md", ""): 1,
+        ("docs/hardening.md", "bash"): 2,
+        ("docs/hardening.md", "console"): 1,
+        ("docs/hardening.md", "json"): 1,
+        ("docs/hardening.md", "yaml"): 2,
+        ("docs/releasing.md", "bash"): 9,
+        ("docs/troubleshooting.md", "bash"): 1,
+        ("docs/troubleshooting.md", "hcl"): 2,
+        ("docs/troubleshooting.md", "text"): 6,
+    }, f"fence labels per page changed: {sorted(found.items())}"

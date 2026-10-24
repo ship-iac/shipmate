@@ -120,7 +120,7 @@ def test_an_unimplemented_provider_key_refuses():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: azure is not a key this engine implements. "
-        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
+        "An environment holds region, vars, identity, workloads, split, needs, apply_mode, review."
     )
 
 
@@ -132,43 +132,77 @@ def test_a_misspelled_environment_key_refuses():
     table = {"layout": "folder", "environments": {"dev-eu": {"regoin": "eu-west-1"}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. "
-        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
+        "An environment holds region, vars, identity, workloads, split, needs, apply_mode, review."
     )
+
+
+def test_the_environment_keys_and_flags_are_exactly_these():
+    """Mutation: put `tf_vars` back in `_ENV_KEYS`, or `gated` in `_FLAGS` -- red."""
+    assert env_config._ENV_KEYS == (
+        "region",
+        "vars",
+        "identity",
+        "workloads",
+        "split",
+        "needs",
+        "apply_mode",
+        "review",
+    )
+    assert env_config._FLAGS == ("split", "review")
+
+
+_RETIRED_KEY_MESSAGE = (
+    "::error::environment dev-eu: {} is not a key this engine implements. "
+    "An environment holds region, vars, identity, workloads, split, needs, apply_mode, review."
+)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("shared", "true"), ("gated", "false"), ("explicit", "true"), ("tf_vars", "{TF_VAR_x: y}")],
+)
+def test_a_retired_key_refuses_as_unknown(key, value):
+    """The retired spellings are unknown keys, with no alias, and the refusal lists the keys
+    that replaced them.
+
+    Mutation: re-add `shared` to `_ENV_KEYS` -- the `shared` case validates.
+    """
+    text = f"layout: folder\nenvironments:\n  dev-eu:\n    {key}: {value}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.load_config(text))
+    assert str(excinfo.value) == _RETIRED_KEY_MESSAGE.format(key)
 
 
 # --- 7: the flags -----------------------------------------------------------------------
 
-_FLAGS = ("shared", "explicit", "gated")
+_FLAGS = ("split", "review")
 
 
 @pytest.mark.parametrize("key", _FLAGS)
 @pytest.mark.parametrize("value", [True, False])
 def test_a_boolean_flag_validates(key, value):
-    """Mutation: drop any of the three from the implemented environment keys."""
+    """Mutation: drop either from the implemented environment keys."""
     table = {"layout": "folder", "environments": {"dev-eu": {key: value}}}
     assert env_config.validate_structure(table) is table
 
 
 _NOT_BOOLEAN = [
-    ("shared", "True", "'True'"),
-    ("shared", "yes", "'yes'"),
-    ("shared", "1", "'1'"),
-    ("explicit", "True", "'True'"),
-    ("explicit", "yes", "'yes'"),
-    ("gated", "FALSE", "'FALSE'"),
-    ("gated", "no", "'no'"),
+    ("split", "True", "'True'"),
+    ("split", "yes", "'yes'"),
+    ("split", "1", "'1'"),
+    ("review", "FALSE", "'FALSE'"),
+    ("review", "no", "'no'"),
 ]
 
 
 @pytest.mark.parametrize(("key", "written", "found"), _NOT_BOOLEAN, ids=range(len(_NOT_BOOLEAN)))
 def test_a_flag_that_is_not_true_or_false_refuses(key, written, found):
     """Only `true` and `false`, exactly as written, are flags. `True` or `yes` reads as set to
-    a person and would resolve as unset. For `explicit` that is the fail-open case: the
-    environment lands on a bare `shipmate apply`.
+    a person and would resolve as unset.
 
     Mutations: normalise the value case-insensitively in `_normalise_bool` -- the `True` and
     `FALSE` cases validate, and `test_three_independent_errors_refuse_as_three_lines` loses its
-    `gated` line; drop the `isinstance` check from `_check_bool` -- every case validates; or
+    `review` line; drop the `isinstance` check from `_check_bool` -- every case validates; or
     drop one key from `_FLAGS` -- that key's cases validate.
     """
     text = f"layout: folder\nenvironments:\n  dev-eu:\n    {key}: {written}\n"
@@ -200,6 +234,63 @@ def test_a_referenced_flag_refuses_before_the_variable_is_read(key, written):
     assert str(excinfo.value) == (
         f"::error::environments.prod.{key} holds a variable reference; a flag accepts no "
         "variable reference. Write true or false."
+    )
+
+
+@pytest.mark.parametrize("value", ["targeted", "bare"])
+def test_an_apply_mode_validates(value):
+    """Mutation: drop `apply_mode` from `_ENV_KEYS`, or `bare` from `_APPLY_MODES` -- red."""
+    text = f"layout: folder\nenvironments:\n  dev-eu:\n    apply_mode: {value}\n"
+    table = env_config.load_config(text)
+    assert env_config.validate_structure(table) is table
+    assert table["environments"]["dev-eu"]["apply_mode"] == value
+
+
+_NOT_AN_APPLY_MODE = [
+    ("auto", "'auto'"),
+    ("true", "'true'"),
+    ("Targeted", "'Targeted'"),
+    ('""', "''"),
+    ("[targeted]", "['targeted']"),
+]
+
+
+@pytest.mark.parametrize(
+    ("written", "found"), _NOT_AN_APPLY_MODE, ids=range(len(_NOT_AN_APPLY_MODE))
+)
+def test_an_apply_mode_that_is_not_targeted_or_bare_refuses(written, found):
+    """Any other value reads as set to a person and resolves as `bare`, which puts the
+    environment on a bare `shipmate apply`. `auto` is refused until an engine implements it.
+
+    Mutations: accept `auto` in `_APPLY_MODES` -- its case validates; drop the
+    `_check_apply_mode` call from `_check_environment` -- every case validates.
+    """
+    text = f"layout: folder\nenvironments:\n  dev-eu:\n    apply_mode: {written}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.load_config(text))
+    assert str(excinfo.value) == (
+        f"::error::environments.dev-eu.apply_mode must be targeted or bare, got {found}."
+    )
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["{vars: SECRETISH}", "[{vars: SECRETISH}]"],
+    ids=["direct", "in-a-list"],
+)
+def test_a_referenced_apply_mode_refuses_before_the_variable_is_read(written):
+    """A variable holding `targeted` would hold an environment back from a setting outside
+    the file, and the value refusal would quote the variable.
+
+    Mutation: drop the `apply_mode` reference check from `_normalise_flags` -- the direct row
+    resolves to `targeted` and validates.
+    """
+    text = f"layout: folder\nenvironments:\n  prod:\n    apply_mode: {written}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"SECRETISH": "targeted"}))
+    assert str(excinfo.value) == (
+        "::error::environments.prod.apply_mode holds a variable reference, and it accepts "
+        "none. Write targeted or bare."
     )
 
 
@@ -240,37 +331,37 @@ def test_a_referenced_layout_resolves():
     }
 
 
-# --- 8: tf_vars names and values ----------------------------------------------------------
+# --- 8: vars names and values ----------------------------------------------------------
 
 
-def test_tf_vars_naming_anything_outside_the_allowlist_refuses():
+def test_vars_naming_anything_outside_the_allowlist_refuses():
     """Mutation: drop the name allowlist -- the table becomes a general env injector."""
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"tf_vars": {"AWS_REGION": "eu-west-1"}}},
+        "environments": {"dev-eu": {"vars": {"AWS_REGION": "eu-west-1"}}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: tf_vars may name only TF_VAR_* and TF_WORKSPACE, "
+        "::error::environment dev-eu: vars may name only TF_VAR_* and TF_WORKSPACE, "
         "and AWS_REGION is neither."
     )
 
 
-def test_tf_vars_holding_a_non_string_refuses():
+def test_vars_holding_a_non_string_refuses():
     """Caught here rather than per cell: env-inject would refuse once per cell instead.
 
     Mutation: check the names and not the values.
     """
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"tf_vars": {"TF_VAR_count": 3}}},
+        "environments": {"dev-eu": {"vars": {"TF_VAR_count": 3}}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: tf_vars.TF_VAR_count must be a string, got int. "
+        "::error::environment dev-eu: vars.TF_VAR_count must be a string, got int. "
         "A non-string value would otherwise refuse once per cell at injection time."
     )
 
 
-def test_tf_vars_may_hold_an_empty_string():
+def test_vars_may_hold_an_empty_string():
     """An explicit empty value is excluded from the plan fingerprint on both paths, so it
     is legal.
 
@@ -278,7 +369,7 @@ def test_tf_vars_may_hold_an_empty_string():
     """
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"tf_vars": {"TF_VAR_region": "", "TF_WORKSPACE": "w"}}},
+        "environments": {"dev-eu": {"vars": {"TF_VAR_region": "", "TF_WORKSPACE": "w"}}},
     }
     assert env_config.validate(table, ()) == table
 
@@ -299,8 +390,8 @@ _MALFORMED = [
         "::error::environment dev-eu: region must be a string, got dict.",
     ),
     (
-        {"layout": "folder", "environments": {"dev-eu": {"tf_vars": "TF_VAR_x"}}},
-        "::error::environment dev-eu: tf_vars must be a mapping, got str.",
+        {"layout": "folder", "environments": {"dev-eu": {"vars": "TF_VAR_x"}}},
+        "::error::environment dev-eu: vars must be a mapping, got str.",
     ),
 ]
 
@@ -355,7 +446,7 @@ def test_a_whole_table_is_returned_unchanged():
             "dev-eu": {
                 "region": "eu-west-1",
                 "needs": ["prod-us"],
-                "tf_vars": {"TF_VAR_team": "core"},
+                "vars": {"TF_VAR_team": "core"},
                 "identity": "dev",
                 "workloads": ["net-edge", "app"],
             }
@@ -376,7 +467,7 @@ def test_a_whole_table_is_returned_unchanged():
             "dev-eu": {
                 "region": "eu-west-1",
                 "needs": ["prod-us"],
-                "tf_vars": {"TF_VAR_team": "core"},
+                "vars": {"TF_VAR_team": "core"},
                 "identity": "dev",
                 "workloads": ["net-edge", "app"],
             }
@@ -876,7 +967,7 @@ def test_a_name_extending_the_engine_environment_is_accepted(name):
     assert env_config.validate(table, ()) == table
 
 
-# --- 12: the tf_vars layout, the entry's tf_vars table, the vars reference -------------
+# --- 12: the tf_vars layout, the entry's vars table, the vars reference -------------
 
 
 def test_the_tf_vars_layout_derives_both_identity_variables():
@@ -891,12 +982,12 @@ def test_the_tf_vars_layout_derives_both_identity_variables():
     }
 
 
-def test_the_entry_tf_vars_table_reaches_the_row():
-    """Mutation: `resolve` reads `entry.get("vars")` -- the row then carries only the
+def test_the_entry_vars_table_reaches_the_row():
+    """Mutation: `resolve` reads `entry.get("tf_vars")` -- the row then carries only the
     derivation."""
     table = {
         "layout": "tf_vars",
-        "environments": {"dev-eu": {"region": "eu-west-1", "tf_vars": {"TF_VAR_x": "y"}}},
+        "environments": {"dev-eu": {"region": "eu-west-1", "vars": {"TF_VAR_x": "y"}}},
     }
     assert env_config.resolve(table, "dev-eu", "apply", "") == {
         "role_arn": "",
@@ -924,6 +1015,34 @@ def test_a_vars_reference_resolves():
         "environments": {"prod": {"region": "eu-west-1", "identity": "prod"}},
     }
     assert env_config.validate_structure(table) == table
+
+
+_VARS_ENTRY = "layout: folder\nenvironments:\n  dev:\n    vars: ENTRY\n"
+
+
+def test_an_entry_holding_only_vars_with_its_variable_set_refuses():
+    """`dev: {vars: ENTRY}` is a reference to the whole entry, not an entry holding `vars`, so
+    it resolves to the variable's string and refuses as a non-mapping entry.
+
+    Mutation: make `_check_environment` return early on a non-mapping entry instead of
+    refusing -- this validates.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(_VARS_ENTRY, {"ENTRY": "TF_VAR_x"}))
+    assert str(excinfo.value) == "::error::environment dev must be a mapping, got str."
+
+
+def test_an_entry_holding_only_vars_with_its_variable_unset_refuses():
+    """Mutation: resolve an unset reference to "" instead of refusing -- this refuses with
+    the non-mapping message instead."""
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(_VARS_ENTRY, {}))
+    assert str(excinfo.value) == (
+        "::error::.github/shipmate-config.yml environments.dev references GitHub variable "
+        "ENTRY, which is not set. A reference reads repository and organization variables; the "
+        "variables of a cell's <env>-plan, <env>-apply or shared <env> Environment are never "
+        "read."
+    )
 
 
 def test_a_lowercase_reference_refusal_spells_the_vars_key():
@@ -954,13 +1073,13 @@ def test_three_independent_errors_refuse_as_three_lines():
     the cycle line is lost.
     """
     table = env_config.parse_table(
-        "layout: folder\n\nenvironments:\n  dev-eu:\n    regoin: eu-west-1\n    gated: False\n"
+        "layout: folder\n\nenvironments:\n  dev-eu:\n    regoin: eu-west-1\n    review: False\n"
         "    needs: [dev-eu]\n"
     )
     assert _structural(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. An "
-        "environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.\n"
-        "::error::environments.dev-eu.gated must be true or false, got 'False'.\n"
+        "environment holds region, vars, identity, workloads, split, needs, apply_mode, review.\n"
+        "::error::environments.dev-eu.review must be true or false, got 'False'.\n"
         "::error::needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before "
         "the next, so the ordering has no first environment and no apply path can sort it. "
         "Break the chain in .github/shipmate-config.yml."
@@ -983,7 +1102,7 @@ def test_the_lines_come_in_check_order():
         ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
         "command_hints.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
-        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
+        "holds region, vars, identity, workloads, split, needs, apply_mode, review."
     )
 
 
@@ -1007,15 +1126,15 @@ def test_a_non_mapping_entry_skips_only_its_own_checks(value, kind):
     assert _structural(table) == (
         f"::error::environment dev must be a mapping, got {kind}.\n"
         "::error::environment prod: regoin is not a key this engine implements. An environment "
-        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
+        "holds region, vars, identity, workloads, split, needs, apply_mode, review."
     )
 
 
-def test_a_non_mapping_tf_vars_is_one_message():
-    """Mutation: drop the `isinstance(tf_vars, dict)` return in `_check_vars` -- `.items()`
+def test_a_non_mapping_vars_is_one_message():
+    """Mutation: drop the `isinstance(env_vars, dict)` return in `_check_vars` -- `.items()`
     on a string raises a raw `AttributeError`."""
-    table = {"layout": "folder", "environments": {"dev": {"tf_vars": "x"}}}
-    assert _structural(table) == "::error::environment dev: tf_vars must be a mapping, got str."
+    table = {"layout": "folder", "environments": {"dev": {"vars": "x"}}}
+    assert _structural(table) == "::error::environment dev: vars must be a mapping, got str."
 
 
 def test_one_error_is_todays_message_byte_for_byte():

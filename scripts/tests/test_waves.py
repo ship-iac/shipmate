@@ -590,7 +590,7 @@ def test_the_blocker_is_a_cell_the_user_can_apply_now():
 
 
 def test_three_targeted_runs_apply_a_zigzag_without_deadlock():
-    """`dns/us -> platform/eu -> edge/us`, both environments explicit: apply us, eu, us.
+    """`dns/us -> platform/eu -> edge/us`, both environments targeted: apply us, eu, us.
 
     Mutation: drop the `- run` subtraction from `out` -- run 1 names `dns / us`, which it
     applies, as the blocker."""

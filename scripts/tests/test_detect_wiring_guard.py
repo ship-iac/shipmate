@@ -97,7 +97,7 @@ _APPLY_DETECT_OUTPUTS = {
     "excluded_envs": "${{ steps.d.outputs.excluded_envs }}",
     "skipped_envs": "${{ steps.d.outputs.skipped_envs }}",
     "review_held_envs": "${{ steps.d.outputs.review_held_envs }}",
-    "applied_ungated_envs": "${{ steps.d.outputs.applied_ungated_envs }}",
+    "applied_exempt_envs": "${{ steps.d.outputs.applied_exempt_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
     "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
     "env_order": "${{ steps.d.outputs.env_order }}",
@@ -246,7 +246,7 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "excluded_envs": {
         "description": (
-            "Bare apply only: JSON list of explicit envs left pending, including held ones; the "
+            "Bare apply only: JSON list of targeted envs left pending, including held ones; the "
             "comment lists a held one under the hold. The targeted form writes none."
         ),
         "value": "${{ steps.d.outputs.excluded_envs }}",
@@ -254,7 +254,7 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     "skipped_envs": {
         "description": (
             "Bare apply only: JSON list of envs skipped because they are ordered after an env "
-            "not fully applying this run (held for review, excluded as explicit, or holding a "
+            "not fully applying this run (held for review, excluded as targeted, or holding a "
             "waiting cell). The targeted form writes none."
         ),
         "value": "${{ steps.d.outputs.skipped_envs }}",
@@ -266,17 +266,17 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.review_held_envs }}",
     },
-    "applied_ungated_envs": {
+    "applied_exempt_envs": {
         "description": (
             "Bare apply only: JSON list of envs applied without an approving review because "
-            "their entry holds `gated: false`. The targeted form writes none."
+            "their entry holds `review: false`. The targeted form writes none."
         ),
-        "value": "${{ steps.d.outputs.applied_ungated_envs }}",
+        "value": "${{ steps.d.outputs.applied_exempt_envs }}",
     },
     "review_not_required_envs": {
         "description": (
-            "JSON list of gated envs authorized under a null review decision, because the pull "
-            "request's review state required none, else []."
+            "JSON list of `review: true` envs authorized under a null review decision, because "
+            "the pull request's review state required none, else []."
         ),
         "value": "${{ steps.d.outputs.review_not_required_envs }}",
     },

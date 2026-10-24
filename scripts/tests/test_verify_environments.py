@@ -166,7 +166,7 @@ def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp
         "outside every control that environment is meant to carry. Two ways to fix it: "
         "create each environment named above, or correct the environment's entry in "
         "`.github/shipmate-config.yml` so the apply binds the environments you did create "
-        "(`shared: true` binds the bare <env>, anything else binds <env>-apply).\n"
+        "(`split: false` binds the bare <env>, anything else binds <env>-apply).\n"
     )
 
 
@@ -263,6 +263,6 @@ def test_a_missing_environment_is_refused_before_an_unscoped_one(tmp_path):
         "deployment branch policy, so the apply would run outside every control that "
         "environment is meant to carry. Two ways to fix it: create each environment named "
         "above, or correct the environment's entry in `.github/shipmate-config.yml` so the "
-        "apply binds the environments you did create (`shared: true` binds the bare <env>, "
+        "apply binds the environments you did create (`split: false` binds the bare <env>, "
         "anything else binds <env>-apply).\n"
     )

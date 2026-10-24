@@ -333,7 +333,7 @@ actual work here:
   `environment:` is branch-authored data: it is `matrix.environment`, which
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
   pull request picks the environment its plan cells bind (`<env>-plan`, or the
-  bare `<env>` for a `shared: true` entry). Detect refuses the name
+  bare `<env>` for a `split: false` entry). Detect refuses the name
   `shipmate-engine`, so no cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
   is named in exactly one job of engine `plan.yml`, the one that checks nothing

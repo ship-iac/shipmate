@@ -42,7 +42,7 @@ def test_an_environment_aws_key_is_an_unknown_key():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: aws is not a key this engine implements. An environment "
-        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
+        "holds region, vars, identity, workloads, split, needs, apply_mode, review."
     )
 
 
@@ -344,18 +344,22 @@ def test_a_varying_identity_needs_a_workloads_list(aws):
 
 
 def test_a_shared_environment_naming_an_identity_with_a_plan_role_refuses():
-    """Mutation: drop the check -- every plan cell would assume the apply role while the file
-    reads as a read-only plan role."""
-    assert _refusal(_named({"plan": _ARN, "apply": _ARN}, shared=True)) == (
+    """Every plan cell would otherwise assume the apply role while the file reads as a
+    read-only plan role.
+
+    Mutations: drop the check; test `entry.get("split") is True` in `_check_named_identity`
+    -- no refusal.
+    """
+    assert _refusal(_named({"plan": _ARN, "apply": _ARN}, split=False)) == (
         "::error::environment dev-eu is shared between the plan and apply paths, so identity "
         "dev's aws.plan cannot apply to it: a shared environment uses aws.apply on both paths. "
-        "Name an identity without aws.plan, or set shared: false."
+        "Name an identity without aws.plan, or remove split: false."
     )
 
 
 def test_a_shared_environment_naming_an_apply_only_identity_validates():
     """Mutation: refuse every identity in a shared environment."""
-    table = _named({"apply": _ARN}, shared=True)
+    table = _named({"apply": _ARN}, split=False)
     assert ec.validate_structure(table) is table
 
 
@@ -647,7 +651,7 @@ def test_resolved_roles_lists_every_environment_path_and_workload():
         },
         "environments": {
             "dev": {"region": "eu-west-1", "identity": "stage", "workloads": ["network", "core"]},
-            "sbx": {"region": "eu-west-1", "identity": "sbx", "shared": True},
+            "sbx": {"region": "eu-west-1", "identity": "sbx", "split": False},
             "free": {"region": "eu-west-1"},
         },
     }

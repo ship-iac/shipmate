@@ -13,7 +13,7 @@ from _loader import load_script
 
 ec = load_script("env-config")
 
-#: Every top-level key, and every entry key but `shared`.
+#: Every top-level key, and every entry key but `split`.
 CANONICAL = """\
 layout: tf_vars                    # tf_vars | workspace | folder, required
 
@@ -33,17 +33,17 @@ identities:
 environments:
   dev-eu:
     region: eu-west-1
-    gated: false                   # optional: a targeted apply needs no approving review
+    review: false                  # optional: a targeted apply needs no approving review
     identity: dev
   dev-us:
     region: us-east-1
     needs: [dev-eu]                # optional: envs that must fully apply first
   prod:
     region: eu-west-1
-    explicit: true                 # optional: a bare `shipmate apply` skips it
+    apply_mode: targeted           # optional: a bare `shipmate apply` skips it
     identity: prod
     workloads: [app, net-edge]     # the workload tags prod admits
-    tf_vars:
+    vars:
       TF_VAR_tier: core            # optional, merged over the derived TF_VAR_*
 """
 
@@ -53,7 +53,7 @@ def test_the_canonical_file_validates():
     ordering and both entry flags.
 
     Mutation: remove any of the three names from the allowed top-level set, or `"identity"`,
-    `"workloads"`, `"needs"`, `"explicit"` or `"gated"` from the allowed entry keys.
+    `"workloads"`, `"needs"`, `"apply_mode"` or `"review"` from the allowed entry keys.
     """
     table = ec.parse_table(CANONICAL)
     assert ec.validate(table, ("dev-eu", "prod")) is table
@@ -143,7 +143,7 @@ def test_the_canonical_file_resolves_each_cell(env, path, workload, expected):
 
     Mutations, each reddening one row: look the role map up by a fixed key (rows 0 and 1
     resolve one role); resolve the plan field for an apply cell, or the reverse (rows 1 and 2
-    swap roles); drop the environment's own `tf_vars` from the merge (`TF_VAR_tier`
+    swap roles); drop the environment's own `vars` from the merge (`TF_VAR_tier`
     disappears); stop taking `cred_region` from the environment's region (every `cred_region`
     empties).
     """

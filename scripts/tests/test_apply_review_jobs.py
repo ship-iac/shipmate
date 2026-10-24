@@ -10,7 +10,7 @@ not a hostile edit to a SHA-pinned engine file. Three of the regressions are sil
 which is why they are pinned whole:
 
 - an `if:` re-appearing on the `review` job. A conditional review job can be skipped, a
-  skipped job delivers an empty decision, and that is the state an `ungated-envs` action input
+  skipped job delivers an empty decision, and that is the state an exempt-list action input
   wider than the repository variable used to exploit. Absence is the property, so the job
   mapping is compared whole rather than the absence assumed.
 - `detect`'s needs list losing `review`: the decision then never arrives at all.
@@ -128,7 +128,7 @@ def _rd():
 
 def test_the_review_job_is_this_whole_mapping():
     """The targeted path once consulted the review decision nowhere at all, so an
-    `ungated-envs` input wider than the repository variable applied unreviewed there
+    exempt-list action input wider than the repository variable applied unreviewed there
     unconditionally. Compared whole, so the job cannot gain an `if:` that skips it, lose its
     environment binding, or widen its token.
 

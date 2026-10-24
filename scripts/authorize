@@ -18,9 +18,9 @@ the only review rule is code-owner review and no changed file has an owner) and
 `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment whose entry holds
-`gated: false`.
+`review: false`.
 
-The `ungated_exemption` output is the targeted path's audit trail: `reviewDecision`
+The `review_exemption` output is the targeted path's audit trail: `reviewDecision`
 is a live value with no history, so once the review lands nothing else distinguishes
 an apply that waited for it from one that did not. It requires all three of
 `authorized` (a report over a refused apply is false), a named environment (a bare
@@ -36,48 +36,48 @@ import sys
 from _shipmate import run_annotated, write_outputs
 
 
-def parse_ungated_envs(raw):
+def parse_exempt_envs(raw):
     """Env names exempt from the review requirement, casefolded.
 
-    `SHIPMATE_GATE_UNGATED_ENVS` carries `gate-config`'s own step output:
+    `SHIPMATE_GATE_EXEMPT_ENVS` carries `gate-config`'s own step output:
     a sorted, comma-joined list of entry names `validate_structure` already charset-checked,
     in the same job. This undoes the join and nothing else.
     """
     return frozenset(e.casefold() for e in (raw or "").split(",") if e)
 
 
-def _review_not_required(review_decision, environment, ungated_envs):
-    """Whether a gated `environment` is authorized only by a `NONE` decision, with no
-    `gated: false` entry for it. GitHub returns that null decision when no rule requires a
+def _review_not_required(review_decision, environment, exempt_envs):
+    """Whether an `environment` under review is authorized only by a `NONE` decision, with no
+    `review: false` entry for it. GitHub returns that null decision when no rule requires a
     review and also when the only review rule is code-owner review and no changed file has an
     owner. The apply comment names each such environment."""
-    return review_decision == "NONE" and environment.casefold() not in ungated_envs
+    return review_decision == "NONE" and environment.casefold() not in exempt_envs
 
 
-def _ungated_exemption(review_decision, environment, ungated_envs):
+def _review_exemption(review_decision, environment, exempt_envs):
     """Whether `environment` applies without the review the branch ruleset requires, by its
-    `gated: false` entry. The apply comment reports each such environment."""
-    return review_decision == "REVIEW_REQUIRED" and environment.casefold() in ungated_envs
+    `review: false` entry. The apply comment reports each such environment."""
+    return review_decision == "REVIEW_REQUIRED" and environment.casefold() in exempt_envs
 
 
-def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
+def _review_reason(review_decision, environment="", exempt_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision, which also covers required code-owner review that owns none of
     the changed files) and APPROVED. Anything
-    else fails closed. An environment whose entry holds `gated: false` is exempt
+    else fails closed. An environment whose entry holds `review: false` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
-    any entry holds `gated: false`, and is partitioned per env in apply-detect's bare form."""
+    any entry holds `review: false`, and is partitioned per env in apply-detect's bare form."""
     if review_decision == "REVIEW_REQUIRED":
-        if ungated_envs and (
-            not environment or _ungated_exemption(review_decision, environment, ungated_envs)
+        if exempt_envs and (
+            not environment or _review_exemption(review_decision, environment, exempt_envs)
         ):
             return None
-        if ungated_envs:
+        if exempt_envs:
             return (
                 f"not authorized: PR review is required by the branch ruleset "
-                f"and has not been satisfied, and `environments.{environment}.gated` is "
+                f"and has not been satisfied, and `environments.{environment}.review` is "
                 f"not `false` in `.github/shipmate-config.yml`; obtain the "
                 f"required approving review(s), then re-run `shipmate apply`."
             )
@@ -153,7 +153,7 @@ def decide(
     pr,
     plan_runs,
     environment="",
-    ungated_envs=frozenset(),
+    exempt_envs=frozenset(),
     verb="apply",
 ):
     """Return (authorized, reason). reason is '' when authorized.
@@ -208,7 +208,7 @@ def decide(
             f"PR is not mergeable (state: {state}); resolve conflicts "
             f"or branch-protection requirements first."
         )
-    review_reason = _review_reason(review_decision, environment, ungated_envs)
+    review_reason = _review_reason(review_decision, environment, exempt_envs)
     if review_reason:
         return False, review_reason
     if not plan_runs:
@@ -252,7 +252,7 @@ def main():
     # One read, used for both the decision and the reported output — the value
     # the decision used and the value reported can never differ.
     environment = os.environ.get("SHIPMATE_ENV", "")
-    ungated_envs = parse_ungated_envs(os.environ.get("SHIPMATE_GATE_UNGATED_ENVS", ""))
+    exempt_envs = parse_exempt_envs(os.environ.get("SHIPMATE_GATE_EXEMPT_ENVS", ""))
     verb = os.environ.get("SHIPMATE_VERB", "apply")
     if verb not in ("apply", "unlock"):
         raise SystemExit(f"::error::unknown verb {verb!r}")
@@ -262,7 +262,7 @@ def main():
         pr=pr,
         plan_runs=plan_runs,
         environment=environment,
-        ungated_envs=ungated_envs,
+        exempt_envs=exempt_envs,
         verb=verb,
     )
     # The targeted path's audit trail. `ok`, a named environment and verb="apply" are the
@@ -271,11 +271,11 @@ def main():
         verb == "apply"
         and ok
         and bool(environment)
-        and _ungated_exemption(review_decision, environment, ungated_envs)
+        and _review_exemption(review_decision, environment, exempt_envs)
     )
     write_outputs(
         authorized=ok,
-        ungated_exemption=bool(exempted),
+        review_exemption=bool(exempted),
         reason=reason,
         environment=environment,
         head_sha=pr.get("head", {}).get("sha", ""),

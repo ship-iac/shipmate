@@ -129,9 +129,9 @@ def wave_cells(wv, parsed):
 MINIMAL_TABLE: dict[str, Any] = {"layout": "folder"}
 
 
-def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), reads=None):
+def stub_read_table(monkeypatch, configs, base=None, order=None, targeted=(), reads=None):
     """Stub `read_table` on every `env-config` instance in `configs`, carrying `order`
-    as each entry's `needs` and `explicit` as each named entry's `explicit: true`.
+    as each entry's `needs` and `targeted` as each named entry's `apply_mode: targeted`.
 
     Shared by the two ordering detects so neither can drift back to stubbing an ordering
     reader in `waves`: a double there answers whatever the test asked for even when the caller
@@ -141,12 +141,12 @@ def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), re
     cannot see a read through another.
     """
     cfg = dict(base or MINIMAL_TABLE)
-    if order is not None or explicit:
+    if order is not None or targeted:
         entries = {env: dict(entry) for env, entry in dict(cfg.get("environments", {})).items()}
         for env, preds in (order or {}).items():
             entries.setdefault(env, {})["needs"] = list(preds)
-        for env in explicit:
-            entries.setdefault(env, {})["explicit"] = True
+        for env in targeted:
+            entries.setdefault(env, {})["apply_mode"] = "targeted"
         cfg["environments"] = entries
 
     def read_table():

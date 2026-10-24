@@ -18,9 +18,9 @@ Invariants:
 
 The binding guard used to pin a ternary over a repository variable, with its comma-boundary
 and case-insensitive matching rules, and a second copy of that rule in `verify-environments`.
-Both rules are gone: which environment is shared is `shared: true` in the table, and which
+Both rules are gone: which environment is shared is `split: false` in the table, and which
 tier that resolves is pinned by
-`test_env_config_resolve.py::test_the_binding_and_tier_follow_the_shared_key`.
+`test_env_config_resolve.py::test_the_binding_and_tier_follow_the_split_key`.
 
 The realistic failure is accidental regression -- a restored expression, one missed wave, a new
 cell job with a hand-rolled binding -- not a hostile edit to these SHA-pinned files, so one

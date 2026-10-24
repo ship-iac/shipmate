@@ -8,6 +8,19 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed
+
+- **Breaking:** environment table keys renamed; the old spellings refuse as unknown keys.
+  - `shared: true` → `split: false`
+  - `gated: false` → `review: false`
+  - `explicit: true` → `apply_mode: targeted`
+  - `tf_vars:` → `vars:`
+  - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
+- **Bare-apply comment line `left pending (explicit)` reads `left pending (targeted)`.**
+- The review-exempt reply to a targeted `shipmate apply` and the matching apply-log notice say `review-exempt` and `review: false` where they said `ungated` and `gated: false`; the no-review notice names `review: true`; `onboard` labels shared environments `shared (split: false):` where it printed `shared:`.
+
 ## [0.52.0] — 2026-10-24
 
 Tags `2ecf618`.
