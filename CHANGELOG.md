@@ -17,6 +17,7 @@ section below names the SHA the release tags.
   - `gated: false` → `review: false`
   - `explicit: true` → `apply_mode: targeted`
   - `tf_vars:` → `vars:`
+  - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
 - **Bare-apply comment line `left pending (explicit)` reads `left pending (targeted)`.**
 
 ## [0.52.0] — 2026-10-24

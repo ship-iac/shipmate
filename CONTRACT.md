@@ -2640,7 +2640,7 @@ log text holds every line:
   true had nothing to enforce`, one per `review: true` environment a `NONE`
   decision authorized. It has its own cause, so it has its own detect output
   (`review_not_required_envs`, from both detects) rather than widening
-  review-exempt. It prints in the targeted and the all-environments form, and names
+  `applied_exempt_envs`. It prints in the targeted and the all-environments form, and names
   only environments with an applied, failed or not-recorded row — apply ran
   there, so infrastructure may have changed — so a run with no rows never
   prints it. It states the authorization fact and never that nobody reviewed:
