@@ -542,6 +542,7 @@ def _run_main(
     graph=None,
     tag_reads=None,
     dot=None,
+    merge_base=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -564,7 +565,10 @@ def _run_main(
     and `run_graph_deps` is `graph`, by default an empty run-graph, which replaces both the
     run-graph read and its cycle sort. `dot`, run-graph text, keeps `run_graph_deps` real
     instead -- the read and the sort -- and answers its Terramate call; it needs `head_sha`.
-    Each `all_tags` call appends the map it answers to `tag_reads` when one is given."""
+    Each `all_tags` call appends the map it answers to `tag_reads` when one is given.
+
+    `merge_base` replaces the merge-base resolution, by default the identity, so a stated
+    base reaches `compute_cells` and the `git diff` unchanged."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -622,6 +626,7 @@ def _run_main(
     fallback = bm.run_graph_deps if dot is not None else lambda: {}
     monkeypatch.setattr(bm, "run_graph_deps", graph or fallback)
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
+    monkeypatch.setattr(bm, "merge_base", merge_base or (lambda base: base))
     bm.main()
     parsed = github_outputs(out)
     return parsed, called
@@ -2670,6 +2675,33 @@ def test_lost_env_tags_ignores_an_added_env_literal(git_repo):
     assert bm.lost_env_tags(base, {"s": {"dev-eu"}}) == {}
 
 
+def test_merge_base_is_the_branch_point_of_a_branch_behind_its_base(git_repo):
+    """`main` moves past the branch point. Mutation: return `base` unchanged -- red."""
+    point = _commit({"s/stack.tm.hcl": _stack("[]")}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/stack.tm.hcl": _stack("[]", "renamed")}, "edit")
+    _git("checkout", "-q", "main")
+    base = _commit({"t/stack.tm.hcl": _stack("[]", "t")}, "moved on main")
+    _git("checkout", "-q", "pr")
+    assert bm.merge_base(base) == point
+
+
+def test_merge_base_refuses_a_head_with_no_common_history(git_repo):
+    """`base` is an orphan commit. Mutation: let `run`'s generic failure through -- red."""
+    _commit({"s/stack.tm.hcl": _stack("[]")}, "head")
+    head = _git("rev-parse", "--short", "HEAD").strip()
+    _git("checkout", "-q", "--orphan", "other")
+    base = _commit({"t/stack.tm.hcl": _stack("[]", "t")}, "orphan")
+    _git("checkout", "-q", "main")
+    with pytest.raises(SystemExit) as exc_info:
+        bm.merge_base(base)
+    assert str(exc_info.value) == (
+        f"::error::the pull request's head {head} shares no history with its base {base}, so "
+        "shipmate cannot tell which stacks the pull request changes. Rebase the branch onto the "
+        "base, or recreate it from the base, and push."
+    )
+
+
 _LOST_ENV_WARNING = (
     "::warning::1 stack(s) lost their last env/* tag in this pull request, so shipmate no "
     "longer plans or deploys them: stacks/gone. If that is deliberate (CONTRACT.md §Taking a "
@@ -2804,6 +2836,64 @@ def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, 
     assert diff_calls == []
     assert "::warning::" not in capsys.readouterr().out
     assert outputs["lost"] == ""
+
+
+def test_detect_diffs_from_the_merge_base_of_base_and_head(monkeypatch, tmp_path):
+    """Mutations: pass the raw base to `compute_cells` -- red; pass it to `warn_lost_env_tags`
+    -- red."""
+    resolved, diff_calls = [], []
+
+    def merge_base(base):
+        resolved.append(base)
+        return "c" * 40
+
+    _, called = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        diffs={"stacks/app": ""},
+        diff_calls=diff_calls,
+        merge_base=merge_base,
+    )
+    assert resolved == ["b" * 40]
+    assert called == [(False, "c" * 40, "")]
+    assert diff_calls == [
+        [
+            "git",
+            "diff",
+            "-U0",
+            "--no-renames",
+            f"{'c' * 40}...HEAD",
+            "--",
+            ":(glob)**/*.tm.hcl",
+            ":(glob)**/*.tm",
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"SHIPMATE_SWEEP": "true"},
+        {"SHIPMATE_BASE_SHA": "0" * 40},
+        {"SHIPMATE_BASE_SHA": ""},
+    ],
+    ids=["sweep", "zero-base", "no-base"],
+)
+def test_detect_resolves_no_merge_base_without_a_pull_request_base(monkeypatch, tmp_path, env):
+    """The sweep case keeps `_PR_ENV`'s base. Mutation: drop each clause of the guard in turn --
+    its case resolves one."""
+    resolved = []
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_PR_ENV, **env},
+        head_sha="cafe1234",
+        diffs={"stacks/app": ""},
+        merge_base=lambda base: resolved.append(base) or base,
+    )
+    assert resolved == []
 
 
 def test_detect_writes_the_lost_pairs_and_leaves_out_an_untagged_stack(monkeypatch, tmp_path):

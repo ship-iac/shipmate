@@ -15,7 +15,7 @@ import os
 import posixpath
 import re
 
-from _shipmate import _load, _run, command_data, named, run_annotated, write_outputs
+from _shipmate import _load, _run, command_data, named, run, run_annotated, write_outputs
 
 ec = _load("env-config")
 wv = _load("waves")
@@ -229,6 +229,25 @@ def _list_stacks(all_stacks, base):
         if base and base != _ZERO_SHA:
             args += ["-B", base]
     return [s.strip() for s in _run(args).splitlines() if s.strip()]
+
+
+def merge_base(base):
+    """The merge base of `base` and `HEAD`, which plan detect diffs from, so a branch behind its
+    base plans only its own changes, not the base's newer commits as reverts. A failing
+    `git merge-base`, as when the two share no history, refuses with that cause and its remedy.
+    """
+    try:
+        return run(["git", "merge-base", base, "HEAD"]).strip()
+    except SystemExit:
+        head = _run(["git", "rev-parse", "--short", "HEAD"]).strip()
+        raise SystemExit(
+            "::error::"
+            + command_data(
+                f"the pull request's head {head} shares no history with its base {base}, so "
+                "shipmate cannot tell which stacks the pull request changes. Rebase the branch "
+                "onto the base, or recreate it from the base, and push."
+            )
+        ) from None
 
 
 _METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')
@@ -722,6 +741,8 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
+    if not sweep and base and base != _ZERO_SHA:
+        base = merge_base(base)
     errors = []
     tag_map = all_tags()
     tagged, cells, tree, unmanaged = compute_cells(sweep, base, tags, errors, tag_map)
