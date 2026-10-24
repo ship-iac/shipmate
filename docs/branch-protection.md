@@ -17,10 +17,12 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   against the pull request's branch tip, not against a merge commit, so a
   plan can describe a base the branch has not seen. Strict protection makes a
   pull request current with the base before it can merge. It gates merging
-  and nothing else. It does not gate the pre-merge apply path: a `shipmate apply
-  <env>` run from a stale branch applies the plan as reviewed, so a stack that
-  was updated and merged to main since this branch forked is rolled back in real
-  infrastructure. Update the branch before running a pre-merge apply.
+  and nothing else. It does not gate the pre-merge apply path. Plan detect diffs
+  from the merge base, so a stale branch plans only the stacks its own commits
+  change; but a stack that both this branch and main changed plans the branch's
+  tree against state holding main's applied change, and a `shipmate apply <env>`
+  of that plan reverts main's change in real infrastructure. Update the branch
+  from the base before running a pre-merge apply.
 
 `shipmate / gate` is written on the PR head commit by `scripts/gate-status`,
 through `actions/summary` (the plan run) and `actions/gate-refresh` (the

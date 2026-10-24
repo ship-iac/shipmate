@@ -1880,7 +1880,8 @@ The five jobs:
   what creates the pending `apply / <stack> / <env>` checks, the sticky plan
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
   mirror of this run's completed `plan / ` checks onto the pull request's
-  head.
+  head, the `⚪ nothing planned` comment when no cell was planned, and the
+  collapse of the started reply that links the run (§Comment-ops).
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the

@@ -1006,9 +1006,10 @@ Properties that fall out of the existing gate semantics:
 
   Strict gates the merge and nothing else, so it does not protect the apply:
   a `shipmate apply <env>` from a stale branch applies the plan as reviewed, and
-  a stack updated and merged to main since this branch forked is rolled back in
-  real infrastructure ([`branch-protection.md`](branch-protection.md)). Update
-  the branch *before* commenting `shipmate apply`, not after.
+  a stack that both the branch and main changed plans against state holding
+  main's change, so its apply reverts that change in real infrastructure
+  ([`branch-protection.md`](branch-protection.md)). Update the branch from the
+  base *before* commenting `shipmate apply`, not after.
 - **The post-merge deploy still runs.** GitHub performs the auto-merge as the
   user who armed it (not `GITHUB_TOKEN`), so the resulting push event triggers
   the `deploy` job normally — which no-ops idempotently when everything was
