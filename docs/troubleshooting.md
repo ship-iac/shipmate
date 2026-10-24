@@ -1262,16 +1262,16 @@ plan run of the head. The re-run re-enters the `plan-<pr>` concurrency group,
 which cancels the run in progress only when the arriving run is a
 `pull_request_target` run other than `ready_for_review` (a push, open or reopen,
 or a re-run of one). A re-run of such a run cancels a newer run in flight, and a
-push, open or reopen run arriving while the re-run is in flight cancels the
-re-run. A `ready_for_review` run or a `shipmate plan` dispatch waits instead,
+push, open or reopen run, or a re-run of one, arriving while the re-run is in
+flight cancels the re-run. A `ready_for_review` run or a `shipmate plan` dispatch waits instead,
 and a later arrival replaces a waiting run; whether a re-run of a
 `ready_for_review` run or of a dispatched run waits is not verified. A re-run
 summary publishes no apply check its own run already published, so it leaves
 alone a check an apply completed or is completing. It refuses before writing
 anything when a newer plan run holds the gate or published apply checks on the
 head, and ends green with that refusal as a notice. A re-run of a plan job
-whose artifact upload succeeded
-fails, because the uploads are not `overwrite:` and 409.
+whose artifact upload succeeded fails, because the uploads are not `overwrite:`
+and 409.
 
 `gate-refresh` refuses to green a held gate from apply checks alone: the apply
 run fails with "shipmate / gate is held", pointing at this status description.
@@ -1611,8 +1611,9 @@ of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, `plan / gate-hold`, the `plan / <env> / <stack>` matrix
 check) stay red or cancelled on the head. Under a fence older than the one in
 [`getting-started.md`](getting-started.md) §The workflow file, a `shipmate plan`
-dispatch cancels it too; re-pin with `repin --write-fence` to make a dispatch
-wait.
+dispatch cancels it too; re-pin with
+`python <engine>/scripts/repin <consumer> <tag> --write-fence` to make a
+dispatch wait.
 
 After the newer plan run has finished, re-run the cancelled run:
 `gh run rerun <id>`. Not before: the re-run re-enters the `plan-<pr>`
