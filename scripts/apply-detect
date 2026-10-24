@@ -262,8 +262,8 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
     over a finite set, so the loop ends."""
     envs = {c["environment"] for c in pending} - stopped
     present = {(c["stack"], c["environment"]) for c in pending}
-    held = {e for _, e in locked}
-    unavailable, last = stopped | held, None
+    lock_envs = {e for _, e in locked}
+    unavailable, last = stopped | lock_envs, None
     while True:
         skipped = wv.blocked_envs(order, unavailable, envs)
         run = [
@@ -276,7 +276,7 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
         if (skipped, waiting) == last:
             return sorted(skipped), run, waiting
         last = (skipped, waiting)
-        unavailable = stopped | skipped | held | {w["environment"] for w in waiting}
+        unavailable = stopped | skipped | lock_envs | {w["environment"] for w in waiting}
 
 
 def _check_run_lines(repo, head_sha):
@@ -429,9 +429,9 @@ def bare_main():
     # Every pending targeted env, held or not: the comment names a held one's
     # targeted command under the hold. A held env that is not targeted stays out.
     excluded = sorted(pending_envs & set(targeted))
-    # The plan runs attach to `runnable`, not `pending`: an excluded, held or waiting cell's
-    # check stays pending by design for a later apply, and that apply refuses on its own over
-    # a record-less cell, so refusing here would strand the cells that CAN apply.
+    # The plan runs attach to `runnable`, not `pending`: an excluded, held, waiting or locked
+    # cell's check stays pending by design for a later apply, and that apply refuses on its own
+    # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
@@ -479,7 +479,7 @@ def bare_main():
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
         locked_cells=json.dumps(locked),
-        # Over `cells`, not `runnable`: the comment lists excluded, held and waiting cells too.
+        # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and locked cells.
         env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
     )
 
@@ -530,7 +530,7 @@ def main():
     run = drop_waiting(pending, locked)
     levels = wv.cell_levels(bm.ec.env_order(table), tag_map)
     waiting = wv.waiting_cells(run, all_pending, deps, tag_map, levels)
-    # Waiting cells drop before `with_plan_runs`: their checks stay pending for a later
+    # Locked and waiting cells drop before `with_plan_runs`: their checks stay pending for a later
     # apply, which refuses on its own over a record-less cell.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)

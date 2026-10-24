@@ -371,11 +371,11 @@ writing `false` gives something up. `apply_mode` is the one enum.
 | `apply_mode: targeted` (`bare`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
 | `split: false` (`true`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
 | `needs: [<env>]` (none) | Its applies, until the earlier env-levels complete (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
-| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
+| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment, or after a cell another pull request locks, waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
 
-On a bare apply, an environment held for review, left out as `targeted`, or holding a
-waiting cell skips the environments ordered after it by `needs`, a review-exempt one
-included, and its cells that do not apply in the run make the cells ordered `after` them
+On a bare apply, an environment held for review, left out as `targeted`, holding a
+waiting cell, or holding a cell another pull request locks skips the environments
+ordered after it by `needs`, a review-exempt one included, and its cells that do not apply in the run make the cells ordered `after` them
 wait, which can skip more; §Env apply order computes the whole set.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,

@@ -3306,7 +3306,7 @@ One `- ` line per inverted pair. Three paths refuse, each over its own cells:
 | Path | Dependent cells | Upstream cells |
 | --- | --- | --- |
 | plan (not a drift sweep) | the plan matrix | the plan matrix |
-| bare `shipmate apply` | pending cells of every environment neither held, `targeted` nor skipped by `needs`, the skips a waiting cell causes included; waiting cells count | every pending cell, held and `targeted` ones included |
+| bare `shipmate apply` | pending cells of every environment neither held, `targeted` nor skipped by `needs`, the skips a waiting or locked cell causes included; waiting cells count | every pending cell, held and `targeted` ones included |
 | merge deploy | every pending cell | every pending cell |
 
 A plan refusal holds the gate, and the gate description carries its first error,
@@ -3324,10 +3324,12 @@ A targeted `shipmate apply <env>` applies one environment's pending cells and
 does not order by `needs`: it runs them as one env-level. A cell of it that
 runs after a cell pending in another environment waits: it stays pending, the
 apply comment names it and its blocker, and the rest apply. A run whose every
-cell waits applies nothing and succeeds. `needs` still decides which
-environments an upstream stack's cells are read from (§Fan-out), so a `needs`
-entry added after the plan makes the cell wait instead of applying out of
-order. Each run applies what is ready, so no order of targeted applies
+cell waits applies nothing and succeeds. On both forms, a pending cell another
+pull request holds a cell lock on stays pending and does not apply, and a cell
+that runs after it waits; the lock goes when its holder merges or closes, or with
+`shipmate unlock <env> --evict`. `needs` still decides which environments an
+upstream stack's cells are read from (§Fan-out), so a `needs` entry added after
+the plan makes the cell wait instead of applying out of order. Each run applies what is ready, so no order of targeted applies
 deadlocks.
 
 A bare `shipmate apply` is the pre-merge equivalent of the merge-deploy path: it
@@ -3336,13 +3338,14 @@ env-levels and applies level 0 fully before level 1, with the same
 failure-skips-successor-levels rule. A `targeted` environment it leaves out keeps
 its position in the order: environments that do not depend on it run normally at
 their own level, while environments ordered (transitively) after an environment
-not fully applying this run — held for review, left out as `targeted`, or holding
-a waiting cell — are skipped with a notice — their ordering precondition cannot
-be met in that run, exactly like a failed predecessor level. The apply-all-detect
-notice names them `skipped_after_targeted`, for every one of those causes.
-A cell that runs after a pending cell of a held, `targeted` or skipped environment
-waits, as on the targeted form, and its environment's
-other cells still apply. An environment with a waiting cell is not fully
+not fully applying this run — held for review, left out as `targeted`, holding
+a waiting cell, or holding a cell another pull request locks — are skipped with a
+notice — their ordering precondition cannot be met in that run, exactly like a
+failed predecessor level. The apply-all-detect notice names them
+`skipped_after_targeted`, for every one of those causes.
+A cell that runs after a pending cell of a held, `targeted` or skipped environment,
+or after a cell another pull request locks, waits, as on the targeted form, and
+its environment's other cells still apply. An environment with a waiting cell is not fully
 applying, so its `needs` successors are skipped, and each new skip can make
 more cells wait; the bare form computes both to one fixpoint.
 Completed cells skip idempotently, so re-commenting `shipmate apply` resumes

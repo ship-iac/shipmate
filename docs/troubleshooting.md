@@ -1434,7 +1434,9 @@ in its compact form, `⚪ waiting on <stack> / <env> (<remedy>): <cells>`.
 The first cell runs after the second through `after`
 ([`../CONTRACT.md`](../CONTRACT.md) §Fan-out), and the second is pending and
 not applying in this run: another environment on a targeted apply, or a held,
-`targeted` or skipped environment on a bare one. The waiting cell's apply check
+`targeted` or skipped environment on a bare one. On either form it can also be a
+cell another pull request locks; that lock goes when its holder merges or closes,
+or with `shipmate unlock <env> --evict`. The waiting cell's apply check
 stays pending and the rest of the run applied. Follow the remedy:
 
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
