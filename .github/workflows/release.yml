@@ -1,0 +1,29 @@
+name: release
+on:
+  workflow_call:
+    inputs:
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
+    secrets:
+      # Feeds the App-token mint for the lock release. Consumers map it by name: a called workflow
+      # sees an environment secret only when its caller passes it.
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
+# Floor, not a default to inherit from: see plan.yml.
+permissions: {}
+jobs:
+  release:
+    # Its API calls grow with the pull request's locked cells; an `ubuntu-slim` job stops at
+    # 15 minutes.
+    runs-on: ${{ inputs.runs_on }}
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    steps:
+      # A called workflow sees its caller's event: the consumer runs this on
+      # `pull_request_target: closed`.
+      - uses: $/actions/lock-release
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          merged: ${{ github.event.pull_request.merged }}
+          closed-at: ${{ github.event.pull_request.closed_at }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

@@ -8,8 +8,8 @@ on:
       # and no environment supplies it (the waves bind the env's apply environment). Without it
       # every env-level apply refuses at its decrypt.
       SHIPMATE_ENCRYPTION_KEY: { required: false }
-      # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud in
-      # gate-refresh's `Verify the App key arrived`, before the mint.
+      # Feeds the `summary` job's App-token mints for the gate write and the lock release. An
+      # empty key fails loud in each one's `Verify the App key arrived`, before the mint.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
 jobs:
@@ -26,6 +26,7 @@ jobs:
       envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
       envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
+      pr_number: ${{ steps.d.outputs.pr_number }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
@@ -120,3 +121,15 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           detect-result: ${{ needs.detect.result }}
           deploy-results: ${{ join(needs.*.result, ',') }}
+      # Runs after a failed or skipped level too: a failed cell keeps its lock through its pending
+      # check, and the cells that applied release theirs. Its failure fails the job, so a re-run
+      # retries the release it owes.
+      - name: Release the merged pull request's cell locks
+        if: ${{ !cancelled() && needs.detect.outputs.pr_number != '' }}
+        uses: $/actions/lock-release
+        with:
+          pr-number: ${{ needs.detect.outputs.pr_number }}
+          head-sha: ${{ needs.detect.outputs.head_sha }}
+          merged: "true"
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

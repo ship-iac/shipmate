@@ -138,7 +138,10 @@ def test_every_mint_names_a_permission():
 
 
 #: Every `(file[:job], step id)` mint requesting `contents: write`, which can write refs.
-_CONTENTS_WRITERS = {("actions/lock-acquire/action.yml", "token")}
+_CONTENTS_WRITERS = {
+    ("actions/lock-acquire/action.yml", "token"),
+    ("actions/lock-release/action.yml", "token"),
+}
 
 
 def test_only_the_lock_writers_mint_contents_write():

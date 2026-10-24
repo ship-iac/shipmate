@@ -30,7 +30,19 @@ EXPECTED_SUMMARY = {
                 "detect-result": "${{ needs.detect.result }}",
                 "deploy-results": "${{ join(needs.*.result, ',') }}",
             },
-        }
+        },
+        {
+            "name": "Release the merged pull request's cell locks",
+            "if": "${{ !cancelled() && needs.detect.outputs.pr_number != '' }}",
+            "uses": "$/actions/lock-release",
+            "with": {
+                "pr-number": "${{ needs.detect.outputs.pr_number }}",
+                "head-sha": "${{ needs.detect.outputs.head_sha }}",
+                "merged": "true",
+                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+            },
+        },
     ],
 }
 

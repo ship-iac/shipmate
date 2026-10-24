@@ -22,7 +22,7 @@ LOCAL_PREFIX = "$/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
 #: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
 #: nothing at all if that glob matches nothing.
-ACTION_COUNT = 25
+ACTION_COUNT = 26
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -107,7 +107,7 @@ def test_every_job_running_an_engine_action_is_counted():
         for job_name, job in (doc.get("jobs") or {}).items()
         if any(_uses(s).startswith(LOCAL_PREFIX) for s in job.get("steps") or [])
     ]
-    assert len(covered) == 27, f"{len(covered)} jobs run an engine action: {covered}"
+    assert len(covered) == 28, f"{len(covered)} jobs run an engine action: {covered}"
 
 
 #: The steps that run an engine action calling `scripts/doctor`, and so must hand it the
@@ -189,6 +189,7 @@ LOCAL_ACTIONS = {
     "gate-refresh",
     "hcl-check",
     "lock-acquire",
+    "lock-release",
     "plan-cell",
     "pr-facts",
     "python-yaml",

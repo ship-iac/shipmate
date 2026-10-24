@@ -272,17 +272,19 @@ engine job but nine:
   `apply.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
+- `release.yml`: `release`.
 
 The input does not reach nine jobs, which run on `ubuntu-slim` and run neither
 `tofu` nor `terramate`: `facts` and `gate-hold` in `plan.yml`; `guard`,
 `review` and `summary` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`
 and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
 
-`issues` in `drift.yml` and `lock` in `apply.yml` run neither tool too, yet
-stay on the `runs_on` runner because an `ubuntu-slim` job stops at 15 minutes
-and their work is not fixed: that of `issues` grows with the sweep's drifted
-cells and with the repository's open drift Issues, and that of `lock` with the
-cells the apply runs.
+`issues` in `drift.yml`, `lock` in `apply.yml` and `release` in `release.yml`
+run neither tool too, yet stay on the `runs_on` runner because an `ubuntu-slim`
+job stops at 15 minutes and their work is not fixed: that of `issues` grows with
+the sweep's drifted cells and with the repository's open drift Issues, that of
+`lock` with the cells the apply runs, and that of `release` with the cells the
+pull request holds locked.
 
 The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
 workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on

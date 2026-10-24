@@ -22,6 +22,7 @@ EXPECTED_INPUTS = {
     "drift.yml": {"workflow_call": ["runs_on", "tags"]},
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on"]},
+    "release.yml": {"workflow_call": ["runs_on"]},
     "unlock.yml": {"workflow_call": ["environment", "ref", "runs_on"]},
 }
 

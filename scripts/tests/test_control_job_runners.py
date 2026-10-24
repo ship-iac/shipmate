@@ -3,15 +3,16 @@
 Jobs that run `terramate` or `tofu`, `plan.yml`'s `summary` and `comment-ops.yml`'s `ops` (both
 parse YAML), and every `drift.yml` job take the consumer's `runs_on:` input. `drift.yml`'s
 `issues` runs neither tool and parses no YAML; it follows the file's one runner by choice.
-`apply.yml`'s `lock` runs neither either, but takes the input because its API calls grow with the
-cell count and an `ubuntu-slim` job stops at 15 minutes. The other control jobs take the 1-CPU
-`ubuntu-slim` image.
+`apply.yml`'s `lock` and `release.yml`'s `release` run neither either, but take the input because
+their API calls grow with the cell count and an `ubuntu-slim` job stops at 15 minutes. The other
+control jobs take the 1-CPU `ubuntu-slim` image.
 Engine CI (`ci.yml`,
 `manifest-load.yml`) stays on `ubuntu-latest`. A new job, a moved job or a flipped label fails
 here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`; `plan.yml`
 `summary` to `ubuntu-slim`; `plan.yml` `facts` to `${{ inputs.runs_on }}`; the
 `apply-env-level.yml` `wave0` cell to `ubuntu-latest`; `comment-ops.yml` `ops` to `ubuntu-slim`;
-`unlock.yml` `unlock` to `ubuntu-latest`; `apply.yml` `lock` to `ubuntu-slim`.
+`unlock.yml` `unlock` to `ubuntu-latest`; `apply.yml` `lock` to `ubuntu-slim`; `release.yml`
+`release` to `ubuntu-slim`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -42,6 +43,7 @@ EXPECTED = {
     ("plan.yml", "plan"): INPUT,
     ("plan.yml", "summary"): INPUT,
     ("plan.yml", "gate-hold"): SLIM,
+    ("release.yml", "release"): INPUT,
     ("unlock.yml", "guard"): SLIM,
     ("unlock.yml", "detect"): INPUT,
     ("unlock.yml", "unlock"): INPUT,

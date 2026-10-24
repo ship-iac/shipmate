@@ -26,48 +26,61 @@ def test_merged_head_exact_match_wins(monkeypatch):
     # An exact merge_commit_sha match is picked over everything else.
     pulls = [
         {
+            "number": 6,
             "merge_commit_sha": "other",
             "merged_at": "2024-01-01T00:00:00Z",
             "head": {"sha": "wrong"},
         },
         {
+            "number": 7,
             "merge_commit_sha": "merge123",
             "merged_at": "2024-01-02T00:00:00Z",
             "head": {"sha": "right"},
         },
     ]
     monkeypatch.setattr(dd, "_gh_json", lambda path: pulls)
-    assert dd._merged_head("o/r", "merge123") == "right"
+    assert dd._merged_head("o/r", "merge123") == ("right", "7")
 
 
 def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch):
     # The sole candidate is an open, unmerged pull request that merely contains the pushed
     # commit. Its plans must not deploy, so the fallback is the merge SHA.
     pulls = [
-        {"merge_commit_sha": "unrelated", "merged_at": None, "head": {"sha": "open-pr-head"}},
+        {
+            "number": 6,
+            "merge_commit_sha": "unrelated",
+            "merged_at": None,
+            "head": {"sha": "open-pr-head"},
+        },
     ]
     monkeypatch.setattr(dd, "_gh_json", lambda path: pulls)
-    assert dd._merged_head("o/r", "merge123") == "merge123"
+    assert dd._merged_head("o/r", "merge123") == ("merge123", "")
 
 
 def test_merged_head_mix_of_merged_and_open_picks_merged(monkeypatch):
     # No pull matches merge_commit_sha exactly, as after a squash merge, but one candidate is
     # merged and one is still open, so the merged one is picked.
     pulls = [
-        {"merge_commit_sha": "unrelated1", "merged_at": None, "head": {"sha": "open-pr-head"}},
         {
+            "number": 6,
+            "merge_commit_sha": "unrelated1",
+            "merged_at": None,
+            "head": {"sha": "open-pr-head"},
+        },
+        {
+            "number": 8,
             "merge_commit_sha": "unrelated2",
             "merged_at": "2024-01-01T00:00:00Z",
             "head": {"sha": "merged-pr-head"},
         },
     ]
     monkeypatch.setattr(dd, "_gh_json", lambda path: pulls)
-    assert dd._merged_head("o/r", "merge123") == "merged-pr-head"
+    assert dd._merged_head("o/r", "merge123") == ("merged-pr-head", "8")
 
 
 def test_merged_head_no_pulls_returns_merge_sha(monkeypatch):
     monkeypatch.setattr(dd, "_gh_json", lambda path: [])
-    assert dd._merged_head("o/r", "merge123", _attempts=1, _sleep=0) == "merge123"
+    assert dd._merged_head("o/r", "merge123", _attempts=1, _sleep=0) == ("merge123", "")
 
 
 def test_merged_head_retries_until_pulls_populated(monkeypatch):
@@ -79,6 +92,7 @@ def test_merged_head_retries_until_pulls_populated(monkeypatch):
         [],
         [
             {
+                "number": 7,
                 "merge_commit_sha": "merge123",
                 "merged_at": "2024-01-01T00:00:00Z",
                 "head": {"sha": "right"},
@@ -95,7 +109,7 @@ def test_merged_head_retries_until_pulls_populated(monkeypatch):
     slept = []
     monkeypatch.setattr(dd, "_gh_json", fake_gh_json)
     monkeypatch.setattr(dd.time, "sleep", lambda s: slept.append(s))
-    assert dd._merged_head("o/r", "merge123", _attempts=5, _sleep=2) == "right"
+    assert dd._merged_head("o/r", "merge123", _attempts=5, _sleep=2) == ("right", "7")
     assert calls["n"] == 3
     assert slept == [2, 2]  # It slept before the 2nd and 3rd attempts only.
 
@@ -111,7 +125,7 @@ def test_merged_head_gives_up_after_attempts_exhausted_all_empty(monkeypatch):
 
     monkeypatch.setattr(dd, "_gh_json", fake_gh_json)
     monkeypatch.setattr(dd.time, "sleep", lambda s: None)
-    assert dd._merged_head("o/r", "merge123", _attempts=3, _sleep=0) == "merge123"
+    assert dd._merged_head("o/r", "merge123", _attempts=3, _sleep=0) == ("merge123", "")
     assert calls["n"] == 3
 
 
@@ -135,12 +149,14 @@ def _run_main(
     reads=None,
     stacks=None,
     head=HEAD,
+    pr_number="7",
     tag_reads=None,
     dot=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
-    into `urls` are the ones the work set itself asks for; `head` is what the stub returns.
+    into `urls` are the ones the work set itself asks for; `head` and `pr_number` are what the stub
+    returns.
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
     the double, and leaves `cells` unused. Without it, `all_tags` tags each stack of `cells`
@@ -175,7 +191,7 @@ def _run_main(
             urls.append(next(a for a in args if a.startswith("repos/")))
         return jsonl
 
-    monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: head)
+    monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: (head, pr_number))
     # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks); a double
     # returning fewer
     # unpacks into the wrong names and fails somewhere unrelated.
@@ -236,6 +252,19 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
     )
     assert len(wave_cells(dd.wv, parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL]
+
+
+def test_main_writes_an_empty_pr_number_for_a_push_with_no_pull_request(tmp_path, monkeypatch):
+    """An empty `pr_number` skips the summary's lock release. Mutation: write `pr_number` as
+    `pr_number or head` -- the head SHA is written instead."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
+        pr_number="",
+    )
+    assert (parsed["head_sha"], parsed["pr_number"]) == (HEAD, "")
 
 
 def test_main_refuses_a_malformed_merged_head_before_any_api_read(tmp_path, monkeypatch):
@@ -561,8 +590,9 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
 
 
 def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
-    """The summary writes the gate's failure on the head only if detect named it. Mutation: move
-    the `head_sha` write to just before `refuse_stranded_checks` -- the file stays empty."""
+    """The summary writes the gate's failure on the head, and releases the pull request's locks,
+    only if detect named them. Mutation: move the `head_sha` write to just before
+    `refuse_stranded_checks` -- the file stays empty. Mutation: drop `pr_number` from it."""
     with pytest.raises(SystemExit) as exc:
         _run_main(
             tmp_path,
@@ -575,7 +605,7 @@ def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
             order={"a": ["b"], "b": ["a"]},
         )
     assert str(exc.value).startswith("::error::needs is cyclic")
-    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD}
+    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "7"}
 
 
 #: The refusal's fixed remedy, hand-written.
@@ -874,7 +904,7 @@ def test_an_inversion_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
     assert str(exc.value).startswith("::error::needs order inverted")
-    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD}
+    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "7"}
 
 
 def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):

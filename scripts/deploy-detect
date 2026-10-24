@@ -28,7 +28,7 @@ ad = _load("apply-detect")
 
 
 def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
-    """Map a merge commit -> the head SHA of the PR it merged.
+    """Map a merge commit -> (head SHA, number) of the PR it merged.
 
     Reviewed .otplan artifacts and apply checks live on the PR head, not on main.
     Edge cases handled: (1) `commits/{sha}/pulls` can transiently return [] for a
@@ -38,20 +38,18 @@ def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
     the returned pulls match exactly, only *merged* PRs (`merged_at` set) are
     eligible fallback candidates — an OPEN PR that merely contains the pushed
     commit must never be selected, since deploying its plans would apply more
-    than main actually contains. If no pull qualifies, head = merge_sha, same as
-    a genuine non-PR push to main.
+    than main actually contains. If no pull qualifies, head = merge_sha and the
+    number is empty, same as a genuine non-PR push to main.
     """
     for attempt in range(_attempts):
         pulls = _gh_json(f"repos/{repo}/commits/{merge_sha}/pulls")
         if pulls:
             exact = next((p for p in pulls if p.get("merge_commit_sha") == merge_sha), None)
-            if exact is not None:
-                return exact["head"]["sha"]
-            merged = next((p for p in pulls if p.get("merged_at")), None)
-            return merged["head"]["sha"] if merged is not None else merge_sha
+            pull = exact or next((p for p in pulls if p.get("merged_at")), None)
+            return (pull["head"]["sha"], str(pull["number"])) if pull else (merge_sha, "")
         if attempt < _attempts - 1:
             time.sleep(_sleep)
-    return merge_sha
+    return merge_sha, ""
 
 
 def refuse_stranded_checks(tree, unmanaged, open_names, pending):
@@ -156,7 +154,7 @@ def run_graph_deps(pending):
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
-    head = _merged_head(repo, merge_sha)
+    head, pr_number = _merged_head(repo, merge_sha)
     validate_head_sha(
         head,
         "the deploy's head SHA (the merged pull request's head from "
@@ -165,7 +163,7 @@ def main():
     # Before any refusal past head validation, so a refused deploy's summary can write the gate's
     # failure on the head.
     # Hyphen-free: `steps.d.outputs.head-sha` parses the '-' as subtraction.
-    write_outputs(head_sha=head)
+    write_outputs(head_sha=head, pr_number=pr_number)
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
     tag_map = bm.all_tags()
