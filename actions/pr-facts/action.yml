@@ -13,7 +13,7 @@ outputs:
     description: The head repository's full name (owner/repo). What build-matrix's fork refusal and the engine plan workflow's summary guard decide on.
     value: ${{ steps.facts.outputs.head_repo }}
   base-sha:
-    description: The pull request's base commit, for change detection.
+    description: The pull request's base commit; detect diffs from its merge base with the head.
     value: ${{ steps.facts.outputs.base_sha }}
   pr-number:
     description: The pull request's number.
