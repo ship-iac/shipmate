@@ -53,11 +53,13 @@ def test_engine_secrets_are_chosen_once_and_unlock_keeps_its_own():
     assert jobs["unlock"]["secrets"] == {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
 
 
-def test_a_ready_plan_run_queues_behind_the_run_in_flight():
-    """Mutation: `cancel-in-progress` restored to `true`."""
+def test_a_ready_or_dispatched_plan_run_queues_behind_the_run_in_flight():
+    """Mutations: `cancel-in-progress` restored to `github.event.action != 'ready_for_review'`;
+    `==` turned to `!=` in the `event_name` clause."""
     assert _jobs("shipmate")["plan"]["concurrency"] == {
         "group": "plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}",
-        "cancel-in-progress": "${{ github.event.action != 'ready_for_review' }}",
+        "cancel-in-progress": "${{ github.event_name == 'pull_request_target'"
+        " && github.event.action != 'ready_for_review' }}",
     }
 
 
