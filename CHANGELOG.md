@@ -8,6 +8,17 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** environment table keys renamed; the old spellings refuse as unknown keys.
+  - `shared: true` → `split: false`
+  - `gated: false` → `review: false`
+  - `explicit: true` → `apply_mode: targeted`
+  - `tf_vars:` → `vars:`
+- **Bare-apply comment line `left pending (explicit)` reads `left pending (targeted)`.**
+
 ## [0.52.0] — 2026-10-24
 
 Tags `2ecf618`.

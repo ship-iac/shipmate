@@ -255,7 +255,7 @@ def test_folder_derives_nothing():
     }
 
 
-# --- shared mode, the binding, and the path the credential came from ------------------
+# --- split: false, the binding, and the path the credential came from -----------------
 
 _SHARED = {
     "layout": "folder",

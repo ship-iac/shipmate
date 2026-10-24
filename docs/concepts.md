@@ -42,7 +42,7 @@ apply result comments and the drift issues.
 A comment-triggered apply runs only for a commenter with write or admin
 permission, on a pull request from a branch of this repository that is not a
 draft, is mergeable and satisfies the branch ruleset's review policy, and only
-against a reviewed plan for the pull request's current head. An environment whose entry holds `gated: false`
+against a reviewed plan for the pull request's current head. An environment whose entry holds `review: false`
 is exempt from the review requirement and from nothing else.
 
 [`CONTRACT.md`](../CONTRACT.md) §Comment-ops holds the grammar, what each verb

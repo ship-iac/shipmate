@@ -30,13 +30,14 @@ live probes.
   `require_last_push_approval` is off, since at count 0 GitHub required no
   code-owner review from a pull request author who individually owns the changed
   files (measured 2026-10-11; team ownership was not). While the default
-  branch's table is readable and an environment is gated, the note names the
-  gated environments, which can apply without an approving review and are held
-  only where a code-owner review is required for the changed files. Count 0
-  with code-owner review off leaves no unforgeable merge-time control at all
-  and warns, and names the gated environments in a second warning. Count 0
-  with `require_last_push_approval` on warns, and omits the sole-maintainer
-  note; the gated-environments note still appears. A sole maintainer cannot
+  branch's table is readable and an environment is under review, the note names
+  the environments under review, which can apply without an approving review and
+  are held only where a code-owner review is required for the changed files.
+  Count 0 with code-owner review off leaves no unforgeable merge-time control at
+  all and warns, and names the environments under review in a second warning.
+  Count 0 with `require_last_push_approval` on warns, and omits the
+  sole-maintainer note; the note naming the environments under review still
+  appears. A sole maintainer cannot
   approve their own last push, so cannot merge. The
   booleans are unioned across every
   `pull_request` rule on the branch, since GitHub enforces the union across
@@ -57,7 +58,7 @@ live probes.
   only a note, and "no approval rule" is deliberately not "no protection rules":
   GitHub synthesizes a `branch_policy` protection rule for any environment with
   a deployment branch policy, and a branch policy is not a review. The role each
-  environment plays comes from `shared: true` in its `environments.<env>`
+  environment plays comes from `split: false` in its `environments.<env>`
   entry of `.github/shipmate-config.yml`, read from the default branch's copy that every
   run binds from; when that copy cannot be read or is invalid, these environment
   probes are skipped with a note. A shared environment carrying approval rules warns that they stall the plan
@@ -148,8 +149,8 @@ live probes.
   on by itself run here — the top-level keys, `layout`, `max_parallel`,
   `command_hints` and the environment entries; `tf_vars`-layout coverage and
   unused entries need a plan matrix or a whole-tree environment scan, and the
-  verdict names them as unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel`
-  values read back, absent ones included: `explicit` set on no entry is
+  verdict names them as unchecked. A valid file also gets its `needs`, `apply_mode` and `max_parallel`
+  values read back, absent ones included: `apply_mode: targeted` set on no entry is
   legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
@@ -300,8 +301,8 @@ mandate. Each one names what to do.
 | `<name> branch policy` — also permits other branches | the environment — `shipmate-engine`, an `<env>-apply`, or a shared bare `<env>` — has a deployment branch policy naming branches besides the default one, so a workflow on any of them can still claim what that environment scopes. Delete the extra entries in Settings → Environments if they were not deliberate. |
 | `<env>-plan` — GitHub Environment `<env>-plan` is a plan environment but has a deployment branch policy | a plan environment must have none: plan cells evaluate at the pull request's base ref, so a policy blocks every cell whose pull request targets a branch it does not name ([`hardening.md`](hardening.md) #8). Remove the policy. A plan environment that also has protection rules prints two `differs` lines: the protection-rules one below first, then this one. |
 | `<env>-plan` — GitHub Environment `<env>-plan` is a plan environment but has protection rules | required reviewers or a wait timer on a plan environment stall that environment's plan cells and every drift sweep covering it. Remove them ([`hardening.md`](hardening.md) #6). |
-| `<env>` — GitHub Environment `<env>` (shared between plan and apply …) has protection rules | a shared bare `<env>` is bound by the plan cells and every drift sweep covering it as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop `shared: true` from `environments.<env>`. |
-| `<env>` — the naming the engine does not bind is also present | the naming `shared: true` in `environments.<env>` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Nothing binds the unused naming, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one by setting or dropping `shared: true` in its entry of the checkout's `.github/shipmate-config.yml`. |
+| `<env>` — GitHub Environment `<env>` (shared between plan and apply …) has protection rules | a shared bare `<env>` is bound by the plan cells and every drift sweep covering it as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop `split: false` from `environments.<env>`. |
+| `<env>` — the naming the engine does not bind is also present | the naming `split` in `environments.<env>` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Nothing binds the unused naming, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one by setting or dropping `split: false` in its entry of the checkout's `.github/shipmate-config.yml`. |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
@@ -389,7 +390,7 @@ Two fail-safes of the exact-plan model produce this, and both mean the reviewed
 generated, and OpenTofu itself rejects the stored plan; or `apply-cell`'s
 pre-apply check found that the current environment's `TF_VAR_*` set no longer
 hashes to the fingerprint recorded with the plan — a variable was added,
-removed or changed, a GitHub variable that an `environments.<env>.tf_vars`
+removed or changed, a GitHub variable that an `environments.<env>.vars`
 reference names included ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
 fingerprint). That error names the current variable names only; it never
 prints a value.
@@ -436,7 +437,7 @@ environment table rather than the plan.** These come from `matrix.environment`
 and the table on the default branch, and both sides resolve them from that one
 table, so they hash identically whatever environment the job bound. What moves
 the whole set is the table changing between the plan and the apply — an
-environment's `tf_vars`, its `region`, or the `layout` itself, edited on the
+environment's `vars`, its `region`, or the `layout` itself, edited on the
 default branch in between. A re-plan is the fix, as above.
 
 **If it names a variable you set yourself, look at the consumer channels.** What
@@ -453,8 +454,8 @@ fingerprint and the binding does reach it. Two causes, both on your side:
   configuration change at all — every plan reviewed before the rotation is
   invalidated by it. A re-plan clears this one.
 
-An environment-naming or `shared: true` change does reach this error for the
-same reason. Setting `shared: true` on an env swaps its two split environments
+An environment-naming or `split` change does reach this error for the
+same reason. Setting `split: false` on an env swaps its two split environments
 for the bare one, so a cell planned before the change and applied
 after it reads its variables and its envelope from a different environment.
 Re-plan after such a change. A mis-binding is a separate failure, refused by the
@@ -615,14 +616,14 @@ Two fixes, and the error names both because either can be the right one:
 
 - **Create each environment named.** The apply path binds `<env>-apply` for a
   split env and the bare `<env>` for one whose `environments.<env>` entry holds
-  `shared: true`. Existence is matched case-exactly against the stack's env
+  `split: false`. Existence is matched case-exactly against the stack's env
   tag, so an environment differing from the named binding only in case does not
   satisfy the pre-flight, and GitHub may reject a second one as a duplicate.
   Rename the existing environment (or the tag) to match rather than creating
   another.
 - **Correct the environment's entry in `.github/shipmate-config.yml`.** If the
   environments you created are the ones you meant, the table is what disagrees
-  with them: `shared: true` on an env that is really split, or missing on one
+  with them: `split: false` on an env that is really split, or missing on one
   that is really shared. The engine reads the default branch's copy, so the fix
   takes a merged pull request. `shipmate doctor` on a pull request reports, per
   env, which naming the default branch's table selects and which environments of
@@ -676,8 +677,10 @@ branch's** copy of the file — that is the only copy execution reads.
 | `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan and drift matrices stays a merged commit. Write the number |
 | `command_hints must be true or false, got …` | `command_hints` holds `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise read as set and resolve as unset |
 | `command_hints holds a variable reference, and it accepts none` | `command_hints` is written into the file, like the flags. Write `true` or `false` |
-| `environments.<env>.<key> must be true or false, got …` | `shared`, `explicit` and `gated` hold `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise resolve to the default |
-| `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `shared`, `explicit` and `gated` are written into the file, so which environments are shared, held back or ungated stays a merged commit. Write `true` or `false` |
+| `environments.<env>.<key> must be true or false, got …` | `split` and `review` hold `true` or `false`, bare or quoted. `no`, `False` or a number would otherwise resolve to the default |
+| `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `split` and `review` are written into the file, so which environments are shared and which are review-exempt stays a merged commit. Write `true` or `false` |
+| `environments.<env>.apply_mode must be targeted or bare, got …` | `apply_mode` holds `targeted` or `bare`. Any other value, `true` and `Targeted` included, would otherwise resolve as `bare` and put the environment on a bare `shipmate apply` |
+| `environments.<env>.apply_mode holds a variable reference, and it accepts none` | `apply_mode` is written into the file, so which environments a bare `shipmate apply` skips stays a merged commit. Write `targeted` or `bare` |
 | `environment <env>: region is empty` | `region:` with nothing after it, or `region: #eu-west-1`, which YAML reads as a comment. Write the region, or remove the key |
 | `layout references GitHub variable <NAME>, whose value is not one of …` | the variable holds something other than `tf_vars`, `workspace` or `folder`. Fix the variable; the refusal names it rather than quoting its value |
 | `environment <env>: identity names no entry under identities` | the entry names an identity the file does not declare; the message lists the ones it does. A misspelled name lands here |
@@ -686,7 +689,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `<n> cell(s) carry a workload tag their environment's workloads list does not name` | each named stack's `workload/<name>` tag is outside its environment's `workloads`. Retag the stack, or add the workload to the list on the default branch in a pull request of its own first; the plan reads the default branch's table, so the same pull request cannot fix it |
 | `environments.<env>.workloads lists <w>, which no stack in <env> tags` | a warning, on drift, `unlock` and a bare `shipmate apply` only. The workload was listed ahead of the branch that tags it, or its last tag was dropped: tag a stack with it, or remove it from the list once the branch dropping its last tag has merged. An environment no stack tags at all gets the unused-entry warning instead |
 | `environments.<name> is not an environment name` or `environments.<name> carries the environment suffix` | an `environments.<name>` entry whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
-| `... names 'shipmate-engine', the engine's own environment` | an entry, a `needs` item, a stack's `env/*` tag or a dispatched environment names `shipmate-engine`, with or without a `-plan`/`-apply` suffix. A `shared: true` entry of that name would bind the engine's own environment, which holds the App private key, so the name is refused as a table entry, a `needs` item, a stack tag and a dispatched environment. Rename the entry, retag the stack, or comment another environment |
+| `... names 'shipmate-engine', the engine's own environment` | an entry, a `needs` item, a stack's `env/*` tag or a dispatched environment names `shipmate-engine`, with or without a `-plan`/`-apply` suffix. A `split: false` entry of that name would bind the engine's own environment, which holds the App private key, so the name is refused as a table entry, a `needs` item, a stack tag and a dispatched environment. Rename the entry, retag the stack, or comment another environment |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
 | `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
@@ -705,22 +708,22 @@ the entry the key fell under. The second line is the diagnosis:
 
 | Where it landed | The second line |
 | --- | --- |
-| under `environments.dev-eu` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
+| under `environments.dev-eu` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, vars, identity, workloads, split, needs, apply_mode, review.` |
 | under `identities.dev` | `identities.dev.layout is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 | under `identities.dev.aws` | `identities.dev.aws.layout is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 
 The fix in every case is the same: write the top-level settings at column 1.
 
-**Three settings refuse nothing when they are absent.** `needs`, `explicit`
+**Three settings refuse nothing when they are absent.** `needs`, `apply_mode`
 and `max_parallel` are optional and take tolerant defaults — no ordering, no
 exclusions, and at most 10 cell jobs at once per plan and drift sweep. A file
-that sets `explicit` on no entry is structurally valid, and a bare
+that sets `apply_mode: targeted` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
 warns. `shipmate doctor` echoes all three on every report for exactly this reason;
 read them before merging.
 
 **Editing them on a branch does not change what that branch applies.**
-`needs`, `explicit`, `max_parallel` and `command_hints` are read from the default
+`needs`, `apply_mode`, `max_parallel` and `command_hints` are read from the default
 branch with the rest of the file. Validate the change with `shipmate doctor` on the pull
 request, then merge it — that is what makes it take effect.
 
@@ -1283,16 +1286,16 @@ The apply comment carries a line
 
 Which review decision refuses a targeted apply, and which environments a bare
 apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
-§Comment-ops (the `gated: false` rules).
+§Comment-ops (the `review: false` rules).
 
-**The apply is refused although the environment is ungated.** Check which copy
-of the file you edited: all three readers resolve `gated` from the
+**The apply is refused although the environment is review-exempt.** Check which
+copy of the file you edited: all three readers resolve `review` from the
 **default branch**, so a flag added on the pull request asking for the apply
 does nothing until it merges. Then check the entry against the rules below. The
-refusal is by *shape*: a non-boolean `gated`, or an entry name with a suffix or a
+refusal is by *shape*: a non-boolean `review`, or an entry name with a suffix or a
 character outside the env charset, is rejected loudly, naming the key. Spelling
 is never refused, and it warns only where a run has already scanned the whole
-tree: `gated: false` on `environments.dev-eu2` for `dev-eu` is accepted and
+tree: `review: false` on `environments.dev-eu2` for `dev-eu` is accepted and
 `dev-eu` simply keeps its review requirement, but a run that scanned the tree
 names `dev-eu2` as an entry no stack tags
 ([`../CONTRACT.md`](../CONTRACT.md) §What the diagnostics can and cannot see).
@@ -1300,12 +1303,13 @@ See
 [`getting-started.md`](getting-started.md) §"Applying chosen environments without
 an approving review".
 
-**The run failed with an `environments.<env>.gated` or `environments.<name> is not an
+**The run failed with an `environments.<env>.review` or `environments.<name> is not an
 environment name` error.** The value or name is rejected loudly rather than left
 silently inert:
 
-- anything but `true` or `false` — `gated: no`, `gated: 0` or a
-  variable reference would otherwise resolve as gated while reading as ungated;
+- anything but `true` or `false` — `review: no`, `review: 0` or a
+  variable reference would otherwise resolve as under review while reading as
+  review-exempt;
 - an entry name with a `-plan` / `-apply` suffix, or outside the env charset
   (lowercase letters, digits, `-`, `_`) — the name is matched against the bare
   logical env name carried by the apply checks, so write `environments.dev-eu`,
@@ -1325,19 +1329,20 @@ so this comment points at the configuration rather than at the authorization. A
 file broken this way also refuses every plan run, which is the louder signal of
 the two.
 
-**A held environment is also an explicit environment.** When both causes apply
+**A held environment is also a `targeted` environment.** When both causes apply
 it is listed once, on its held line, because the hold is the thing to
 clear first. Clearing it does not release the environment into a bare
-`shipmate apply`, though: its entry still holds `explicit: true`, so it still
+`shipmate apply`, though: its entry still holds `apply_mode: targeted`, so it still
 needs a targeted `shipmate apply <env>`. The held line names that command:
 ``⚪ prod: held, the review state does not permit applying; once it clears, comment `shipmate apply prod` ``.
 
-**An ungated environment that is also explicit is not held.** It gets the explicit
-line, ``🟡 <env>: left pending (explicit), comment `shipmate apply <env>` `` — and that targeted apply
-then succeeds without an approving review, because the environment is
-ungated. `gated` and `explicit` are independent: the first decides whether a
-review is required, the second only decides that a bare apply will not reach it.
-An environment that must never apply unreviewed must not hold `gated: false`.
+**A review-exempt environment that is also `targeted` is not held.** It gets the
+targeted line, ``🟡 <env>: left pending (targeted), comment `shipmate apply <env>` `` — and that
+targeted apply then succeeds without an approving review, because the environment
+is review-exempt. `review` and `apply_mode` are independent: the first decides
+whether a review is required, the second only decides that a bare apply will not
+reach it. An environment that must never apply unreviewed must not hold
+`review: false`.
 
 ### `stack ordering cycle through <stacks>`
 
@@ -1368,7 +1373,7 @@ fix lands, and every plan whose head carries the loop refuses.
    and changes the stack of every cell any refused deploy named after
    `pending on this merge:` (any edit `terramate list --changed` marks).
 2. Its cells are applied before merge under a required gate (`shipmate apply`,
-   and `shipmate apply <env>` for an `explicit` environment), or by its deploy
+   and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.
 
 A refused deploy's apply checks are never read again. Its gate and `detect`
@@ -1409,7 +1414,7 @@ A refused deploy appends the cells of the merge it left pending. After a
 default branch and applies them. For a fix to tags or `after`, open a new pull
 request that makes it and changes every listed stack; its cells are applied
 before merge under a required gate (`shipmate apply`, and `shipmate apply
-<env>` for an `explicit` environment), or by its deploy otherwise. A re-run
+<env>` for a `targeted` environment), or by its deploy otherwise. A re-run
 reads tags and `after` from the merged commit and refuses again.
 
 A targeted `shipmate apply <env>` never refuses this: it does not order by
@@ -1425,20 +1430,20 @@ in its compact form, `⚪ waiting on <stack> / <env> (<remedy>): <cells>`.
 The first cell runs after the second through `after`
 ([`../CONTRACT.md`](../CONTRACT.md) §Fan-out), and the second is pending and
 not applying in this run: another environment on a targeted apply, or a held,
-explicit or skipped environment on a bare one. The waiting cell's apply check
+`targeted` or skipped environment on a bare one. The waiting cell's apply check
 stays pending and the rest of the run applied. Follow the remedy:
 
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
-  `shipmate apply <env>` ``: the blocker's environment is held and explicit.
+  `shipmate apply <env>` ``: the blocker's environment is held and `targeted`.
   Get an approving review, then comment `shipmate apply <env>` for it.
 - `it is held until the pull request is approved`: get an approving review
   (§An environment was held for review, or the apply was refused), then comment
   `shipmate apply`.
 - ``its environment waits on its `needs` predecessors, which must apply first,
   including any held for review``: get any review the predecessors are held
-  for, apply an explicit one with `shipmate apply <env>`, then comment
+  for, apply a `targeted` one with `shipmate apply <env>`, then comment
   `shipmate apply`.
 
 Before any of these, check the run for a cell whose job log shows
@@ -1696,7 +1701,7 @@ applies nothing, so these other cells of this merge are not applied either:
 changes every other listed stack (any edit that `terramate list --changed` marks, such
 as a comment line). It plans the current default branch for all of them, this merged
 change included, and its cells are applied before merge under a required gate
-(`shipmate apply`, and `shipmate apply <env>` for an `explicit` environment), or by its
+(`shipmate apply`, and `shipmate apply <env>` for a `targeted` environment), or by its
 deploy otherwise. If an untag was deliberate, apply that stranded
 change by hand instead of retagging; the pull request still changes every listed stack,
 and with none listed no pull request is needed. Re-running this deploy checks out the
@@ -1718,7 +1723,7 @@ The list names every such cell, with an apply check or without.
 2. Review its plan: it plans the current default branch, this merged change
    included.
 3. Its cells are applied before merge under a required gate (`shipmate apply`,
-   and `shipmate apply <env>` for an `explicit` environment), or by its deploy
+   and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.
 
 If the untag was deliberate ([`../CONTRACT.md`](../CONTRACT.md) §Taking a stack out

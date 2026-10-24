@@ -256,6 +256,32 @@ def test_head_sha_is_a_required_input():
     assert "${{" not in inputs["head-sha"]["description"]  # GHA evaluates descriptions.
 
 
+def test_declared_inputs_are_exactly_these():
+    """The render step's `env:` reads `inputs.<name>`, and an undeclared name evaluates to empty
+    without error. Mutation: rename `applied-exempt-envs` under `inputs:` alone -> the declared
+    set differs."""
+    assert set(action_yaml("apply-summary")["inputs"]) == {
+        "pr-number",
+        "environment",
+        "envlevel0-waves",
+        "envlevel1-waves",
+        "envlevel2-waves",
+        "envlevel3-waves",
+        "excluded-envs",
+        "skipped-envs",
+        "review-held-envs",
+        "applied-exempt-envs",
+        "review-not-required-envs",
+        "waiting-cells",
+        "detect-refusal",
+        "env-order",
+        "results",
+        "head-sha",
+        "app-id",
+        "private-key",
+    }
+
+
 def test_token_mint_also_grants_checks_read():
     mint = _find_step(_steps(), uses_contains="create-github-app-token")
     with_ = mint.get("with") or {}

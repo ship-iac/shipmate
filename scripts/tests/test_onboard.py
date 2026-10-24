@@ -724,11 +724,11 @@ def test_repository_level_key_is_deleted(monkeypatch):
     ]
 
 
-def test_shared_mode_binds_one_bare_environment(monkeypatch):
+def test_split_false_binds_one_bare_environment(monkeypatch):
     """An environment whose table entry holds `split: false` is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
-    The two suffixed reads are the naming-conflict probe, which in shared mode looks for
+    The two suffixed reads are the naming-conflict probe, which under `split: false` looks for
     the split pair: they 404 here, so the bare environment is reconciled.
 
     Mutation: pass `False` for `shared` to `ec.env_names` in `_reconcile_envs`, which
@@ -3707,10 +3707,10 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch)
     assert context["unresolved"] == {"dev-eu"}
 
 
-def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
+def test_split_false_reports_the_unused_naming_too(monkeypatch):
     """Running once without `split: false` and once with it produces all three environments.
-    The second run must not silently bind the bare one: nothing binds the pair in shared
-    mode, so the probe runs in shared mode as well.
+    The second run must not silently bind the bare one: nothing binds the pair under
+    `split: false`, so the probe runs there as well.
 
     Mutation: guard the probe with `if env not in ctx["shared"]`, which reconciles
     `dev-eu` and reports nothing.

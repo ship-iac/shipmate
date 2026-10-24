@@ -180,7 +180,7 @@ never used.
 
 - Every logical environment (for example `staging`, `production`) is carried by
   GitHub Environments named after it: `staging-plan` and `staging-apply` by
-  default, or a single `staging` in shared mode (both namings below). The
+  default, or a single `staging` under `split: false` (both namings below). The
   Environment is always the unit of binding, apply-gating, protection, and the
   plan/apply split; the engine reads no identity variable from it. What a cell
   injects depends on how the consumer repo models environments (its IaC layout):
@@ -214,7 +214,7 @@ never used.
   names it may set.
   - **The injected names are lowercase after the prefix.** `TF_VAR_ENV` is a
     different variable from the `TF_VAR_env` OpenTofu reads, and the table's
-    `tf_vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
+    `vars` allowlist accepts either spelling. Nothing refuses the mis-cased one:
     plan and apply resolve it from the same table, so it hashes identically on
     both sides. The variable simply never reaches OpenTofu, and the stack runs on
     whatever default it declares for the name it does read.
@@ -237,12 +237,12 @@ never used.
   environment) carry required reviewers configured on the GitHub
   Environment itself, so approval gating is enforced by GitHub, not by
   workflow logic.
-- **Plan and apply bind different GitHub Environments by default (split
-  mode).** For a logical env `<env>`, plan jobs (and each drift sweep covering it) bind
+- **Plan and apply bind different GitHub Environments by default
+  (`split: true`).** For a logical env `<env>`, plan jobs (and each drift sweep covering it) bind
   `<env>-plan`, apply jobs bind `<env>-apply`. This lets apply carry stricter
   protection rules (required reviewers, wait timers) than plan, even though both
   act against the same logical environment. "The apply environment" below means
-  `<env>-apply` in split mode and the bare `<env>` in shared mode.
+  `<env>-apply` by default and the bare `<env>` under `split: false`.
 - **Detect resolves the binding, and every cell job reads it from its row.**
   `scripts/env-config` computes `env_binding` from the default-branch table
   when detect stamps each matrix row, and the eight wave jobs of
@@ -261,8 +261,8 @@ never used.
 
   A repository may therefore mix modes freely — some envs shared, some split —
   and no workflow file names either.
-- **A logical env may opt into one shared environment (shared mode).**
-  `shared: true` in its `environments.<env>` entry makes both paths bind the
+- **A logical env may opt into one shared environment (`split: false`).**
+  `split: false` in its `environments.<env>` entry makes both paths bind the
   bare `<env>` — one environment, no suffix. The price is stated in
   `docs/hardening.md` (§6 and §7–9): a protection rule on a shared environment
   gates the plan cells and every drift sweep covering it too, so the reviewer gate is
@@ -272,8 +272,8 @@ never used.
     pull request cannot move its own cells between the two namings. Changing it
     is an ordinary pull request to the default branch, under the same review as
     any other change to the table.
-  - `shared` must be `true` or `false`: any other value (`yes`, `True`) refuses
-    at detect rather than reading as unshared. An absent key and `shared: false`
+  - `split` must be `true` or `false`: any other value (`no`, `False`) refuses
+    at detect rather than reading as split. An absent key and `split: true`
     both mean split.
   - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
     logical env literally named `foo-apply` makes the naming undecidable (is an
@@ -281,7 +281,7 @@ never used.
     environment?) and binds `foo-apply-apply` on the apply path. An
     `environments.<name>` entry, a `needs` item, an `env/<name>` stack tag or a
     dispatched environment carrying the suffix refuses. `shipmate-engine` is
-    reserved too, and the same four refuse it: a `shared: true` entry of that
+    reserved too, and the same four refuse it: a `split: false` entry of that
     name would bind the engine's own environment, which holds the App private
     key, and one rule for every name is simpler than a shared-only rule.
 - **A binding that disagrees with the environment names is invisible to the
@@ -342,7 +342,7 @@ never used.
   below) and GitHub Environment configuration. Adding a new environment is
   purely a data change: add its entry to the environment table, create its
   GitHub Environments (`<env>-plan` and `<env>-apply`, or one bare `<env>`
-  when its entry holds `shared: true`), then tag the stacks that belong to it. The
+  when its entry holds `split: false`), then tag the stacks that belong to it. The
   table entry merges on its own pull request, before the tags — §Adding and
   removing an environment has why the order is not optional. No workflow YAML is
   edited to add or remove an environment — every cell job binds the row's
@@ -366,7 +366,7 @@ never used.
   literal exception, spelled identically everywhere it appears because it
   names one fixed thing, not a per-repo variable.
 - For every name in the row's `tf_vars` — the layout's derived names plus the
-  environment's own `tf_vars` — the value `tofu` receives is the table's. A
+  environment's own `vars` — the value `tofu` receives is the table's. A
   consuming repository's `terramate.config.run.env` may read any name, and may
   set any name the row does not hold. Terramate applies `run.env` to the child
   process after the ambient environment, so an assignment to one of the row's
@@ -376,10 +376,10 @@ never used.
   one. Cells then collapse onto one state key with plan, gate and apply all
   green. To give local runs a default, read the injected name first in the
   chain — `tm_try(env.TF_VAR_env, env.env, "dev")`. To let `run.env` own a
-  variable, leave it out of the table's `tf_vars`.
+  variable, leave it out of the environment's `vars`.
   - What the row does not hold stays the consumer's. `TF_VAR_env` is an
     ordinary variable under `layout: folder`, and `TF_WORKSPACE` is the
-    table's only under `workspace` or through a `tf_vars` entry. Under the
+    table's only under `workspace` or through a `vars` entry. Under the
     `tf_vars` and `folder` layouts, a `run.env` `TF_WORKSPACE` selects the same
     workspace at plan and apply, and the cell actions run `scripts/state-path`
     inside `terramate run` (§State backend), so the state path the cell records
@@ -398,7 +398,7 @@ never used.
     a name comes back different from the table's value or unset, when
     `terramate run` exits non-zero, when the child's output is not a JSON
     object, and when the step received no stack. A row whose `tf_vars` is empty
-    (`folder` with no `tf_vars`) runs nothing. The comparison is against the real
+    (`folder` with no `vars`) runs nothing. The comparison is against the real
     value, so a `run.env` literal equal to it passes in that cell and refuses in
     any cell where it differs.
   - `run.env` is evaluated per stack, and a `terramate.config.run.env` block
@@ -438,7 +438,7 @@ it plans; changing any of those takes a merge to the default branch. The read
 names `GITHUB_REPOSITORY`, which is the base repository under both pull-request
 events, and a fork pull request is still refused in `detect` before it plans.
 
-**`needs`, `explicit`, `gated`, `max_parallel` and `command_hints` come from the
+**`needs`, `apply_mode`, `review`, `max_parallel` and `command_hints` come from the
 default branch too.** They are read from the same parsed mapping as the environment
 table, and a branch therefore cannot reorder its own apply waves, drop its own
 production exclusion, exempt itself from the review requirement, raise its own
@@ -496,14 +496,15 @@ environments:
     split: false                   # one bare `sbx` Environment on both paths
 ```
 
-An environment entry holds `region`, `tf_vars`, `identity`, `workloads`,
-`shared`, `needs`, `explicit` and `gated`, and nothing else. `shared: true`
+An environment entry holds `region`, `vars`, `identity`, `workloads`,
+`split`, `needs`, `apply_mode` and `review`, and nothing else. `split: false`
 binds the environment
 as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pair
-(§Env model, shared mode). `explicit: true` keeps the environment out of a bare
-`shipmate apply`, and `gated: false` exempts it from the review requirement
-(§Comment-ops). The three hold `true` or `false`, bare or quoted; `shared` and
-`explicit` default to `false`, `gated` to `true`.
+(§Env model). `apply_mode: targeted` keeps the environment out of a bare
+`shipmate apply`, and `review: false` exempts it from the review requirement
+(§Comment-ops). `split` and `review` hold `true` or `false`, bare or quoted, and
+default to `true`: writing `false` gives something up. `apply_mode` holds
+`targeted` or `bare` and defaults to `bare`.
 
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
@@ -533,7 +534,7 @@ were not probed and are assumed to do the same), and a capped cell
 queued behind a live apply's concurrency group would hold a slot the others
 need. Plans and drift
 sweeps bind `<env>-plan`, which carries no reviewers (§Env model). The one
-exception is a `shared: true` environment: it binds its bare `<env>` on plans
+exception is a `split: false` environment: it binds its bare `<env>` on plans
 and drift too, so its reviewers or wait timer apply again to each batch of a
 plan or sweep over the cap.
 
@@ -542,7 +543,7 @@ is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
 `{` and `[` open a mapping or list, which is meant only in a reference
 (`{vars: NAME}`) and in the `workloads` and `needs` lists; `*`, `&` and `!` an
 alias, anchor or tag, each refused; and `#` a comment that empties the value. Only a
-`tf_vars` value may be empty, so only there is a `#`-led value not refused.
+`vars` value may be empty, so only there is a `#`-led value not refused.
 
 **An identity names credentials once.** `identities.<name>` holds three
 fields, each optional, all under `aws`:
@@ -622,7 +623,7 @@ message for each position.
 step — which is how the three credential-free sample repositories work. A file
 holding only `layout: workspace` is a complete, warning-free table.
 
-**What each layout derives**, before the environment's own `tf_vars` merges over it:
+**What each layout derives**, before the environment's own `vars` merges over it:
 
 | `layout` | Injected |
 |---|---|
@@ -630,13 +631,13 @@ holding only `layout: workspace` is a complete, warning-free table.
 | `workspace` | `TF_WORKSPACE = <environment key>` |
 | `folder` | nothing |
 
-`tf_vars` accepts only `TF_VAR_*` and `TF_WORKSPACE` names and only string values.
+`vars` accepts only `TF_VAR_*` and `TF_WORKSPACE` names and only string values.
 Without that allowlist the table would be a general environment injector and
 would stop describing environment identity.
 
 ### Variable references
 
-Any string value in the file except `shared`, `explicit`, `gated`,
+Any string value in the file except `split`, `apply_mode`, `review`,
 `max_parallel` and `command_hints` may instead name a GitHub variable:
 
 ```yaml
@@ -660,7 +661,7 @@ environments:
 - **Shape.** Exactly `{vars: NAME}`, in flow or block form: a mapping with one
   key, `vars`, holding a string, named after GitHub's `vars` context. It is valid at every
   string position, list items and an identity map's values included, except
-  `shared`, `explicit`, `gated`, `max_parallel` and `command_hints` (see Values),
+  `split`, `apply_mode`, `review`, `max_parallel` and `command_hints` (see Values),
   and it replaces the whole string before `{workload}` is filled. Any other
   mapping is ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
@@ -674,8 +675,8 @@ environments:
   job that reads the file binds one. comment-ops and the plan `summary` job
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
-- **Values.** A resolved value is always a string. `shared`, `explicit`,
-  `gated`, `max_parallel` and `command_hints` accept no reference: one refuses before it
+- **Values.** A resolved value is always a string. `split`, `apply_mode`,
+  `review`, `max_parallel` and `command_hints` accept no reference: one refuses before it
   resolves, so the refusal never quotes the variable's value. A referenced
   `layout` whose value is not a layout refuses naming the variable, not the
   value. The name is
@@ -698,7 +699,7 @@ environments:
 - **Plan and apply.** A cell's role and credentials region are outside the
   apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
   changed between plan and apply, reaches the apply with no re-plan. A
-  referenced `environments.<env>.tf_vars` value is inside it, and so is
+  referenced `environments.<env>.vars` value is inside it, and so is
   `region` under the `tf_vars` layout, which derives `TF_VAR_region`: changing
   that variable between plan and apply refuses the apply as stale, and a re-plan
   clears it.
@@ -721,8 +722,8 @@ variable rows depend on the run as well as the file, so they are not structural.
 | `layout: tf_vars` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables |
 | An empty `region` (`region:`, or `region: #eu-west-1`, which YAML reads as empty) | an empty region derives no `TF_VAR_region` the fingerprint can tell apart, and the credentials step needs one |
 | A cell's `workload/<name>` tag its environment's `workloads` does not list | a listed workload is the only one the default branch grants a role to. One refusal names every such cell. Checked only for the cells the run plans, applies or unlocks: a completed, excluded or held cell is not refused, and neither is an untagged cell, a tag in an environment naming no identity, or one in an environment writing no list |
-| An environment name outside the env-name charset, carrying a `-plan`/`-apply` suffix, or `shipmate-engine` | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing. A `shared: true` entry named `shipmate-engine` would bind the engine's own environment, which holds the App private key, so that name is refused as a table entry, a `needs` item, a stack tag and a dispatched environment |
-| An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting indented under an entry; credentials live in `identities.<name>`, never in an entry |
+| An environment name outside the env-name charset, carrying a `-plan`/`-apply` suffix, or `shipmate-engine` | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing. A `split: false` entry named `shipmate-engine` would bind the engine's own environment, which holds the App private key, so that name is refused as a table entry, a `needs` item, a stack tag and a dispatched environment |
+| An environment key other than `region`, `vars`, `identity`, `workloads`, `split`, `needs`, `apply_mode`, `review` | catches a misspelled key and a top-level setting indented under an entry; credentials live in `identities.<name>`, never in an entry |
 | `identity` that is not a string, or names no `identities.<name>` entry | the refusal lists the identities the file declares |
 | An environment naming an identity with no non-empty string `region` | the credentials step authenticates against the environment's region and requires one |
 | `workloads` on an environment naming no identity | without an identity a workload tag is inert, so the list would admit nothing |
@@ -732,9 +733,9 @@ variable rows depend on the run as well as the file, so they are not structural.
 | For one workload, a role name on one path and a full ARN on the other | the account rule is per workload over both paths; write both as ARNs |
 | For one workload, a role name and no account | a name becomes `arn:aws:iam::<account>:role/<name>` and has no account to go in it |
 | For one workload, a full ARN and an account | an ARN carries its own account, so the file would hold two for one role |
-| `shared`, `explicit` or `gated` that is not `true` or `false` | any other value would otherwise resolve to the default: `shared: yes` binds the split pair the repository believes it gave up, `explicit: True` puts the environment on a bare `shipmate apply`, and `gated: no` leaves it gated. A variable reference refuses before it resolves, even one that would resolve to `true`, so the refusal never quotes its value |
-| A shared environment naming an identity that sets `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
-| `tf_vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
+| `split` or `review` that is not `true` or `false`, or `apply_mode` that is not `targeted` or `bare` | any other value would otherwise resolve to the default: `split: no` binds the split pair the repository believes it gave up, `apply_mode: Targeted` puts the environment on a bare `shipmate apply`, and `review: no` leaves it under review. A variable reference refuses before it resolves, even one that would resolve to a valid value, so the refusal never quotes its value |
+| A `split: false` environment naming an identity that sets `aws.plan` | a shared environment is one GitHub Environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
+| `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape | a string where a mapping is required, and the reverse |
 | An identity key other than `aws`, or an `aws` field other than `account`, `plan`, `apply` | an identity holds only `aws.account`, `aws.plan` and `aws.apply`, and the refusal names them |
 | An identity setting neither `aws.plan` nor `aws.apply` | it grants no credential; apply-only is legal, all-empty is not |
@@ -759,7 +760,7 @@ identity the environment names. An environment absent from the table or naming
 no identity, a path the identity sets no role for, a tag outside the entry's
 `workloads`, and an untagged cell whose identity varies by workload each resolve
 an empty role, and the cell's credentials step is skipped explicitly. A
-shared-mode environment resolves `aws.apply` on both paths. Each row carries
+`split: false` environment resolves `aws.apply` on both paths. Each row carries
 what its detect resolved: `role_arn`, `cred_region` (the entry's `region` when it
 names an identity, else empty), `tf_vars`, `config_path` — the path actually
 consulted, which is diagnostic and read by nothing — and `env_binding`, the
@@ -841,7 +842,7 @@ warning, and stay silent.
 rather than declaring one, and a predecessor matching no tag warns by name under
 the same rule, on the same paths, naming what it therefore fails to do: it is fail-open,
 and orders nothing. A predecessor needs no entry of its own, so it warns rather
-than refuses. `explicit` and `gated` sit on the entry itself, so a flag on a
+than refuses. `apply_mode` and `review` sit on the entry itself, so a flag on a
 misspelled entry is named by the unused-entry warning above. The charset refusal
 catches only names no environment name could take; a plain misspelling reaches
 these warnings instead.
@@ -953,7 +954,7 @@ job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
-except that a shared environment (`shared: true`) resolves `aws.apply` on
+except that a shared environment (`split: false`) resolves `aws.apply` on
 every path. The `snapshot` and `complete` jobs deliberately get no token.
 
 On the apply path the engine passes through whatever role the environment
@@ -1334,7 +1335,7 @@ paths, which `docs/troubleshooting.md` §shipmate doctor lists. `shipmate doctor
 never affects `shipmate / gate`.
 
 Because the report enumerates the guardrails a repository is *missing* — an
-ungated default branch, an apply environment with no approval rule, an App
+unprotected default branch, an apply environment with no approval rule, an App
 installation short of the manifest's permissions — the `doctor` route requires
 the commenter's write access (above). A refused commenter gets the refusal
 reply and nothing else happens — no App token is minted, no probe runs, no
@@ -1348,21 +1349,21 @@ and intended for repositories the installing organization controls.
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies every environment that has a
 reviewed plan for the current PR head, in `needs` env-levels (see Env
-apply order, below), except environments whose entry holds `explicit: true`
+apply order, below), except environments whose entry holds `apply_mode: targeted`
 in `.github/shipmate-config.yml` and environments held for review (below). In both
 forms a cell that runs after a pending cell not applying in that run waits and
-stays pending (see Env apply order). Explicit
+stays pending (see Env apply order). `targeted`
 environments (typically production) must always be named: their
 `apply / <stack> / <env>` checks stay pending under a bare apply — so
 `shipmate / gate` keeps gating the merge — until someone runs
-`shipmate apply <env>` for them. An entry without `explicit`, or with
-`explicit: false`, is part of a bare apply. Any value but `true` or `false`
-fails loud, `yes` and `True` included: read as not explicit, it would put the
+`shipmate apply <env>` for them. An entry without `apply_mode`, or with
+`apply_mode: bare`, is part of a bare apply. Any value but `targeted` or `bare`
+fails loud, `Targeted` and `true` included: read as `bare`, it would put the
 environment on a bare apply.
 
-`explicit` constrains the bare pre-merge `shipmate apply` only. The
+`apply_mode` constrains the bare pre-merge `shipmate apply` only. The
 post-merge deploy applies every cell whose apply check is still pending,
-explicit environments included; the control on that path is the apply
+`targeted` environments included; the control on that path is the apply
 environment's required reviewers — which a shared environment cannot carry (see
 §Env model) — not this setting. The asymmetry is deliberate:
 after merge the pull request is closed, and the apply requirements above include
@@ -1401,7 +1402,7 @@ its own actionable rejection reason:
   requiring zero approvals reports no decision even when an approval exists,
   but a `CHANGES_REQUESTED` review still blocks. Any other value — including
   an absent or empty decision — fails closed with a wiring-error reason. An
-  environment whose entry holds `gated: false` is exempt from this requirement,
+  environment whose entry holds `review: false` is exempt from this requirement,
   and from no other (below);
 - **undiverged**: at least one `apply / <stack> / <env>` check on the pull
   request's current head names the plan run its plan came from (each check
@@ -1451,7 +1452,7 @@ detect refuses a cell it would apply whose apply check records another pull
 request, or none (§Apply-match fingerprint); the remedy is a re-plan on this pull
 request.
 
-`gated: false` on an entry in `.github/shipmate-config.yml` lets that environment be
+`review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
 on the apply checks:
 
@@ -1466,7 +1467,7 @@ environments:
 ```
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`
-value. Everything else still decides, on an ungated environment exactly as on any
+value. Everything else still decides, on a review-exempt environment exactly as on any
 other: `write access`, `same repository`, `not a draft`, `mergeable`,
 `undiverged` and the exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
 because an explicit human "no" is not an absent review; and an unknown or
@@ -1474,21 +1475,21 @@ absent decision still fails closed. Nor does it touch the `<env>-apply`
 environment's required reviewers — that is a different control, gating the
 deployment rather than the code review (see `docs/hardening.md`).
 
-`gated` holds `true` or `false`. Any other value — `no`, `False`, `0`, a variable
-reference — is a loud configuration error naming `environments.<env>.gated`: a
-silently inert value would leave an operator believing an environment is ungated
-when it is not. The entry's own name is held to the env-name charset and the
+`review` holds `true` or `false`. Any other value — `no`, `False`, `0`, a variable
+reference — is a loud configuration error naming `environments.<env>.review`: a
+silently inert value would leave an operator believing an environment is
+review-exempt when it is not. The entry's own name is held to the env-name charset and the
 `-plan` / `-apply` suffix rule, so an entry no stack's tag can name is refused
 rather than left to exempt nothing, and it may not be the reserved
 `shipmate-engine` (§Tag grammar).
 
-**Absent means gated**: an entry without `gated`, or with `gated: true`, keeps
+**Absent means under review**: an entry without `review`, or with `review: true`, keeps
 the ruleset's review requirement. There is no second source for an absent key
 to fall through to.
 
 Opting in takes two things, and the setting alone is not enough:
 
-1. `gated: false` on the environment's entry on the default branch, and
+1. `review: false` on the environment's entry on the default branch, and
 2. the consumer's `shipmate.yml` pinning its `.github/workflows/apply.yml@`
    reference (the `apply` job) to the same commit as its `comment-ops.yml`
    reference, as §Consumption's one-change rule requires. `comment-ops.yml`
@@ -1496,7 +1497,7 @@ Opting in takes two things, and the setting alone is not enough:
    different commits, an apply authorized under one engine's rule is enforced by
    another's, or by none.
 
-**One source, three readers.** `actions/comment-ops` resolves the ungated set
+**One source, three readers.** `actions/comment-ops` resolves the review-exempt set
 before it authorizes, and each apply form's detect resolves it again before it
 enforces —
 `scripts/gate-config` and both forms of `scripts/apply-detect`, all
@@ -1519,23 +1520,23 @@ dispatch while a bare apply spans many environments:
 `apply.yml` re-reads `reviewDecision` itself in a `review` job,
 rather than trusting a dispatch input, and that
 job is unconditional — the
-default branch's `gated: false` entries are the only source of this policy, and only
+default branch's `review: false` entries are the only source of this policy, and only
 engine-owned scripts read it.
 
 - **Targeted `shipmate apply <env>`** — the env is known at comment time, so
-  `actions/comment-ops` refuses early: `REVIEW_REQUIRED` on an ungated env
+  `actions/comment-ops` refuses early: `REVIEW_REQUIRED` on a review-exempt env
   authorizes, on any other env it refuses with the usual message extended to
-  name the env's `gated` setting. The engine's `apply.yml` then
+  name the env's `review` setting. The engine's `apply.yml` then
   re-applies the identical rule to the freshly read decision and refuses the
   run before any wave, leaving every apply check — and the gate — pending.
 - **Bare `shipmate apply`** — authorized at comment time whenever any entry is
-  ungated, then partitioned per environment by the engine's `apply.yml`.
-  `NONE` / `APPROVED` apply everything; `REVIEW_REQUIRED` applies the ungated
-  environments and holds the rest — all of them when none is ungated;
-  `CHANGES_REQUESTED`, an unknown value, or no decision at all holds
-  everything, ungated environments included.
+  review-exempt, then partitioned per environment by the engine's `apply.yml`.
+  `NONE` / `APPROVED` apply everything; `REVIEW_REQUIRED` applies the
+  review-exempt environments and holds the rest — all of them when none is
+  review-exempt; `CHANGES_REQUESTED`, an unknown value, or no decision at all
+  holds everything, review-exempt environments included.
 
-A held environment travels the path explicit-environment exclusions already
+A held environment travels the path `targeted`-environment exclusions already
 travel: dropped before env-levels are built, its `apply / <stack> / <env>`
 checks left pending — so `shipmate / gate` stays pending and the merge
 stays blocked — and environments ordered after it are skipped. The apply run
@@ -1543,12 +1544,12 @@ names both halves: its result comment names the environments held for review,
 and a notice annotation in its log names each environment permitted to apply
 under the exemption (§Apply result comment).
 
-`gated` can only relax an existing review requirement, never create one. When
+`review` can only relax an existing review requirement, never create one. When
 no branch rule requires an approving review, the decision is `NONE` (unless a
-requested-changes review stands, which still refuses), and both paths apply a
-gated environment without one. A notice annotation in the apply run's log names
-each gated environment that applied that way (§Apply result comment), and
-`shipmate doctor` names the gated environments when it can read the default
+requested-changes review stands, which still refuses), and both paths apply an
+environment under review without one. A notice annotation in the apply run's log
+names each `review: true` environment that applied that way (§Apply result
+comment), and `shipmate doctor` names the environments under review when it can read the default
 branch's table: in a note while code-owner review is on, since they are still
 held wherever a code-owner review is required (a pull request changing owned
 files, opened by someone who does not own those files), and in a warning beside
@@ -1557,13 +1558,13 @@ reports only the sole-maintainer note, or only the code-owner warning when that
 review is off.
 
 What bounds the exemption is the default branch, not an admin boundary. Anyone who
-can open a pull request can propose `gated: false`; what they cannot do is have it take
+can open a pull request can propose `review: false`; what they cannot do is have it take
 effect on that pull request, because all three readers resolve the file from the
 default branch. Relaxing the gate is therefore a merged commit, under whatever
 the branch ruleset requires of one, rather than a line in the pull request that
 benefits from it. `shipmate doctor` validates the file it is in and reports a malformed
-entry, but does not list the `gated: false` entries; its count-0 finding names
-their complement, the gated environments. `gated` accepts no variable
+entry, but does not list the `review: false` entries; its count-0 finding names
+their complement, the environments under review. `review` accepts no variable
 reference (§Variable references), so the decision stays a merged commit.
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
@@ -1791,7 +1792,7 @@ request following it gates normally. A ruleset created by hand follows the same
 order: create it after that pull request merges.
 
 For a repository migrating from another TACO, that same pull request is
-ungated by both systems at once: the outgoing tool's checks are being removed
+checked by neither system: the outgoing tool's checks are being removed
 in it, and shipmate's cannot run on it yet. Review it as the one change nothing
 plans.
 
@@ -2586,21 +2587,21 @@ The rows form and the no-rows form carry the same set, fed by one shared
 function, and the size budget never sheds a footer line — so the comment's most
 actionable warning cannot be lost on either path. In the order they render:
 
-- **explicit** — ``🟡 <env>: left pending (explicit), comment `shipmate apply <env>` ``.
+- **targeted** — ``🟡 <env>: left pending (targeted), comment `shipmate apply <env>` ``.
 - **skipped** — `⚪ <env>: skipped, ordered after an environment not fully
   applying this run`. It names no cause, since being skipped can mean an
-  unapplied explicit environment, a held one, or one holding a waiting cell —
-  the explicit, held and waiting lines carry that distinction instead.
+  unapplied `targeted` environment, a held one, or one holding a waiting cell —
+  the targeted, held and waiting lines carry that distinction instead.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
-  environment that is also explicit is listed once, here and not on an explicit
+  environment that is also `targeted` is listed once, here and not on a targeted
   line, with its command: ``⚪ prod: held, the review state does not permit
   applying; once it clears, comment `shipmate apply prod` ``, since a bare
   apply would not pick it up even once the hold clears. A held environment that
-  is not explicit names no command. When any environment is held, one line
+  is not `targeted` names no command. When any environment is held, one line
   follows: `held: get an approving review, or resolve or dismiss a
   requested-changes review. The run log's apply-all-detect notice names the
   decision seen.` The held lines are deliberately cause-agnostic: three
-  distinct decisions hold an environment (`REVIEW_REQUIRED` on a gated env,
+  distinct decisions hold an environment (`REVIEW_REQUIRED` on a `review: true` env,
   `CHANGES_REQUESTED`, or an unknown or absent decision), and only the run's
   own apply-all-detect notice carries which one, since the decision never
   reaches this renderer.
@@ -2611,7 +2612,7 @@ actionable warning cannot be lost on either path. In the order they render:
   nothing itself when there is one, so it can apply now. `<remedy>` is
   `` it is held until the pull request is approved, then comment
   `shipmate apply <env>` `` when the blocker's environment is held and
-  explicit, `it is held until the pull request is approved` when it is held,
+  `targeted`, `it is held until the pull request is approved` when it is held,
   `` its environment waits on its `needs` predecessors, which must apply first,
   including any held for review `` when it is skipped, and otherwise
   `` apply it first with `shipmate apply <env>` ``, each naming the blocker's
@@ -2626,8 +2627,8 @@ the repository keeps its workflow logs. GitHub caps the annotations it renders
 per step, so the annotations view can show fewer than were printed; the step's
 log text holds every line:
 
-- **ungated** — `<env>: ungated, permitted to apply without an approving review
-  (gated: false in .github/shipmate-config.yml)`, one per environment the
+- **review-exempt** — `<env>: review-exempt, permitted to apply without an approving
+  review (review: false in .github/shipmate-config.yml)`, one per environment the
   all-environments run was permitted to apply without an approving review. It
   is the audit trail such an apply leaves: `reviewDecision` is a live
   value with no history, so once the review lands nothing else in a run
@@ -2635,11 +2636,11 @@ log text holds every line:
   permission, never an outcome — the set is derived before any wave runs, so a
   failed wave or a skipped env-level leaves an environment named here that
   never applied, and the text carries no completion verb.
-- **no review required** — `<env>: no approving review was required, so gated
-  had nothing to enforce`, one per gated environment a `NONE` decision
-  authorized. It has its own cause, so it has its own detect output
+- **no review required** — `<env>: no approving review was required, so review:
+  true had nothing to enforce`, one per `review: true` environment a `NONE`
+  decision authorized. It has its own cause, so it has its own detect output
   (`review_not_required_envs`, from both detects) rather than widening
-  ungated. It prints in the targeted and the all-environments form, and names
+  review-exempt. It prints in the targeted and the all-environments form, and names
   only environments with an applied, failed or not-recorded row — apply ran
   there, so infrastructure may have changed — so a run with no rows never
   prints it. It states the authorization fact and never that nobody reviewed:
@@ -2741,11 +2742,11 @@ environments comma-separated (`<envs>`), in the per-environment order, and the
 waiting cells are one line per blocker, keeping every blocker and its remedy;
 the `held:` remedy line is unchanged:
 
-- `` 🟡 left pending (explicit): <envs>; comment `shipmate apply <env>` for each ``
+- `` 🟡 left pending (targeted): <envs>; comment `shipmate apply <env>` for each ``
 - `⚪ skipped, ordered after an environment not fully applying this run: <envs>`
 - `⚪ held, the review state does not permit applying: <envs>`, followed by
   `` ; once the hold clears, comment `shipmate apply <env>` for <envs> `` naming
-  the held environments that are also explicit, when there are any
+  the held environments that are also `targeted`, when there are any
 - `⚪ waiting on <stack> / <env> (<remedy>): <cells>`, one per blocker, naming
   every cell waiting on it comma-separated as `<stack> / <env>`, in first-seen
   order
@@ -2923,11 +2924,11 @@ reaches the process.
 | --- | --- | --- |
 | plan cells, drift cells | `<env>-plan` | the read key |
 | apply cells, unlock cells | `<env>-apply` | the write key |
-| any of the above when the env's entry holds `shared: true` | bare `<env>` | one value for both paths |
+| any of the above when the env's entry holds `split: false` | bare `<env>` | one value for both paths |
 
 Drift reads and unlock writes, so each lands on the tier that matches what it
 does. **The read/write split needs the split environments**: an environment
-holding `shared: true` has one key serving both paths and forfeits
+holding `split: false` has one key serving both paths and forfeits
 the split, consistent with what it already forfeits in §Env model.
 
 ### Values that differ between the two tiers
@@ -3303,7 +3304,7 @@ One `- ` line per inverted pair. Three paths refuse, each over its own cells:
 | Path | Dependent cells | Upstream cells |
 | --- | --- | --- |
 | plan (not a drift sweep) | the plan matrix | the plan matrix |
-| bare `shipmate apply` | pending cells of every environment neither held, explicit nor skipped by `needs`, the skips a waiting cell causes included; waiting cells count | every pending cell, held and explicit ones included |
+| bare `shipmate apply` | pending cells of every environment neither held, `targeted` nor skipped by `needs`, the skips a waiting cell causes included; waiting cells count | every pending cell, held and `targeted` ones included |
 | merge deploy | every pending cell | every pending cell |
 
 A plan refusal holds the gate, and the gate description carries its first error,
@@ -3328,16 +3329,16 @@ order. Each run applies what is ready, so no order of targeted applies
 deadlocks.
 
 A bare `shipmate apply` is the pre-merge equivalent of the merge-deploy path: it
-buckets the pending applies of every non-explicit environment into the same
+buckets the pending applies of every environment not `targeted` into the same
 env-levels and applies level 0 fully before level 1, with the same
-failure-skips-successor-levels rule. An environment excluded as explicit keeps
+failure-skips-successor-levels rule. A `targeted` environment it leaves out keeps
 its position in the order: environments that do not depend on it run normally at
 their own level, while environments ordered (transitively) after an environment
-not fully applying this run — held for review, excluded as explicit, or holding
+not fully applying this run — held for review, left out as `targeted`, or holding
 a waiting cell — are skipped with a notice — their ordering precondition cannot
 be met in that run, exactly like a failed predecessor level. The apply-all-detect
 notice names them `skipped_after_targeted`, for every one of those causes.
-A cell that runs after a pending cell of a held, explicit or skipped environment
+A cell that runs after a pending cell of a held, `targeted` or skipped environment
 waits, as on the targeted form, and its environment's
 other cells still apply. An environment with a waiting cell is not fully
 applying, so its `needs` successors are skipped, and each new skip can make

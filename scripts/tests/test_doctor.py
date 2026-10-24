@@ -384,7 +384,7 @@ _MISSING_SHARED = (
         "of its protection rules, and their apply then runs in it too. Create it."
     ),
 )
-#: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
+#: The NOTICE for a shared bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
     doctor.NOTICE,
     (
@@ -628,7 +628,7 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
 
 
 def test_a_missing_environment_is_named_by_the_selected_naming(monkeypatch):
-    """With nothing created, split mode names each half and shared mode the bare name,
+    """With nothing created, the split naming names each half and the shared one the bare name,
     and neither names the naming the table does not select.
 
     Mutation: report the other mode's names from `_environment_warnings`."""
@@ -5321,8 +5321,8 @@ def test_the_notice_states_the_rule_and_never_that_this_env_is_unprotected(monke
     ]
 
 
-def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeypatch):
-    """In shared mode the plan environment IS the apply environment, so its finding cannot
+def test_split_false_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeypatch):
+    """Under `split: false` the plan environment IS the apply environment, so its finding cannot
     be the split one: the credential a consumer put there for applying is reachable by
     plan-time code. Pinned on the requested paths as well as the wording -- wording it as
     a split plan environment understates the exposure."""
@@ -5493,8 +5493,8 @@ def test_app_private_key_in_a_plan_env_is_a_warning(monkeypatch):
     assert "plan environment `dev-eu-plan` holds" in found[1][1]
 
 
-def test_shared_mode_app_key_warning_does_not_call_the_env_a_plan_environment(monkeypatch):
-    """The noun follows the ROLE, not the mode. In shared mode the sibling NOTICE
+def test_split_false_app_key_warning_does_not_call_the_env_a_plan_environment(monkeypatch):
+    """The noun follows the ROLE, not the naming. Under `split: false` the sibling NOTICE
     in the same report calls `dev-eu` shared between both paths, so this warning
     may not call the same environment the plan environment."""
     responses = {

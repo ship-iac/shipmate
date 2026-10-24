@@ -11,7 +11,7 @@ Four claims, each its own way to lose the guarantee:
   behind a still-green suite;
 - the group names nothing else, no mode or verb in particular. A group that forks by mode puts
   two jobs touching the same state into different queues, which is the one variation that would
-  let a shared-mode and a split-mode apply run against the same stack at once;
+  let a shared and a split apply run against the same stack at once;
 - `cancel-in-progress: false`, so a queued run waits instead of killing the running apply
   mid-`tofu apply`;
 - the block is present on every one of them. An absent block is no serialization at all, and

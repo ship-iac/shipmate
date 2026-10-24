@@ -197,18 +197,18 @@ fails closed rather than proceeding unreviewed.)
   `require_last_push_approval` off; §Reproducible ruleset has the two values
   and why): `shipmate apply` needs no approving review (a one-person repo can never self-approve
   on GitHub) — but a `CHANGES_REQUESTED` review still blocks apply until
-  resolved. `shipmate doctor` names each gated environment when it can read
-  the default branch's table, in a note while code-owner review is on and in a
-  warning while it is off: `gated` can only relax an existing review
-  requirement, never create one, so a gated environment is held only where a
+  resolved. `shipmate doctor` names each environment under review when it can
+  read the default branch's table, in a note while code-owner review is on and in
+  a warning while it is off: `review` can only relax an existing review
+  requirement, never create one, so an environment under review is held only where a
   code-owner review is required for the changed files.
 - **Team mode** (`required_approving_review_count` ≥ 1 and/or code-owner
   review): GitHub enforces the approval count / CODEOWNERS / last-push-approval.
   `shipmate apply` stays blocked until `reviewDecision` clears — for every
   environment, unless some are exempted (next bullet). No shipmate
   config — set it on the ruleset (the `pull_request` rule).
-- **Team mode with named environments exempted** (`gated: false`): the
-  ruleset requirement is repository-wide, so `gated: false` on an
+- **Team mode with named environments exempted** (`review: false`): the
+  ruleset requirement is repository-wide, so `review: false` on an
   environment's entry in `.github/shipmate-config.yml` lets `shipmate apply` apply
   that environment without an approving review while the merge still needs one
   ([`getting-started.md`](getting-started.md) §"Applying chosen environments
@@ -222,12 +222,12 @@ fails closed rather than proceeding unreviewed.)
   (`getting-started.md` §Required — apply → §Environment setup has those
   settings). This gates both pre-merge `shipmate apply <env>` and the
   post-merge `deploy` job's apply, since both run against the apply environment. An
-  env holding `shared: true` cannot be gated this way (`hardening.md` §6).
+  env holding `split: false` cannot be gated this way (`hardening.md` §6).
   - Deployment approvals differ from PR reviews: a reviewer can approve
     their own deployment by default, so a sole maintainer still gets a
     confirm-step on a gated environment. Tick "Prevent self-review" on the
     environment for genuine four-eyes once there's a team.
-  - Pair a reviewer-gated production env with `explicit: true` on its entry in
+  - Pair a reviewer-gated production env with `apply_mode: targeted` on its entry in
     `.github/shipmate-config.yml` so the bare `shipmate apply` skips it and
     it is only ever applied via the targeted `shipmate apply <env>` (which
     then pauses for the environment reviewer).

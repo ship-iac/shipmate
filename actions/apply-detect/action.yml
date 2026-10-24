@@ -1,5 +1,5 @@
 name: shipmate apply-detect
-description: A targeted apply computes one environment's work set from the head's apply checks and wave-orders it at env-level 0. A bare apply (empty environment) computes every `bare` environment's work set, buckets it into env-levels and wave-orders each level. Every form skips already-applied cells. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read.
+description: A targeted apply computes one environment's work set from the head's apply checks and wave-orders it at env-level 0. A bare apply (empty environment) computes the work set of every environment not `targeted`, buckets it into env-levels and wave-orders each level. Every form skips already-applied cells. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read.
 inputs:
   environment:
     description: Target environment, e.g. dev-eu. Empty runs the bare form over every pending environment.

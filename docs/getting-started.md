@@ -22,7 +22,7 @@ does with that wiring.
   declares and every one a stack tags. So declare an environment in the table
   and run `scripts/onboard` before the first pull request tagging a stack into
   it merges. Otherwise that merge's deploy refuses, because the `<env>-apply` it
-  binds does not exist; or, for a `shared: true` entry, it applies in the bare
+  binds does not exist; or, for a `split: false` entry, it applies in the bare
   `<env>` the pull request's plan auto-created, without the default-branch
   policy `scripts/onboard` sets. Until a stack tags it, `scripts/onboard` names
   it on its `.github/shipmate-config.yml` checklist item, and every whole-tree run (the
@@ -98,7 +98,7 @@ while still planning fine locally. See [`aws.md`](aws.md).
 **`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
 after the ambient environment, so an assignment to a name the environment table
 resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under the `tf_vars` layout,
-`TF_WORKSPACE` under `workspace`, any name in an environment's `tf_vars` — wins
+`TF_WORKSPACE` under `workspace`, any name in an environment's `vars` — wins
 over whatever the cell was given, invisibly, because the fingerprint is computed
 outside `terramate run` and so agrees on both sides. Each cell reads those names
 back through `terramate run` before `tofu init` and refuses when one comes back
@@ -150,7 +150,7 @@ It writes:
   declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted. An environment whose entry in the
-  checkout's `.github/shipmate-config.yml` holds `shared: true` gets one bare `<env>`
+  checkout's `.github/shipmate-config.yml` holds `split: false` gets one bare `<env>`
   instead, under the same default-branch policy, so set it only where every
   pull request targets the default branch, or add each other branch they target
   to its policy (plan cells for a base it does not name are refused, and an
@@ -226,7 +226,7 @@ request with "GitHub Environment `<env>-apply` does not exist" until the apply
 tier is done.
 
 **One environment instead of two.** To share a single bare `<env>` between
-plan and apply, set `shared: true` in its `environments.<env>` entry of
+plan and apply, set `split: false` in its `environments.<env>` entry of
 `.github/shipmate-config.yml`, create `<env>` alone (no `-plan`, no `-apply`), and
 re-run `scripts/onboard` after adding or removing the key: onboard creates the
 bare `<env>` only for the entries it reads. It costs that env's reviewer gate
@@ -277,7 +277,7 @@ repositories already laid out by OpenTofu workspace or by one directory per
 environment and region.
 
 Across both tiers each environment needs two GitHub Environments, `<env>-plan` and
-`<env>-apply`, or one bare `<env>` for an entry holding `shared: true`, and the
+`<env>-apply`, or one bare `<env>` for an entry holding `split: false`, and the
 repository needs `shipmate-engine` once: four split environments need nine. Under
 `tf_vars`, a stack tagged into an environment with no entry, or with an entry that has
 no region, is refused; under `workspace` or `folder` an `env/<name>` stack tag alone
@@ -329,7 +329,7 @@ Choose how finely to split environments before writing those trust policies
 
 **A value can come from a GitHub variable.** Write `{vars: NAME}` in
 place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
-except `shared`, `explicit`, `gated`, `max_parallel` and `command_hints`
+except `split`, `apply_mode`, `review`, `max_parallel` and `command_hints`
 ([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
 name as a repository or organization variable. A resolved value is printed in job
 outputs and logs, so reference variables only, never secrets. Never define it
@@ -362,27 +362,28 @@ request that is not a draft, with a folded section naming `shipmate apply` and
 `after` is a Terramate stack attribute (`after = [...]` in the stack block). In the
 review column, approving review is the branch ruleset's `reviewDecision`, and
 environment reviewers are the GitHub Environment's required reviewers, a different
-control. `—` means the key has no effect there.
+control. `—` means the key has no effect there. `split` and `review` default to on;
+writing `false` gives something up. `apply_mode` is the one enum.
 
 | Key (default) | Holds back | Bare `shipmate apply` | `shipmate apply <env>` | Merge deploy | Review | Gives up |
 | --- | --- | --- | --- | --- | --- | --- |
-| `gated: false` (`true`) | — | On `REVIEW_REQUIRED`, applies it and holds the gated environments | Authorized on `REVIEW_REQUIRED` | — | Approving review not required; `CHANGES_REQUESTED` and an unknown or absent decision still refuse. Environment reviewers untouched. At 0 required approving reviews it changes nothing: a gated environment is then held only where a code-owner review is required | The approving review before a pre-merge apply |
-| `explicit: true` (`false`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
-| `shared: true` (`false`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
+| `review: false` (`true`) | — | On `REVIEW_REQUIRED`, applies it and holds the environments under review | Authorized on `REVIEW_REQUIRED` | — | Approving review not required; `CHANGES_REQUESTED` and an unknown or absent decision still refuse. Environment reviewers untouched. At 0 required approving reviews it changes nothing: an environment under review is then held only where a code-owner review is required | The approving review before a pre-merge apply |
+| `apply_mode: targeted` (`bare`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
+| `split: false` (`true`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
 | `needs: [<env>]` (none) | Its applies, until the earlier env-levels complete (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
 | `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
 
-On a bare apply, an environment held for review, excluded as `explicit`, or holding a
-waiting cell skips the environments ordered after it by `needs`, an ungated one
+On a bare apply, an environment held for review, left out as `targeted`, or holding a
+waiting cell skips the environments ordered after it by `needs`, a review-exempt one
 included, and its cells that do not apply in the run make the cells ordered `after` them
 wait, which can skip more; §Env apply order computes the whole set.
 
-Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `gated` and `explicit`,
-§Env model for `shared`, §Env apply order for `needs` and the waiting cells, §Fan-out for
+Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,
+§Env model for `split`, §Env apply order for `needs` and the waiting cells, §Fan-out for
 `after`'s waves. The four table keys are read from the default branch
 (§Environment table, §Env model), so a pull request cannot change its own; a deploy
 re-run reads `after` from the merged commit (§Env apply order). §"Applying chosen
-environments without an approving review" has the `gated` setup.
+environments without an approving review" has the `review` setup.
 
 ### The workflow file
 
@@ -480,7 +481,7 @@ on:
         options: [plan, apply, unlock]
         required: true
       environment:
-        description: Target environment (apply and unlock; empty apply = every non-explicit environment)
+        description: Target environment (apply and unlock; empty apply = every environment not `targeted`)
         required: false
         default: ''
       ref:
@@ -732,7 +733,7 @@ rules from Settings → Environments → `<name>` (or the API):
   every apply environment where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
-- **Pair a reviewer-gated environment with `explicit: true` in
+- **Pair a reviewer-gated environment with `apply_mode: targeted` in
   `.github/shipmate-config.yml`.**
   Set it on the bare env's entry (`environments.prod` — neither `prod-plan`
   nor `prod-apply`). A bare `shipmate apply` then skips it. While
@@ -990,8 +991,8 @@ the last green check, so the PR merges itself:
 
 Properties that fall out of the existing gate semantics:
 
-- **Explicit environments still gate.** An environment whose entry holds
-  `explicit: true` is skipped by the bare `shipmate apply` and its apply checks
+- **`targeted` environments still gate.** An environment whose entry holds
+  `apply_mode: targeted` is skipped by the bare `shipmate apply` and its apply checks
   stay pending — gate stays pending, so auto-merge waits until someone runs the
   targeted `shipmate apply <env>`. Arming auto-merge never weakens the
   apply-before-merge guarantee; it only removes the final click.
@@ -1022,7 +1023,7 @@ Properties that fall out of the existing gate semantics:
 
 The branch ruleset's review requirement is repository-wide, so requiring an
 approval before merge also requires one before every apply. To keep a low-tier
-environment self-service while the rest stay gated, set `gated: false` on its
+environment self-service while the rest stay under review, set `review: false` on its
 entry in `.github/shipmate-config.yml`:
 
 ```yaml

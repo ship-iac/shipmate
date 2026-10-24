@@ -87,14 +87,18 @@ def _resolve(monkeypatch, tmp_path, table):
 
 
 def test_the_file_is_the_only_source(monkeypatch, tmp_path):
-    """The output comes from the table, sorted. The retired `SHIPMATE_UNGATED_ENVS` is set
-    both bare and in `SHIPMATE_GITHUB_VARS`, so a fallback an admin could set without a pull
-    request changes the output. Mutations: union `SHIPMATE_UNGATED_ENVS` from the parsed
-    `SHIPMATE_GITHUB_VARS`, or from the process environment, into `exempt_envs`' result --
-    `prod` joins; or have `exempt_envs` return the `review: true` entries -- `prod` replaces
-    both dev entries."""
-    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_UNGATED_ENVS": "prod"}')
+    """The output comes from the table, sorted. `SHIPMATE_UNGATED_ENVS` and
+    `SHIPMATE_EXEMPT_ENVS`, names an admin could set without a pull request, are set both bare
+    and in `SHIPMATE_GITHUB_VARS`, so a fallback reading either changes the output. Mutations:
+    union either name from the parsed `SHIPMATE_GITHUB_VARS`, or from the process environment,
+    into `exempt_envs`' result -- `prod` joins; or have `exempt_envs` return the `review: true`
+    entries -- `prod` replaces both dev entries."""
+    monkeypatch.setenv(
+        "SHIPMATE_GITHUB_VARS",
+        '{"SHIPMATE_UNGATED_ENVS": "prod", "SHIPMATE_EXEMPT_ENVS": "prod"}',
+    )
     monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "prod")
+    monkeypatch.setenv("SHIPMATE_EXEMPT_ENVS", "prod")
     table = {
         "layout": "folder",
         "environments": {

@@ -91,8 +91,8 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named by the identity each environment's entry names in the environment table; any residual static key as an environment secret — never repo- or org-level | Environment table (role); Environment (secret) | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for the role the table's resolution rule is the scoping — see §7–9) |
-| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, which must carry one: it is row 17 doing real work, plan cells pass a default-branch policy at their base ref, and pull requests targeting another branch need that branch added (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
-| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
+| 8 | Plan environments (`<env>-plan`; under `split: false` the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, which must carry one: it is row 17 doing real work, plan cells pass a default-branch policy at their base ref, and pull requests targeting another branch need that branch added (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
+| 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). Under `split: false` it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
 | 12 | Allowed-actions list (this engine, `ship-iac/shipmate/*@*` as `onboard` prints it, + the third-party actions the engine itself pulls in, not only the ones your own workflows name) | Settings → Actions | Supply chain |
@@ -108,7 +108,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
-`environments.<env>` entry holds `shared: true` binds one bare `<env>` on
+`environments.<env>` entry holds `split: false` binds one bare `<env>` on
 both paths instead (CONTRACT.md §Env model). On such an environment:
 
 - **Row 6 is forfeited.** A protection rule gates every job that binds the
@@ -160,12 +160,12 @@ row 6 — the one row that is unforgeable at apply time.
 **What is left when row 6 is unavailable.** It is a coherent posture rather than
 a broken one:
 
-- production's entry in `.github/shipmate-config.yml` without `gated: false`, so no
+- production's entry in `.github/shipmate-config.yml` without `review: false`, so no
   apply reaches it without an approving review on the pull request;
-- production's entry holding `explicit: true`, so before the merge
+- production's entry holding `apply_mode: targeted`, so before the merge
   a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
   reaches it — the setting constrains that path only. The post-merge deploy
-  applies every cell whose apply check is still pending, explicit environments
+  applies every cell whose apply check is still pending, `targeted` environments
   included (CONTRACT.md §Comment-ops), and the control it relies on there is
   exactly row 6: with row 6 unavailable, a production cell left pending at merge
   applies on the push to the default branch with no approval of any kind;
@@ -294,13 +294,13 @@ anywhere requires a reviewed pull request — and no merge-time control a holder
 of the App private key cannot satisfy is left either. `shipmate doctor` warns
 whenever code-owner review is off, whatever the count is. Count `0` with
 `require_code_owner_review` on is a different setting, which doctor reports as a
-note rather than a warning, naming any gated environments in it. Under it, a pull
+note rather than a warning, naming any environments under review in it. Under it, a pull
 request whose author owns the changed files needs no review, and one someone else
 opens changing owned files waits for an owner's approval (measured 2026-10-11 with
 one individual owner). A commit someone else pushes onto the owner's own pull
 request is not held (inferred: the exemption follows the pull request's author). Count `0` with `require_last_push_approval` on warns
-whatever else is set, and omits the sole-maintainer note; the gated-environments
-note still appears.
+whatever else is set, and omits the sole-maintainer note; the note naming the
+environments under review still appears.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
 resolved or dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
 `docs/branch-protection.md` §"Review policy").
@@ -310,7 +310,7 @@ get self-service applies on a low-blast-radius tier. The two per-environment
 controls below do different jobs, and an organization can want either without
 the other:
 
-- **`gated: false` exempts an environment from the code review before apply,
+- **`review: false` exempts an environment from the code review before apply,
   and from nothing else.** It is a flag on the environment's entry in
   `.github/shipmate-config.yml` on the default branch, and the ruleset still
   requires the review before the merge. What it exempts and what still decides
@@ -329,9 +329,9 @@ Two things to know before relying on it:
   it as code. Anyone who can push a branch can still *propose* the entry, so
   this bounds when it takes effect, not who may ask.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
-  environment is already ungated there, so `gated: false` on some narrows nothing. It
-  can only relax an existing requirement, never create one: every environment
-  still marked gated can apply without an approving review, and is held only
+  environment is already unreviewed there, so `review: false` on some narrows nothing.
+  It can only relax an existing requirement, never create one: every environment
+  still under review can apply without an approving review, and is held only
   where a code-owner review is required for the changed files. What
   `shipmate doctor` and the apply run's log report about it is in `CONTRACT.md`
   §Comment-ops.
@@ -414,8 +414,8 @@ Two platform ceilings this control cannot be configured past:
 maximally-hardened position is a reviewer on every `<env>-apply` that holds a
 secret or touches real infrastructure, dev and staging included. Many teams
 accept unreviewed applies on low-blast-radius tiers to keep them self-service.
-shipmate does not choose for you; what it can do is state what an ungated tier
-costs, so the choice is made with the price visible:
+shipmate does not choose for you; what it can do is state what a tier without a
+reviewer costs, so the choice is made with the price visible:
 
 - The apply to that environment is gated by nothing a holder of the App private
   key cannot produce. Every other control on this page is either upstream of the
@@ -429,8 +429,8 @@ costs, so the choice is made with the price visible:
 - Its apply can plant a cache entry that the gated environments' cells in the
   same repository restore ("A cache entry planted by an unreviewed apply" under
   "What none of this fixes").
-- **Shared mode is the strongest form of ungated.** A logical env holding
-  `shared: true` binds one bare `<env>` for plan and apply, and a
+- **`split: false` is the strongest form of going without a reviewer.** A
+  logical env holding `split: false` binds one bare `<env>` for plan and apply, and a
   reviewer on it stalls that environment's plan cells and every drift sweep covering it — so the gate
   is not merely unset, it is unavailable, and no later decision can turn it on
   without splitting the environment again. The same environment is what plan-time
@@ -440,7 +440,7 @@ costs, so the choice is made with the price visible:
   while every pull request targets a branch it names. Who may flip this posture
   on is a separate question from what it costs — see §7–9.
 
-Pair every environment you gate with `explicit: true` on its entry in
+Pair every environment you gate with `apply_mode: targeted` on its entry in
 `.github/shipmate-config.yml`, whichever ones those are, so a bare
 `shipmate apply` skips it and it is reached only by the targeted
 `shipmate apply <env>`. Left off, a bare `shipmate apply` fans out into that
@@ -450,7 +450,7 @@ asked. The entry is the bare environment name — `environments.staging`, not
 name carried by the apply checks (see CONTRACT.md), and an entry carrying either
 suffix is a configuration error the engine rejects loudly.
 
-`explicit` is read from the *default branch*, so editing it is a pull
+`apply_mode` is read from the *default branch*, so editing it is a pull
 request under row 4 rather than something the branch being applied can change
 for itself. It is still ergonomics, not enforcement: it decides which command
 reaches an environment, never who may run it. The environment reviewer is the
@@ -458,8 +458,9 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`shared`, `explicit`, `gated` and `command_hints` hold `true` or `false`,
-`max_parallel` holds a number, and all five refuse a reference, so which
+`split`, `review` and `command_hints` hold `true` or `false`, `apply_mode`
+holds `targeted` or `bare`, `max_parallel` holds a number, and all five refuse a
+reference, so which
 environments share one binding, which a bare apply skips, which apply
 unreviewed, how many plan and drift cell jobs run at once and whether the plan
 comment shows its commands stay merged commits. Where this page says editing
@@ -645,7 +646,7 @@ no split of its own.
   plan cell — or from a branch workflow — cannot assume the apply role. Do this
   on every role reachable from the repository, not only the apply role: see
   "What none of this fixes" for why it is the only bound that holds.
-- **In shared mode the plan path holds the apply role.** The bare `<env>`
+- **Under `split: false` the plan path holds the apply role.** The bare `<env>`
   resolves one role — its identity's `aws.apply` — and the wave jobs use
   it, so it must be the apply role or every apply fails at
   provider init, and the plan and drift cells resolve that same field. So a
@@ -672,7 +673,7 @@ no split of its own.
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.
 - **Read the key at the granularity of what it spends, not of where it is
-  set.** `shared: true` is one line per environment entry, which invites
+  set.** `split: false` is one line per environment entry, which invites
   reading a shared cell as a setting you can revisit. The OIDC consequence is
   not revisitable. What each shared cell gives up is not a knob on that cell —
   it is shipmate's ability to say *plan may read, apply may write* for that
@@ -682,7 +683,7 @@ no split of its own.
   first shared: shared where plan-time branch code holding the write role is
   genuinely acceptable, split everywhere you would ever want a reviewer or a
   read-only plan role.
-- **The key is default-branch content.** The engine reads `shared` from the
+- **The key is default-branch content.** The engine reads `split` from the
   default branch's `.github/shipmate-config.yml`, so sharing an environment is a
   merged pull request under row 4, like naming a role in row 18 — and row 4's
   code-owner half is a no-op unless a `CODEOWNERS` entry covers
@@ -1211,8 +1212,8 @@ for exactly the exposure control 1 exists to limit.
   request's configuration in a job that can write the default branch's Actions
   cache, because it saves state (`CONTRACT.md` §State backend) and providers
   (§Terramate safeguards). Where an environment applies without an approving
-  review (`gated: false`, or a gated environment under a ruleset that requires
-  none), code in that apply can save a provider or state entry that other plan,
+  review (`review: false`, or an environment under review under a ruleset that
+  requires none), code in that apply can save a provider or state entry that other plan,
   drift and apply cells restore, in every environment and on every later pull
   request. Nothing verifies a restored provider archive: the lock file verifies
   provider packages, not the archive around them. A restored state entry
@@ -1226,8 +1227,8 @@ for exactly the exposure control 1 exists to limit.
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval
   count (see "The gate is an assertion, not a proof"). The cache is per
-  repository: put an ungated tier in its own repository to keep it from
-  reaching your gated environments' cells. Reading an entry is not this
+  repository: put a review-exempt tier in its own repository to keep it from
+  reaching the cells of your environments under review. Reading an entry is not this
   exposure: any workflow run, a fork's pull request included, can restore a
   `state/` entry, anyone who can read the repository's Actions runs can download
   a plan artifact, and both are ciphertext under
@@ -1260,7 +1261,7 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `needs`, `explicit`, `gated`, `max_parallel` and `command_hints` are not on this list:
+  allowed to do. `needs`, `apply_mode`, `review`, `max_parallel` and `command_hints` are not on this list:
   they live in `.github/shipmate-config.yml`, read from the default branch with the
   rest of it, so a branch can neither reorder its own apply waves,
   drop its own exclusion, exempt itself from review, raise its own fan-out nor

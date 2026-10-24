@@ -32,7 +32,7 @@ outputs:
     # React on accept repeats this expression: a composite step cannot read its action's outputs.
     value: ${{ steps.authz.outputs.authorized == 'true' || steps.planauthz.outputs.authorized == 'true' }}
   environment:
-    description: Parsed target environment; empty for a bare `shipmate apply` (all `bare` environments) and on the plan route, whose dispatched run carries no environment.
+    description: Parsed target environment; empty for a bare `shipmate apply` (every environment not `targeted`) and on the plan route, whose dispatched run carries no environment.
     value: ${{ steps.authz.outputs.environment }}
   head-sha:
     description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.

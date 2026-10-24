@@ -69,7 +69,7 @@ def _bold_cell(row):
 
 def _not_attempted_note(rows, env_name):
     """The 'apply checks stay pending' note when a row is not attempted, parameterized on the
-    targeted environment: a bare `shipmate apply` excludes targeted envs
+    named environment: a bare `shipmate apply` excludes targeted envs
     (`apply_mode: targeted` in `.github/shipmate-config.yml`), so it cannot retry one — the note
     must name the targeted form. env_name is author-controlled and escaped.
 

@@ -864,7 +864,7 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
 
 
 def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
-    """A bare apply runs every `bare` env at once, so it needs the line as much as a deploy.
+    """A bare apply runs every env not `targeted` at once, so it needs the line as much as a deploy.
 
     Mutation: delete `bare_main`'s DAG-shape notice print -- the line is missing.
     """
