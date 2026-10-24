@@ -505,8 +505,9 @@ jobs:
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-      # A ready run waits for the run in flight instead of cancelling it.
-      cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
+      # A ready run and a dispatched plan wait for the run in flight; any other
+      # pull_request_target run (push, open, reopen, a re-run) cancels it.
+      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'ready_for_review' }}
     uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
     # Required: the callee is capped by these; fewer kills the run with no log.
     permissions:
