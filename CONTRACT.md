@@ -2590,7 +2590,8 @@ actionable warning cannot be lost on either path. In the order they render:
 - **targeted** — ``🟡 <env>: left pending (targeted), comment `shipmate apply <env>` ``.
 - **skipped** — `⚪ <env>: skipped, ordered after an environment not fully
   applying this run`. It names no cause, since being skipped can mean an
-  unapplied `targeted` environment, a held one, or one holding a waiting cell —
+  unapplied `targeted` environment, a held one, one holding a waiting cell, or
+  one holding a cell another pull request locks —
   the targeted, held and waiting lines carry that distinction instead.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
   environment that is also `targeted` is listed once, here and not on a targeted

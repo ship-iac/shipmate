@@ -100,6 +100,7 @@ _APPLY_DETECT_OUTPUTS = {
     "applied_exempt_envs": "${{ steps.d.outputs.applied_exempt_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
     "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
+    "locked_cells": "${{ steps.d.outputs.locked_cells }}",
     "env_order": "${{ steps.d.outputs.env_order }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
 }
@@ -191,7 +192,7 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
-    orders environments by name."""
+    orders environments by name; delete `locked_cells`."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -254,8 +255,9 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     "skipped_envs": {
         "description": (
             "Bare apply only: JSON list of envs skipped because they are ordered after an env "
-            "not fully applying this run (held for review, excluded as targeted, or holding a "
-            "waiting cell). The targeted form writes none."
+            "not fully applying this run (held for review, excluded as targeted, holding a "
+            "waiting cell, or holding a cell another pull request locks). The targeted form "
+            "writes none."
         ),
         "value": "${{ steps.d.outputs.skipped_envs }}",
     },
@@ -287,6 +289,14 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.waiting_cells }}",
     },
+    "locked_cells": {
+        "description": (
+            "JSON list of pending cells another pull request holds a cell lock on, left pending "
+            "and not applying this run, each `{stack, environment, holder}` with the holder's "
+            "pull request number (null when the lock's holder is unknown); both forms."
+        ),
+        "value": "${{ steps.d.outputs.locked_cells }}",
+    },
     "env_order": {
         "description": (
             "JSON list of every environment the apply checks on the head name, in apply order "
@@ -310,5 +320,6 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
 
 def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
-    delete its `refusal` output; delete its `env_order` output."""
+    delete its `refusal` output; delete its `env_order` output; delete its `locked_cells`
+    output; restore `skipped_envs`' description without the lock cause."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

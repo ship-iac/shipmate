@@ -12,8 +12,10 @@ from _detect_fixtures import (
     answering_run_graph,
     forbid_shared_runner,
     foreign_message,
+    held,
     partial_message,
     run_graph_capture,
+    stub_read_locks,
 )
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
@@ -256,11 +258,12 @@ def _stub_read_table(monkeypatch, table, reads):
     monkeypatch.setattr(ad.bm.ec, "read_table", read_table)
 
 
-def _stub_apply(monkeypatch, deps, checks, dot=None):
-    """Stub the apply path's IO: the run-graph, the check-run listing and the per-stack tag
-    query. Every terramate call must be stubbed, because CI installs uv alone -- a real
-    invocation passes on a developer machine and fails there. `dot`, run-graph text, keeps
-    `run_graph_deps` real and answers its Terramate call; `deps` then only keys the tag map.
+def _stub_apply(monkeypatch, deps, checks, dot=None, locks=None, lock_reads=None):
+    """Stub the apply path's IO: the run-graph, the check-run listing, the per-stack tag
+    query and the lock read (`stub_read_locks`). Every terramate call must be stubbed, because
+    CI installs uv alone -- a real invocation passes on a developer machine and fails there.
+    `dot`, run-graph text, keeps `run_graph_deps` real and answers its Terramate call; `deps`
+    then only keys the tag map.
 
     Returns the list of `gh api` paths main() requested, so a re-added run lookup shows up as
     an extra entry rather than as a silent success."""
@@ -282,6 +285,7 @@ def _stub_apply(monkeypatch, deps, checks, dot=None):
     monkeypatch.setattr(
         ad.bm, "all_tags", lambda: {s: ["env/dev-eu", "workload/app"] for s in deps}
     )
+    stub_read_locks(monkeypatch, ad.cl, locks, lock_reads)
     return urls
 
 
@@ -336,8 +340,8 @@ def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
 
 def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     # No site keys an apply on a plan run's head_sha any more. Whole-list comparison against a
-    # hand-written constant, so any added gh api call -- a run lookup, an artifact listing --
-    # reddens here.
+    # hand-written constant, so an added gh api call -- a run lookup, an artifact listing --
+    # reddens here. The lock read is stubbed above the runner (`stub_read_locks`).
     out = _apply_env(monkeypatch, tmp_path)
     urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", cells=1)])
     ad.main()
@@ -885,6 +889,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "review_not_required_envs=[]\n"
         "waiting_cells=[]\n"
+        "locked_cells=[]\n"
         'env_order=["dev-eu"]\n'
     )
 
@@ -901,8 +906,8 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
     ad.main()
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
-        "cells=2 completed=0 pending=2 waiting=0 waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False"
-        in capsys.readouterr().out.splitlines()
+        "cells=2 completed=0 pending=2 waiting=0 locked=0 "
+        "waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False" in capsys.readouterr().out.splitlines()
     )
 
 
@@ -1273,6 +1278,81 @@ def test_main_notice_counts_a_waiting_cell_as_pending(monkeypatch, tmp_path, cap
     _zigzag(monkeypatch, tmp_path, checks)
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
-        "cells=1 completed=0 pending=1 waiting=1 waves=[0, 0, 0, 0, 0, 0, 0, 0] empty=True"
+        "cells=1 completed=0 pending=1 waiting=1 locked=0 waves=[0, 0, 0, 0, 0, 0, 0, 0] empty=True"
         in capsys.readouterr().out.splitlines()
     )
+
+
+#: `platform` runs after `dns`, `workers` stands alone; all three in dev-eu.
+_LOCK_DEPS = {"stacks/dns": set(), "stacks/platform": {"stacks/dns"}, "stacks/workers": set()}
+_LOCK_CHECKS = [_apply_check(s, cells=3) for s in _LOCK_DEPS]
+
+
+def _locked_run(monkeypatch, tmp_path, locks, lock_reads=None, checks=_LOCK_CHECKS, tags=None):
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, _LOCK_DEPS, checks, locks=locks, lock_reads=lock_reads)
+    if tags is not None:
+        monkeypatch.setattr(ad.bm, "all_tags", lambda: tags)
+    ad.main()
+    parsed = github_outputs(out)
+    waves = json.loads(parsed["envlevel0_waves"])
+    return parsed, [c["stack"] for w in waves.values() for c in w]
+
+
+def test_a_cell_another_pull_request_holds_stays_pending_and_its_dependent_waits(
+    monkeypatch, tmp_path, capsys
+):
+    """PR 7 holds `dns`, so it applies nowhere, `platform` waits on it, `workers` applies.
+
+    Mutation: pass `pending` instead of the lock-filtered cells to `waves.waiting_cells` and
+    `drop_waiting` in `main` -- `dns` applies. Mutation: write `locked_cells=[]` -- red.
+    Mutation: print `0` for the notice's `locked=` -- `locked=1` is absent."""
+    parsed, applied = _locked_run(monkeypatch, tmp_path, held(ad.cl, "stacks/dns", "dev-eu", 7))
+    assert applied == ["stacks/workers"]
+    assert json.loads(parsed["locked_cells"]) == [
+        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
+    ]
+    assert json.loads(parsed["waiting_cells"]) == [
+        {
+            "stack": "stacks/platform",
+            "environment": "dev-eu",
+            "after_stack": "stacks/dns",
+            "after_environment": "dev-eu",
+        }
+    ]
+    assert (
+        f"::notice title=apply-detect::env=dev-eu head={'a' * 40} cells=3 completed=0 "
+        "pending=3 waiting=1 locked=1 waves=[1, 0, 0, 0, 0, 0, 0, 0] empty=False"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+def test_a_cell_the_applying_pull_request_holds_applies(monkeypatch, tmp_path):
+    """Mutation: pass `pr_number` to `cell_lock.foreign` unconverted -- the string never equals
+    the lock's int, so `dns` reads as foreign and stays pending."""
+    lock = held(ad.cl, "stacks/dns", "dev-eu", int(PR_NUMBER))
+    parsed, applied = _locked_run(monkeypatch, tmp_path, lock)
+    assert applied == ["stacks/dns", "stacks/workers", "stacks/platform"]
+    assert json.loads(parsed["locked_cells"]) == []
+
+
+def test_a_failed_lock_read_refuses_the_targeted_apply(monkeypatch, tmp_path):
+    """Mutation: catch `SystemExit` around `read_locks` in `locked_cells` and read no locks --
+    the run applies."""
+    with pytest.raises(SystemExit) as exc_info:
+        _locked_run(monkeypatch, tmp_path, SystemExit("::error::lock read failed"))
+    assert str(exc_info.value) == "::error::lock read failed"
+
+
+def test_a_targeted_apply_reads_the_locks_of_its_pending_cells_environment(monkeypatch, tmp_path):
+    """`box` is tagged dev-us and its check is pending too, outside this apply.
+
+    Mutation: read the environments of `all_pending` -- dev-us is read. Mutation: pass
+    `cell_lock.foreign` an empty lock map -- `dns` applies."""
+    reads = []
+    checks = [*_LOCK_CHECKS, _apply_check("stacks/box", "dev-us", plan_run="99", cells=1)]
+    lock = held(ad.cl, "stacks/dns", "dev-eu", 7)
+    tags = {s: ["env/dev-eu"] for s in _LOCK_DEPS} | {"stacks/box": ["env/dev-us"]}
+    _, applied = _locked_run(monkeypatch, tmp_path, lock, reads, checks, tags)
+    assert reads == [("acme/iac", {"dev-eu"})]
+    assert applied == ["stacks/workers"]

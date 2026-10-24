@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ""
   skipped-envs:
-    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, or holding a waiting cell); all-environments form only. Empty = []."
+    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, holding a waiting cell, or holding a cell another pull request locks); all-environments form only. Empty = []."
     required: false
     default: ""
   review-held-envs:
