@@ -2507,15 +2507,16 @@ turned draft since the comment) posts no comment and writes no gate: the red run
 is the signal. The started-run reply may link it (§Comment-ops says when).
 
 Structure, in order, blank lines between the parts, each part present only when
-it has content: the header, the verdict line, the detect error fence, one line
+it has content: the header, the verdict line, the error fence, one line
 or fold-out per row, the notes, the footer lines, and, under any verdict but 🟢,
 the help hint ``Comment `shipmate help` for the available commands.`` A 🟢
 comment has no footer. A run with no rows to render is the header, the verdict
-line, the detect error fence, the footer lines and, under any verdict but 🟢,
-the hint. The detect error fence shows when `detect` failed with an `::error::`
-(a refusal or a failed tool or API call): its first error on one line, in a
-plain code fence, cut at 4,000 characters and fenced longer than any backtick
-run in it. A `detect` that failed without an `::error::` renders no fence.
+line, the error fence, the footer lines and, under any verdict but 🟢,
+the hint. The error fence shows when `detect` or the `lock` job failed with an
+`::error::` (a refusal or a failed tool or API call): its first error on one
+line, in a plain code fence, cut at 4,000 characters and fenced longer than any
+backtick run in it. A failed `detect` skips `lock`, so at most one of them
+names an error. A job that failed without an `::error::` renders no fence.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
   apply` for a bare one; the environment headings and the footer lines name the
@@ -2523,16 +2524,19 @@ run in it. A `detect` that failed without an `::error::` renders no fence.
 - **Verdict line.** With rows: one count per display status, in the order
   `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
   zero counts omitted, joined by `, `, then `N waiting` when cells wait (see
-  the waiting line below). When the job-level `SHIPMATE_RESULTS`
+  the waiting line below) and `N locked` when another pull request locks
+  pending cells (see the locked line below). When the job-level `SHIPMATE_RESULTS`
   outcome signals a failure and no row is failed or blocked, a bare `failed`
   leads the counts, so an apply run that dies before any cell reports (a
   missing/denied apply environment, a job-level cancel) still surfaces a
   failure signal. A not-recorded row does not suppress it: it describes one
   cell in one environment and says nothing about a different environment whose
   job died before reporting. The circle is 🔴 for a failed run, else the worst
-  of the rows' circles and, when cells wait, ⚪ (🔴, 🟠, 🟡, ⚪, 🟢 in that
-  order), so a run with waiting cells is never 🟢. With no rows, the first that
-  holds: `🔴 failed`, `⚪ nothing applied, environments are held for review`,
+  of the rows' circles and, when cells wait or are locked, ⚪ (🔴, 🟠, 🟡, ⚪,
+  🟢 in that order), so a run with waiting or locked cells is never 🟢. With no
+  rows, the first that holds: `🔴 failed`,
+  `⚪ nothing applied, environments are held for review`,
+  `⚪ nothing applied, pending cells are locked`,
   `⚪ nothing applied, cells wait on pending cells they run after`, or
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
@@ -2573,7 +2577,8 @@ run in it. A `detect` that failed without an `::error::` renders no fence.
   cells are recovered when that note is present, and always followed by a
   pointer to the lost-save section.
 - **Footer lines**, one per line: the bare-apply form's environment
-  dispositions, then, in both forms, one line per waiting cell. The comment
+  dispositions, then, in both forms, one line per lock holder and environment
+  and one line per waiting cell. The comment
   states no gate line: the `shipmate / gate` status shows the gate's state.
 
 There is no separate "nothing pending" input: the expected cell set is the
@@ -2582,7 +2587,8 @@ cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
 holding evidence that an apply ran.
 
-The disposition lines are one per environment and cause, or per waiting cell.
+The disposition lines are one per environment and cause, per lock holder and
+environment, or per waiting cell.
 The rows form and the no-rows form carry the same set, fed by one shared
 function, and the size budget never sheds a footer line — so the comment's most
 actionable warning cannot be lost on either path. In the order they render:
@@ -2592,7 +2598,7 @@ actionable warning cannot be lost on either path. In the order they render:
   applying this run`. It names no cause, since being skipped can mean an
   unapplied `targeted` environment, a held one, one holding a waiting cell, or
   one holding a cell another pull request locks —
-  the targeted, held and waiting lines carry that distinction instead.
+  the targeted, held, locked and waiting lines carry that distinction instead.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
   environment that is also `targeted` is listed once, here and not on a targeted
   line, with its command: ``⚪ prod: held, the review state does not permit
@@ -2606,11 +2612,22 @@ actionable warning cannot be lost on either path. In the order they render:
   `CHANGES_REQUESTED`, or an unknown or absent decision), and only the run's
   own apply-all-detect notice carries which one, since the decision never
   reaches this renderer.
+- **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
+  then re-plan, or comment `shipmate unlock <env> --evict`.``, one per pull
+  request `#<n>` holding a cell lock on pending cells of `<env>` (`locked_cells`),
+  naming each as `<stack> / <env>` comma-separated. A lock whose holder is
+  unknown renders ``🔒 locked by an unreadable lock: <cells>. Comment
+  `shipmate unlock <env> --evict`.`` Both forms render these lines.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
   (§Fan-out) is pending and not applying this run; the second pair is that
   blocker. Both forms render these lines. The blocker is a cell that waits on
   nothing itself when there is one, so it can apply now. `<remedy>` is
+  `` it is locked by #<n>; wait for #<n> to merge or close, then re-plan, or
+  comment `shipmate unlock <env> --evict` `` when another pull request locks
+  the blocker cell (`` it is locked by an unreadable lock; comment
+  `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
+  else holds its environment, else
   `` it is held until the pull request is approved, then comment
   `shipmate apply <env>` `` when the blocker's environment is held and
   `targeted`, `it is held until the pull request is approved` when it is held,
@@ -2618,8 +2635,8 @@ actionable warning cannot be lost on either path. In the order they render:
   including any held for review `` when it is skipped, and otherwise
   `` apply it first with `shipmate apply <env>` ``, each naming the blocker's
   environment. The targeted form has no held or skipped environments to
-  consult, so its remedy always names `shipmate apply <env>`, even for a blocker
-  that waits on a review or on `needs`.
+  consult, so its remedy names the lock's or `shipmate apply <env>`, even for a
+  blocker that waits on a review or on `needs`.
 
 Two audit facts are not comment lines. The render step prints each as one
 `::notice::` workflow annotation in its own log, environment names escaped as
@@ -2742,7 +2759,7 @@ when a row is blocked, one note follows the row lines:
 In the compact form each environment disposition is one line naming its
 environments comma-separated (`<envs>`), in the per-environment order, and the
 waiting cells are one line per blocker, keeping every blocker and its remedy;
-the `held:` remedy line is unchanged:
+the `held:` remedy line and the locked lines are unchanged:
 
 - `` 🟡 left pending (targeted): <envs>; comment `shipmate apply <env>` for each ``
 - `⚪ skipped, ordered after an environment not fully applying this run: <envs>`

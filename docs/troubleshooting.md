@@ -1436,9 +1436,16 @@ The first cell runs after the second through `after`
 not applying in this run: another environment on a targeted apply, or a held,
 `targeted` or skipped environment on a bare one. On either form it can also be a
 cell another pull request locks; that lock goes when its holder merges or closes,
-or with `shipmate unlock <env> --evict`. The waiting cell's apply check
+or with `shipmate unlock <env> --evict`, and a `🔒 locked by` line names its
+holder. The waiting cell's apply check
 stays pending and the rest of the run applied. Follow the remedy:
 
+- ``it is locked by #<n>; wait for #<n> to merge or close, then re-plan, or
+  comment `shipmate unlock <env> --evict` ``: another pull request holds the
+  blocker cell's lock. Wait for it to merge or close, then re-plan, or evict
+  the lock with that comment.
+- ``it is locked by an unreadable lock; comment `shipmate unlock <env> --evict` ``:
+  the lock names no holder, so no merge or close releases it; evict it.
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
@@ -1457,10 +1464,11 @@ Before any of these, check the run for a cell whose job log shows
 environment applies that cell again. Follow
 §`The apply step ran and its state was not saved` for it first.
 
-A targeted apply always names `shipmate apply <env>`, even when the blocker's
-environment is held or ordered by `needs`, because the targeted form's comment
+A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
+the blocker's environment is held or ordered by `needs`, because the targeted form's comment
 receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
-verdict reads `⚪ nothing applied, cells wait on pending cells they run after`.
+verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
+`⚪ nothing applied, pending cells are locked` when a pending cell is locked.
 
 ### A stack's plan does not show its upstream stack's change
 

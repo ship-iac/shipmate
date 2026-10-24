@@ -2176,3 +2176,167 @@ def test_main_renders_the_detect_refusal_from_the_render_step_env(monkeypatch, t
         "(or dismiss the review), then re-run `shipmate apply`.\n"
         "```\n\n" + HINT
     )
+
+
+def _locked(stack, env, holder):
+    return {"stack": stack, "environment": env, "holder": holder}
+
+
+_LOCKS = [
+    _locked("stacks/app", "dev", 12),
+    _locked("stacks/db", "dev", 12),
+    _locked("stacks/app", "prod", 12),
+    _locked("stacks/dns", "dev", 7),
+    _locked("stacks/net", "dev", None),
+    _locked("stacks/edge", "dev", "12"),
+]
+#: `_LOCKS`'s lines, hand-written: one per holder and environment, in first-seen order.
+_LOCK_LINES = [
+    (
+        "🔒 locked by #12: stacks/app / dev, stacks/db / dev. Wait for #12 to merge or close, then "
+        "re-plan, or comment `shipmate unlock dev --evict`."
+    ),
+    (
+        "🔒 locked by #12: stacks/app / prod. Wait for #12 to merge or close, then re-plan, or "
+        "comment `shipmate unlock prod --evict`."
+    ),
+    (
+        "🔒 locked by #7: stacks/dns / dev. Wait for #7 to merge or close, then re-plan, or "
+        "comment `shipmate unlock dev --evict`."
+    ),
+    (
+        "🔒 locked by an unreadable lock: stacks/net / dev, stacks/edge / dev. Comment "
+        "`shipmate unlock dev --evict`."
+    ),
+]
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_each_lock_holder_and_environment_gets_one_line_in_both_forms(compact):
+    """The remedy names the environment, so one holder over two environments gets two lines; a
+    holder that is not a number names no pull request.
+
+    Mutation: group the lines by holder alone -- `prod` joins the `dev` line, red.
+    Mutation: return `holder` unconditionally from `_lock_holder` -- `#12` for the string, red.
+    Mutation: drop `d["locked"]` from `_per_env_lines` -- the per-environment case, red.
+    Mutation: drop `d["locked"]` from `_grouped_lines` -- the compact case, red."""
+    assert ac._footer_parts([], [], locked=_LOCKS, compact=compact) == _LOCK_LINES
+
+
+def test_the_lock_lines_escape_every_name():
+    """Mutation: drop `_md_name` from the locked cell's stack -- the team mention, red.
+    Mutation: drop `_md_escape` from the locked cell's environment -- red."""
+    assert ac._footer_parts([], [], locked=[_locked("s@org/team<1", "e<2", 3)]) == [
+        (
+            "🔒 locked by #3: s@<!-- -->org/team&lt;1 / e&lt;2. Wait for #3 to merge or close, "
+            "then re-plan, or comment `shipmate unlock e&lt;2 --evict`."
+        )
+    ]
+
+
+def test_a_run_where_every_cell_is_locked_is_never_green():
+    """Work was pending and another pull request's lock kept it from applying.
+
+    Mutation: drop the `locked` branch from `_empty_verdict` -- 🟢 no pending applies with no
+    hint, red."""
+    assert _comment([], locked=[_locked("stacks/app", "dev-eu", 12)]) == (
+        f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {AT}\n\n"
+        "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, or "
+        "comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
+    )
+
+
+def test_a_partly_applied_run_counts_its_locked_cells_beside_its_waiting_ones():
+    """Mutation: drop the `locked` token from `_verdict` -- red.
+    Mutation: drop the locked `circles.append("⚪")` -- 🟢, red (the run has no waiting cell)."""
+    locked = [_locked("stacks/db", "dev-eu", 12), _locked("stacks/dns", "dev-eu", 12)]
+    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), locked) == (
+        "⚪",
+        f"⚪ 1 applied, 2 locked {AT}",
+    )
+    assert ac._verdict([_row()], False, (), SHA, RUN_URL, [_PLATFORM_WAITS], locked) == (
+        "⚪",
+        f"⚪ 1 applied, 1 waiting, 2 locked {AT}",
+    )
+
+
+def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
+    """The blocker's environment is held and targeted, and only the cell is locked: the lock
+    remedy wins over the review and targeted ones, keyed on the blocker cell, not its
+    environment. The cells render as one comment, the lock lines above the waiting lines.
+
+    Mutation: drop the `locked` branch from `_waiting_remedy` -- the held-and-targeted remedy,
+    red.
+    Mutation: key the blocker's lock on its environment alone -- `stacks/c` names the lock,
+    red."""
+    waiting = [
+        _waits("stacks/a", "qa", "stacks/dns", "ops"),
+        _waits("stacks/b", "qa", "stacks/net", "ops"),
+        _waits("stacks/c", "qa", "stacks/vault", "ops"),
+    ]
+    locked = [_locked("stacks/dns", "ops", 12), _locked("stacks/net", "ops", None)]
+    body = ac.build_comment(
+        [], [], RUN_URL, ["ops"], [], "", "success", ["ops"], SHA, waiting, locked=locked
+    )
+    assert body == (
+        f"### shipmate apply\n\n⚪ nothing applied, environments are held for review {AT}\n\n"
+        "⚪ ops: held, the review state does not permit applying; once it clears, comment "
+        "`shipmate apply ops`\n"
+        "held: get an approving review, or resolve or dismiss a requested-changes review. "
+        "The run log's apply-all-detect notice names the decision seen.\n"
+        "🔒 locked by #12: stacks/dns / ops. Wait for #12 to merge or close, then re-plan, or "
+        "comment `shipmate unlock ops --evict`.\n"
+        "🔒 locked by an unreadable lock: stacks/net / ops. Comment "
+        "`shipmate unlock ops --evict`.\n"
+        "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #12; wait "
+        "for #12 to merge or close, then re-plan, or comment `shipmate unlock ops --evict`\n"
+        "⚪ stacks/b / qa: waits on stacks/net / ops, not applied yet; it is locked by an "
+        "unreadable lock; comment `shipmate unlock ops --evict`\n"
+        "⚪ stacks/c / qa: waits on stacks/vault / ops, not applied yet; it is held until the pull "
+        "request is approved, then comment `shipmate apply ops`\n\n" + HINT
+    )
+
+
+def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp_path):
+    """Mutation: drop the `SHIPMATE_LOCKED_CELLS` argument from `main`'s `build_comment` call --
+    🟢 no pending applies, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_LOCKED_CELLS", json.dumps([_locked("stacks/app", "dev-eu", 12)]))
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
+        "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, or "
+        "comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
+    )
+
+
+_LOCK_REFUSAL = (
+    "stacks/app in dev-eu is locked by #12; wait for #12 to merge or close, then re-plan, or "
+    "comment `shipmate unlock dev-eu --evict`"
+)
+
+
+def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_applying(
+    monkeypatch, tmp_path
+):
+    """A refused lock job follows a detect that succeeded: its waves name the cells, which read
+    not attempted, and the refusal sits in the detect refusal's fence under the failed verdict.
+
+    Mutation: drop the `SHIPMATE_LOCK_REFUSAL` read from `main` -- no fence, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success,success,success,failure,skipped")
+    monkeypatch.setenv("SHIPMATE_LOCK_REFUSAL", _LOCK_REFUSAL)
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🔴 failed, 1 not attempted {_MAIN_AT}\n\n"
+        f"```\n{_LOCK_REFUSAL}\n```\n\n"
+        "#### dev-eu: 1 cell, 1 not attempted\n\n"
+        f'🟡 stacks/app: not attempted <a href="{_MAIN_RUN}">logs</a>\n\n'
+        "not attempted: the apply checks stay pending; retry with `shipmate apply dev-eu`."
+        + _LOST_POINTER
+        + "\n\n"
+        + HINT
+    )

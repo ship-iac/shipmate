@@ -273,7 +273,9 @@ jobs:
           applied-exempt-envs: ${{ needs.detect.outputs.applied_exempt_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
+          locked-cells: ${{ needs.detect.outputs.locked_cells }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
+          lock-refusal: ${{ needs.lock.outputs.refusal }}
           env-order: ${{ needs.detect.outputs.env_order }}
           results: ${{ join(needs.*.result, ',') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
