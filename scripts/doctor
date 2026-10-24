@@ -359,7 +359,7 @@ def _no_review_findings(ctx, branch, code_owner, last_push):
     gated = []
     if table is not None:
         listed = set(table.get("environments", {})) | set(ctx["envs"])
-        gated = sorted(listed - ec.ungated_envs(table))
+        gated = sorted(listed - ec.exempt_envs(table))
     if gated:
         level = NOTICE if code_owner else WARNING
         return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
@@ -1832,7 +1832,7 @@ def _config_defaults(table):
     one a reader already assumes.
     """
     order = ec.env_order(table)
-    envs = ec.explicit_envs(table)
+    envs = ec.targeted_envs(table)
     cap = ec.max_parallel(table)
     cap_head = (
         f"`max_parallel: {cap}`:" if "max_parallel" in table else "`max_parallel`: not set, so"

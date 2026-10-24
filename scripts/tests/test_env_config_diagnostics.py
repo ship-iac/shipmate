@@ -89,13 +89,16 @@ def test_an_entry_matching_only_in_case_is_unused(capsys):
 
 
 def test_a_misspelled_flagged_entry_warns_as_unused(capsys):
-    """`explicit` is the only thing holding an environment back from a bare `shipmate
-    apply`, so a flag on a misspelled entry holds nothing back and the apply runs. The flag
-    sits on the entry, so the unused-entry warning is what names it.
+    """`apply_mode: targeted` is the only thing holding an environment back from a bare
+    `shipmate apply`, so a flag on a misspelled entry holds nothing back and the apply runs.
+    The flag sits on the entry, so the unused-entry warning is what names it.
 
     Mutation: drop the unused-entry print from `_report_unused`.
     """
-    table = {"layout": "folder", "environments": {"prd": {"explicit": True, "gated": False}}}
+    table = {
+        "layout": "folder",
+        "environments": {"prd": {"apply_mode": "targeted", "review": False}},
+    }
     _validate(table, tagged=_scan("prod"))
     assert capsys.readouterr().out.splitlines() == [
         (
@@ -180,7 +183,7 @@ def test_reference_keys_naming_real_environments_say_nothing(capsys):
     """
     table = {
         "layout": "folder",
-        "environments": {"prod": {"needs": ["dev"], "explicit": True, "gated": False}},
+        "environments": {"prod": {"needs": ["dev"], "apply_mode": "targeted", "review": False}},
     }
     _validate(table, tagged=_scan("prod", "dev"))
     assert capsys.readouterr().out == ""

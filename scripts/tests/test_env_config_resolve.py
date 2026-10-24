@@ -38,7 +38,7 @@ _ROLES = {
         "mapped": {"region": "eu-west-1", "identity": "mapped", "workloads": ["core", "net"]},
         "full": {"region": "eu-west-1", "identity": "full"},
         "pathed": {"region": "eu-west-1", "identity": "pathed"},
-        "sbx": {"region": "eu-west-1", "identity": "shared", "shared": True},
+        "sbx": {"region": "eu-west-1", "identity": "shared", "split": False},
     },
 }
 
@@ -260,31 +260,31 @@ def test_folder_derives_nothing():
 _SHARED = {
     "layout": "folder",
     "identities": {"dev": {"aws": {"apply": "arn:aws:iam::9817:role/apply"}}},
-    "environments": {"dev-eu": {"region": "eu-west-1", "shared": True, "identity": "dev"}},
+    "environments": {"dev-eu": {"region": "eu-west-1", "split": False, "identity": "dev"}},
 }
 
-#: (the entry's `shared` value, or None for absent; the requested path) -> (env_binding,
+#: (the entry's `split` value, or None for absent; the requested path) -> (env_binding,
 #: config_path). Hand-written: a shared environment binds the bare name on both paths and
 #: resolves `aws.apply` on both; every other entry binds `<env>-<path>` and keeps the path.
 _BINDINGS = {
     (None, "plan"): ("dev-eu-plan", "plan"),
     (None, "apply"): ("dev-eu-apply", "apply"),
-    (False, "plan"): ("dev-eu-plan", "plan"),
-    (False, "apply"): ("dev-eu-apply", "apply"),
-    (True, "plan"): ("dev-eu", "apply"),
-    (True, "apply"): ("dev-eu", "apply"),
+    (True, "plan"): ("dev-eu-plan", "plan"),
+    (True, "apply"): ("dev-eu-apply", "apply"),
+    (False, "plan"): ("dev-eu", "apply"),
+    (False, "apply"): ("dev-eu", "apply"),
 }
 
 
-def _binding(shared, path):
-    entry = {} if shared is None else {"shared": shared}
+def _binding(split, path):
+    entry = {} if split is None else {"split": split}
     resolved = env_config.resolve(
         {"layout": "folder", "environments": {"dev-eu": entry}}, "dev-eu", path, ""
     )
     return resolved["env_binding"], resolved["config_path"]
 
 
-def test_the_binding_and_tier_follow_the_shared_key():
+def test_the_binding_and_tier_follow_the_split_key():
     """Mutations: return `f"{env}-{path}"` as `env_binding` unconditionally -- both shared rows
     red; resolve `config_path` from `path` for a shared entry -- the shared plan row reds.
     """
@@ -329,65 +329,90 @@ def test_an_unshared_environment_keeps_the_requested_path(monkeypatch):
     }
 
 
-def test_shared_envs_names_the_entries_holding_shared_true(monkeypatch):
+def test_shared_envs_names_the_entries_holding_split_false(monkeypatch):
     """The retired `SHIPMATE_SHARED_ENVS` is set both bare and in `SHIPMATE_GITHUB_VARS`, so a
-    fallback beside the table changes the set. Mutations: test the key for presence rather
-    than for `true` -- `dev-us` joins the set; union `SHIPMATE_SHARED_ENVS` from the parsed
-    `SHIPMATE_GITHUB_VARS`, or from the process environment, into `shared_envs`' result --
-    `dev-us` joins."""
-    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_SHARED_ENVS": "dev-us"}')
-    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "dev-us")
+    fallback beside the table changes the set. Mutations: `is False` -> `is True` in
+    `shared_envs` -- `stg` replaces `dev`; test the key for falsiness or absence -- `prd`
+    joins; union `SHIPMATE_SHARED_ENVS` from the parsed `SHIPMATE_GITHUB_VARS`, or from the
+    process environment, into `shared_envs`' result -- `stg` joins."""
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_SHARED_ENVS": "stg"}')
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "stg")
+    table = {
+        "layout": "folder",
+        "environments": {"dev": {"split": False}, "stg": {"split": True}, "prd": {}},
+    }
+    assert env_config.shared_envs(table) == {"dev"}
+
+
+def test_exempt_envs_names_the_entries_holding_review_false():
+    """Mutations: `is False` -> `is True` in `exempt_envs` -- `stg` replaces `dev`; read an
+    absent `review` as exempt -- `prd` joins."""
+    table = {
+        "layout": "folder",
+        "environments": {"dev": {"review": False}, "stg": {"review": True}, "prd": {}},
+    }
+    assert env_config.exempt_envs(table) == frozenset({"dev"})
+
+
+def test_targeted_envs_names_the_entries_holding_apply_mode_targeted():
+    """Mutation: `== "targeted"` -> `!= "bare"` in `targeted_envs` -- the absent `prd` joins."""
     table = {
         "layout": "folder",
         "environments": {
-            "dev-eu": {"shared": True},
-            "dev-us": {"shared": False},
-            "prod": {"region": "eu-west-1"},
+            "dev": {"apply_mode": "targeted"},
+            "stg": {"apply_mode": "bare"},
+            "prd": {},
         },
     }
-    assert env_config.shared_envs(table) == {"dev-eu"}
+    assert env_config.targeted_envs(table) == ["dev"]
 
 
 _FLAGGED = {
     "layout": "folder",
     "environments": {
-        "held": {"explicit": True, "gated": True},
-        "open": {"explicit": False, "gated": False},
+        "held": {"apply_mode": "targeted", "review": True},
+        "open": {"apply_mode": "bare", "review": False},
         "plain": {"region": "eu-west-1"},
-        "mixed": {"explicit": True, "gated": False},
+        "mixed": {"apply_mode": "targeted", "review": False},
     },
 }
 
 
 def test_the_flag_accessors_read_each_entry_against_its_default(capsys):
-    """`explicit` defaults to false and `gated` to true, so `plain` is in neither set, and a
-    table with no entries exempts and holds back nothing. Neither accessor prints.
+    """`apply_mode` defaults to `bare` and `review` to true, so `plain` is in neither set, and
+    a table with no entries exempts and holds back nothing. Neither accessor prints.
 
-    Mutations: read `gated` as "absent means ungated" -- `plain` joins the ungated set;
-    invert `ungated_envs` to `gated is True` -- `held` replaces `open` and `mixed`; test
-    `explicit` for presence rather than `True` -- `open` joins.
+    Mutations: read `review` as "absent means exempt" -- `plain` joins the exempt set;
+    invert `exempt_envs` to `review is True` -- `held` replaces `open` and `mixed`; test
+    `apply_mode` for presence rather than `targeted` -- `open` joins.
     """
     assert env_config.validate_structure(_FLAGGED) is _FLAGGED
-    assert env_config.explicit_envs(_FLAGGED) == ["held", "mixed"]
-    assert env_config.ungated_envs(_FLAGGED) == frozenset({"open", "mixed"})
-    assert env_config.explicit_envs({"layout": "folder"}) == []
-    assert env_config.ungated_envs({"layout": "folder"}) == frozenset()
+    assert env_config.targeted_envs(_FLAGGED) == ["held", "mixed"]
+    assert env_config.exempt_envs(_FLAGGED) == frozenset({"open", "mixed"})
+    assert env_config.targeted_envs({"layout": "folder"}) == []
+    assert env_config.exempt_envs({"layout": "folder"}) == frozenset()
     assert capsys.readouterr().out == ""
 
 
 def test_the_flag_accessors_read_only_a_boolean_as_set():
-    """On a table nothing validated, a quoted value sets neither flag: `"false"` leaves an
-    entry gated, the protected direction, and `"true"` leaves it off a bare apply's
-    exclusions exactly as `validate_structure` would otherwise have refused it.
+    """On a table nothing validated, a quoted or cased value sets nothing: `"false"` leaves an
+    entry split and under review, the protected direction, and `"Targeted"` leaves it on a
+    bare apply exactly as `validate_structure` would otherwise have refused it.
 
-    Mutations: test `explicit` for truthiness -- `quoted` joins the explicit list; test
-    `gated` for falsiness -- `zero` joins the ungated set.
+    Mutations: `shared_envs` or `exempt_envs` tests its key for falsiness -- `zero` joins;
+    either compares the lowercased string to `"false"` -- `quoted` joins; `targeted_envs`
+    compares casefolded -- `cased` joins.
     """
     table = {
-        "environments": {"quoted": {"explicit": "true", "gated": "false"}, "zero": {"gated": 0}}
+        "environments": {
+            "quoted": {"split": "false", "review": "false"},
+            "zero": {"split": 0, "review": 0},
+            "cased": {"apply_mode": "Targeted"},
+        }
     }
-    assert env_config.explicit_envs(table) == []
-    assert env_config.ungated_envs(table) == frozenset()
+    assert env_config.shared_envs(table) == set()
+    assert env_config.exempt_envs(table) == frozenset()
+    assert env_config.targeted_envs(table) == []
 
 
 # --- no fallback to vars.* ------------------------------------------------------------
@@ -414,24 +439,24 @@ def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch
     }
 
 
-# --- the environment's tf_vars merge over the derivation ------------------------------
+# --- the environment's vars merge over the derivation ------------------------------
 
 
 def _with_vars(variables):
     table = {
         "layout": "workspace",
-        "environments": {"dev-eu": {"tf_vars": variables}},
+        "environments": {"dev-eu": {"vars": variables}},
     }
     return env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"]
 
 
-def test_tf_vars_overrides_the_derived_value():
-    """Mutation: ignore `tf_vars`, or merge it under the derivation instead of over it."""
+def test_vars_overrides_the_derived_value():
+    """Mutation: ignore `vars`, or merge it under the derivation instead of over it."""
     assert _with_vars({"TF_WORKSPACE": "shared-tenant"}) == {"TF_WORKSPACE": "shared-tenant"}
 
 
-def test_tf_vars_extends_the_derived_set():
-    """Mutation: ignore `tf_vars` -- this reds while the override case stays green under a
+def test_vars_extends_the_derived_set():
+    """Mutation: ignore `vars` -- this reds while the override case stays green under a
     merge-order mutation, which is why the two are written separately."""
     assert _with_vars({"TF_VAR_team": "core"}) == {
         "TF_WORKSPACE": "dev-eu",
@@ -439,7 +464,7 @@ def test_tf_vars_extends_the_derived_set():
     }
 
 
-def test_tf_vars_may_set_a_value_to_an_explicit_empty_string():
+def test_vars_may_set_a_value_to_an_explicit_empty_string():
     """`plan-classify` excludes an empty `TF_VAR_*` from the fingerprint on both sides,
     so an explicit empty value stays consistent -- but only if it is emitted.
 
@@ -504,7 +529,7 @@ _SHAPES = {
         "named": {"region": "eu-west-1", "identity": "named"},
         "keyed": {"region": "eu-west-1", "identity": "keyed", "workloads": ["net", "core"]},
         "full": {"region": "eu-west-1", "identity": "full"},
-        "sbx": {"region": "eu-west-1", "identity": "shared", "shared": True},
+        "sbx": {"region": "eu-west-1", "identity": "shared", "split": False},
     },
 }
 
@@ -549,7 +574,7 @@ def test_validation_and_resolution_read_the_same_role(cell, roles):
     table = env_config.validate_structure(_SHAPES)
     entry = table["environments"][env]
     name = entry["identity"]
-    consulted = "apply" if entry.get("shared") else path
+    consulted = "apply" if entry.get("split") is False else path
     aws = table["identities"][name]["aws"]
     listed = env_config._listed_roles(env, name, aws, (consulted,), workload)
     resolved = env_config.resolve(table, env, path, workload or "")["role_arn"]

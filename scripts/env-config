@@ -52,7 +52,8 @@ def runner_refusal():
     return None
 
 
-_FLAGS = ("shared", "explicit", "gated")
+_FLAGS = ("split", "review")
+_APPLY_MODES = ("targeted", "bare")
 
 
 def load_config(text):
@@ -61,13 +62,13 @@ def load_config(text):
     The runner check runs ahead of the parse, which would otherwise fail on a missing PyYAML
     with a bare `ModuleNotFoundError` instead of naming the runner prerequisite.
 
-    Every scalar is a string. An environment's `shared`, `explicit` or `gated` holding exactly
-    `true` or `false` becomes a bool here, before any reference resolves; one holding a
-    variable reference anywhere in it refuses here, and so does a `layout` that is neither a
-    string nor a reference, so the refusals that quote those values never quote a resolved
-    one. `max_parallel` and `command_hints` holding a reference anywhere in them refuse here for
-    the same reason, and `command_hints` holding exactly `true` or `false` becomes a bool. Any
-    other value stays as written for `validate_structure` to refuse.
+    Every scalar is a string. An environment's `split` or `review` holding exactly `true` or
+    `false` becomes a bool here, before any reference resolves; one of those or `apply_mode`
+    holding a variable reference anywhere in it refuses here, and so does a `layout` that is
+    neither a string nor a reference, so the refusals that quote those values never quote a
+    resolved one. `max_parallel` and `command_hints` holding a reference anywhere in them
+    refuse here for the same reason, and `command_hints` holding exactly `true` or `false`
+    becomes a bool. Any other value stays as written for `validate_structure` to refuse.
     """
     refusal = runner_refusal()
     if refusal:
@@ -116,6 +117,11 @@ def _normalise_flags(env, entry):
             key,
             f"::error::environments.{env}.{key} holds a variable reference; a flag accepts "
             "no variable reference. Write true or false.",
+        )
+    if any(_is_reference(node) for _, node in _walk(entry.get("apply_mode"), "apply_mode")):
+        raise SystemExit(
+            f"::error::environments.{env}.apply_mode holds a variable reference, and it accepts "
+            "none. Write targeted or bare."
         )
 
 
@@ -319,7 +325,7 @@ def contents_text(path, fetch=None):
 
 #: The layouts a repository may declare, and the environment-level keys an entry may hold.
 _LAYOUTS = ("tf_vars", "workspace", "folder")
-_ENV_KEYS = ("region", "tf_vars", "identity", "workloads", "shared", "needs", "explicit", "gated")
+_ENV_KEYS = ("region", "vars", "identity", "workloads", "split", "needs", "apply_mode", "review")
 
 #: An identity's fields, all under `aws`. Each is a string or a map keyed by workload.
 _ID_FIELDS = ("account", "plan", "apply")
@@ -388,39 +394,53 @@ def _gather(errors):
 
 def _check_vars(entry, env, errors):
     """`TF_VAR_*` and `TF_WORKSPACE` only, and strings only, one message per name. A
-    non-mapping `tf_vars` gets its one message and no per-name check.
+    non-mapping `vars` gets its one message and no per-name check.
 
     A non-string value would otherwise pass here and refuse once per cell at injection
     time -- forty identical failures in a forty-cell matrix instead of one at the top.
     """
-    tf_vars = entry["tf_vars"]
+    env_vars = entry["vars"]
     with _gather(errors) as shape:
-        _mapping(tf_vars, f"environment {env}: tf_vars")
+        _mapping(env_vars, f"environment {env}: vars")
     if not shape.ok:
         return
-    for name, value in sorted(tf_vars.items()):
+    for name, value in sorted(env_vars.items()):
         if not name.startswith("TF_VAR_") and name != "TF_WORKSPACE":
             errors.append(
-                f"::error::environment {env}: tf_vars may name only TF_VAR_* and "
+                f"::error::environment {env}: vars may name only TF_VAR_* and "
                 f"TF_WORKSPACE, and {name} is neither."
             )
         elif not isinstance(value, str):
             errors.append(
-                f"::error::environment {env}: tf_vars.{name} must be a string, got "
+                f"::error::environment {env}: vars.{name} must be a string, got "
                 f"{type(value).__name__}. A non-string value would otherwise refuse once "
                 "per cell at injection time."
             )
 
 
 def _check_flags(entry, env, errors):
-    """`shared`, `explicit` and `gated` hold `true` or `false`, one message per flag.
+    """`split` and `review` hold `true` or `false`, one message per flag.
 
     `load_config` turned those two spellings into bools and refused any value holding a
     reference, so anything else here is written in the file. It reads as set to a person and
-    resolves as unset; for `explicit` that puts the environment on a bare `shipmate apply`.
+    resolves as unset.
     """
     for key in _FLAGS:
         _check_bool(entry, key, f"environments.{env}.{key}", errors)
+
+
+def _check_apply_mode(entry, env, errors):
+    """`apply_mode` is exactly the string `targeted` or `bare`. Anything else reads as set to
+    a person and resolves as `bare`, which puts the environment on a bare `shipmate apply`.
+
+    `load_config` refused any value holding a reference, so the value here is written in the
+    file.
+    """
+    if "apply_mode" in entry and entry["apply_mode"] not in _APPLY_MODES:
+        errors.append(
+            f"::error::environments.{env}.apply_mode must be targeted or bare, got "
+            f"{entry['apply_mode']!r}."
+        )
 
 
 def _check_bool(mapping, key, label, errors):
@@ -429,14 +449,14 @@ def _check_bool(mapping, key, label, errors):
 
 
 def shared_envs(table):
-    """The environments whose entry holds `shared: true`.
+    """The environments whose entry holds `split: false`.
 
     Such an environment binds one bare GitHub Environment on both paths instead of the
-    `<env>-plan` / `<env>-apply` pair. Anything but `true` is unshared, the protected
+    `<env>-plan` / `<env>-apply` pair. Anything but `false` is split, the protected
     direction; `validate_structure` refuses a non-boolean value before a run reads it.
     """
     return {
-        env for env, entry in table.get("environments", {}).items() if entry.get("shared") is True
+        env for env, entry in table.get("environments", {}).items() if entry.get("split") is False
     }
 
 
@@ -491,25 +511,28 @@ def command_hints(table):
     return table.get("command_hints", False)
 
 
-def explicit_envs(table):
+def targeted_envs(table):
     """Environments a bare `shipmate apply` skips: each needs its own `shipmate apply <env>`.
 
-    Only `explicit: true` holds one back; `validate_structure` refuses any other value.
+    Only `apply_mode: targeted` holds one back; `validate_structure` refuses any value but
+    `targeted` and `bare`.
     """
     return sorted(
-        e for e, entry in table.get("environments", {}).items() if entry.get("explicit") is True
+        e
+        for e, entry in table.get("environments", {}).items()
+        if entry.get("apply_mode") == "targeted"
     )
 
 
-def ungated_envs(table):
+def exempt_envs(table):
     """Environments a targeted apply reaches without an approving review.
 
-    Only `gated: false` exempts one; anything else is gated, the protected direction.
+    Only `review: false` exempts one; anything else is under review, the protected direction.
     Entry names are lowercase by `check_env_name`, so the set already matches the
     casefolded env name `authorize` compares against it.
     """
     return frozenset(
-        e for e, entry in table.get("environments", {}).items() if entry.get("gated") is False
+        e for e, entry in table.get("environments", {}).items() if entry.get("review") is False
     )
 
 
@@ -537,9 +560,10 @@ def _check_environment(entry, env, errors, identities):
                     f"::error::environment {env}: region is empty. Give it a value, or remove "
                     "the key."
                 )
-    if "tf_vars" in entry:
+    if "vars" in entry:
         _check_vars(entry, env, errors)
     _check_flags(entry, env, errors)
+    _check_apply_mode(entry, env, errors)
     if identities is not None:
         _check_identity_use(entry, env, errors, *identities)
 
@@ -717,12 +741,12 @@ def _check_named_identity(entry, env, name, aws, errors, listed_ok):
             f"::error::environment {env} names identity {name}, whose roles vary by workload, "
             "and lists no workloads. List the workloads it admits: workloads: […]."
         )
-    shared = entry.get("shared") is True
+    shared = entry.get("split") is False
     if shared and "plan" in aws:
         errors.append(
             f"::error::environment {env} is shared between the plan and apply paths, so "
             f"identity {name}'s aws.plan cannot apply to it: a shared environment uses "
-            "aws.apply on both paths. Name an identity without aws.plan, or set shared: false."
+            "aws.apply on both paths. Name an identity without aws.plan, or remove split: false."
         )
     if varies and not listed_ok:
         return
@@ -831,7 +855,7 @@ def _report_unused(table, tagged):
     A `needs` predecessor no stack tags gets its own warning, because the key is fail-open: it
     reads as ordering something while the run orders nothing. The charset rule catches only
     names no env name could take; a plain typo passes it and lands here. Only predecessors are
-    checked: the env holding `needs` is an entry, like one holding `explicit` or `gated`, and
+    checked: the env holding `needs` is an entry, like one holding `apply_mode` or `review`, and
     the unused-entry warning covers it.
 
     A listed workload no stack in its environment tags warns per environment; an environment
@@ -964,7 +988,7 @@ def check_env_name(e, label, matched):
     Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
     suffix -- each is matched against the bare logical env name, matches nothing, and so
     orders, holds back or exempts nothing while reading as if it did. It also refuses
-    `ENGINE_ENV`, with or without one suffix: a `shared: true` entry of that name would
+    `ENGINE_ENV`, with or without one suffix: a `split: false` entry of that name would
     bind the engine's own environment, which holds the App's private key, and one rule for
     every name is simpler than a shared-only rule. The suffixed form gets this message, not
     the suffix one whose remedy is the reserved name. `label` opens each message and
@@ -1026,7 +1050,7 @@ def validate_structure(table):
     non-mapping `identities` skips every identity check and every entry's `identity` and
     `workloads` checks, a refused identity the role checks of each entry naming it, a
     non-mapping `environments` skips every entry, a non-mapping entry its own checks and its
-    `needs`, a non-mapping `tf_vars` its per-name checks, a refused `needs` list the cycle
+    `needs`, a non-mapping `vars` its per-name checks, a refused `needs` list the cycle
     check, and a cyclic `needs` graph the depth check. The role checks of one workload stop
     at its first refusal.
 
@@ -1169,7 +1193,7 @@ def resolve(table, env, path, workload):
     the entry's `workloads`, or a varying identity and a tag it does not list. It never raises
     on a validated table, including for a completed cell the table no longer lists. The
     workload is matched as written: `net-edge` and `net_edge` are two workloads. The
-    environment's own `tf_vars` merges last, over the derivation.
+    environment's own `vars` merges last, over the derivation.
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
@@ -1180,7 +1204,7 @@ def resolve(table, env, path, workload):
     return {
         "role_arn": role,
         "cred_region": entry.get("region", "") if "identity" in entry else "",
-        "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("tf_vars", {})},
+        "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("vars", {})},
         "config_path": config_path,
         "env_binding": env_binding(env, shared, path),
     }

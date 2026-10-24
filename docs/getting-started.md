@@ -1032,7 +1032,7 @@ layout: tf_vars
 environments:
   dev-eu:
     region: eu-west-1
-    gated: false
+    review: false
 ```
 
 Your workflow file needs no line for it, and neither does a repository setting.

@@ -248,7 +248,7 @@ def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, caps
 
     Mutation: restore the loop refusing a shared name outside the tag-derived environments.
     """
-    write_table(tmp_path, "    shared: true\n")
+    write_table(tmp_path, "    split: false\n")
     policies = {"repos/o/r/environments/dev-eu/deployment-branch-policies": ABSENT}
     _, exc = run_main(monkeypatch, tmp_path, policies, ["--dry-run"], membership=({}, {}))
     assert exc.code == 0
@@ -1368,7 +1368,7 @@ def test_the_table_decides_which_naming_is_created(monkeypatch, tmp_path):
     shared case; writing a SHIPMATE_SHARED_ENVS variable from `_reconcile_variables`
     reddens its variable list.
     """
-    write_table(tmp_path, "    shared: true\n")
+    write_table(tmp_path, "    split: false\n")
     fake, _ = run_main(
         monkeypatch,
         tmp_path,
@@ -1397,10 +1397,10 @@ def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
     Mutation: drop the `validate_structure` call in `_resolve_shared`, which reconciles
     the split pair.
     """
-    write_table(tmp_path, "    shared: yes\n")
+    write_table(tmp_path, "    split: yes\n")
     fake, exc = run_main(monkeypatch, tmp_path, {}, [])
     assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
-    assert str(exc) == ("::error::environments.dev-eu.shared must be true or false, got 'yes'.")
+    assert str(exc) == ("::error::environments.dev-eu.split must be true or false, got 'yes'.")
 
 
 def write_referencing_table(root):
@@ -1408,7 +1408,7 @@ def write_referencing_table(root):
     (root / ".github").mkdir(exist_ok=True)
     (root / ".github" / "shipmate-config.yml").write_text(
         "layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: {vars: DEV_EU_REGION}\n"
-        "    shared: true\n",
+        "    split: false\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -1471,9 +1471,9 @@ def test_resolve_shared_returns_the_table_it_validated(tmp_path):
     """`main` keeps the table for the checklist. Mutation: return `{}, set()` when there is
     no file, which reads as a table declaring nothing."""
     assert onboard._resolve_shared(tmp_path, "o/r", {}) == (None, set())
-    write_table(tmp_path, "    shared: true\n")
+    write_table(tmp_path, "    split: false\n")
     assert onboard._resolve_shared(tmp_path, "o/r", {}) == (
-        {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "shared": True}}},
+        {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "split": False}}},
         {"dev-eu"},
     )
 
@@ -1485,7 +1485,7 @@ def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
         raise AssertionError(f"unexpected call: {args}")
 
     monkeypatch.setattr(onboard, "_run", refuse)
-    write_table(tmp_path, "    shared: true\n")
+    write_table(tmp_path, "    split: false\n")
     assert onboard._resolve_shared(tmp_path, "o/r", {})[1] == {"dev-eu"}
 
 
@@ -2443,7 +2443,7 @@ def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
 
     Mutation: call `ec.validate_structure` instead of `ec.validate`.
     """
-    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    shared: false\n")
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    split: true\n")
     assert onboard._table_item(ctx(table=table)) == (
         "todo",
         "`.github/shipmate-config.yml`",
@@ -2909,7 +2909,7 @@ def test_an_ungated_environment_is_not_asked_for_reviewers(monkeypatch, capsys, 
         ctx(
             root=tmp_path,
             envs=["dev-eu", "dev-us"],
-            table={"environments": {"dev-us": {"gated": False}}},
+            table={"environments": {"dev-us": {"review": False}}},
             apply_envs={"dev-eu-apply": REVIEWED_APPLY, "dev-us-apply": {}},
         )
     )
@@ -4401,7 +4401,7 @@ def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
 
     Mutation: drop the `ec.validate` check from `_coverage_blockers` -- `ok`.
     """
-    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    shared: false\n")
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    split: true\n")
     cells, tags = _tree(("a", "dev-eu"))
     context = _drift_ctx(
         tmp_path, {"drift.yml": FOLDERS_DRIFT}, table=table, cells=cells, tags_by_stack=tags

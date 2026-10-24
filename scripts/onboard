@@ -1305,7 +1305,7 @@ def _checklist(ctx):
     # A reviewer on a shared env's bare environment stalls the plan cells and the drift
     # sweeps covering it, so it is asked for only where the apply path has an environment
     # of its own.
-    ungated = ec.ungated_envs(ctx["table"] or {})
+    ungated = ec.exempt_envs(ctx["table"] or {})
     gated = [env for env in ctx["envs"] if env not in ctx["unresolved"] and env not in ungated]
     reviewed = [ec.env_names(env, False)["apply"] for env in gated if env not in ctx["shared"]]
     items = [_encryption_key_item(ctx), _table_item(ctx)]

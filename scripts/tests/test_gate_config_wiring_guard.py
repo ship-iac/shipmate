@@ -98,9 +98,9 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
     table = {
         "layout": "folder",
         "environments": {
-            "dev-us": {"gated": False},
-            "dev-eu": {"gated": False},
-            "prod": {"gated": True},
+            "dev-us": {"review": False},
+            "dev-eu": {"review": False},
+            "prod": {"review": True},
             "stage": {},
         },
     }
@@ -123,7 +123,9 @@ def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):
     Mutation: resolve the table straight from `read_table` without
     validating it; this test then writes an empty exemption instead of refusing.
     """
-    table = {"layout": "folder", "environments": {"dev-eu": {"gated": "no"}}}
+    table = {"layout": "folder", "environments": {"dev-eu": {"review": "no"}}}
     with pytest.raises(SystemExit) as exc:
         _resolve(monkeypatch, tmp_path, table)
-    assert str(exc.value) == ("::error::environments.dev-eu.gated must be true or false, got 'no'.")
+    assert str(exc.value) == (
+        "::error::environments.dev-eu.review must be true or false, got 'no'."
+    )

@@ -635,7 +635,7 @@ def _gate(ungated):
     hold `gated: false`."""
     return {
         "layout": "folder",
-        "environments": {e: {"gated": False} for e in ungated.split(",") if e},
+        "environments": {e: {"review": False} for e in ungated.split(",") if e},
     }
 
 
@@ -794,14 +794,14 @@ def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path
     _apply_env(
         monkeypatch,
         tmp_path,
-        table={"layout": "folder", "environments": {"dev-eu": {"gated": "no"}}},
+        table={"layout": "folder", "environments": {"dev-eu": {"review": "no"}}},
         SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
     )
     _boom_on_the_workset(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value) == (
-        "::error::environments.dev-eu.gated must be true or false, got 'no'."
+        "::error::environments.dev-eu.review must be true or false, got 'no'."
     )
 
 

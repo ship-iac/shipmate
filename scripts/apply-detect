@@ -322,10 +322,10 @@ def refuse_unreviewed(env, table, decision):
     The run dies before any wave, the apply checks stay pending, and the gate stays
     pending with them.
 
-    `table` must have been through `validate_structure`: `ungated_envs` reads only a
+    `table` must have been through `validate_structure`: `exempt_envs` reads only a
     boolean `false` as ungated, so a `gated: no` would otherwise refuse as
     unreviewed rather than as the malformed setting it is."""
-    ungated = bm.ec.ungated_envs(table)
+    ungated = bm.ec.exempt_envs(table)
     reason = az._review_reason(decision, env, ungated)
     if reason:
         raise SystemExit(f"::error::{reason}")
@@ -385,12 +385,12 @@ def bare_main():
     order = bm.ec.env_order(table)
     levels = wv.cell_levels(order, tags_by_stack)
     pending_envs = {c["environment"] for c in pending}
-    ungated = bm.ec.ungated_envs(table)
+    ungated = bm.ec.exempt_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     # An absent decision reads as '' and holds every env. It is reachable only through
     # wiring drift: the review job has no `if:`, and a failed one skips this script.
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, ungated))
-    explicit = bm.ec.explicit_envs(table)
+    explicit = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(explicit + held)
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels)
     wv.refuse_inversions(
@@ -473,7 +473,7 @@ def main():
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     refuse_unreviewed(env, table, decision)
     no_review_required = (
-        [env] if az._review_not_required(decision, env, bm.ec.ungated_envs(table)) else []
+        [env] if az._review_not_required(decision, env, bm.ec.exempt_envs(table)) else []
     )
 
     deps = bm.run_graph_deps()

@@ -214,7 +214,7 @@ def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_pa
                 },
                 "environments": {
                     "dev-eu": {"region": "eu-west-1", "identity": "dev"},
-                    "prod-eu": {"explicit": True},
+                    "prod-eu": {"apply_mode": "targeted"},
                 },
             },
         )

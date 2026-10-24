@@ -264,7 +264,7 @@ def _run_main(
         gated = dict(table or MINIMAL_TABLE)
         entries = {e: dict(v) for e, v in dict(gated.get("environments", {})).items()}
         for env in ungated.split(","):
-            entries.setdefault(env, {})["gated"] = False
+            entries.setdefault(env, {})["review"] = False
         gated["environments"] = entries
         table = gated
     if checks is None:
@@ -635,7 +635,7 @@ def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
         cells=2,
-        table={"layout": "folder", "environments": {"dev-eu": {"gated": False}}},
+        table={"layout": "folder", "environments": {"dev-eu": {"review": False}}},
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu"]
@@ -643,14 +643,14 @@ def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
     assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
 
 
-@pytest.mark.parametrize("written", ["true", '"true"'], ids=["bare", "quoted"])
+@pytest.mark.parametrize("written", ["targeted", '"targeted"'], ids=["bare", "quoted"])
 def test_an_explicit_flag_holds_the_env_back_however_it_is_quoted(tmp_path, monkeypatch, written):
-    """Every scalar in the file is a string, so a bare `true` and a quoted one parse alike and
-    both must keep the environment off a bare apply. The table goes through the real parser.
+    """Every scalar in the file is a string, so a bare `targeted` and a quoted one parse alike
+    and both must keep the environment off a bare apply. The table goes through the real
+    parser.
 
-    Mutation: delete the flag normalisation in `load_config` -- `explicit_envs` then sees the
-    string `"true"`, and prod applies with dev-eu."""
-    text = f"layout: folder\nenvironments:\n  prod:\n    explicit: {written}\n"
+    Mutation: `targeted_envs` tests `apply_mode` for `True` -- prod applies with dev-eu."""
+    text = f"layout: folder\nenvironments:\n  prod:\n    apply_mode: {written}\n"
     parsed = _run_main(
         tmp_path,
         monkeypatch,

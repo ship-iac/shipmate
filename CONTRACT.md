@@ -483,17 +483,17 @@ environments:
     region: eu-west-1              # the layout's TF_VAR_region and the credentials step's region
     identity: dev
     workloads: [core, net-edge]    # the workload tags this environment admits
-    gated: false                   # applies without an approving review
+    review: false                  # applies without an approving review
   prod:
     region: eu-west-1
     identity: prod
     needs: [dev-eu]                # dev-eu fully applies first
-    explicit: true                 # a bare `shipmate apply` skips it
-    tf_vars:
+    apply_mode: targeted           # a bare `shipmate apply` skips it
+    vars:
       TF_VAR_account: 4402         # merged over the layout's TF_VAR_*
   sbx:
     region: eu-west-1
-    shared: true                   # one bare `sbx` Environment on both paths
+    split: false                   # one bare `sbx` Environment on both paths
 ```
 
 An environment entry holds `region`, `tf_vars`, `identity`, `workloads`,
@@ -653,7 +653,7 @@ environments:
     needs: [{vars: FIRST_ENV}]
     region: {vars: PROD_REGION}
     identity: prod
-    tf_vars:
+    vars:
       TF_VAR_account: {vars: PROD_ACCOUNT}
 ```
 
@@ -1462,7 +1462,7 @@ layout: tf_vars
 environments:
   dev-eu:
     region: eu-west-1
-    gated: false
+    review: false
 ```
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`

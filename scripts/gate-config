@@ -17,7 +17,7 @@ ec = _load("env-config")
 
 def main():
     table = ec.validate_structure(ec.read_table())
-    ungated = ec.ungated_envs(table)
+    ungated = ec.exempt_envs(table)
     # Sorted, so two runs over one file cannot produce two different output strings.
     write_outputs(ungated_envs=",".join(sorted(ungated)))
 

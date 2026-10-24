@@ -332,7 +332,7 @@ layout: tf_vars
 environments:
   dev-eu:
     region: eu-west-1
-    shared: true
+    split: false
 """
 _UNSHARED_TABLE = """\
 layout: tf_vars
@@ -340,7 +340,7 @@ layout: tf_vars
 environments:
   dev-eu:
     region: eu-west-1
-    shared: false
+    split: true
 """
 #: Well-formed YAML that `validate_structure` refuses: an entry that is not a mapping.
 _INVALID_TABLE = """\
@@ -2811,7 +2811,9 @@ def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
 
     Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;env&gt;` shows.
     Mutation: drop the `_md_escape` around the env names -- `a<b` renders raw."""
-    [_, (level, text), _] = doctor._config_defaults({"environments": {"a<b": {"explicit": True}}})
+    [_, (level, text), _] = doctor._config_defaults(
+        {"environments": {"a<b": {"apply_mode": "targeted"}}}
+    )
     assert doctor._finding_row(level, text) == (
         f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit: true` on a&lt;b: a bare "
         "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
@@ -4940,7 +4942,7 @@ environments:
     region: eu-west-1
   sandbox:
     region: eu-west-1
-    gated: false
+    review: false
 """
 _ALL_UNGATED_TABLE = """\
 layout: tf_vars
@@ -4948,7 +4950,7 @@ layout: tf_vars
 environments:
   dev-eu:
     region: eu-west-1
-    gated: false
+    review: false
 """
 
 
@@ -5694,7 +5696,7 @@ _MISINDENTED_FINDING = (
         "identity. Declare layout: tf_vars, layout: workspace or layout: folder on the default "
         "branch, which is where this table is read from. "
         "environment prod: layout is not a key this engine implements. An environment "
-        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. Merging it "
+        "holds region, vars, identity, workloads, split, needs, apply_mode, review. Merging it "
         "refuses every "
         "operation that reads the table. Execution still reads the default branch's copy, which "
         "this says nothing about."
@@ -5755,10 +5757,10 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
 
     Mutations, each proven: render `str(exc).removeprefix("::error::")` whole, as one line
     -- the second and third messages keep their prefix; join the lines with `"; "`, which
-    reads `gated.; environments`.
+    reads `review.; environments`.
     """
     text = (
-        "layout: folder\n\nenvironments:\n  dev-eu:\n    regoin: eu-west-1\n    gated: False\n"
+        "layout: folder\n\nenvironments:\n  dev-eu:\n    regoin: eu-west-1\n    review: False\n"
         "    needs: [dev-eu]\n"
     )
     responses = _config_responses(text)
@@ -5769,8 +5771,8 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
             (
                 "`.github/shipmate-config.yml` at the commit under examination is not valid: "
                 "environment dev-eu: regoin is not a key this engine implements. An environment "
-                "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
-                "environments.dev-eu.gated must be true or false, got 'False'. "
+                "holds region, vars, identity, workloads, split, needs, apply_mode, review. "
+                "environments.dev-eu.review must be true or false, got 'False'. "
                 "needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before the "
                 "next, so the ordering has no first environment and no apply path can sort it. "
                 "Break the chain in .github/shipmate-config.yml. Merging it refuses every "
@@ -5996,7 +5998,7 @@ environments:
     region: eu-west-1
     identity: dev
   prod:
-    explicit: true
+    apply_mode: targeted
     needs: [{vars: FIRST_ENV}]
 """
 
@@ -6080,7 +6082,7 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
     name = "environment-with-a-long-name-{:02d}".format
     table = {
         "environments": {
-            name(i): {"explicit": True, **({"needs": [name(i - 1)]} if i else {})}
+            name(i): {"apply_mode": "targeted", **({"needs": [name(i - 1)]} if i else {})}
             for i in range(20)
         }
     }
@@ -6197,7 +6199,7 @@ environments:
   ops:
     region: eu-west-1
     identity: ops
-    shared: true
+    split: false
   plain:
     region: eu-west-1
   stage:
@@ -6486,7 +6488,7 @@ def test_a_shared_environment_has_one_subject_reaching_the_apply_accounts():
                 }
             }
         },
-        "environments": {"ops": {"region": "eu-west-1", "identity": "ops", "shared": True}},
+        "environments": {"ops": {"region": "eu-west-1", "identity": "ops", "split": False}},
     }
     assert doctor._subject_accounts(table) == [_accounts_line("ops", "777777777777")]
 
