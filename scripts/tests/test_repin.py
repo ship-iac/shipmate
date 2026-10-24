@@ -130,7 +130,7 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     Mutations, each red: read without `newline=""` (the CRLF file comes back LF); drop the
     quote group `("?)` (the quoted pin loses its closing quote's place); run the substitution
     over the whole file text with `\\s+` for `[ \\t]+` (the apply line swallows the note line);
-    `# {sha}` for `# {tag}` in the replacement; print `updated` for every file; drop
+    `# {sha}` for `# {tag}` in the replacement; print `pins updated` for every file; drop
     `^{commit}` from the `rev-parse` argument (the annotated tag's object SHA is not origin's
     peeled commit, so the run refuses);
     compare origin's unpeeled tag line instead of its `^{}` line (the run refuses as stale).
@@ -140,9 +140,9 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {sha}\n"
-        "unchanged ci.yml\n"
-        "updated shipmate.yml\n"
-        "updated sweep.yml\n"
+        "pins unchanged ci.yml\n"
+        "pins updated shipmate.yml\n"
+        "pins updated sweep.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -7,5 +7,8 @@\n"
@@ -376,9 +376,9 @@ def test_a_crlf_shim_equal_to_the_fence_but_for_its_pins_matches(
     """Mutation: drop the `\\r\\n` normalization from `onboard.shim_diff` -- every line differs."""
     wf = consumer(tmp_path, {"shipmate.yml": _fence_shim("main", f"{OLD} # v0.1.0", "\r\n")})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 0
-    assert (
-        capsys.readouterr().out
-        == f"v1.2.3 -> {engine.sha}\nupdated shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\npins updated shipmate.yml\n"
+        "shipmate.yml matches the v1.2.3 fence\n"
     )
     assert on_disk(wf) == {"shipmate.yml": _fence_shim("main", f"{engine.sha} # v1.2.3", "\r\n")}
 
@@ -388,9 +388,9 @@ def test_a_crlf_shim_on_develop_matches_a_develop_render(engine, tmp_path, monke
     the fence renders on `main`, and the run exits 2."""
     wf = consumer(tmp_path, {"shipmate.yml": _fence_shim("develop", f"{OLD} # v0.1.0", "\r\n")})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 0
-    assert (
-        capsys.readouterr().out
-        == f"v1.2.3 -> {engine.sha}\nupdated shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\npins updated shipmate.yml\n"
+        "shipmate.yml matches the v1.2.3 fence\n"
     )
     assert on_disk(wf) == {"shipmate.yml": _fence_shim("develop", f"{engine.sha} # v1.2.3", "\r\n")}
 
@@ -407,7 +407,7 @@ def test_a_shim_with_an_extra_line_prints_its_diff_and_exits_2(
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "updated shipmate.yml\n"
+        "pins updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -5,6 +5,7 @@\n"
@@ -437,7 +437,7 @@ def test_a_shim_without_a_final_newline_ends_the_diff_on_one(engine, tmp_path, m
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "updated shipmate.yml\n"
+        "pins updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -8,4 +8,4 @@\n"
@@ -480,11 +480,11 @@ def test_a_local_tag_on_another_commit_than_origins_is_refused(
 
 def _other(engine, tmp_path, monkeypatch, capsys, files, out=None, tag=TAG):
     """Run over `files` holding no `shipmate.yml`, asserting the whole output `out` (by default
-    the resolved tag and `updated other.yml`); return the bytes left on disk."""
+    the resolved tag and `pins updated other.yml`); return the bytes left on disk."""
     wf = consumer(tmp_path, files)
     assert run(monkeypatch, str(tmp_path / "consumer"), tag) == 2
     assert capsys.readouterr().out == (
-        out or f"v1.2.3 -> {engine.sha}\nupdated other.yml\nshipmate.yml absent\n"
+        out or f"v1.2.3 -> {engine.sha}\npins updated other.yml\nshipmate.yml absent\n"
     )
     return on_disk(wf)
 
@@ -499,7 +499,7 @@ def test_a_tag_origin_lacks_passes(engine, tmp_path, monkeypatch, capsys):
     _git(engine.path, "tag", "v1.2.4")
     out = (
         f"v1.2.4 -> {engine.sha}\norigin has no tag v1.2.4: pinning to a local tag\n"
-        "updated other.yml\nshipmate.yml absent\n"
+        "pins updated other.yml\nshipmate.yml absent\n"
     )
     files = {"other.yml": GOOD}
     assert _other(engine, tmp_path, monkeypatch, capsys, files, out, "v1.2.4") == {
@@ -516,7 +516,7 @@ def test_a_wildcard_trigger_renders_on_main_and_shows_in_the_diff(
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "updated shipmate.yml\n"
+        "pins updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -1,7 +1,7 @@\n"
@@ -586,7 +586,7 @@ def test_trailing_blanks_after_a_pin_pass(engine, tmp_path, monkeypatch, capsys,
 def test_a_yaml_file_is_rewritten_like_a_yml_file(engine, tmp_path, monkeypatch, capsys):
     """GitHub runs both extensions. Mutation: rewrite only names ending in `.yml` -- the
     `.yaml` pin is refused as a leftover."""
-    out = f"v1.2.3 -> {engine.sha}\nupdated other.yaml\nshipmate.yml absent\n"
+    out = f"v1.2.3 -> {engine.sha}\npins updated other.yaml\nshipmate.yml absent\n"
     assert _other(engine, tmp_path, monkeypatch, capsys, {"other.yaml": GOOD}, out) == {
         "other.yaml": _pinned(engine.sha).encode()
     }
@@ -628,7 +628,7 @@ def test_an_absent_shim_is_reported_and_exits_2(engine, tmp_path, monkeypatch, c
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert (
         capsys.readouterr().out
-        == f"v1.2.3 -> {engine.sha}\nupdated sweep.yml\nshipmate.yml absent\n"
+        == f"v1.2.3 -> {engine.sha}\npins updated sweep.yml\nshipmate.yml absent\n"
     )
     assert on_disk(wf) == {
         "sweep.yml": (
@@ -651,7 +651,7 @@ def test_write_fence_prints_the_diff_then_writes_the_fence(engine, tmp_path, mon
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "updated shipmate.yml\n"
+        "pins updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -5,6 +5,7 @@\n"
@@ -668,7 +668,36 @@ def test_write_fence_prints_the_diff_then_writes_the_fence(engine, tmp_path, mon
     assert on_disk(wf) == {"shipmate.yml": fence}
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
     assert capsys.readouterr().out == (
-        f"v1.2.3 -> {engine.sha}\nunchanged shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
+        f"v1.2.3 -> {engine.sha}\npins unchanged shipmate.yml\n"
+        "shipmate.yml matches the v1.2.3 fence\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": fence}
+
+
+def test_write_fence_over_current_pins_names_the_pins_unchanged(
+    engine, tmp_path, monkeypatch, capsys
+):
+    """Pins already at the tag, a local `with:` line: the per-file line names the pins, not
+    the file the fence then writes. Mutation: print `unchanged {name}` -- the output reads
+    `unchanged shipmate.yml` above `wrote shipmate.yml`."""
+    fence = _fence_shim("main", f"{engine.sha} # v1.2.3", "\n")
+    pin = b"plan.yml@" + f"{engine.sha} # v1.2.3\n".encode()
+    wf = consumer(tmp_path, {"shipmate.yml": fence.replace(pin, pin + b"    with: {x: 1}\n")})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
+        "pins unchanged shipmate.yml\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -5,6 +5,7 @@\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+        "+    with: {x: 1}\n"
+        "   apply:\n"
+        f"     uses: {WF}/apply.yml@<pin>\n"
+        "   deploy:\n"
+        "wrote shipmate.yml from the v1.2.3 fence; every line above that differed is replaced\n"
     )
     assert on_disk(wf) == {"shipmate.yml": fence}
 
@@ -695,7 +724,7 @@ def test_write_fence_refuses_a_wildcard_trigger(engine, tmp_path, monkeypatch, c
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "unchanged shipmate.yml\n"
+        "pins unchanged shipmate.yml\n"
         "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -722,7 +751,7 @@ def test_write_fence_refuses_a_trigger_with_a_paths_filter(engine, tmp_path, mon
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "unchanged shipmate.yml\n"
+        "pins unchanged shipmate.yml\n"
         "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -752,7 +781,7 @@ def test_write_fence_refuses_a_paths_filter_behind_a_comment(
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
-        "unchanged shipmate.yml\n"
+        "pins unchanged shipmate.yml\n"
         "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -796,7 +825,7 @@ def test_write_fence_reads_only_the_push_trigger(engine, tmp_path, monkeypatch, 
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {sha}\n"
-        "unchanged shipmate.yml\n"
+        "pins unchanged shipmate.yml\n"
         "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -820,7 +849,7 @@ def test_write_fence_creates_no_absent_shim(engine, tmp_path, monkeypatch, capsy
     wf = consumer(tmp_path, {"other.yml": GOOD})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
     assert capsys.readouterr().out == (
-        f"v1.2.3 -> {engine.sha}\nupdated other.yml\n"
+        f"v1.2.3 -> {engine.sha}\npins updated other.yml\n"
         "not writing shipmate.yml: it is absent\nshipmate.yml absent\n"
     )
     assert on_disk(wf) == {"other.yml": _pinned(engine.sha).encode()}

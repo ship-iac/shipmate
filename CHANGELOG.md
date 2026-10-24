@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Changed
+
+- `repin` prints `pins updated <file>` and `pins unchanged <file>`, naming what each line measures.
+
 ## [0.51.0] — 2026-10-21
 
 Tags `7d46d73`.
