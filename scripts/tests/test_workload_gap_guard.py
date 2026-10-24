@@ -175,7 +175,7 @@ def test_the_unlock_refuses_over_the_queue_only(monkeypatch, tmp_path):
 
 
 def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_path):
-    """Call site 6: `apply-detect` bare_main(). prod-eu is explicit, so its cell stays pending
+    """Call site 6: `apply-detect` bare_main(). prod-eu is targeted, so its cell stays pending
     for a targeted apply and does not run here.
 
     Mutation: pass `pending` instead of `runnable` -- the prod-eu cell is recorded too."""
@@ -185,7 +185,7 @@ def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_pa
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
         cells=2,
-        explicit=["prod-eu"],
+        targeted=["prod-eu"],
         decision="APPROVED",
         table=trs._TABLE,
     )
@@ -201,7 +201,7 @@ def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_pa
                     "plan_sha256": PLAN_SHA,
                 }
             ],
-            # `_run_main` folds `explicit` into the table it stubs.
+            # `_run_main` folds `targeted` into the table it stubs.
             {
                 "layout": "folder",
                 "identities": {
@@ -280,9 +280,9 @@ def test_the_unlock_refuses_an_outside_tag_only_on_a_queued_cell(monkeypatch, tm
         assert json.loads(github_outputs(out)["cells"]) == []
 
 
-@pytest.mark.parametrize("explicit", [False, True], ids=["runnable", "excluded"])
+@pytest.mark.parametrize("targeted", [False, True], ids=["runnable", "excluded"])
 def test_the_bare_apply_refuses_an_outside_tag_only_on_a_runnable_cell(
-    monkeypatch, tmp_path, explicit
+    monkeypatch, tmp_path, targeted
 ):
     """dev-eu carries the gap; dev-us applies either way.
 
@@ -294,13 +294,13 @@ def test_the_bare_apply_refuses_an_outside_tag_only_on_a_runnable_cell(
             monkeypatch,
             envs=["dev-eu", "dev-us"],
             cells=2,
-            explicit=["dev-eu"] if explicit else [],
+            targeted=["dev-eu"] if targeted else [],
             decision="APPROVED",
             tags={"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"]},
             table=_GAP,
         )
 
-    if explicit:
+    if targeted:
         assert taad._wave_envs(run()) == ["dev-us"]
     else:
         with pytest.raises(SystemExit) as exc:

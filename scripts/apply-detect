@@ -22,7 +22,7 @@ which puts every cell at env-level 0 and leaves levels 1-3 empty. A cell that ru
 after a cell pending in another environment waits (`waves.waiting_cells`): it stays
 pending, `waiting_cells` names it, and the rest apply. Before any of that, the
 PR's review decision — read server-side by the `review` job, narrowed by
-`gated: false` on the environment's entry — must authorize this environment, or
+`review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
 """
 
@@ -323,10 +323,10 @@ def refuse_unreviewed(env, table, decision):
     pending with them.
 
     `table` must have been through `validate_structure`: `exempt_envs` reads only a
-    boolean `false` as ungated, so a `gated: no` would otherwise refuse as
+    boolean `false` as review-exempt, so a `review: no` would otherwise refuse as
     unreviewed rather than as the malformed setting it is."""
-    ungated = bm.ec.exempt_envs(table)
-    reason = az._review_reason(decision, env, ungated)
+    exempt = bm.ec.exempt_envs(table)
+    reason = az._review_reason(decision, env, exempt)
     if reason:
         raise SystemExit(f"::error::{reason}")
 
@@ -346,22 +346,22 @@ def bare_main():
 
     After `settle`, it refuses a run cell that runs after a pending cell `needs` puts on a
     later env-level (`waves.refuse_inversions`): a cell of an env `settle` skips is no root. A
-    waiting run cell stays one, and a held or explicit upstream counts, so the contradiction
+    waiting run cell stays one, and a held or targeted upstream counts, so the contradiction
     refuses rather than wait for a review or apply that would only reach this refusal. Four
     exclusions distinguish the bare form from deploy:
-    - envs whose entry holds `explicit: true` (typically prod) are removed
+    - envs whose entry holds `apply_mode: targeted` (typically prod) are removed
       before env-levels are built; their apply checks stay pending, so
       `shipmate / gate` keeps gating the merge until a targeted
       `shipmate apply <env>` completes them. `excluded_envs` names every one with
       pending work, including those also held for review;
     - envs ordered (transitively) after an env not fully applying this run — held,
-      excluded as explicit, or holding a waiting cell — are skipped with a notice
-      (`skipped_after_explicit`, named for its first cause) — their ordering
+      excluded as targeted, or holding a waiting cell — are skipped with a notice
+      (`skipped_after_targeted`, named for its first cause) — their ordering
       precondition cannot be met this run, exactly like a failed predecessor
       level;
     - envs the PR's review decision does not authorize are held until it carries
       an approving review, dropped the same way; an entry holding
-      `gated: false` is exempt from that hold;
+      `review: false` is exempt from that hold;
     - cells that run after a pending cell not applying this run wait, named in
       `waiting_cells`. An env with a waiting cell stops its `needs` successors, and
       each new skip can make more cells wait: `settle` runs both to one fixpoint.
@@ -385,32 +385,32 @@ def bare_main():
     order = bm.ec.env_order(table)
     levels = wv.cell_levels(order, tags_by_stack)
     pending_envs = {c["environment"] for c in pending}
-    ungated = bm.ec.exempt_envs(table)
+    exempt = bm.ec.exempt_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     # An absent decision reads as '' and holds every env. It is reachable only through
     # wiring drift: the review job has no `if:`, and a failed one skips this script.
-    held = sorted(e for e in pending_envs if az._review_reason(decision, e, ungated))
-    explicit = bm.ec.targeted_envs(table)
-    stopped = pending_envs & set(explicit + held)
+    held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
+    targeted = bm.ec.targeted_envs(table)
+    stopped = pending_envs & set(targeted + held)
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels)
     wv.refuse_inversions(
         run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
     )
-    # Every pending explicit env, held or not: the comment names a held one's
-    # explicit command under the hold. A held env that is not explicit stays out.
-    excluded = sorted(pending_envs & set(explicit))
+    # Every pending targeted env, held or not: the comment names a held one's
+    # targeted command under the hold. A held env that is not targeted stays out.
+    excluded = sorted(pending_envs & set(targeted))
     # The plan runs attach to `runnable`, not `pending`: an excluded, held or waiting cell's
     # check stays pending by design for a later apply, and that apply refuses on its own over
     # a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
-    # From `runnable`, never from `pending & ungated`: an ungated env can still be
+    # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
-    applied_ungated = sorted(
+    applied_exempt = sorted(
         {
             c["environment"]
             for c in runnable
-            if az._ungated_exemption(decision, c["environment"], ungated)
+            if az._review_exemption(decision, c["environment"], exempt)
         }
     )
     # From `runnable` for the same reason.
@@ -418,7 +418,7 @@ def bare_main():
         {
             c["environment"]
             for c in runnable
-            if az._review_not_required(decision, c["environment"], ungated)
+            if az._review_not_required(decision, c["environment"], exempt)
         }
     )
 
@@ -431,8 +431,8 @@ def bare_main():
     print(
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
-        f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
-        f"review_held={held} waiting={len(waiting)} applied_ungated={applied_ungated} "
+        f"excluded_targeted={excluded} skipped_after_targeted={skipped} "
+        f"review_held={held} waiting={len(waiting)} applied_exempt={applied_exempt} "
         # The hold cause: an everything-held run is otherwise indistinguishable
         # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
         # review job) renders visibly as ''.
@@ -444,7 +444,7 @@ def bare_main():
         excluded_envs=json.dumps(excluded),
         skipped_envs=json.dumps(skipped),
         review_held_envs=json.dumps(held),
-        applied_ungated_envs=json.dumps(applied_ungated),
+        applied_exempt_envs=json.dumps(applied_exempt),
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
         # Over `cells`, not `runnable`: the comment lists excluded, held and waiting cells too.
@@ -455,7 +455,7 @@ def bare_main():
 def main():
     env = os.environ["SHIPMATE_ENV"]
     # Routed before `refuse_unreviewed`: `_review_reason` reads an empty env as a bare
-    # apply, exempt when any entry is ungated, so it must never reach the targeted refusal.
+    # apply, exempt when any entry is review-exempt, so it must never reach the targeted refusal.
     if not env:
         bare_main()
         return
@@ -466,7 +466,7 @@ def main():
     validate_env(env)
     pr_number = ag.env_pr_number()
 
-    # Structure-validated before the refusal reads `gated`; `validate` re-runs it
+    # Structure-validated before the refusal reads `review`; `validate` re-runs it
     # below, which costs nothing and parses nothing again.
     table = bm.ec.read_table()
     bm.ec.validate_structure(table)

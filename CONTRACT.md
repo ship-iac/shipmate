@@ -3336,7 +3336,7 @@ their own level, while environments ordered (transitively) after an environment
 not fully applying this run — held for review, excluded as explicit, or holding
 a waiting cell — are skipped with a notice — their ordering precondition cannot
 be met in that run, exactly like a failed predecessor level. The apply-all-detect
-notice names them `skipped_after_explicit`, for every one of those causes.
+notice names them `skipped_after_targeted`, for every one of those causes.
 A cell that runs after a pending cell of a held, explicit or skipped environment
 waits, as on the targeted form, and its environment's
 other cells still apply. An environment with a waiting cell is not fully

@@ -25,7 +25,7 @@ NO_PLAN_REASON = (
     "apply; otherwise wait for this head's plan run, or start one (comment `shipmate plan` or "
     "push), then `shipmate apply` again."
 )
-UNGATED_DEV = frozenset({"dev-eu"})
+EXEMPT_DEV = frozenset({"dev-eu"})
 #: The refusal an apply on a draft gets, hand-written: it is the sentence a
 #: commenter reads on a PR.
 DRAFT_REASON = (
@@ -161,7 +161,7 @@ def test_review_reject_reasons_are_distinct():
         _decide(
             review_decision="REVIEW_REQUIRED",
             environment="prod-eu",
-            ungated_envs=UNGATED_DEV,
+            exempt_envs=EXEMPT_DEV,
         )[1]
     )
     assert len(reasons) == 4
@@ -279,19 +279,19 @@ def test_mergeable_null_reports_still_computing_not_conflict():
     assert not ok and "computing" in reason and "conflict" not in reason
 
 
-def test_parse_ungated_envs_empty_yields_empty_set():
-    assert az.parse_ungated_envs("") == frozenset()
+def test_parse_exempt_envs_empty_yields_empty_set():
+    assert az.parse_exempt_envs("") == frozenset()
 
 
-def test_parse_ungated_envs_splits_on_commas():
-    assert az.parse_ungated_envs("dev-eu,dev-us") == frozenset({"dev-eu", "dev-us"})
+def test_parse_exempt_envs_splits_on_commas():
+    assert az.parse_exempt_envs("dev-eu,dev-us") == frozenset({"dev-eu", "dev-us"})
 
 
-def test_parse_ungated_envs_ignores_empty_fields():
-    assert az.parse_ungated_envs("dev-eu,") == frozenset({"dev-eu"})
+def test_parse_exempt_envs_ignores_empty_fields():
+    assert az.parse_exempt_envs("dev-eu,") == frozenset({"dev-eu"})
 
 
-def test_parse_ungated_envs_casefolds_every_entry():
+def test_parse_exempt_envs_casefolds_every_entry():
     """`gate-config` casefolds before joining, so this is defence at a cross-process string
     boundary rather than the only casefold. Kept because dropping it makes an authorization
     decision depend on an invariant held in another script, and pinned because an unpinned
@@ -300,29 +300,29 @@ def test_parse_ungated_envs_casefolds_every_entry():
     Mutation: return the entries verbatim -- `DEV-EU` then matches no environment, and the
     exemption silently stops applying.
     """
-    assert az.parse_ungated_envs("DEV-EU,Dev-Us") == frozenset({"dev-eu", "dev-us"})
+    assert az.parse_exempt_envs("DEV-EU,Dev-Us") == frozenset({"dev-eu", "dev-us"})
 
 
 @pytest.mark.parametrize("entry", ["dev-eu", "dev_eu", "env1", "2dev"])
-def test_parse_ungated_envs_accepts_every_env_name_shape(entry):
+def test_parse_exempt_envs_accepts_every_env_name_shape(entry):
     # The other half of the allow-list: refusing a legal env name would refuse applies the
     # operator opted in for. Probed against Terramate, which accepts each of these as a tag.
-    assert az.parse_ungated_envs(entry) == frozenset({entry})
+    assert az.parse_exempt_envs(entry) == frozenset({entry})
 
 
 @pytest.mark.parametrize(
-    ("review_decision", "environment", "ungated_envs", "authorized"),
+    ("review_decision", "environment", "exempt_envs", "authorized"),
     [
-        ("REVIEW_REQUIRED", "dev-eu", UNGATED_DEV, True),
-        ("REVIEW_REQUIRED", "prod-eu", UNGATED_DEV, False),
+        ("REVIEW_REQUIRED", "dev-eu", EXEMPT_DEV, True),
+        ("REVIEW_REQUIRED", "prod-eu", EXEMPT_DEV, False),
         ("REVIEW_REQUIRED", "dev-eu", frozenset(), False),
-        ("REVIEW_REQUIRED", "", UNGATED_DEV, True),
+        ("REVIEW_REQUIRED", "", EXEMPT_DEV, True),
         ("REVIEW_REQUIRED", "", frozenset(), False),
-        ("CHANGES_REQUESTED", "dev-eu", UNGATED_DEV, False),
-        ("", "dev-eu", UNGATED_DEV, False),
-        ("BANANA", "dev-eu", UNGATED_DEV, False),
-        ("NONE", "dev-eu", UNGATED_DEV, True),
-        ("APPROVED", "dev-eu", UNGATED_DEV, True),
+        ("CHANGES_REQUESTED", "dev-eu", EXEMPT_DEV, False),
+        ("", "dev-eu", EXEMPT_DEV, False),
+        ("BANANA", "dev-eu", EXEMPT_DEV, False),
+        ("NONE", "dev-eu", EXEMPT_DEV, True),
+        ("APPROVED", "dev-eu", EXEMPT_DEV, True),
     ],
     ids=[
         "listed-env-exempt",
@@ -337,11 +337,11 @@ def test_parse_ungated_envs_accepts_every_env_name_shape(entry):
         "approved-authorizes",
     ],
 )
-def test_ungated_env_decision_table(review_decision, environment, ungated_envs, authorized):
+def test_exempt_env_decision_table(review_decision, environment, exempt_envs, authorized):
     ok, reason = _decide(
         review_decision=review_decision,
         environment=environment,
-        ungated_envs=ungated_envs,
+        exempt_envs=exempt_envs,
     )
     assert ok is authorized
     assert (reason == "") is authorized
@@ -352,12 +352,12 @@ def test_unlisted_env_reason_names_the_setting():
     environment the commenter asked for and the setting that would exempt it, and a partial
     check leaves whichever half it does not read free to go stale."""
     ok, reason = _decide(
-        review_decision="REVIEW_REQUIRED", environment="prod-eu", ungated_envs=UNGATED_DEV
+        review_decision="REVIEW_REQUIRED", environment="prod-eu", exempt_envs=EXEMPT_DEV
     )
     assert not ok
     assert reason == (
         "not authorized: PR review is required by the branch ruleset and has not been "
-        "satisfied, and `environments.prod-eu.gated` is not `false` in "
+        "satisfied, and `environments.prod-eu.review` is not `false` in "
         "`.github/shipmate-config.yml`; obtain the required approving review(s), then re-run "
         "`shipmate apply`."
     )
@@ -378,7 +378,7 @@ def test_empty_list_keeps_todays_review_required_message(environment):
 def test_exemption_does_not_reach_the_other_checks():
     # An exempting decision must not authorize anything the other predicates refuse: the
     # exemption sits inside the review check, not around it.
-    exempt = dict(review_decision="REVIEW_REQUIRED", environment="dev-eu", ungated_envs=UNGATED_DEV)
+    exempt = dict(review_decision="REVIEW_REQUIRED", environment="dev-eu", exempt_envs=EXEMPT_DEV)
     ok, reason = _decide(permission="read", **exempt)
     assert (ok, reason) == (False, _a1("apply", "read"))
     ok, reason = _decide(pr={**PR_OK, "mergeable": False, "mergeable_state": "dirty"}, **exempt)
@@ -387,9 +387,9 @@ def test_exemption_does_not_reach_the_other_checks():
     assert not ok and "no reviewed plan" in reason
 
 
-def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
-    # Pins that both SHIPMATE_GATE_UNGATED_ENVS and SHIPMATE_ENV reach decide(). The env is
-    # deliberately not ungated, so the refusal carries the exemption-aware message only if
+def test_main_reads_exempt_envs_and_environment(tmp_path, monkeypatch):
+    # Pins that both SHIPMATE_GATE_EXEMPT_ENVS and SHIPMATE_ENV reach decide(). The env is
+    # deliberately not review-exempt, so the refusal carries the exemption-aware message only if
     # both values arrived.
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
@@ -404,7 +404,7 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "REVIEW_REQUIRED",
         "SHIPMATE_ENV": "prod-eu",
-        "SHIPMATE_GATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_GATE_EXEMPT_ENVS": "dev-eu",
     }.items():
         monkeypatch.setenv(key, value)
     az.main()
@@ -412,7 +412,7 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     assert "authorized=false" in text.splitlines()
     assert (
         "reason=not authorized: PR review is required by the branch ruleset and has not been "
-        "satisfied, and `environments.prod-eu.gated` is not `false` in "
+        "satisfied, and `environments.prod-eu.review` is not `false` in "
         "`.github/shipmate-config.yml`; obtain the required approving review(s), then re-run "
         "`shipmate apply`."
     ) in text.splitlines()
@@ -433,7 +433,7 @@ def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "NONE",
         "SHIPMATE_ENV": "",
-        "SHIPMATE_GATE_UNGATED_ENVS": "",
+        "SHIPMATE_GATE_EXEMPT_ENVS": "",
     }
     base.update(env)
     for key, value in base.items():
@@ -442,7 +442,7 @@ def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):
     return github_outputs(out)
 
 
-def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_path, monkeypatch):
+def test_review_exemption_is_not_reported_when_a_later_requirement_refused(tmp_path, monkeypatch):
     # The exemption passed the review check and the apply was still refused, for want of a plan
     # run on the head, which is checked after it. The report claims permission to apply, so it
     # must not post over a refusal.
@@ -452,14 +452,14 @@ def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_
         plan_runs={},
         REVIEW_DECISION="REVIEW_REQUIRED",
         SHIPMATE_ENV="dev-eu",
-        SHIPMATE_GATE_UNGATED_ENVS="dev-eu",
+        SHIPMATE_GATE_EXEMPT_ENVS="dev-eu",
     )
     assert parsed["authorized"] == "false"
-    assert parsed["ungated_exemption"] == "false"
+    assert parsed["review_exemption"] == "false"
 
 
 @pytest.mark.parametrize(
-    ("decision", "environment", "ungated", "pr", "expected"),
+    ("decision", "environment", "exempt", "pr", "expected"),
     [
         # The exemption fired: this apply proceeds with no approving review, and the
         # comment-ops report is its only trace.
@@ -484,8 +484,8 @@ def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_
         ),
     ],
 )
-def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
-    tmp_path, monkeypatch, decision, environment, ungated, pr, expected
+def test_review_exemption_output_is_set_only_when_the_exemption_fired(
+    tmp_path, monkeypatch, decision, environment, exempt, pr, expected
 ):
     parsed = _main_output(
         tmp_path,
@@ -493,9 +493,9 @@ def test_ungated_exemption_output_is_set_only_when_the_exemption_fired(
         pr=pr,
         REVIEW_DECISION=decision,
         SHIPMATE_ENV=environment,
-        SHIPMATE_GATE_UNGATED_ENVS=ungated,
+        SHIPMATE_GATE_EXEMPT_ENVS=exempt,
     )
-    assert parsed["ungated_exemption"] == expected
+    assert parsed["review_exemption"] == expected
 
 
 def test_apply_on_a_draft_is_refused_with_the_remedy():
@@ -634,8 +634,8 @@ def test_the_fork_check_runs_after_the_permission_check():
     assert _decide(permission="read", pr=FORK_PR) == (False, _a1("apply", "read"))
 
 
-def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_path, monkeypatch):
-    """unlock with review_decision="REVIEW_REQUIRED", the named env in ungated_envs and
+def test_unlock_with_review_exemption_does_not_produce_false_audit_line(tmp_path, monkeypatch):
+    """unlock with review_decision="REVIEW_REQUIRED", the named env in exempt_envs and
     write permission authorizes, without the exemption. The exemption is an audit record of an
     apply without review, and unlock applies nothing, so it must not produce that audit
     line."""
@@ -652,18 +652,18 @@ def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_pat
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "REVIEW_REQUIRED",
         "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_GATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_GATE_EXEMPT_ENVS": "dev-eu",
         "SHIPMATE_VERB": "unlock",
     }.items():
         monkeypatch.setenv(key, value)
     az.main()
     text = out.read_text(encoding="utf-8")
     assert "authorized=true" in text
-    assert "ungated_exemption=false" in text
+    assert "review_exemption=false" in text
 
 
-def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkeypatch):
-    # apply, not unlock, with review_decision="REVIEW_REQUIRED", the named env in ungated_envs
+def test_apply_with_review_exemption_still_produces_audit_line(tmp_path, monkeypatch):
+    # apply, not unlock, with review_decision="REVIEW_REQUIRED", the named env in exempt_envs
     # and write permission authorizes and records the exemption. Scoping the exemption to the
     # verb must not disable it for apply.
     pr_json = tmp_path / "pr.json"
@@ -679,14 +679,14 @@ def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkey
         "GITHUB_OUTPUT": str(out),
         "REVIEW_DECISION": "REVIEW_REQUIRED",
         "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_GATE_UNGATED_ENVS": "dev-eu",
+        "SHIPMATE_GATE_EXEMPT_ENVS": "dev-eu",
         "SHIPMATE_VERB": "apply",
     }.items():
         monkeypatch.setenv(key, value)
     az.main()
     text = out.read_text(encoding="utf-8")
     assert "authorized=true" in text
-    assert "ungated_exemption=true" in text
+    assert "review_exemption=true" in text
 
 
 def test_no_plan_run_id_output(tmp_path, monkeypatch):
@@ -707,7 +707,7 @@ def test_no_plan_run_id_output(tmp_path, monkeypatch):
     ],
 )
 def test_review_not_required_decision_table(decision, environment, expected):
-    """dev-eu holds `gated: false`; prod-eu is gated.
+    """dev-eu holds `review: false`; prod-eu is under review.
 
     Mutation: compare `review_decision != "NONE"` -- the three prod-eu rows flip.
     Mutation: drop `.casefold()` -- the `DEV-EU` row is named."""
@@ -724,9 +724,9 @@ def test_review_not_required_decision_table(decision, environment, expected):
         ("APPROVED", "dev-eu", False),
     ],
 )
-def test_ungated_exemption_decision_table(decision, environment, expected):
-    """dev-eu holds `gated: false`; prod-eu is gated.
+def test_review_exemption_decision_table(decision, environment, expected):
+    """dev-eu holds `review: false`; prod-eu is under review.
 
-    Mutation: drop the `in ungated_envs` clause -- the prod-eu row goes true.
+    Mutation: drop the `in exempt_envs` clause -- the prod-eu row goes true.
     Mutation: drop `.casefold()` -- the `DEV-EU` row goes false."""
-    assert az._ungated_exemption(decision, environment, frozenset({"dev-eu"})) is expected
+    assert az._review_exemption(decision, environment, frozenset({"dev-eu"})) is expected

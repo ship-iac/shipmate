@@ -584,7 +584,7 @@ _REMEDY = (
     "stack (any edit that `terramate list --changed` marks, such as a comment line). It plans "
     "the current default branch for all of them, this merged change included, and its cells "
     "are applied before merge under a required gate (`shipmate apply`, and `shipmate apply "
-    "<env>` for an `explicit` environment), or by its deploy otherwise. If an untag was "
+    "<env>` for a `targeted` environment), or by its deploy otherwise. If an untag was "
     "deliberate, apply that stranded change by hand instead of "
     "retagging; the pull request still changes every listed stack, and with none listed no "
     "pull request is needed. Re-running this deploy checks out the same commit and refuses "
@@ -795,7 +795,7 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
         "both live in this merged commit, so a re-run refuses again; open a new pull request "
         "that makes the fix and changes every listed stack (any edit `terramate list "
         "--changed` marks); its cells are applied before merge under a required gate "
-        "(`shipmate apply`, and `shipmate apply <env>` for an `explicit` environment), or by "
+        "(`shipmate apply`, and `shipmate apply <env>` for a `targeted` environment), or by "
         "its deploy otherwise."
     )
 

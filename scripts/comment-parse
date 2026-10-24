@@ -5,7 +5,7 @@ Grammar: `shipmate <verb> [env]`. Injection-safe: the whole command line
 must match one anchored regex; nothing is ever passed to a shell. The verbs are
 `apply`, `doctor`, `help`, `plan` and `unlock`; any other verb is unknown.
 env is optional for `apply` and required for `unlock`: a bare `shipmate apply`
-targets every non-explicit environment (env=None -> "all"), while a bare
+targets every `bare` environment (env=None -> "all"), while a bare
 `shipmate unlock` is rejected. A line outside the grammar is refused with a
 reply naming its cause (`_malformed_error`).
 """
@@ -32,7 +32,7 @@ VERBS = {
     "apply": {
         "args": "[env]",
         "desc": (
-            "Apply the reviewed plan for one environment, or every non-explicit "
+            "Apply the reviewed plan for one environment, or every `bare` "
             "environment when the environment is omitted."
         ),
     },

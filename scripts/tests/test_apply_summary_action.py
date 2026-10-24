@@ -133,7 +133,7 @@ _RENDER_ENV = {
     "SHIPMATE_EXCLUDED_ENVS": "${{ inputs.excluded-envs }}",
     "SHIPMATE_SKIPPED_ENVS": "${{ inputs.skipped-envs }}",
     "SHIPMATE_REVIEW_HELD_ENVS": "${{ inputs.review-held-envs }}",
-    "SHIPMATE_APPLIED_UNGATED_ENVS": "${{ inputs.applied-ungated-envs }}",
+    "SHIPMATE_APPLIED_EXEMPT_ENVS": "${{ inputs.applied-exempt-envs }}",
     "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
     "SHIPMATE_WAITING_CELLS": "${{ inputs.waiting-cells }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
@@ -377,7 +377,7 @@ _APPLY_SUMMARY_WITH = {
     "excluded-envs": "${{ needs.detect.outputs.excluded_envs }}",
     "skipped-envs": "${{ needs.detect.outputs.skipped_envs }}",
     "review-held-envs": "${{ needs.detect.outputs.review_held_envs }}",
-    "applied-ungated-envs": "${{ needs.detect.outputs.applied_ungated_envs }}",
+    "applied-exempt-envs": "${{ needs.detect.outputs.applied_exempt_envs }}",
     "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
     "waiting-cells": "${{ needs.detect.outputs.waiting_cells }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
@@ -395,7 +395,7 @@ def test_apply_passes_apply_summary_exactly_this_with():
     read are pinned whole in `test_detect_wiring_guard.py`.
 
     Mutation: drop `environment:` from the step's `with:` -- red.
-    Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red.
+    Mutation: wire `applied_exempt_envs` into `review-not-required-envs` -- red.
     Mutation: drop `waiting-cells:` from the step's `with:`, so the input defaults to `[]`
     -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.

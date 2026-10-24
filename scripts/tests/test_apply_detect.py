@@ -295,8 +295,8 @@ class _Stop(Exception):
 def test_main_routes_an_empty_env_to_the_bare_form_and_never_to_the_review_refusal(
     monkeypatch, tmp_path, environment, expected
 ):
-    """`_review_reason` reads an empty env as a bare apply, exempt when any entry is ungated, so
-    an empty env reaching `refuse_unreviewed` is a bypassed refusal.
+    """`_review_reason` reads an empty env as a bare apply, exempt when any entry is review-exempt,
+    so an empty env reaching `refuse_unreviewed` is a bypassed refusal.
 
     Mutation: route on `env is None` instead of `not env` -- the empty case reaches
     `validate_env`'s SystemExit. Mutation: `if env:` -- dev-eu records `bare_main`, and the
@@ -630,20 +630,20 @@ def test_main_refuses_a_workset_stack_the_metadata_lacks(tmp_path, monkeypatch):
     )
 
 
-def _gate(ungated):
-    """A structure-valid table whose entries named in `ungated`, a comma-separated string,
-    hold `gated: false`."""
+def _gate(exempt):
+    """A structure-valid table whose entries named in `exempt`, a comma-separated string,
+    hold `review: false`."""
     return {
         "layout": "folder",
-        "environments": {e: {"review": False} for e in ungated.split(",") if e},
+        "environments": {e: {"review": False} for e in exempt.split(",") if e},
     }
 
 
-# The engine resolves the exemption list itself and refuses on it, because an `ungated-envs`
+# The engine resolves the exemption list itself and refuses on it, because an exempt-list action
 # input wider than the repository's own configuration would otherwise apply unreviewed on the
 # targeted path unconditionally.
 @pytest.mark.parametrize(
-    ("decision", "ungated"),
+    ("decision", "exempt"),
     [
         ("NONE", ""),
         ("APPROVED", ""),
@@ -652,17 +652,17 @@ def _gate(ungated):
         ("REVIEW_REQUIRED", "other,dev-eu"),
     ],
 )
-def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
-    ad.refuse_unreviewed("dev-eu", _gate(ungated), decision)  # must not raise
+def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, exempt):
+    ad.refuse_unreviewed("dev-eu", _gate(exempt), decision)  # must not raise
 
 
 @pytest.mark.parametrize(
-    ("decision", "ungated"),
+    ("decision", "exempt"),
     [
         # The hole: an unreviewed pull request with the variable unset. The input the
         # consumer wired into comment-ops cannot widen this.
         ("REVIEW_REQUIRED", ""),
-        # Ungated, but not this env.
+        # Review-exempt, but not this env.
         ("REVIEW_REQUIRED", "prod-eu"),
         ("CHANGES_REQUESTED", "dev-eu"),
         ("BANANA", ""),
@@ -671,9 +671,9 @@ def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
         ("", ""),
     ],
 )
-def test_refuse_unreviewed_refuses_everything_else(decision, ungated):
+def test_refuse_unreviewed_refuses_everything_else(decision, exempt):
     with pytest.raises(SystemExit) as exc_info:
-        ad.refuse_unreviewed("dev-eu", _gate(ungated), decision)
+        ad.refuse_unreviewed("dev-eu", _gate(exempt), decision)
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
@@ -687,8 +687,8 @@ def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
     assert str(exc_info.value) == f"::error::{reason}"
 
 
-def test_refuse_unreviewed_refuses_an_env_whose_entry_is_gated():
-    """`gated: false` on the default branch's entry is the only source, so an environment
+def test_refuse_unreviewed_refuses_an_env_whose_entry_is_under_review():
+    """`review: false` on the default branch's entry is the only source, so an environment
     without it is refused whatever else is set.
 
     Mutation: resolve the exemption from the process environment -- nothing sets it, so this
@@ -754,7 +754,7 @@ def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_pat
     """The table reaches the refusal. `main` resolves the env under test from the table the
     run loaded, so an env the table exempts elsewhere is still refused here.
 
-    Mutation: exempt unconditionally once any entry is ungated -- dev-eu is then exempted
+    Mutation: exempt unconditionally once any entry is review-exempt -- dev-eu is then exempted
     by prod-eu's entry and main() runs to completion."""
     _apply_env(
         monkeypatch,
@@ -768,7 +768,7 @@ def test_main_refuses_an_env_the_gate_table_does_not_exempt(monkeypatch, tmp_pat
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
-def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
+def test_main_exempts_an_env_whose_entry_is_review_exempt(monkeypatch, tmp_path):
     """The other half: an unreviewed apply of a listed env runs.
 
     Mutation: drop the gate read -- dev-eu is no longer exempt and main() refuses."""
@@ -786,8 +786,8 @@ def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
 
 
 def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
-    """A `gated: no` reads as ungated to a person and resolves as gated. The run must die
-    naming the malformed setting, not refuse the apply as unreviewed.
+    """A `review: no` reads as review-exempt to a person and resolves as under review. The run
+    must die naming the malformed setting, not refuse the apply as unreviewed.
 
     Mutation: drop `bm.ec.validate_structure(table)` from main -- the refusal passes the
     unvalidated table on and raises "not authorized" rather than naming the setting."""
@@ -829,16 +829,17 @@ def test_apply_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_pa
         ("APPROVED", None, []),
     ],
 )
-def test_main_names_a_gated_env_applied_with_no_review_required(
+def test_main_names_a_reviewed_env_applied_with_no_review_required(
     monkeypatch, tmp_path, decision, table, expected
 ):
-    """A null decision authorizes a gated env without a review (no rule requires one, or
-    the code-owner rule owns none of the changed files); an ungated env's `gated: false`
-    entry already declares it applies unreviewed, and an approval needs no disclosure.
+    """A null decision authorizes a `review: true` env without a review (no rule requires one,
+    or the code-owner rule owns none of the changed files); a review-exempt env's
+    `review: false` entry already declares it applies unreviewed, and an approval needs no
+    disclosure.
 
     Mutation: compare `review_decision != "NONE"` in `authorize._review_not_required` -- the
-    NONE/gated and APPROVED cases swap and go red.
-    Mutation: drop its ungated check -- the NONE/ungated case names dev-eu and goes red."""
+    NONE/reviewed and APPROVED cases swap and go red.
+    Mutation: drop its exempt check -- the NONE/exempt case names dev-eu and goes red."""
     out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
     _stub_apply(
         monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]

@@ -61,7 +61,7 @@ def test_unknown_verb_is_rejected():
 
 
 def test_bare_apply_targets_all_envs():
-    # env is optional: a bare `shipmate apply` applies every non-explicit env.
+    # env is optional: a bare `shipmate apply` applies every `bare` env.
     r = cp.parse("shipmate apply")
     assert r == {
         "is_command": True,
@@ -334,7 +334,7 @@ _HELP = (
     "| command | what it does |\n"
     "| --- | --- |\n"
     "| `shipmate apply [env]` | Apply the reviewed plan for one environment, or every "
-    "non-explicit environment when the environment is omitted. |\n"
+    "`bare` environment when the environment is omitted. |\n"
     "| `shipmate doctor` | Report setup problems: repository settings, environments, App "
     "permissions, and warnings from this commit's workflow runs. |\n"
     "| `shipmate help` | Show this command list. |\n"

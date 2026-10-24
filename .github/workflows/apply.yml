@@ -2,7 +2,7 @@ name: apply
 on:
   workflow_call:
     inputs:
-      # Empty runs a bare apply: every pending environment the review decision and `explicit`
+      # Empty runs a bare apply: every pending environment the review decision and `apply_mode`
       # allow, in `needs` order. A name applies that one alone.
       environment: { required: false, type: string, default: "" }
       ref: { required: true, type: string }
@@ -121,7 +121,7 @@ jobs:
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
       review_held_envs: ${{ steps.d.outputs.review_held_envs }}
-      applied_ungated_envs: ${{ steps.d.outputs.applied_ungated_envs }}
+      applied_exempt_envs: ${{ steps.d.outputs.applied_exempt_envs }}
       review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
       waiting_cells: ${{ steps.d.outputs.waiting_cells }}
       env_order: ${{ steps.d.outputs.env_order }}
@@ -246,7 +246,7 @@ jobs:
           excluded-envs: ${{ needs.detect.outputs.excluded_envs }}
           skipped-envs: ${{ needs.detect.outputs.skipped_envs }}
           review-held-envs: ${{ needs.detect.outputs.review_held_envs }}
-          applied-ungated-envs: ${{ needs.detect.outputs.applied_ungated_envs }}
+          applied-exempt-envs: ${{ needs.detect.outputs.applied_exempt_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}

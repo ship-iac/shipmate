@@ -708,7 +708,7 @@ _AUTHORIZE_ENV = {
     "PR_JSON": "pr.json",
     "PLAN_RUN_JSON": "plan_run.json",
     "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
-    "SHIPMATE_GATE_UNGATED_ENVS": "${{ steps.gate.outputs.ungated_envs }}",
+    "SHIPMATE_GATE_EXEMPT_ENVS": "${{ steps.gate.outputs.exempt_envs }}",
     "SHIPMATE_VERB": "${{ steps.parse.outputs.route }}",
 }
 
@@ -865,18 +865,18 @@ def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():
     assert _gather_step()["env"]["SHIPMATE_APP_ID"] == "${{ inputs.app-id }}"
 
 
-def test_authorize_step_receives_the_resolved_ungated_envs():
+def test_authorize_step_receives_the_resolved_exempt_envs():
     """The resolve step's output is the only channel: `authorize` gets the list the gate
     step read from the default branch's file, in the same job, and the action takes no
     input a caller could supply a different one through.
 
-    Mutation: add an `ungated-envs` input to the manifest and bind it here instead.
+    Mutation: add an `exempt-envs` input to the manifest and bind it here instead.
     """
     assert (
-        _authorize_step()["env"]["SHIPMATE_GATE_UNGATED_ENVS"]
-        == "${{ steps.gate.outputs.ungated_envs }}"
+        _authorize_step()["env"]["SHIPMATE_GATE_EXEMPT_ENVS"]
+        == "${{ steps.gate.outputs.exempt_envs }}"
     )
-    assert "ungated-envs" not in action_yaml("comment-ops")["inputs"]
+    assert "exempt-envs" not in action_yaml("comment-ops")["inputs"]
 
 
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
@@ -953,9 +953,9 @@ _REPLIES = {
         "SHIPMATE_REPLY_ENV": "${{ steps.authz.outputs.environment }}",
         "SHIPMATE_REPLY_OUTCOME": "notice",
         "SHIPMATE_REPLY_TEXT": (
-            "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an "
-            "approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result "
-            "comment shows what applied."
+            "${{ steps.authz.outputs.environment }}: review-exempt, permitted to apply without an "
+            "approving review (`review: false` in `.github/shipmate-config.yml`). The apply "
+            "result comment shows what applied."
         ),
     },
     "Reject with reason": {
@@ -1170,7 +1170,7 @@ def test_the_exemption_report_fires_only_when_the_exemption_fired():
     """Not on `authorized == 'true'`: an ordinary reviewed apply is authorized too, and this
     sentence over it would be false."""
     step = step_by("comment-ops", name="Report the review exemption")
-    assert step["if"] == "${{ steps.authz.outputs.ungated_exemption == 'true' }}"
+    assert step["if"] == "${{ steps.authz.outputs.review_exemption == 'true' }}"
 
 
 @bash_only
@@ -1187,8 +1187,8 @@ def test_the_exemption_report_claims_permission_never_completion(tmp_path):
     )
     assert body == (
         "### shipmate apply dev-eu\n\n"
-        "⚪ dev-eu: ungated, permitted to apply without an approving review "
-        "(`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what "
+        "⚪ dev-eu: review-exempt, permitted to apply without an approving review "
+        "(`review: false` in `.github/shipmate-config.yml`). The apply result comment shows what "
         "applied.\n\n"
         f"[comment run]({_RUN_URL})"
     )
