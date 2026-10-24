@@ -31,8 +31,9 @@ every file as it was:
    flow mapping or a `paths:` filter shows in the diff. A single branch other than the default
    is `onboard`'s to report, not this script's.
 
-It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
-it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
+It then writes each changed file, prints `pins updated <file>` or `pins unchanged <file>` for
+every file holding an engine ref, and prints the diff from the rendered fence to `shipmate.yml`,
+pins masked.
 It does not commit.
 
 `--write-fence`, in any position, then writes the rendered fence over a differing
@@ -40,8 +41,8 @@ It does not commit.
 keeps the file's push branch and replaces every other local edit, a changed `runs_on` or
 secret mapping included, so read the printed diff first. When `shipmate.yml` is absent, or
 differs and its push trigger holds anything but one plain branch, it prints
-`not writing shipmate.yml: <why>` after the `updated`/`unchanged` lines, then the diff (or
-`shipmate.yml absent`), and writes nothing more.
+`not writing shipmate.yml: <why>` after the `pins updated`/`pins unchanged` lines, then the
+diff (or `shipmate.yml absent`), and writes nothing more.
 
 Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence or was
 written from it; 2 every engine ref pinned and `shipmate.yml` differs or is absent; 1 a
@@ -218,6 +219,16 @@ def _args():
     return *args, _FLAG in flags
 
 
+def _write_pins(wf, texts, new):
+    """Write each file `new` changed; print a per-file line for each file holding an engine ref."""
+    for name, text in new.items():
+        if text != texts[name]:
+            (wf / name).write_text(text, encoding="utf-8", newline="")
+            print(f"pins updated {name}")
+        elif any(_REF.search(b) for b, _ in _lines(text)):
+            print(f"pins unchanged {name}")
+
+
 def main():
     consumer, tag, write = _args()
     sha, on_origin = _resolve(tag)
@@ -229,12 +240,7 @@ def main():
     _check_refs(wf, texts, new, sha, tag)
     _check_callees(new, sha, tag)
     rendered, plain = _render(new, sha, tag)
-    for name, text in new.items():
-        if text == texts[name]:
-            print(f"unchanged {name}")
-        else:
-            (wf / name).write_text(text, encoding="utf-8", newline="")
-            print(f"updated {name}")
+    _write_pins(wf, texts, new)
     if SHIM not in new:
         if write:
             print(f"not writing {SHIM}: it is absent")

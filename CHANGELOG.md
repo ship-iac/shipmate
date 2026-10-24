@@ -14,6 +14,10 @@ section below names the SHA the release tags.
 
 - A dispatched `shipmate plan` or `shipmate apply` run collapses its started reply as outdated once it posts its result. A `shipmate plan` that plans no cell posts the `⚪ nothing planned` comment.
 
+### Fixed
+
+- `repin` prints `pins updated <file>` and `pins unchanged <file>`, naming what each line measures, and only for a file holding an engine ref.
+
 ## [0.51.0] — 2026-10-21
 
 Tags `7d46d73`.
