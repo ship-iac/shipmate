@@ -1659,9 +1659,9 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All eight jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review` and
-`summary`, `apply-env-level.yml` `complete`, `deploy.yml` `summary` and
+All nine jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review`, `lock`
+and `summary`, `apply-env-level.yml` `complete`, `deploy.yml` `summary` and
 `drift.yml` `issues`. No `shipmate / gate` status, sticky comment or comment
 reply is written.
 

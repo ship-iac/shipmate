@@ -267,9 +267,9 @@ engine job but nine:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
-- `apply.yml` and `deploy.yml`: `detect`, and the apply cells in
-  `apply-env-level.yml`, to which both pass `runs_on`.
-- `apply.yml`: `lock`.
+- `apply.yml` and `deploy.yml`: `detect`, the apply cells in
+  `apply-env-level.yml`, to which both pass `runs_on`, and `lock` in
+  `apply.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
 

@@ -2,8 +2,9 @@
 
 Threat model: accidental regression in the job's wiring. A dropped `envlevelN-waves` input leaves
 that level's cells applying unlocked; a dropped `environment` leaves the mint with no App key; an
-`always()` `if:` acquires after `detect` failed; a wave job that stops needing `lock` starts
-before the cells are held. Each is compared whole against a hand-written constant.
+`always()` `if:` acquires after `detect` failed. The job is compared whole against a
+hand-written constant; `DOWNSTREAM_NEEDS` in `test_apply_dispatch_actor_guard.py` pins that every
+wave level needs `lock`.
 """
 
 from _loader import ENGINE_ENVIRONMENT, workflow_jobs
@@ -32,31 +33,8 @@ LOCK_JOB = {
     ],
 }
 
-NEEDS = {
-    "envlevel0": ["guard", "review", "detect", "lock"],
-    "envlevel1": ["guard", "review", "detect", "lock", "envlevel0"],
-    "envlevel2": ["guard", "review", "detect", "lock", "envlevel0", "envlevel1"],
-    "envlevel3": ["guard", "review", "detect", "lock", "envlevel0", "envlevel1", "envlevel2"],
-    "summary": [
-        "guard",
-        "review",
-        "detect",
-        "lock",
-        "envlevel0",
-        "envlevel1",
-        "envlevel2",
-        "envlevel3",
-    ],
-}
-
 
 def test_the_lock_job_acquires_every_level_with_the_engine_key():
     """Mutations: pass only `envlevel0-waves`; remove `environment`; `if:` to `always()`; add
     an `actions/checkout` step."""
     assert workflow_jobs("apply.yml")["lock"] == LOCK_JOB
-
-
-def test_every_wave_level_and_the_summary_need_the_lock():
-    """Mutation: drop `lock` from `envlevel0`'s `needs`."""
-    jobs = workflow_jobs("apply.yml")
-    assert {job: jobs[job]["needs"] for job in NEEDS} == NEEDS

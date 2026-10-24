@@ -1900,8 +1900,8 @@ The five jobs:
 - **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
-  jobs that mint an App token (reading the review decision, completing apply
-  checks, refreshing the gate, posting the apply result comment) are likewise
+  jobs that mint an App token (reading the review decision, acquiring cell
+  locks, completing apply checks, refreshing the gate, posting the apply result comment) are likewise
   bound to `shipmate-engine`.
 - **`comment-ops.yml`**'s `ops` job (engine, reached through the consumer's
   `comment-ops` job on `issue_comment`) — binds `shipmate-engine` for comment
