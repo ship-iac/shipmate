@@ -210,6 +210,19 @@ def test_a_record_round_trips_through_its_message():
     assert gh.drained()
 
 
+def test_a_ref_that_targets_no_commit_refuses_naming_the_manual_remedy():
+    """Mutation: drop the `object.type` check (the blob's sha is read as a commit)."""
+    listed = [{"ref": AUTH_REF, "object": {"sha": OLD, "type": "blob"}}]
+    gh = Gh().on(listing("shipmate/locks/dev/"), json.dumps(listed))
+    with pytest.raises(SystemExit) as exc:
+        cl.read_locks(REPO, ["dev"], run=gh)
+    assert exc.value.code == (
+        f"::error::the cell lock ref {AUTH_REF} targets a blob, not a commit; someone with write "
+        f"access must delete it: git push origin :{AUTH_REF}"
+    )
+    assert gh.drained()
+
+
 # --- acquire -------------------------------------------------------------------------------------
 
 
@@ -251,6 +264,20 @@ def test_another_pull_request_refuses_naming_it_and_rolls_back_this_calls_create
     assert exc.value.code == (
         "::error::`dev` / `stacks/auth` is locked by #12; wait for #12 to merge or close, then "
         "re-plan, or comment `shipmate unlock dev --evict`"
+    )
+    assert gh.drained()
+
+
+def test_a_malformed_response_refuses_and_rolls_back_this_calls_creates():
+    """Mutation: catch only `SystemExit` around the install loop (the KeyError escapes and
+    DNS_REF's conditional delete is never sent)."""
+    gh = gh_acquire_start(DNS).on(ref_write(DNS_REF, NEW), "{}")
+    gh.on(commit_write(AUTH), "{}")
+    gh.on(REPO_ID_READ, REPO_ID).on(update(DNS_REF, NEW, ZERO, False), "{}")
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [DNS, AUTH], PR, ACQ, run=gh)
+    assert exc.value.code == (
+        "::error::could not lock the cells: an API response was malformed (KeyError('sha'))"
     )
     assert gh.drained()
 
@@ -343,22 +370,25 @@ PR_STATE_READ = [
 
 
 @pytest.mark.parametrize(
-    "state",
+    ("state", "closed"),
     [
-        pytest.param(_pr_state("CLOSED", "2026-10-24T11:00:00Z"), id="closed"),
-        pytest.param(_pr_state("OPEN", "2026-10-24T11:00:00Z"), id="reopened-after-commit"),
-        pytest.param(_pr_state("OPEN", "2026-10-24T10:00:00Z"), id="closed-same-second"),
+        pytest.param("CLOSED", "2026-10-24T11:00:00", id="closed"),
+        pytest.param("OPEN", "2026-10-24T11:00:00", id="reopened-after-commit"),
+        pytest.param("OPEN", "2026-10-24T10:00:00", id="closed-same-second"),
     ],
 )
-def test_the_fence_refuses_and_deletes_every_installed_lock(state):
+def test_the_fence_refuses_and_deletes_every_installed_lock(state, closed):
     """Mutations: check `state` only (reopened-after-commit passes); compare the close `<=` the
     commit (closed-same-second passes); raise without the rollback (no delete is sent)."""
     installed = [lock(AUTH_REF, NEW), lock(DNS_REF, OTHER, stack="stacks/dns")]
-    gh = Gh().on(PR_STATE_READ, state).on(REPO_ID_READ, REPO_ID)
+    gh = Gh().on(PR_STATE_READ, _pr_state(state, closed + "Z")).on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, NEW, ZERO, False), "{}").on(update(DNS_REF, OTHER, ZERO, False), "{}")
     with pytest.raises(SystemExit) as exc:
         cl.fence_open(REPO, PR, installed, run=gh)
-    assert str(exc.value.code).startswith(f"::error::pull request #{PR} was closed")
+    assert exc.value.code == (
+        "::error::pull request #7 was closed while this run acquired its cell locks (state "
+        f"{state}, last closed {closed}+00:00); the locks it took are released"
+    )
     assert gh.drained()
 
 
@@ -561,4 +591,185 @@ def test_marks_writes_each_foreign_holder_per_cell(monkeypatch, tmp_path):
     monkeypatch.setattr(cl.sys, "argv", ["cell-lock", "marks"])
     cl.main()
     assert github_outputs(out) == {"locks": json.dumps({"stacks/auth / dev": 12})}
+    assert gh.drained()
+
+
+HEAD = "d" * 40
+EMPTY_WAVES = json.dumps({f"wave{i}": [] for i in range(8)})
+CHECK_RUNS_READ = [
+    "gh",
+    "api",
+    "--paginate",
+    f"repos/{REPO}/commits/{HEAD}/check-runs?filter=all&per_page=100",
+    "--jq",
+    ".check_runs[]",
+]
+
+
+def _main(monkeypatch, tmp_path, command, gh, env):
+    """Run `cell-lock <command>` with `env` over a base environment (None unsets a variable);
+    returns the step outputs it wrote."""
+    out = tmp_path / "out"
+    out.write_text("", encoding="utf-8")
+    base = {
+        "GITHUB_OUTPUT": str(out),
+        "GITHUB_REPOSITORY": REPO,
+        "SHIPMATE_PR_NUMBER": str(PR),
+        "SHIPMATE_HEAD_SHA": HEAD,
+        "SHIPMATE_APP_ID": "99",
+        "GITHUB_RUN_ID": "900",
+        "GITHUB_RUN_ATTEMPT": "1",
+    }
+    for key, value in {**base, **env}.items():
+        if value is None:
+            monkeypatch.delenv(key, raising=False)
+        else:
+            monkeypatch.setenv(key, value)
+    monkeypatch.setattr(cl, "_run", gh)
+    monkeypatch.setattr(cl.sys, "argv", ["cell-lock", command])
+    cl.main()
+    return github_outputs(out)
+
+
+def _waves(level0=EMPTY_WAVES):
+    return {
+        "SHIPMATE_ENVLEVEL0_WAVES": level0,
+        **{f"SHIPMATE_ENVLEVEL{n}_WAVES": EMPTY_WAVES for n in (1, 2, 3)},
+    }
+
+
+def test_acquire_locks_every_wave_cell_then_fences(monkeypatch, tmp_path):
+    """Mutation: skip `fence_open` (the state read is never sent)."""
+    gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), "{}")
+    gh.on(PR_STATE_READ, _pr_state("OPEN"))
+    level0 = json.dumps({"wave0": [], "wave1": [AUTH]})
+    _main(monkeypatch, tmp_path, "acquire", gh, _waves(level0))
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("env", "refusal"),
+    [
+        pytest.param(
+            {"SHIPMATE_ENVLEVEL2_WAVES": None},
+            "SHIPMATE_ENVLEVEL2_WAVES must be a JSON map of waves",
+            id="missing",
+        ),
+        pytest.param(
+            {"SHIPMATE_ENVLEVEL1_WAVES": "nope"},
+            "SHIPMATE_ENVLEVEL1_WAVES must be a JSON map of waves",
+            id="not-json",
+        ),
+        pytest.param(
+            {"SHIPMATE_ENVLEVEL3_WAVES": "[]"},
+            "SHIPMATE_ENVLEVEL3_WAVES must be a JSON map of waves",
+            id="not-a-map",
+        ),
+        pytest.param(
+            {"SHIPMATE_ENVLEVEL0_WAVES": json.dumps({"wave0": [{"stack": 1}]})},
+            "every wave cell must be a {stack, environment} object",
+            id="bad-cell",
+        ),
+        pytest.param(
+            {"GITHUB_RUN_ID": None},
+            "GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be decimal (got: ['', '1'])",
+            id="no-run-id",
+        ),
+        pytest.param(
+            {"GITHUB_RUN_ATTEMPT": "1x"},
+            "GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be decimal (got: ['900', '1x'])",
+            id="bad-attempt",
+        ),
+    ],
+)
+def test_acquire_refuses_bad_input_before_any_call(monkeypatch, tmp_path, env, refusal):
+    """Mutations: drop `KeyError` (missing), `ValueError` (not-json) or `AttributeError`
+    (not-a-map) from `_wave_cells`' except; drop its `checked is None` refusal (bad-cell); drop
+    the run id check (no-run-id and bad-attempt reach the API)."""
+    level0 = json.dumps({"wave0": [AUTH]})
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "acquire", Gh(), {**_waves(level0), **env})
+    assert exc.value.code == "::error::" + refusal
+
+
+@pytest.mark.parametrize(
+    ("env", "released"),
+    [
+        pytest.param({"SHIPMATE_MERGED": "true"}, DNS_REF, id="merged"),
+        pytest.param(
+            {"SHIPMATE_MERGED": "false", "SHIPMATE_CLOSED_AT": "2026-10-24T11:00:00Z"},
+            AUTH_REF,
+            id="unmerged",
+        ),
+    ],
+)
+def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
+    """Mutations: release nothing in the unmerged branch (`gone = []`: no delete is sent); read
+    `pending` without the App filter (`parse_jsonl` for `app_runs` in `pending_names`: the
+    foreign check on stacks/dns keeps its lock)."""
+    gh = _all_locks(
+        (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
+        (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), LATE),
+    )
+    if env["SHIPMATE_MERGED"] == "true":
+        gh.on(
+            CHECK_RUNS_READ,
+            jsonl(
+                _check("apply / stacks/auth / dev", "queued", None),
+                _check("apply / stacks/dns / dev", "queued", None, run_id=2, app=15368),
+            ),
+        )
+    sha = OLD if released == AUTH_REF else NEW
+    gh.on(REPO_ID_READ, REPO_ID).on(update(released, sha, ZERO, False), "{}")
+    _main(monkeypatch, tmp_path, "release", gh, env)
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("env", "refusal"),
+    [
+        pytest.param(
+            {"SHIPMATE_MERGED": "yes", "SHIPMATE_CLOSED_AT": LATE},
+            "SHIPMATE_MERGED must be true or false (got: 'yes')",
+            id="merged-yes",
+        ),
+        pytest.param(
+            {"SHIPMATE_MERGED": None, "SHIPMATE_CLOSED_AT": LATE},
+            "SHIPMATE_MERGED must be true or false (got: '')",
+            id="merged-unset",
+        ),
+        pytest.param(
+            {"SHIPMATE_MERGED": "false", "SHIPMATE_CLOSED_AT": "2026-10-24T11:00:00"},
+            "SHIPMATE_CLOSED_AT must be an ISO-8601 time (got: '2026-10-24T11:00:00')",
+            id="closed-at-no-offset",
+        ),
+    ],
+)
+def test_release_cli_refuses_a_bad_mode_before_any_call(monkeypatch, tmp_path, env, refusal):
+    """Mutations: treat any `SHIPMATE_MERGED` but `true` as unmerged (merged-yes and
+    merged-unset release by `SHIPMATE_CLOSED_AT`); drop the `_when` check (closed-at-no-offset
+    reaches the API)."""
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "release", Gh(), env)
+    assert exc.value.code == "::error::" + refusal
+
+
+def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
+    """Mutation: `parse_jsonl` for `app_runs` in `_evict_cmd` (the foreign check on stacks/dns
+    evicts its lock)."""
+    gh = Gh().on(
+        CHECK_RUNS_READ,
+        jsonl(
+            _check("apply / stacks/auth / dev", "completed", "success"),
+            _check("apply / stacks/dns / dev", "queued", None, run_id=2, app=15368),
+        ),
+    )
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(12, "dev", "stacks/dns")))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    out = _main(monkeypatch, tmp_path, "evict", gh, {"SHIPMATE_ENV": "dev"})
+    assert out == {
+        "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}])
+    }
     assert gh.drained()

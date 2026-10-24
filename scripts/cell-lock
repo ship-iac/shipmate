@@ -43,6 +43,7 @@ from _shipmate import (
     check_runs,
     gh_json,
     is_head_sha,
+    is_run_id,
     run_annotated,
     write_outputs,
 )
@@ -115,11 +116,17 @@ def _env(env):
 
 def _refs(repo, prefix, run):
     """`{ref: sha}` of every ref starting `refs/<prefix>`. matching-refs answers an absent ref
-    with `[]`, so absence is data, not a status to parse."""
-    return {
-        e["ref"]: e["object"]["sha"]
-        for e in gh_json(f"repos/{repo}/git/matching-refs/{prefix}", run)
-    }
+    with `[]`, so absence is data, not a status to parse. Refuses a ref that targets anything
+    but a commit: `updateRefs` cannot delete it, so no release or eviction can clear it."""
+    out = {}
+    for e in gh_json(f"repos/{repo}/git/matching-refs/{prefix}", run):
+        if e["object"]["type"] != "commit":
+            raise SystemExit(
+                f"::error::the cell lock ref {e['ref']} targets a {e['object']['type']}, not a "
+                f"commit; someone with write access must delete it: git push origin :{e['ref']}"
+            )
+        out[e["ref"]] = e["object"]["sha"]
+    return out
 
 
 def _ref_sha(repo, ref, run):
@@ -280,6 +287,9 @@ def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
                 created.append(lock)
     except SystemExit as exc:
         raise SystemExit(_rollback(repo, created, exc.code, run)) from None
+    except (LookupError, TypeError, ValueError) as exc:
+        reason = f"::error::could not lock the cells: an API response was malformed ({exc!r})"
+        raise SystemExit(_rollback(repo, created, reason, run)) from None
     return installed
 
 
@@ -395,7 +405,12 @@ def _head_names(repo, run):
 
 
 def _acquire_cmd(repo, pr, run):
-    acquisition = f"{os.environ['GITHUB_RUN_ID']}.{os.environ['GITHUB_RUN_ATTEMPT']}"
+    ids = [os.environ.get(k, "") for k in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")]
+    if not all(map(is_run_id, ids)):
+        raise SystemExit(
+            f"::error::GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be decimal (got: {ids!r})"
+        )
+    acquisition = ".".join(ids)
     locks = acquire(repo, _wave_cells(), pr, acquisition, run=run)
     fence_open(repo, pr, locks, run=run)
     print(f"::notice::pull request #{pr} holds {len(locks)} cell lock(s)")
