@@ -2636,8 +2636,8 @@ log text holds every line:
   permission, never an outcome — the set is derived before any wave runs, so a
   failed wave or a skipped env-level leaves an environment named here that
   never applied, and the text carries no completion verb.
-- **no review required** — `<env>: no approving review was required, so review:
-  true had nothing to enforce`, one per `review: true` environment a `NONE`
+- **no review required** — `<env>: no approving review was required, so the
+  review requirement had nothing to enforce`, one per `review: true` environment a `NONE`
   decision authorized. It has its own cause, so it has its own detect output
   (`review_not_required_envs`, from both detects) rather than widening
   `applied_exempt_envs`. It prints in the targeted and the all-environments form, and names

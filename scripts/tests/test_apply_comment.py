@@ -484,7 +484,9 @@ _EXEMPT_NOTICE = (
     ": review-exempt, permitted to apply without an approving review "
     "(review: false in .github/shipmate-config.yml)"
 )
-_NO_REVIEW_NOTICE = ": no approving review was required, so review: true had nothing to enforce"
+_NO_REVIEW_NOTICE = (
+    ": no approving review was required, so the review requirement had nothing to enforce"
+)
 
 
 def test_the_notices_name_exempt_then_no_review_envs():

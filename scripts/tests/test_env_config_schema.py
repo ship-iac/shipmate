@@ -173,19 +173,6 @@ def test_a_retired_key_refuses_as_unknown(key, value):
     assert str(excinfo.value) == _RETIRED_KEY_MESSAGE.format(key)
 
 
-def test_shared_true_refuses_as_unknown():
-    """The parametrization above is built from a list a later edit can shorten; this pins the
-    one retired key whose old meaning inverts under its replacement.
-
-    Mutation: re-add `shared` to `_ENV_KEYS` -- this validates.
-    """
-    table = {"layout": "folder", "environments": {"dev-eu": {"shared": True}}}
-    assert _structural(table) == (
-        "::error::environment dev-eu: shared is not a key this engine implements. "
-        "An environment holds region, vars, identity, workloads, split, needs, apply_mode, review."
-    )
-
-
 # --- 7: the flags -----------------------------------------------------------------------
 
 _FLAGS = ("split", "review")

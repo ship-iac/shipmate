@@ -19,6 +19,7 @@ section below names the SHA the release tags.
   - `tf_vars:` → `vars:`
   - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
 - **Bare-apply comment line `left pending (explicit)` reads `left pending (targeted)`.**
+- **The review-exempt comment-ops reply reads "review-exempt, permitted to apply without an approving review (`review: false` in `.github/shipmate-config.yml`)", and the no-review notice reads `no approving review was required, so the review requirement had nothing to enforce`.**
 
 ## [0.52.0] — 2026-10-24
 

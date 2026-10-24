@@ -3437,7 +3437,7 @@ def test_no_tagged_stack_and_no_table_binds_nothing(monkeypatch, tmp_path, capsy
     assert exc.code == 0
     lines = capsys.readouterr().out.splitlines()
     assert "environments: (none)" in lines
-    assert "split false: (none)" in lines
+    assert "shared (split: false): (none)" in lines
 
 
 UNMANAGED_ITEM = "unmanaged stacks"

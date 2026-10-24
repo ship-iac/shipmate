@@ -97,11 +97,12 @@ def load_config(text):
 
 
 def _normalise_settings(parsed):
-    if any(_is_reference(node) for _, node in _walk(parsed.get("max_parallel"), "max_parallel")):
-        raise SystemExit(
-            "::error::max_parallel holds a variable reference, and it accepts none. Write the "
-            "number into the file."
-        )
+    _refuse_reference(
+        parsed,
+        "max_parallel",
+        "::error::max_parallel holds a variable reference, and it accepts none. Write the "
+        "number into the file.",
+    )
     _normalise_bool(
         parsed,
         "command_hints",
@@ -118,19 +119,25 @@ def _normalise_flags(env, entry):
             f"::error::environments.{env}.{key} holds a variable reference; a flag accepts "
             "no variable reference. Write true or false.",
         )
-    if any(_is_reference(node) for _, node in _walk(entry.get("apply_mode"), "apply_mode")):
-        raise SystemExit(
-            f"::error::environments.{env}.apply_mode holds a variable reference, and it accepts "
-            "none. Write targeted or bare."
-        )
+    _refuse_reference(
+        entry,
+        "apply_mode",
+        f"::error::environments.{env}.apply_mode holds a variable reference, and it accepts "
+        "none. Write targeted or bare.",
+    )
 
 
 def _normalise_bool(mapping, key, refusal):
     """Refuses a reference anywhere in `mapping[key]`, then turns `true`/`false` into a bool."""
-    if any(_is_reference(node) for _, node in _walk(mapping.get(key), key)):
-        raise SystemExit(refusal)
+    _refuse_reference(mapping, key, refusal)
     if mapping.get(key) in ("true", "false"):
         mapping[key] = mapping[key] == "true"
+
+
+def _refuse_reference(mapping, key, refusal):
+    """Raises `refusal` when a reference sits anywhere in `mapping[key]`."""
+    if any(_is_reference(node) for _, node in _walk(mapping.get(key), key)):
+        raise SystemExit(refusal)
 
 
 def _is_reference(value):
