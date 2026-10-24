@@ -19,6 +19,7 @@ SCRIPTS_EXPECTED = [
     "apply-snapshot",
     "authorize",
     "build-matrix",
+    "collapse-reply",
     "comment-parse",
     "deploy-detect",
     "dispatch-body",
