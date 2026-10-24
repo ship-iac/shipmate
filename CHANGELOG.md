@@ -12,6 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
+- **A branch behind its base plans only the stacks its own commits change, not stacks only the base changed.** Plan detect diffs from the merge base of the pull request's base and head. A stack both changed still plans against the base's applied state, so its plan shows the base's change reverted: update the branch from the base before applying it.
 - `repin` prints `pins updated <file>` and `pins unchanged <file>`, naming what each line measures, and only for a file holding an engine ref.
 
 ## [0.51.0] — 2026-10-21

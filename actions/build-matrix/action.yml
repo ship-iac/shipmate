@@ -3,8 +3,8 @@ description: Compute the changed stack x environment plan matrix (fails above 25
 inputs:
   base-sha:
     description: >-
-      Base commit to diff against for change detection (PR base SHA). A sweep leaves it
-      empty.
+      The pull request's base commit. Detect diffs from the merge base of it and the
+      checked-out head. A sweep leaves it empty.
     required: false
     default: ""
   sweep:
