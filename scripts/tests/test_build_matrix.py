@@ -2724,16 +2724,51 @@ def test_merge_base_refuses_a_head_with_no_common_history(git_repo):
 
 
 def test_merge_base_names_gits_error_for_a_base_missing_from_the_clone(git_repo):
-    """`git merge-base` exits 128 for an unknown object. Mutation: answer every failure with the
-    no-history refusal -- red."""
+    """`git merge-base` fails for an unknown object; git's own wording is not pinned. Mutation:
+    answer every failure with the no-history refusal -- red."""
     _commit({"s/stack.tm.hcl": _stack("[]")}, "head")
     base = "1" * 40
     with pytest.raises(SystemExit) as exc_info:
         bm.merge_base(base)
-    assert str(exc_info.value) == (
+    text = str(exc_info.value)
+    prefix = (
         f"::error::could not resolve the merge base of the pull request's base {base} and its "
-        f"head: fatal: Not a valid commit name {base}. Re-run the workflow; if it fails again, "
-        "the base commit is not reachable from this checkout."
+        "head: "
+    )
+    suffix = (
+        ". Re-run the workflow; if it fails again, the base commit is not reachable from this "
+        "checkout."
+    )
+    assert text.startswith(prefix)
+    assert text.endswith(suffix)
+    assert text[len(prefix) : -len(suffix)].strip()
+    assert "shares no history" not in text
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stderr", "cause"),
+    [
+        (128, "fatal: bad ref a%20b\nhint: try again\n", "fatal: bad ref a%20b | hint: try again"),
+        (128, "", "git merge-base exited 128 with no message"),
+        (-9, "\n", "git merge-base exited -9 with no message"),
+    ],
+    ids=["stderr", "empty-stderr", "signal"],
+)
+def test_merge_base_names_the_git_cause_raw_on_one_line(monkeypatch, returncode, stderr, cause):
+    """`run_annotated` escapes on print, so the refusal stays raw. Mutations: escape it with
+    `command_data` -- `stderr` red (`%2520`); join with a space -- `stderr` red; drop the
+    no-message fallback -- `empty-stderr` and `signal` red."""
+    monkeypatch.setattr(
+        bm.subprocess,
+        "run",
+        lambda args, **kw: subprocess.CompletedProcess(args, returncode, "", stderr),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        bm.merge_base("b" * 40)
+    assert str(exc_info.value) == (
+        f"::error::could not resolve the merge base of the pull request's base {'b' * 40} and "
+        f"its head: {cause}. Re-run the workflow; if it fails again, the base commit is not "
+        "reachable from this checkout."
     )
 
 
