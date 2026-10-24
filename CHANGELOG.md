@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.52.0] — 2026-10-24
 
+Tags `2ecf618`.
+
 ### Changed
 
 - **A dispatched `shipmate plan` or `shipmate apply` run collapses the started reply that links it as outdated once it posts its result.** The plan run collapses it after writing its gate, when its sticky comment was created or updated; the apply run after posting its result comment. A run that posts no result keeps the reply (`CONTRACT.md` §Comment-ops). A `shipmate plan` that plans no cell posts the `⚪ nothing planned` comment.
