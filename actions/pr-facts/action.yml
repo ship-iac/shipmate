@@ -22,7 +22,7 @@ outputs:
     description: '"true" when the pull request is a draft. Autoplan skips a draft; an explicitly requested plan does not. The summary job passes it to the gate, which a draft autoplan writes pending.'
     value: ${{ steps.facts.outputs.is_draft }}
   on-demand:
-    description: '"true" when a human named this plan (the workflow_dispatch leg), "false" for a pull-request event. It is what lets an explicit plan override the draft skip.'
+    description: '"true" when a human named this plan (the workflow_dispatch leg), "false" for a pull-request event. Read by the detect job, where "true" overrides the draft skip, and by the summary job, where "true" mirrors the run''s per-cell checks onto the head, lets gate-state tell a requested plan from a draft autoplan, posts the sticky comment (`⚪ nothing planned`) when no cell was planned, and collapses the started reply that links the run once the gate is written and the comment was created or updated.'
     value: ${{ steps.facts.outputs.on_demand }}
 runs:
   using: composite

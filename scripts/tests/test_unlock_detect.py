@@ -200,9 +200,10 @@ def test_unlock_refuses_a_queue_above_the_matrix_limit(monkeypatch, tmp_path):
     assert str(exc.value) == (
         "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. Split the "
         "change across several pull requests -- the matrix is built over `terramate list "
-        "--changed`. A one-line edit to a shared local module correctly marks every dependent "
-        "stack changed and is one atomic change by nature; there the only lever is to reduce "
-        "the number of environments in play."
+        "--changed`, on a plan from the merge base of the base and head, so only the pull "
+        "request's own commits count. A one-line edit to a shared local module correctly marks "
+        "every dependent stack changed and is one atomic change by nature; there the only lever "
+        "is to reduce the number of environments in play."
     )
 
 
