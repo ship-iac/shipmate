@@ -1112,6 +1112,7 @@ def test_the_upsert_step_maps_exactly_these_env_vars():
     assert step_by("summary", name="Upsert sticky comment")["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "PR": "${{ inputs.pr-number }}",
+        "ON_DEMAND": "${{ inputs.on-demand }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "MODE": "${{ steps.gate.outputs.comment_mode }}",
         "DOCTOR_WARNED": "${{ steps.doctor.outputs.warned }}",

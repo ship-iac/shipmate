@@ -1193,6 +1193,20 @@ started-run reply, a `⚪` notice:
   fails is a warning on the comment-handling run, not a failure, and the pull
   request gets nothing.
 
+The started run collapses this reply as outdated once it posts the verb's
+result: a plan run after it writes the gate, when it created or updated the
+sticky plan comment; an apply run once it posts its result comment.
+`scripts/collapse-reply` minimizes each `github-actions[bot]` comment holding a
+line equal to the verdict that links that run; a failed collapse is a warning on
+that run. A run that posts no result leaves the reply: an apply refused at
+review, an `unlock`, a run that ends or is cancelled before its result, a
+superseded plan, a plan whose comment was not written, and a plan whose
+apply-check publish or gate write fails (for example a newer run's hold refuses
+it once the head moved). A reply with no run link is never collapsed. A result
+posted before the reply exists leaves the reply too: nothing matches yet, and
+the reply is posted one API round trip after the dispatch answers, while the
+result needs at least three sequential jobs.
+
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
 header `### shipmate <verb>` (with `<env>` when the command named one, and
@@ -1214,10 +1228,13 @@ dispatch, an errored read or decision of the commenter's permission), and
 `scripts/reply-comment` renders and posts all of them.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
-exactly what a push-triggered plan authors and nothing more: the sticky plan
-comment, the per-cell plan checks, the plan artifacts an apply consumes, and
-`shipmate / gate` (§Plan comment; a dispatched run's cell checks reach the pull
-request head as App-authored mirrors, described with the App identities below).
+what a push-triggered plan authors: the sticky plan comment, the per-cell plan
+checks, the plan artifacts an apply consumes, and `shipmate / gate` (§Plan
+comment; a dispatched run's cell checks reach the pull request head as
+App-authored mirrors, described with the App identities below). It differs in
+two ways: a run that plans no cell still posts the `⚪ nothing planned`
+comment, and once its comment and its gate are written it collapses the started
+reply that links it (above).
 It takes no arguments — there is one plan of record per head commit, and a
 run holding a single environment's artifacts would leave every other
 environment's workset empty at the next apply, so an env alongside it is
@@ -1671,6 +1688,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
   every comment-ops apply run (targeted and bare); unlike the sticky plan
   comment it is never upserted against a marker, so a failure-then-retry
   sequence stays visible across separate comments — an audit trail.
+- **The collapsed started reply** — the reply itself is authored by
+  `github-actions[bot]`; `actions/summary` and `actions/apply-summary` minimize
+  it as outdated (GraphQL `minimizeComment`) through `scripts/collapse-reply`,
+  under the App token they already mint with `pull_requests: write`
+  (§Comment-ops).
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
   artifact. A separate `issues` job, bound to `shipmate-engine`, calls
@@ -2253,23 +2275,27 @@ reads no head. A failed read warns and writes nothing for the held body, and
 fails the job ("could not read the head of pull request #<n>") before any apply
 check or gate is written for the plan body.
 
-Where the zero *does* mean no stacks changed, the suppression is create-only:
-an existing comment is always updated to the no-changes body, because a pull
+Where the zero *does* mean no stacks changed, the suppression is create-only: an
+existing comment is always updated to the no-changes body, because a pull
 request that planned changes and then pushed them away must not keep displaying
 applies that no longer exist. With no comment yet, none is posted — a docs-only
-or engine-pin-bump pull request carries no shipmate comment — with two
+or engine-pin-bump pull request carries no shipmate comment — with four
 exceptions. A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
-(see §Comment-ops), and this comment's doctor line links that run from the
-pull request. `::notice::`
-findings do not trigger the exception: they are informational, and would put a
-comment on every quiet run. Nor do warnings from the repository-settings probes
-(the gate ruleset, the review rule and `CODEOWNERS`): they hold until an admin
-changes the settings, so they would put a comment on every quiet pull request.
-`shipmate doctor` and the run page still report them. A run whose comment
-carries the unmanaged line also posts: a pull request that changes only stacks
-with no `env/*` tag plans nothing, and the comment is where it says so. When
-the line is left out for size (below), this exception does not apply.
+(see §Comment-ops), and this comment's doctor line links that run from the pull
+request. `::notice::` findings do not trigger the exception: they are
+informational, and would put a comment on every quiet run. Nor do warnings from
+the repository-settings probes (the gate ruleset, the review rule and
+`CODEOWNERS`): they hold until an admin changes the settings, so they would put
+a comment on every quiet pull request. `shipmate doctor` and the run page still
+report them. A run whose comment carries the unmanaged line also posts: a pull
+request that changes only stacks with no `env/*` tag plans nothing, and the
+comment is where it says so. When the line is left out for size (below), this
+exception does not apply. A run whose comment carries the lost pairs line also
+posts: a pull request that removes one `env/*` tag from a stack that keeps
+another drops that stack / environment pair, and the comment is where it says
+so; the same size rule applies. A run a `shipmate plan` command started also
+posts: the comment is that command's answer on the pull request (§Comment-ops).
 
 An existing comment is edited in place on every plan run but a draft autoplan, a
 cancelled plan job and a run whose pull request moved to a newer head (comment
@@ -2317,8 +2343,9 @@ writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
 
-- **Verdict line.** `⚪ nothing planned` when the run planned no cell,
-  `🟢 no changes` when no cell changes, else `🟡 N of M cells change`, then
+- **Verdict line.** `⚪ nothing planned` when the run planned no cell (an
+  autoplan posts it only under the exceptions above, a `shipmate plan` command
+  always), `🟢 no changes` when no cell changes, else `🟡 N of M cells change`, then
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)`. `<sha7>` is the first
   seven characters of the planned head commit and `<commit url>` is
   `<server>/<owner>/<repo>/commit/<sha>`; `<n>` is the run number and

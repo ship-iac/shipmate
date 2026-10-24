@@ -250,6 +250,7 @@ def _run(
         "DOCTOR_WARNED": "false",
         "UNMANAGED": "false",
         "LOST": "false",
+        "ON_DEMAND": "false",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_RUN_ID": RUN_ID,
@@ -543,6 +544,11 @@ LATER_STEP_IFS = {
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_SUPERSEDED,
     GATE: NOT_SUPERSEDED,
+    "Collapse the started reply": (
+        "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true'"
+        " && (steps.upsert.outputs.result == 'created'"
+        " || steps.upsert.outputs.result == 'updated') }}"
+    ),
 }
 
 

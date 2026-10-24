@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
+description: Render the apply result comment, post it to the pull request, and collapse the started reply that links this run. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -178,3 +178,15 @@ runs:
         # search for or PATCH an existing one.
         [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::pr-number must be numeric (got: $PR_NUMBER)"; exit 1; }
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md >/dev/null
+
+    - name: Collapse the started reply
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: apply
+      run: |
+        set -euo pipefail
+        # Reviewer-facing only, and after the result post: a failure or a hang degrades to a
+        # warning and the job's result stays the post's.
+        timeout 120 python3 "$GITHUB_ACTION_PATH/../../scripts/collapse-reply" || echo "::warning::the started reply was not collapsed (exit $?); the result comment is posted"

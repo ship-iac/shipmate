@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- A dispatched `shipmate plan` or `shipmate apply` run collapses its started reply as outdated once it posts its result. A `shipmate plan` that plans no cell posts the `⚪ nothing planned` comment.
+
 ### Fixed
 
 - **A branch behind its base plans only the stacks its own commits change, not stacks only the base changed.** Plan detect diffs from the merge base of the pull request's base and head. A stack both changed still plans against the base's applied state, so its plan shows the base's change reverted: update the branch from the base before applying it.
