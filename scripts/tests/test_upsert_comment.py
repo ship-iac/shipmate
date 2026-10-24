@@ -398,7 +398,16 @@ _HELD_BODY = (
 
 
 def _run_summary(
-    tmp_path, mode, *, warned="false", unmanaged="false", lost="false", head=_SHA, env=None, **gh
+    tmp_path,
+    mode,
+    *,
+    warned="false",
+    unmanaged="false",
+    lost="false",
+    on_demand="false",
+    head=_SHA,
+    env=None,
+    **gh,
 ):
     """The summary action's upsert step under its own env names; return (process, gh calls).
     `env` adds to or, with None values, removes from the step's environment."""
@@ -413,7 +422,9 @@ def _run_summary(
         "DOCTOR_WARNED": warned,
         "UNMANAGED": unmanaged,
         "LOST": lost,
+        "ON_DEMAND": on_demand,
         "SHIPMATE_HOLD_REASON": "the reason",
+        "GITHUB_OUTPUT": str(tmp_path / "github_output"),
         "SHIPMATE_MISSING": "[]",
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_SERVER_URL": "https://gh",
@@ -460,14 +471,19 @@ def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
 
 @bash_only
 @pytest.mark.parametrize(
-    ("listing", "write"),
-    [("", _post_of("held.md")), (_head(5, SUMMARY), _patch_of("held.md"))],
+    ("listing", "write", "result"),
+    [
+        ("", _post_of("held.md"), "created"),
+        (_head(5, SUMMARY), _patch_of("held.md"), "updated"),
+    ],
     ids=["no-comment", "existing"],
 )
-def test_summary_held_writes_the_held_body(tmp_path, listing, write):
-    """A held gate creates the comment when there is none and replaces the existing one.
+def test_summary_held_writes_the_held_body(tmp_path, listing, write, result):
+    """A held gate creates the comment when there is none and replaces the existing one, and
+    writes upsert-comment's word as output `result` for the collapse step.
     Mutations: pass `--update-only` on the held write -- `no-comment` writes nothing; render
-    without `SHIPMATE_COMMENT_MODE=held` -- no held body, and no write."""
+    without `SHIPMATE_COMMENT_MODE=held` -- no held body, and no write; drop the held branch's
+    `result=` line -- no output."""
     proc, calls = _run_summary(tmp_path, "held", listing=listing + "\n")
     assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
         0,
@@ -476,6 +492,7 @@ def test_summary_held_writes_the_held_body(tmp_path, listing, write):
         [_LIST, _PULLS, write],
     )
     assert (tmp_path / "held.md").read_text(encoding="utf-8") == _HELD_BODY
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == f"result={result}\n"
 
 
 @bash_only
@@ -563,65 +580,57 @@ def test_summary_post_head_read_failure_fails_the_step(tmp_path, mode):
     )
 
 
+_POSTS = [_LIST, _PULLS, _post_of("comment.md")]
+
+
 @bash_only
 @pytest.mark.parametrize(
-    ("mode", "warned", "unmanaged", "lost", "listing", "expected", "stdout"),
+    ("mode", "warned", "unmanaged", "lost", "on_demand", "listing", "expected", "result"),
     [
-        ("nothing-changed", "false", "false", "false", "", [_LIST], _SUMMARY_SKIPPED),
-        ("post", "false", "false", "false", "", [_LIST, _PULLS, _post_of("comment.md")], ""),
-        (
-            "nothing-changed",
-            "true",
-            "false",
-            "false",
-            "",
-            [_LIST, _PULLS, _post_of("comment.md")],
-            "",
-        ),
+        ("nothing-changed", "false", "false", "false", "false", "", [_LIST], "skipped"),
+        ("post", "false", "false", "false", "false", "", _POSTS, "created"),
+        ("nothing-changed", "true", "false", "false", "false", "", _POSTS, "created"),
+        ("nothing-changed", "false", "true", "false", "false", "", _POSTS, "created"),
+        ("nothing-changed", "false", "false", "true", "false", "", _POSTS, "created"),
+        ("nothing-changed", "false", "false", "false", "true", "", _POSTS, "created"),
         (
             "nothing-changed",
             "false",
-            "true",
-            "false",
-            "",
-            [_LIST, _PULLS, _post_of("comment.md")],
-            "",
-        ),
-        (
-            "nothing-changed",
-            "false",
-            "false",
-            "true",
-            "",
-            [_LIST, _PULLS, _post_of("comment.md")],
-            "",
-        ),
-        (
-            "nothing-changed",
             "false",
             "false",
             "false",
             _head(5, SUMMARY),
             [_LIST, _PULLS, _patch_of("comment.md")],
-            "",
+            "updated",
         ),
     ],
-    ids=["quiet", "ordinary", "doctor-warned", "unmanaged", "lost", "quiet-existing"],
+    ids=["quiet", "ordinary", "doctor-warned", "unmanaged", "lost", "on-demand", "quiet-existing"],
 )
 def test_summary_posts_unless_quiet_and_keeps_an_existing_comment_current(
-    tmp_path, mode, warned, unmanaged, lost, listing, expected, stdout
+    tmp_path, mode, warned, unmanaged, lost, on_demand, listing, expected, result
 ):
-    """Nothing changed, no doctor warning, no unmanaged line and no lost pairs line: update only.
+    """Nothing changed, no doctor warning, no unmanaged line, no lost pairs line and no
+    `shipmate plan` command: update only. upsert-comment's word is output `result`, which the
+    collapse step reads.
 
     A quiet run with no comment reads no head (`quiet`).
     Mutations: delete the `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED`
-    clause (unmanaged red); delete the `LOST` clause (lost red); delete the `nothing-changed`
-    clause (ordinary red).
+    clause (unmanaged red); delete the `LOST` clause (lost red); delete the `ON_DEMAND` clause
+    (on-demand red); delete the `nothing-changed` clause (ordinary red); drop the posted
+    branch's `result=` line (every case red).
     """
     proc, calls = _run_summary(
-        tmp_path, mode, warned=warned, unmanaged=unmanaged, lost=lost, listing=listing + "\n"
+        tmp_path,
+        mode,
+        warned=warned,
+        unmanaged=unmanaged,
+        lost=lost,
+        on_demand=on_demand,
+        listing=listing + "\n",
     )
+    stdout = _SUMMARY_SKIPPED if result == "skipped" else ""
     assert (proc.returncode, proc.stdout, calls) == (0, stdout, expected), proc.stderr
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == f"result={result}\n"
 
 
 @bash_only

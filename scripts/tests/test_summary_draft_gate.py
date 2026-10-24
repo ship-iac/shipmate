@@ -270,6 +270,8 @@ def _run_upsert(tmp_path, mode):
             "MODE": mode,
             "DOCTOR_WARNED": "false",
             "UNMANAGED": "false",
+            "ON_DEMAND": "false",
+            "GITHUB_OUTPUT": str(tmp_path / "github_output"),
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         },

@@ -207,6 +207,7 @@ EXPECTED_STEP_NAMES = [
     "Upsert sticky comment",
     "Create apply checks (pending / no-changes)",
     "Create/refresh gate",
+    "Collapse the started reply",
 ]
 
 
