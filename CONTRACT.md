@@ -1778,6 +1778,9 @@ environment's locks (a `release`, every environment's) with
 `` the cell lock ref <ref> targets a <type>, not a commit; someone with write
 access must delete it: git push origin :<ref> ``, because no conditional delete
 can remove it. No workflow run fires on a lock ref's creation or deletion.
+Every read lists its refs in one unpaginated `matching-refs` call, observed
+complete at 120 refs; a repository holding more locks than one listing returns
+is unprobed.
 
 Every delete is GraphQL `updateRefs` conditional on the commit the deleter read,
 so two releasers cannot delete a lock taken after the one they read. That
@@ -1801,9 +1804,9 @@ not this deleter's lock, and done; still on the same commit refuses.
 the ref is read rather than the status parsed: this run's commit is acquired,
 this pull request's earlier commit is re-entered, and another pull request's
 commit, an unknown holder's or an absent ref refuses. A refusal deletes the
-locks this run created and keeps those it re-entered. After every ref is
-installed, `lock` reads the pull request's state and newest close event and
-refuses, deleting every lock it installed, unless the pull request is open and
+locks this run created and puts those it re-entered through the close check
+below, deleting them unless it passes. After every ref is installed, `lock`
+reads the pull request's state and newest close event and refuses, deleting every lock it installed, unless the pull request is open and
 that close (if any) is older than every installed lock's commit. A commit
 created before a close and installed after a reopen therefore refuses.
 

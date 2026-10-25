@@ -1131,8 +1131,9 @@ engine `release.yml` binds `shipmate-engine` and mints a `contents: write`
 token. Three things bound it: the job checks nothing out, so it runs only engine
 code; every value it reads is the event payload GitHub writes (the pull
 request's number, head SHA, `merged` and `closed_at`), none of which the fork
-authors; and it deletes only cell locks held by that pull request's number,
-which a fork never holds: `shipmate apply` refuses a head branch outside this
+can use to steer what is deleted, because the head SHA is read only on the
+merged path, which a maintainer controls; and it deletes only cell locks held
+by that pull request's number, which a fork never holds: `shipmate apply` refuses a head branch outside this
 repository (the same-repository apply requirement, `CONTRACT.md`
 §Comment-ops), so no `lock` job ever runs for a fork.
 

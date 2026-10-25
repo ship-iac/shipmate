@@ -841,8 +841,9 @@ nothing.
   against.
 - Or comment `shipmate unlock <env> --evict` on this pull request, with write
   access. It releases the locks other pull requests hold on this pull request's
-  cells in `<env>` and comments on #<n> naming who released them. #<n> takes the
-  lock again with its next apply.
+  cells in `<env>` and comments on #<n> naming who released them. #<n>'s next
+  apply locks again only the cells still pending on #<n>; a cell #<n> already
+  applied is not locked again.
 - After the `lock` job form, comment `shipmate apply` again: the new run leaves
   the locked cell pending and applies the rest.
 
