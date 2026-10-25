@@ -414,7 +414,8 @@ def bare_main():
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(targeted + held)
-    # Only the envs that can apply this run: a lock elsewhere is not this run's to report.
+    # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
+    # waiting cell's remedy names it.
     locked = locked_cells(repo, [c for c in pending if c["environment"] not in stopped], pr_number)
     skipped, run, waiting = settle(
         order,
