@@ -1823,6 +1823,12 @@ cells. Commenting `shipmate apply` again, or "Re-run all jobs", recomputes: its
 `detect` leaves that cell pending and the rest apply. "Re-run failed jobs" does
 not re-run `detect`, so its `lock` refuses again.
 
+**Limit: every env-level is locked up front.** `lock` acquires the cells of
+every env-level before `L0` starts. When an earlier level fails, the later
+levels are skipped, and their cells stay locked to this pull request until it
+merges or closes, or another pull request evicts them with
+`shipmate unlock <env> --evict`.
+
 **Re-running a failed wave.** "Re-run failed jobs" re-runs the failed wave jobs
 and neither `detect` nor `lock`. So every pre-merge apply cell first reads its
 own lock, read-only, and refuses before downloading its plan unless the pull
