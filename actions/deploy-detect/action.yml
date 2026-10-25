@@ -41,6 +41,9 @@ outputs:
   head_sha:
     description: PR head SHA for the merged commit.
     value: "${{ steps.detect.outputs.head_sha }}"
+  pr_number:
+    description: Number of the pull request the commit merged; empty for a push that merged none.
+    value: "${{ steps.detect.outputs.pr_number }}"
 runs:
   using: composite
   steps:

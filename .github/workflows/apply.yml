@@ -124,6 +124,7 @@ jobs:
       applied_exempt_envs: ${{ steps.d.outputs.applied_exempt_envs }}
       review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
       waiting_cells: ${{ steps.d.outputs.waiting_cells }}
+      locked_cells: ${{ steps.d.outputs.locked_cells }}
       env_order: ${{ steps.d.outputs.env_order }}
       refusal: ${{ steps.d.outputs.refusal }}
     steps:
@@ -143,6 +144,30 @@ jobs:
           review-decision: ${{ needs.review.outputs.decision }}
           github-vars: ${{ toJSON(vars) }}
 
+  # Holds every cell the waves apply before the first one starts. A cell another pull request
+  # took after `detect` read the locks refuses the whole run here. A new `shipmate apply` or
+  # "Re-run all jobs" recomputes; "Re-run failed jobs" does not re-run `detect`.
+  lock:
+    needs: [guard, review, detect]
+    if: ${{ !failure() && !cancelled() }}
+    # Its API calls grow with the cell count; an `ubuntu-slim` job stops at 15 minutes.
+    runs-on: ${{ inputs.runs_on }}
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    outputs:
+      refusal: ${{ steps.l.outputs.refusal }}
+    steps:
+      - id: l
+        uses: $/actions/lock-acquire
+        with:
+          envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
+          envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
+          envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
+          envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
   envlevel0:
     # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name
     # is load-bearing: renaming it strands apply checks pending. deploy.yml repeats it.
@@ -150,7 +175,7 @@ jobs:
     # `guard` and `review` are listed so their failures reach `!failure()`: otherwise a failed one
     # skips `detect`, whose outputs then read as '' -- which `!= 'true'` fans out on, over
     # `fromJSON('')`.
-    needs: [guard, review, detect]
+    needs: [guard, review, detect, lock]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
     permissions: &envlevel-permissions { contents: read, checks: read, actions: read, id-token: write }
@@ -158,6 +183,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -171,7 +197,7 @@ jobs:
 
   envlevel1:
     name: L1
-    needs: [guard, review, detect, envlevel0]
+    needs: [guard, review, detect, lock, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
     permissions: *envlevel-permissions
@@ -179,11 +205,12 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     secrets: *envlevel-secrets
 
   envlevel2:
     name: L2
-    needs: [guard, review, detect, envlevel0, envlevel1]
+    needs: [guard, review, detect, lock, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
     permissions: *envlevel-permissions
@@ -191,11 +218,12 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     secrets: *envlevel-secrets
 
   envlevel3:
     name: L3
-    needs: [guard, review, detect, envlevel0, envlevel1, envlevel2]
+    needs: [guard, review, detect, lock, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
     permissions: *envlevel-permissions
@@ -203,10 +231,11 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     secrets: *envlevel-secrets
 
   summary:
-    needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
+    needs: [guard, review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3]
     # A rejected dispatch or an unbound `pr_number`/`ref` gets a red run, no App comment, no gate
     # write. Keyed on `review`, not `detect`: a `detect` failure after a bound review still gets
     # both, as a failed or cancelled apply does.
@@ -249,7 +278,9 @@ jobs:
           applied-exempt-envs: ${{ needs.detect.outputs.applied_exempt_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
+          locked-cells: ${{ needs.detect.outputs.locked_cells }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
+          lock-refusal: ${{ needs.lock.outputs.refusal }}
           env-order: ${{ needs.detect.outputs.env_order }}
           results: ${{ join(needs.*.result, ',') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

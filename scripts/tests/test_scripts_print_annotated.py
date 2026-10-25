@@ -19,6 +19,7 @@ SCRIPTS_EXPECTED = [
     "apply-snapshot",
     "authorize",
     "build-matrix",
+    "cell-lock",
     "collapse-reply",
     "comment-parse",
     "deploy-detect",
@@ -28,6 +29,7 @@ SCRIPTS_EXPECTED = [
     "drift-issues",
     "env-config",
     "env-inject",
+    "evict-reply",
     "gate-config",
     "gate-state",
     "gate-status",
@@ -58,6 +60,7 @@ MAIN_BLOCK = "if __name__ == '__main__':\n    run_annotated(main)"
 BLOCKS = {
     "apply-detect": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "build-matrix": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
+    "cell-lock": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "gate-status": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "hcl-check": (
         "if __name__ == '__main__':\n"

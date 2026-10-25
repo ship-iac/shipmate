@@ -267,24 +267,28 @@ engine job but nine:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
-- `apply.yml` and `deploy.yml`: `detect`, and the apply cells in
-  `apply-env-level.yml`, to which both pass `runs_on`.
+- `apply.yml` and `deploy.yml`: `detect`, the apply cells in
+  `apply-env-level.yml`, to which both pass `runs_on`, and `lock` in
+  `apply.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
+- `release.yml`: `release`.
 
 The input does not reach nine jobs, which run on `ubuntu-slim` and run neither
 `tofu` nor `terramate`: `facts` and `gate-hold` in `plan.yml`; `guard`,
 `review` and `summary` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`
 and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
 
-`issues` in `drift.yml` runs neither tool too, yet stays on the `runs_on`
-runner because an `ubuntu-slim` job stops at 15 minutes and the work of
-`issues` is not fixed: it grows with the sweep's drifted cells and with the
-repository's open drift Issues.
+`issues` in `drift.yml`, `lock` in `apply.yml` and `release` in `release.yml`
+run neither tool too, yet stay on the `runs_on` runner because an `ubuntu-slim`
+job stops at 15 minutes and their work is not fixed: that of `issues` grows with
+the sweep's drifted cells and with the repository's open drift Issues, that of
+`lock` with the cells the apply runs, and that of `release` with the cells the
+pull request holds locked.
 
 The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
 workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on
-the `plan` job, and the other four jobs repeat it with `runs_on: *runner`. A
+the `plan` job, and the other five jobs repeat it with `runs_on: *runner`. A
 YAML anchor cannot cross files, so the drift fence writes the label on its
 `drift` job. To choose x64, set the anchor and each drift file's `runs_on:` to
 `ubuntu-latest`; for a self-hosted runner, set them to its label. A label the

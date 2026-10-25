@@ -76,8 +76,8 @@ trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
 uses lives in that one file, except each drift file's own `schedule` and
 `workflow_dispatch`, so what separates `shipmate.yml`'s jobs is not which file
 holds which trigger but each job's `if:` — a `pull_request_target`
-event selects the `plan` job and no other. doctor's `shipmate.yml` probe
-compares all five of those expressions, whole, against the fence `getting-started.md` publishes. See
+event selects the `plan` job, or on `closed` the `release` job, and no other. doctor's
+`shipmate.yml` probe compares all six of those expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 
 ## Checklist
@@ -102,7 +102,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 | 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate-config.yml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `identities.<name>` retargets every environment carrying `identity: <name>`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate-config.yml` (`branch-protection.md`) |
-| 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
+| 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` and `release`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 | 21 | Row 4's `pull_request` rule targets every branch a pull request may use as a base (for example `~ALL`) | Branch ruleset | An unreviewed apply: a pull request into a branch no review rule covers has no review decision, which the apply path reads as no review required |
 
@@ -830,6 +830,15 @@ trust to all of them.
   `docs/github-app.md` §7. Anyone who had push access could have copied the
   PEM out of a workflow run, and revoking their access does not invalidate it.
 
+**The App holds `contents: write`, for the cell locks.** A key holder can
+therefore mint a token that writes any ref the repository's rulesets leave
+open: that is the scope GitHub documents for `contents: write`, not something
+probed here. Two limits were probed on 2026-10-24: such a token cannot add a file under
+`.github/workflows` (403) and cannot move the default branch under its ruleset
+(422). The engine requests `contents: write`
+only in the jobs that write a cell lock, all bound to `shipmate-engine`
+(`docs/github-app.md` §Reference).
+
 **The multi-repo cost, stated plainly.** GitHub has no org-level environment
 secrets — environments are per repository — so an organization whose IaC is
 split across N repositories places the key N times and rotates it N times. It
@@ -1115,6 +1124,18 @@ Both the fact and
 the comparison live in engine-owned, SHA-pinned YAML (`CONTRACT.md` §Post-plan
 topology), so a consumer supplies neither and can neither fail it closed nor
 loosen it.
+
+**The `release` job holds the key on a fork's close too.** The consumer's
+`release` job runs on `pull_request_target` `closed` with no fork clause, and
+engine `release.yml` binds `shipmate-engine` and mints a `contents: write`
+token. Three things bound it: the job checks nothing out, so it runs only engine
+code; every value it reads is the event payload GitHub writes (the pull
+request's number, head SHA, `merged` and `closed_at`), none of which the fork
+can use to steer what is deleted, because the head SHA is read only on the
+merged path, which a maintainer controls; and it deletes only cell locks held
+by that pull request's number, which a fork never holds: `shipmate apply` refuses a head branch outside this
+repository (the same-repository apply requirement, `CONTRACT.md`
+§Comment-ops), so no `lock` job ever runs for a fork.
 
 **`workflow_dispatch` keeps every fact out of a dispatcher's hands.** A commented
 `shipmate plan` `workflow_dispatch`es the same `shipmate.yml` the autoplan runs

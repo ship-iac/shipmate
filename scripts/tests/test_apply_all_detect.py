@@ -12,9 +12,11 @@ from _detect_fixtures import (
     check_run,
     forbid_shared_runner,
     foreign_message,
+    held,
     partial_message,
     run_graph_capture,
     spy_env_config,
+    stub_read_locks,
     stub_read_table,
     wave_cells,
 )
@@ -232,6 +234,8 @@ def _run_main(
     deps=None,
     dot=None,
     cells=1,
+    locks=None,
+    lock_reads=None,
 ):
     """main() with an empty SHIPMATE_ENV, which is bare_main(), over the head's apply checks,
     with everything the script reaches from GitHub or Terramate stubbed. Defaults to one
@@ -245,7 +249,8 @@ def _run_main(
     `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
     no edges, and `tags` the tag map, which defaults to no tags for each of them. `dot`,
-    run-graph text, keeps `run_graph_deps` real and answers its Terramate call instead."""
+    run-graph text, keeps `run_graph_deps` real and answers its Terramate call instead. `locks`
+    and `lock_reads` go to `stub_read_locks`."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -295,6 +300,7 @@ def _run_main(
         _membership_double(tree, tags or {p: [] for ps in tree.values() for p in ps}, membership),
     )
     stub_read_table(monkeypatch, (aad.bm.ec,), table, order, targeted, reads)
+    stub_read_locks(monkeypatch, aad.cl, locks, lock_reads)
     aad.main()
     return github_outputs(out)
 
@@ -927,7 +933,7 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
         (
             f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, "
             "0] "
-            "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 "
+            "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 locked=0 "
             "applied_exempt=[] "
             "review_decision='APPROVED'"
         )
@@ -1249,6 +1255,145 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
     assert json.loads(parsed["excluded_envs"]) == ["ex"]
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 envlevels=[0, 0, 0, 0] "
-        "excluded_targeted=['ex'] skipped_after_targeted=[] review_held=[] waiting=2 "
+        "excluded_targeted=['ex'] skipped_after_targeted=[] review_held=[] waiting=2 locked=0 "
         "applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
+
+
+#: `platform` runs after `dns` and `workers` stands alone, in dev-eu; prod-eu needs dev-eu.
+_LOCK_TREE = {"dev-eu": ["stacks/dns", "stacks/platform", "stacks/workers"], "prod-eu": ["box"]}
+
+
+def _locked(tmp_path, monkeypatch, locks, **kw):
+    kw.setdefault(
+        "checks", [_apply_check(s, e, cells=4) for e, ss in _LOCK_TREE.items() for s in ss]
+    )
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=[],
+        tree=_LOCK_TREE,
+        tags={s: [f"env/{e}"] for e, ss in _LOCK_TREE.items() for s in ss},
+        deps={
+            "stacks/dns": set(),
+            "stacks/platform": {"stacks/dns"},
+            "stacks/workers": set(),
+            "box": set(),
+        },
+        order={"prod-eu": ["dev-eu"]},
+        decision="APPROVED",
+        locks=locks,
+        **kw,
+    )
+
+
+def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
+    tmp_path, monkeypatch, capsys
+):
+    """PR 7 holds `dns/dev-eu`: it applies nowhere, `platform` waits on it, `workers` applies,
+    and prod-eu, which needs dev-eu, is skipped.
+
+    Mutation: drop the `locked` filter from `settle`'s `run` -- `dns` applies. Mutation:
+    write `locked_cells=[]` -- red. Mutation: print `0` for `locked=` -- red."""
+    parsed = _locked(tmp_path, monkeypatch, held(aad.cl, "stacks/dns", "dev-eu", 7))
+    assert _applied(parsed) == [("stacks/workers", "dev-eu")]
+    assert json.loads(parsed["locked_cells"]) == [
+        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
+    ]
+    assert json.loads(parsed["waiting_cells"]) == [
+        {
+            "stack": "stacks/platform",
+            "environment": "dev-eu",
+            "after_stack": "stacks/dns",
+            "after_environment": "dev-eu",
+        }
+    ]
+    assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+    assert (
+        f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
+        "excluded_targeted=[] skipped_after_targeted=['prod-eu'] review_held=[] waiting=1 "
+        "locked=1 applied_exempt=[] review_decision='APPROVED'"
+    ) in capsys.readouterr().out.splitlines()
+
+
+def test_main_skips_the_needs_successor_of_an_env_holding_a_locked_cell(tmp_path, monkeypatch):
+    """PR 7 holds `workers/dev-eu`, which nothing runs after, so no cell waits; dev-eu is still
+    not fully applying, so prod-eu, which needs it, is skipped.
+
+    Mutation: leave the locked cells' envs out of `settle`'s `unavailable` -- `box/prod-eu`
+    applies."""
+    parsed = _locked(tmp_path, monkeypatch, held(aad.cl, "stacks/workers", "dev-eu", 7))
+    assert _applied(parsed) == [("stacks/dns", "dev-eu"), ("stacks/platform", "dev-eu")]
+    assert json.loads(parsed["waiting_cells"]) == []
+    assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+
+
+def test_main_applies_a_cell_the_applying_pull_request_holds(tmp_path, monkeypatch):
+    """Mutation: pass `pr_number` to `cell_lock.foreign` unconverted -- `dns`
+    stays pending."""
+    lock = held(aad.cl, "stacks/dns", "dev-eu", int(PR_NUMBER))
+    parsed = _locked(tmp_path, monkeypatch, lock)
+    assert sorted(_applied(parsed)) == [
+        ("box", "prod-eu"),
+        ("stacks/dns", "dev-eu"),
+        ("stacks/platform", "dev-eu"),
+        ("stacks/workers", "dev-eu"),
+    ]
+    assert json.loads(parsed["locked_cells"]) == []
+
+
+def test_main_reads_the_locks_of_the_pending_cells_environments_only(tmp_path, monkeypatch):
+    """prod-eu's one check is done, so only dev-eu has a pending cell.
+
+    Mutation: read the locks of every environment in `stacks_by_env` -- prod-eu is read.
+    Mutation: pass `settle` no `locked` -- `dns` applies."""
+    reads = []
+    checks = [_apply_check(s, "dev-eu", cells=3) for s in _LOCK_TREE["dev-eu"]]
+    parsed = _locked(
+        tmp_path,
+        monkeypatch,
+        held(aad.cl, "stacks/dns", "dev-eu", 7),
+        checks=[*checks, check_run(name="apply / box / prod-eu")],
+        lock_reads=reads,
+    )
+    assert reads == [("o/r", {"dev-eu"})]
+    assert _applied(parsed) == [("stacks/workers", "dev-eu")]
+
+
+@pytest.mark.parametrize(
+    "stop",
+    [
+        pytest.param({"targeted": ["prod-eu"]}, id="targeted"),
+        pytest.param({"decision": "REVIEW_REQUIRED", "exempt": "dev-eu"}, id="review-held"),
+    ],
+)
+def test_main_reads_no_locks_in_an_env_that_does_not_apply(tmp_path, monkeypatch, stop):
+    """prod-eu is excluded as targeted, or held for review, so its locks are not this run's.
+
+    Mutation: read the locks of every pending cell's env in `bare_main` (prod-eu is read)."""
+    reads = []
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=[],
+        tree=_LOCK_TREE,
+        tags={s: [f"env/{e}"] for e, ss in _LOCK_TREE.items() for s in ss},
+        checks=[_apply_check(s, e, cells=4) for e, ss in _LOCK_TREE.items() for s in ss],
+        deps={s: set() for ss in _LOCK_TREE.values() for s in ss},
+        order={"prod-eu": ["dev-eu"]},
+        locks=held(aad.cl, "stacks/dns", "dev-eu", 7),
+        lock_reads=reads,
+        **{"decision": "APPROVED", **stop},
+    )
+    assert reads == [("o/r", {"dev-eu"})]
+    assert json.loads(parsed["locked_cells"]) == [
+        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
+    ]
+
+
+def test_main_refuses_a_bare_apply_whose_lock_read_fails(tmp_path, monkeypatch):
+    """Mutation: catch `SystemExit` around `read_locks` in `locked_cells` and read no locks -- the
+    run applies."""
+    with pytest.raises(SystemExit) as exc_info:
+        _locked(tmp_path, monkeypatch, SystemExit("::error::lock read failed"))
+    assert str(exc_info.value) == "::error::lock read failed"

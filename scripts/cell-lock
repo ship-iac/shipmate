@@ -1,0 +1,555 @@
+#!/usr/bin/env python3
+"""The cross-pull-request cell lock store: one git ref per locked cell.
+
+A cell `<stack>` in `<env>` is locked by the ref `refs/shipmate/locks/<env>/<cell_key(stack)>`,
+which targets a parentless commit whose message is one line of JSON,
+`{"pr": <int>, "env": <str>, "stack": <str>, "acquisition": "<run id>.<run attempt>"}`. Its
+committer date, stamped by the server, is the acquisition time. The ref name is the lock's
+identity: a message that is not exactly that record, or whose `env` and `stack` name another
+ref, reads as a lock of unknown holder, which only `evict` releases.
+
+Every delete and replace is GraphQL `updateRefs` conditional on the sha read (`beforeOid`), so
+two releasers cannot delete a lock taken after the one they read. `updateRefs` answers a stale
+sha, a missing ref and a server fault with the same untyped error, so each error re-reads the
+ref and decides from what is there.
+
+Subcommands, each reading the environment, printing `::notice::` lines and refusing with
+`::error::` (also written to the step output `refusal`):
+
+- `acquire`: locks every cell of `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES` for
+  pull request `SHIPMATE_PR_NUMBER`, then fences the acquisition against a close.
+- `release`: `SHIPMATE_MERGED` `true` deletes the pull request's locks except those whose apply
+  check is pending on `SHIPMATE_HEAD_SHA`; `false` deletes them all while the pull request is
+  closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again. Refuses,
+  after releasing the rest, naming each lock whose delete refused.
+- `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
+  on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes outputs `evicted` and
+  `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
+- `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
+  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds.
+- `verify`: read-only; refuses unless the pull request holds the lock on `STACK` in
+  `SHIPMATE_ENV`. A "Re-run failed jobs" of an apply re-runs its waves without `acquire`, so
+  each apply cell checks its lock here.
+"""
+
+import dataclasses
+import datetime
+import functools
+import hashlib
+import json
+import os
+import sys
+from collections.abc import Iterable
+
+from _shipmate import (
+    _load,
+    _run,
+    cell_names,
+    check_runs,
+    gh_json,
+    is_head_sha,
+    is_run_id,
+    run_annotated,
+    write_outputs,
+)
+
+ag = _load("apply-gate")
+ec = _load("env-config")
+
+LOCKS = "refs/shipmate/locks/"
+ZERO = "0" * 40
+_KEYS = {"pr", "env", "stack", "acquisition"}
+UPDATE_REFS = (
+    "mutation($repo: ID!, $name: GitRefname!, $before: GitObjectID!, $after: GitObjectID!, "
+    "$force: Boolean!) { updateRefs(input: {repositoryId: $repo, refUpdates: [{name: $name, "
+    "beforeOid: $before, afterOid: $after, force: $force}]}) { clientMutationId } }"
+)
+PR_STATE = (
+    "query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name) "
+    "{ pullRequest(number: $pr) { state headRefOid timelineItems(itemTypes: [CLOSED_EVENT], "
+    "last: 1) { nodes { ... on ClosedEvent { createdAt } } } } } }"
+)
+
+
+def cell_key(stack: str) -> str:
+    """The full lowercase hex SHA-256 of the UTF-8 stack path: one ref segment, so nested
+    stacks never meet git's directory/file conflict."""
+    return hashlib.sha256(stack.encode("utf-8")).hexdigest()
+
+
+def ref_name(env: str, stack: str) -> str:
+    return f"{LOCKS}{env}/{cell_key(stack)}"
+
+
+@dataclasses.dataclass(frozen=True)
+class Lock:
+    """A lock ref and its commit. `ref` is the identity; `pr`, `env`, `stack` and
+    `acquisition` are all None for an unknown holder."""
+
+    ref: str
+    sha: str
+    committed_at: str
+    pr: int | None
+    env: str | None
+    stack: str | None
+    acquisition: str | None
+
+
+def _record(ref, text):
+    """`(pr, env, stack, acquisition)` from a lock commit message, all None unless it is the
+    exact record of `ref`."""
+    try:
+        r = json.loads(text)
+    except ValueError:
+        return None, None, None, None
+    if not (
+        isinstance(r, dict)
+        and r.keys() == _KEYS
+        and type(r["pr"]) is int
+        and all(isinstance(r[k], str) for k in ("env", "stack", "acquisition"))
+        and ref_name(r["env"], r["stack"]) == ref
+    ):
+        return None, None, None, None
+    return r["pr"], r["env"], r["stack"], r["acquisition"]
+
+
+def _env(env):
+    if not ec.is_env_name(env):
+        raise SystemExit(f"::error::{env!r} is not an environment name ({ec.ENV_NAME_RULE})")
+    return env
+
+
+def _refs(repo, prefix, run):
+    """`{ref: sha}` of every ref starting `refs/<prefix>`. matching-refs answers an absent ref
+    with `[]`, so absence is data, not a status to parse. Refuses a ref that targets anything
+    but a commit: `updateRefs` cannot delete it, so no release or eviction can clear it."""
+    out = {}
+    for e in gh_json(f"repos/{repo}/git/matching-refs/{prefix}", run):
+        if e["object"]["type"] != "commit":
+            raise SystemExit(
+                f"::error::the cell lock ref {e['ref']} targets a {e['object']['type']}, not a "
+                f"commit; someone with write access must delete it: git push origin :{e['ref']}"
+            )
+        out[e["ref"]] = e["object"]["sha"]
+    return out
+
+
+def _ref_sha(repo, ref, run):
+    return _refs(repo, ref.removeprefix("refs/"), run).get(ref)
+
+
+def _lock(repo, ref, sha, run):
+    if not is_head_sha(sha):
+        raise SystemExit(f"::error::{ref} targets {sha!r}, not a commit sha")
+    commit = gh_json(f"repos/{repo}/git/commits/{sha}", run)
+    return Lock(ref, sha, commit["committer"]["date"], *_record(ref, commit["message"].strip()))
+
+
+def _scan(repo, prefix, run):
+    return {ref: _lock(repo, ref, sha, run) for ref, sha in _refs(repo, prefix, run).items()}
+
+
+def read_locks(repo: str, envs: Iterable[str], *, run=_run) -> dict[str, Lock]:
+    """Every lock in each of `envs`, keyed by ref name, unknown holders included."""
+    out = {}
+    for env in sorted(set(envs)):
+        out.update(_scan(repo, f"shipmate/locks/{_env(env)}/", run))
+    return out
+
+
+def foreign(locks, cells, pr: int) -> list[dict]:
+    """`{stack, environment, holder}` for each cell whose lock in `locks` another pull request
+    holds; `holder` is None for an unknown holder."""
+    out = []
+    for c in cells:
+        lock = locks.get(ref_name(c["environment"], c["stack"]))
+        if lock is not None and lock.pr != pr:
+            out.append({"stack": c["stack"], "environment": c["environment"], "holder": lock.pr})
+    return out
+
+
+@functools.cache
+def _repo_id(repo, run):
+    return run(["gh", "api", f"repos/{repo}", "--jq", ".node_id"]).strip()
+
+
+def _update(repo, ref, before, after, force, run):
+    """Whether `updateRefs` moved `ref` from `before` to `after`. `gh api graphql` exits
+    nonzero on a GraphQL error, so `run` raises for every refusal."""
+    node = _repo_id(repo, run)
+    try:
+        run(
+            ["gh", "api", "graphql", "-f", f"query={UPDATE_REFS}", "-f", f"repo={node}"]
+            + ["-f", f"name={ref}", "-f", f"before={before}", "-f", f"after={after}"]
+            + ["-F", f"force={'true' if force else 'false'}"]
+        )
+    except SystemExit:
+        return False
+    return True
+
+
+def _cell(lock):
+    return f"`{lock.env}` / `{lock.stack}`" if lock.pr is not None else lock.ref
+
+
+def delete(repo: str, lock: Lock, *, run=_run) -> bool:
+    """Delete `lock` if its ref still targets `lock.sha`. True when deleted, False when the
+    ref is absent or moved on (not ours); refuses when it still targets `lock.sha`."""
+    if _update(repo, lock.ref, lock.sha, ZERO, False, run):
+        return True
+    if _ref_sha(repo, lock.ref, run) == lock.sha:
+        raise SystemExit(
+            f"::error::could not release the cell lock {lock.ref} of {_cell(lock)}; it is "
+            f"still held at {lock.sha}"
+        )
+    return False
+
+
+def _rollback(repo, locks, reason, run):
+    """`reason`, after deleting each of `locks`, joined with any delete's own refusal."""
+    reasons = [reason]
+    for lock in locks:
+        try:
+            delete(repo, lock, run=run)
+        except SystemExit as exc:
+            reasons.append(exc.code)
+    return "\n".join(map(str, reasons))
+
+
+def _install(repo, cell, pr, acquisition, tree, run):
+    """`(lock, created)` for `cell`: its lock now on this run's new commit, `created` False
+    when it replaced our own pull request's earlier lock. Refuses any other holder."""
+    env, stack = cell["environment"], cell["stack"]
+    ref, where = ref_name(env, stack), f"`{env}` / `{stack}`"
+    msg = json.dumps({"pr": pr, "env": env, "stack": stack, "acquisition": acquisition})
+    new = json.loads(
+        run(
+            ["gh", "api", "-X", "POST", f"repos/{repo}/git/commits", "-f", f"message={msg}"]
+            + ["-f", f"tree={tree}"]
+        )
+    )
+    mine = Lock(ref, new["sha"], new["committer"]["date"], pr, env, stack, acquisition)
+    try:
+        run(
+            [
+                "gh",
+                "api",
+                "-X",
+                "POST",
+                f"repos/{repo}/git/refs",
+                "-f",
+                f"ref={ref}",
+                "-f",
+                f"sha={mine.sha}",
+            ]
+        )
+        return mine, True
+    except SystemExit:
+        pass
+    # A failed create is classified by what the ref holds, never by its status.
+    sha = _ref_sha(repo, ref, run)
+    if sha == mine.sha:
+        return mine, True
+    if sha is None:
+        raise SystemExit(
+            f"::error::could not lock {where}: creating {ref} failed and the ref is absent"
+        )
+    held = _lock(repo, ref, sha, run)
+    if held.pr is None:
+        raise SystemExit(
+            f"::error::{where} is locked by an unknown holder ({ref}); comment "
+            f"`shipmate unlock {env} --evict` to release it"
+        )
+    if held.pr != pr:
+        raise SystemExit(
+            f"::error::{where} is locked by #{held.pr}; wait for #{held.pr} to merge or close, "
+            f"then re-plan, or comment `shipmate unlock {env} --evict`"
+        )
+    if _update(repo, ref, sha, mine.sha, True, run) or _ref_sha(repo, ref, run) == mine.sha:
+        return mine, False
+    raise SystemExit(f"::error::could not re-enter the lock on {where}: replacing {ref} failed")
+
+
+def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
+    """Lock every cell for `pr`, re-entering locks `pr` already holds, then pass every lock
+    installed through `fence_open`. Returns every lock installed. A refusal first deletes the
+    locks this call created, then fences those it replaced: a lock re-entered after a close
+    would otherwise outlive the close's release."""
+    todo = {ref_name(_env(c["environment"]), c["stack"]): c for c in cells}
+    if not todo:
+        return []
+    installed, created = [], []
+    try:
+        tree = json.loads(
+            run(
+                ["gh", "api", "-X", "POST", f"repos/{repo}/git/trees", "-f", "tree[][path]=lock"]
+                + ["-f", "tree[][mode]=100644", "-f", "tree[][type]=blob"]
+                + ["-f", f"tree[][content]={acquisition}"]
+            )
+        )["sha"]
+        for cell in todo.values():
+            lock, new = _install(repo, cell, pr, acquisition, tree, run)
+            installed.append(lock)
+            if new:
+                created.append(lock)
+    except SystemExit as exc:
+        reason = exc.code
+    except (LookupError, TypeError, ValueError) as exc:
+        reason = f"::error::could not lock the cells: an API response was malformed ({exc!r})"
+    else:
+        fence_open(repo, pr, installed, created, run=run)
+        return installed
+    reason = _rollback(repo, created, reason, run)
+    try:
+        fence_open(repo, pr, [lock for lock in installed if lock not in created], [], run=run)
+    except SystemExit as fenced:
+        reason = f"{reason}\n{fenced.code}"
+    raise SystemExit(reason)
+
+
+def _when(stamp):
+    """`stamp` as an aware datetime; a stamp with no offset raises ValueError."""
+    when = datetime.datetime.fromisoformat(stamp)
+    if when.tzinfo is None:
+        raise ValueError(f"{stamp!r} has no UTC offset")
+    return when
+
+
+def _pr_state(repo, pr, run):
+    """`(state, close times, head)` of `pr`: `OPEN`, `CLOSED` or `MERGED`, the time of its
+    newest close, if any, and its head commit (the one it merged at, once merged). Refuses when
+    the read fails or its answer is malformed."""
+    owner, name = repo.split("/", 1)
+    try:
+        pull = json.loads(
+            run(
+                ["gh", "api", "graphql", "-f", f"query={PR_STATE}", "-f", f"owner={owner}"]
+                + ["-f", f"name={name}", "-F", f"pr={pr}", "--jq", ".data.repository.pullRequest"]
+            )
+        )
+        closes = [_when(n["createdAt"]) for n in pull["timelineItems"]["nodes"]]
+        if pull["state"] in ("OPEN", "CLOSED", "MERGED"):
+            return pull["state"], closes, pull["headRefOid"]
+        why = f"state {pull['state']!r}"
+    except (SystemExit, LookupError, TypeError, ValueError) as exc:
+        why = str(exc)
+    raise SystemExit(f"::error::the state of pull request #{pr} could not be read ({why})")
+
+
+def fence_open(repo, pr: int, acquired: list[Lock], created: list[Lock], *, run=_run) -> None:
+    """Refuse unless `pr` is open and was last closed before each lock in `acquired` was
+    committed: a commit made before a close and installed after a reopen fails this. A
+    confirmed close deletes every lock in `acquired`. An unreadable state deletes only
+    `created`: deleting a re-entered lock on a guess frees a cell `pr` may still hold."""
+    if not acquired:
+        return
+    try:
+        state, closes, _ = _pr_state(repo, pr, run)
+    except SystemExit as exc:
+        reason = (
+            f"{exc.code}; the cell locks this run created are released and those it re-entered "
+            "are kept"
+        )
+        raise SystemExit(_rollback(repo, created, reason, run)) from None
+    if state == "OPEN" and all(c < _when(lock.committed_at) for c in closes for lock in acquired):
+        return
+    reason = (
+        f"::error::pull request #{pr} was closed while this run acquired its cell locks (state "
+        f"{state}, last closed {closes[-1].isoformat() if closes else 'never'}); the locks it "
+        "took are released"
+    )
+    raise SystemExit(_rollback(repo, acquired, reason, run))
+
+
+def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
+    """Delete `pr`'s locks in every environment. Returns (deleted locks, [(lock, refusal)] for
+    each delete refused), as `evict` does: a refusal does not stop the rest. Merged
+    (`pending`): keep a lock whose apply check name is in `pending`. Unmerged (`closed_at`):
+    read `pr`'s state after listing its locks; still closed, delete them all; merged since,
+    apply the merge rule to the pending checks of the head it merged at; open again, delete
+    only a lock committed at or before the close. An unreadable state refuses before any
+    delete. An unknown holder is never released here."""
+    if (pending is None) == (closed_at is None):
+        raise ValueError("pass exactly one of pending and closed_at")
+    mine = [lock for lock in _scan(repo, "shipmate/locks/", run).values() if lock.pr == pr]
+    state, _, head = _pr_state(repo, pr, run) if closed_at and mine else (None, None, None)
+    if state == "MERGED":
+        pending = pending_names(*_head_names(repo, run, head))
+    gone, refused = [], []
+    for lock in mine:
+        if pending is not None:
+            keep = ag.check_name(lock.stack, lock.env) in pending
+        else:
+            keep = state == "OPEN" and _when(lock.committed_at) > _when(closed_at)
+        if keep:
+            continue
+        try:
+            if delete(repo, lock, run=run):
+                gone.append(lock)
+        except SystemExit as exc:
+            refused.append((lock, exc.code))
+    return gone, refused
+
+
+def evict(repo, env: str, pr: int, stacks: set[str], *, run=_run):
+    """Delete each lock in `env` on a stack in `stacks` held by anyone but `pr`, an unknown
+    holder included. Returns (deleted locks, [(lock, refusal)] for each delete refused): a
+    refusal does not stop the rest, so every lock deleted is reported and its holder told."""
+    wanted = {ref_name(env, s) for s in stacks}
+    gone, refused = [], []
+    for lock in read_locks(repo, [env], run=run).values():
+        if lock.ref not in wanted or lock.pr == pr:
+            continue
+        try:
+            if delete(repo, lock, run=run):
+                gone.append(lock)
+        except SystemExit as exc:
+            refused.append((lock, exc.code))
+    return gone, refused
+
+
+def evict_stacks(names, env):
+    """The stack of each apply check name in `env`: with the env known, stripping
+    `apply / ` and ` / <env>` inverts `apply-gate.check_name` exactly."""
+    suffix = f" / {env}"
+    return {
+        n.removeprefix(ag.APPLY_PREFIX).removesuffix(suffix)
+        for n in names
+        if n.startswith(ag.APPLY_PREFIX) and n.endswith(suffix)
+    }
+
+
+def pending_names(lines, app_id):
+    """The App's apply check names on a head whose newest run is not done."""
+    runs = ag.app_runs(lines, app_id)
+    return set(ag.latest_by_name(runs)) - ag.done_names(runs)
+
+
+def _wave_cells():
+    cells = []
+    for n in range(4):
+        name = f"SHIPMATE_ENVLEVEL{n}_WAVES"
+        try:
+            cells += [c for wave in json.loads(os.environ[name]).values() for c in wave]
+        except (KeyError, ValueError, AttributeError, TypeError):
+            raise SystemExit(f"::error::{name} must be a JSON map of waves") from None
+    checked = cell_names(json.dumps(cells))
+    if checked is None:
+        raise SystemExit("::error::every wave cell must be a {stack, environment} object")
+    return checked
+
+
+def _head_names(repo, run, sha=None):
+    sha = os.environ.get("SHIPMATE_HEAD_SHA", "") if sha is None else sha
+    lines = check_runs(repo, sha, run=run).splitlines()
+    return lines, os.environ.get("SHIPMATE_APP_ID", "")
+
+
+def _acquire_cmd(repo, pr, run):
+    ids = [os.environ.get(k, "") for k in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")]
+    if not all(map(is_run_id, ids)):
+        raise SystemExit(
+            f"::error::GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT must be decimal (got: {ids!r})"
+        )
+    acquisition = ".".join(ids)
+    locks = acquire(repo, _wave_cells(), pr, acquisition, run=run)
+    print(f"::notice::pull request #{pr} holds {len(locks)} cell lock(s)")
+
+
+def _release_cmd(repo, pr, run):
+    merged = os.environ.get("SHIPMATE_MERGED", "")
+    if merged == "true":
+        gone, refused = release(repo, pr, pending=pending_names(*_head_names(repo, run)), run=run)
+    elif merged == "false":
+        closed_at = os.environ.get("SHIPMATE_CLOSED_AT", "")
+        try:
+            _when(closed_at)
+        except ValueError:
+            raise SystemExit(
+                f"::error::SHIPMATE_CLOSED_AT must be an ISO-8601 time (got: {closed_at!r})"
+            ) from None
+        gone, refused = release(repo, pr, closed_at=closed_at, run=run)
+    else:
+        raise SystemExit(f"::error::SHIPMATE_MERGED must be true or false (got: {merged!r})")
+    print(f"::notice::released {len(gone)} cell lock(s) of pull request #{pr}")
+    if refused:
+        raise SystemExit("\n".join(code for _, code in refused))
+
+
+def _evict_cmd(repo, pr, run):
+    env = _env(os.environ.get("SHIPMATE_ENV", ""))
+    lines, app_id = _head_names(repo, run)
+    stacks = evict_stacks(ag.latest_by_name(ag.app_runs(lines, app_id)), env)
+    by_ref = {ref_name(env, s): s for s in stacks}
+    gone, refused = evict(repo, env, pr, stacks, run=run)
+
+    def cells(locks):
+        return json.dumps(
+            [{"stack": by_ref[g.ref], "environment": env, "holder": g.pr} for g in locks]
+        )
+
+    write_outputs(evicted=cells(gone), refused=cells(lock for lock, _ in refused))
+    print(f"::notice::evicted {len(gone)} cell lock(s) in {env}")
+    if refused:
+        raise SystemExit("\n".join(code for _, code in refused))
+
+
+def _marks_cmd(repo, pr, run):
+    cells = cell_names(os.environ.get("SHIPMATE_CELLS", ""))
+    if cells is None:
+        raise SystemExit(
+            "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
+        )
+    held = foreign(read_locks(repo, {c["environment"] for c in cells}, run=run), cells, pr)
+    write_outputs(
+        locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held})
+    )
+
+
+def _verify_cmd(repo, pr, run):
+    env, stack = _env(os.environ.get("SHIPMATE_ENV", "")), os.environ.get("STACK", "")
+    ref, where = ref_name(env, stack), f"`{env}` / `{stack}`"
+    try:
+        sha = _ref_sha(repo, ref, run)
+        held = None if sha is None else _lock(repo, ref, sha, run)
+    except SystemExit as exc:
+        why = (
+            exc.code.removeprefix("::error::")
+            if isinstance(exc.code, str)
+            else "the lock read failed"
+        )
+        raise SystemExit(f"::error::could not read the cell lock on {where} ({why})") from None
+    except (LookupError, TypeError, ValueError) as exc:
+        raise SystemExit(f"::error::could not read the cell lock on {where} ({exc!r})") from None
+    if held is not None and held.pr == pr:
+        return
+    holder = (
+        "the cell is not locked"
+        if held is None
+        else f"it is locked by {'an unknown holder' if held.pr is None else f'#{held.pr}'}"
+    )
+    raise SystemExit(
+        f"::error::apply aborted for {where}: pull request #{pr} no longer holds its cell lock "
+        f"({holder}); comment `shipmate apply` again to lock it or name its holder"
+    )
+
+
+COMMANDS = {
+    "acquire": _acquire_cmd,
+    "release": _release_cmd,
+    "evict": _evict_cmd,
+    "marks": _marks_cmd,
+    "verify": _verify_cmd,
+}
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
+        raise SystemExit(f"::error::usage: cell-lock {{{'|'.join(COMMANDS)}}}")
+    pr = int(ag.env_pr_number())
+    # `_run` is looked up per call, so a test that replaces the module's `_run` reaches it.
+    COMMANDS[sys.argv[1]](os.environ["GITHUB_REPOSITORY"], pr, _run)
+
+
+if __name__ == "__main__":
+    run_annotated(main, refusal_output=True)

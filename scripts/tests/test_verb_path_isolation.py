@@ -71,6 +71,7 @@ APPLY_JOBS = {
     "guard",
     "review",
     "detect",
+    "lock",
     "envlevel0",
     "envlevel1",
     "envlevel2",

@@ -371,11 +371,11 @@ writing `false` gives something up. `apply_mode` is the one enum.
 | `apply_mode: targeted` (`bare`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
 | `split: false` (`true`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
 | `needs: [<env>]` (none) | Its applies, until the earlier env-levels complete (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
-| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
+| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment, or after a cell another pull request locks, waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
 
-On a bare apply, an environment held for review, left out as `targeted`, or holding a
-waiting cell skips the environments ordered after it by `needs`, a review-exempt one
-included, and its cells that do not apply in the run make the cells ordered `after` them
+On a bare apply, an environment held for review, left out as `targeted`, holding a
+waiting cell, or holding a cell another pull request locks skips the environments
+ordered after it by `needs`, a review-exempt one included, and its cells that do not apply in the run make the cells ordered `after` them
 wait, which can skip more; §Env apply order computes the whole set.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,
@@ -390,16 +390,18 @@ environments without an approving review" has the `review` setup.
 A repository holds `shipmate.yml` and one drift file per sweep, from the two
 fences below. `scripts/onboard` writes `shipmate.yml`, pinned; you save each
 drift file yourself, under any name in `.github/workflows/`, and pin it.
-`shipmate.yml` is a shim: four triggers and five jobs, each job calling an
+`shipmate.yml` is a shim: four triggers and six jobs, each job calling an
 engine reusable workflow SHA-pinned. A drift file is one job calling engine
 `drift.yml` on its cron or a dispatch. The jobs behind those calls — `facts`, `detect`, `plan` and
 `summary` in engine `plan.yml`, and their equivalents on the other paths — live
 in the engine, so none of what they decide is wiring you can get
 wrong.
 
-`shipmate.yml` and every drift file go in at tier 1, and three kinds of job are
-this tier's: `plan`, `comment-ops` and each drift file's `drift`, which need
-`<env>-plan`, `shipmate-engine` and the App key and nothing else. `deploy` runs from the
+`shipmate.yml` and every drift file go in at tier 1, and four kinds of job are
+this tier's: `plan`, `release`, `comment-ops` and each drift file's `drift`,
+which need `<env>-plan`, `shipmate-engine` and the App key and nothing else
+(`release` needs no `<env>-plan`). `release` runs when a pull request closes,
+merged or not, and releases the cell locks its applies took. `deploy` runs from the
 start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
 `<env>`). The other two, `apply` and `unlock`, wait for the
@@ -424,7 +426,7 @@ that name is what makes the plan cells `plan / <env> / <stack>` and lets the
 plan comment's `plan` links resolve to them. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
 instead; `shipmate doctor` reports it. The other jobs display their verb:
-`comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
+`release`, `comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
 Renaming one of them changes
 only its own check-run names: no link resolves through them, and doctor does
 not check them.
@@ -433,7 +435,7 @@ not check them.
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
-the job name, dispatch wiring, event routing and a drift job, on it. A
+the job name, dispatch wiring, event routing, trigger types and a drift job, on it. A
 file under another name is reached by nothing. A drift file's name matters to
 nothing: nothing dispatches it, and doctor finds a drift file by its call of
 `drift.yml`.
@@ -442,7 +444,8 @@ Which trigger reaches which job, and which engine workflow it calls:
 
 | Trigger | Job | Engine reusable workflow |
 | --- | --- | --- |
-| `pull_request_target`, or `verb: plan` | `plan` | `plan.yml` |
+| `pull_request_target` other than `closed`, or `verb: plan` | `plan` | `plan.yml` |
+| `pull_request_target` `closed` | `release` | `release.yml` |
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` to the default branch | `deploy` | `deploy.yml` |
 | `verb: apply` | `apply` | `apply.yml` |
@@ -451,7 +454,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 Every job below passes a `runs_on:` input, which sets the runner of every
 engine job except nine that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
-`ubuntu-26.04-arm` by default, and the other four repeat it with `*runner`.
+`ubuntu-26.04-arm` by default, and the other five repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
 files. Set both to a label your account offers, such as `ubuntu-latest` for
 x64; one it does not leaves those jobs waiting for a runner that never
@@ -460,13 +463,15 @@ arrives. [`aws.md`](aws.md) §Runner choice lists the jobs on each runner.
 ```yaml
 name: shipmate
 run-name: >-
-  shipmate · ${{ github.event_name == 'pull_request_target' && 'plan'
+  shipmate · ${{ github.event_name == 'pull_request_target'
+  && github.event.action == 'closed' && 'release'
+  || github.event_name == 'pull_request_target' && 'plan'
   || github.event_name == 'issue_comment' && 'comment'
   || github.event_name == 'push' && 'deploy'
   || inputs.verb }}
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   issue_comment:
     types: [created]
   push:
@@ -502,7 +507,7 @@ jobs:
     # `github.event.inputs` reads under pull_request_target too, and the concurrency group
     # relies on it. apply and unlock use `inputs.*`, the only form that applies declared
     # defaults, so an omitted `environment` reads as ''.
-    if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
+    if: (github.event_name == 'pull_request_target' && github.event.action != 'closed') || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
       # A ready run and a dispatched plan wait for the run in flight; a push, open
@@ -524,6 +529,19 @@ jobs:
     # `*runner` reuses it, drift files set their own. ubuntu-latest for x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
+  # Releases the pull request's cell locks, merged or not.
+  release:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
+    # Its own group: the plan group cancels the run in flight.
+    concurrency:
+      group: release-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    uses: ship-iac/shipmate/.github/workflows/release.yml@<engine-sha>  # see the latest release
+    permissions: {}
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+    with:
+      runs_on: *runner
   comment-ops:
     name: comment
     # The engine drops comments on issues; this only selects the event.
@@ -676,7 +694,7 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 This tier gets you `shipmate apply` and `shipmate unlock` in a pull request
 comment (a pre-merge apply of the reviewed plan, through the `apply`
-job, and a lock release through `unlock`), and the environment protection that
+job, and an OpenTofu state lock release through `unlock`), and the environment protection that
 also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
 push to the default branch.
 
@@ -687,7 +705,10 @@ plan for the pull request's current head, and only on a pull request that is not
 a draft — the six apply requirements in
 [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
 ([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
-names which requirement failed.
+names which requirement failed. Each cell an apply runs is locked to the pull
+request until it merges or closes; another pull request's apply leaves that
+cell pending and names the holder, and `shipmate unlock <env> --evict` releases
+the lock ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
 
 **The two are coupled.** If you require `shipmate / gate` as a
 branch-protection check — tier 3 — then applies have to happen pre-merge, because
@@ -783,7 +804,7 @@ omitted key read as the empty string.
 
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
 `unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
-a lock reads no plan artifact and mints no App token, so it declares neither
+a state lock reads no plan artifact and mints no App token, so it declares neither
 engine secret, and mapping a secret the callee does not declare is a load-time
 rejection with no job and no log. That is why the `unlock` job is the one job of
 the file whose `secrets:` block names no engine credential.

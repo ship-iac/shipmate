@@ -47,6 +47,7 @@ CALLABLE_WORKFLOWS = [
     "deploy.yml",
     "drift.yml",
     "plan.yml",
+    "release.yml",
     "unlock.yml",
 ]
 

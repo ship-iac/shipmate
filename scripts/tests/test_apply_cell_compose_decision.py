@@ -33,6 +33,7 @@ def _run_compose(
     monkeypatch,
     tmp_path,
     *,
+    cell_lock="skipped",
     download="skipped",
     planned_head="skipped",
     decrypt="skipped",
@@ -51,6 +52,7 @@ def _run_compose(
     RUNNER_TEMP pointed at a tmp dir, then return the resulting cell.json as a dict."""
     monkeypatch.setenv("STACK", stack)
     monkeypatch.setenv("ENV", env)
+    monkeypatch.setenv("CELL_LOCK_OUTCOME", cell_lock)
     monkeypatch.setenv("DOWNLOAD_OUTCOME", download)
     monkeypatch.setenv("PLANNED_HEAD_OUTCOME", planned_head)
     monkeypatch.setenv("DECRYPT_OUTCOME", decrypt)
@@ -83,6 +85,7 @@ _DECRYPT_REASON = (
 #: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
 #: is the table below, never derived from FAILSAFES: a derived row passes whatever that list says.
 _ALL_SUCCESS = {
+    "cell_lock": "success",
     "download": "success",
     "planned_head": "success",
     "decrypt": "success",
@@ -99,6 +102,11 @@ _ALL_SUCCESS = {
 @pytest.mark.parametrize(
     ("failed", "reason"),
     [
+        pytest.param(
+            "cell_lock",
+            "could not confirm this pull request holds the cell's lock (see the job log)",
+            id="cell_lock",
+        ),
         pytest.param(
             "download",
             "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or "

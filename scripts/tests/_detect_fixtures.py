@@ -171,3 +171,25 @@ def spy_env_config(monkeypatch, build_matrix):
 
     monkeypatch.setattr(build_matrix, "env_config", spy)
     return seen
+
+
+def held(cl, stack, env, pr):
+    """`{ref: Lock}` for one lock pull request `pr` holds on `stack` in `env`."""
+    ref = cl.ref_name(env, stack)
+    lock = cl.Lock(ref, "c" * 40, "2026-10-24T00:00:00Z", pr, env, stack, "1.1")
+    return {ref: lock}
+
+
+def stub_read_locks(monkeypatch, cl, locks=None, reads=None):
+    """Answer `cl.read_locks` with `locks` (none by default), or raise `locks` when it is an
+    exception, appending `(repo, envs)` to `reads` per call. Its `run` default is bound to the
+    real runner at import, so an unstubbed read would reach `gh`."""
+
+    def read_locks(repo, envs, *, run=None):
+        if reads is not None:
+            reads.append((repo, set(envs)))
+        if isinstance(locks, BaseException):
+            raise locks
+        return dict(locks or {})
+
+    monkeypatch.setattr(cl, "read_locks", read_locks)

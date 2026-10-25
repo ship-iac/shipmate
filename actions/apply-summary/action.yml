@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ""
   skipped-envs:
-    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, or holding a waiting cell); all-environments form only. Empty = []."
+    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, holding a waiting cell, or holding a cell another pull request locks); all-environments form only. Empty = []."
     required: false
     default: ""
   review-held-envs:
@@ -48,8 +48,16 @@ inputs:
     description: "JSON list of cells left pending because a cell they run after is pending and not applying this run, each with that cell (both forms); the comment names each cell's blocker and its remedy."
     required: false
     default: "[]"
+  locked-cells:
+    description: "JSON list of pending cells another pull request holds a cell lock on, each `{stack, environment, holder}` with the holder's pull request number, null when unknown (both forms); the comment names each holder and the remedy. Empty = []."
+    required: false
+    default: "[]"
   detect-refusal:
     description: "apply-detect's `refusal` output: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
+    required: false
+    default: ""
+  lock-refusal:
+    description: "The lock job's `refusal` output: the first error of the `::error::` message that failed lock acquisition (a refusal or a failed API call) on one line, empty when it raised none. Non-empty, the comment shows it in a code fence under the verdict line, as it does detect-refusal; empty leaves the comment unchanged."
     required: false
     default: ""
   env-order:
@@ -158,7 +166,9 @@ runs:
         SHIPMATE_APPLIED_EXEMPT_ENVS: ${{ inputs.applied-exempt-envs }}
         SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
+        SHIPMATE_LOCKED_CELLS: ${{ inputs.locked-cells }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
+        SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}

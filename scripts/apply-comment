@@ -5,10 +5,11 @@ Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
 the expected-cell set (per-env-level waves JSON), the head SHA,
-the excluded/skipped/held envs (bare form only), the waiting cells (both forms)
-and the review-exempt and no-review envs, and writes a fresh comment.md -- this comment is
-never upserted, unlike the plan sticky comment. The review-exempt and no-review envs go to
-stdout, the step log, as `notices` annotations, not into the comment.
+the excluded/skipped/held envs (bare form only), the waiting and locked cells (both forms),
+the detect or lock job's refusal, and the review-exempt and no-review envs, and writes a
+fresh comment.md -- this comment is never upserted, unlike the plan sticky comment. The
+review-exempt and no-review envs go to stdout, the step log, as `notices` annotations, not
+into the comment.
 
 DO NOT refactor this and summary-comment into one renderer with a
 `mode=plan|apply` switch. The injection-critical primitives (fence escaping,
@@ -454,12 +455,14 @@ def render_apply_section(line, text, url, limit):
     return sc.fold(line, text, limit, trailer, _tail_lines, lang="")
 
 
-def _empty_verdict(failed_run, held, waiting):
+def _empty_verdict(failed_run, held, waiting, locked):
     if failed_run:
         return "🔴", "failed"
     if held:
         # Work WAS pending and the engine refused it.
         return "⚪", "nothing applied, environments are held for review"
+    if locked:
+        return "⚪", "nothing applied, pending cells are locked"
     if waiting:
         return "⚪", "nothing applied, cells wait on pending cells they run after"
     return "🟢", "no pending applies"
@@ -470,12 +473,13 @@ def _tally_tokens(n):
     return [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
 
 
-def _verdict(rows, failed_run, held, head_sha, run_url, waiting=()):
+def _verdict(rows, failed_run, held, head_sha, run_url, waiting=(), locked=()):
     """(circle, line): the line under the header and its circle. With rows: a count per
     status in `_STATUS` order, zero counts omitted, led by a bare `failed` when the run failed
-    and no failed or blocked row shows it, then `N waiting` when cells wait; the circle is the
-    worst of the rows' and, when cells wait, ⚪, or 🔴 for a failed run. Without rows:
-    `🔴 failed`, the held sentence, the waiting sentence, or `🟢 no pending applies`. Then
+    and no failed or blocked row shows it, then `N waiting` when cells wait and `N locked` when
+    cells are locked; the circle is the worst of the rows' and, when cells wait or are locked,
+    ⚪, or 🔴 for a failed run. Without rows: `🔴 failed`, the held sentence, the locked
+    sentence, the waiting sentence, or `🟢 no pending applies`. Then
     `provenance`. The circle is returned with the line so the footer decision reads it, never
     the rendered text.
 
@@ -485,7 +489,7 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=()):
     before any cell reported (a denied apply environment, a job-level cancel), whose rows read
     `not attempted`; suppressing on it would hide that environment's only failure signal."""
     if not rows:
-        circle, text = _empty_verdict(failed_run, held, waiting)
+        circle, text = _empty_verdict(failed_run, held, waiting, locked)
     else:
         n = collections.Counter(r["status"] for r in rows)
         tokens = _tally_tokens(n)
@@ -494,6 +498,9 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=()):
         circles = [_STATUS[s][0] for s in n]
         if waiting:
             tokens.append(f"{len(waiting)} waiting")
+            circles.append("⚪")
+        if locked:
+            tokens.append(f"{len(locked)} locked")
             circles.append("⚪")
         circle = "🔴" if failed_run else sc.worst(circles)
         text = ", ".join(tokens)
@@ -547,12 +554,29 @@ def notices(rows, applied_exempt, review_not_required):
     ]
 
 
-def _waiting_remedy(env, held, skipped, excluded):
-    """What clears a waiting cell's blocker in `env`. A targeted apply ignores `needs`, so a
+def _lock_holder(holder):
+    """`holder` when it is a pull request number, else None: anything else names no one."""
+    return holder if type(holder) is int else None
+
+
+def _lock_remedy(holder, env):
+    """What releases a cell lock in `env` held by pull request `holder` (None: unknown)."""
+    evict = f"comment `shipmate unlock {env} --evict`"
+    if holder is None:
+        return evict
+    return f"wait for #{holder} to merge or close, then re-plan, or {evict}"
+
+
+def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None):
+    """What clears a waiting cell's blocker in `env`. A `locked` blocker needs its lock gone
+    first, whatever else holds its environment. A targeted apply ignores `needs`, so a
     blocker in a `needs`-skipped environment never gets its `shipmate apply` command; a
     predecessor it waits on may itself be held, so that remedy names both causes. A held
     targeted blocker needs the approval and then its command. The targeted form passes
-    `held`, `skipped` and `excluded` empty, so its remedy is always `shipmate apply <env>`."""
+    `held`, `skipped` and `excluded` empty, so its remedy is the lock's or
+    `shipmate apply <env>`."""
+    if locked:
+        return f"it is locked by {sc.lock_who(holder)}; {_lock_remedy(holder, env)}"
     if env in held and env in excluded:
         return f"it is held until the pull request is approved, then comment `shipmate apply {env}`"
     if env in held:
@@ -565,30 +589,57 @@ def _waiting_remedy(env, held, skipped, excluded):
     return f"apply it first with `shipmate apply {env}`"
 
 
-def _dispositions(excluded, skipped, held, waiting=()):
+def _locked_lines(locked):
+    """One `🔒` line per lock holder and environment, in first-seen order, naming every cell it
+    locks as `<stack> / <env>` and the remedy."""
+    by_lock = {}
+    for c in locked:
+        key = (_lock_holder(c["holder"]), sc._md_escape(c["environment"]))
+        by_lock.setdefault(key, []).append(f"{sc._md_name(c['stack'])} / {key[1]}")
+    lines = []
+    for (holder, env), cells in by_lock.items():
+        remedy = _lock_remedy(holder, env)
+        lines.append(
+            f"🔒 locked by {sc.lock_who(holder)}: {', '.join(cells)}. "
+            f"{remedy[0].upper()}{remedy[1:]}."
+        )
+    return lines
+
+
+def _dispositions(excluded, skipped, held, waiting=(), locked=()):
     """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
     `excluded`, `skipped` and `held` are all-environments sets; the caller passes them empty in
     the targeted form, because apply.yml reads them from the bare-apply detector only.
-    `waiting` comes from both forms: each cell becomes an escaped
-    `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`. A held env
-    that is also targeted is listed under `held` only, and under `held_targeted` for its
+    `waiting` and `locked` come from both forms: each waiting cell becomes an escaped
+    `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`, its remedy
+    the lock's when its blocker is a `locked` cell; `locked` becomes its rendered lines. A held
+    env that is also targeted is listed under `held` only, and under `held_targeted` for its
     command."""
+    holders = {(c["stack"], c["environment"]): _lock_holder(c["holder"]) for c in locked}
     excluded, skipped, held = _esc(excluded), _esc(skipped), _esc(held)
-    cells = [
-        (
-            sc._md_name(w["stack"]),
-            sc._md_escape(w["environment"]),
-            sc._md_name(w["after_stack"]),
-            sc._md_escape(w["after_environment"]),
+    cells = []
+    for w in waiting:
+        blocker = (w["after_stack"], w["after_environment"])
+        env = sc._md_escape(w["after_environment"])
+        remedy = _waiting_remedy(
+            env, held, skipped, excluded, blocker in holders, holders.get(blocker)
         )
-        for w in waiting
-    ]
+        cells.append(
+            (
+                sc._md_name(w["stack"]),
+                sc._md_escape(w["environment"]),
+                sc._md_name(w["after_stack"]),
+                env,
+                remedy,
+            )
+        )
     return {
         "targeted": [e for e in excluded if e not in held],
         "skipped": skipped,
         "held": held,
         "held_targeted": [e for e in held if e in excluded],
-        "waiting": [(*c, _waiting_remedy(c[3], held, skipped, excluded)) for c in cells],
+        "locked": _locked_lines(locked),
+        "waiting": cells,
     }
 
 
@@ -603,6 +654,7 @@ def _per_env_lines(d):
     lines += [_held_line(e, e in d["held_targeted"]) for e in d["held"]]
     if d["held"]:
         lines.append(_HELD_REMEDY)
+    lines += d["locked"]
     return lines + [
         f"⚪ {s} / {e}: waits on {a_s} / {a_e}, not applied yet; {remedy}"
         for s, e, a_s, a_e, remedy in d["waiting"]
@@ -622,8 +674,8 @@ def _grouped_waiting(waiting):
 
 def _grouped_lines(d):
     """The compact form's footer lines: one per disposition, its environments comma-separated,
-    then one per blocker of the waiting cells."""
-    g = {k: ", ".join(v) for k, v in d.items() if k != "waiting"}
+    then the lock lines, then one per blocker of the waiting cells."""
+    g = {k: ", ".join(v) for k, v in d.items() if k not in ("locked", "waiting")}
     lines = []
     if g["targeted"]:
         lines.append(
@@ -640,15 +692,16 @@ def _grouped_lines(d):
                 f"; once the hold clears, comment `shipmate apply <env>` for {g['held_targeted']}"
             )
         lines += [line, _HELD_REMEDY]
-    return lines + _grouped_waiting(d["waiting"])
+    return lines + d["locked"] + _grouped_waiting(d["waiting"])
 
 
-def _footer_parts(excluded, skipped, held=(), waiting=(), compact=False):
+def _footer_parts(excluded, skipped, held=(), waiting=(), locked=(), compact=False):
     """The lines above the footer: one line per environment for each disposition this run
     produced (targeted left pending, skipped, held for review) and a `held:` remedy line when
-    any is held, then one line per waiting cell naming its blocker and the blocker's remedy.
-    Only `waiting` comes from both forms; apply.yml reads the other sets from the bare-apply
-    detector only. Stack and env names are author-controlled, so `_md_escape`d, a stack
+    any is held, then one `🔒` line per lock holder and environment naming its locked cells and
+    the remedy, then one line per waiting cell naming its blocker and the blocker's remedy.
+    Only `waiting` and `locked` come from both forms; apply.yml reads the other sets from the
+    bare-apply detector only. Stack and env names are author-controlled, so `_md_escape`d, a stack
     through `_md_name`. `compact` renders each disposition as one line naming its
     environments comma-separated, and the waiting cells as one line per blocker, with the
     same meanings, for the hard-cap fallback.
@@ -663,7 +716,7 @@ def _footer_parts(excluded, skipped, held=(), waiting=(), compact=False):
     and an unknown or absent decision) and only the run's own detect notice
     carries which one, since the decision never reaches this renderer; the
     `held:` line names every remedy and points there."""
-    d = _dispositions(excluded, skipped, held, waiting)
+    d = _dispositions(excluded, skipped, held, waiting, locked)
     return _grouped_lines(d) if compact else _per_env_lines(d)
 
 
@@ -721,6 +774,7 @@ def build_comment(
     waiting=(),
     refusal="",
     order=(),
+    locked=(),
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
     order of `order` its `sc.env_heading` (`1 cell, ` or `N cells, `, then the verdict's
@@ -729,14 +783,17 @@ def build_comment(
     environment), the notes, the footer lines,
     and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it is header,
     verdict, footer lines and footer. A non-empty `refusal`, the first error of the `::error::`
-    that failed detect on one line, sits in `sc.reason_fence` directly under the verdict.
+    that failed detect or the lock job on one line, sits in `sc.reason_fence` directly under the
+    verdict. `locked` is detect's `locked_cells`: the verdict counts them and the footer lines
+    name each holder.
 
     Every row is guaranteed its bare line: the space all headings and remaining rows' bare lines
     need is reserved up front, together, so an early giant apply.txt cannot starve a later row.
     When even the bare lines overflow HARD_CAP, `_compact` renders them without headings or the
-    blocked reasons and with one footer line per disposition and one per waiting blocker; past
-    that a SystemExit names the cause."""
-    circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url, waiting)
+    blocked reasons and with one footer line per disposition, the lock lines, and one per waiting
+    blocker; past that a SystemExit names the cause."""
+    failed = _results_failed(results_csv)
+    circle, verdict = _verdict(rows, failed, held, head_sha, run_url, waiting, locked)
     head = f"{sc.header('apply', env_name)}\n\n{verdict}"
     if refusal:
         head = f"{head}\n\n{sc.reason_fence(refusal)}"
@@ -747,7 +804,7 @@ def build_comment(
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )
-    dispositions = (excluded, skipped, held, waiting)
+    dispositions = (excluded, skipped, held, waiting, locked)
     parts = _footer_parts(*dispositions)
     tail = _tail(notes, parts, hint)
     # Each entry is a bare line, its row and its url; a heading's row and url are None.
@@ -815,8 +872,11 @@ def main():
         json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]"),
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
         json.loads(os.environ.get("SHIPMATE_WAITING_CELLS") or "[]"),
-        os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
+        # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
+        os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
+        or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
         sc.env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
+        json.loads(os.environ.get("SHIPMATE_LOCKED_CELLS") or "[]"),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

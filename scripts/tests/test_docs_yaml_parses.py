@@ -137,6 +137,7 @@ def test_the_wrapper_snippets_are_still_being_found():
         ("docs/getting-started.md", "deploy.yml"),
         ("docs/getting-started.md", "drift.yml"),
         ("docs/getting-started.md", "plan.yml"),
+        ("docs/getting-started.md", "release.yml"),
         ("docs/getting-started.md", "unlock.yml"),
     ], f"documented engine reusable-workflow calls changed: {found}"
 

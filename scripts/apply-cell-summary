@@ -22,6 +22,10 @@ from _shipmate import run_annotated
 # the fail-safe that actually tripped can claim the blocked reason.
 FAILSAFES = [
     (
+        "CELL_LOCK_OUTCOME",
+        "could not confirm this pull request holds the cell's lock (see the job log)",
+    ),
+    (
         "DOWNLOAD_OUTCOME",
         (
             "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or push, "

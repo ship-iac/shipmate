@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Parse a PR comment against the strict comment-ops grammar.
 
-Grammar: `shipmate <verb> [env]`. Injection-safe: the whole command line
-must match one anchored regex; nothing is ever passed to a shell. The verbs are
+Grammar: `shipmate <verb> [env]`, plus `shipmate unlock <env> --evict` (route `evict`).
+Injection-safe: the whole command line must match an anchored regex; nothing is ever passed to
+a shell. The verbs are
 `apply`, `doctor`, `help`, `plan` and `unlock`; any other verb is unknown.
 env is optional for `apply` and required for `unlock`: a bare `shipmate apply`
 targets every environment not `targeted` (env=None -> "all"), while a bare
@@ -20,6 +21,7 @@ ec = _load("env-config")
 
 # `shipmate` as a whole word, a verb, then an optional env in env-config's `_ENV_ENTRY` charset.
 _CMD = re.compile(rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{ec._ENV_ENTRY.pattern}))?$")
+_EVICT = re.compile(rf"^shipmate unlock (?P<env>{ec._ENV_ENTRY.pattern}) --evict$")
 _SHIPMATE_LINE = re.compile(r"^shipmate\b")
 _HELP_HINT = " (try `shipmate help`)"
 
@@ -56,11 +58,13 @@ VERBS = {
         ),
     },
     "unlock": {
-        "args": "<env>",
+        "args": "<env> [--evict]",
         "desc": (
             "Release a state lock stranded by a cancelled or killed apply, so "
             "the environment's stacks can apply again. Does not re-apply, and "
-            "does not recover a partial apply."
+            "does not recover a partial apply. With `--evict`, release instead "
+            "the cell locks other pull requests hold on this pull request's "
+            "stacks in the environment; their holders are told to re-plan."
         ),
     },
 }
@@ -133,6 +137,10 @@ def parse(body):
     if line is None:
         return result
     result["is_command"] = True
+    m = _EVICT.match(line)
+    if m:
+        result.update(verb="unlock", env=m.group("env"), route="evict", valid=True)
+        return result
     m = _CMD.match(line)
     if not m:
         # Verb, env and route stay empty: the reply header prints them outside a code span.
@@ -184,6 +192,9 @@ def help_markdown(run_url):
             "Unlocking requires "
             "write access to this repository and a pull request from this "
             "repository, but no review, no plan and no such readiness. "
+            "Evicting requires write access to this repository, and releases only "
+            "locks on stacks this pull request's current head has planned in that "
+            "environment. "
             "`doctor` and `help` are read-only, and `plan` changes no "
             "infrastructure. `help` answers anyone; `doctor` and `plan` require "
             "write access to this repository."

@@ -201,6 +201,7 @@ EXPECTED_STEP_NAMES = [
     "Mirror this run's per-cell plan checks onto the head",
     "$/actions/python-yaml",
     "Doctor: settings-drift warnings (annotations only, never blocks)",
+    "Mark cells another pull request holds",
     "Build comment + gate state",
     "Decide gate state and comment mode",
     "Download cell errors",

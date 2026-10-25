@@ -26,6 +26,7 @@ _EXPECTED = {
     "drift.yml": (_ABSENT, {}),
     "manifest-load.yml": (_ABSENT, {}),
     "plan.yml": ("read", {}),
+    "release.yml": (_ABSENT, {}),
     "unlock.yml": ("read", {}),
 }
 

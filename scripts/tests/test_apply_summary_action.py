@@ -136,7 +136,9 @@ _RENDER_ENV = {
     "SHIPMATE_APPLIED_EXEMPT_ENVS": "${{ inputs.applied-exempt-envs }}",
     "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
     "SHIPMATE_WAITING_CELLS": "${{ inputs.waiting-cells }}",
+    "SHIPMATE_LOCKED_CELLS": "${{ inputs.locked-cells }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
+    "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
     "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
@@ -160,7 +162,11 @@ def test_render_step_env_block_matches_the_expected_mapping():
     Mutation: drop `SHIPMATE_DETECT_REFUSAL` from the render step, so a refused apply's comment
     never names the refusal -- red.
     Mutation: drop `SHIPMATE_ENV_ORDER` from the render step, so the comment orders environments
-    by name -- red."""
+    by name -- red.
+    Mutation: drop `SHIPMATE_LOCKED_CELLS` from the render step, so an all-locked run reads
+    `🟢 no pending applies` -- red.
+    Mutation: drop `SHIPMATE_LOCK_REFUSAL` from the render step, so a refused lock job's comment
+    never names the refusal -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -273,7 +279,9 @@ def test_declared_inputs_are_exactly_these():
         "applied-exempt-envs",
         "review-not-required-envs",
         "waiting-cells",
+        "locked-cells",
         "detect-refusal",
+        "lock-refusal",
         "env-order",
         "results",
         "head-sha",
@@ -406,7 +414,9 @@ _APPLY_SUMMARY_WITH = {
     "applied-exempt-envs": "${{ needs.detect.outputs.applied_exempt_envs }}",
     "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
     "waiting-cells": "${{ needs.detect.outputs.waiting_cells }}",
+    "locked-cells": "${{ needs.detect.outputs.locked_cells }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
+    "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "env-order": "${{ needs.detect.outputs.env_order }}",
     "results": "${{ join(needs.*.result, ',') }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -425,7 +435,9 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: drop `waiting-cells:` from the step's `with:`, so the input defaults to `[]`
     -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
-    Mutation: drop `env-order:` from the step's `with:` -- red."""
+    Mutation: drop `env-order:` from the step's `with:` -- red.
+    Mutation: drop `locked-cells:` from the step's `with:` -- red.
+    Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red."""
     steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
@@ -453,4 +465,18 @@ def test_the_detect_refusal_input_is_optional_and_empty_by_default():
         ),
         "required": False,
         "default": "",
+    }
+
+
+def test_the_lock_inputs_are_optional_with_empty_defaults():
+    """`deploy.yml` posts no apply comment; an empty value renders no lock line and no fence.
+    Mutation: set `lock-refusal` `required: true` -- red.
+    Mutation: default `locked-cells` to `""` -- red."""
+    inputs = action_yaml("apply-summary")["inputs"]
+    assert {
+        name: {k: v for k, v in inputs[name].items() if k != "description"}
+        for name in ("locked-cells", "lock-refusal")
+    } == {
+        "locked-cells": {"required": False, "default": "[]"},
+        "lock-refusal": {"required": False, "default": ""},
     }

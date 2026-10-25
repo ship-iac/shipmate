@@ -260,6 +260,27 @@ runs:
           echo "warnings=0" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Mark cells another pull request holds
+      # Empty names (build-matrix refused, detect skipped) plan no cell, so there is nothing to
+      # mark.
+      if: ${{ steps.hold.outputs.superseded != 'true' && inputs.planned-cell-names != '' }}
+      id: marks
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_CELLS: ${{ inputs.planned-cell-names }}
+      run: |
+        set -euo pipefail
+        # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and nothing
+        # on the gate path reads it. `Create/refresh gate` is later and must not inherit this.
+        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" marks 2>marks.err; then
+          sed 's/^::error::/::warning::/' marks.err >&2
+          echo "::warning::could not read the cell locks; the plan comment marks no locked cell"
+          exit 0
+        fi
+        cat marks.err >&2
+
     - name: Build comment + gate state
       if: ${{ steps.hold.outputs.superseded != 'true' }}
       id: build
@@ -279,6 +300,7 @@ runs:
         SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DOCTOR_WARNINGS: ${{ steps.doctor.outputs.warnings }}
+        SHIPMATE_LOCKS: ${{ steps.marks.outputs.locks }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links

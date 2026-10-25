@@ -1,7 +1,7 @@
 """Run comment-ops' repository-permission read over what the API can answer.
 
-One read serves the four gated verbs, `plan`, `doctor`, `apply` and `unlock`, and feeds
-the `access` step, where `scripts/authorize --permission` decides it. Bash in the action
+One read serves the five gated routes, `plan`, `doctor`, `apply`, `unlock` and `evict`, and
+feeds the `access` step, where `scripts/authorize --permission` decides it. Bash in the action
 writes it rather than an importable script. The read must fail closed: a failed call or an
 unexpected shape writes an empty value, which authorize refuses as unreadable.
 """

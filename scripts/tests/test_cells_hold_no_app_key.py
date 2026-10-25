@@ -116,12 +116,14 @@ def test_the_completer_is_the_only_job_naming_the_engine_environment():
 ENGINE_BOUND_JOBS = {
     ("apply-env-level.yml", "complete"),
     ("apply.yml", "review"),
+    ("apply.yml", "lock"),
     ("apply.yml", "summary"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),
     ("drift.yml", "issues"),
     ("plan.yml", "summary"),
     ("plan.yml", "gate-hold"),
+    ("release.yml", "release"),
 }
 
 
@@ -130,7 +132,7 @@ def test_exactly_these_jobs_bind_the_engine_environment_and_create_no_deployment
     test is edited for. Each binding is the whole `ENGINE_ENVIRONMENT` mapping: a plain
     `environment: shipmate-engine` creates a deployment on every run.
 
-    Mutations: bind a ninth job; revert one binding to the plain string; set `deployment: true`.
+    Mutations: bind one more job; revert one binding to the plain string; set `deployment: true`.
     """
     bound = {
         (wf.name, n): j["environment"]

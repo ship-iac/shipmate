@@ -99,12 +99,12 @@ live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds four checks, so an unreadable file
-  leaves all four unverified together. A call counts only when it names the
+  the commit under examination, feeds five checks, so an unreadable file
+  leaves all five unverified together. A call counts only when it names the
   engine repository doctor runs from, in any letter case: a fork, a renamed
   engine or a wrapper workflow does not count. When that repository could not
   be determined, the job-name, routing and drift-call checks are a note
-  saying so, and the dispatch check still runs:
+  saying so, and the dispatch and trigger-types checks still run:
   - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
     makes the plan cell checks `plan / <env> / <stack>`. Under another name
@@ -124,7 +124,7 @@ live probes.
     run carries the error, and the dispatch failure reply on the pull request
     links it when it can be posted (`CONTRACT.md` §Comment-ops).
   - Whether each of its jobs is selected by the `if:` its event needs. The file
-    gates five jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
+    gates six jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
     each job's whole `if:` against the expression that file's published fence
     carries. Each finding identifies the job by the engine workflow it calls —
     "the job calling the engine's `apply.yml`", which is the fence's `apply` —
@@ -137,6 +137,12 @@ live probes.
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
+  - Whether its `pull_request_target` types are exactly the fence's `opened`,
+    `synchronize`, `reopened`, `ready_for_review` and `closed`. A missing type
+    starts no run for its event, and nothing else shows it: without `closed`,
+    no cell lock of a pull request closed without merging is released. The
+    finding names what each missing type loses, and any extra type, which
+    starts a plan the fence never routes.
   - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
     runs on that file's triggers. Move the drift job to a workflow file of its
     own, and drop the `schedule` trigger and the `drift` verb option from
@@ -374,8 +380,8 @@ place. Re-run with `--key <path to the App's PEM private key>`.
 
 ## Common failures
 
-When a `shipmate apply` fails at `detect` with an `::error::` (a refusal or a
-failed tool or API call), its comment shows the message's first error on one
+When a `shipmate apply` fails at `detect` or `lock` with an `::error::` (a
+refusal or a failed tool or API call), its comment shows the message's first error on one
 line, in a fence under the `🔴 failed` verdict: search this page for its text.
 The post-merge deploy posts no apply comment, so a deploy's `detect` error is
 only in that run's `detect` annotation.
@@ -768,7 +774,9 @@ a well-formed one that names no role.
 
 ### A state lock is held
 
-Every apply of the cell fails acquiring the lock, and the apply result comment
+This is the OpenTofu state lock; a `🔒 locked by` line is a cell lock
+(§A cell is `locked by #<n>`). Every apply of the cell fails acquiring the
+lock, and the apply result comment
 carries a `state lock held:` note under its cell lines naming each such cell, the held lock's id, the
 command that releases it, and — when the backend reported a usable timestamp —
 when it was taken. Per-cell concurrency admits one apply at a time, so the
@@ -810,6 +818,107 @@ Two locks this verb does not reach:
   against the same state. That is the lock unlock must not break, and it is why
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
+
+### A cell is `locked by #<n>`
+
+The apply result comment carries
+``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close, then re-plan, or
+comment `shipmate unlock <env> --evict`.``, the plan comment ends a cell's line
+with `🔒 locked by #<n>`, or the apply run's `lock` job fails with
+`` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
+re-plan, or comment `shipmate unlock <env> --evict` ``, or an apply cell
+fails with `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no
+longer holds its cell lock (<why>) ``.
+
+Pull request #<n> applied that cell first and holds its cell lock until it
+merges or closes ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). This is not
+an OpenTofu state lock, and `shipmate unlock <env>` does not release it. In
+the comment form, the cell stays pending, the cells that run after it wait, and
+the rest of the run applied. In the `lock` job form, #<n> took the cell between
+this run's `detect` and its `lock` job, so the whole run refused and applied
+nothing.
+
+- Wait for #<n> to merge or close, then re-plan (comment `shipmate plan` or
+  push) and apply: #<n>'s apply may have changed what your plan was made
+  against.
+- Or comment `shipmate unlock <env> --evict` on this pull request, with write
+  access. It releases the locks other pull requests hold on this pull request's
+  cells in `<env>` and comments on #<n> naming who released them. #<n>'s next
+  apply locks again only the cells still pending on #<n>; a cell #<n> already
+  applied is not locked again.
+- After the `lock` job form, comment `shipmate apply` again: the new run leaves
+  the locked cell pending and applies the rest. "Re-run failed jobs" does not
+  re-run `detect`, so its `lock` job tries the same cells again.
+- "Re-run failed jobs" on an apply run re-runs its failed waves without the
+  `lock` job. Every apply cell checks the lock before its cloud credentials and
+  refuses if this pull request no longer holds it, which the `no longer holds
+  its cell lock` form reports. Comment `shipmate apply` again instead: the new
+  run locks the cell again, or leaves it pending and names its holder.
+- A lock read that fails refuses with `` could not read the cell lock on
+  `<env>` / `<stack>` (<why>) ``. Re-run the job once the read succeeds.
+
+### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
+
+The apply result comment carries
+``🔒 locked by an unreadable lock: <cells>. Comment `shipmate unlock <env> --evict`.``,
+the plan comment marks a cell `🔒 locked by an unreadable lock`, or the `lock`
+job fails with `` `<env>` / `<stack>` is locked by an unknown holder (<ref>) ``.
+
+The lock ref's commit message is not the record the engine writes, or names
+another cell: someone wrote or edited the ref outside shipmate. No merge or close
+releases it, because no pull request is its holder. Comment
+`shipmate unlock <env> --evict` on a pull request that changes the cell.
+
+A different failure has the same cause: a ref under `refs/shipmate/locks/` that
+targets something other than a commit. Every read of its environment's locks
+refuses with ``the cell lock ref <ref> targets a <type>, not a commit; someone
+with write access must delete it: git push origin :<ref>``: applies to that
+environment, `shipmate unlock <env> --evict` there, every pull request's
+`release` job and every merge deploy's lock release fail (both read every
+environment's locks), and a plan with a cell in that environment marks no
+locked cell at all. `--evict` cannot delete it. Run the command the error names from a clone, with write access.
+
+### The deploy's `summary` failed releasing cell locks
+
+The merge deploy's `summary` job fails at `Release the merged pull request's cell
+locks`, with `could not release the cell lock <ref> of <cell>; it is still held
+at <sha>` or a failed App token mint.
+
+The merged pull request still holds those locks, and other pull requests' applies
+leave the cells pending. Re-run the deploy's failed jobs. Each run releases every
+lock the merged pull request holds whose cell has no pending apply check, so a
+re-run releases what the failed one owed, whatever else it re-applies. A failed
+mint after a release that added `contents: write` is the un-accepted permission
+request ([`github-app.md`](github-app.md) §Re-approve after permission changes).
+
+### A cell stays locked after its pull request closed
+
+Another pull request's apply still reports ``🔒 locked by #<n>`` after #<n>
+merged or closed.
+
+- **The `release` job failed.** Open the closing run of #<n>'s `shipmate.yml`
+  (`shipmate · release`) and re-run it.
+- **#<n>'s close started no run.** The file's `pull_request_target` types lack
+  `closed`; `shipmate doctor`'s `shipmate.yml` probe reports the types. A merge
+  is still released by the merge deploy's `summary`; a close without merge is
+  not.
+- **The closing run skipped every job.** The file has no `release` job;
+  `shipmate doctor`'s `shipmate.yml` probe reports zero jobs calling
+  `release.yml`.
+- **#<n> merged and the cell's apply check is still pending on its head.** The
+  lock stays until the merge deploy applies the cell; a failed deploy keeps it
+  (§The deploy's `summary` failed releasing cell locks). Re-run the deploy. A
+  merge into a branch no deploy runs on leaves the check pending, and the lock
+  with it.
+- **#<n> was closed without merging, then reopened, and the lock is newer than
+  the close.** The release keeps a lock taken after the close while #<n> is
+  open again. An apply that took the lock after the close refuses and deletes
+  it itself; one that remains is evicted with `shipmate unlock <env> --evict`.
+
+For the second and third causes, re-pin the fence
+(`python <engine>/scripts/repin <consumer> <tag> --write-fence`) where it
+differs. In every case, `shipmate unlock <env> --evict` from a pull request that
+changes the cell releases the lock now.
 
 ### The encryption key is missing: `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, `SHIPMATE_ENCRYPTION_KEY is empty`
 
@@ -1434,9 +1543,18 @@ in its compact form, `⚪ waiting on <stack> / <env> (<remedy>): <cells>`.
 The first cell runs after the second through `after`
 ([`../CONTRACT.md`](../CONTRACT.md) §Fan-out), and the second is pending and
 not applying in this run: another environment on a targeted apply, or a held,
-`targeted` or skipped environment on a bare one. The waiting cell's apply check
+`targeted` or skipped environment on a bare one. On either form it can also be a
+cell another pull request locks; that lock goes when its holder merges or closes,
+or with `shipmate unlock <env> --evict`, and a `🔒 locked by` line names its
+holder. The waiting cell's apply check
 stays pending and the rest of the run applied. Follow the remedy:
 
+- ``it is locked by #<n>; wait for #<n> to merge or close, then re-plan, or
+  comment `shipmate unlock <env> --evict` ``: another pull request holds the
+  blocker cell's lock. Wait for it to merge or close, then re-plan, or evict
+  the lock with that comment.
+- ``it is locked by an unreadable lock; comment `shipmate unlock <env> --evict` ``:
+  the lock names no holder, so no merge or close releases it; evict it.
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
@@ -1455,10 +1573,11 @@ Before any of these, check the run for a cell whose job log shows
 environment applies that cell again. Follow
 §`The apply step ran and its state was not saved` for it first.
 
-A targeted apply always names `shipmate apply <env>`, even when the blocker's
-environment is held or ordered by `needs`, because the targeted form's comment
+A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
+the blocker's environment is held or ordered by `needs`, because the targeted form's comment
 receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
-verdict reads `⚪ nothing applied, cells wait on pending cells they run after`.
+verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
+`⚪ nothing applied, pending cells are locked` when a pending cell is locked.
 
 ### A stack's plan does not show its upstream stack's change
 
@@ -1592,9 +1711,9 @@ files plans the destroy of what the revert removed from configuration, and a
 
 ### A dispatched verb produced a run in which every job was skipped
 
-The comment was accepted, the dispatch succeeded and the run page shows five
+The comment was accepted, the dispatch succeeded and the run page shows six
 skipped jobs and nothing else — which is what a healthy run also shows for the
-four jobs the event did not select.
+five jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
@@ -1657,11 +1776,11 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All eight jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review` and
-`summary`, `apply-env-level.yml` `complete`, `deploy.yml` `summary` and
-`drift.yml` `issues`. No `shipmate / gate` status, sticky comment or comment
-reply is written.
+All ten jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review`, `lock`
+and `summary`, `apply-env-level.yml` `complete`, `deploy.yml` `summary`,
+`drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
+sticky comment or comment reply is written, and no cell lock is released.
 
 `shipmate-engine` has an enabled custom deployment protection rule. Every engine
 job binds that environment with `deployment: false`, which creates no deployment,

@@ -128,6 +128,12 @@ Terramate `after` DAG, across environments as well as inside one
 comment-triggered apply and a post-merge deploy share one concurrency group per
 stack × environment, so they never race on the same cell.
 
+A cell one open pull request applied is locked to it until it merges or closes,
+so a second pull request's re-plan cannot roll that apply back: its apply leaves
+the cell pending and names the holder, and its plan comment marks the cell.
+The lock is a git ref per cell, with no server behind it
+([`CONTRACT.md`](../CONTRACT.md) §Cell locks).
+
 Each drift sweep is a workflow file of its own: on its schedule or a
 `workflow_dispatch` it plans every stack × environment, or the cells its
 `tags` query selects, and opens one GitHub Issue per drifted cell; setup is in [drift.md](drift.md).

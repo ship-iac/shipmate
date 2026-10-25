@@ -1,0 +1,56 @@
+name: shipmate lock-release
+description: >-
+  Release the cell locks a closed pull request holds through scripts/cell-lock. A merge releases
+  every lock but those whose apply check is still pending on the head; a close without merge
+  releases every lock while the pull request stays closed, applies the merge rule once it has
+  merged since, and releases only those taken at or before the close once it is reopened.
+  Mints its own App token with contents:write, checks:read and pull-requests:read.
+inputs:
+  pr-number:
+    description: The pull request whose locks are released.
+    required: true
+  head-sha:
+    description: The pull request's head SHA, whose pending apply checks keep their locks on a merge.
+    required: true
+  merged:
+    description: "'true' for a merge, 'false' for a close without merge; any other value refuses."
+    required: true
+  closed-at:
+    description: ISO-8601 time the pull request closed; read only when merged is 'false'.
+    required: false
+    default: ""
+  app-id:
+    description: shipmate App id (repo/org variable).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-contents: write
+        permission-checks: read
+        permission-pull-requests: read
+    - name: Release the cell locks
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_MERGED: ${{ inputs.merged }}
+        SHIPMATE_CLOSED_AT: ${{ inputs.closed-at }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" release

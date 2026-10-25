@@ -535,6 +535,9 @@ LATER_STEP_IFS = {
     ),
     "$/actions/python-yaml": NOT_SUPERSEDED,
     "Doctor: settings-drift warnings (annotations only, never blocks)": NOT_SUPERSEDED,
+    "Mark cells another pull request holds": (
+        "${{ steps.hold.outputs.superseded != 'true' && inputs.planned-cell-names != '' }}"
+    ),
     "Build comment + gate state": NOT_SUPERSEDED,
     "Decide gate state and comment mode": NOT_SUPERSEDED,
     "Download cell errors": (

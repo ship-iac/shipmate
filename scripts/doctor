@@ -1304,11 +1304,13 @@ def _fork_trigger_warnings(ctx):
     misconfiguration on that page an outside contributor can reach without push
     access.
 
-    The consumer's `shipmate.yml` is on this trigger by design and stays exempt with the
-    comment-ops, deploy, apply and unlock jobs in it: every one of those `if:`
-    expressions is false under `pull_request_target`, so those jobs do not run, and a job
-    that does not run binds no environment and is handed no token. `_shipmate_yml_warnings`
-    is what watches those five `if:` expressions.
+    The consumer's `shipmate.yml` is on this trigger by design and stays exempt. Its
+    comment-ops, deploy, apply and unlock jobs' `if:` expressions are false under
+    `pull_request_target`, so those jobs do not run, and a job that does not run binds no
+    environment and is handed no token. Its `plan` and `release` jobs do run, and bind
+    `shipmate-engine` only in engine jobs that check out no pull request content: `release`
+    has no checkout at all and only deletes lock refs. `_shipmate_yml_warnings` is what
+    watches those six `if:` expressions.
 
     Reads the consumer's workflow files at the commit under examination
     (`_contents_ref`): a pull request that *removes* the trigger must not still
@@ -1335,8 +1337,9 @@ def _fork_trigger_warnings(ctx):
                     "the base ref with this repository's secrets, and on a pull request "
                     "into the default branch that is the ref `shipmate-engine`'s branch "
                     "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
-                    "uses this trigger safely because the job holding the App key (the "
-                    "`summary` job inside the engine's reusable plan workflow) runs "
+                    "uses this trigger safely because the jobs holding the App key (the "
+                    "`summary` job inside the engine's reusable plan workflow and the "
+                    "`release` job inside its release workflow) run "
                     "no *consumer* repository content. If this workflow checks out or acts "
                     "on the pull request's own code in a job binding a CREDENTIALED "
                     "environment (one holding the App key or cloud credentials), it "
@@ -1519,7 +1522,7 @@ def _dispatch_wiring_finding(doc, name):
 
 
 #: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
-#: calls. The consumer owns these five expressions and `docs/getting-started.md` publishes
+#: calls. The consumer owns these six expressions and `docs/getting-started.md` publishes
 #: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
 #: skipped, which reads as success everywhere. Compared whole — normalised only for an
 #: enclosing quote pair, the optional `${{ }}` wrapper and whitespace — because a subset check
@@ -1527,8 +1530,11 @@ def _dispatch_wiring_finding(doc, name):
 #: every job.
 ROUTING_IFS = {
     "plan.yml": (
-        "github.event_name == 'pull_request_target' || "
+        "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
         "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
+    ),
+    "release.yml": (
+        "github.event_name == 'pull_request_target' && github.event.action == 'closed'"
     ),
     "comment-ops.yml": "github.event_name == 'issue_comment'",
     "deploy.yml": "github.event_name == 'push'",
@@ -1545,7 +1551,7 @@ def _normalize_if(value):
     so a consumer who writes `if: ${{ ... }}` — the shape `docs/getting-started.md` shipped
     before this file existed — must not be reported for a difference that is not one.
 
-    Only a MATCHING enclosing pair of quotes is dropped: four of the five expressions end
+    Only a MATCHING enclosing pair of quotes is dropped: five of the six expressions end
     in a `'`, and stripping quote characters off both ends would mangle every one of them
     on both sides of the comparison, which stays green while the message is wrong."""
     v = value.strip()
@@ -1559,10 +1565,10 @@ def _normalize_if(value):
 def _routing_finding(doc, name, engine):
     """One finding per `ROUTING_IFS` entry the file does not satisfy.
 
-    One file gates five jobs on the event, and a wrong gate is silent in both directions: a
+    One file gates six jobs on the event, and a wrong gate is silent in both directions: a
     dispatched verb whose job never runs completes green with nothing done, and a job whose
     `if:` is too wide runs on an event it was never meant to see. Nothing else observes this.
-    `actions/dispatch` sees an accepted dispatch; the run page shows four skipped jobs beside
+    `actions/dispatch` sees an accepted dispatch; the run page shows five skipped jobs beside
     the one that ran, which is what a healthy run also shows."""
     out = []
     for callee, expected in ROUTING_IFS.items():
@@ -1626,6 +1632,49 @@ def _routing_finding(doc, name, engine):
     return out
 
 
+#: The `pull_request_target` types `docs/getting-started.md`'s fence declares, each with what a
+#: file lacking it loses. A missing type is silent: its event starts no run at all.
+PR_TARGET_TYPES = {
+    "opened": "an opened pull request is not planned",
+    "synchronize": "a push to a pull request is not planned",
+    "reopened": "a reopened pull request is not planned",
+    "ready_for_review": "a draft marked ready is not planned",
+    "closed": "no cell lock of a pull request closed without merging is released",
+}
+#: GitHub's types for a `pull_request_target` trigger that names none.
+_PR_TARGET_DEFAULT_TYPES = ["opened", "synchronize", "reopened"]
+
+
+def _pr_target_types_finding(doc, name):
+    """One finding when the file's `pull_request_target` types are not exactly
+    `PR_TARGET_TYPES`, compared as a whole set: a missing type stops its event from
+    starting any run, and an extra one starts a plan on an event the fence never routes."""
+    if "pull_request_target" not in _events(doc):
+        found = []
+    else:
+        trigger = _mapping(doc.get("on")).get("pull_request_target")
+        types = _mapping(trigger).get("types", _PR_TARGET_DEFAULT_TYPES)
+        found = [types] if isinstance(types, str) else types
+    if not isinstance(found, list) or not all(isinstance(t, str) for t in found):
+        found = None
+    if found is not None and set(found) == set(PR_TARGET_TYPES):
+        return []
+    lost = [why for t, why in PR_TARGET_TYPES.items() if found is None or t not in found]
+    extra = sorted(set(found or []) - set(PR_TARGET_TYPES))
+    if extra:
+        lost.append(f"extra types {_and_list(extra)} start plans the fence never routes")
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `pull_request_target` types are not the published "
+                f"{_and_list(PR_TARGET_TYPES)}: {'; '.join(lost)}. Set its `types:` to exactly "
+                "those (docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
     "the workflow file's job name, dispatch wiring, event routing and drift call",
@@ -1647,7 +1696,7 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing and drift-call findings over the
+    """The job-name, dispatch-wiring, routing, trigger-types and drift-call findings over the
     consumer's `shipmate.yml` alone, in that order, from one read at the commit under
     examination (`_contents_ref`): a pull request that fixes the file must not still be
     reported for the old state.
@@ -1662,7 +1711,7 @@ def _shipmate_yml_warnings(ctx):
 
     Without the engine repository the three engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring
-    reads no engine slug and still runs."""
+    and the trigger types read no engine slug and still run."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
@@ -1674,11 +1723,16 @@ def _shipmate_yml_warnings(ctx):
         return []
     engine = ctx["engine_repo"]
     if not engine:
-        return [*_dispatch_wiring_finding(doc, name), SHIPMATE_YML_NO_ENGINE]
+        return [
+            *_dispatch_wiring_finding(doc, name),
+            *_pr_target_types_finding(doc, name),
+            SHIPMATE_YML_NO_ENGINE,
+        ]
     return [
         *_shim_job_name_finding(doc, name, engine),
         *_dispatch_wiring_finding(doc, name),
         *_routing_finding(doc, name, engine),
+        *_pr_target_types_finding(doc, name),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]
 

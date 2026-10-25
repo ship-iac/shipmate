@@ -20,7 +20,9 @@ A named environment selects the targeted form, scoped to that ONE environment.
 It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
 which puts every cell at env-level 0 and leaves levels 1-3 empty. A cell that runs
 after a cell pending in another environment waits (`waves.waiting_cells`): it stays
-pending, `waiting_cells` names it, and the rest apply. Before any of that, the
+pending, `waiting_cells` names it, and the rest apply. A cell another pull request
+holds a cell lock on stays pending the same way, named in `locked_cells` (both forms),
+and the cells that run after it wait. Before any of that, the
 PR's review decision — read server-side by the `review` job, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
@@ -43,6 +45,7 @@ bm = _load("build-matrix")
 wv = _load("waves")
 ag = _load("apply-gate")
 az = _load("authorize")
+cl = _load("cell-lock")
 
 _NAMED = 10
 
@@ -241,25 +244,39 @@ def drop_waiting(cells, waiting):
     return [c for c in cells if (c["stack"], c["environment"]) not in keys]
 
 
-def settle(order, stopped, pending, deps, tags, level):
+def locked_cells(repo, pending, pr_number):
+    """`cell_lock.foreign` over `pending`: the cells another pull request holds a lock on.
+    Reads only the pending cells' environments; a failed read refuses the run."""
+    locks = cl.read_locks(repo, {c["environment"] for c in pending}, run=_run)
+    return cl.foreign(locks, pending, int(pr_number))
+
+
+def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
     """(sorted skipped envs, run cells, waiting cells) at the joint fixpoint of `needs`
     skips and waiting cells.
 
-    An env with a waiting cell is not fully applying, so it stops its `needs` successors
-    like a stopped env, and each new skip can make more cells wait. Its ready cells still
-    run: it joins `unavailable`, never `skipped`. `unavailable` only grows over a finite
-    set, so the loop ends."""
+    An env with a waiting cell, or a cell in `locked` ((stack, env) pairs another pull
+    request holds), is not fully applying, so it stops its `needs` successors like a stopped
+    env, and each new skip can make more cells wait. A locked cell never runs; the env's
+    ready cells still do: it joins `unavailable`, never `skipped`. `unavailable` only grows
+    over a finite set, so the loop ends."""
     envs = {c["environment"] for c in pending} - stopped
     present = {(c["stack"], c["environment"]) for c in pending}
-    unavailable, last = set(stopped), None
+    lock_envs = {e for _, e in locked}
+    unavailable, last = stopped | lock_envs, None
     while True:
         skipped = wv.blocked_envs(order, unavailable, envs)
-        run = [c for c in pending if c["environment"] not in stopped | skipped]
+        run = [
+            c
+            for c in pending
+            if c["environment"] not in stopped | skipped
+            and (c["stack"], c["environment"]) not in locked
+        ]
         waiting = wv.waiting_cells(run, present, deps, tags, level)
         if (skipped, waiting) == last:
             return sorted(skipped), run, waiting
         last = (skipped, waiting)
-        unavailable = stopped | skipped | {w["environment"] for w in waiting}
+        unavailable = stopped | skipped | lock_envs | {w["environment"] for w in waiting}
 
 
 def _check_run_lines(repo, head_sha):
@@ -355,7 +372,8 @@ def bare_main():
       `shipmate apply <env>` completes them. `excluded_envs` names every one with
       pending work, including those also held for review;
     - envs ordered (transitively) after an env not fully applying this run — held,
-      excluded as targeted, or holding a waiting cell — are skipped with a notice
+      excluded as targeted, holding a waiting cell, or holding a cell another pull request
+      locks — are skipped with a notice
       (`skipped_after_targeted`, named for its first cause) — their ordering
       precondition cannot be met this run, exactly like a failed predecessor
       level;
@@ -365,6 +383,10 @@ def bare_main():
     - cells that run after a pending cell not applying this run wait, named in
       `waiting_cells`. An env with a waiting cell stops its `needs` successors, and
       each new skip can make more cells wait: `settle` runs both to one fixpoint.
+
+    A pending cell another pull request locks (`locked_cells`) stays pending and applies
+    nowhere, exactly like a waiting cell; it is named in `locked_cells`. Locks are read only
+    in the envs neither held nor excluded as targeted.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -392,16 +414,27 @@ def bare_main():
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(targeted + held)
-    skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels)
+    # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
+    # waiting cell's remedy names it.
+    locked = locked_cells(repo, [c for c in pending if c["environment"] not in stopped], pr_number)
+    skipped, run, waiting = settle(
+        order,
+        stopped,
+        pending,
+        deps,
+        tags_by_stack,
+        levels,
+        {(c["stack"], c["environment"]) for c in locked},
+    )
     wv.refuse_inversions(
         run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
     )
     # Every pending targeted env, held or not: the comment names a held one's
     # targeted command under the hold. A held env that is not targeted stays out.
     excluded = sorted(pending_envs & set(targeted))
-    # The plan runs attach to `runnable`, not `pending`: an excluded, held or waiting cell's
-    # check stays pending by design for a later apply, and that apply refuses on its own over
-    # a record-less cell, so refusing here would strand the cells that CAN apply.
+    # The plan runs attach to `runnable`, not `pending`: an excluded, held, waiting or locked
+    # cell's check stays pending by design for a later apply, and that apply refuses on its own
+    # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
@@ -432,7 +465,8 @@ def bare_main():
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_targeted={excluded} skipped_after_targeted={skipped} "
-        f"review_held={held} waiting={len(waiting)} applied_exempt={applied_exempt} "
+        f"review_held={held} waiting={len(waiting)} locked={len(locked)} "
+        f"applied_exempt={applied_exempt} "
         # The hold cause: an everything-held run is otherwise indistinguishable
         # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
         # review job) renders visibly as ''.
@@ -447,7 +481,8 @@ def bare_main():
         applied_exempt_envs=json.dumps(applied_exempt),
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
-        # Over `cells`, not `runnable`: the comment lists excluded, held and waiting cells too.
+        locked_cells=json.dumps(locked),
+        # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and locked cells.
         env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
     )
 
@@ -494,11 +529,13 @@ def main():
 
     all_pending = pending_tuples(names, completed, wv.env_stacks(tag_map))
     pending = filter_pending(cells, completed)
+    locked = locked_cells(repo, pending, pr_number)
+    run = drop_waiting(pending, locked)
     levels = wv.cell_levels(bm.ec.env_order(table), tag_map)
-    waiting = wv.waiting_cells(pending, all_pending, deps, tag_map, levels)
-    # Waiting cells drop before `with_plan_runs`: their checks stay pending for a later
+    waiting = wv.waiting_cells(run, all_pending, deps, tag_map, levels)
+    # Locked and waiting cells drop before `with_plan_runs`: their checks stay pending for a later
     # apply, which refuses on its own over a record-less cell.
-    runnable = with_plan_runs(drop_waiting(pending, waiting), lines, app_id, pr_number=pr_number)
+    runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
 
     # Before the padding, whose over-depth refusal is where this line helps most.
@@ -508,13 +545,15 @@ def main():
     print(
         f"::notice title=apply-detect::env={env} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "
-        f"waiting={len(waiting)} waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
+        f"waiting={len(waiting)} locked={len(locked)} "
+        f"waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
     )
     write_outputs(
         **wv.env_level_outputs(per_level),
         head_sha=head,
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
+        locked_cells=json.dumps(locked),
         env_order=json.dumps([env]),
     )
 

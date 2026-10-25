@@ -1,0 +1,25 @@
+name: shipmate lock-verify
+description: >-
+  Refuse unless the pull request holds the cell's lock, read-only through scripts/cell-lock. A
+  lock that cannot be read refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read.
+inputs:
+  pr-number:
+    description: The pull request that must hold the lock.
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu.
+    required: true
+  stack:
+    description: Stack path, e.g. stacks/app.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify the pull request holds the cell lock
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_ENV: ${{ inputs.env }}
+        STACK: ${{ inputs.stack }}
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify
