@@ -510,6 +510,9 @@ def _verify_cmd(repo, pr, run):
     try:
         sha = _ref_sha(repo, ref, run)
         held = None if sha is None else _lock(repo, ref, sha, run)
+    except SystemExit as exc:
+        why = str(exc.code).removeprefix("::error::")
+        raise SystemExit(f"::error::could not read the cell lock on {where} ({why})") from None
     except (LookupError, TypeError, ValueError) as exc:
         raise SystemExit(f"::error::could not read the cell lock on {where} ({exc!r})") from None
     if held is not None and held.pr == pr:

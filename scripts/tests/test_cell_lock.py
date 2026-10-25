@@ -1090,7 +1090,12 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
 @pytest.mark.parametrize(
     ("commit_answer", "refusal"),
     [
-        pytest.param(FAIL, "::error::command failed (1): gh api", id="read-fails"),
+        pytest.param(
+            FAIL,
+            "::error::could not read the cell lock on `dev` / `stacks/auth` "
+            "(command failed (1): gh api)",
+            id="read-fails",
+        ),
         pytest.param(
             "{}",
             "::error::could not read the cell lock on `dev` / `stacks/auth` "
@@ -1100,8 +1105,9 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
     ],
 )
 def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, refusal):
-    """Mutations: catch `SystemExit` around the read and pass (read-fails passes); return
-    instead of refusing on a malformed answer (malformed passes)."""
+    """Mutations: catch `SystemExit` around the read and pass (read-fails passes); re-raise
+    the read's `SystemExit` unchanged (read-fails loses the cell); return instead of refusing
+    on a malformed answer (malformed passes)."""
     gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
     with pytest.raises(SystemExit) as exc:
         _verify(monkeypatch, tmp_path, gh)
