@@ -1,5 +1,5 @@
 name: shipmate apply-cell
-description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key; a trusted trailing job completes the apply check afterwards. Reads the job's GITHUB_TOKEN, which needs actions:read to download the reviewed-plan artifact and, given a pull request, contents:read to read its cell lock.
+description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key; a trusted trailing job completes the apply check afterwards. Reads the job's GITHUB_TOKEN, which needs actions:read to download the reviewed-plan artifact.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
@@ -28,10 +28,9 @@ inputs:
     description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
-  pr-number:
-    description: The pull request a pre-merge apply runs for; the apply refuses unless that pull request holds the cell's lock. Empty on the merge deploy, which ignores cell locks, and skips the check.
-    required: false
-    default: ""
+  cell-lock-outcome:
+    description: The outcome of the wave job's lock-verify step, which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
+    required: true
 runs:
   using: composite
   steps:
@@ -55,18 +54,20 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
-    # "Re-run failed jobs" re-runs a failed wave without the `lock` job, so the cell checks its
-    # lock itself, read-only. Any read failure refuses.
-    - name: Verify the pull request holds the cell lock
+    # Carries the wave job's lock check into this cell's blocked reason. The check ran before
+    # the cloud credentials, so a refused cell never assumed the apply role.
+    - name: Refuse a cell whose lock check did not pass
       id: cell-lock
-      if: ${{ inputs.pr-number != '' }}
       shell: bash
       env:
-        GH_TOKEN: ${{ github.token }}
-        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
-        SHIPMATE_ENV: ${{ inputs.env }}
+        ENV: ${{ inputs.env }}
         STACK: ${{ inputs.stack }}
-      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify
+        OUTCOME: ${{ inputs.cell-lock-outcome }}
+      run: |
+        if [ "$OUTCOME" != success ] && [ "$OUTCOME" != skipped ]; then
+          echo "::error::apply aborted for $ENV/$STACK: the cell lock check did not pass (outcome: '$OUTCOME'); the job's lock check step names why"
+          exit 1
+        fi
 
     - name: Download reviewed plan artifact (fail-safe if missing)
       id: download

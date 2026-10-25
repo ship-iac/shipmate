@@ -22,7 +22,7 @@ LOCAL_PREFIX = "$/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
 #: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
 #: nothing at all if that glob matches nothing.
-ACTION_COUNT = 26
+ACTION_COUNT = 27
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -190,6 +190,7 @@ LOCAL_ACTIONS = {
     "hcl-check",
     "lock-acquire",
     "lock-release",
+    "lock-verify",
     "plan-cell",
     "pr-facts",
     "python-yaml",

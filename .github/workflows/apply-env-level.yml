@@ -5,8 +5,8 @@ on:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
       runs_on: { required: true, type: string }
-      # Empty on the merge deploy, which ignores cell locks; set, each cell refuses unless that
-      # pull request holds its lock.
+      # Empty on the merge deploy, which ignores cell locks; set, a re-run cell refuses unless
+      # that pull request holds its lock.
       pr_number: { required: false, type: string, default: "" }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
@@ -60,6 +60,16 @@ jobs:
     # wave1..wave7 alias this list, so an edit here changes all eight waves. A change for one
     # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
     steps: &wave-steps
+      # "Re-run failed jobs" re-runs a failed wave without the `lock` job, so a re-run cell checks
+      # its lock first: a failure skips the cloud credentials, and apply-cell runs only to refuse.
+      - name: Verify the pull request holds the cell lock
+        id: cell-lock
+        if: ${{ inputs.pr_number != '' && github.run_attempt > 1 }}
+        uses: $/actions/lock-verify
+        with:
+          pr-number: ${{ inputs.pr_number }}
+          env: ${{ matrix.environment }}
+          stack: ${{ matrix.stack }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.head_sha }}" }
       - uses: $/actions/setup
@@ -72,6 +82,7 @@ jobs:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
       - uses: $/actions/apply-cell
+        if: ${{ success() || steps.cell-lock.outcome == 'failure' }}
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -81,7 +92,7 @@ jobs:
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
           encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
-          pr-number: ${{ inputs.pr_number }}
+          cell-lock-outcome: ${{ steps.cell-lock.outcome }}
   wave1:
     needs: [wave0]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
