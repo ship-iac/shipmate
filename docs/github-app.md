@@ -10,7 +10,8 @@ needs `actions: write`, and the engine's comment-ops job grants its
 `GITHUB_TOKEN` only `actions: read`: the write permission exists only in the
 App token the dispatch step mints once the command is authorized. The same App
 also authors every apply check, the `shipmate / gate` commit status, the
-sticky plan/result comments, and drift issues — installation tokens minted
+sticky plan/result comments and drift issues, and writes the cell lock
+refs — installation tokens minted
 fresh per job, never a long-lived credential in the workflow. The bot
 identity is derived automatically from the App name once it's registered, so
 an App named `shipmate-acme` comments as `shipmate-acme[bot]`.
@@ -267,6 +268,12 @@ as above, and step 5 runs in every consumer repository.
   `checks: write`, `statuses: write`, `issues: write`, `environments: read`
   (doctor's plan-environment secret listing — names only; no GitHub API returns
   a secret's value, and this permission cannot write one).
+- `contents: write` writes the cell lock refs, `refs/shipmate/locks/…`
+  ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). Only the mints that write a
+  lock request it, plus `shipmate doctor`'s probe of the whole permission set,
+  whose token nothing reads. A token holding it cannot add a file under
+  `.github/workflows` (the contents API and a git-data tree both answer 403) and
+  cannot move the default branch under its ruleset (422); probed 2026-10-24.
 - The App mints a fresh installation token per job and authors every
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
@@ -304,10 +311,14 @@ it. Until that happens, API calls using the new scopes (e.g. the App's
 `statuses: write` gate POST) fail with a permission error even though the
 manifest and the installed App's token both look correct. The gap is the
 un-approved request, not a code or config bug. A mint that requests the new
-scope fails outright: the plan run's summary token requests every scope the gate
-path and doctor use, so until the request is accepted no plan run writes apply
-checks or a `shipmate / gate` status, and `shipmate doctor` replies that it could
-not mint a token.
+scope fails outright, so what breaks is whatever requests it. `shipmate doctor`
+mints a token requesting the manifest's whole set and reports that mint failing
+on any missing permission. A scope the plan run's `summary` mint requests stops
+every plan run writing apply checks or a `shipmate / gate` status. For
+`contents: write`, plans keep running, and every
+mint that writes a cell lock fails: every `shipmate apply` refuses at its `lock`
+job, and the `release` job, the deploy's lock release and
+`shipmate unlock <env> --evict` fail.
 
 ## Key-exposure boundary
 
@@ -375,7 +386,10 @@ actual work here:
   send, or `push` to the default branch. Either way the run executes only the
   default branch's workflow code, and `apply.yml`'s `review` job binds an apply
   dispatch's inputs to its pull request (`CONTRACT.md` §Comment-ops). The unlock
-  dispatch reaches no key (`docs/hardening.md` names its residual).
+  dispatch reaches no key (`docs/hardening.md` names its residual). The
+  `release` job reaches it on `pull_request_target` `closed`, at the base branch
+  ref like the autoplan, and checks out nothing either: it reads only the event
+  payload (`docs/hardening.md` §Contributors without push access).
 - **The plan-run jobs that hold the key run no consumer repository content.**
   The `summary` job and `gate-hold`, which runs only when the gate-writer
   concurrency group cancelled `summary`, check out nothing, and a consumer

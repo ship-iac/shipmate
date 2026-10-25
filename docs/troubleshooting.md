@@ -374,8 +374,8 @@ place. Re-run with `--key <path to the App's PEM private key>`.
 
 ## Common failures
 
-When a `shipmate apply` fails at `detect` with an `::error::` (a refusal or a
-failed tool or API call), its comment shows the message's first error on one
+When a `shipmate apply` fails at `detect` or `lock` with an `::error::` (a
+refusal or a failed tool or API call), its comment shows the message's first error on one
 line, in a fence under the `🔴 failed` verdict: search this page for its text.
 The post-merge deploy posts no apply comment, so a deploy's `detect` error is
 only in that run's `detect` annotation.
@@ -768,7 +768,9 @@ a well-formed one that names no role.
 
 ### A state lock is held
 
-Every apply of the cell fails acquiring the lock, and the apply result comment
+This is the OpenTofu state lock; a `🔒 locked by` line is a cell lock
+(§A cell is `locked by #<n>`). Every apply of the cell fails acquiring the
+lock, and the apply result comment
 carries a `state lock held:` note under its cell lines naming each such cell, the held lock's id, the
 command that releases it, and — when the backend reported a usable timestamp —
 when it was taken. Per-cell concurrency admits one apply at a time, so the
@@ -810,6 +812,88 @@ Two locks this verb does not reach:
   against the same state. That is the lock unlock must not break, and it is why
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
+
+### A cell is `locked by #<n>`
+
+The apply result comment carries
+``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close, then re-plan, or
+comment `shipmate unlock <env> --evict`.``, the plan comment ends a cell's line
+with `🔒 locked by #<n>`, or the apply run's `lock` job fails with
+`` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
+re-plan, or comment `shipmate unlock <env> --evict` ``.
+
+Pull request #<n> applied that cell first and holds its cell lock until it
+merges or closes ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). This is not
+an OpenTofu state lock, and `shipmate unlock <env>` does not release it. In
+the comment form, the cell stays pending, the cells that run after it wait, and
+the rest of the run applied. In the `lock` job form, #<n> took the cell between
+this run's `detect` and its `lock` job, so the whole run refused and applied
+nothing.
+
+- Wait for #<n> to merge or close, then re-plan (comment `shipmate plan` or
+  push) and apply: #<n>'s apply may have changed what your plan was made
+  against.
+- Or comment `shipmate unlock <env> --evict` on this pull request, with write
+  access. It releases the locks other pull requests hold on this pull request's
+  cells in `<env>` and comments on #<n> naming who released them. #<n> takes the
+  lock again with its next apply.
+- After the `lock` job form, comment `shipmate apply` again: the new run leaves
+  the locked cell pending and applies the rest.
+
+### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
+
+The apply result comment carries
+``🔒 locked by an unreadable lock: <cells>. Comment `shipmate unlock <env> --evict`.``,
+the plan comment marks a cell `🔒 locked by an unreadable lock`, or the `lock`
+job fails with `` `<env>` / `<stack>` is locked by an unknown holder (<ref>) ``.
+
+The lock ref's commit message is not the record the engine writes, or names
+another cell: someone wrote or edited the ref outside shipmate. No merge or close
+releases it, because no pull request is its holder. Comment
+`shipmate unlock <env> --evict` on a pull request that changes the cell.
+
+A different failure has the same cause: a ref under `refs/shipmate/locks/` that
+targets something other than a commit. Every read of its environment's locks
+refuses with ``the cell lock ref <ref> targets a <type>, not a commit; someone
+with write access must delete it: git push origin :<ref>``: applies to that
+environment, `shipmate unlock <env> --evict` there and every pull request's
+`release` job fail, and the plan comment marks no locked cell. `--evict` cannot
+delete it. Run the command the error names from a clone, with write access.
+
+### The deploy's `summary` failed releasing cell locks
+
+The merge deploy's `summary` job fails at `Release the merged pull request's cell
+locks`, with `could not release the cell lock <ref> of <cell>; it is still held
+at <sha>` or a failed App token mint.
+
+The merged pull request still holds those locks, and other pull requests' applies
+leave the cells pending. Re-run the deploy's failed jobs. Each run releases every
+lock the merged pull request holds whose cell has no pending apply check, so a
+re-run releases what the failed one owed, whatever else it re-applies. A failed
+mint after a release that added `contents: write` is the un-accepted permission
+request ([`github-app.md`](github-app.md) §Re-approve after permission changes).
+
+### A cell stays locked after its pull request closed
+
+Another pull request's apply still reports ``🔒 locked by #<n>`` after #<n>
+merged or closed.
+
+- **The `release` job failed or did not run.** Open the closing run of #<n>'s
+  `shipmate.yml` (`shipmate · release`) and re-run it. No run at all means the
+  file's `pull_request_target` types lack `closed`, which nothing reports, or
+  its `release` job is missing, which `shipmate doctor`'s `shipmate.yml` probe
+  reports. Re-pin the fence
+  (`python <engine>/scripts/repin <consumer> <tag> --write-fence`), then evict
+  the lock as below.
+- **#<n> merged and the cell's apply check is still pending on its head.** The
+  lock stays until the merge deploy applies the cell; a failed deploy keeps it
+  (§The deploy's `summary` failed releasing cell locks). Re-run the deploy.
+- **#<n> was closed without merging and the lock is newer than the close.** An
+  apply that took the lock after the close refuses and deletes it itself; one
+  that remains is evicted with `shipmate unlock <env> --evict`.
+
+In every case, `shipmate unlock <env> --evict` from a pull request that changes
+the cell releases it now.
 
 ### The encryption key is missing: `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, `SHIPMATE_ENCRYPTION_KEY is empty`
 

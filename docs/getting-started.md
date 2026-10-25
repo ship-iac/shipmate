@@ -397,9 +397,11 @@ engine reusable workflow SHA-pinned. A drift file is one job calling engine
 in the engine, so none of what they decide is wiring you can get
 wrong.
 
-`shipmate.yml` and every drift file go in at tier 1, and three kinds of job are
-this tier's: `plan`, `comment-ops` and each drift file's `drift`, which need
-`<env>-plan`, `shipmate-engine` and the App key and nothing else. `deploy` runs from the
+`shipmate.yml` and every drift file go in at tier 1, and four kinds of job are
+this tier's: `plan`, `release`, `comment-ops` and each drift file's `drift`,
+which need `<env>-plan`, `shipmate-engine` and the App key and nothing else
+(`release` needs no `<env>-plan`). `release` runs when a pull request closes,
+merged or not, and releases the cell locks its applies took. `deploy` runs from the
 start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
 `<env>`). The other two, `apply` and `unlock`, wait for the
@@ -692,7 +694,7 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 This tier gets you `shipmate apply` and `shipmate unlock` in a pull request
 comment (a pre-merge apply of the reviewed plan, through the `apply`
-job, and a lock release through `unlock`), and the environment protection that
+job, and an OpenTofu state lock release through `unlock`), and the environment protection that
 also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
 push to the default branch.
 
@@ -703,7 +705,10 @@ plan for the pull request's current head, and only on a pull request that is not
 a draft — the six apply requirements in
 [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
 ([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
-names which requirement failed.
+names which requirement failed. Each cell an apply runs is locked to the pull
+request until it merges or closes; another pull request's apply leaves that
+cell pending and names the holder, and `shipmate unlock <env> --evict` releases
+the lock ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
 
 **The two are coupled.** If you require `shipmate / gate` as a
 branch-protection check — tier 3 — then applies have to happen pre-merge, because
@@ -799,7 +804,7 @@ omitted key read as the empty string.
 
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
 `unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
-a lock reads no plan artifact and mints no App token, so it declares neither
+a state lock reads no plan artifact and mints no App token, so it declares neither
 engine secret, and mapping a secret the callee does not declare is a load-time
 rejection with no job and no log. That is why the `unlock` job is the one job of
 the file whose `secrets:` block names no engine credential.
