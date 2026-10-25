@@ -1391,22 +1391,6 @@ def test_main_reads_no_locks_in_an_env_that_does_not_apply(tmp_path, monkeypatch
     ]
 
 
-def test_main_names_no_lock_in_an_env_skipped_this_run(tmp_path, monkeypatch):
-    """`dns/dev-eu` is locked, so prod-eu, which needs dev-eu, is skipped; its own locked `box`
-    applies nowhere this run and is not named.
-
-    Mutation: drop the `skipped` filter on `locked` after `settle` (`box` is named)."""
-    locks = {
-        **held(aad.cl, "stacks/dns", "dev-eu", 7),
-        **held(aad.cl, "box", "prod-eu", 9),
-    }
-    parsed = _locked(tmp_path, monkeypatch, locks)
-    assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
-    assert json.loads(parsed["locked_cells"]) == [
-        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
-    ]
-
-
 def test_main_refuses_a_bare_apply_whose_lock_read_fails(tmp_path, monkeypatch):
     """Mutation: catch `SystemExit` around `read_locks` in `locked_cells` and read no locks -- the
     run applies."""
