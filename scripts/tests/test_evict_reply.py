@@ -31,7 +31,7 @@ def posts(monkeypatch):
         got.append((pr, stdin))
         return "{}"
 
-    monkeypatch.setattr(er, "run", run)
+    monkeypatch.setattr(er.rc, "run", run)
     return got, fail
 
 

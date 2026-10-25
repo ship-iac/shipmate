@@ -21,7 +21,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, run, run_annotated
+from _shipmate import _load, current_run_url, is_pr_number, run_annotated
 
 sc = _load("summary-comment")
 rc = _load("reply-comment")
@@ -90,10 +90,7 @@ def failed(refusal, env):
 
 
 def _post(pr, text, outcome="notice"):
-    body = rc.body("unlock", os.environ["SHIPMATE_ENV"], outcome, text, current_run_url())
-    repo = os.environ["GITHUB_REPOSITORY"]
-    argv = ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-F", "body=@-"]
-    run(argv, stdin=body)
+    rc.post(pr, rc.body("unlock", os.environ["SHIPMATE_ENV"], outcome, text, current_run_url()))
 
 
 def _cells(name):

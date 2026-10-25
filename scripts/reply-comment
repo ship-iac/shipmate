@@ -50,6 +50,17 @@ def body(verb, env, outcome, text, run_url):
     return f"{sc.header(verb, env)}\n\n{VERDICTS[outcome]}{text}\n\n{foot}"
 
 
+def post(pr, text):
+    """POST `text` as a comment on pull request `pr` of `GITHUB_REPOSITORY`. The body goes
+    through stdin: `run`'s failure message quotes the argv. A failed POST raises `run`'s
+    `SystemExit`."""
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run(
+        ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-F", "body=@-"],
+        stdin=text,
+    )
+
+
 def main():
     if sys.argv[1:]:
         sys.exit("::error::usage: reply-comment")
@@ -69,11 +80,8 @@ def main():
     else:
         verdict = os.environ.get("SHIPMATE_REPLY_TEXT", "")
     text = body(verb, os.environ.get("SHIPMATE_REPLY_ENV", ""), outcome, verdict, current_run_url())
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    # The body goes through stdin: `run`'s failure message quotes the argv.
-    argv = ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-F", "body=@-"]
     try:
-        run(argv, stdin=text)
+        post(pr, text)
     except SystemExit as exc:
         # One line: unannotated, so a raw stderr line could start a workflow command.
         reason = " | ".join(str(exc.code).splitlines())
