@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
+description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. `shipmate unlock <env> --evict` (route `evict`) is carried out here; it deletes the cell locks other pull requests hold on stacks with an App-authored apply check on this pull request's head in `<env>`, tells each holder, and replies. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -38,7 +38,7 @@ outputs:
     description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.
     value: ${{ steps.authz.outputs.head_sha }}
   verb:
-    description: The parsed verb, forwarded to actions/dispatch (plan, apply or unlock, which select a job in the consumer's one shipmate.yml). The `doctor` and `help` routes are answered in place and never reach a dispatch.
+    description: The parsed verb, forwarded to actions/dispatch (plan, apply or unlock, which select a job in the consumer's one shipmate.yml). The `doctor`, `evict` and `help` routes are answered in place and never reach a dispatch.
     value: ${{ steps.parse.outputs.route }}
 runs:
   using: composite
@@ -345,6 +345,88 @@ runs:
           # of probes for a report this run already rendered. The next run can recover.
           echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run: $retry_hint"
         fi
+
+    # `shipmate unlock <env> --evict` is answered here and never dispatches: no step writes
+    # `authz`/`planauthz` for it, so `authorized` stays false.
+    - name: Mint App token for evict
+      id: evicttoken
+      if: ${{ steps.parse.outputs.route == 'evict' && steps.access.outputs.authorized == 'true' }}
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        # Deletes lock refs, reads the head's apply checks, and posts on the holders' pull
+        # requests (`pull-requests`, not `issues`, as the doctor mint explains).
+        permission-contents: write
+        permission-checks: read
+        permission-pull-requests: write
+
+    - name: "Evict: App token unavailable"
+      if: ${{ steps.parse.outputs.route == 'evict' && steps.access.outputs.authorized == 'true' && steps.evicttoken.outcome != 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: failed
+        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository, with contents:write, checks:read and pull-requests:write accepted? Ask an org admin to install it or accept the permissions, then retry."
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
+
+    - name: "Evict: read the pull request head"
+      id: evicthead
+      if: ${{ steps.parse.outputs.route == 'evict' && steps.evicttoken.outcome == 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
+        echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+
+    - name: "Evict: release the other pull requests' cell locks"
+      id: evict
+      if: ${{ steps.parse.outputs.route == 'evict' && steps.evicttoken.outcome == 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.evicttoken.outputs.token }}
+        SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_HEAD_SHA: ${{ steps.evicthead.outputs.head_sha }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" evict
+
+    - name: "Evict: tell the holders and reply"
+      if: ${{ steps.parse.outputs.route == 'evict' && steps.evicttoken.outcome == 'success' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.evicttoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        COMMENT_USER: ${{ inputs.comment-user }}
+        SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_EVICTED: ${{ steps.evict.outputs.evicted }}
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"
+
+    - name: "Evict: failed"
+      # A failed step skips every later `success()`-gated step, so without `failure()` the
+      # commenter would get no answer.
+      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || steps.evict.outcome == 'failure') }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.evicttoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_EVICT_REFUSAL: ${{ steps.evict.outputs.refusal }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply" --failed
+        exit 1
 
     - name: Mint App token (checks:read)
       id: apptoken

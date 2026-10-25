@@ -208,19 +208,25 @@ def _run_permission_mode(tmp_path, monkeypatch, permission, verb):
 #: (permission, verb) -> the whole `GITHUB_OUTPUT` of `--permission` mode, hand-written.
 _PERMISSION_MODE_TABLE = [
     (p, verb, f"authorized={authorized}\nreason={reason}\n")
-    for verb in ("apply", "unlock", "plan", "doctor")
+    for verb, cmd in (
+        ("apply", "apply"),
+        ("unlock", "unlock"),
+        ("plan", "plan"),
+        ("doctor", "doctor"),
+        ("evict", "unlock --evict"),
+    )
     for p, authorized, reason in (
         ("admin", "true", ""),
         ("write", "true", ""),
-        ("read", "false", _a1(verb, "read")),
-        ("none", "false", _a1(verb, "none")),
-        ("", "false", _a2(verb)),
-        ("WRITE", "false", _a2(verb)),
-        ("wr ite", "false", _a2(verb)),
-        ("write\n", "false", _a2(verb)),
-        ("maintain", "false", _a3(verb, "maintain")),
-        ("triage", "false", _a3(verb, "triage")),
-        ("null", "false", _a3(verb, "null")),
+        ("read", "false", _a1(cmd, "read")),
+        ("none", "false", _a1(cmd, "none")),
+        ("", "false", _a2(cmd)),
+        ("WRITE", "false", _a2(cmd)),
+        ("wr ite", "false", _a2(cmd)),
+        ("write\n", "false", _a2(cmd)),
+        ("maintain", "false", _a3(cmd, "maintain")),
+        ("triage", "false", _a3(cmd, "triage")),
+        ("null", "false", _a3(cmd, "null")),
     )
 ]
 
@@ -232,10 +238,10 @@ def test_permission_mode_decides_the_permission_alone(
     """`--permission` decides every gated verb from `PERMISSION` alone: no pull request, review
     decision or plan record is read, and the reason names the verb.
 
-    Mutations: drop `"doctor"` from the permission-mode allowlist (the doctor rows exit
-    `unknown verb`); return None from `_permission_reason` for `read` (the read rows
-    authorize); write `authorized=true` unconditionally in permission mode (every refusal row
-    reads `authorized=true`)."""
+    Mutations: drop `"doctor"` or `"evict"` from the permission-mode allowlist (those rows
+    exit `unknown verb`); name `evict` as itself (its rows read `shipmate evict`); return None
+    from `_permission_reason` for `read` (the read rows authorize); write `authorized=true`
+    unconditionally in permission mode (every refusal row reads `authorized=true`)."""
     assert _run_permission_mode(tmp_path, monkeypatch, permission, verb) == expected
 
 

@@ -29,6 +29,7 @@ SCRIPTS_EXPECTED = [
     "drift-issues",
     "env-config",
     "env-inject",
+    "evict-reply",
     "gate-config",
     "gate-state",
     "gate-status",

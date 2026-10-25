@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Tell each holder its cell lock was evicted, then answer the `shipmate unlock <env> --evict`
+command.
+
+Reads `SHIPMATE_EVICTED` (`cell-lock evict`'s `evicted` output: a JSON list of `{stack,
+environment, holder}`, `holder` null for an unknown holder), `SHIPMATE_ENV`, `COMMENT_USER`
+(the commenter's login), `PR_NUMBER` (the commenting pull request) and `GH_TOKEN`. Each lock
+whose holder is a pull request gets one notice there, then the command gets one reply naming
+every evicted cell, or that there was none. With `--failed` it posts only the failure reply,
+holding `SHIPMATE_EVICT_REFUSAL` (cell-lock's `refusal`, empty when the head read failed) in a
+fence: a refusal can name a branch-controlled stack path.
+
+The locks are already gone when this runs, so a notice that cannot be posted never stops the
+reply: the reply names the holders not told and the script exits 1 after posting it. A reply
+that cannot be posted exits 1 too.
+"""
+
+import json
+import os
+import sys
+
+from _shipmate import _load, current_run_url, is_pr_number, run, run_annotated
+
+sc = _load("summary-comment")
+rc = _load("reply-comment")
+
+
+def cell(env, stack):
+    """`` `<env>` / `<stack>` ``; a stack a code span cannot hold is bold + `_md_name` instead,
+    as the apply comment names it. `env` is a validated environment name."""
+    if "`" in stack or "\n" in stack or "\r" in stack:
+        return f"`{env}` / **{sc._md_name(stack)}**"
+    return f"`{env}` / `{stack}`"
+
+
+def notice(lock, login, pr):
+    """The text posted on `lock`'s holder pull request."""
+    where = cell(lock["environment"], lock["stack"])
+    return f"🔓 {where} lock released by @<!-- -->`{login}` from #{pr}; re-plan before applying it."
+
+
+def reply(evicted, env, untold):
+    """(outcome, text) answering the command: the evicted cells with their holders, and the
+    holders `untold` whose notice failed."""
+    if not evicted:
+        return "notice", (
+            f"no lock held by another pull request on a cell this pull request changes in `{env}`"
+        )
+    named = ", ".join(
+        f"{cell(e['environment'], e['stack'])} (held by "
+        f"{'#' + str(e['holder']) if e['holder'] is not None else 'an unreadable lock'})"
+        for e in evicted
+    )
+    if untold:
+        prs = ", ".join(f"#{h}" for h in sorted(untold))
+        return "failed", (
+            f"released {named}, but could not tell {prs}; this run's log has the error. Tell "
+            "them to re-plan before applying."
+        )
+    return "notice", f"released {named}."
+
+
+def failed(refusal, env):
+    """The failure reply's text."""
+    text = (
+        f"could not finish evicting the cell locks in `{env}`; any lock already released "
+        "was not announced to its holder. This run's log has the error; comment again."
+    )
+    return f"{text}\n\n{sc.reason_fence(refusal)}" if refusal else text
+
+
+def _post(pr, text, outcome="notice"):
+    body = rc.body("unlock", os.environ["SHIPMATE_ENV"], outcome, text, current_run_url())
+    repo = os.environ["GITHUB_REPOSITORY"]
+    argv = ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-F", "body=@-"]
+    run(argv, stdin=body)
+
+
+def main():
+    pr = os.environ.get("PR_NUMBER", "")
+    if not is_pr_number(pr):
+        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr})")
+    if sys.argv[1:] == ["--failed"]:
+        env = os.environ["SHIPMATE_ENV"]
+        _post(pr, failed(os.environ.get("SHIPMATE_EVICT_REFUSAL", ""), env), "failed")
+        return
+    login = os.environ.get("COMMENT_USER", "")
+    evicted = json.loads(os.environ.get("SHIPMATE_EVICTED", ""))
+    untold = set()
+    for lock in evicted:
+        holder = lock["holder"]
+        if holder is None:
+            continue
+        try:
+            _post(holder, notice(lock, login, pr))
+        except SystemExit as exc:
+            # One line: a raw stderr line could start a workflow command.
+            reason = " | ".join(str(exc.code).splitlines())
+            print(f"::warning::could not post the eviction notice on #{holder}: {reason}")
+            untold.add(holder)
+    outcome, text = reply(evicted, os.environ["SHIPMATE_ENV"], untold)
+    _post(pr, text, outcome)
+    if untold:
+        sys.exit(f"::error::could not post the eviction notice on {len(untold)} pull request(s)")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

@@ -1157,10 +1157,19 @@ body contains `shipmate` in any case; every other comment starts no runner.
 | `shipmate doctor` | none | write access (below); read-only |
 | `shipmate help` | none | none — read-only, open to any commenter |
 | `shipmate plan` | none | write access (below); changes no infrastructure |
-| `shipmate unlock <env>` | required env | write access and same repository, plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
+| `shipmate unlock <env> [--evict]` | required env | write access and same repository, plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below); with `--evict`, write access alone |
 
-`plan`, `doctor`, `apply` and `unlock` require the commenter's write access
-(the "write access" apply requirement below defines it), read and decided once
+`shipmate unlock <env> --evict` is its own route, `evict`, answered inside the
+comment-handling run and never dispatched. It deletes each cell lock in `<env>`
+that another pull request (or an unknown holder) holds on a stack with an
+App-authored `apply / <stack> / <env>` check on this pull request's head,
+comments `` 🔓 `<env>` / `<stack>` lock released by @`<login>` from #<pr>; re-plan
+before applying it. `` on each holder's pull request, and replies naming the
+evicted cells, or that there was none. A notice that cannot be posted turns the
+reply into `🔴 failed:` naming the holders not told, and fails the run.
+
+`plan`, `doctor`, `apply`, `unlock` and `unlock --evict` require the commenter's
+write access (the "write access" apply requirement below defines it), read and decided once
 per comment before any step that mints a token, reads the pull request or
 dispatches; the 👀 acknowledgement on `plan` and `doctor` comes first. A refused
 commenter gets one `🔴 refused:` reply naming the verb and the permission read,
@@ -1171,8 +1180,8 @@ Every dispatching verb dispatches the same file,
 selects the job: `plan` → the `plan` job, `apply` → the `apply` job, `unlock` → the `unlock`
 job. That file carries four triggers; `workflow_dispatch` is the one a
 commented verb reaches, and the other three (`pull_request_target`,
-`issue_comment`, `push`) fire from their own events. `doctor` and
-`help` dispatch nothing: both are answered inside the comment-ops run itself. A
+`issue_comment`, `push`) fire from their own events. `doctor`, `help` and
+`unlock --evict` dispatch nothing: each is answered inside the comment-ops run itself. A
 repository with no `.github/workflows/shipmate.yml`, or one that declares no
 `workflow_dispatch` trigger or not the inputs a verb's dispatch sends, fails at
 dispatch time on that comment-handling run — for every verb alike, since they share the file. That

@@ -964,6 +964,16 @@ _REPLIES = {
         "SHIPMATE_REPLY_OUTCOME": "refused",
         "SHIPMATE_REPLY_TEXT": "${{ steps.authz.outputs.reason }}",
     },
+    "Evict: App token unavailable": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "failed",
+        "SHIPMATE_REPLY_TEXT": (
+            "could not mint a GitHub App token. Is the shipmate App installed on this "
+            "repository, with contents:write, checks:read and pull-requests:write accepted? Ask "
+            "an org admin to install it or accept the permissions, then retry."
+        ),
+    },
 }
 
 
@@ -990,11 +1000,17 @@ def test_every_reply_step_names_its_header_outcome_and_text():
 
 #: A run line that posts a comment: an issue-comment endpoint at the end of a path
 #: (`/comments/<id>/reactions` is not one), a `reply-comment`, or an `upsert-comment`.
-_POSTS = re.compile(r"/comments\b(?!/)|scripts/reply-comment\b|scripts/upsert-comment\b")
+_POSTS = re.compile(r"/comments\b(?!/)|scripts/(?:reply-comment|upsert-comment|evict-reply)\b")
 
 #: The steps that post a comment reply-comment does not render: help prints its own frame, and
-#: the doctor report is a sticky upsert of doctor's own body.
-_NON_REPLY_POSTERS = {"Post help", "Doctor: render and upsert the sticky comment"}
+#: the doctor report is a sticky upsert of doctor's own body, and `evict-reply` renders the
+#: eviction's notices and replies (`test_evict_reply.py`).
+_NON_REPLY_POSTERS = {
+    "Post help",
+    "Doctor: render and upsert the sticky comment",
+    "Evict: tell the holders and reply",
+    "Evict: failed",
+}
 
 
 def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
@@ -1100,6 +1116,7 @@ def _posted_body(tmp_path, name, context):
 
 
 def _access_reason(route, permission):
+    route = "unlock --evict" if route == "evict" else route
     if permission == "":
         return (
             "not authorized: could not read the commenter's permission on this repository, so "
@@ -1113,7 +1130,7 @@ def _access_reason(route, permission):
 
 @bash_only
 @pytest.mark.parametrize("permission", ["admin", "read", ""])
-@pytest.mark.parametrize("route", ["plan", "doctor", "apply"])
+@pytest.mark.parametrize("route", ["plan", "doctor", "apply", "evict"])
 def test_the_access_step_as_wired_decides_the_permission_for_its_route(tmp_path, route, permission):
     """Mutations: set the step's `SHIPMATE_VERB` to `apply` (the `plan` and `doctor` reasons
     name `apply`); drop `--permission` from `run` (the full decision runs, and `plan` exits
@@ -1329,7 +1346,7 @@ def test_the_contract_verb_table_carries_exactly_the_verbs():
         "`shipmate doctor`",
         "`shipmate help`",
         "`shipmate plan`",
-        "`shipmate unlock <env>`",
+        "`shipmate unlock <env> [--evict]`",
     }
     assert rows == derived == expected
 
@@ -1355,6 +1372,12 @@ _STEP_NAMES = [
     "Doctor: probe the manifest's full permission set",
     "Doctor: gather head SHA, declared environments, annotations",
     "Doctor: render and upsert the sticky comment",
+    "Mint App token for evict",
+    "Evict: App token unavailable",
+    "Evict: read the pull request head",
+    "Evict: release the other pull requests' cell locks",
+    "Evict: tell the holders and reply",
+    "Evict: failed",
     "Mint App token (checks:read)",
     "App token unavailable (App not installed?)",
     "Resolve gate configuration",
@@ -1535,6 +1558,145 @@ def test_one_verdict_answers_for_every_route():
     dispatch a doctor; `_AUTHORIZED` excludes it.
 
     Mutations, one at a time: drop the `planauthz` arm from the output only; `||` -> `&&` in
-    React on accept's `if:` only; add `steps.access.outputs.authorized == 'true' ||` to both."""
+    React on accept's `if:` only; add `steps.access.outputs.authorized == 'true' ||` to both;
+    add `steps.evict.outcome == 'success' ||` to the output (an evict would dispatch)."""
     assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == _AUTHORIZED
     assert step_by("comment-ops", name="React on accept")["if"] == _AUTHORIZED
+
+
+_EVICT_GATED = "steps.parse.outputs.route == 'evict' && steps.access.outputs.authorized == 'true'"
+_EVICT_MINTED = (
+    "${{ steps.parse.outputs.route == 'evict' && steps.evicttoken.outcome == 'success' }}"
+)
+#: The whole `if:` of every evict-only step, hand-written. Only the mint and its failure reply
+#: read `access`; every later step needs the mint, which needs `access`.
+_EVICT_ROUTE_IFS = {
+    "Mint App token for evict": f"${{{{ {_EVICT_GATED} }}}}",
+    "Evict: App token unavailable": (
+        f"${{{{ {_EVICT_GATED} && steps.evicttoken.outcome != 'success' }}}}"
+    ),
+    "Evict: read the pull request head": _EVICT_MINTED,
+    "Evict: release the other pull requests' cell locks": _EVICT_MINTED,
+    "Evict: tell the holders and reply": _EVICT_MINTED,
+}
+
+
+def test_every_evict_route_step_is_behind_the_permission_decision():
+    """The mint keys on `access`, and runs after it, so a read-only commenter mints nothing.
+
+    Mutations: drop the `access` arm from the mint's `if:`; move the mint step above
+    `Authorize the commenter's permission`."""
+    steps = _steps_conditioned_on("evict")
+    assert dict(steps) == _EVICT_ROUTE_IFS
+    ids = [s.get("id") for s in action_steps("comment-ops")]
+    assert ids.index("access") < ids.index("evicttoken")
+
+
+def test_the_evict_mint_requests_exactly_its_permissions():
+    """Mutation: request `permission-issues: write` in place of `permission-pull-requests`."""
+    with_ = step_by("comment-ops", id="evicttoken")["with"]
+    assert {k: v for k, v in with_.items() if k.startswith("permission-")} == {
+        "permission-contents": "write",
+        "permission-checks": "read",
+        "permission-pull-requests": "write",
+    }
+
+
+#: The `env:` of the steps that delete and announce, hand-written whole.
+_EVICT_ENVS = {
+    "evict": {
+        "GH_TOKEN": "${{ steps.evicttoken.outputs.token }}",
+        "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
+        "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
+        "SHIPMATE_HEAD_SHA": "${{ steps.evicthead.outputs.head_sha }}",
+        "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+    },
+    "Evict: tell the holders and reply": {
+        "GH_TOKEN": "${{ steps.evicttoken.outputs.token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+        "COMMENT_USER": "${{ inputs.comment-user }}",
+        "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
+        "SHIPMATE_EVICTED": "${{ steps.evict.outputs.evicted }}",
+    },
+    "Evict: failed": {
+        "GH_TOKEN": "${{ steps.evicttoken.outputs.token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+        "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
+        "SHIPMATE_EVICT_REFUSAL": "${{ steps.evict.outputs.refusal }}",
+    },
+}
+
+
+def test_the_evict_steps_bind_exactly_this_env():
+    """Mutations: bind the evict step's `SHIPMATE_HEAD_SHA` to `steps.authz.outputs.head_sha`
+    (empty on this route); bind the reply's `GH_TOKEN` to `github.token`."""
+    got = {
+        "evict": step_by("comment-ops", id="evict")["env"],
+        **{
+            n: step_by("comment-ops", name=n)["env"]
+            for n in ("Evict: tell the holders and reply", "Evict: failed")
+        },
+    }
+    assert got == _EVICT_ENVS
+
+
+def test_the_evict_steps_run_these_bodies():
+    """Mutations: drop `exit 1` from `Evict: failed` (a failed eviction reads green); run
+    `cell-lock release` in the evict step."""
+    bodies = {
+        "evict": step_by("comment-ops", id="evict")["run"],
+        "reply": step_by("comment-ops", name="Evict: tell the holders and reply")["run"],
+        "failed": step_by("comment-ops", name="Evict: failed")["run"],
+    }
+    assert bodies == {
+        "evict": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" evict',
+        "reply": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"',
+        "failed": (
+            "set -euo pipefail\n"
+            'python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply" --failed\n'
+            "exit 1\n"
+        ),
+    }
+
+
+def test_an_errored_eviction_is_answered():
+    """Mutation: drop `failure() &&` (a failed step skips it); key it on `steps.evict.outcome`
+    alone (a failed head read gets no answer)."""
+    assert step_by("comment-ops", name="Evict: failed")["if"] == (
+        "${{ failure() && (steps.evicthead.outcome == 'failure' || "
+        "steps.evict.outcome == 'failure') }}"
+    )
+
+
+_HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+@bash_only
+def test_the_evict_route_reads_the_head_while_authorized_stays_false(tmp_path):
+    """The head comes from its own step, since `authz` (the only other head producer) runs for
+    apply and unlock alone; the `authorized` verdict has no evict arm, so nothing dispatches.
+
+    Mutations: write the output as `head=`; add `steps.evict.outcome == 'success' ||` to the
+    `authorized` output."""
+    (tmp_path / "gh").write_text(
+        f"#!/bin/bash\nprintf '%s\n' \"$*\" >> argv.txt\necho {_HEAD}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    (tmp_path / "gh").chmod(0o755)
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_REPOSITORY": "org/repo",
+        "PR_NUMBER": "42",
+        "GITHUB_OUTPUT": str(out),
+    }
+    result = run_step(tmp_path, step_by("comment-ops", id="evicthead")["run"], env)
+    assert result.returncode == 0, result.stderr
+    assert out.read_text(encoding="utf-8") == f"head_sha={_HEAD}\n"
+    assert (tmp_path / "argv.txt").read_text(encoding="utf-8") == (
+        "api repos/org/repo/pulls/42 --jq .head.sha\n"
+    )
+    assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == _AUTHORIZED

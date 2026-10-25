@@ -243,7 +243,7 @@ def test_pure_garbage_shipmate_line_still_errors():
 
 def test_registry_shape():
     for verb, spec in cp.VERBS.items():
-        assert spec["args"] in ("", "[env]", "<env>"), verb
+        assert spec["args"] in ("", "[env]", "<env>", "<env> [--evict]"), verb
         assert spec["desc"].strip(), verb
 
 
@@ -341,9 +341,11 @@ _HELP = (
     "| `shipmate plan` | Plan this pull request's changed stacks on demand: the same plan a "
     "push produces, including on a draft. Re-planning is safe and replaces the plan of record "
     "for the current head. |\n"
-    "| `shipmate unlock <env>` | Release a state lock stranded by a cancelled or killed "
-    "apply, so the environment's stacks can apply again. Does not re-apply, and does not "
-    "recover a partial apply. |\n"
+    "| `shipmate unlock <env> [--evict]` | Release a state lock stranded by a cancelled or "
+    "killed apply, so the environment's stacks can apply again. Does not re-apply, and does "
+    "not recover a partial apply. With `--evict`, release instead the cell locks other pull "
+    "requests hold on this pull request's stacks in the environment; their holders are told "
+    "to re-plan. |\n"
     "\n"
     "The environment is a GitHub Environment name such as `dev-eu`. Applying requires write "
     "access to this repository, a pull request from this repository rather than a fork, an "
@@ -351,7 +353,8 @@ _HELP = (
     "for its current head commit, and a pull request that is not a draft. "
     "Unlocking requires write access to this "
     "repository and a pull request from this repository, but no review, no plan and no such "
-    "readiness. "
+    "readiness. Evicting requires write access to this repository, and releases only locks on "
+    "stacks this pull request's current head has planned in that environment. "
     "`doctor` and `help` are read-only, and `plan` changes no infrastructure. `help` answers "
     "anyone; `doctor` and `plan` require write access to this repository.\n"
     "\n"
@@ -515,3 +518,55 @@ def test_unlock_without_an_env_is_rejected():
 def test_unlock_appears_in_the_help_output():
     md = cp.help_markdown(_RUN_URL)
     assert "shipmate unlock <env>" in md
+
+
+def test_unlock_evict_parses_to_route_evict():
+    """Mutation: route the evict line as `unlock` (an evict would dispatch an unlock run)."""
+    assert cp.parse("shipmate unlock dev-eu --evict") == {
+        "is_command": True,
+        "valid": True,
+        "verb": "unlock",
+        "env": "dev-eu",
+        "route": "evict",
+        "error": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("body", "error"),
+    [
+        ("shipmate unlock --evict", "environment `--evict` " + _OUTSIDE),
+        ("shipmate apply dev-eu --evict", "unexpected `--evict` after the environment" + _HINT),
+        ("shipmate unlock dev-eu --force", "unexpected `--force` after the environment" + _HINT),
+        ("shipmate unlock dev-eu --evict x", "unexpected `--evict` after the environment" + _HINT),
+    ],
+)
+def test_evict_is_accepted_after_unlock_env_only(body, error):
+    """Mutations: widen `_EVICT`'s verb to `[a-z]+` (`apply ... --evict` parses); drop `$`
+    from `_EVICT` (`unlock dev-eu --evict x` parses)."""
+    assert cp.parse(body) == {
+        "is_command": True,
+        "valid": False,
+        "verb": None,
+        "env": None,
+        "route": None,
+        "error": error,
+    }
+
+
+def test_main_writes_the_evict_route_under_the_unlock_verb(tmp_path, monkeypatch):
+    """The reply header reads `verb`, comment-ops branches on `route`.
+
+    Mutation: write `verb=evict`."""
+    lines = _main_output(tmp_path, monkeypatch, "shipmate unlock dev-eu --evict")
+    assert [ln for ln in lines if ln.split("=")[0] in ("verb", "env", "route")] == [
+        "verb=unlock",
+        "env=dev-eu",
+        "route=evict",
+    ]
+
+
+def test_help_has_no_bare_evict_line():
+    """Mutation: add a help line `shipmate unlock dev-eu --evict`."""
+    for line in cp.help_markdown(_RUN_URL).splitlines():
+        assert cp._EVICT.match(line.strip()) is None, line

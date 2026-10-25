@@ -141,6 +141,7 @@ def test_every_mint_names_a_permission():
 _CONTENTS_WRITERS = {
     ("actions/lock-acquire/action.yml", "token"),
     ("actions/lock-release/action.yml", "token"),
+    ("actions/comment-ops/action.yml", "evicttoken"),
 }
 
 
