@@ -268,7 +268,9 @@ def _install(repo, cell, pr, acquisition, tree, run):
 
 def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
     """Lock every cell for `pr`, re-entering locks `pr` already holds. Returns every lock
-    installed. A refusal first deletes the locks this call created, not those it replaced."""
+    installed. A refusal first deletes the locks this call created, and fences those it
+    replaced with `fence_open`: the refusal skips the caller's fence, and a lock re-entered
+    after a close would otherwise outlive the close's release."""
     todo = {ref_name(_env(c["environment"]), c["stack"]): c for c in cells}
     if not todo:
         return []
@@ -287,11 +289,17 @@ def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
             if new:
                 created.append(lock)
     except SystemExit as exc:
-        raise SystemExit(_rollback(repo, created, exc.code, run)) from None
+        reason = exc.code
     except (LookupError, TypeError, ValueError) as exc:
         reason = f"::error::could not lock the cells: an API response was malformed ({exc!r})"
-        raise SystemExit(_rollback(repo, created, reason, run)) from None
-    return installed
+    else:
+        return installed
+    reason = _rollback(repo, created, reason, run)
+    try:
+        fence_open(repo, pr, [lock for lock in installed if lock not in created], run=run)
+    except SystemExit as fenced:
+        reason = f"{reason}\n{fenced.code}"
+    raise SystemExit(reason)
 
 
 def _when(stamp):

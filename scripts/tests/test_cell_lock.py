@@ -406,6 +406,50 @@ def test_the_fence_passes_an_open_pull_request_with_no_later_close(state):
     assert gh.drained()
 
 
+HELD = "d" * 40
+DNS_REFUSAL = (
+    "::error::`dev` / `stacks/dns` is locked by #12; wait for #12 to merge or close, then "
+    "re-plan, or comment `shipmate unlock dev --evict`"
+)
+
+
+def _reenter_then_refuse(state):
+    """AUTH re-entered (OLD replaced by NEW at LATE), then DNS refused as #12's lock."""
+    gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(PR, "dev", "stacks/auth", "800.1")))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, NEW, True), "{}")
+    gh.on(commit_write(DNS), commit(OTHER, message(PR, "dev", "stacks/dns"), LATE))
+    gh.on(ref_write(DNS_REF, OTHER), FAIL).on(ref_read(DNS_REF), refs((DNS_REF, HELD)))
+    gh.on(commit_read(HELD), commit(HELD, message(12, "dev", "stacks/dns")))
+    return gh.on(PR_STATE_READ, state)
+
+
+def test_a_refusal_fences_a_lock_reentered_after_a_close():
+    """Mutation: drop the `fence_open` call from `acquire`'s refusal path (AUTH_REF's
+    conditional delete is never sent and the refusal names no fence)."""
+    gh = _reenter_then_refuse(_pr_state("CLOSED", "2026-10-24T11:00:00Z"))
+    gh.on(update(AUTH_REF, NEW, ZERO, False), "{}")
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert exc.value.code == (
+        f"{DNS_REFUSAL}\n::error::pull request #7 was closed while this run acquired its cell "
+        "locks (state CLOSED, last closed 2026-10-24T11:00:00+00:00); the locks it took are "
+        "released"
+    )
+    assert gh.drained()
+
+
+def test_a_refusal_keeps_a_reentered_lock_of_an_open_pull_request():
+    """Mutation: roll back every installed lock on a refusal (AUTH_REF's delete is an
+    unexpected call)."""
+    gh = _reenter_then_refuse(_pr_state("OPEN", "2026-10-24T09:00:00Z"))
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert exc.value.code == DNS_REFUSAL
+    assert gh.drained()
+
+
 # --- foreign, evict and release over an unknown holder -------------------------------------------
 
 
