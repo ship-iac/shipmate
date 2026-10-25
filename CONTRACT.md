@@ -1163,10 +1163,13 @@ body contains `shipmate` in any case; every other comment starts no runner.
 comment-handling run and never dispatched. It deletes each cell lock in `<env>`
 that another pull request (or an unknown holder) holds on a stack with an
 App-authored `apply / <stack> / <env>` check on this pull request's head,
-comments `` 🔓 `<env>` / `<stack>` lock released by @`<login>` from #<pr>; re-plan
-before applying it. `` on each holder's pull request, and replies naming the
-evicted cells, or that there was none. A notice that cannot be posted turns the
-reply into `🔴 failed:` naming the holders not told, and fails the run.
+comments once on each holder's pull request, `` 🔓 <cells> released by
+@`<login>` from #<pr>; re-plan before applying them. `` (each cell as
+`` `<env>` / `<stack>` ``), and replies naming the evicted cells, or that there
+was none. A lock whose delete is refused does not stop the others: the
+holders of the deleted ones are still told. A refused delete or a notice that
+cannot be posted turns the reply into `🔴 failed:`, naming the cells not
+released and the holders not told, and fails the run.
 
 `plan`, `doctor`, `apply`, `unlock` and `unlock --evict` require the commenter's
 write access (the "write access" apply requirement below defines it), read and decided once

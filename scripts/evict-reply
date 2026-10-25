@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Tell each holder its cell lock was evicted, then answer the `shipmate unlock <env> --evict`
+"""Tell each holder its cell locks were evicted, then answer the `shipmate unlock <env> --evict`
 command.
 
-Reads `SHIPMATE_EVICTED` (`cell-lock evict`'s `evicted` output: a JSON list of `{stack,
-environment, holder}`, `holder` null for an unknown holder), `SHIPMATE_ENV`, `COMMENT_USER`
-(the commenter's login), `PR_NUMBER` (the commenting pull request) and `GH_TOKEN`. Each lock
-whose holder is a pull request gets one notice there, then the command gets one reply naming
-every evicted cell, or that there was none. With `--failed` it posts only the failure reply,
-holding `SHIPMATE_EVICT_REFUSAL` (cell-lock's `refusal`, empty when the head read failed) in a
-fence: a refusal can name a branch-controlled stack path.
+Reads `SHIPMATE_EVICTED` and `SHIPMATE_REFUSED` (`cell-lock evict`'s `evicted` and `refused`
+outputs: JSON lists of `{stack, environment, holder}`, `holder` null for an unknown holder),
+`SHIPMATE_ENV`, `COMMENT_USER` (the commenter's login), `PR_NUMBER` (the commenting pull
+request) and `GH_TOKEN`. Each holder that is a pull request gets one notice there listing its
+evicted cells, then the command gets one reply naming every evicted cell and every cell whose
+lock could not be released, or that there was none. Either list missing or not a JSON list
+refuses before any post. With `--failed` it posts only the failure reply, holding
+`SHIPMATE_EVICT_REFUSAL` (cell-lock's `refusal`, empty when the head read failed) in a fence: a
+refusal can name a branch-controlled stack path.
 
 The locks are already gone when this runs, so a notice that cannot be posted never stops the
-reply: the reply names the holders not told and the script exits 1 after posting it. A reply
-that cannot be posted exits 1 too.
+reply: the reply names the holders not told. The script exits 1 after posting a reply that
+names a refused cell or an untold holder, and when the reply cannot be posted.
 """
 
 import json
@@ -33,38 +35,56 @@ def cell(env, stack):
     return f"`{env}` / `{stack}`"
 
 
-def notice(lock, login, pr):
-    """The text posted on `lock`'s holder pull request."""
-    where = cell(lock["environment"], lock["stack"])
-    return f"🔓 {where} lock released by @<!-- -->`{login}` from #{pr}; re-plan before applying it."
+def by_holder(evicted):
+    """{holder: [lock, ...]} for each holder that is a pull request, in first-seen order."""
+    out = {}
+    for lock in evicted:
+        if lock["holder"] is not None:
+            out.setdefault(lock["holder"], []).append(lock)
+    return out
 
 
-def reply(evicted, env, untold):
-    """(outcome, text) answering the command: the evicted cells with their holders, and the
-    holders `untold` whose notice failed."""
-    if not evicted:
+def notice(locks, login, pr):
+    """The one text posted on a holder's pull request, naming all of its evicted `locks`."""
+    cells = ", ".join(cell(e["environment"], e["stack"]) for e in locks)
+    return f"🔓 {cells} released by @<!-- -->`{login}` from #{pr}; re-plan before applying them."
+
+
+def _named(locks):
+    return ", ".join(
+        f"{cell(e['environment'], e['stack'])} (held by "
+        f"{'#' + str(e['holder']) if e['holder'] is not None else 'an unreadable lock'})"
+        for e in locks
+    )
+
+
+def reply(evicted, refused, env, untold):
+    """(outcome, text) answering the command: the evicted cells with their holders, the cells
+    whose lock could not be released, and the holders `untold` whose notice failed."""
+    if not evicted and not refused:
         return "notice", (
             f"no lock held by another pull request on a cell this pull request changes in `{env}`"
         )
-    named = ", ".join(
-        f"{cell(e['environment'], e['stack'])} (held by "
-        f"{'#' + str(e['holder']) if e['holder'] is not None else 'an unreadable lock'})"
-        for e in evicted
-    )
+    clauses = [f"released {_named(evicted)}"] if evicted else []
+    if refused:
+        clauses.append(f"could not release {_named(refused)}")
     if untold:
-        prs = ", ".join(f"#{h}" for h in sorted(untold))
-        return "failed", (
-            f"released {named}, but could not tell {prs}; this run's log has the error. Tell "
-            "them to re-plan before applying."
-        )
-    return "notice", f"released {named}."
+        clauses.append(f"could not tell {', '.join(f'#{h}' for h in sorted(untold))}")
+    text = "; ".join(clauses) + "."
+    if not refused and not untold:
+        return "notice", text
+    text += " This run's log has the error."
+    if refused:
+        text += " Comment again to retry."
+    if untold:
+        text += " Tell them to re-plan before applying."
+    return "failed", text
 
 
 def failed(refusal, env):
     """The failure reply's text."""
     text = (
-        f"could not finish evicting the cell locks in `{env}`; any lock already released "
-        "was not announced to its holder. This run's log has the error; comment again."
+        f"could not evict the cell locks in `{env}`. This run's log has the error; comment again."
     )
     return f"{text}\n\n{sc.reason_fence(refusal)}" if refusal else text
 
@@ -76,6 +96,17 @@ def _post(pr, text, outcome="notice"):
     run(argv, stdin=body)
 
 
+def _cells(name):
+    raw = os.environ.get(name, "")
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        value = None
+    if not isinstance(value, list):
+        sys.exit(f"::error::{name} must be a JSON list (got: {raw[:80]!r})")
+    return value
+
+
 def main():
     pr = os.environ.get("PR_NUMBER", "")
     if not is_pr_number(pr):
@@ -85,23 +116,24 @@ def main():
         _post(pr, failed(os.environ.get("SHIPMATE_EVICT_REFUSAL", ""), env), "failed")
         return
     login = os.environ.get("COMMENT_USER", "")
-    evicted = json.loads(os.environ.get("SHIPMATE_EVICTED", ""))
+    evicted, refused = _cells("SHIPMATE_EVICTED"), _cells("SHIPMATE_REFUSED")
     untold = set()
-    for lock in evicted:
-        holder = lock["holder"]
-        if holder is None:
-            continue
+    for holder, locks in by_holder(evicted).items():
         try:
-            _post(holder, notice(lock, login, pr))
+            _post(holder, notice(locks, login, pr))
         except SystemExit as exc:
             # One line: a raw stderr line could start a workflow command.
             reason = " | ".join(str(exc.code).splitlines())
             print(f"::warning::could not post the eviction notice on #{holder}: {reason}")
             untold.add(holder)
-    outcome, text = reply(evicted, os.environ["SHIPMATE_ENV"], untold)
+    outcome, text = reply(evicted, refused, os.environ["SHIPMATE_ENV"], untold)
     _post(pr, text, outcome)
     if untold:
         sys.exit(f"::error::could not post the eviction notice on {len(untold)} pull request(s)")
+    if refused:
+        sys.exit(
+            f"::error::could not release {len(refused)} cell lock(s); the evict step names each"
+        )
 
 
 if __name__ == "__main__":

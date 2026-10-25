@@ -1019,7 +1019,8 @@ def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
 
     Mutations: add a step running `gh api -X POST
     "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=x` with no reply env; add one
-    running `scripts/reply-comment` with no reply env -- each red."""
+    running `scripts/reply-comment` with no reply env; add one running `scripts/evict-reply`
+    outside `_NON_REPLY_POSTERS` -- each red."""
     posters = {
         s["name"]
         for s in action_steps("comment-ops")
@@ -1577,7 +1578,6 @@ _EVICT_ROUTE_IFS = {
     ),
     "Evict: read the pull request head": _EVICT_MINTED,
     "Evict: release the other pull requests' cell locks": _EVICT_MINTED,
-    "Evict: tell the holders and reply": _EVICT_MINTED,
 }
 
 
@@ -1617,6 +1617,7 @@ _EVICT_ENVS = {
         "COMMENT_USER": "${{ inputs.comment-user }}",
         "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
         "SHIPMATE_EVICTED": "${{ steps.evict.outputs.evicted }}",
+        "SHIPMATE_REFUSED": "${{ steps.evict.outputs.refused }}",
     },
     "Evict: failed": {
         "GH_TOKEN": "${{ steps.evicttoken.outputs.token }}",
@@ -1659,12 +1660,20 @@ def test_the_evict_steps_run_these_bodies():
     }
 
 
-def test_an_errored_eviction_is_answered():
-    """Mutation: drop `failure() &&` (a failed step skips it); key it on `steps.evict.outcome`
-    alone (a failed head read gets no answer)."""
+def test_an_errored_eviction_is_answered_once():
+    """An evict step that wrote `evicted` before refusing is answered by the reply step, which
+    tells the holders of the locks it did delete; one that wrote nothing, or a failed head read,
+    by `Evict: failed`.
+
+    Mutations: key the reply step on `success()` (`!cancelled()` dropped: a partial eviction's
+    holders are never told); drop `failure() &&` from `Evict: failed`; drop its
+    `evicted == ''` arm (a partial eviction gets two replies)."""
+    assert step_by("comment-ops", name="Evict: tell the holders and reply")["if"] == (
+        "${{ !cancelled() && steps.evict.outputs.evicted != '' }}"
+    )
     assert step_by("comment-ops", name="Evict: failed")["if"] == (
         "${{ failure() && (steps.evicthead.outcome == 'failure' || "
-        "steps.evict.outcome == 'failure') }}"
+        "(steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) }}"
     )
 
 

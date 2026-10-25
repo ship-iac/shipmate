@@ -441,10 +441,62 @@ def test_evict_removes_another_holder_and_an_unknown_one_in_stacks_only():
     gh.on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, OLD, ZERO, False), "{}").on(update(DNS_REF, OTHER, ZERO, False), "{}")
     stacks = {"stacks/auth", "stacks/dns", "stacks/own"}
-    assert cl.evict(REPO, "dev", PR, stacks, run=gh) == [
-        lock(AUTH_REF, OLD, pr=12),
-        unknown(DNS_REF, OTHER),
-    ]
+    assert cl.evict(REPO, "dev", PR, stacks, run=gh) == (
+        [lock(AUTH_REF, OLD, pr=12), unknown(DNS_REF, OTHER)],
+        [],
+    )
+    assert gh.drained()
+
+
+def _two_foreign_locks_first_refused():
+    """Two locks of #12; the first delete fails and the ref still holds the sha read."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(12, "dev", "stacks/dns")))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
+    return gh
+
+
+_AUTH_REFUSAL = (
+    f"::error::could not release the cell lock {AUTH_REF} of `dev` / `stacks/auth`; it is "
+    f"still held at {OLD}"
+)
+
+
+def test_evict_continues_past_a_refused_delete():
+    """A lock deleted after a refusal is still reported, so its holder is still told.
+
+    Mutation: re-raise the refusal in `evict` (the second lock is never deleted)."""
+    gh = _two_foreign_locks_first_refused()
+    assert cl.evict(REPO, "dev", PR, {"stacks/auth", "stacks/dns"}, run=gh) == (
+        [lock(DNS_REF, OTHER, pr=12, stack="stacks/dns")],
+        [(lock(AUTH_REF, OLD, pr=12), _AUTH_REFUSAL)],
+    )
+    assert gh.drained()
+
+
+def test_evict_cli_writes_both_sets_then_refuses(monkeypatch, tmp_path):
+    """Mutations: write `evicted` only after the refusal check (no output survives); drop the
+    final refusal (the step reads green)."""
+    gh = Gh().on(
+        CHECK_RUNS_READ,
+        jsonl(
+            _check("apply / stacks/auth / dev", "completed", "success"),
+            _check("apply / stacks/dns / dev", "completed", "success", run_id=2),
+        ),
+    )
+    for argv, answers in _two_foreign_locks_first_refused().calls.items():
+        gh.on(list(argv), *answers)
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, {"SHIPMATE_ENV": "dev"})
+    assert exc.value.code == _AUTH_REFUSAL
+    assert github_outputs(out) == {
+        "evicted": json.dumps([{"stack": "stacks/dns", "environment": "dev", "holder": 12}]),
+        "refused": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}]),
+    }
     assert gh.drained()
 
 
@@ -791,6 +843,7 @@ def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
     gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
     out = _main(monkeypatch, tmp_path, "evict", gh, {"SHIPMATE_ENV": "dev"})
     assert out == {
-        "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}])
+        "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}]),
+        "refused": "[]",
     }
     assert gh.drained()

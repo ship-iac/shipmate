@@ -403,7 +403,9 @@ runs:
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" evict
 
     - name: "Evict: tell the holders and reply"
-      if: ${{ steps.parse.outputs.route == 'evict' && steps.evicttoken.outcome == 'success' }}
+      # Also after a failed evict step: it writes `evicted` before refusing on a lock it could
+      # not delete, and every lock it did delete still needs its holder told.
+      if: ${{ !cancelled() && steps.evict.outputs.evicted != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.evicttoken.outputs.token }}
@@ -411,12 +413,13 @@ runs:
         COMMENT_USER: ${{ inputs.comment-user }}
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
         SHIPMATE_EVICTED: ${{ steps.evict.outputs.evicted }}
+        SHIPMATE_REFUSED: ${{ steps.evict.outputs.refused }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"
 
     - name: "Evict: failed"
       # A failed step skips every later `success()`-gated step, so without `failure()` the
-      # commenter would get no answer.
-      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || steps.evict.outcome == 'failure') }}
+      # commenter would get no answer. An evict step that wrote `evicted` is answered above.
+      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || (steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.evicttoken.outputs.token }}

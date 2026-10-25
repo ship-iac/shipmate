@@ -22,7 +22,8 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   check is pending on `SHIPMATE_HEAD_SHA`; `false` deletes those committed by
   `SHIPMATE_CLOSED_AT`.
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
-  on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes output `evicted`.
+  on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes outputs `evicted` and
+  `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds.
 """
@@ -357,15 +358,21 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run) -> list[Lo
     return gone
 
 
-def evict(repo, env: str, pr: int, stacks: set[str], *, run=_run) -> list[Lock]:
+def evict(repo, env: str, pr: int, stacks: set[str], *, run=_run):
     """Delete each lock in `env` on a stack in `stacks` held by anyone but `pr`, an unknown
-    holder included; return those deleted."""
+    holder included. Returns (deleted locks, [(lock, refusal)] for each delete refused): a
+    refusal does not stop the rest, so every lock deleted is reported and its holder told."""
     wanted = {ref_name(env, s) for s in stacks}
-    gone = []
+    gone, refused = [], []
     for lock in read_locks(repo, [env], run=run).values():
-        if lock.ref in wanted and lock.pr != pr and delete(repo, lock, run=run):
-            gone.append(lock)
-    return gone
+        if lock.ref not in wanted or lock.pr == pr:
+            continue
+        try:
+            if delete(repo, lock, run=run):
+                gone.append(lock)
+        except SystemExit as exc:
+            refused.append((lock, exc.code))
+    return gone, refused
 
 
 def evict_stacks(names, env):
@@ -439,13 +446,17 @@ def _evict_cmd(repo, pr, run):
     lines, app_id = _head_names(repo, run)
     stacks = evict_stacks(ag.latest_by_name(ag.app_runs(lines, app_id)), env)
     by_ref = {ref_name(env, s): s for s in stacks}
-    gone = evict(repo, env, pr, stacks, run=run)
-    write_outputs(
-        evicted=json.dumps(
-            [{"stack": by_ref[g.ref], "environment": env, "holder": g.pr} for g in gone]
+    gone, refused = evict(repo, env, pr, stacks, run=run)
+
+    def cells(locks):
+        return json.dumps(
+            [{"stack": by_ref[g.ref], "environment": env, "holder": g.pr} for g in locks]
         )
-    )
+
+    write_outputs(evicted=cells(gone), refused=cells(lock for lock, _ in refused))
     print(f"::notice::evicted {len(gone)} cell lock(s) in {env}")
+    if refused:
+        raise SystemExit("\n".join(code for _, code in refused))
 
 
 def _marks_cmd(repo, pr, run):

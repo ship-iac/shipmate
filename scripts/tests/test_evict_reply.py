@@ -35,8 +35,9 @@ def posts(monkeypatch):
     return got, fail
 
 
-def _main(monkeypatch, evicted, argv=("evict-reply",)):
+def _main(monkeypatch, evicted, refused=(), argv=("evict-reply",)):
     monkeypatch.setenv("SHIPMATE_EVICTED", json.dumps(evicted))
+    monkeypatch.setenv("SHIPMATE_REFUSED", json.dumps(list(refused)))
     monkeypatch.setattr("sys.argv", list(argv))
     er.main()
 
@@ -49,29 +50,31 @@ def _body(outcome, text):
 
 _A = {"stack": "stacks/auth", "environment": "dev-eu", "holder": 3}
 _B = {"stack": "stacks/a`b", "environment": "dev-eu", "holder": 4}
+_C = {"stack": "stacks/dns", "environment": "dev-eu", "holder": 3}
 _U = {"stack": "stacks/app", "environment": "dev-eu", "holder": None}
 
 
-def test_each_holder_is_told_and_the_command_names_every_evicted_cell(monkeypatch, posts):
-    """Mutations: post a notice for the unknown holder; drop `@<!-- -->` from the notice (the
-    commenter is mentioned); put the backticked stack in a code span."""
+def test_each_holder_is_told_once_and_the_command_names_every_evicted_cell(monkeypatch, posts):
+    """Mutations: post one notice per lock (#3 gets two); post a notice for the unknown holder;
+    drop `@<!-- -->` from the notice (the commenter is mentioned); put the backticked stack in a
+    code span."""
     got, _ = posts
-    _main(monkeypatch, [_A, _B, _U])
+    _main(monkeypatch, [_A, _B, _C, _U])
     assert got == [
         (
             "3",
             _body(
                 "notice",
-                "🔓 `dev-eu` / `stacks/auth` lock released by @<!-- -->`kp` from #9; re-plan "
-                "before applying it.",
+                "🔓 `dev-eu` / `stacks/auth`, `dev-eu` / `stacks/dns` released by @<!-- -->`kp` "
+                "from #9; re-plan before applying them.",
             ),
         ),
         (
             "4",
             _body(
                 "notice",
-                "🔓 `dev-eu` / **stacks/a`b** lock released by @<!-- -->`kp` from #9; re-plan "
-                "before applying it.",
+                "🔓 `dev-eu` / **stacks/a`b** released by @<!-- -->`kp` from #9; re-plan before "
+                "applying them.",
             ),
         ),
         (
@@ -79,7 +82,8 @@ def test_each_holder_is_told_and_the_command_names_every_evicted_cell(monkeypatc
             _body(
                 "notice",
                 "released `dev-eu` / `stacks/auth` (held by #3), `dev-eu` / **stacks/a`b** "
-                "(held by #4), `dev-eu` / `stacks/app` (held by an unreadable lock).",
+                "(held by #4), `dev-eu` / `stacks/dns` (held by #3), `dev-eu` / `stacks/app` "
+                "(held by an unreadable lock).",
             ),
         ),
     ]
@@ -103,7 +107,7 @@ def test_nothing_evicted_says_so(monkeypatch, posts):
 def test_a_notice_that_fails_still_reports_the_eviction_and_fails(monkeypatch, posts):
     """The lock is already gone, so the reply must say so.
 
-    Mutations: re-raise the notice failure (no reply is posted); drop the final `sys.exit`
+    Mutations: re-raise the notice failure (no reply is posted); drop the untold `sys.exit`
     (the step reads green)."""
     got, fail = posts
     fail.add("3")
@@ -114,11 +118,52 @@ def test_a_notice_that_fails_still_reports_the_eviction_and_fails(monkeypatch, p
             "9",
             _body(
                 "failed",
-                "released `dev-eu` / `stacks/auth` (held by #3), but could not tell #3; this "
-                "run's log has the error. Tell them to re-plan before applying.",
+                "released `dev-eu` / `stacks/auth` (held by #3); could not tell #3. This run's "
+                "log has the error. Tell them to re-plan before applying.",
             ),
         )
     ]
+
+
+def test_a_partial_eviction_tells_the_holders_and_names_the_refused_cells(monkeypatch, posts):
+    """Mutations: drop the `refused` clause (the reply reads as a full success); drop the
+    refused `sys.exit` (the step reads green)."""
+    got, _ = posts
+    with pytest.raises(SystemExit, match="could not release 1 cell lock"):
+        _main(monkeypatch, [_C], refused=[_A])
+    assert got == [
+        (
+            "3",
+            _body(
+                "notice",
+                "🔓 `dev-eu` / `stacks/dns` released by @<!-- -->`kp` from #9; re-plan before "
+                "applying them.",
+            ),
+        ),
+        (
+            "9",
+            _body(
+                "failed",
+                "released `dev-eu` / `stacks/dns` (held by #3); could not release `dev-eu` / "
+                "`stacks/auth` (held by #3). This run's log has the error. Comment again to "
+                "retry.",
+            ),
+        ),
+    ]
+
+
+@pytest.mark.parametrize("raw", ["", "{}", "not json"])
+def test_an_unreadable_list_refuses_before_any_post(monkeypatch, posts, raw):
+    """Mutation: `json.loads` without the guard (`""` and `not json` raise a traceback, `{}`
+    iterates as a list)."""
+    got, _ = posts
+    monkeypatch.setenv("SHIPMATE_EVICTED", raw)
+    monkeypatch.setenv("SHIPMATE_REFUSED", "[]")
+    monkeypatch.setattr("sys.argv", ["evict-reply"])
+    with pytest.raises(SystemExit) as exc:
+        er.main()
+    assert exc.value.code == f"::error::SHIPMATE_EVICTED must be a JSON list (got: {raw!r})"
+    assert got == []
 
 
 def test_a_failed_eviction_fences_the_refusal(monkeypatch, posts):
@@ -131,8 +176,7 @@ def test_a_failed_eviction_fences_the_refusal(monkeypatch, posts):
             "9",
             _body(
                 "failed",
-                "could not finish evicting the cell locks in `dev-eu`; any lock already "
-                "released was not announced to its holder. This run's log has the error; "
+                "could not evict the cell locks in `dev-eu`. This run's log has the error; "
                 "comment again.\n\n```\ncould not release `x`\n```",
             ),
         )
