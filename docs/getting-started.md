@@ -461,7 +461,8 @@ arrives. [`aws.md`](aws.md) §Runner choice lists the jobs on each runner.
 ```yaml
 name: shipmate
 run-name: >-
-  shipmate · ${{ github.event.action == 'closed' && 'release'
+  shipmate · ${{ github.event_name == 'pull_request_target'
+  && github.event.action == 'closed' && 'release'
   || github.event_name == 'pull_request_target' && 'plan'
   || github.event_name == 'issue_comment' && 'comment'
   || github.event_name == 'push' && 'deploy'
@@ -528,7 +529,7 @@ jobs:
       runs_on: &runner ubuntu-26.04-arm
   # Releases the pull request's cell locks, merged or not.
   release:
-    if: github.event.action == 'closed'
+    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'
     # Its own group: the plan group cancels the run in flight.
     concurrency:
       group: release-${{ github.event.pull_request.number }}

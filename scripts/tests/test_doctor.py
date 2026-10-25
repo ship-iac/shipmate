@@ -1355,7 +1355,7 @@ _SHIPMATE_WF = (
     "      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}\n"
     "      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}\n"
     "  release:\n"
-    "    if: github.event.action == 'closed'\n"
+    "    if: github.event_name == 'pull_request_target' && github.event.action == 'closed'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/release.yml@{_SHA}\n"
     "  comment-ops:\n"
     "    name: comment\n"
@@ -4262,13 +4262,16 @@ def test_the_routing_probe_reports_a_missing_release_job():
 
 
 def test_the_routing_table_is_the_six_published_expressions():
-    """Mutations: drop `release.yml`; drop the `closed` clause from `plan.yml`."""
+    """Mutations: drop `release.yml`; drop the `closed` clause from `plan.yml`; drop the
+    `event_name` clause from `release.yml`."""
     assert doctor.ROUTING_IFS == {
         "plan.yml": (
             "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
             "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
         ),
-        "release.yml": "github.event.action == 'closed'",
+        "release.yml": (
+            "github.event_name == 'pull_request_target' && github.event.action == 'closed'"
+        ),
         "comment-ops.yml": "github.event_name == 'issue_comment'",
         "deploy.yml": "github.event_name == 'push'",
         "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",

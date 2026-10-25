@@ -1533,7 +1533,9 @@ ROUTING_IFS = {
         "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
         "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
     ),
-    "release.yml": "github.event.action == 'closed'",
+    "release.yml": (
+        "github.event_name == 'pull_request_target' && github.event.action == 'closed'"
+    ),
     "comment-ops.yml": "github.event_name == 'issue_comment'",
     "deploy.yml": "github.event_name == 'push'",
     "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
