@@ -5,6 +5,9 @@ on:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
       runs_on: { required: true, type: string }
+      # Empty on the merge deploy, which ignores cell locks; set, each cell refuses unless that
+      # pull request holds its lock.
+      pr_number: { required: false, type: string, default: "" }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
         required: false
@@ -78,6 +81,7 @@ jobs:
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
           encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+          pr-number: ${{ inputs.pr_number }}
   wave1:
     needs: [wave0]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}

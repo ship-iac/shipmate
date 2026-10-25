@@ -826,7 +826,9 @@ The apply result comment carries
 comment `shipmate unlock <env> --evict`.``, the plan comment ends a cell's line
 with `🔒 locked by #<n>`, or the apply run's `lock` job fails with
 `` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
-re-plan, or comment `shipmate unlock <env> --evict` ``.
+re-plan, or comment `shipmate unlock <env> --evict` ``, or a re-run apply cell
+fails with `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no
+longer holds its cell lock (<why>) ``.
 
 Pull request #<n> applied that cell first and holds its cell lock until it
 merges or closes ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). This is not
@@ -846,6 +848,11 @@ nothing.
   applied is not locked again.
 - After the `lock` job form, comment `shipmate apply` again: the new run leaves
   the locked cell pending and applies the rest.
+- "Re-run failed jobs" on an apply run re-runs its failed waves without the
+  `lock` job. Each re-run cell re-checks the lock and refuses if this pull
+  request no longer holds it, which the `no longer holds its cell lock` form
+  reports. Comment `shipmate apply` again instead: the new run locks the cell
+  again, or leaves it pending and names its holder.
 
 ### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
 

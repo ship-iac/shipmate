@@ -182,6 +182,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -203,6 +204,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -215,6 +217,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -227,6 +230,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ inputs.pr_number }}
     secrets: *envlevel-secrets
 
   summary:

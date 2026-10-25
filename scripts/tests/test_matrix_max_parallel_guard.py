@@ -43,13 +43,19 @@ EXPECTED_STRATEGIES = {
 }
 
 #: Each env-level call's whole `with:` in the two callers.
+#: The pre-merge apply passes its pull request, whose cell locks each cell verifies; the merge
+#: deploy passes none, because it ignores cell locks.
 EXPECTED_ENVLEVEL_WITH = {
     (workflow, f"envlevel{n}"): {
         "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",
         "head_sha": "${{ needs.detect.outputs.head_sha }}",
         "runs_on": "${{ inputs.runs_on }}",
+        **extra,
     }
-    for workflow in ("apply.yml", "deploy.yml")
+    for workflow, extra in (
+        ("apply.yml", {"pr_number": "${{ inputs.pr_number }}"}),
+        ("deploy.yml", {}),
+    )
     for n in range(4)
 }
 
@@ -92,6 +98,7 @@ def test_apply_env_level_takes_no_cap():
         "waves_json": {"required": True, "type": "string"},
         "head_sha": {"required": True, "type": "string"},
         "runs_on": {"required": True, "type": "string"},
+        "pr_number": {"required": False, "type": "string", "default": ""},
     }
 
 

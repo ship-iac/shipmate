@@ -1011,3 +1011,75 @@ def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
         "refused": "[]",
     }
     assert gh.drained()
+
+
+# --- verify --------------------------------------------------------------------------------------
+
+
+def _verify(monkeypatch, tmp_path, gh):
+    return _main(
+        monkeypatch, tmp_path, "verify", gh, {"SHIPMATE_ENV": "dev", "STACK": "stacks/auth"}
+    )
+
+
+def test_verify_passes_a_cell_our_pull_request_holds(monkeypatch, tmp_path):
+    """Mutation: refuse when the holder is our pull request (`held.pr != pr` for `==`)."""
+    gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(PR, "dev", "stacks/auth")))
+    assert _verify(monkeypatch, tmp_path, gh) == {}
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("listed", "msg", "holder"),
+    [
+        pytest.param("[]", None, "the cell is not locked", id="absent"),
+        pytest.param(
+            refs((AUTH_REF, OLD)),
+            message(12, "dev", "stacks/auth"),
+            "it is locked by #12",
+            id="other",
+        ),
+        pytest.param(
+            refs((AUTH_REF, OLD)), "garbage", "it is locked by an unknown holder", id="unknown"
+        ),
+    ],
+)
+def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
+    monkeypatch, tmp_path, listed, msg, holder
+):
+    """Mutations: pass when the ref is absent (`held is None or held.pr == pr`: absent passes);
+    pass any lock with a holder (`held.pr is not None`: other passes); pass an unknown holder
+    (`held.pr in (pr, None)`: unknown passes)."""
+    gh = Gh().on(ref_read(AUTH_REF), listed)
+    if msg is not None:
+        gh.on(commit_read(OLD), commit(OLD, msg))
+    with pytest.raises(SystemExit) as exc:
+        _verify(monkeypatch, tmp_path, gh)
+    assert exc.value.code == (
+        f"::error::apply aborted for `dev` / `stacks/auth`: pull request #7 no longer holds its "
+        f"cell lock ({holder}); comment `shipmate apply` again to lock it or name its holder"
+    )
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("commit_answer", "refusal"),
+    [
+        pytest.param(FAIL, "::error::command failed (1): gh api", id="read-fails"),
+        pytest.param(
+            "{}",
+            "::error::could not read the cell lock on `dev` / `stacks/auth` "
+            "(KeyError('committer'))",
+            id="malformed",
+        ),
+    ],
+)
+def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, refusal):
+    """Mutations: catch `SystemExit` around the read and pass (read-fails passes); return
+    instead of refusing on a malformed answer (malformed passes)."""
+    gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
+    with pytest.raises(SystemExit) as exc:
+        _verify(monkeypatch, tmp_path, gh)
+    assert exc.value.code == refusal
+    assert gh.drained()

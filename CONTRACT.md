@@ -1822,6 +1822,16 @@ This is the one case in which a locked cell stops the pull request's other
 cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
 cell pending and the rest apply.
 
+**Re-running a failed wave.** "Re-run failed jobs" re-runs the failed wave jobs
+and neither `detect` nor `lock`. So every pre-merge apply cell first reads its
+own lock, read-only, and refuses before downloading its plan unless the pull
+request holds it: a re-run of a failed wave re-checks the lock and refuses if
+the pull request no longer holds it (an eviction, or a release after a close),
+with `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer
+holds its cell lock (<why>); comment `shipmate apply` again to lock it or name
+its holder ``. A lock read that fails refuses too. The merge deploy passes no
+pull request, so its cells skip the check.
+
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the
 merged pull request holds whose cell has no pending apply check. The deploy's
@@ -1833,14 +1843,14 @@ cell's check and then was cancelled, or failed its delete, leaves a lock its
 re-run still releases.
 
 **Failure.** A lock read or write that fails refuses, in `detect`, `lock`,
-the `release` job, the deploy's release step (whose failure fails the deploy's
+each pre-merge apply cell, the `release` job, the deploy's release step (whose failure fails the deploy's
 `summary`) and `--evict`. A release and an eviction continue past a delete that
 refuses, then fail naming each lock left held. A failed release stays owed until
 a re-run of that job succeeds. The plan comment's marker alone degrades: a lock read that fails there
 warns, and the comment marks no cell.
 
-**Permissions.** `detect` reads locks with its `GITHUB_TOKEN` at
-`contents: read`. Every lock write mints an App token with `contents: write`
+**Permissions.** `detect` and each pre-merge apply cell read locks with their
+`GITHUB_TOKEN` at `contents: read`. Every lock write mints an App token with `contents: write`
 in a job bound to `shipmate-engine`: `apply.yml`'s `lock`, `release.yml`'s
 `release`, `deploy.yml`'s `summary` and `comment-ops.yml`'s `ops`. An
 installation that has not accepted `contents: write` fails each of those
