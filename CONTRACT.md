@@ -1829,19 +1829,19 @@ levels are skipped, and their cells stay locked to this pull request until it
 merges or closes, or another pull request evicts them with
 `shipmate unlock <env> --evict`.
 
-**Re-running a failed wave.** "Re-run failed jobs" re-runs the failed wave jobs
-and neither `detect` nor `lock`. So on a re-run (run attempt above 1) every
-pre-merge apply cell first reads its own lock, read-only, as the wave job's
-first step, before its cloud credentials, and refuses unless the pull request
-holds it (an eviction, or a release after a close, takes it away), with
+**Every apply cell re-checks its lock.** "Re-run failed jobs" re-runs the failed wave jobs
+and neither `detect` nor `lock`, and a first attempt's wave can wait hours on an
+environment approval. So on every attempt each pre-merge apply cell first reads
+its own lock, read-only, as the wave job's first step, before its cloud
+credentials, and refuses unless the pull request holds it (an eviction, or a
+release after a close, takes it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``.
 A lock read that fails refuses with `` could not read the cell lock on `<env>` /
 `<stack>` (<why>) ``. A refused cell assumes no cloud role, and the apply result
 comment gives it the blocked reason `could not confirm this pull request holds
-the cell's lock (see the job log)`. A first run skips the check: its `lock` job
-has just acquired every cell. The merge deploy passes no pull request, so its
-cells skip the check.
+the cell's lock (see the job log)`. The merge deploy passes no pull request, so
+its cells skip the check.
 
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the
@@ -1860,7 +1860,7 @@ refuses, then fail naming each lock left held. A failed release stays owed until
 a re-run of that job succeeds. The plan comment's marker alone degrades: a lock read that fails there
 warns, and the comment marks no cell.
 
-**Permissions.** `detect` and each re-run pre-merge apply cell read locks with their
+**Permissions.** `detect` and each pre-merge apply cell read locks with their
 `GITHUB_TOKEN` at `contents: read`. Every lock write mints an App token with `contents: write`
 in a job bound to `shipmate-engine`: `apply.yml`'s `lock`, `release.yml`'s
 `release`, `deploy.yml`'s `summary` and `comment-ops.yml`'s `ops`. An

@@ -5,8 +5,8 @@ on:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
       runs_on: { required: true, type: string }
-      # Empty on the merge deploy, which ignores cell locks; set, a re-run cell refuses unless
-      # that pull request holds its lock.
+      # Empty on the merge deploy, which ignores cell locks; set, each cell refuses unless that
+      # pull request holds its lock.
       pr_number: { required: false, type: string, default: "" }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
@@ -60,11 +60,11 @@ jobs:
     # wave1..wave7 alias this list, so an edit here changes all eight waves. A change for one
     # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
     steps: &wave-steps
-      # "Re-run failed jobs" re-runs a failed wave without the `lock` job, so a re-run cell checks
-      # its lock first: a failure skips the cloud credentials, and apply-cell runs only to refuse.
+      # Every attempt: a wave can wait hours on an environment approval, and "Re-run failed
+      # jobs" skips `lock`. A failure skips the cloud credentials; apply-cell runs only to refuse.
       - name: Verify the pull request holds the cell lock
         id: cell-lock
-        if: ${{ inputs.pr_number != '' && github.run_attempt > 1 }}
+        if: ${{ inputs.pr_number != '' }}
         uses: $/actions/lock-verify
         with:
           pr-number: ${{ inputs.pr_number }}
@@ -82,7 +82,7 @@ jobs:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
       - uses: $/actions/apply-cell
-        if: ${{ success() || steps.cell-lock.outcome == 'failure' }}
+        if: ${{ !cancelled() && (success() || steps.cell-lock.outcome == 'failure') }}
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}

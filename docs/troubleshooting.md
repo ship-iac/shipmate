@@ -826,8 +826,8 @@ The apply result comment carries
 comment `shipmate unlock <env> --evict`.``, the plan comment ends a cell's line
 with `🔒 locked by #<n>`, or the apply run's `lock` job fails with
 `` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
-re-plan, or comment `shipmate unlock <env> --evict` ``, or a cell of a re-run
-apply fails with `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no
+re-plan, or comment `shipmate unlock <env> --evict` ``, or an apply cell
+fails with `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no
 longer holds its cell lock (<why>) ``.
 
 Pull request #<n> applied that cell first and holds its cell lock until it
@@ -850,12 +850,12 @@ nothing.
   the locked cell pending and applies the rest. "Re-run failed jobs" does not
   re-run `detect`, so its `lock` job tries the same cells again.
 - "Re-run failed jobs" on an apply run re-runs its failed waves without the
-  `lock` job. On that re-run each cell checks the lock before its cloud
-  credentials and refuses if this pull request no longer holds it, which the
-  `no longer holds its cell lock` form reports. A lock read that fails refuses
-  with `` could not read the cell lock on `<env>` / `<stack>` (<why>) ``;
-  re-run the job once the read succeeds. Comment `shipmate apply` again instead: the new run locks the cell
-  again, or leaves it pending and names its holder.
+  `lock` job. Every apply cell checks the lock before its cloud credentials and
+  refuses if this pull request no longer holds it, which the `no longer holds
+  its cell lock` form reports. Comment `shipmate apply` again instead: the new
+  run locks the cell again, or leaves it pending and names its holder.
+- A lock read that fails refuses with `` could not read the cell lock on
+  `<env>` / `<stack>` (<why>) ``. Re-run the job once the read succeeds.
 
 ### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
 

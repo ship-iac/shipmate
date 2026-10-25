@@ -1,7 +1,7 @@
-"""A "Re-run failed jobs" of an apply re-runs a failed wave without its `lock` job, so each re-run
-cell checks, read-only, that its pull request still holds the cell's lock. The check is the wave
-job's first step, before the cloud credentials, and runs only on a re-run (`run_attempt > 1`) of
-a pre-merge apply; the merge deploy passes no pull request and skips it. Its failure skips every
+"""Each pre-merge apply cell checks, read-only and on every attempt, that its pull request still
+holds the cell's lock: a wave can wait hours on an environment approval, and "Re-run failed jobs"
+re-runs a failed wave without its `lock` job. The check is the wave job's first step, before the
+cloud credentials; the merge deploy passes no pull request and skips it. Its failure skips every
 step but apply-cell, which runs only to refuse, so the cell reports a blocked reason. The read
 uses the wave job's GITHUB_TOKEN at `contents: read`.
 
@@ -28,7 +28,7 @@ VERIFY_STEP = {
 WAVE_VERIFY = {
     "name": "Verify the pull request holds the cell lock",
     "id": "cell-lock",
-    "if": "${{ inputs.pr_number != '' && github.run_attempt > 1 }}",
+    "if": "${{ inputs.pr_number != '' }}",
     "uses": "$/actions/lock-verify",
     "with": {
         "pr-number": "${{ inputs.pr_number }}",
@@ -45,12 +45,13 @@ def test_lock_verify_reads_the_lock_with_the_job_token():
     )
 
 
-def test_every_wave_verifies_first_on_a_rerun_and_refuses_through_apply_cell():
-    """Mutations: drop the `if:` (every first run reads the lock); write `run_attempt > 0`
-    (first runs check too); invert to `inputs.pr_number == ''`; move the step after the
-    credentials step; drop apply-cell's `if:` (a failed check skips apply-cell and the cell
-    reports no blocked reason); pass `steps.cell-lock.conclusion`; drop `contents: read` from
-    the wave permissions (the lock read 403s and every re-run cell refuses)."""
+def test_every_wave_verifies_first_and_refuses_through_apply_cell():
+    """Mutations: drop the `if:` (the deploy's cells refuse on an empty pull request); add
+    `&& github.run_attempt > 1` (first attempts skip the check); invert to
+    `inputs.pr_number == ''`; move the step after the credentials step; drop apply-cell's `if:`
+    (a failed check skips apply-cell and the cell reports no blocked reason); drop its
+    `!cancelled() &&`; pass `steps.cell-lock.conclusion`; drop `contents: read` from the wave
+    permissions (the lock read 403s and every pre-merge cell refuses)."""
     jobs = workflow_jobs("apply-env-level.yml")
     found = {}
     for wave in WAVES:
@@ -65,7 +66,7 @@ def test_every_wave_verifies_first_on_a_rerun_and_refuses_through_apply_cell():
     expected = (
         {"contents": "read", "actions": "read", "id-token": "write"},
         WAVE_VERIFY,
-        "${{ success() || steps.cell-lock.outcome == 'failure' }}",
+        "${{ !cancelled() && (success() || steps.cell-lock.outcome == 'failure') }}",
         "${{ steps.cell-lock.outcome }}",
     )
     assert found == dict.fromkeys(WAVES, expected)
