@@ -1100,6 +1100,15 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
             "(command failed (1): gh api)",
             id="read-fails",
         ),
+        *[
+            pytest.param(
+                SystemExit(code),
+                "::error::could not read the cell lock on `dev` / `stacks/auth` "
+                "(the lock read failed)",
+                id=f"read-exits-{code}",
+            )
+            for code in (None, 1)
+        ],
         pytest.param(
             "{}",
             "::error::could not read the cell lock on `dev` / `stacks/auth` "
@@ -1110,8 +1119,9 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
 )
 def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, refusal):
     """Mutations: catch `SystemExit` around the read and pass (read-fails passes); re-raise
-    the read's `SystemExit` unchanged (read-fails loses the cell); return instead of refusing
-    on a malformed answer (malformed passes)."""
+    the read's `SystemExit` unchanged (read-fails loses the cell); quote a non-string exit
+    code (read-exits-* print `(None)` and `(1)`); return instead of refusing on a malformed
+    answer (malformed passes)."""
     gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
     with pytest.raises(SystemExit) as exc:
         _verify(monkeypatch, tmp_path, gh)
