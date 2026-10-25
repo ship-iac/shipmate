@@ -54,7 +54,7 @@ def post(pr, text):
     """POST `text` as a comment on pull request `pr` of `GITHUB_REPOSITORY`. The body goes
     through stdin: `run`'s failure message quotes the argv. A failed POST raises `run`'s
     `SystemExit`."""
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    repo = os.environ["GITHUB_REPOSITORY"]
     run(
         ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-F", "body=@-"],
         stdin=text,

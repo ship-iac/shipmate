@@ -140,6 +140,16 @@ def test_main_posts_the_body_to_the_pull_request_and_prints_nothing(monkeypatch,
     assert capsys.readouterr().out == ""
 
 
+def test_a_missing_repository_posts_nothing(monkeypatch):
+    """Mutation: read `GITHUB_REPOSITORY` with a default of `""` (posts to `repos//issues`)."""
+    calls = []
+    monkeypatch.setattr(rc, "run", lambda args, stdin=None: calls.append(args))
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    with pytest.raises(KeyError):
+        rc.post("42", "body")
+    assert calls == []
+
+
 def test_an_unknown_outcome_posts_nothing(monkeypatch):
     """Mutation: post before validating the outcome."""
     assert _post(monkeypatch, outcome="refuse") == (
