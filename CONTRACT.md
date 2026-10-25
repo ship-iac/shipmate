@@ -2512,6 +2512,10 @@ and `lost` outputs, which the same rule reads.
   followed by an empty HTML comment (`@<!-- -->`), so a stack path cannot
   mention a user or team; the apply comment's cell lines and its notes'
   bold cell names and the doctor report's check headers do the same.
+  A changed cell another pull request holds a cell lock on ends its line with
+  ` 🔒 locked by #<n>`, or ` 🔒 locked by an unreadable lock` for an unknown
+  holder (§Cell locks). The marker is part of the bare line, so the size budget
+  never sheds it. A lock read that fails warns and marks no cell.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
