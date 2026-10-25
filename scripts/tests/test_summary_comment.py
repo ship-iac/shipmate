@@ -1827,7 +1827,8 @@ def test_main_marks_a_locked_cell_and_leaves_every_output_as_it_was(tmp_path, mo
 @pytest.mark.parametrize("raw", [None, ""], ids=["absent", "empty"])
 def test_main_renders_no_marker_without_locks(tmp_path, monkeypatch, capsys, raw):
     """A failed or skipped marks step leaves `SHIPMATE_LOCKS` empty; the comment renders as
-    before, with no warning of its own (the marks step already warned)."""
+    before, with no warning of its own (the marks step already warned). Mutation: drop
+    `lock_marks`' empty-value return -- the empty case warns, red."""
     if raw is not None:
         monkeypatch.setenv("SHIPMATE_LOCKS", raw)
     _run_main(tmp_path, monkeypatch, [_cell()])
