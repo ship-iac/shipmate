@@ -83,6 +83,8 @@ ENGINE_CALL_SECRETS = {
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
     # from a plain TF_VAR_*.
     "unlock.yml": _CONSUMER_SECRETS,
+    # Release deletes lock refs and runs no tofu: the App key alone.
+    "release.yml": _APP_KEY,
 }
 
 #: The whole `environment:` value of every engine job that holds the App key. `deployment: false`

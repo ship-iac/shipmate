@@ -263,7 +263,7 @@ as above, and step 5 runs in every consumer repository.
 
 ## Reference: what the App can and can't do
 
-- Permissions: `actions: write`, `pull_requests: write`, `contents: read`,
+- Permissions: `actions: write`, `pull_requests: write`, `contents: write`,
   `checks: write`, `statuses: write`, `issues: write`, `environments: read`
   (doctor's plan-environment secret listing — names only; no GitHub API returns
   a secret's value, and this permission cannot write one).

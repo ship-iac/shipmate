@@ -26,7 +26,7 @@ def _jobs(name):
     return load_workflow_text(_fence_text(name))["jobs"]
 
 
-@pytest.mark.parametrize("job", ["plan", "comment-ops", "deploy", "apply", "unlock"])
+@pytest.mark.parametrize("job", ["plan", "release", "comment-ops", "deploy", "apply", "unlock"])
 def test_every_engine_job_runs_on_the_default_runner(job):
     """Mutations: `deploy`'s `*runner` replaced by `ubuntu-latest`; `comment-ops`'s `with:`
     deleted."""
@@ -37,12 +37,13 @@ def test_the_runner_is_chosen_once_through_an_anchor():
     """Mutation: `apply`'s `*runner` inlined as `ubuntu-26.04-arm`, which parses the same."""
     text = _fence_text("shipmate")
     assert text.count(f"runs_on: &runner {RUNNER}\n") == 1
-    assert text.count("runs_on: *runner\n") == 4
+    assert text.count("runs_on: *runner\n") == 5
 
 
-def test_engine_secrets_are_chosen_once_and_unlock_keeps_its_own():
+def test_engine_secrets_are_chosen_once_and_unlock_and_release_keep_their_own():
     """Mutations: `apply`'s block written out in full, which parses the same; `apply`'s block
-    written out without `SHIPMATE_SECRETS`; `unlock` aliased to `*engine-secrets`."""
+    written out without `SHIPMATE_SECRETS`; `unlock` aliased to `*engine-secrets`; `release`
+    aliased to `*engine-secrets`."""
     text = _fence_text("shipmate")
     assert text.count("secrets: &engine-secrets\n") == 1
     assert text.count("secrets: *engine-secrets\n") == 2
@@ -51,6 +52,9 @@ def test_engine_secrets_are_chosen_once_and_unlock_keeps_its_own():
     assert jobs["deploy"]["secrets"] == ENGINE_SECRETS
     assert jobs["apply"]["secrets"] == ENGINE_SECRETS
     assert jobs["unlock"]["secrets"] == {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
+    assert jobs["release"]["secrets"] == {
+        "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"
+    }
 
 
 def test_a_ready_or_dispatched_plan_run_queues_behind_the_run_in_flight():
@@ -60,6 +64,16 @@ def test_a_ready_or_dispatched_plan_run_queues_behind_the_run_in_flight():
         "group": "plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}",
         "cancel-in-progress": "${{ github.event_name == 'pull_request_target'"
         " && github.event.action != 'ready_for_review' }}",
+    }
+
+
+def test_a_release_run_is_never_cancelled():
+    """The plan group cancels the run in flight, so a release sharing it could stop mid-delete.
+
+    Mutations: `group` set to the plan group; `cancel-in-progress` set to `true`."""
+    assert _jobs("shipmate")["release"]["concurrency"] == {
+        "group": "release-${{ github.event.pull_request.number }}",
+        "cancel-in-progress": False,
     }
 
 

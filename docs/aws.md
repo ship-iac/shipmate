@@ -288,7 +288,7 @@ pull request holds locked.
 
 The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
 workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on
-the `plan` job, and the other four jobs repeat it with `runs_on: *runner`. A
+the `plan` job, and the other five jobs repeat it with `runs_on: *runner`. A
 YAML anchor cannot cross files, so the drift fence writes the label on its
 `drift` job. To choose x64, set the anchor and each drift file's `runs_on:` to
 `ubuntu-latest`; for a self-hosted runner, set them to its label. A label the

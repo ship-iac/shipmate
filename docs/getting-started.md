@@ -390,7 +390,7 @@ environments without an approving review" has the `review` setup.
 A repository holds `shipmate.yml` and one drift file per sweep, from the two
 fences below. `scripts/onboard` writes `shipmate.yml`, pinned; you save each
 drift file yourself, under any name in `.github/workflows/`, and pin it.
-`shipmate.yml` is a shim: four triggers and five jobs, each job calling an
+`shipmate.yml` is a shim: four triggers and six jobs, each job calling an
 engine reusable workflow SHA-pinned. A drift file is one job calling engine
 `drift.yml` on its cron or a dispatch. The jobs behind those calls — `facts`, `detect`, `plan` and
 `summary` in engine `plan.yml`, and their equivalents on the other paths — live
@@ -424,7 +424,7 @@ that name is what makes the plan cells `plan / <env> / <stack>` and lets the
 plan comment's `plan` links resolve to them. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
 instead; `shipmate doctor` reports it. The other jobs display their verb:
-`comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
+`release`, `comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
 Renaming one of them changes
 only its own check-run names: no link resolves through them, and doctor does
 not check them.
@@ -442,7 +442,8 @@ Which trigger reaches which job, and which engine workflow it calls:
 
 | Trigger | Job | Engine reusable workflow |
 | --- | --- | --- |
-| `pull_request_target`, or `verb: plan` | `plan` | `plan.yml` |
+| `pull_request_target` other than `closed`, or `verb: plan` | `plan` | `plan.yml` |
+| `pull_request_target` `closed` | `release` | `release.yml` |
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` to the default branch | `deploy` | `deploy.yml` |
 | `verb: apply` | `apply` | `apply.yml` |
@@ -451,7 +452,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 Every job below passes a `runs_on:` input, which sets the runner of every
 engine job except nine that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
-`ubuntu-26.04-arm` by default, and the other four repeat it with `*runner`.
+`ubuntu-26.04-arm` by default, and the other five repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
 files. Set both to a label your account offers, such as `ubuntu-latest` for
 x64; one it does not leaves those jobs waiting for a runner that never
@@ -460,13 +461,14 @@ arrives. [`aws.md`](aws.md) §Runner choice lists the jobs on each runner.
 ```yaml
 name: shipmate
 run-name: >-
-  shipmate · ${{ github.event_name == 'pull_request_target' && 'plan'
+  shipmate · ${{ github.event.action == 'closed' && 'release'
+  || github.event_name == 'pull_request_target' && 'plan'
   || github.event_name == 'issue_comment' && 'comment'
   || github.event_name == 'push' && 'deploy'
   || inputs.verb }}
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
   issue_comment:
     types: [created]
   push:
@@ -502,7 +504,7 @@ jobs:
     # `github.event.inputs` reads under pull_request_target too, and the concurrency group
     # relies on it. apply and unlock use `inputs.*`, the only form that applies declared
     # defaults, so an omitted `environment` reads as ''.
-    if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
+    if: (github.event_name == 'pull_request_target' && github.event.action != 'closed') || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
       # A ready run and a dispatched plan wait for the run in flight; a push, open
@@ -524,6 +526,19 @@ jobs:
     # `*runner` reuses it, drift files set their own. ubuntu-latest for x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
+  # Releases the pull request's cell locks, merged or not.
+  release:
+    if: github.event.action == 'closed'
+    # Its own group: the plan group cancels the run in flight.
+    concurrency:
+      group: release-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    uses: ship-iac/shipmate/.github/workflows/release.yml@<engine-sha>  # see the latest release
+    permissions: {}
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+    with:
+      runs_on: *runner
   comment-ops:
     name: comment
     # The engine drops comments on issues; this only selects the event.

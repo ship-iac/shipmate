@@ -76,8 +76,8 @@ trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
 uses lives in that one file, except each drift file's own `schedule` and
 `workflow_dispatch`, so what separates `shipmate.yml`'s jobs is not which file
 holds which trigger but each job's `if:` — a `pull_request_target`
-event selects the `plan` job and no other. doctor's `shipmate.yml` probe
-compares all five of those expressions, whole, against the fence `getting-started.md` publishes. See
+event selects the `plan` job, or on `closed` the `release` job, and no other. doctor's
+`shipmate.yml` probe compares all six of those expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 
 ## Checklist

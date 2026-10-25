@@ -124,7 +124,7 @@ live probes.
     run carries the error, and the dispatch failure reply on the pull request
     links it when it can be posted (`CONTRACT.md` §Comment-ops).
   - Whether each of its jobs is selected by the `if:` its event needs. The file
-    gates five jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
+    gates six jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
     each job's whole `if:` against the expression that file's published fence
     carries. Each finding identifies the job by the engine workflow it calls —
     "the job calling the engine's `apply.yml`", which is the fence's `apply` —
@@ -1602,9 +1602,9 @@ files plans the destroy of what the revert removed from configuration, and a
 
 ### A dispatched verb produced a run in which every job was skipped
 
-The comment was accepted, the dispatch succeeded and the run page shows five
+The comment was accepted, the dispatch succeeded and the run page shows six
 skipped jobs and nothing else — which is what a healthy run also shows for the
-four jobs the event did not select.
+five jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs

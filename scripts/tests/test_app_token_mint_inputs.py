@@ -38,7 +38,7 @@ reaches the JWT `iss` claim unvalidated before merging.
 
 from _loader import ACTIONS as _ACTIONS
 from _loader import ENGINE as _ROOT
-from _loader import action_yaml, workflow_yaml
+from _loader import action_yaml, strings, workflow_yaml
 
 _GITHUB = _ROOT / ".github"
 
@@ -138,10 +138,13 @@ def test_every_mint_names_a_permission():
 
 
 #: Every `(file[:job], step id)` mint requesting `contents: write`, which can write refs.
+#: `fullmint` requests the manifest's whole set to probe the installation; no step reads its
+#: token (test_no_step_reads_the_full_permission_probe_token).
 _CONTENTS_WRITERS = {
     ("actions/lock-acquire/action.yml", "token"),
     ("actions/lock-release/action.yml", "token"),
     ("actions/comment-ops/action.yml", "evicttoken"),
+    ("actions/comment-ops/action.yml", "fullmint"),
 }
 
 
@@ -153,3 +156,16 @@ def test_only_the_lock_writers_mint_contents_write():
         if (step.get("with") or {}).get("permission-contents") == "write"
     }
     assert writers == _CONTENTS_WRITERS
+
+
+def test_no_step_reads_the_full_permission_probe_token():
+    """`fullmint`'s token can write refs; comment-ops consumes only its `outcome`.
+
+    Mutation: pass `steps.fullmint.outputs.token` to the doctor report step's env."""
+    readers = [
+        value
+        for doc in (action_yaml("comment-ops"), workflow_yaml("comment-ops.yml"))
+        for value in strings(doc)
+        if "steps.fullmint.outputs" in value
+    ]
+    assert readers == []

@@ -1861,6 +1861,7 @@ _CALL_PATH = "/shipmate/.github/workflows/"
 _EXPECTED_CALLEES = {
     "shipmate.yml": [
         "plan.yml",
+        "release.yml",
         "comment-ops.yml",
         "deploy.yml",
         "apply.yml",
@@ -1882,8 +1883,8 @@ def _callees(text):
 def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
     """The locator reads the workflow file's body out of the docs rather than carrying a
     copy. It must find exactly one fence, and that fence must call every engine reusable
-    workflow the file routes to, in document order -- five jobs, five pin sites, and a
-    locator that found only the first would ship four unpinned calls.
+    workflow the file routes to, in document order -- six jobs, six pin sites, and a
+    locator that found only the first would ship five unpinned calls.
 
     The expected callee list is hand-written here, never read out of the docs, and the
     whole mapping is compared with `==`.
@@ -1916,11 +1917,11 @@ def test_the_published_drift_fence_calls_drift_yml_on_the_placeholder():
     ]
 
 
-_EXPECTED_PINS = {"shipmate.yml": 5}
+_EXPECTED_PINS = {"shipmate.yml": 6}
 
 
 def test_every_shim_is_pinned_at_every_site():
-    """One file, five pins, and a file shipped still carrying `@<engine-sha>` resolves to
+    """One file, six pins, and a file shipped still carrying `@<engine-sha>` resolves to
     nothing.
 
     Nothing else can see a missed rewrite: `_callees` splits before the `@`, so a surviving
@@ -1928,12 +1929,12 @@ def test_every_shim_is_pinned_at_every_site():
     expensive: `_DOC_PIN` requires the trailing `#` comment, so a docs edit dropping
     `# see the latest release` from one line stops that pin being rewritten; and it is
     anchored on `ship-iac`, so normalising an owner in the docs to `<owner>` would unpin all
-    five. `_DOC_PIN` stays anchored deliberately -- `scripts/repin` is anchored the same way
+    six. `_DOC_PIN` stays anchored deliberately -- `scripts/repin` is anchored the same way
     and the two writers must agree -- and this vector is what makes either edit loud.
 
     Hand-written, never derived from the docs.
 
-    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the five; and delete
+    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the six; and delete
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """

@@ -278,7 +278,7 @@ runs:
         repositories: ${{ github.event.repository.name }}
         permission-actions: write
         permission-pull-requests: write
-        permission-contents: read
+        permission-contents: write
         permission-checks: write
         permission-statuses: write
         permission-issues: write

@@ -49,9 +49,9 @@ reports a plan-calling job carrying another name; until it is fixed,
 `plan / <env> / <stack>` lookup across every check run on the head SHA —
 finds no match and every `plan` link falls back to the workflow-run URL.
 
-The consumer's `shipmate.yml` gates five jobs on the event (§Post-plan
+The consumer's `shipmate.yml` gates six jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
-not run, named by that job's display name — `comment`, `deploy`,
+not run, named by that job's display name — `release`, `comment`, `deploy`,
 `apply`, `unlock` on a plan run — with conclusion `skipped`. They are display
 artefacts of the file's shape, and nothing functional depends on them:
 `shipmate / gate` is the required check, `scripts/summary-comment` resolves plan
@@ -1632,7 +1632,7 @@ fail-safe. The order is unlock, then `shipmate apply <env>`, then a re-plan if
 that refuses (`docs/troubleshooting.md`).
 
 The GitHub App carries this permission set: `actions: write`,
-`pull_requests: write`, `contents: read`, `checks: write`,
+`pull_requests: write`, `contents: write`, `checks: write`,
 `statuses: write`, `issues: write`, `environments: read` — the last for
 `shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
 path returns a secret's value, and this permission cannot write one).
@@ -1745,7 +1745,7 @@ is then refused by the exact-plan fail-safe if the first advanced the state.
 ## Post-plan topology
 
 The consumer's workflow is one file, `.github/workflows/shipmate.yml`: four
-triggers, and five jobs each gated on the event with an `if:` and each calling
+triggers, and six jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
 `SHIPMATE_ENCRYPTION_KEY` and `SHIPMATE_SECRETS` by name (never
@@ -1755,14 +1755,15 @@ SHA-pinned YAML.
 
 | event or verb | job | engine callee |
 |---|---|---|
-| `pull_request_target`, or `workflow_dispatch` with `verb: plan` | `plan` | `plan.yml` |
+| `pull_request_target` other than `closed`, or `workflow_dispatch` with `verb: plan` | `plan` | `plan.yml` |
+| `pull_request_target` `closed` | `release` | `release.yml` |
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` | `deploy` | `deploy.yml` |
 | `workflow_dispatch` with `verb: apply` | `apply` | `apply.yml` |
 | `workflow_dispatch` with `verb: unlock` | `unlock` | `unlock.yml` |
 
 Each of those `if:` expressions is a contract literal, not a style choice:
-`shipmate doctor`'s `shipmate.yml` probe holds all five and compares each one whole,
+`shipmate doctor`'s `shipmate.yml` probe holds all six and compares each one whole,
 because a wrong expression sends a verb nowhere and produces a dispatched run
 that completes with every job skipped — green, and no work done.
 
@@ -1784,8 +1785,8 @@ satisfies its default-branch-only policy for a different reason.
 
 **The calling job's name is a contract literal.** Each job displays its verb:
 `plan` carries `name: plan`, `comment-ops` `name: comment`, `deploy`
-`name: deploy`, and a drift file's `drift` job `name: sweep`; `apply` and
-`unlock` carry no `name:` and display as their job id.
+`name: deploy`, and a drift file's `drift` job `name: sweep`; `release`, `apply`
+and `unlock` carry no `name:` and display as their job id.
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 only a plan job named `plan` produces `plan / <env> / <stack>` plan
 cells and the `plan / summary`, `plan / facts` and `plan / detect`
@@ -1828,7 +1829,8 @@ in the engine placing it there. What *is* base-branch under this trigger is the
 checkout: `GITHUB_SHA` and `GITHUB_REF` name the base, which is why the engine's
 `detect` and `plan` jobs pass `ref: ${{ needs.facts.outputs.head-sha }}`
 explicitly. The two are routinely confused; they are opposite sides of the same
-trigger. The file's other four jobs are skipped under that trigger, each
+trigger. The file's other five jobs are skipped under that trigger (on `closed`,
+`release` runs and `plan` is skipped), each
 completing as a `skipped` check-run on the same head; nothing functional depends
 on them, and `scripts/mirror-checks` does not copy them.
 

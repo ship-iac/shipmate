@@ -230,7 +230,7 @@ def _quiet_new_probes():
     `pull_request_target` and named `shipmate.yml`, which keeps the fork-trigger probe quiet:
     it is the exemption, not the absence of the trigger. Its plan-calling job is named
     `shipmate`, its dispatch leg -- the trigger, the four inputs, the verb options -- is
-    whole, and its five jobs carry the five documented `if:` expressions, keeping the
+    whole, and its six jobs carry the six documented `if:` expressions, keeping the
     `shipmate.yml` probe quiet. `shipmate-drift.yml` calls the engine's `drift.yml`, keeping
     the drift-file probe quiet. The plan-env secret probe reads one listing per plan env; an
     empty one keeps the healthy path quiet."""
@@ -1310,7 +1310,7 @@ _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
 #: The consumer workflow file `_quiet_new_probes()` serves, in the shipped shape, and the
-#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: five jobs, one per
+#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: six jobs, one per
 #: engine reusable workflow, each with the `if:` that routes its event. Hand-written rather
 #: than read from the page, so a drifting page reddens the fence guard and not every test
 #: here. Defined here rather than beside that fixture because interpolating `_SHA` happens at
@@ -1347,13 +1347,16 @@ _SHIPMATE_WF = (
     "jobs:\n"
     "  plan:\n"
     "    name: plan\n"
-    "    if: github.event_name == 'pull_request_target' || (github.event_name == "
-    "'workflow_dispatch' && github.event.inputs.verb == 'plan')\n"
+    "    if: (github.event_name == 'pull_request_target' && github.event.action != 'closed') "
+    "|| (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
     "    permissions: { contents: read, pull-requests: read, id-token: write }\n"
     "    secrets:\n"
     "      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}\n"
     "      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}\n"
+    "  release:\n"
+    "    if: github.event.action == 'closed'\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/release.yml@{_SHA}\n"
     "  comment-ops:\n"
     "    name: comment\n"
     "    if: github.event_name == 'issue_comment'\n"
@@ -3324,9 +3327,10 @@ _FORK_SILENT = [
         },
         id="quoted_event_name_comparison_is_silent",
     ),
-    # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the job
-    # holding the App key is the engine plan workflow's `summary` job, which checks out no
-    # consumer content. Warning about it trains readers to ignore the dangerous labeler workflow.
+    # `shipmate.yml` declaring `pull_request_target` IS the shape the engine ships: the jobs
+    # holding the App key are the engine plan workflow's `summary` and the release workflow's
+    # `release`, which check out no consumer content. Warning about it trains readers to
+    # ignore the dangerous labeler workflow.
     pytest.param(
         {"shipmate.yml": "on:\n  pull_request_target:\n    types: [opened]\n"},
         id="the_consumer_workflow_file_is_not_warned_about",
@@ -4160,7 +4164,7 @@ def test_the_routing_probe_is_silent_on_the_documented_file():
     """The floor under the three reporting cases below, and the oracle for false positives:
     the file consumers paste, verbatim, through the whole probe.
 
-    Mutation: edit any one of the five `ROUTING_IFS` expressions."""
+    Mutation: edit any one of the six `ROUTING_IFS` expressions."""
     text = _documented_workflow_file()
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _PUBLISHED_ENGINE) == []
 
@@ -4204,8 +4208,8 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact():
 
     Mutation: escape `|` as `&#124;` in `_md_escape` -- the row shows `&#124;&#124;`."""
     text = _SHIPMATE_WF.replace(
-        "    if: github.event_name == 'pull_request_target' || (github.event_name == "
-        "'workflow_dispatch' && github.event.inputs.verb == 'plan')\n",
+        "    if: (github.event_name == 'pull_request_target' && github.event.action != 'closed') "
+        "|| (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')\n",
         "",
         1,
     )
@@ -4214,8 +4218,9 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact():
         f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s job calling the engine's "
         "`plan.yml` declares no `if:`, so it then runs on every one of this file's triggers, so "
         "a `push` starts a plan and an `issue_comment` starts an apply. Add `if: "
-        "github.event_name == 'pull_request_target' || (github.event_name == "
-        "'workflow_dispatch' && github.event.inputs.verb == 'plan')` (docs/getting-started.md)."
+        "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
+        "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')` "
+        "(docs/getting-started.md)."
     )
 
 
@@ -4243,6 +4248,32 @@ def test_the_routing_probe_reports_a_missing_job():
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _wrong_count_text("unlock.yml", 0))
     ]
+
+
+def test_the_routing_probe_reports_a_missing_release_job():
+    """A fence without `release` leaves every closed pull request's cell locks held.
+
+    Mutation: drop `release.yml` from `ROUTING_IFS`."""
+    start = _SHIPMATE_WF.index("  release:\n")
+    text = _SHIPMATE_WF[:start] + _SHIPMATE_WF[_SHIPMATE_WF.index("  comment-ops:\n") :]
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _wrong_count_text("release.yml", 0))
+    ]
+
+
+def test_the_routing_table_is_the_six_published_expressions():
+    """Mutations: drop `release.yml`; drop the `closed` clause from `plan.yml`."""
+    assert doctor.ROUTING_IFS == {
+        "plan.yml": (
+            "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
+            "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
+        ),
+        "release.yml": "github.event.action == 'closed'",
+        "comment-ops.yml": "github.event_name == 'issue_comment'",
+        "deploy.yml": "github.event_name == 'push'",
+        "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
+        "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
+    }
 
 
 def test_the_routing_probe_reports_two_jobs_calling_one_callee():
@@ -4274,7 +4305,7 @@ def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wi
     """With no engine repository the anchored selector matches no call, so the routing finder
     would report every job missing. Dispatch wiring reads no slug and still reports.
 
-    Mutations: remove the empty-engine guard -- five count-0 routing findings; return the
+    Mutations: remove the empty-engine guard -- six count-0 routing findings; return the
     notice alone -- the dispatch finding leaves the list."""
     responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4296,7 +4327,7 @@ _MIXED_CASE_ENGINE = "Acme/Engine"
 def test_a_mixed_case_engine_slug_is_routed():
     """GitHub resolves `owner/repo` in `uses:` case-insensitively.
 
-    Mutation: drop `(?i:` from `_engine_slug` -- five count-0 findings."""
+    Mutation: drop `(?i:` from `_engine_slug` -- six count-0 findings."""
     text = _SHIPMATE_WF.replace(f"{_ENGINE_REPO}/", f"{_MIXED_CASE_ENGINE}/")
     assert _MIXED_CASE_ENGINE in text
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
