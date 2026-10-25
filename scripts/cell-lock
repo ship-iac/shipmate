@@ -364,19 +364,22 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
     """Delete `pr`'s locks in every environment. Returns (deleted locks, [(lock, refusal)] for
     each delete refused), as `evict` does: a refusal does not stop the rest. Merged
     (`pending`): keep a lock whose apply check name is in `pending`. Unmerged (`closed_at`):
-    read `pr`'s state after listing its locks; still closed, delete them all; open again,
-    delete only a lock committed at or before the close. An unreadable state refuses before
-    any delete. An unknown holder is never released here."""
+    read `pr`'s state after listing its locks; still closed, delete them all; merged since,
+    apply the merge rule to the head's pending checks; open again, delete only a lock
+    committed at or before the close. An unreadable state refuses before any delete. An
+    unknown holder is never released here."""
     if (pending is None) == (closed_at is None):
         raise ValueError("pass exactly one of pending and closed_at")
     mine = [lock for lock in _scan(repo, "shipmate/locks/", run).values() if lock.pr == pr]
-    reopened = closed_at is not None and bool(mine) and _pr_state(repo, pr, run)[0] == "OPEN"
+    state = closed_at is not None and bool(mine) and _pr_state(repo, pr, run)[0]
+    if state == "MERGED":
+        pending = pending_names(*_head_names(repo, run))
     gone, refused = [], []
     for lock in mine:
         if pending is not None:
             keep = ag.check_name(lock.stack, lock.env) in pending
         else:
-            keep = reopened and _when(lock.committed_at) > _when(closed_at)
+            keep = state == "OPEN" and _when(lock.committed_at) > _when(closed_at)
         if keep:
             continue
         try:

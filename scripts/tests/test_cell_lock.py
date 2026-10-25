@@ -660,14 +660,38 @@ def test_release_unmerged_of_a_reopened_pull_request_deletes_only_locks_by_the_c
     assert gh.drained()
 
 
-@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
-def test_release_unmerged_of_a_closed_pull_request_deletes_every_lock(state):
+def test_release_unmerged_of_a_closed_pull_request_deletes_every_lock():
     """A lock the server dated after the close still goes: git's clock and the API's can
     disagree. Mutation: apply the date fence whatever the state (the later lock is kept)."""
-    gh = _unmerged(_pr_state(state, "2026-10-24T11:00:00Z"))
+    gh = _unmerged(_pr_state("CLOSED", "2026-10-24T11:00:00Z"))
     gh.on(update(LATER_REF, OTHER, ZERO, False), "{}")
     gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
     assert ([g.ref for g in gone], refused) == ([AUTH_REF, DNS_REF, LATER_REF], [])
+    assert gh.drained()
+
+
+def test_release_unmerged_of_a_since_merged_pull_request_keeps_its_pending_locks(monkeypatch):
+    """The early lock's apply check is pending on the head, so the merge rule keeps it.
+    Mutations: treat MERGED as CLOSED (the pending lock is deleted); treat MERGED as OPEN (the
+    pending lock is deleted and the later one kept)."""
+    monkeypatch.setenv("SHIPMATE_HEAD_SHA", HEAD)
+    monkeypatch.setenv("SHIPMATE_APP_ID", "99")
+    gh = _all_locks(
+        (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
+        (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), EARLY),
+        (LATER_REF, OTHER, message(PR, "dev", "stacks/later"), LATE),
+    )
+    gh.on(PR_STATE_READ, _pr_state("MERGED", "2026-10-24T11:00:00Z")).on(REPO_ID_READ, REPO_ID)
+    gh.on(
+        CHECK_RUNS_READ,
+        jsonl(
+            _check("apply / stacks/auth / dev", "queued", None),
+            _check("apply / stacks/dns / dev", "completed", "success", run_id=2),
+        ),
+    )
+    gh.on(update(DNS_REF, NEW, ZERO, False), "{}").on(update(LATER_REF, OTHER, ZERO, False), "{}")
+    gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
+    assert ([g.ref for g in gone], refused) == ([DNS_REF, LATER_REF], [])
     assert gh.drained()
 
 

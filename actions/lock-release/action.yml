@@ -2,8 +2,8 @@ name: shipmate lock-release
 description: >-
   Release the cell locks a closed pull request holds through scripts/cell-lock. A merge releases
   every lock but those whose apply check is still pending on the head; a close without merge
-  releases every lock while the pull request stays closed, and only those taken at or before
-  the close once it is reopened. Mints its own App token with contents:write,
+  releases every lock while the pull request stays closed, applies the merge rule once it has
+  merged since, and releases only those taken at or before the close once it is reopened. Mints its own App token with contents:write,
   checks:read and pull-requests:read.
 inputs:
   pr-number:
