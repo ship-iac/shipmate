@@ -1819,8 +1819,9 @@ between refuses the whole run in `lock`, naming the holder
 (`` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
 re-plan, or comment `shipmate unlock <env> --evict` ``), and no cell applies.
 This is the one case in which a locked cell stops the pull request's other
-cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
-cell pending and the rest apply.
+cells. Commenting `shipmate apply` again, or "Re-run all jobs", recomputes: its
+`detect` leaves that cell pending and the rest apply. "Re-run failed jobs" does
+not re-run `detect`, so its `lock` refuses again.
 
 **Re-running a failed wave.** "Re-run failed jobs" re-runs the failed wave jobs
 and neither `detect` nor `lock`. So every pre-merge apply cell first reads its

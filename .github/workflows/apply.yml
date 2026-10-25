@@ -145,7 +145,8 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
 
   # Holds every cell the waves apply before the first one starts. A cell another pull request
-  # took after `detect` read the locks refuses the whole run here; a re-run recomputes.
+  # took after `detect` read the locks refuses the whole run here. A new `shipmate apply` or
+  # "Re-run all jobs" recomputes; "Re-run failed jobs" does not re-run `detect`.
   lock:
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() }}

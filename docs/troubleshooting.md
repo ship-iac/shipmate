@@ -847,7 +847,8 @@ nothing.
   apply locks again only the cells still pending on #<n>; a cell #<n> already
   applied is not locked again.
 - After the `lock` job form, comment `shipmate apply` again: the new run leaves
-  the locked cell pending and applies the rest.
+  the locked cell pending and applies the rest. "Re-run failed jobs" does not
+  re-run `detect`, so its `lock` job refuses again.
 - "Re-run failed jobs" on an apply run re-runs its failed waves without the
   `lock` job. Each re-run cell re-checks the lock and refuses if this pull
   request no longer holds it, which the `no longer holds its cell lock` form
