@@ -385,7 +385,9 @@ def bare_main():
       each new skip can make more cells wait: `settle` runs both to one fixpoint.
 
     A pending cell another pull request locks (`locked_cells`) stays pending and applies
-    nowhere, exactly like a waiting cell; it is named in `locked_cells`.
+    nowhere, exactly like a waiting cell; it is named in `locked_cells`. Locks are read only
+    in the envs neither held nor excluded as targeted, and a lock in an env skipped this run
+    is not named.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -401,7 +403,6 @@ def bare_main():
     cells = bm.stamp_rows(cells, table, "apply")
 
     pending = filter_pending(cells, ag.app_done_names(lines, app_id))
-    locked = locked_cells(repo, pending, pr_number)
 
     deps = bm.run_graph_deps()
     order = bm.ec.env_order(table)
@@ -414,6 +415,8 @@ def bare_main():
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(targeted + held)
+    # Only the envs that can apply this run: a lock elsewhere is not this run's to report.
+    locked = locked_cells(repo, [c for c in pending if c["environment"] not in stopped], pr_number)
     skipped, run, waiting = settle(
         order,
         stopped,
@@ -423,6 +426,7 @@ def bare_main():
         levels,
         {(c["stack"], c["environment"]) for c in locked},
     )
+    locked = [c for c in locked if c["environment"] not in skipped]
     wv.refuse_inversions(
         run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
     )
