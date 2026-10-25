@@ -1816,14 +1816,15 @@ This is the one case in which a locked cell stops the pull request's other
 cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
 cell pending and the rest apply.
 
-**Release is reconciled, not queued.** Each run of the `release` job and of
-the deploy's `summary`, re-runs included, deletes each lock the merged pull
-request holds whose cell has no pending apply check, independently of the
-deploy's work queue. Both are needed: the deploy's queue is the pending apply
-checks, so under a required gate, where every cell applied before the merge,
-the deploy visits no cell and the `release` job alone releases. A deploy that
-completed a cell's check and then was cancelled, or failed its delete, leaves
-a lock its re-run still releases.
+**Release is reconciled, not queued.** On a merge, each run of the `release`
+job and of the deploy's `summary`, re-runs included, deletes each lock the
+merged pull request holds whose cell has no pending apply check. The deploy's
+release step runs whenever `deploy-detect` found the merged pull request, before
+and apart from its work queue, so either job alone releases every such lock,
+even when the deploy applies no cell. The `release` job alone handles a close
+without merge and a merge that starts no deploy. A deploy that completed a
+cell's check and then was cancelled, or failed its delete, leaves a lock its
+re-run still releases.
 
 **Failure.** A lock read or write that fails refuses, in `detect`, `lock`,
 the `release` job, the deploy's release step (whose failure fails the deploy's
@@ -2034,9 +2035,10 @@ The five jobs:
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — whether each file parses as YAML, stale engine
 pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
-and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring and event routing observe whether the plan comment's
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing and `pull_request_target` types observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
-and whether the job it reaches is the one that verb names, and whose fourth
+whether the job it reaches is the one that verb names, and whether every pull
+request event the fence routes starts a run, and whose fifth
 check reports a drift job in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the

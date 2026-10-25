@@ -99,12 +99,12 @@ live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds four checks, so an unreadable file
-  leaves all four unverified together. A call counts only when it names the
+  the commit under examination, feeds five checks, so an unreadable file
+  leaves all five unverified together. A call counts only when it names the
   engine repository doctor runs from, in any letter case: a fork, a renamed
   engine or a wrapper workflow does not count. When that repository could not
   be determined, the job-name, routing and drift-call checks are a note
-  saying so, and the dispatch check still runs:
+  saying so, and the dispatch and trigger-types checks still run:
   - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
     makes the plan cell checks `plan / <env> / <stack>`. Under another name
@@ -137,6 +137,12 @@ live probes.
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
+  - Whether its `pull_request_target` types are exactly the fence's `opened`,
+    `synchronize`, `reopened`, `ready_for_review` and `closed`. A missing type
+    starts no run for its event, and nothing else shows it: without `closed`,
+    no cell lock of a pull request closed without merging is released. The
+    finding names what each missing type loses, and any extra type, which
+    starts a plan the fence never routes.
   - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
     runs on that file's triggers. Move the drift job to a workflow file of its
     own, and drop the `schedule` trigger and the `drift` verb option from
@@ -856,9 +862,10 @@ A different failure has the same cause: a ref under `refs/shipmate/locks/` that
 targets something other than a commit. Every read of its environment's locks
 refuses with ``the cell lock ref <ref> targets a <type>, not a commit; someone
 with write access must delete it: git push origin :<ref>``: applies to that
-environment, `shipmate unlock <env> --evict` there and every pull request's
-`release` job fail, and the plan comment marks no locked cell. `--evict` cannot
-delete it. Run the command the error names from a clone, with write access.
+environment, `shipmate unlock <env> --evict` there, every pull request's
+`release` job and every merge deploy's lock release fail (both read every
+environment's locks), and a plan with a cell in that environment marks no
+locked cell at all. `--evict` cannot delete it. Run the command the error names from a clone, with write access.
 
 ### The deploy's `summary` failed releasing cell locks
 
@@ -878,22 +885,28 @@ request ([`github-app.md`](github-app.md) §Re-approve after permission changes)
 Another pull request's apply still reports ``🔒 locked by #<n>`` after #<n>
 merged or closed.
 
-- **The `release` job failed or did not run.** Open the closing run of #<n>'s
-  `shipmate.yml` (`shipmate · release`) and re-run it. No run at all means the
-  file's `pull_request_target` types lack `closed`, which nothing reports, or
-  its `release` job is missing, which `shipmate doctor`'s `shipmate.yml` probe
-  reports. Re-pin the fence
-  (`python <engine>/scripts/repin <consumer> <tag> --write-fence`), then evict
-  the lock as below.
+- **The `release` job failed.** Open the closing run of #<n>'s `shipmate.yml`
+  (`shipmate · release`) and re-run it.
+- **#<n>'s close started no run.** The file's `pull_request_target` types lack
+  `closed`; `shipmate doctor`'s `shipmate.yml` probe reports the types. A merge
+  is still released by the merge deploy's `summary`; a close without merge is
+  not.
+- **The closing run skipped every job.** The file has no `release` job;
+  `shipmate doctor`'s `shipmate.yml` probe reports zero jobs calling
+  `release.yml`.
 - **#<n> merged and the cell's apply check is still pending on its head.** The
   lock stays until the merge deploy applies the cell; a failed deploy keeps it
-  (§The deploy's `summary` failed releasing cell locks). Re-run the deploy.
+  (§The deploy's `summary` failed releasing cell locks). Re-run the deploy. A
+  merge into a branch no deploy runs on leaves the check pending, and the lock
+  with it.
 - **#<n> was closed without merging and the lock is newer than the close.** An
   apply that took the lock after the close refuses and deletes it itself; one
   that remains is evicted with `shipmate unlock <env> --evict`.
 
-In every case, `shipmate unlock <env> --evict` from a pull request that changes
-the cell releases it now.
+For the second and third causes, re-pin the fence
+(`python <engine>/scripts/repin <consumer> <tag> --write-fence`) where it
+differs. In every case, `shipmate unlock <env> --evict` from a pull request that
+changes the cell releases the lock now.
 
 ### The encryption key is missing: `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, `SHIPMATE_ENCRYPTION_KEY is empty`
 

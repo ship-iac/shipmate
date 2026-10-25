@@ -832,7 +832,8 @@ trust to all of them.
 
 **The App holds `contents: write`, for the cell locks.** A key holder can
 therefore mint a token that writes any ref the repository's rulesets leave
-open. Probed 2026-10-24, such a token cannot add a file under
+open: that is the scope GitHub documents for `contents: write`, not something
+probed here. Two limits were probed on 2026-10-24: such a token cannot add a file under
 `.github/workflows` (403) and cannot move the default branch under its ruleset
 (422). The engine requests `contents: write`
 only in the jobs that write a cell lock, all bound to `shipmate-engine`
@@ -1131,8 +1132,9 @@ token. Three things bound it: the job checks nothing out, so it runs only engine
 code; every value it reads is the event payload GitHub writes (the pull
 request's number, head SHA, `merged` and `closed_at`), none of which the fork
 authors; and it deletes only cell locks held by that pull request's number,
-which a fork never holds, because a fork's plan is refused and nothing of it
-applies.
+which a fork never holds: `shipmate apply` refuses a head branch outside this
+repository (the same-repository apply requirement, `CONTRACT.md`
+§Comment-ops), so no `lock` job ever runs for a fork.
 
 **`workflow_dispatch` keeps every fact out of a dispatcher's hands.** A commented
 `shipmate plan` `workflow_dispatch`es the same `shipmate.yml` the autoplan runs
