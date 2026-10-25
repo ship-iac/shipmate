@@ -1796,7 +1796,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | the same run | `apply.yml` `lock`, after `detect` and before the first env-level | Locks every cell the env-levels will apply. A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
 | merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff |
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check |
-| close without merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds whose commit is no newer than the close |
+| close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unreadable lock` for an unknown holder) |
 
@@ -1808,7 +1808,10 @@ locks this run created and puts those it re-entered through the close check
 below, deleting them unless it passes. After every ref is installed, `lock`
 reads the pull request's state and newest close event and refuses, deleting every lock it installed, unless the pull request is open and
 that close (if any) is older than every installed lock's commit. A commit
-created before a close and installed after a reopen therefore refuses.
+created before a close and installed after a reopen therefore refuses. A state
+read that fails or answers malformed refuses too, but deletes only the locks
+this run created: a re-entered lock is the pull request's earlier hold, and
+deleting it on an unconfirmed close would free a cell it may still hold.
 
 **Limit: the race between `detect` and `lock`.** `detect` reads the locks and
 `lock` takes them in a later job. A cell another pull request acquires in
@@ -1831,8 +1834,9 @@ re-run still releases.
 
 **Failure.** A lock read or write that fails refuses, in `detect`, `lock`,
 the `release` job, the deploy's release step (whose failure fails the deploy's
-`summary`) and `--evict`. A failed release stays owed until a re-run of that job
-succeeds. The plan comment's marker alone degrades: a lock read that fails there
+`summary`) and `--evict`. A release and an eviction continue past a delete that
+refuses, then fail naming each lock left held. A failed release stays owed until
+a re-run of that job succeeds. The plan comment's marker alone degrades: a lock read that fails there
 warns, and the comment marks no cell.
 
 **Permissions.** `detect` reads locks with its `GITHUB_TOKEN` at

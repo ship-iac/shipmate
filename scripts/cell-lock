@@ -19,8 +19,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
 - `acquire`: locks every cell of `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES` for
   pull request `SHIPMATE_PR_NUMBER`, then fences the acquisition against a close.
 - `release`: `SHIPMATE_MERGED` `true` deletes the pull request's locks except those whose apply
-  check is pending on `SHIPMATE_HEAD_SHA`; `false` deletes those committed by
-  `SHIPMATE_CLOSED_AT`.
+  check is pending on `SHIPMATE_HEAD_SHA`; `false` deletes them all while the pull request is
+  closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again. Refuses,
+  after releasing the rest, naming each lock whose delete refused.
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
   on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes outputs `evicted` and
   `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
@@ -267,10 +268,10 @@ def _install(repo, cell, pr, acquisition, tree, run):
 
 
 def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
-    """Lock every cell for `pr`, re-entering locks `pr` already holds. Returns every lock
-    installed. A refusal first deletes the locks this call created, and fences those it
-    replaced with `fence_open`: the refusal skips the caller's fence, and a lock re-entered
-    after a close would otherwise outlive the close's release."""
+    """Lock every cell for `pr`, re-entering locks `pr` already holds, then pass every lock
+    installed through `fence_open`. Returns every lock installed. A refusal first deletes the
+    locks this call created, then fences those it replaced: a lock re-entered after a close
+    would otherwise outlive the close's release."""
     todo = {ref_name(_env(c["environment"]), c["stack"]): c for c in cells}
     if not todo:
         return []
@@ -293,10 +294,11 @@ def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
     except (LookupError, TypeError, ValueError) as exc:
         reason = f"::error::could not lock the cells: an API response was malformed ({exc!r})"
     else:
+        fence_open(repo, pr, installed, created, run=run)
         return installed
     reason = _rollback(repo, created, reason, run)
     try:
-        fence_open(repo, pr, [lock for lock in installed if lock not in created], run=run)
+        fence_open(repo, pr, [lock for lock in installed if lock not in created], [], run=run)
     except SystemExit as fenced:
         reason = f"{reason}\n{fenced.code}"
     raise SystemExit(reason)
@@ -310,9 +312,9 @@ def _when(stamp):
     return when
 
 
-def _closed_since(repo, pr, acquired, run):
-    """None when `pr` is open and its newest close predates every lock in `acquired`, else
-    why not."""
+def _pr_state(repo, pr, run):
+    """`(state, close times)` of `pr`: `OPEN`, `CLOSED` or `MERGED`, and the time of its newest
+    close, if any. Refuses when the read fails or its answer is malformed."""
     owner, name = repo.split("/", 1)
     try:
         pull = json.loads(
@@ -322,48 +324,64 @@ def _closed_since(repo, pr, acquired, run):
             )
         )
         closes = [_when(n["createdAt"]) for n in pull["timelineItems"]["nodes"]]
-        state = pull["state"]
-        if state == "OPEN" and all(
-            c < _when(lock.committed_at) for c in closes for lock in acquired
-        ):
-            return None
+        if pull["state"] in ("OPEN", "CLOSED", "MERGED"):
+            return pull["state"], closes
+        why = f"state {pull['state']!r}"
     except (SystemExit, LookupError, TypeError, ValueError) as exc:
-        return f"its state could not be read ({exc})"
-    return f"state {state}, last closed {closes[-1].isoformat() if closes else 'never'}"
+        why = str(exc)
+    raise SystemExit(f"::error::the state of pull request #{pr} could not be read ({why})")
 
 
-def fence_open(repo, pr: int, acquired: list[Lock], *, run=_run) -> None:
-    """Refuse, after deleting every lock in `acquired`, unless `pr` is open and was last
-    closed before each lock's commit: a commit made before a close and installed after a
-    reopen fails this."""
+def fence_open(repo, pr: int, acquired: list[Lock], created: list[Lock], *, run=_run) -> None:
+    """Refuse unless `pr` is open and was last closed before each lock in `acquired` was
+    committed: a commit made before a close and installed after a reopen fails this. A
+    confirmed close deletes every lock in `acquired`. An unreadable state deletes only
+    `created`: deleting a re-entered lock on a guess frees a cell `pr` may still hold."""
     if not acquired:
         return
-    why = _closed_since(repo, pr, acquired, run)
-    if why is not None:
+    try:
+        state, closes = _pr_state(repo, pr, run)
+    except SystemExit as exc:
         reason = (
-            f"::error::pull request #{pr} was closed while this run acquired its cell locks "
-            f"({why}); the locks it took are released"
+            f"{exc.code}; the cell locks this run created are released and those it re-entered "
+            "are kept"
         )
-        raise SystemExit(_rollback(repo, acquired, reason, run))
+        raise SystemExit(_rollback(repo, created, reason, run)) from None
+    if state == "OPEN" and all(c < _when(lock.committed_at) for c in closes for lock in acquired):
+        return
+    reason = (
+        f"::error::pull request #{pr} was closed while this run acquired its cell locks (state "
+        f"{state}, last closed {closes[-1].isoformat() if closes else 'never'}); the locks it "
+        "took are released"
+    )
+    raise SystemExit(_rollback(repo, acquired, reason, run))
 
 
-def release(repo, pr: int, *, pending=None, closed_at=None, run=_run) -> list[Lock]:
-    """Delete `pr`'s locks in every environment and return those deleted. Merged (`pending`):
-    keep a lock whose apply check name is in `pending`. Unmerged (`closed_at`): delete only a
-    lock committed at or before the close. An unknown holder is never released here."""
+def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
+    """Delete `pr`'s locks in every environment. Returns (deleted locks, [(lock, refusal)] for
+    each delete refused), as `evict` does: a refusal does not stop the rest. Merged
+    (`pending`): keep a lock whose apply check name is in `pending`. Unmerged (`closed_at`):
+    read `pr`'s state after listing its locks; still closed, delete them all; open again,
+    delete only a lock committed at or before the close. An unreadable state refuses before
+    any delete. An unknown holder is never released here."""
     if (pending is None) == (closed_at is None):
         raise ValueError("pass exactly one of pending and closed_at")
-    gone = []
-    for lock in _scan(repo, "shipmate/locks/", run).values():
-        if lock.pr != pr:
-            continue
+    mine = [lock for lock in _scan(repo, "shipmate/locks/", run).values() if lock.pr == pr]
+    reopened = closed_at is not None and bool(mine) and _pr_state(repo, pr, run)[0] == "OPEN"
+    gone, refused = [], []
+    for lock in mine:
         if pending is not None:
             keep = ag.check_name(lock.stack, lock.env) in pending
         else:
-            keep = _when(lock.committed_at) > _when(closed_at)
-        if not keep and delete(repo, lock, run=run):
-            gone.append(lock)
-    return gone
+            keep = reopened and _when(lock.committed_at) > _when(closed_at)
+        if keep:
+            continue
+        try:
+            if delete(repo, lock, run=run):
+                gone.append(lock)
+        except SystemExit as exc:
+            refused.append((lock, exc.code))
+    return gone, refused
 
 
 def evict(repo, env: str, pr: int, stacks: set[str], *, run=_run):
@@ -427,14 +445,13 @@ def _acquire_cmd(repo, pr, run):
         )
     acquisition = ".".join(ids)
     locks = acquire(repo, _wave_cells(), pr, acquisition, run=run)
-    fence_open(repo, pr, locks, run=run)
     print(f"::notice::pull request #{pr} holds {len(locks)} cell lock(s)")
 
 
 def _release_cmd(repo, pr, run):
     merged = os.environ.get("SHIPMATE_MERGED", "")
     if merged == "true":
-        gone = release(repo, pr, pending=pending_names(*_head_names(repo, run)), run=run)
+        gone, refused = release(repo, pr, pending=pending_names(*_head_names(repo, run)), run=run)
     elif merged == "false":
         closed_at = os.environ.get("SHIPMATE_CLOSED_AT", "")
         try:
@@ -443,10 +460,12 @@ def _release_cmd(repo, pr, run):
             raise SystemExit(
                 f"::error::SHIPMATE_CLOSED_AT must be an ISO-8601 time (got: {closed_at!r})"
             ) from None
-        gone = release(repo, pr, closed_at=closed_at, run=run)
+        gone, refused = release(repo, pr, closed_at=closed_at, run=run)
     else:
         raise SystemExit(f"::error::SHIPMATE_MERGED must be true or false (got: {merged!r})")
     print(f"::notice::released {len(gone)} cell lock(s) of pull request #{pr}")
+    if refused:
+        raise SystemExit("\n".join(code for _, code in refused))
 
 
 def _evict_cmd(repo, pr, run):

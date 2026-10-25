@@ -900,9 +900,10 @@ merged or closed.
   (§The deploy's `summary` failed releasing cell locks). Re-run the deploy. A
   merge into a branch no deploy runs on leaves the check pending, and the lock
   with it.
-- **#<n> was closed without merging and the lock is newer than the close.** An
-  apply that took the lock after the close refuses and deletes it itself; one
-  that remains is evicted with `shipmate unlock <env> --evict`.
+- **#<n> was closed without merging, then reopened, and the lock is newer than
+  the close.** The release keeps a lock taken after the close while #<n> is
+  open again. An apply that took the lock after the close refuses and deletes
+  it itself; one that remains is evicted with `shipmate unlock <env> --evict`.
 
 For the second and third causes, re-pin the fence
 (`python <engine>/scripts/repin <consumer> <tag> --write-fence`) where it

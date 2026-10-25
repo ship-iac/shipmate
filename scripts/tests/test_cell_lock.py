@@ -228,7 +228,7 @@ def test_a_ref_that_targets_no_commit_refuses_naming_the_manual_remedy():
 
 def test_a_created_ref_is_acquired():
     """Mutation: return no lock for a 201."""
-    gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), "{}")
+    gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), "{}").on(PR_STATE_READ, OPEN)
     assert cl.acquire(REPO, [AUTH], PR, ACQ, run=gh) == [lock(AUTH_REF, NEW, date=LATE)]
     assert gh.drained()
 
@@ -236,7 +236,7 @@ def test_a_created_ref_is_acquired():
 def test_a_failed_create_that_reads_back_our_commit_is_acquired():
     """Mutation: refuse whenever the create fails."""
     gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), FAIL)
-    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, NEW)))
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, NEW))).on(PR_STATE_READ, OPEN)
     assert cl.acquire(REPO, [AUTH], PR, ACQ, run=gh) == [lock(AUTH_REF, NEW, date=LATE)]
     assert gh.drained()
 
@@ -247,6 +247,7 @@ def test_our_pull_request_at_another_sha_is_replaced_with_force():
     gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(PR, "dev", "stacks/auth", "800.1")))
     gh.on(REPO_ID_READ, REPO_ID + "\n").on(update(AUTH_REF, OLD, NEW, True), "{}")
+    gh.on(PR_STATE_READ, OPEN)
     assert cl.acquire(REPO, [AUTH], PR, ACQ, run=gh) == [lock(AUTH_REF, NEW, date=LATE)]
     assert gh.drained()
 
@@ -339,7 +340,7 @@ def test_a_failed_replace_refuses_unless_our_commit_reads_back(read_back):
 
 def test_a_failed_replace_that_reads_back_our_commit_is_acquired():
     """Mutation: refuse on every replace error."""
-    gh = _replace_failing(refs((AUTH_REF, NEW)))
+    gh = _replace_failing(refs((AUTH_REF, NEW))).on(PR_STATE_READ, OPEN)
     assert cl.acquire(REPO, [AUTH], PR, ACQ, run=gh) == [lock(AUTH_REF, NEW, date=LATE)]
     assert gh.drained()
 
@@ -367,6 +368,7 @@ PR_STATE_READ = [
     "--jq",
     ".data.repository.pullRequest",
 ]
+OPEN = _pr_state("OPEN")
 
 
 @pytest.mark.parametrize(
@@ -384,7 +386,7 @@ def test_the_fence_refuses_and_deletes_every_installed_lock(state, closed):
     gh = Gh().on(PR_STATE_READ, _pr_state(state, closed + "Z")).on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, NEW, ZERO, False), "{}").on(update(DNS_REF, OTHER, ZERO, False), "{}")
     with pytest.raises(SystemExit) as exc:
-        cl.fence_open(REPO, PR, installed, run=gh)
+        cl.fence_open(REPO, PR, installed, [], run=gh)
     assert exc.value.code == (
         "::error::pull request #7 was closed while this run acquired its cell locks (state "
         f"{state}, last closed {closed}+00:00); the locks it took are released"
@@ -402,7 +404,7 @@ def test_the_fence_refuses_and_deletes_every_installed_lock(state, closed):
 def test_the_fence_passes_an_open_pull_request_with_no_later_close(state):
     """Mutation: compare the close `>` the commit (closed-earlier refuses)."""
     gh = Gh().on(PR_STATE_READ, state)
-    cl.fence_open(REPO, PR, [lock(AUTH_REF, NEW)], run=gh)
+    cl.fence_open(REPO, PR, [lock(AUTH_REF, NEW)], [], run=gh)
     assert gh.drained()
 
 
@@ -436,6 +438,52 @@ def test_a_refusal_fences_a_lock_reentered_after_a_close():
         f"{DNS_REFUSAL}\n::error::pull request #7 was closed while this run acquired its cell "
         "locks (state CLOSED, last closed 2026-10-24T11:00:00+00:00); the locks it took are "
         "released"
+    )
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        pytest.param(FAIL, "::error::command failed (1): gh api", id="read-fails"),
+        pytest.param('{"state": "OPEN"}', "'timelineItems'", id="malformed"),
+        pytest.param(_pr_state(None), "state None", id="no-state"),
+    ],
+)
+def test_an_unreadable_state_keeps_reentered_locks_and_releases_created_ones(answer, why):
+    """AUTH re-entered, DNS created, then the state read fails: only DNS is rolled back.
+
+    Mutations: treat an unreadable state as closed in `fence_open` (AUTH_REF's delete is an
+    unexpected call); read any `state` but `OPEN` as closed in `_pr_state` (no-state deletes
+    AUTH_REF); skip the rollback of `created` (DNS_REF's delete is never sent)."""
+    gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(PR, "dev", "stacks/auth", "800.1")))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, NEW, True), "{}")
+    gh.on(commit_write(DNS), commit(OTHER, message(PR, "dev", "stacks/dns"), LATE))
+    gh.on(ref_write(DNS_REF, OTHER), "{}").on(PR_STATE_READ, answer)
+    gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert exc.value.code == (
+        f"::error::the state of pull request #7 could not be read ({why}); the cell locks this "
+        "run created are released and those it re-entered are kept"
+    )
+    assert gh.drained()
+
+
+def test_a_refusal_with_an_unreadable_state_keeps_the_reentered_lock():
+    """AUTH re-entered, DNS refused as #12's lock, then the state read fails.
+
+    Mutation: treat an unreadable state as closed in `fence_open` (AUTH_REF's delete is an
+    unexpected call)."""
+    gh = _reenter_then_refuse(FAIL)
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert exc.value.code == (
+        f"{DNS_REFUSAL}\n::error::the state of pull request #7 could not be read (::error::"
+        "command failed (1): gh api); the cell locks this run created are released and those "
+        "it re-entered are kept"
     )
     assert gh.drained()
 
@@ -580,25 +628,75 @@ def test_release_merged_keeps_only_our_pending_locks():
     gh.on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, OLD, ZERO, False), "{}")
     gh.on(update(dropped_ref, OTHER, ZERO, False), "{}")
-    gone = cl.release(REPO, PR, pending={"apply / stacks/app / prod"}, run=gh)
-    assert [g.ref for g in gone] == [AUTH_REF, dropped_ref]
+    gone, refused = cl.release(REPO, PR, pending={"apply / stacks/app / prod"}, run=gh)
+    assert ([g.ref for g in gone], refused) == ([AUTH_REF, dropped_ref], [])
     assert gh.drained()
 
 
-def test_release_unmerged_deletes_only_locks_committed_by_the_close():
-    """Mutations: drop the date comparison (the later lock is deleted); compare `<` (the
-    same-second lock is kept); release an unknown holder."""
-    later_ref = cl.ref_name("dev", "stacks/later")
+LATER_REF = cl.ref_name("dev", "stacks/later")
+
+
+def _unmerged(state):
+    """Three of our locks, committed before, at and after the 11:00 close, an unknown holder,
+    then `state` answering the state read."""
     gh = _all_locks(
         (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
         (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), "2026-10-24T11:00:00Z"),
-        (later_ref, OTHER, message(PR, "dev", "stacks/later"), LATE),
+        (LATER_REF, OTHER, message(PR, "dev", "stacks/later"), LATE),
         (cl.ref_name("dev", "stacks/x"), TREE, "garbage", EARLY),
     )
-    gh.on(REPO_ID_READ, REPO_ID)
-    gh.on(update(AUTH_REF, OLD, ZERO, False), "{}").on(update(DNS_REF, NEW, ZERO, False), "{}")
-    gone = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
-    assert [g.ref for g in gone] == [AUTH_REF, DNS_REF]
+    gh.on(PR_STATE_READ, state).on(REPO_ID_READ, REPO_ID)
+    return gh.on(update(AUTH_REF, OLD, ZERO, False), "{}").on(
+        update(DNS_REF, NEW, ZERO, False), "{}"
+    )
+
+
+def test_release_unmerged_of_a_reopened_pull_request_deletes_only_locks_by_the_close():
+    """Mutations: drop the date comparison (the later lock is deleted); compare `<` (the
+    same-second lock is kept); release an unknown holder."""
+    gh = _unmerged(_pr_state("OPEN", "2026-10-24T11:00:00Z"))
+    gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
+    assert ([g.ref for g in gone], refused) == ([AUTH_REF, DNS_REF], [])
+    assert gh.drained()
+
+
+@pytest.mark.parametrize("state", ["CLOSED", "MERGED"])
+def test_release_unmerged_of_a_closed_pull_request_deletes_every_lock(state):
+    """A lock the server dated after the close still goes: git's clock and the API's can
+    disagree. Mutation: apply the date fence whatever the state (the later lock is kept)."""
+    gh = _unmerged(_pr_state(state, "2026-10-24T11:00:00Z"))
+    gh.on(update(LATER_REF, OTHER, ZERO, False), "{}")
+    gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
+    assert ([g.ref for g in gone], refused) == ([AUTH_REF, DNS_REF, LATER_REF], [])
+    assert gh.drained()
+
+
+def test_release_unmerged_with_an_unreadable_state_refuses_before_any_delete():
+    """Mutation: read an unreadable state as closed (every lock is deleted)."""
+    gh = _all_locks((AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY))
+    gh.on(PR_STATE_READ, FAIL)
+    with pytest.raises(SystemExit) as exc:
+        cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
+    assert exc.value.code == (
+        "::error::the state of pull request #7 could not be read (::error::command failed "
+        "(1): gh api)"
+    )
+    assert gh.drained()
+
+
+def test_release_continues_past_a_refused_delete():
+    """Mutation: let the refusal escape `release` (the second lock is never deleted)."""
+    gh = _all_locks(
+        (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
+        (DNS_REF, OTHER, message(PR, "dev", "stacks/dns"), EARLY),
+    )
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
+    assert cl.release(REPO, PR, pending=set(), run=gh) == (
+        [lock(DNS_REF, OTHER, stack="stacks/dns")],
+        [(lock(AUTH_REF, OLD), _AUTH_REFUSAL)],
+    )
     assert gh.drained()
 
 
@@ -836,9 +934,31 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
                 _check("apply / stacks/dns / dev", "queued", None, run_id=2, app=15368),
             ),
         )
+    else:
+        gh.on(PR_STATE_READ, _pr_state("OPEN", "2026-10-24T11:00:00Z"))
     sha = OLD if released == AUTH_REF else NEW
     gh.on(REPO_ID_READ, REPO_ID).on(update(released, sha, ZERO, False), "{}")
     _main(monkeypatch, tmp_path, "release", gh, env)
+    assert gh.drained()
+
+
+def test_release_cli_names_each_refused_delete_after_releasing_the_rest(
+    monkeypatch, tmp_path, capsys
+):
+    """Mutation: drop the final refusal in `_release_cmd` (the step reads green)."""
+    gh = _all_locks(
+        (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
+        (DNS_REF, OTHER, message(PR, "dev", "stacks/dns"), EARLY),
+    )
+    gh.on(PR_STATE_READ, _pr_state("CLOSED", LATE))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
+    env = {"SHIPMATE_MERGED": "false", "SHIPMATE_CLOSED_AT": LATE}
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "release", gh, env)
+    assert exc.value.code == _AUTH_REFUSAL
+    assert "::notice::released 1 cell lock(s) of pull request #7" in capsys.readouterr().out
     assert gh.drained()
 
 
