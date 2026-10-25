@@ -1632,6 +1632,49 @@ def _routing_finding(doc, name, engine):
     return out
 
 
+#: The `pull_request_target` types `docs/getting-started.md`'s fence declares, each with what a
+#: file lacking it loses. A missing type is silent: its event starts no run at all.
+PR_TARGET_TYPES = {
+    "opened": "an opened pull request is not planned",
+    "synchronize": "a push to a pull request is not planned",
+    "reopened": "a reopened pull request is not planned",
+    "ready_for_review": "a draft marked ready is not planned",
+    "closed": "no cell lock of a pull request closed without merging is released",
+}
+#: GitHub's types for a `pull_request_target` trigger that names none.
+_PR_TARGET_DEFAULT_TYPES = ["opened", "synchronize", "reopened"]
+
+
+def _pr_target_types_finding(doc, name):
+    """One finding when the file's `pull_request_target` types are not exactly
+    `PR_TARGET_TYPES`, compared as a whole set: a missing type stops its event from
+    starting any run, and an extra one starts a plan on an event the fence never routes."""
+    if "pull_request_target" not in _events(doc):
+        found = []
+    else:
+        trigger = _mapping(doc.get("on")).get("pull_request_target")
+        types = _mapping(trigger).get("types", _PR_TARGET_DEFAULT_TYPES)
+        found = [types] if isinstance(types, str) else types
+    if not isinstance(found, list) or not all(isinstance(t, str) for t in found):
+        found = None
+    if found is not None and set(found) == set(PR_TARGET_TYPES):
+        return []
+    lost = [why for t, why in PR_TARGET_TYPES.items() if found is None or t not in found]
+    extra = sorted(set(found or []) - set(PR_TARGET_TYPES))
+    if extra:
+        lost.append(f"extra types {_and_list(extra)} start plans the fence never routes")
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `pull_request_target` types are not the published "
+                f"{_and_list(PR_TARGET_TYPES)}: {'; '.join(lost)}. Set its `types:` to exactly "
+                "those (docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
     "the workflow file's job name, dispatch wiring, event routing and drift call",
@@ -1653,7 +1696,7 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing and drift-call findings over the
+    """The job-name, dispatch-wiring, routing, trigger-types and drift-call findings over the
     consumer's `shipmate.yml` alone, in that order, from one read at the commit under
     examination (`_contents_ref`): a pull request that fixes the file must not still be
     reported for the old state.
@@ -1668,7 +1711,7 @@ def _shipmate_yml_warnings(ctx):
 
     Without the engine repository the three engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring
-    reads no engine slug and still runs."""
+    and the trigger types read no engine slug and still run."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
@@ -1680,11 +1723,16 @@ def _shipmate_yml_warnings(ctx):
         return []
     engine = ctx["engine_repo"]
     if not engine:
-        return [*_dispatch_wiring_finding(doc, name), SHIPMATE_YML_NO_ENGINE]
+        return [
+            *_dispatch_wiring_finding(doc, name),
+            *_pr_target_types_finding(doc, name),
+            SHIPMATE_YML_NO_ENGINE,
+        ]
     return [
         *_shim_job_name_finding(doc, name, engine),
         *_dispatch_wiring_finding(doc, name),
         *_routing_finding(doc, name, engine),
+        *_pr_target_types_finding(doc, name),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]
 

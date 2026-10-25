@@ -1319,7 +1319,7 @@ _SHIPMATE_WF = (
     "name: shipmate\n"
     "on:\n"
     "  pull_request_target:\n"
-    "    types: [opened, synchronize, reopened, ready_for_review]\n"
+    "    types: [opened, synchronize, reopened, ready_for_review, closed]\n"
     "  issue_comment:\n"
     "    types: [created]\n"
     "  push:\n"
@@ -6889,3 +6889,81 @@ def test_a_failed_shared_read_fails_every_probe_that_asks(monkeypatch):
         with pytest.raises(SystemExit):
             doctor._existing_env_names(ctx)
     assert asked == [f"repos/{_REPO}/environments?per_page=100"]
+
+
+_NO_CLOSED_TEXT = (
+    "`shipmate.yml`'s `pull_request_target` types are not the published `opened`, "
+    "`synchronize`, `reopened`, `ready_for_review` and `closed`: no cell lock of a pull "
+    "request closed without merging is released. Set its `types:` to exactly those "
+    "(docs/getting-started.md)."
+)
+_WF_NO_CLOSED = _SHIPMATE_WF.replace("ready_for_review, closed]", "ready_for_review]", 1)
+
+
+def test_the_trigger_types_match_the_documented_workflow_file():
+    """The fence's `pull_request_target` types, doctor's `PR_TARGET_TYPES` and this hand-written
+    list are one list.
+
+    Mutations: drop `closed` from the fence's `types:`; drop `closed` from
+    `PR_TARGET_TYPES`."""
+    documented = load_workflow_text(_documented_workflow_file())["on"]["pull_request_target"]
+    expected = ["opened", "synchronize", "reopened", "ready_for_review", "closed"]
+    assert documented["types"] == expected
+    assert list(doctor.PR_TARGET_TYPES) == expected
+
+
+def test_the_trigger_types_probe_is_silent_on_the_documented_file():
+    """Mutation: add a type to `PR_TARGET_TYPES`."""
+    text = _documented_workflow_file()
+    assert doctor._pr_target_types_finding(_doc(text), "shipmate.yml") == []
+
+
+def test_the_trigger_types_probe_reports_a_missing_closed():
+    """A fence without `closed` starts no run when a pull request closes, so no `release` job
+    frees its locks.
+
+    Mutation: return `[]` before the comparison in `_pr_target_types_finding`."""
+    assert _WF_NO_CLOSED != _SHIPMATE_WF
+    assert doctor._pr_target_types_finding(_doc(_WF_NO_CLOSED), "shipmate.yml") == [
+        (doctor.WARNING, _NO_CLOSED_TEXT)
+    ]
+
+
+def test_the_trigger_types_probe_reads_githubs_defaults_for_a_bare_trigger():
+    """`pull_request_target:` with no `types:` gets GitHub's three, so it loses
+    `ready_for_review` and `closed`.
+
+    Mutation: read a missing `types:` as `PR_TARGET_TYPES` instead of GitHub's defaults."""
+    text = _SHIPMATE_WF.replace(
+        "    types: [opened, synchronize, reopened, ready_for_review, closed]\n", "", 1
+    )
+    assert text != _SHIPMATE_WF
+    assert doctor._pr_target_types_finding(_doc(text), "shipmate.yml") == [
+        (
+            doctor.WARNING,
+            (
+                "`shipmate.yml`'s `pull_request_target` types are not the published `opened`, "
+                "`synchronize`, `reopened`, `ready_for_review` and `closed`: a draft marked "
+                "ready is not planned; no cell lock of a pull request closed without merging "
+                "is released. Set its `types:` to exactly those (docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
+def test_the_shipmate_yml_probe_runs_the_trigger_types_finder(monkeypatch):
+    """Mutations: drop `_pr_target_types_finding` from either return of
+    `_shipmate_yml_warnings`."""
+    responses = _fork_responses({"shipmate.yml": _WF_NO_CLOSED})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == [(doctor.WARNING, _NO_CLOSED_TEXT)]
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo="")) == [
+        (doctor.WARNING, _NO_CLOSED_TEXT),
+        (
+            "notice",
+            (
+                "the workflow file's job name, event routing and drift call not verified: "
+                "the engine repository could not be determined."
+            ),
+        ),
+    ]
