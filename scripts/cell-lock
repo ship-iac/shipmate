@@ -66,8 +66,8 @@ UPDATE_REFS = (
 )
 PR_STATE = (
     "query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, name: $name) "
-    "{ pullRequest(number: $pr) { state timelineItems(itemTypes: [CLOSED_EVENT], last: 1) "
-    "{ nodes { ... on ClosedEvent { createdAt } } } } } }"
+    "{ pullRequest(number: $pr) { state headRefOid timelineItems(itemTypes: [CLOSED_EVENT], "
+    "last: 1) { nodes { ... on ClosedEvent { createdAt } } } } } }"
 )
 
 
@@ -316,8 +316,9 @@ def _when(stamp):
 
 
 def _pr_state(repo, pr, run):
-    """`(state, close times)` of `pr`: `OPEN`, `CLOSED` or `MERGED`, and the time of its newest
-    close, if any. Refuses when the read fails or its answer is malformed."""
+    """`(state, close times, head)` of `pr`: `OPEN`, `CLOSED` or `MERGED`, the time of its
+    newest close, if any, and its head commit (the one it merged at, once merged). Refuses when
+    the read fails or its answer is malformed."""
     owner, name = repo.split("/", 1)
     try:
         pull = json.loads(
@@ -328,7 +329,7 @@ def _pr_state(repo, pr, run):
         )
         closes = [_when(n["createdAt"]) for n in pull["timelineItems"]["nodes"]]
         if pull["state"] in ("OPEN", "CLOSED", "MERGED"):
-            return pull["state"], closes
+            return pull["state"], closes, pull["headRefOid"]
         why = f"state {pull['state']!r}"
     except (SystemExit, LookupError, TypeError, ValueError) as exc:
         why = str(exc)
@@ -343,7 +344,7 @@ def fence_open(repo, pr: int, acquired: list[Lock], created: list[Lock], *, run=
     if not acquired:
         return
     try:
-        state, closes = _pr_state(repo, pr, run)
+        state, closes, _ = _pr_state(repo, pr, run)
     except SystemExit as exc:
         reason = (
             f"{exc.code}; the cell locks this run created are released and those it re-entered "
@@ -365,15 +366,15 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
     each delete refused), as `evict` does: a refusal does not stop the rest. Merged
     (`pending`): keep a lock whose apply check name is in `pending`. Unmerged (`closed_at`):
     read `pr`'s state after listing its locks; still closed, delete them all; merged since,
-    apply the merge rule to the head's pending checks; open again, delete only a lock
-    committed at or before the close. An unreadable state refuses before any delete. An
-    unknown holder is never released here."""
+    apply the merge rule to the pending checks of the head it merged at; open again, delete
+    only a lock committed at or before the close. An unreadable state refuses before any
+    delete. An unknown holder is never released here."""
     if (pending is None) == (closed_at is None):
         raise ValueError("pass exactly one of pending and closed_at")
     mine = [lock for lock in _scan(repo, "shipmate/locks/", run).values() if lock.pr == pr]
-    state = closed_at is not None and bool(mine) and _pr_state(repo, pr, run)[0]
+    state, _, head = _pr_state(repo, pr, run) if closed_at and mine else (None, None, None)
     if state == "MERGED":
-        pending = pending_names(*_head_names(repo, run))
+        pending = pending_names(*_head_names(repo, run, head))
     gone, refused = [], []
     for lock in mine:
         if pending is not None:
@@ -438,8 +439,9 @@ def _wave_cells():
     return checked
 
 
-def _head_names(repo, run):
-    lines = check_runs(repo, os.environ.get("SHIPMATE_HEAD_SHA", ""), run=run).splitlines()
+def _head_names(repo, run, sha=None):
+    sha = os.environ.get("SHIPMATE_HEAD_SHA", "") if sha is None else sha
+    lines = check_runs(repo, sha, run=run).splitlines()
     return lines, os.environ.get("SHIPMATE_APP_ID", "")
 
 

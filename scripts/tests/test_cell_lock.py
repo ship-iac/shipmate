@@ -40,8 +40,8 @@ UPDATE_REFS = (
 )
 PR_STATE = (
     "query=query($owner: String!, $name: String!, $pr: Int!) { repository(owner: $owner, "
-    "name: $name) { pullRequest(number: $pr) { state timelineItems(itemTypes: [CLOSED_EVENT], "
-    "last: 1) { nodes { ... on ClosedEvent { createdAt } } } } } }"
+    "name: $name) { pullRequest(number: $pr) { state headRefOid timelineItems(itemTypes: "
+    "[CLOSED_EVENT], last: 1) { nodes { ... on ClosedEvent { createdAt } } } } } }"
 )
 FAIL = SystemExit("::error::command failed (1): gh api")
 
@@ -348,9 +348,12 @@ def test_a_failed_replace_that_reads_back_our_commit_is_acquired():
 # --- fence_open ----------------------------------------------------------------------------------
 
 
-def _pr_state(state, closed_at=None):
+MERGED_HEAD = "e" * 40
+
+
+def _pr_state(state, closed_at=None, head=MERGED_HEAD):
     nodes = [{"createdAt": closed_at}] if closed_at else []
-    return json.dumps({"state": state, "timelineItems": {"nodes": nodes}})
+    return json.dumps({"state": state, "headRefOid": head, "timelineItems": {"nodes": nodes}})
 
 
 PR_STATE_READ = [
@@ -671,9 +674,10 @@ def test_release_unmerged_of_a_closed_pull_request_deletes_every_lock():
 
 
 def test_release_unmerged_of_a_since_merged_pull_request_keeps_its_pending_locks(monkeypatch):
-    """The early lock's apply check is pending on the head, so the merge rule keeps it.
-    Mutations: treat MERGED as CLOSED (the pending lock is deleted); treat MERGED as OPEN (the
-    pending lock is deleted and the later one kept)."""
+    """Closed at HEAD, reopened, pushed MERGED_HEAD and merged: the early lock's apply check
+    is pending on MERGED_HEAD, so the merge rule keeps it. Mutations: treat MERGED as CLOSED
+    (the pending lock is deleted); treat MERGED as OPEN (the pending lock is deleted and the
+    later one kept); read the checks of `SHIPMATE_HEAD_SHA` (HEAD's checks are never served)."""
     monkeypatch.setenv("SHIPMATE_HEAD_SHA", HEAD)
     monkeypatch.setenv("SHIPMATE_APP_ID", "99")
     gh = _all_locks(
@@ -683,7 +687,7 @@ def test_release_unmerged_of_a_since_merged_pull_request_keeps_its_pending_locks
     )
     gh.on(PR_STATE_READ, _pr_state("MERGED", "2026-10-24T11:00:00Z")).on(REPO_ID_READ, REPO_ID)
     gh.on(
-        CHECK_RUNS_READ,
+        [a.replace(HEAD, MERGED_HEAD) for a in CHECK_RUNS_READ],
         jsonl(
             _check("apply / stacks/auth / dev", "queued", None),
             _check("apply / stacks/dns / dev", "completed", "success", run_id=2),
