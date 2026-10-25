@@ -1821,7 +1821,7 @@ re-plan, or comment `shipmate unlock <env> --evict` ``), and no cell applies.
 This is the one case in which a locked cell stops the pull request's other
 cells. Commenting `shipmate apply` again, or "Re-run all jobs", recomputes: its
 `detect` leaves that cell pending and the rest apply. "Re-run failed jobs" does
-not re-run `detect`, so its `lock` refuses again.
+not re-run `detect`, so its `lock` tries the same cells again.
 
 **Limit: every env-level is locked up front.** `lock` acquires the cells of
 every env-level before `L0` starts. When an earlier level fails, the later
