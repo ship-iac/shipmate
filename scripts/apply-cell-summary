@@ -23,10 +23,7 @@ from _shipmate import run_annotated
 FAILSAFES = [
     (
         "CELL_LOCK_OUTCOME",
-        (
-            "this pull request no longer holds the cell's lock; comment shipmate apply again to "
-            "lock it or name its holder"
-        ),
+        "could not confirm this pull request holds the cell's lock (see the job log)",
     ),
     (
         "DOWNLOAD_OUTCOME",

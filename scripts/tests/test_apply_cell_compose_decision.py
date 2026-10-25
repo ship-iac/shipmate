@@ -104,8 +104,7 @@ _ALL_SUCCESS = {
     [
         pytest.param(
             "cell_lock",
-            "this pull request no longer holds the cell's lock; comment shipmate apply again to "
-            "lock it or name its holder",
+            "could not confirm this pull request holds the cell's lock (see the job log)",
             id="cell_lock",
         ),
         pytest.param(
