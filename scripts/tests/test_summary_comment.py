@@ -10,6 +10,7 @@ from _loader import (
     bash_only,
     load_script,
     run_lines,
+    run_step,
     run_with_gate_gh,
     step_by,
 )
@@ -1212,6 +1213,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
         "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
+        "SHIPMATE_LOCKS": "${{ steps.marks.outputs.locks }}",
     }
     # Mutation: `required: true` on any of the five (GitHub does not enforce it, but it
     # misdocuments a draft run).
@@ -1774,3 +1776,121 @@ def test_a_failed_build_listing_warns_and_renders_from_an_empty_file(tmp_path):
         "::warning::check-runs listing failed; comment links degrade to the workflow-run URL\n"
     )
     assert (tmp_path / "check-runs.jsonl").read_text(encoding="utf-8") == ""
+
+
+#: Two changed cells and one unchanged, in `dev-eu`; `cell-lock marks` keys are `<stack> / <env>`.
+_LOCK_CELLS = [
+    (_cell(), "  + one"),
+    (_cell(stack="stacks/db"), None),
+    (_cell(changed=False, stack="stacks/dns"), None),
+]
+
+
+def test_a_changed_cell_another_pull_request_holds_names_its_holder():
+    """A known holder renders its number, an unknown one `an unreadable lock`. An unchanged cell
+    is never marked: it has nothing to apply. Mutations: drop `cell["changed"] and` -- the dns
+    line gains a marker, red; key the lookup by the bare stack -- no marker, red."""
+    locks = {"stacks/app / dev-eu": 12, "stacks/db / dev-eu": None, "stacks/dns / dev-eu": 9}
+    assert sc.build_comment(_LOCK_CELLS, CHECKS, RUN_URL, SHA, locks=locks)[0] == (
+        HEAD + f"🟡 2 of 3 cells change {AT}\n\n"
+        "#### dev-eu: 3 cells, 2 changed\n\n"
+        f"<details><summary>{_bare_app('https://ck/app-eu')} 🔒 locked by #12</summary>\n\n"
+        "```diff\n+   one\n```\n</details>\n\n"
+        '🟡 stacks/db: +1 ~0 -0 <a href="https://gh/run/1">plan</a> 🔒 locked by an unreadable '
+        "lock\n"
+        '🟢 stacks/dns: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+_UNMARKED_LOCK_BODY = (
+    HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n#### dev-eu: 1 cell, 1 changed\n\n"
+    f"<details><summary>{_bare_app('https://gh/o/r/actions/runs/1')}</summary>\n\n```diff\n"
+    "+   resource added\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
+)
+
+
+def test_main_marks_a_locked_cell_and_leaves_every_output_as_it_was(tmp_path, monkeypatch):
+    """The marker is reviewer-facing only: the gate and the comment mode read `count`, `pending`
+    and `missing`, which must not move. Mutation: drop the `SHIPMATE_LOCKS` read from `main` --
+    no marker, red."""
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    unmarked = _run_main(tmp_path / "a", monkeypatch, [_cell()])
+    monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
+    marked = _run_main(tmp_path / "b", monkeypatch, [_cell()])
+    assert marked == unmarked
+    assert (tmp_path / "b" / "comment.md").read_text(encoding="utf-8") == (
+        _UNMARKED_LOCK_BODY.replace("plan</a></summary>", "plan</a> 🔒 locked by #12</summary>")
+    )
+
+
+@pytest.mark.parametrize("raw", [None, ""], ids=["absent", "empty"])
+def test_main_renders_no_marker_without_locks(tmp_path, monkeypatch, capsys, raw):
+    """A failed or skipped marks step leaves `SHIPMATE_LOCKS` empty; the comment renders as
+    before, with no warning of its own (the marks step already warned)."""
+    if raw is not None:
+        monkeypatch.setenv("SHIPMATE_LOCKS", raw)
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _UNMARKED_LOCK_BODY
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "raw", ["not json", '["stacks/app / dev-eu"]', '{"stacks/app / dev-eu": "12"}']
+)
+def test_main_warns_and_marks_nothing_for_malformed_locks(tmp_path, monkeypatch, capsys, raw):
+    """A holder renders after `#`, so only an int or null may reach the comment. Mutation: drop
+    the holder type check -- the string holder renders `#12`, red."""
+    monkeypatch.setenv("SHIPMATE_LOCKS", raw)
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _UNMARKED_LOCK_BODY
+    assert capsys.readouterr().out == (
+        "::warning::the cell locks are not a JSON map of holders; the plan comment marks none\n"
+    )
+
+
+_MARKS = "Mark cells another pull request holds"
+#: The marks step's whole run, hand-written. Its handler is a scoped degrade: the marker is
+#: reviewer-facing, and `Create/refresh gate` is a later step.
+MARKS_RUN = [
+    "set -euo pipefail",
+    'if ! python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" marks 2>marks.err; then',
+    "sed 's/^::error::/::warning::/' marks.err >&2",
+    'echo "::warning::could not read the cell locks; the plan comment marks no locked cell"',
+    "exit 0",
+    "fi",
+    "cat marks.err >&2",
+]
+
+
+def test_the_marks_step_reads_the_planned_cells_with_the_plan_token():
+    """`SHIPMATE_LOCKS` on the build step is pinned with that step's whole env. Mutations: bind
+    `SHIPMATE_CELLS` to another input -- red; `exit 0` -> `exit 1` in the handler -- red."""
+    step = step_by("summary", name=_MARKS)
+    assert (step["id"], step["env"], run_lines(step)) == (
+        "marks",
+        {
+            "GH_TOKEN": "${{ steps.token.outputs.token }}",
+            "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
+            "SHIPMATE_CELLS": "${{ inputs.planned-cell-names }}",
+        },
+        MARKS_RUN,
+    )
+
+
+@bash_only
+def test_a_failed_marks_read_warns_and_the_step_passes(tmp_path):
+    """cell-lock refuses as `::error::`; the step turns it into a warning and passes, so the job
+    goes on to the comment and the gate. Mutation: `exit 0` -> `exit 1` in the handler -- the
+    return code reddens; drop the `sed` -- the error stays an error, red."""
+    stub = 'python3() { echo "::error::lock read failed" >&2; return 1; }\n'
+    proc = run_step(
+        tmp_path,
+        stub + step_by("summary", name=_MARKS)["run"],
+        {**os.environ, "GITHUB_ACTION_PATH": str(tmp_path)},
+    )
+    assert (proc.returncode, proc.stdout, proc.stderr) == (
+        0,
+        "::warning::could not read the cell locks; the plan comment marks no locked cell\n",
+        "::warning::lock read failed\n",
+    )

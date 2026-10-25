@@ -21,8 +21,8 @@ any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
 The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_order`,
-`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here because
-apply-comment and doctor already load this module.
+`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `lock_who`, `_join`) lives
+here because apply-comment and doctor already load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface
 unless `command_hints` is on, and shows only where the reader has something to do: under a
@@ -310,8 +310,19 @@ def state(cell):
     return tally(*(cell[k] for k in ("add", "change", "destroy", "import", "forget")))
 
 
-def _plan_line(cell, url):
-    return cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
+def lock_who(holder):
+    """Who holds a cell lock: `#<holder>`, or `an unreadable lock` for None (unknown holder)."""
+    return f"#{holder}" if holder is not None else "an unreadable lock"
+
+
+def _plan_line(cell, url, locks):
+    """A cell's bare line; a changed cell another pull request holds ends with `🔒 locked by`
+    and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys)."""
+    line = cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
+    key = f"{cell['stack']} / {cell['environment']}"
+    if cell["changed"] and key in locks:
+        line += f" 🔒 locked by {lock_who(locks[key])}"
+    return line
 
 
 def fold(line, body, limit, trailer, cut, lang="diff"):
@@ -470,7 +481,7 @@ def _join(sections):
     return "".join(out)
 
 
-def _entries(cells, order, checks, run_url):
+def _entries(cells, order, checks, run_url, locks):
     """`(bare line, cell, plan text, url)` per heading and cell, in comment order; a heading has
     no cell."""
     entries = []
@@ -479,12 +490,21 @@ def _entries(cells, order, checks, run_url):
         entries.append((env_heading(env, len(group), f"{n} changed"), None, None, None))
         for c, text in group:
             url = check_url(c, checks, run_url)
-            entries.append((_plan_line(c, url), c, text, url))
+            entries.append((_plan_line(c, url, locks), c, text, url))
     return entries
 
 
 def build_comment(
-    cells, checks, run_url, head_sha, unmanaged=None, lost=None, warnings=0, order=(), hints=False
+    cells,
+    checks,
+    run_url,
+    head_sha,
+    unmanaged=None,
+    lost=None,
+    warnings=0,
+    order=(),
+    hints=False,
+    locks=None,
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, `doctor_line` of
     `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when
@@ -493,14 +513,15 @@ def build_comment(
     text, else its bare line, which names no environment). No footer: the verdict links the
     run, and neither plan verdict asks anything. With `hints`, a body with a changed cell ends
     with `COMMANDS` when the whole body stays within SIZE_BUDGET, and leaves it out silently
-    otherwise, after every cell is sized, so it never shrinks one. Every cell is guaranteed its
+    otherwise, after every cell is sized, so it never shrinks one. `locks` (`lock_marks`) marks
+    the changed cells another pull request holds. Every cell is guaranteed its
     bare line: the space all headings and remaining cells' bare lines need is reserved up
     front, so an early giant plan cannot starve a later cell. Each of the three lines yields,
     with a warning, when the headings and bare lines leave it no room under HARD_CAP. Returns
     `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
-    entries = _entries(cells, order, checks, run_url)
+    entries = _entries(cells, order, checks, run_url, locks or {})
     bares = [e[0] for e in entries]
     named = []
     for line, what in (
@@ -672,6 +693,22 @@ def _named_output(raw, input_name, key, noun):
     return None
 
 
+def lock_marks(raw):
+    """`cell-lock marks`' `locks` output `raw`, `{"<stack> / <env>": holder}` with each holder
+    an int or None: `{}` when empty (the marks step failed or was skipped), and `{}` with one
+    warning when it is not that shape."""
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, dict) and all(h is None or type(h) is int for h in value.values()):
+        return value
+    print("::warning::the cell locks are not a JSON map of holders; the plan comment marks none")
+    return {}
+
+
 CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
 
 
@@ -755,6 +792,7 @@ def main():
         # `shipmate apply` refuses a draft, so an on-demand plan of one must not invite it.
         hints=os.environ.get("SHIPMATE_COMMAND_HINTS") == "true"
         and os.environ.get("SHIPMATE_IS_DRAFT") != "true",
+        locks=lock_marks(os.environ.get("SHIPMATE_LOCKS", "")),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

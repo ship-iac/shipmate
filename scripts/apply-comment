@@ -559,10 +559,6 @@ def _lock_holder(holder):
     return holder if type(holder) is int else None
 
 
-def _lock_who(holder):
-    return f"#{holder}" if holder is not None else "an unreadable lock"
-
-
 def _lock_remedy(holder, env):
     """What releases a cell lock in `env` held by pull request `holder` (None: unknown)."""
     evict = f"comment `shipmate unlock {env} --evict`"
@@ -580,7 +576,7 @@ def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None):
     `held`, `skipped` and `excluded` empty, so its remedy is the lock's or
     `shipmate apply <env>`."""
     if locked:
-        return f"it is locked by {_lock_who(holder)}; {_lock_remedy(holder, env)}"
+        return f"it is locked by {sc.lock_who(holder)}; {_lock_remedy(holder, env)}"
     if env in held and env in excluded:
         return f"it is held until the pull request is approved, then comment `shipmate apply {env}`"
     if env in held:
@@ -604,7 +600,7 @@ def _locked_lines(locked):
     for (holder, env), cells in by_lock.items():
         remedy = _lock_remedy(holder, env)
         lines.append(
-            f"🔒 locked by {_lock_who(holder)}: {', '.join(cells)}. "
+            f"🔒 locked by {sc.lock_who(holder)}: {', '.join(cells)}. "
             f"{remedy[0].upper()}{remedy[1:]}."
         )
     return lines
