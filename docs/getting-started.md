@@ -390,7 +390,7 @@ environments without an approving review" has the `review` setup.
 A repository holds `shipmate.yml` and one drift file per sweep, from the two
 fences below. `scripts/onboard` writes `shipmate.yml`, pinned; you save each
 drift file yourself, under any name in `.github/workflows/`, and pin it.
-`shipmate.yml` is a shim: four triggers and six jobs, each job calling an
+`shipmate.yml` is a shim: four triggers and seven jobs, each job calling an
 engine reusable workflow SHA-pinned. A drift file is one job calling engine
 `drift.yml` on its cron or a dispatch. The jobs behind those calls — `facts`, `detect`, `plan` and
 `summary` in engine `plan.yml`, and their equivalents on the other paths — live
@@ -404,7 +404,7 @@ which need `<env>-plan`, `shipmate-engine` and the App key and nothing else
 merged or not, and releases the cell locks its applies took. `deploy` runs from the
 start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
-`<env>`). The other two, `apply` and `unlock`, wait for the
+`<env>`). The other three, `apply`, `auto` and `unlock`, wait for the
 environments and secrets the apply tier creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push
@@ -426,10 +426,10 @@ that name is what makes the plan cells `plan / <env> / <stack>` and lets the
 plan comment's `plan` links resolve to them. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
 instead; `shipmate doctor` reports it. The other jobs display their verb:
-`release`, `comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
-Renaming one of them changes
-only its own check-run names: no link resolves through them, and doctor does
-not check them.
+`release`, `comment`, `deploy`, `apply`, `auto`, `unlock`, and each drift file's
+`sweep`. A display `name:` changes only its own check-run names: no link resolves
+through them, and doctor does not check them. Keep the job ids, though:
+`shipmate doctor` checks each job's routing by its id.
 
 **The filename is load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
@@ -449,12 +449,13 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` to the default branch | `deploy` | `deploy.yml` |
 | `verb: apply` | `apply` | `apply.yml` |
+| `verb: auto` | `auto` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
 engine job except nine that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
-`ubuntu-26.04-arm` by default, and the other five repeat it with `*runner`.
+`ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
 files. Set both to a label your account offers, such as `ubuntu-latest` for
 x64; one it does not leaves those jobs waiting for a runner that never
@@ -478,23 +479,23 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      # Only verb is required: one schema serves three verbs, and GitHub answers 422 to an
+      # Only verb is required: one schema serves four verbs, and GitHub answers 422 to an
       # empty required input. The engine refuses a plan with no number, an apply with no ref.
       verb:
-        description: What to run (plan, apply or unlock)
+        description: What to run (plan, apply, unlock or auto)
         type: choice
-        options: [plan, apply, unlock]
+        options: [plan, apply, unlock, auto]
         required: true
       environment:
         description: "Target environment (apply and unlock; empty apply = every environment without apply_mode: targeted)"
         required: false
         default: ''
       ref:
-        description: PR head SHA (apply and unlock)
+        description: PR head SHA (apply, unlock and auto)
         required: false
         default: ''
       pr_number:
-        description: Pull request number (plan and apply)
+        description: Pull request number (plan, apply and auto)
         required: false
         default: ''
 # Deny by default: each job grants its own permissions, so a job that loses its block gets none.
@@ -578,6 +579,18 @@ jobs:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
       runs_on: *runner
+  # Dispatched by the autoplan when its plan covers an `apply_mode: auto` environment;
+  # no comment selects it.
+  auto:
+    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'
+    uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
+    permissions: { contents: read, checks: read, pull-requests: read, actions: read, id-token: write }
+    secrets: *engine-secrets
+    with:
+      auto: true
+      ref: ${{ inputs.ref }}
+      pr_number: ${{ inputs.pr_number }}
+      runs_on: *runner
   unlock:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
@@ -635,7 +648,7 @@ what a job declares is what its callee is capped at, and a job that loses its
 block gets nothing.
 
 **`verb` is the one required input, and every other is optional with an explicit
-default.** One schema serves three verbs, and GitHub reads an empty value for a
+default.** One schema serves four verbs, and GitHub reads an empty value for a
 `required: true` input as not provided, answering HTTP 422 before the run starts
 — so requiring `pr_number` would refuse every `unlock`, whose dispatch body does
 not carry one. No human
@@ -766,10 +779,11 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The apply jobs
 
-This tier adds no file. The `apply` and `unlock` jobs are already in
+This tier adds no file. The `apply`, `auto` and `unlock` jobs are already in
 the `shipmate.yml` published above (§[The workflow file](#the-workflow-file));
 what this tier does is create the environments and secrets they need. The
-`comment-ops` job that dispatches them and the `deploy` job are tier 1's;
+`comment-ops` job that dispatches `apply` and `unlock`, the `plan` job whose
+autoplan dispatches `auto`, and the `deploy` job are tier 1's;
 `comment-ops` is described here because this is where its verbs land.
 
 The `comment-ops` job turns a `shipmate <verb>` pull request comment into an

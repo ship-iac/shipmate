@@ -124,16 +124,16 @@ live probes.
     run carries the error, and the dispatch failure reply on the pull request
     links it when it can be posted (`CONTRACT.md` §Comment-ops).
   - Whether each of its jobs is selected by the `if:` its event needs. The file
-    gates six jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
-    each job's whole `if:` against the expression that file's published fence
-    carries. Each finding identifies the job by the engine workflow it calls —
-    "the job calling the engine's `apply.yml`", which is the fence's `apply` —
-    because a job that is missing or duplicated has no one job id to name. A
-    file with no call of the engine's plan workflow is reported here, as zero
-    jobs calling `plan.yml`: its dispatch is accepted and the run plans nothing.
-    A wrong expression and a missing `if:` are both quoted with the expression
-    to write; a job count other than one is not, since there is no single job to
-    compare. Nothing else observes any of this: a verb whose job never runs
+    gates seven jobs, each calling one engine reusable workflow other than
+    `drift.yml`, and the probe compares each job's whole `if:` against the
+    expression that file's published fence carries. Each finding names the job
+    by its fence id, because `apply` and `auto` both call `apply.yml`: a job
+    under another id is reported missing, and a further job calling one of those
+    workflows is reported as running the work twice or never. A file with no
+    call of the engine's plan workflow is reported here, as having no `plan` job
+    calling `plan.yml`: its dispatch is accepted and the run plans nothing. A
+    wrong expression and a missing `if:` are both quoted with the expression to
+    write. Nothing else observes any of this: a verb whose job never runs
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
@@ -904,7 +904,7 @@ merged or closed.
   is still released by the merge deploy's `summary`; a close without merge is
   not.
 - **The closing run skipped every job.** The file has no `release` job;
-  `shipmate doctor`'s `shipmate.yml` probe reports zero jobs calling
+  `shipmate doctor`'s `shipmate.yml` probe reports no `release` job calling
   `release.yml`.
 - **#<n> merged and the cell's apply check is still pending on its head.** The
   lock stays until the merge deploy applies the cell; a failed deploy keeps it
@@ -1712,15 +1712,15 @@ files plans the destroy of what the revert removed from configuration, and a
 
 ### A dispatched verb produced a run in which every job was skipped
 
-The comment was accepted, the dispatch succeeded and the run page shows six
+The comment was accepted, the dispatch succeeded and the run page shows seven
 skipped jobs and nothing else — which is what a healthy run also shows for the
-five jobs the event did not select.
+six jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
 do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
-run — with the expression to write, unless what it found was a job count other
-than one — and the run is in the Actions tab, linked from the dispatch reply on
+run — with the expression to write, unless the job is missing or another job
+calls the same workflow — and the run is in the Actions tab, linked from the dispatch reply on
 the pull request when that reply carries a link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
 

@@ -230,7 +230,7 @@ def _quiet_new_probes():
     `pull_request_target` and named `shipmate.yml`, which keeps the fork-trigger probe quiet:
     it is the exemption, not the absence of the trigger. Its plan-calling job is named
     `shipmate`, its dispatch leg -- the trigger, the four inputs, the verb options -- is
-    whole, and its six jobs carry the six documented `if:` expressions, keeping the
+    whole, and its seven jobs carry the seven documented `if:` expressions, keeping the
     `shipmate.yml` probe quiet. `shipmate-drift.yml` calls the engine's `drift.yml`, keeping
     the drift-file probe quiet. The plan-env secret probe reads one listing per plan env; an
     empty one keeps the healthy path quiet."""
@@ -1310,8 +1310,8 @@ _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
 #: The consumer workflow file `_quiet_new_probes()` serves, in the shipped shape, and the
-#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: six jobs, one per
-#: engine reusable workflow, each with the `if:` that routes its event. Hand-written rather
+#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: seven jobs, each
+#: calling one engine reusable workflow with the `if:` that routes its event. Hand-written rather
 #: than read from the page, so a drifting page reddens the fence guard and not every test
 #: here. Defined here rather than beside that fixture because interpolating `_SHA` happens at
 #: import time, while the fixture's own body is evaluated only when a test calls it.
@@ -1327,9 +1327,9 @@ _SHIPMATE_WF = (
     "  workflow_dispatch:\n"
     "    inputs:\n"
     "      verb:\n"
-    "        description: What to run (plan, apply or unlock)\n"
+    "        description: What to run (plan, apply, unlock or auto)\n"
     "        type: choice\n"
-    "        options: [plan, apply, unlock]\n"
+    "        options: [plan, apply, unlock, auto]\n"
     "        required: true\n"
     "      environment:\n"
     "        description: Target environment\n"
@@ -1367,6 +1367,9 @@ _SHIPMATE_WF = (
     f"    uses: {_ENGINE_REPO}/.github/workflows/deploy.yml@{_SHA}\n"
     "  apply:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "  auto:\n"
+    "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     "  unlock:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'\n"
@@ -3848,7 +3851,7 @@ _WF_REQUIRED_TAGS = _SHIPMATE_WF.replace(
     1,
 )
 _WF_SHORT_OPTIONS = _SHIPMATE_WF.replace(
-    "        options: [plan, apply, unlock]\n", "        options: [plan, apply]\n", 1
+    "        options: [plan, apply, unlock, auto]\n", "        options: [plan, apply, unlock]\n", 1
 )
 # Hand-written, whole, and never derived from `scripts/doctor`: each finding is compared
 # in full rather than by substring, so a reworded message is a deliberate edit here and
@@ -3885,11 +3888,11 @@ _REQUIRED_TAGS_TEXT = (
     "and `default: ''` (docs/getting-started.md)."
 )
 _SHORT_OPTIONS_TEXT = (
-    "`shipmate.yml`'s `verb` input does not offer `[plan, apply, unlock]`, which is "
+    "`shipmate.yml`'s `verb` input does not offer `[plan, apply, unlock, auto]`, which is "
     "the whole set of verbs this file routes. A missing option is refused at the dispatch "
     "form and at the API, so that verb reaches nothing; an extra one offers a verb no job's "
     "`if:` selects, and its run completes with every job skipped, which reads as success "
-    "everywhere. Write `options: [plan, apply, unlock]` (docs/getting-started.md)."
+    "everywhere. Write `options: [plan, apply, unlock, auto]` (docs/getting-started.md)."
 )
 
 
@@ -3953,9 +3956,9 @@ def test_only_a_boolean_true_makes_an_input_required(required, expected):
 
 def test_the_dispatch_probe_reports_a_changed_verb_option_list():
     """The whole option list is compared, not the presence of an `options:` key: a list
-    missing `unlock` refuses that verb at the dispatch form and at the API.
+    missing `auto` refuses the autoplan's dispatch at the API.
 
-    Mutation: check only that `options:` is present."""
+    Mutations: check only that `options:` is present; drop `auto` from `_VERB_OPTION_LIST`."""
     assert doctor._dispatch_wiring_finding(_doc(_WF_SHORT_OPTIONS), "shipmate.yml") == [
         (doctor.WARNING, _SHORT_OPTIONS_TEXT)
     ]
@@ -3964,10 +3967,10 @@ def test_the_dispatch_probe_reports_a_changed_verb_option_list():
 @pytest.mark.parametrize(
     "options",
     [
-        "[plan,apply,unlock]",
-        "[ plan, apply, unlock ]",
-        "[plan, apply,  unlock]",
-        "\n          - plan\n          - apply\n          - unlock",
+        "[plan,apply,unlock,auto]",
+        "[ plan, apply, unlock, auto ]",
+        "[plan, apply,  unlock, auto]",
+        "\n          - plan\n          - apply\n          - unlock\n          - auto",
     ],
     ids=["flow-tight", "flow-padded", "flow-uneven", "block"],
 )
@@ -3979,11 +3982,11 @@ def test_the_dispatch_probe_accepts_any_spelling_of_the_option_list(options):
 
     Mutation: compare the parsed options against the flow string `_VERB_OPTIONS` instead of
     `_VERB_OPTION_LIST` -- every row reddens."""
-    assert load_workflow_text(options) == ["plan", "apply", "unlock"], (
+    assert load_workflow_text(options) == ["plan", "apply", "unlock", "auto"], (
         "the fixture must be the same sequence the fence declares, or it proves nothing"
     )
     text = _SHIPMATE_WF.replace(
-        "        options: [plan, apply, unlock]\n", f"        options: {options}\n", 1
+        "        options: [plan, apply, unlock, auto]\n", f"        options: {options}\n", 1
     )
     assert doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml") == []
 
@@ -3991,7 +3994,7 @@ def test_the_dispatch_probe_accepts_any_spelling_of_the_option_list(options):
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(monkeypatch):
     """The fail-open leg: the published file whose `plan` job calls a local workflow instead
     of the engine's is dispatchable, so the run starts with nothing in it that plans. The job
-    stays, because it holds the fence's anchors. The routing finding's zero count is the one
+    stays, because it holds the fence's anchors. The routing finding's missing `plan` job is the one
     report; the job-name finder has no call to name.
 
     Mutation: restore the dispatch finding's own "does not call the engine's plan workflow"
@@ -4003,7 +4006,7 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(mon
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_PUBLISHED_ENGINE)) == [
-        (doctor.WARNING, _wrong_count_text("plan.yml", 0))
+        (doctor.WARNING, _missing_job_text("plan", "plan.yml"))
     ]
 
 
@@ -4056,7 +4059,7 @@ def test_a_flow_style_on_value_is_silent():
     text = (
         "name: shipmate\n"
         "on: { pull_request_target: {}, workflow_dispatch: { inputs: { verb: { type: choice, "
-        "options: [plan, apply, unlock], required: true }, environment: "
+        "options: [plan, apply, unlock, auto], required: true }, environment: "
         "{ required: false, default: '' }, ref: { required: false, default: '' }, "
         "pr_number: { required: false, default: '' } } } }\n"
         "jobs:\n"
@@ -4118,7 +4121,7 @@ def test_a_degraded_probe_logs_the_whole_failure_to_stderr(monkeypatch, capsys):
 # `ROUTING_IFS`: the expressions are spelled out here, so an edited constant reddens these
 # rather than being followed by them.
 _EDITED_IF_TEXT = (
-    "`shipmate.yml`'s job calling the engine's `apply.yml` is selected by "
+    "`shipmate.yml`'s `apply` job is selected by "
     "`github.event_name == 'workflow_dispatch'`, not "
     "`github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'`. A wrong expression "
     "routes a verb nowhere and its dispatched run completes with every job skipped, which "
@@ -4126,14 +4129,24 @@ _EDITED_IF_TEXT = (
 )
 
 
-def _wrong_count_text(callee, count):
+def _missing_job_text(job_id, callee):
     return (
-        f"`shipmate.yml` has {count} jobs calling the engine's `{callee}`: it needs exactly one, "
-        "selected by the `if:` that routes its event. With none, the verb or event it serves "
-        "reaches nothing and its run completes with every job skipped, which reads as success "
-        "everywhere; with more than one, either the work runs twice or one of them is "
-        "unreachable (docs/getting-started.md)."
+        f"`shipmate.yml` has no `{job_id}` job calling the engine's `{callee}`. The verb or event "
+        "it serves reaches nothing, and its run completes with every job skipped, which reads as "
+        f"success everywhere. Add the published `{job_id}` job (docs/getting-started.md)."
     )
+
+
+def _wrong_if_text(job_id, found, expected):
+    return (
+        f"`shipmate.yml`'s `{job_id}` job is selected by `{found}`, not `{expected}`. A wrong "
+        "expression routes a verb nowhere and its dispatched run completes with every job "
+        "skipped, which reads as success everywhere (docs/getting-started.md)."
+    )
+
+
+_APPLY_IF = "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'"
+_AUTO_IF = "github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'"
 
 
 def test_the_routing_table_matches_the_documented_workflow_file():
@@ -4143,18 +4156,20 @@ def test_the_routing_table_matches_the_documented_workflow_file():
     as mis-routed, or blesses a fence that routes nothing.
 
     Derived from the fence, compared whole against the hand-written side in `doctor`: one
-    entry per engine callee, and each entry's whole `if:`.
+    entry per job id, each with its engine callee and whole `if:`.
 
-    Mutation: change one clause of one `if:` in the fence; change one entry of `ROUTING_IFS`.
+    Mutation: change one clause of one `if:` in the fence; change one entry of `ROUTING_IFS`;
+    swap the fence's `apply` and `auto` `if:`s.
     """
     jobs = load_workflow_text(_documented_workflow_file())["jobs"]
     documented = {
-        job["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0]: doctor._normalize_if(
-            job.get("if")
+        job_id: (
+            job["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0],
+            doctor._normalize_if(job.get("if")),
         )
-        for job in jobs.values()
+        for job_id, job in jobs.items()
     }
-    expected = {k: doctor._normalize_if(v) for k, v in doctor.ROUTING_IFS.items()}
+    expected = {k: (c, doctor._normalize_if(v)) for k, (c, v) in doctor.ROUTING_IFS.items()}
     assert documented == expected, (
         f"the documented file routes {documented!r}; doctor expects {expected!r}"
     )
@@ -4164,7 +4179,7 @@ def test_the_routing_probe_is_silent_on_the_documented_file():
     """The floor under the three reporting cases below, and the oracle for false positives:
     the file consumers paste, verbatim, through the whole probe.
 
-    Mutation: edit any one of the six `ROUTING_IFS` expressions."""
+    Mutation: edit any one of the seven `ROUTING_IFS` expressions."""
     text = _documented_workflow_file()
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _PUBLISHED_ENGINE) == []
 
@@ -4181,6 +4196,27 @@ def test_the_routing_probe_reports_a_job_whose_if_was_edited():
     ]
 
 
+def test_the_apply_and_auto_jobs_are_each_judged_by_their_own_if():
+    """Both jobs call `apply.yml`, so only the job id tells them apart: swapped `if:`s send a
+    commented `shipmate apply` to the auto form and the autoplan's dispatch to the bare one.
+
+    Mutations: read the first `apply.yml` call for every job id (`calls[0]`) -- `auto` is
+    judged by the `apply` job and only one finding is left; give `auto` the `apply` `if:` in
+    `ROUTING_IFS`."""
+    apply_line = f"    if: {_APPLY_IF}\n"
+    auto_line = f"    if: {_AUTO_IF}\n"
+    assert _SHIPMATE_WF.count(apply_line) == _SHIPMATE_WF.count(auto_line) == 1
+    text = (
+        _SHIPMATE_WF.replace(apply_line, "@@\n")
+        .replace(auto_line, apply_line)
+        .replace("@@\n", auto_line)
+    )
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _wrong_if_text("apply", _AUTO_IF, _APPLY_IF)),
+        (doctor.WARNING, _wrong_if_text("auto", _APPLY_IF, _AUTO_IF)),
+    ]
+
+
 def test_the_routing_probe_reports_an_if_that_is_not_one_expression():
     """A list under `if:` is no expression to compare, so it gets its own wording rather than
     a rendered `None`.
@@ -4194,9 +4230,8 @@ def test_the_routing_probe_reports_an_if_that_is_not_one_expression():
         (
             doctor.WARNING,
             (
-                "`shipmate.yml`'s job calling the engine's `deploy.yml` has an `if:` that is not a "
-                "single expression. Write `if: github.event_name == 'push'` "
-                "(docs/getting-started.md)."
+                "`shipmate.yml`'s `deploy` job has an `if:` that is not a single expression. "
+                "Write `if: github.event_name == 'push'` (docs/getting-started.md)."
             ),
         )
     ]
@@ -4215,9 +4250,9 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact():
     )
     [(level, finding)] = doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO)
     assert doctor._finding_row(level, finding) == (
-        f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s job calling the engine's "
-        "`plan.yml` declares no `if:`, so it then runs on every one of this file's triggers, so "
-        "a `push` starts a plan and an `issue_comment` starts an apply. Add `if: "
+        f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s `plan` job declares no `if:`, "
+        "so it runs on every one of this file's triggers: a `push` starts a plan and an "
+        "`issue_comment` starts an apply. Add `if: "
         "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
         "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')` "
         "(docs/getting-started.md)."
@@ -4243,54 +4278,104 @@ def test_the_routing_probe_reports_a_missing_job():
     """A verb whose job is not in the file at all: the dispatch is accepted, every job is
     skipped, and the run is green.
 
-    Mutation: skip a callee the file does not call (`if count == 0: continue`)."""
+    Mutation: skip a job id the file lacks (`continue` in place of the missing-job finding)."""
     text = _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
-        (doctor.WARNING, _wrong_count_text("unlock.yml", 0))
+        (doctor.WARNING, _missing_job_text("unlock", "unlock.yml"))
     ]
 
 
 def test_the_routing_probe_reports_a_missing_release_job():
     """A fence without `release` leaves every closed pull request's cell locks held.
 
-    Mutation: drop `release.yml` from `ROUTING_IFS`."""
+    Mutation: drop `release` from `ROUTING_IFS`."""
     start = _SHIPMATE_WF.index("  release:\n")
     text = _SHIPMATE_WF[:start] + _SHIPMATE_WF[_SHIPMATE_WF.index("  comment-ops:\n") :]
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
-        (doctor.WARNING, _wrong_count_text("release.yml", 0))
+        (doctor.WARNING, _missing_job_text("release", "release.yml"))
     ]
 
 
-def test_the_routing_table_is_the_six_published_expressions():
-    """Mutations: drop `release.yml`; drop the `closed` clause from `plan.yml`; drop the
-    `event_name` clause from `release.yml`."""
+def test_the_routing_probe_reports_a_missing_auto_job():
+    """A fence without `auto` accepts the autoplan's dispatch and skips every job: no
+    `apply_mode: auto` environment ever applies, and the run reads green.
+
+    Mutation: drop `auto` from `ROUTING_IFS`."""
+    start = _SHIPMATE_WF.index("  auto:\n")
+    text = _SHIPMATE_WF[:start] + _SHIPMATE_WF[_SHIPMATE_WF.index("  unlock:\n") :]
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _missing_job_text("auto", "apply.yml"))
+    ]
+
+
+def test_the_routing_table_is_the_seven_published_expressions():
+    """Mutations: drop `auto`; swap the `apply` and `auto` expressions; drop the `closed`
+    clause from `plan`; drop the `event_name` clause from `release`."""
     assert doctor.ROUTING_IFS == {
-        "plan.yml": (
-            "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
-            "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
+        "plan": (
+            "plan.yml",
+            (
+                "(github.event_name == 'pull_request_target' && github.event.action != 'closed')"
+                " || (github.event_name == 'workflow_dispatch'"
+                " && github.event.inputs.verb == 'plan')"
+            ),
         ),
-        "release.yml": (
-            "github.event_name == 'pull_request_target' && github.event.action == 'closed'"
+        "release": (
+            "release.yml",
+            "github.event_name == 'pull_request_target' && github.event.action == 'closed'",
         ),
-        "comment-ops.yml": "github.event_name == 'issue_comment'",
-        "deploy.yml": "github.event_name == 'push'",
-        "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
-        "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
+        "comment-ops": ("comment-ops.yml", "github.event_name == 'issue_comment'"),
+        "deploy": ("deploy.yml", "github.event_name == 'push'"),
+        "apply": ("apply.yml", _APPLY_IF),
+        "auto": ("apply.yml", _AUTO_IF),
+        "unlock": (
+            "unlock.yml",
+            "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
+        ),
     }
 
 
-def test_the_routing_probe_reports_two_jobs_calling_one_callee():
-    """Two jobs on one callee means one of them is unreachable or the work runs twice, and the
-    single-region reader would silently judge only the first.
+def test_the_routing_probe_reports_a_third_job_calling_apply_yml():
+    """A job calling `apply.yml` under an id the table does not route there either runs the
+    work twice or is unreachable, and the per-id reader would never look at it.
 
-    Mutation: report only a callee no job calls (`if count == 0`)."""
+    Mutation: drop the `_extra_caller_findings` call from `_routing_finding`."""
     text = _SHIPMATE_WF + (
         "  apply-eu:\n"
-        "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
+        f"    if: {_APPLY_IF}\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     )
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
-        (doctor.WARNING, _wrong_count_text("apply.yml", 2))
+        (
+            doctor.WARNING,
+            (
+                "`shipmate.yml`'s `apply-eu` job calls the engine's `apply.yml`, which the "
+                "published file calls only from `apply` and `auto`: either the work runs twice "
+                "or the job is unreachable. Remove it, or give it its published id "
+                "(docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
+def test_a_renamed_auto_job_is_reported_missing_and_extra():
+    """`apply.yml` still has two callers, so a count would pass; the id is what routes.
+
+    Mutation: report extra callers only when a callee has more callers than `ROUTING_IFS`
+    routes to it -- the `auto2` finding leaves the list."""
+    assert _SHIPMATE_WF.count("  auto:\n") == 1
+    text = _SHIPMATE_WF.replace("  auto:\n", "  auto2:\n")
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _missing_job_text("auto", "apply.yml")),
+        (
+            doctor.WARNING,
+            (
+                "`shipmate.yml`'s `auto2` job calls the engine's `apply.yml`, which the "
+                "published file calls only from `apply` and `auto`: either the work runs twice "
+                "or the job is unreachable. Remove it, or give it its published id "
+                "(docs/getting-started.md)."
+            ),
+        ),
     ]
 
 
@@ -4308,7 +4393,7 @@ def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wi
     """With no engine repository the anchored selector matches no call, so the routing finder
     would report every job missing. Dispatch wiring reads no slug and still reports.
 
-    Mutations: remove the empty-engine guard -- six count-0 routing findings; return the
+    Mutations: remove the empty-engine guard -- seven missing-job routing findings; return the
     notice alone -- the dispatch finding leaves the list."""
     responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4330,7 +4415,7 @@ _MIXED_CASE_ENGINE = "Acme/Engine"
 def test_a_mixed_case_engine_slug_is_routed():
     """GitHub resolves `owner/repo` in `uses:` case-insensitively.
 
-    Mutation: drop `(?i:` from `_engine_slug` -- six count-0 findings."""
+    Mutation: drop `(?i:` from `_engine_slug` -- seven missing-job findings."""
     text = _SHIPMATE_WF.replace(f"{_ENGINE_REPO}/", f"{_MIXED_CASE_ENGINE}/")
     assert _MIXED_CASE_ENGINE in text
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
@@ -4659,14 +4744,14 @@ def test_a_partial_drift_scan_reports_only_the_unreadable_notice(monkeypatch):
 
 
 def test_drift_is_not_a_verb_shipmate_yml_offers():
-    """Drift runs from its own workflow file, so `shipmate.yml` offers the three dispatched
+    """Drift runs from its own workflow file, so `shipmate.yml` offers the four dispatched
     verbs and an option list still carrying `drift` offers one no job selects.
 
     Mutation: re-add `"drift"` to `_VERB_OPTION_LIST` -- both assertions redden."""
     assert doctor._dispatch_wiring_finding(_doc(_SHIPMATE_WF), "shipmate.yml") == []
     old = _SHIPMATE_WF.replace(
-        "        options: [plan, apply, unlock]\n",
-        "        options: [plan, apply, unlock, drift]\n",
+        "        options: [plan, apply, unlock, auto]\n",
+        "        options: [plan, apply, unlock, auto, drift]\n",
     )
     assert doctor._dispatch_wiring_finding(_doc(old), "shipmate.yml") == [
         (doctor.WARNING, _SHORT_OPTIONS_TEXT)
@@ -4674,7 +4759,8 @@ def test_drift_is_not_a_verb_shipmate_yml_offers():
 
 
 def test_shipmate_yml_without_a_drift_job_draws_no_routing_finding():
-    """Mutation: re-add the `drift.yml` entry to `ROUTING_IFS` -- a zero-count finding."""
+    """Mutation: re-add a `drift` entry calling `drift.yml` to `ROUTING_IFS` -- a missing-job
+    finding."""
     assert "drift.yml" not in _SHIPMATE_WF
     assert doctor._routing_finding(_doc(_SHIPMATE_WF), "shipmate.yml", _ENGINE_REPO) == []
 

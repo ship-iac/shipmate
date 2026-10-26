@@ -133,6 +133,7 @@ def test_the_wrapper_snippets_are_still_being_found():
     )
     assert found == [
         ("docs/getting-started.md", "apply.yml"),
+        ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "comment-ops.yml"),
         ("docs/getting-started.md", "deploy.yml"),
         ("docs/getting-started.md", "drift.yml"),
@@ -278,7 +279,7 @@ def test_documented_wrapper_grants_every_permission_the_callee_requests(page, li
     and the failure this guards is a scope the callee gained and the published shim never did.
 
     Mutations: drop `id-token: write` from the plan shim, `actions: read` from the drift shim,
-    `issues: write` from the comment-ops shim.
+    `issues: write` from the comment-ops shim, `pull-requests: read` from the `auto` job.
     """
     for job_name, target, job in _engine_workflow_calls(load_workflow_text(body)):
         where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
@@ -332,14 +333,15 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     type and the choice list included.
 
     An input a dispatch body may send empty is optional with a default. The one documented
-    wrapper is dispatched only by `actions/dispatch`, from a body the engine builds and no human
-    fills, so `required: true` protects no caller there. What it does do is turn a value the
-    engine sent empty on purpose into an HTTP 422 before the workflow starts: GitHub reads an
-    empty value for a required `workflow_dispatch` input as "not provided". Every
+    wrapper is dispatched only by the engine (`actions/dispatch`, and the autoplan for `auto`),
+    from a body it builds and no human fills, so `required: true` protects no caller there.
+    What it does do is turn a value the engine sent empty on purpose into an HTTP 422 before
+    the workflow starts: GitHub reads an empty value for a required `workflow_dispatch` input
+    as "not provided". Every
     `shipmate unlock` dispatch failed that way while the wrapper still declared the plan-run
     input the engine has since retired, because unlock applies no plan and so carried no run id.
     The engine validates instead, where the verb is known. `verb` is the one required input: one
-    schema serves three verbs, every body `actions/dispatch` sends carries a verb, and a run with
+    schema serves four verbs, every body the engine sends carries a verb, and a run with
     none has no job to route to.
 
     Keyed by the fence's own workflow `name:` as well as the page, so that a second documented
@@ -359,8 +361,8 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     fence is illustrative; the copyable wrapper in `getting-started.md` is what consumers paste,
     and it is what this pins.
 
-    Mutations: drop `unlock` from the fence's `options:` list; swap `verb` to
-    `required: false`.
+    Mutations: drop `unlock` from the fence's `options:` list; drop `auto` from it; swap `verb`
+    to `required: false`.
     """
     found = sorted(
         (page.relative_to(ENGINE).as_posix(), doc.get("name"), name, *shape)
@@ -387,7 +389,7 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
             True,
             None,
             "choice",
-            ("plan", "apply", "unlock"),
+            ("plan", "apply", "unlock", "auto"),
         ),
     ], f"documented workflow_dispatch inputs changed: {found}"
 

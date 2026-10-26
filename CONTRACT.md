@@ -49,10 +49,10 @@ reports a plan-calling job carrying another name; until it is fixed,
 `plan / <env> / <stack>` lookup across every check run on the head SHA —
 finds no match and every `plan` link falls back to the workflow-run URL.
 
-The consumer's `shipmate.yml` gates six jobs on the event (§Post-plan
+The consumer's `shipmate.yml` gates seven jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
 not run, named by that job's display name — `release`, `comment`, `deploy`,
-`apply`, `unlock` on a plan run — with conclusion `skipped`. They are display
+`apply`, `auto`, `unlock` on a plan run — with conclusion `skipped`. They are display
 artefacts of the file's shape, and nothing functional depends on them:
 `shipmate / gate` is the required check, `scripts/summary-comment` resolves plan
 links by an exact three-segment name, and `scripts/mirror-checks` copies only
@@ -1007,7 +1007,7 @@ the apply-match fingerprint by construction — it hashes only non-empty
 
 **Every calling job whose callee runs a cell must grant `id-token: write`, cloud
 or not.** GitHub caps a called workflow's permissions at each `uses:` boundary,
-so the `plan`, `drift`, `deploy`, `apply` and `unlock` jobs of the
+so the `plan`, `drift`, `deploy`, `apply`, `auto` and `unlock` jobs of the
 consumer's `shipmate.yml` grant it; its `comment-ops` job does not, because no
 job in engine `comment-ops.yml` requests it. This applies to a consumer that
 uses no cloud credentials whatsoever: without the grant the run fails at
@@ -1878,7 +1878,7 @@ mints, so every `shipmate apply` refuses at `lock` (`docs/github-app.md`
 ## Post-plan topology
 
 The consumer's workflow is one file, `.github/workflows/shipmate.yml`: four
-triggers, and six jobs each gated on the event with an `if:` and each calling
+triggers, and seven jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
 `SHIPMATE_ENCRYPTION_KEY` and `SHIPMATE_SECRETS` by name (never
@@ -1893,11 +1893,12 @@ SHA-pinned YAML.
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` | `deploy` | `deploy.yml` |
 | `workflow_dispatch` with `verb: apply` | `apply` | `apply.yml` |
+| `workflow_dispatch` with `verb: auto` | `auto` | `apply.yml` |
 | `workflow_dispatch` with `verb: unlock` | `unlock` | `unlock.yml` |
 
 Each of those `if:` expressions is a contract literal, not a style choice:
-`shipmate doctor`'s `shipmate.yml` probe holds all six and compares each one whole,
-because a wrong expression sends a verb nowhere and produces a dispatched run
+`shipmate doctor`'s `shipmate.yml` probe holds all seven, keyed by job id, and compares
+each one whole, because a wrong expression sends a verb nowhere and produces a dispatched run
 that completes with every job skipped — green, and no work done.
 
 The drift sweep is not in that file. Each drift workflow file holds one job,
@@ -1962,7 +1963,7 @@ in the engine placing it there. What *is* base-branch under this trigger is the
 checkout: `GITHUB_SHA` and `GITHUB_REF` name the base, which is why the engine's
 `detect` and `plan` jobs pass `ref: ${{ needs.facts.outputs.head-sha }}`
 explicitly. The two are routinely confused; they are opposite sides of the same
-trigger. The file's other five jobs are skipped under that trigger (on `closed`,
+trigger. The file's other six jobs are skipped under that trigger (on `closed`,
 `release` runs and `plan` is skipped), each
 completing as a `skipped` check-run on the same head; nothing functional depends
 on them, and `scripts/mirror-checks` does not copy them.

@@ -11,7 +11,7 @@ as `./.github/workflows/<file>`. One commit, one tree.
 ## Consumers move every engine ref in one change
 
 The engine's reusable workflows share inputs and secrets across a release, so a consumer
-re-pins every `uses:` line in one commit — the five in `shipmate.yml` and the one in each drift
+re-pins every `uses:` line in one commit — the seven in `shipmate.yml` and the one in each drift
 workflow file (§ Re-pin a consumer) — and never merges a Dependabot pull request that bumps
 one line alone.
 
