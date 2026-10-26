@@ -422,18 +422,7 @@ def refuse_provenance(repo, head, runnable):
             f"::error::auto apply refused: plan run {run_id} planned {sha}, not the head "
             f"{head}. " + _AUTO_REMEDY
         )
-    query = f"event=pull_request_target&head_sha={head}&per_page=100"
-    listing = _run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/{repo}/actions/workflows/{bm.PLAN_WORKFLOW.rsplit('/', 1)[-1]}/runs?{query}",
-            "--jq",
-            ".workflow_runs[].id",
-        ]
-    )
-    newest = max(map(int, listing.split()), default=None)
+    newest = ag.newest_autoplan(repo, head, bm.PLAN_WORKFLOW, run=_run)
     if newest is None:
         raise SystemExit(
             f"::error::auto apply refused: plan run {run_id} is not listed, and no autoplan run "

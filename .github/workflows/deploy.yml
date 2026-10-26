@@ -50,7 +50,7 @@ jobs:
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, id-token: write }
+    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}

@@ -9,6 +9,10 @@ attempted-or-blocked cell.
 succeeded or was skipped: it fails exactly when it fires, and a cancelled or unknown outcome
 counts as lost (fail-closed). It reaches only this run's apply comment, and only when the
 artifact uploads: a later run, and its comment, do not know the state was lost.
+
+A failed pre-apply check takes its blocked reason from that check's own refusal
+(`PRE_APPLY_REFUSAL`), less its `apply aborted for <cell>: ` prefix, so a moved head, a newer
+autoplan or a moved base is named as such; with no refusal, its FAILSAFES text names no cause.
 """
 
 import json
@@ -22,8 +26,8 @@ from _shipmate import run_annotated
 # the fail-safe that actually tripped can claim the blocked reason.
 FAILSAFES = [
     (
-        "CELL_LOCK_OUTCOME",
-        "could not confirm this pull request holds the cell's lock (see the job log)",
+        "PRE_APPLY_OUTCOME",
+        "could not confirm the pull request still allows this apply (see the job log)",
     ),
     (
         "DOWNLOAD_OUTCOME",
@@ -76,6 +80,9 @@ def main():
         if os.environ[env_key] == "failure":
             result, reason = "blocked", message
             break
+    if result and env_key == "PRE_APPLY_OUTCOME" and os.environ.get("PRE_APPLY_REFUSAL"):
+        cell = f"apply aborted for `{os.environ['ENV']}` / `{os.environ['STACK']}`: "
+        reason = os.environ["PRE_APPLY_REFUSAL"].removeprefix(cell)
 
     if result is None:
         apply_outcome = os.environ["APPLY_OUTCOME"]

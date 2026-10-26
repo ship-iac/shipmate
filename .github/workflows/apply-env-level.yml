@@ -8,6 +8,10 @@ on:
       # Empty on the merge deploy, which ignores cell locks; set, each cell refuses unless that
       # pull request holds its lock.
       pr_number: { required: false, type: string, default: "" }
+      # The auto form's provenance, re-checked in each cell: detect's plan run and base tip.
+      auto: { required: false, type: boolean, default: false }
+      provenance_run: { required: false, type: string, default: "" }
+      base_sha: { required: false, type: string, default: "" }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
         required: false
@@ -47,7 +51,7 @@ jobs:
     needs: [snapshot]
     if: ${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}
     runs-on: ${{ inputs.runs_on }}
-    permissions: &wave-permissions { contents: read, actions: read, id-token: write }
+    permissions: &wave-permissions { contents: read, actions: read, checks: read, pull-requests: read, id-token: write }
     strategy:
       fail-fast: false
       matrix:
@@ -61,15 +65,21 @@ jobs:
     # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
     steps: &wave-steps
       # Every attempt: a wave can wait hours on an environment approval, and "Re-run failed
-      # jobs" skips `lock`. A failure skips the cloud credentials; apply-cell runs only to refuse.
-      - name: Verify the pull request holds the cell lock
-        id: cell-lock
+      # jobs" skips `detect` and `lock`. A failure skips the cloud credentials; apply-cell runs
+      # only to refuse.
+      - name: Pre-apply check
+        id: pre-apply
         if: ${{ inputs.pr_number != '' }}
         uses: $/actions/lock-verify
         with:
           pr-number: ${{ inputs.pr_number }}
           env: ${{ matrix.environment }}
           stack: ${{ matrix.stack }}
+          head-sha: ${{ inputs.head_sha }}
+          auto: ${{ inputs.auto }}
+          provenance-run: ${{ inputs.provenance_run }}
+          base-sha: ${{ inputs.base_sha }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.head_sha }}" }
       - uses: $/actions/setup
@@ -82,7 +92,7 @@ jobs:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
       - uses: $/actions/apply-cell
-        if: ${{ !cancelled() && (success() || steps.cell-lock.outcome == 'failure') }}
+        if: ${{ !cancelled() && (success() || steps.pre-apply.outcome == 'failure') }}
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
@@ -92,7 +102,8 @@ jobs:
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
           encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
-          cell-lock-outcome: ${{ steps.cell-lock.outcome }}
+          pre-apply-outcome: ${{ steps.pre-apply.outcome }}
+          pre-apply-refusal: ${{ steps.pre-apply.outputs.refusal }}
   wave1:
     needs: [wave0]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}

@@ -1,7 +1,11 @@
 name: shipmate lock-verify
 description: >-
-  Refuse unless the pull request holds the cell's lock, read-only through scripts/cell-lock. A
-  lock that cannot be read refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read.
+  The pre-apply check, read-only through scripts/cell-lock verify. Refuses unless the pull request
+  holds the cell's lock and is open at the applied head; with auto true, also unless the
+  provenance run is still the head's newest autoplan and the run the cell's newest plan record
+  names, and the base tip is still the one detect read. A read that fails refuses too. Reads the
+  job's GITHUB_TOKEN, which needs contents:read and pull-requests:read, and, with auto true,
+  actions:read and checks:read.
 inputs:
   pr-number:
     description: The pull request that must hold the lock.
@@ -12,14 +16,42 @@ inputs:
   stack:
     description: Stack path, e.g. stacks/app.
     required: true
+  head-sha:
+    description: The applied head; the pull request must be open at it.
+    required: true
+  auto:
+    description: true for an auto apply, false otherwise; any other value refuses.
+    required: true
+  provenance-run:
+    description: The auto apply's plan run, from detect. Empty refuses when auto is true.
+    required: false
+    default: ""
+  base-sha:
+    description: The base tip detect read. Empty refuses when auto is true.
+    required: false
+    default: ""
+  app-id:
+    description: The shipmate App id, whose apply checks carry the plan records.
+    required: false
+    default: ""
+outputs:
+  refusal:
+    description: The refusal on one line; empty when the check passed or failed before naming one.
+    value: ${{ steps.verify.outputs.refusal }}
 runs:
   using: composite
   steps:
-    - name: Verify the pull request holds the cell lock
+    - name: Pre-apply check
+      id: verify
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_ENV: ${{ inputs.env }}
         STACK: ${{ inputs.stack }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_AUTO: ${{ inputs.auto }}
+        SHIPMATE_PROVENANCE_RUN: ${{ inputs.provenance-run }}
+        SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify

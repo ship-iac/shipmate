@@ -194,12 +194,15 @@ jobs:
     needs: [guard, review, detect, lock]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, id-token: write }
+    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -222,6 +225,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -235,6 +241,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -248,6 +257,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     secrets: *envlevel-secrets
 
   summary:

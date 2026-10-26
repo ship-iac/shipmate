@@ -264,6 +264,23 @@ def _plan_run(record):
     return plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None
 
 
+def newest_autoplan(repo, head, workflow, *, run):
+    """The newest run id of the workflow file `workflow` started by `pull_request_target` on
+    `head`, or None when none is listed. Every page is read."""
+    query = f"event=pull_request_target&head_sha={head}&per_page=100"
+    listing = run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{repo}/actions/workflows/{workflow.rsplit('/', 1)[-1]}/runs?{query}",
+            "--jq",
+            ".workflow_runs[].id",
+        ]
+    )
+    return max(map(int, listing.split()), default=None)
+
+
 def verdict(check_runs):
     """The gate verdict over `check_runs`, which must already be `app_runs` output: this does
     not filter by App identity."""

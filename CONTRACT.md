@@ -1830,18 +1830,24 @@ levels are skipped, and their cells stay locked to this pull request until it
 merges or closes, or another pull request evicts them with
 `shipmate unlock <env> --evict`.
 
-**Every apply cell re-checks its lock.** "Re-run failed jobs" re-runs the failed wave jobs
-and neither `detect` nor `lock`, and a first attempt's wave can wait hours on an
-environment approval. So on every attempt each pre-merge apply cell first reads
-its own lock, read-only, as the wave job's first step, before its cloud
-credentials, and refuses unless the pull request holds it (an eviction, or a
-release after a close, takes it away), with
+**Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed wave
+jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours on an
+environment approval. So on every attempt each pre-merge apply cell first runs the
+pre-apply check, read-only, as the wave job's first step, before its cloud
+credentials. It refuses unless the pull request holds the cell's lock (an eviction,
+or a release after a close, takes it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
-cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``.
-A lock read that fails refuses with `` could not read the cell lock on `<env>` /
-`<stack>` (<why>) ``. A refused cell assumes no cloud role, and the apply result
-comment gives it the blocked reason `could not confirm this pull request holds
-the cell's lock (see the job log)`. The merge deploy passes no pull request, so
+cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
+and unless the pull request is open at the applied head. Under `apply_mode: auto`
+it also refuses unless the plan run detect bound is still the head's newest autoplan
+and the run the cell's newest plan record names, and the base tip is still the one
+detect read, whatever the stack. A read that fails refuses with
+`` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
+or comment `shipmate apply` on the pull request ``, and every other refusal names its
+mismatch with the same remedy. A refused cell assumes no cloud role, and the apply
+result comment gives it the refusal, less its `apply aborted for` prefix, as the
+blocked reason, or `could not confirm the pull request still allows this apply (see
+the job log)` when no refusal arrived. The merge deploy passes no pull request, so
 its cells skip the check.
 
 **Release is reconciled, not queued.** On a merge, each run of the `release`

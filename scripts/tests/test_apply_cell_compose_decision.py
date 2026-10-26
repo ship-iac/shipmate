@@ -33,7 +33,8 @@ def _run_compose(
     monkeypatch,
     tmp_path,
     *,
-    cell_lock="skipped",
+    pre_apply="skipped",
+    pre_apply_refusal="",
     download="skipped",
     planned_head="skipped",
     decrypt="skipped",
@@ -52,7 +53,8 @@ def _run_compose(
     RUNNER_TEMP pointed at a tmp dir, then return the resulting cell.json as a dict."""
     monkeypatch.setenv("STACK", stack)
     monkeypatch.setenv("ENV", env)
-    monkeypatch.setenv("CELL_LOCK_OUTCOME", cell_lock)
+    monkeypatch.setenv("PRE_APPLY_OUTCOME", pre_apply)
+    monkeypatch.setenv("PRE_APPLY_REFUSAL", pre_apply_refusal)
     monkeypatch.setenv("DOWNLOAD_OUTCOME", download)
     monkeypatch.setenv("PLANNED_HEAD_OUTCOME", planned_head)
     monkeypatch.setenv("DECRYPT_OUTCOME", decrypt)
@@ -85,7 +87,7 @@ _DECRYPT_REASON = (
 #: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
 #: is the table below, never derived from FAILSAFES: a derived row passes whatever that list says.
 _ALL_SUCCESS = {
-    "cell_lock": "success",
+    "pre_apply": "success",
     "download": "success",
     "planned_head": "success",
     "decrypt": "success",
@@ -103,9 +105,9 @@ _ALL_SUCCESS = {
     ("failed", "reason"),
     [
         pytest.param(
-            "cell_lock",
-            "could not confirm this pull request holds the cell's lock (see the job log)",
-            id="cell_lock",
+            "pre_apply",
+            "could not confirm the pull request still allows this apply (see the job log)",
+            id="pre_apply",
         ),
         pytest.param(
             "download",
@@ -276,4 +278,41 @@ def test_the_decrypt_reason_renders_without_escaped_entities_in_a_code_span(monk
         "a corrupt, truncated or altered artifact; or "
         "an openssl or disk failure on the runner, which a re-run of the job clears when "
         "transient); docs/troubleshooting.md gives each remedy"
+    )
+
+
+def test_a_failed_pre_apply_check_names_its_own_refusal(monkeypatch, tmp_path):
+    """Mutation: keep the FAILSAFES text when a refusal arrived (drop the refusal branch).
+    Mutation: drop the `removeprefix` (the reason repeats the cell)."""
+    cell = _run_compose(
+        monkeypatch,
+        tmp_path,
+        pre_apply="failure",
+        pre_apply_refusal=(
+            "apply aborted for `dev-eu` / `stacks/app`: the base branch moved from b to c since "
+            "this auto apply was detected; push, or comment `shipmate apply` on the pull request"
+        ),
+    )
+    assert (cell["result"], cell["reason"]) == (
+        "blocked",
+        (
+            "the base branch moved from b to c since this auto apply was detected; push, or "
+            "comment `shipmate apply` on the pull request"
+        ),
+    )
+
+
+def test_a_pre_apply_refusal_does_not_name_another_failsafe(monkeypatch, tmp_path):
+    """A refusal output with a passing pre-apply check never reaches a later fail-safe's reason.
+    Mutation: drop `env_key == "PRE_APPLY_OUTCOME"` from the refusal branch."""
+    cell = _run_compose(
+        monkeypatch,
+        tmp_path,
+        pre_apply="success",
+        pre_apply_refusal="apply aborted for `dev-eu` / `stacks/app`: stale",
+        download="failure",
+    )
+    assert cell["reason"] == (
+        "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or push, or "
+        "after the merge open a new pull request touching the stack"
     )
