@@ -30,7 +30,7 @@ the run refuses.
 `SHIPMATE_AUTO=true` selects the auto form, `auto_main`: the bare form over the
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
 refuses unless the actor, the plan's provenance, the pusher's permission and the pull
-request's mergeability hold.
+request's mergeability hold, and holds a cell whose stack the base also changed.
 """
 
 import json
@@ -273,10 +273,10 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
     skips and waiting cells.
 
     An env with a waiting cell, or a cell in `locked` ((stack, env) pairs another pull
-    request holds), is not fully applying, so it stops its `needs` successors like a stopped
-    env, and each new skip can make more cells wait. A locked cell never runs; the env's
-    ready cells still do: it joins `unavailable`, never `skipped`. `unavailable` only grows
-    over a finite set, so the loop ends."""
+    request holds, or the auto form's overlap cells), is not fully applying, so it stops its
+    `needs` successors like a stopped env, and each new skip can make more cells wait. A locked
+    cell never runs; the env's ready cells still do: it joins `unavailable`, never `skipped`.
+    `unavailable` only grows over a finite set, so the loop ends."""
     envs = {c["environment"] for c in pending} - stopped
     present = {(c["stack"], c["environment"]) for c in pending}
     lock_envs = {e for _, e in locked}
@@ -498,16 +498,30 @@ def wait_mergeable(repo, pr_number, head):
     return base
 
 
+def overlap_cells(candidates, changed):
+    """`{stack, environment}` of each cell in `candidates` whose stack is in `changed`, the
+    stacks the base changed since the merge base: applying its plan would revert that change."""
+    return [
+        {"stack": c["stack"], "environment": c["environment"]}
+        for c in candidates
+        if c["stack"] in changed
+    ]
+
+
 def auto_main():
     """The auto apply: `bare_main` over the `apply_mode: auto` environments' pending cells.
 
     Every other pending environment counts as stopped in `settle`, so its `needs` successors
     skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
     bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
-    cell to apply, the plan run its records name must be the head's newest autoplan
-    (`refuse_provenance`), that run's pusher must have write access (`refuse_pusher`), and the
-    pull request must be ready and mergeable at this head (`wait_mergeable`). Writes the bare
-    outputs plus `provenance_run` and `base_sha`, both empty when no cell applies."""
+    pending cell in an environment not stopped, the pull request must be ready and mergeable at
+    this head (`wait_mergeable`), and a cell whose stack the base changed since the merge base
+    (`build-matrix.base_changed_stacks`) is held in `overlap_cells`: it stays pending and stops
+    its environment's `needs` successors, as a locked cell does. With a cell to apply, the plan
+    run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
+    pusher must have write access (`refuse_pusher`). Writes the bare outputs plus
+    `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
+    on, empty when no pull request read was needed, and `overlap_cells`."""
     bare_main(auto=True)
 
 
@@ -535,8 +549,9 @@ def bare_main(auto=False):
       `shipmate apply <env>` completes them. `excluded_envs` names every one with
       pending work, including those also held for review;
     - envs ordered (transitively) after an env not fully applying this run — held,
-      excluded as targeted, holding a waiting cell, or holding a cell another pull request
-      locks — are skipped with a notice
+      excluded as targeted, holding a waiting cell, holding a cell another pull request
+      locks, or, under the auto form, holding a cell the base also changed or not
+      `apply_mode: auto` — are skipped with a notice
       (`skipped_after_targeted`, named for its first cause) — their ordering
       precondition cannot be met this run, exactly like a failed predecessor
       level;
@@ -583,7 +598,13 @@ def bare_main(auto=False):
         stopped |= pending_envs - set(bm.ec.auto_envs(table))
     # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
     # waiting cell's remedy names it.
-    locked = locked_cells(repo, [c for c in pending if c["environment"] not in stopped], pr_number)
+    candidates = [c for c in pending if c["environment"] not in stopped]
+    overlap, base_sha = [], ""
+    if auto and candidates:
+        # One read: the wave re-check compares the base tip with the one overlap was computed on.
+        base_sha = wait_mergeable(repo, pr_number, head)
+        overlap = overlap_cells(candidates, bm.base_changed_stacks(base_sha))
+    locked = locked_cells(repo, candidates, pr_number)
     skipped, run, waiting = settle(
         order,
         stopped,
@@ -591,7 +612,7 @@ def bare_main(auto=False):
         deps,
         tags_by_stack,
         levels,
-        {(c["stack"], c["environment"]) for c in locked},
+        {(c["stack"], c["environment"]) for c in [*locked, *overlap]},
     )
     wv.refuse_inversions(
         run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
@@ -606,12 +627,15 @@ def bare_main(auto=False):
     bm.refuse_workload_gaps(runnable, table)
     auto_outputs = {}
     if auto:
-        provenance_run, base_sha = "", ""
+        provenance_run = ""
         if runnable:
             refuse_pusher(repo, refuse_provenance(repo, head, runnable))
             provenance_run = runnable[0]["plan_run_id"]
-            base_sha = wait_mergeable(repo, pr_number, head)
-        auto_outputs = {"provenance_run": provenance_run, "base_sha": base_sha}
+        auto_outputs = {
+            "provenance_run": provenance_run,
+            "base_sha": base_sha,
+            "overlap_cells": json.dumps(overlap),
+        }
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_exempt = sorted(

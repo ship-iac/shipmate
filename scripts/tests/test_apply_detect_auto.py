@@ -77,6 +77,7 @@ def _run_auto(
     *,
     auto=("dev-eu",),
     other=(),
+    stacks=("stacks/app",),
     order=None,
     checks=None,
     actor=BOT,
@@ -90,13 +91,17 @@ def _run_auto(
     calls=None,
     sleeps=None,
     argv=None,
+    base_changed=(),
+    base_reads=None,
 ):
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
-    to one pending `stacks/app` check per env in `auto` and `other`, all recording plan run
+    to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
     `RUN`, whose API body is an autoplan of `HEAD` pushed by `k3np`. `listing` is the head's
     autoplan run ids, `permission` the pusher's (an exception raises from the read), `pulls`
-    the successive pull request reads. Each `gh api` path goes to `calls`, its whole argv to
-    `argv`, each sleep to `sleeps`. Returns the parsed GITHUB_OUTPUT."""
+    the successive pull request reads, `base_changed` the stacks the base changed (an exception
+    raises from the read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
+    sleep to `sleeps`, each base tip the base-side detection is asked about to `base_reads`.
+    Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
     out = tmp_path / "out"
     for k, v in {
@@ -111,8 +116,11 @@ def _run_auto(
         "SHIPMATE_REVIEW_DECISION": decision,
     }.items():
         monkeypatch.setenv(k, v)
+    planned = len(envs) * len(stacks)
     checks = (
-        checks if checks is not None else [_check("stacks/app", e, cells=len(envs)) for e in envs]
+        checks
+        if checks is not None
+        else [_check(st, e, cells=planned) for e in envs for st in stacks]
     )
     run = run or {
         "id": int(RUN),
@@ -130,23 +138,32 @@ def _run_auto(
         [] if argv is None else argv,
     )
 
-    tree = {e: ["stacks/app"] for e in envs}
+    tree = {e: list(stacks) for e in envs}
     monkeypatch.setattr(aad, "_run", github)
     monkeypatch.setattr(aad.bm, "_run", github)
     forbid_shared_runner(monkeypatch)
-    monkeypatch.setattr(aad.bm, "run_graph_deps", lambda: {"stacks/app": set()})
+    monkeypatch.setattr(aad.bm, "run_graph_deps", lambda: {st: set() for st in stacks})
     monkeypatch.setattr(
         aad.bm,
         "env_membership",
         lambda all_stacks=False, base="", check_names=True: (
             tree,
-            {"stacks/app": []},
+            {st: [] for st in stacks},
         ),
     )
     table = _table(auto, other, order)
     monkeypatch.setattr(aad.bm.ec, "read_table", lambda: json.loads(json.dumps(table)))
     stub_read_locks(monkeypatch, aad.cl, locks)
     monkeypatch.setattr(aad, "_sleep", (sleeps if sleeps is not None else []).append)
+    reads = [] if base_reads is None else base_reads
+
+    def _base_changed(base_ref):
+        reads.append(base_ref)
+        if isinstance(base_changed, BaseException):
+            raise base_changed
+        return set(base_changed)
+
+    monkeypatch.setattr(aad.bm, "base_changed_stacks", _base_changed)
     aad.main()
     return github_outputs(out)
 
@@ -193,10 +210,22 @@ def test_an_unreviewed_pull_request_applies_the_review_exempt_auto_environment(
 def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     """The action passes `false` for a bare apply, whose actor is no App bot.
 
-    Mutation: route on `os.environ.get("SHIPMATE_AUTO")` being non-empty -- the actor refuses."""
-    parsed = _run_auto(tmp_path, monkeypatch, other=("stage",), actor="k3np", flag="false")
+    Mutation: route on `os.environ.get("SHIPMATE_AUTO")` being non-empty -- the actor refuses.
+    Mutation: drop `auto and` from the overlap read's condition -- the base side is read."""
+    reads = []
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        other=("stage",),
+        actor="k3np",
+        flag="false",
+        base_changed={"stacks/app"},
+        base_reads=reads,
+    )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
+    assert "overlap_cells" not in parsed
+    assert reads == []
 
 
 @pytest.mark.parametrize("actor", ["github-actions[bot]", "other-app[bot]", "shipmate-iac"])
@@ -292,6 +321,7 @@ def test_changes_requested_holds_every_environment(tmp_path, monkeypatch):
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", "")
     assert calls == [f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"]
+    assert json.loads(parsed["overlap_cells"]) == []
 
 
 def test_a_pusher_with_read_permission_refuses(tmp_path, monkeypatch):
@@ -423,3 +453,73 @@ def test_detect_grants_exactly_these_permissions():
         "actions": "read",
         "pull-requests": "read",
     }
+
+
+def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_successor(
+    tmp_path, monkeypatch
+):
+    """The base changed `stacks/app` (through a module, as the probe found Terramate reports it)
+    since the merge base: both `stacks/app` cells are held, `prod`, which needs `dev-eu`, skips,
+    and the unrelated `stacks/dns` applies in `dev-eu`. The overlap is computed on the base tip
+    the pull request read returned, which is the `base_sha` written.
+
+    Mutation: pass `settle` the locked cells alone -- `stacks/app / dev-eu` applies and `prod`
+    runs, red.
+    Mutation: write `overlap_cells` as `[]` -- red.
+    Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red."""
+    reads = []
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        auto=("dev-eu", "prod"),
+        stacks=("stacks/app", "stacks/dns"),
+        order={"prod": ["dev-eu"]},
+        base_changed={"stacks/app", "stacks/other"},
+        base_reads=reads,
+    )
+    assert _applied(parsed) == [("stacks/dns", "dev-eu")]
+    assert json.loads(parsed["overlap_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu"},
+        {"stack": "stacks/app", "environment": "prod"},
+    ]
+    assert json.loads(parsed["skipped_envs"]) == ["prod"]
+    assert json.loads(parsed["locked_cells"]) == []
+    assert reads == [BASE]
+    assert parsed["base_sha"] == BASE
+
+
+def test_a_run_the_base_changed_nothing_of_applies_every_cell(tmp_path, monkeypatch):
+    """Mutation: hold every candidate in `overlap_cells` -- nothing applies, red."""
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        stacks=("stacks/app", "stacks/dns"),
+        base_changed={"stacks/other"},
+    )
+    assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/dns", "dev-eu")]
+    assert json.loads(parsed["overlap_cells"]) == []
+
+
+def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeypatch):
+    """Nothing applies, so neither the plan run nor its pusher is read; the base tip the overlap
+    was computed on is still written.
+
+    Mutation: read the provenance whenever a pull request read happened -- the run is read,
+    red."""
+    calls = []
+    parsed = _run_auto(tmp_path, monkeypatch, base_changed={"stacks/app"}, calls=calls)
+    assert _applied(parsed) == []
+    assert (parsed["provenance_run"], parsed["base_sha"]) == ("", BASE)
+    assert json.loads(parsed["overlap_cells"]) == [{"stack": "stacks/app", "environment": "dev-eu"}]
+    assert [c for c in calls if c.startswith("repos/o/r/actions/")] == []
+
+
+def test_an_unresolvable_merge_base_refuses_the_run(tmp_path, monkeypatch):
+    """`build-matrix.merge_base`'s refusal reaches the run whole: no output, nothing applies.
+
+    Mutation: catch `SystemExit` around `base_changed_stacks` and hold nothing -- the run
+    applies, red."""
+    error = SystemExit("::error::could not resolve the merge base")
+    assert _refusal(tmp_path, monkeypatch, base_changed=error) == (
+        "::error::could not resolve the merge base"
+    )

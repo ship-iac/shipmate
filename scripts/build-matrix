@@ -15,6 +15,7 @@ import os
 import posixpath
 import re
 import subprocess
+import tempfile
 
 from _shipmate import _load, _run, command_data, named, run_annotated, write_outputs
 
@@ -220,8 +221,8 @@ _ZERO_SHA = "0" * 40
 _ENV_TAG_LITERAL = re.compile(f'"env/({ec._ENV_ENTRY.pattern})"')
 
 
-def _list_stacks(all_stacks, base):
-    args = ["terramate", "list"]
+def _list_stacks(all_stacks, base, tree=None):
+    args = ["terramate", *(["-C", tree] if tree else []), "list"]
     if not all_stacks:
         args.append("--changed")
         # github.event.before is the all-zero SHA on a force-push or the first
@@ -232,11 +233,11 @@ def _list_stacks(all_stacks, base):
     return [s.strip() for s in _run(args).splitlines() if s.strip()]
 
 
-def merge_base(base):
+def merge_base(base, retry="Re-run the workflow"):
     """The merge base of `base` and `HEAD`, which plan detect diffs from, so a branch behind its
     base plans only the stacks its own commits change. Refuses when the two share no history
     (exit 1, no output) with that cause and its remedy, and on any other git failure, such as a
-    base missing from the clone, with git's error on one line.
+    base missing from the clone, with git's error on one line and `retry` as the remedy.
     """
     # Not `_run`: the refusal depends on git's exit status, which `run` folds into its message.
     # S603/S607: a fixed argv, git from PATH as every other call here.
@@ -255,10 +256,26 @@ def merge_base(base):
         error = " | ".join(lines) or f"git merge-base exited {p.returncode} with no message"
         message = (
             f"could not resolve the merge base of the pull request's base {base} and its head: "
-            f"{error}. Re-run the workflow; if it fails again, the base commit is not reachable "
-            "from this checkout."
+            f"{error}. {retry}; if it fails again, the base commit is not reachable from this "
+            "checkout."
         )
     raise SystemExit("::error::" + message)
+
+
+def base_changed_stacks(base_ref):
+    """The stacks `base_ref` changed since its merge base with `HEAD`, a module's consumers
+    included: Terramate's change detection, run in a detached worktree of `base_ref`. A plan of
+    such a stack made on `HEAD` reverts the base's change. Refuses as `merge_base` does when the
+    merge base cannot be resolved, and on a failed worktree or listing."""
+    # A re-run of an auto apply refuses at its actor check; a base that moved since the
+    # checkout is fetched again by a new run.
+    since = merge_base(base_ref, retry="Push again, or comment `shipmate apply`")
+    tree = tempfile.mkdtemp(prefix="shipmate-base-")
+    _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
+    try:
+        return set(_list_stacks(False, since, tree))
+    finally:
+        _run(["git", "worktree", "remove", "--force", tree])
 
 
 _METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')

@@ -3115,3 +3115,61 @@ def test_a_refused_max_parallel_writes_no_matrix(monkeypatch, tmp_path):
     assert github_outputs(tmp_path / "out.txt") == {
         "refusal": "max_parallel is '0'; refused",
     }
+
+
+def _base_moved_a_module(git_repo):
+    """`main` changes only `modules/m` after `pr` branched, `pr` changes `stacks/app`: the shape
+    the overlap probe ran. Returns (merge base, base tip), with `pr` checked out."""
+    since = _commit({"modules/m/main.tf": "v1\n", "stacks/app/main.tf": "app\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/app/main.tf": "app edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "v2\n"}, "module only")
+    _git("checkout", "-q", "pr")
+    return since, tip
+
+
+def test_base_changed_stacks_lists_the_base_tips_changes_since_the_merge_base(
+    git_repo, monkeypatch
+):
+    """Terramate lists the changes in a detached worktree of the base tip, against the merge base,
+    and the worktree is removed after. The stub answers `stacks/app` as Terramate did for this
+    module-only change.
+
+    Mutation: drop `["-C", tree]` from `_list_stacks` -- the argv, red.
+    Mutation: add the worktree at `HEAD` -- the worktree holds the branch's module, red.
+    Mutation: pass `base_ref` to `_list_stacks` for the merge base -- the argv, red.
+    Mutation: return the directories of `git diff --name-only <merge base> <base>` -- a file path
+    intersection names `modules/m`, red.
+    Mutation: drop the `worktree remove` -- two worktrees are left, red."""
+    since, tip = _base_moved_a_module(git_repo)
+    real, seen = bm._run, []
+
+    def _run(args):
+        if args[0] != "terramate":
+            return real(args)
+        seen.append(args)
+        assert (pathlib.Path(args[2]) / "modules/m/main.tf").read_text() == "v2\n"
+        return "stacks/app\n"
+
+    monkeypatch.setattr(bm, "_run", _run)
+    assert bm.base_changed_stacks(tip) == {"stacks/app"}
+    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", since]]
+    assert len(_git("worktree", "list").splitlines()) == 1
+
+
+def test_base_changed_stacks_refuses_a_base_tip_the_clone_lacks(git_repo, monkeypatch):
+    """The auto form's remedy: a re-run refuses at the auto actor check.
+
+    Mutation: add the worktree before `merge_base` -- the stubbed `_run` is called, red.
+    Mutation: drop `retry=` from the `merge_base` call -- "Re-run the workflow", red."""
+    _commit({"stacks/app/main.tf": "app\n"}, "common")
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
+    missing = "f" * 40
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(missing)
+    assert e.value.code == (
+        f"::error::could not resolve the merge base of the pull request's base {missing} and its "
+        f"head: fatal: Not a valid commit name {missing}. Push again, or comment `shipmate "
+        "apply`; if it fails again, the base commit is not reachable from this checkout."
+    )

@@ -2340,3 +2340,96 @@ def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_ap
         + "\n\n"
         + HINT
     )
+
+
+def _overlap(stack, env):
+    return {"stack": stack, "environment": env}
+
+
+#: The overlap line for `stacks/app` and `stacks/db` in `dev-eu`, hand-written.
+_OVERLAP_LINE = (
+    "⚪ held, the base changed these stacks after this branch left it, so their plans would "
+    "revert that change: stacks/app / dev-eu, stacks/db / dev-eu. Update the branch from the "
+    "base and push."
+)
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_the_overlap_cells_get_one_line_naming_them_and_the_remedy_in_both_forms(compact):
+    """Mutation: drop `d["overlap"]` from `_per_env_lines` -- the per-environment case, red.
+    Mutation: drop `d["overlap"]` from `_grouped_lines` -- the compact case, red."""
+    overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
+    assert ac._footer_parts([], [], overlap=overlap, compact=compact) == [_OVERLAP_LINE]
+
+
+def test_the_overlap_line_escapes_every_name():
+    """Mutation: drop `_md_name` from the overlap cell's stack -- the team mention, red.
+    Mutation: drop `_md_escape` from the overlap cell's environment -- red."""
+    assert ac._footer_parts([], [], overlap=[_overlap("s@org/team<1", "e<2")]) == [
+        (
+            "⚪ held, the base changed these stacks after this branch left it, so their plans "
+            "would revert that change: s@<!-- -->org/team&lt;1 / e&lt;2. Update the branch from "
+            "the base and push."
+        )
+    ]
+
+
+def test_a_run_whose_every_pending_cell_overlaps_the_base_is_never_green():
+    """Work was pending and the base had changed its stacks.
+
+    Mutation: drop the `overlap` branch from `_empty_verdict` -- 🟢 no pending applies with no
+    hint, red."""
+    overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
+    assert _comment([], env="", overlap=overlap) == (
+        "### shipmate apply\n\n⚪ nothing applied, the base also changed the pending cells' "
+        f"stacks {AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
+    )
+
+
+def test_a_partly_applied_run_counts_its_overlap_cells():
+    """Mutation: drop the overlap token from `_verdict` -- red.
+    Mutation: drop the overlap `circles.append("⚪")` -- 🟢, red."""
+    overlap = [_overlap("stacks/db", "dev-eu")]
+    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), (), overlap) == (
+        "⚪",
+        f"⚪ 1 applied, 1 held (base changed) {AT}",
+    )
+
+
+def test_a_cell_waiting_on_an_overlap_cell_names_the_branch_update():
+    """The blocker's environment is held and targeted, and only the cell overlaps the base: the
+    branch update wins over the review and targeted remedies, keyed on the blocker cell.
+
+    Mutation: drop the `overlap` branch from `_waiting_remedy` -- the held-and-targeted remedy,
+    red.
+    Mutation: key the blocker's overlap on its environment alone -- `stacks/b` names the branch
+    update, red."""
+    waiting = [
+        _waits("stacks/a", "qa", "stacks/dns", "ops"),
+        _waits("stacks/b", "qa", "stacks/vault", "ops"),
+    ]
+    parts = ac._footer_parts(["ops"], [], ["ops"], waiting, overlap=[_overlap("stacks/dns", "ops")])
+    assert parts[-2:] == [
+        (
+            "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; the base also changed "
+            "it; update the branch from the base and push"
+        ),
+        (
+            "⚪ stacks/b / qa: waits on stacks/vault / ops, not applied yet; it is held until the "
+            "pull request is approved, then comment `shipmate apply ops`"
+        ),
+    ]
+
+
+def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tmp_path):
+    """Mutation: drop the `SHIPMATE_OVERLAP_CELLS` argument from `main`'s `build_comment` call --
+    🟢 no pending applies, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
+    monkeypatch.setenv("SHIPMATE_OVERLAP_CELLS", json.dumps(overlap))
+    assert _main_body(tmp_path) == (
+        "### shipmate apply dev-eu\n\n⚪ nothing applied, the base also changed the pending "
+        f"cells' stacks {_MAIN_AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
+    )

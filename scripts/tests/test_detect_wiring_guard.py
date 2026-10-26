@@ -106,6 +106,7 @@ _APPLY_DETECT_OUTPUTS = {
     "env_order": "${{ steps.d.outputs.env_order }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
+    "overlap_cells": "${{ steps.d.outputs.overlap_cells }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
 }
 
@@ -195,11 +196,31 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
     assert checkouts == [{"fetch-depth": 0, "filter": "blob:none"}]
 
 
+def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
+    """Exactly one runs: the auto form computes the merge base of the base tip and the head, which
+    a one-commit checkout does not hold. Two steps, because `fetch-depth: ${{ inputs.auto && 0 ||
+    1 }}` reads `0` as falsy and always fetches one commit. PyYAML gives the int 0.
+
+    Mutation: delete `fetch-depth` from the auto checkout.
+    Mutation: drop the `!` from the first checkout's `if:`, so an auto run checks out twice and
+    a bare one not at all.
+    Mutation: delete the auto checkout's `if:`."""
+    checkouts = [
+        {k: v for k, v in s.items() if k != "uses"}
+        for s in workflow_yaml("apply.yml")["jobs"]["detect"]["steps"]
+        if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
+    ]
+    assert checkouts == [
+        {"if": "${{ !inputs.auto }}", "with": {"ref": "${{ inputs.ref }}"}},
+        {"if": "${{ inputs.auto }}", "with": {"ref": "${{ inputs.ref }}", "fetch-depth": 0}},
+    ]
+
+
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
     orders environments by name; delete `locked_cells`; delete `provenance_run`; delete
-    `base_sha`."""
+    `base_sha`; delete `overlap_cells`."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -264,7 +285,8 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
             "Bare and auto forms: JSON list of envs skipped because they are ordered after an "
             "env not fully applying this run (held for review, excluded as targeted, holding a "
             "waiting cell, holding a cell another pull request locks, or, under the auto form, "
-            "not `apply_mode: auto`). The targeted form writes none."
+            "holding a cell the base also changed or not `apply_mode: auto`). The targeted form "
+            "writes none."
         ),
         "value": "${{ steps.d.outputs.skipped_envs }}",
     },
@@ -321,10 +343,19 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "base_sha": {
         "description": (
-            "Auto form only: the pull request's base tip, read after the mergeability wait; "
-            "empty when no cell applies."
+            "Auto form only: the pull request's base tip, read after the mergeability wait, "
+            "that overlap_cells was computed on; empty when no environment had a pending cell "
+            "to consider."
         ),
         "value": "${{ steps.d.outputs.base_sha }}",
+    },
+    "overlap_cells": {
+        "description": (
+            "Auto form only: JSON list of pending cells left pending because the base changed "
+            "their stack since the merge base, directly or through a module, each "
+            "`{stack, environment}`; their plans would revert that change."
+        ),
+        "value": "${{ steps.d.outputs.overlap_cells }}",
     },
     "refusal": {
         "description": (
@@ -343,5 +374,6 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
     delete its `refusal` output; delete its `env_order` output; delete its `locked_cells`
     output; restore `skipped_envs`' description without the lock cause; delete its
-    `provenance_run` output; delete its `base_sha` output."""
+    `provenance_run` output; delete its `base_sha` output; delete its `overlap_cells` output;
+    restore `skipped_envs`' description without the overlap cause."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
