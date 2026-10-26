@@ -15,9 +15,19 @@ HEAD = "a" * 40
 RUN_ID = "32668143791"
 PR = "4217"
 
+
 # Hand-written: the bytes and the digest below were computed once, off the tree, so an
 # assertion cannot be satisfied by the same hashlib call the code under test makes. The
 # trailing newline is load-bearing -- it is what a `.strip()` before hashing would drop.
+@pytest.fixture(autouse=True)
+def _push_event(tmp_path, monkeypatch):
+    """A `synchronize` payload at `GITHUB_EVENT_PATH`, so the runner's own never leaks in."""
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"action": "synchronize"}), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(payload))
+    return payload
+
+
 PLAN_A = b"Terraform will perform the following actions:\n\n  # null_resource.a will be created\n"
 SHA_A = "4e6d7400bf477bbcb3b78627cecd50f1a4706fa04da5a4f809ae0e1fb3b58704"
 PLAN_B = b"No changes. Your infrastructure matches the configuration.\n"
@@ -78,6 +88,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         "plan_sha256": SHA_A,
         "pr": PR,
         "cells": 1,
+        "action": "synchronize",
     }
     assert body == {
         "name": "apply / stacks/app / dev-eu",
@@ -112,6 +123,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         "plan_sha256": SHA_B,
         "pr": PR,
         "cells": 1,
+        "action": "synchronize",
     }
 
 
@@ -180,7 +192,33 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
         "plan_sha256": SHA_A,
         "pr": "31",
         "cells": 1,
+        "action": "synchronize",
     }
+
+
+@pytest.mark.parametrize(
+    ("payload", "action"),
+    [
+        pytest.param({"inputs": {"verb": "plan"}}, "", id="dispatch"),
+        pytest.param({"action": "ready_for_review"}, "ready_for_review", id="ready"),
+    ],
+)
+def test_the_record_names_the_plan_runs_event_action(tmp_path, _push_event, payload, action):
+    """Mutation: record `"synchronize"` in place of `event_action()` (both rows red). Mutation:
+    drop `"action"` from the record (both rows red)."""
+    _push_event.write_text(json.dumps(payload), encoding="utf-8")
+    cells = tmp_path / "cells"
+    _write_cell(
+        cells,
+        "dev-eu",
+        "stacks-app",
+        stack="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+    )
+    (body,) = _emit(cells)
+    assert json.loads(body["external_id"])["action"] == action
 
 
 def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
@@ -475,6 +513,7 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
                 "plan_sha256": SHA_A,
                 "pr": PR,
                 "cells": 2,
+                "action": "synchronize",
             },
         )
     ]

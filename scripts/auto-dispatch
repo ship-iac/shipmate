@@ -20,11 +20,10 @@ The table is read last, through `env-config.read_table`, so a run that fails a c
 no API call. A refusal there exits 1 with `::error::`.
 """
 
-import json
 import os
 import sys
 
-from _shipmate import _load, cell_summaries, run_annotated
+from _shipmate import _load, cell_summaries, event_action, run_annotated
 
 ec = _load("env-config")
 
@@ -48,16 +47,6 @@ def skip_reason(*, event, action, attempt, is_draft, state, mode):
     if (state, mode) != ("pending", "post"):
         return f"the gate is not pending over a complete plan (state {state!r}, mode {mode!r})"
     return None
-
-
-def event_action():
-    """The `action` of the event payload at `GITHUB_EVENT_PATH`, or "" when it cannot be read."""
-    try:
-        with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fh:
-            action = json.load(fh).get("action")
-    except (KeyError, OSError, ValueError, AttributeError):
-        return ""
-    return action if isinstance(action, str) else ""
 
 
 def changed_auto_envs(cells, auto):

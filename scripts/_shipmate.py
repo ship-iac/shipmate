@@ -263,6 +263,17 @@ def write_outputs(**pairs):
             fh.write(f"{name}={value}\n")
 
 
+def event_action():
+    """The `action` of the event payload at `GITHUB_EVENT_PATH`, or "" when it cannot be read
+    or names none, as a `workflow_dispatch` payload does."""
+    try:
+        with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fh:
+            action = json.load(fh).get("action")
+    except (KeyError, OSError, ValueError, AttributeError):
+        return ""
+    return action if isinstance(action, str) else ""
+
+
 def utf8_output():
     """Write stdout and stderr as UTF-8: a cp1252 Windows console prints `—` and `§` as `?`.
 

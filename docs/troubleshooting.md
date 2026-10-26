@@ -1771,6 +1771,14 @@ The autoplan was re-run, so its `triggering_actor` is whoever re-ran it, not the
 pusher in its `actor`. `auto` authorizes only the push itself. Nothing applied.
 A collaborator with write access comments `shipmate apply`.
 
+### `auto apply refused: the plan records of <cells> name no push event action`
+
+The newest plan of the head was not started by a push: the pull request was
+marked ready for review or reopened after the push, or the plan came from an
+engine that records no event action. Nothing applied. Comment `shipmate apply`.
+A wave cell refuses the same way with `the cell's plan record names event action
+<action>, not a push (opened or synchronize)`.
+
 ### `auto apply refused: the <read> read returned a malformed answer (<error>)`
 
 `<read>` is `plan run <n>` or `autoplan listing`: it came back in a shape `detect`

@@ -1101,15 +1101,16 @@ def _tip(sha=BASE):
     return json.dumps({"ref": "refs/heads/main", "object": {"sha": sha, "type": "commit"}})
 
 
-def _record(plan_run, run_id=1):
+def _record(plan_run, run_id=1, action="synchronize"):
+    record = {"plan_run": plan_run} | ({} if action is None else {"action": action})
     return {
         **_check("apply / stacks/auth / dev", "queued", None, run_id=run_id),
-        "external_id": json.dumps({"plan_run": plan_run}),
+        "external_id": json.dumps(record),
     }
 
 
-def _records(*plan_runs):
-    return jsonl(*(_record(r, i) for i, r in enumerate(plan_runs, 1)))
+def _records(*plan_runs, action="synchronize"):
+    return jsonl(*(_record(r, i, action) for i, r in enumerate(plan_runs, 1)))
 
 
 def _held():
@@ -1239,6 +1240,19 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
+
+
+@pytest.mark.parametrize("action", ["ready_for_review", "", None])
+def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, action):
+    """A ready-for-review autoplan of the head can become the newest autoplan after detect.
+
+    Mutation: drop the action refusal from `_verify_auto` (the run read runs, unexpected)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh.on(RECORD_READ, _records(RUN, action=action))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the cell's plan record names event action {action!r}, not a push "
+        "(opened or synchronize); comment `shipmate apply`"
+    )
 
 
 def test_verify_auto_refuses_a_draft(monkeypatch, tmp_path):

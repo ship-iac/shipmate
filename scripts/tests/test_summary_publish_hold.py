@@ -197,6 +197,7 @@ def _check_post(slug, cells):
                 "plan_sha256": "1b4025dc7b8d27cf38df85e77b20ed44a00851a2c28b338560560d85deded8e3",
                 "pr": "7",
                 "cells": cells,
+                "action": "synchronize",
             }
         ),
         "output": {
@@ -233,8 +234,11 @@ def _run(
     # Without the exec bit, bash on Linux skips the stub on PATH and runs the real `gh`.
     (bin_dir / "gh").chmod(0o755)
     calls = tmp_path / "calls"
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"action": "synchronize"}), encoding="utf-8")
     env = {
         **os.environ,
+        "GITHUB_EVENT_PATH": str(payload),
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "GH_TOKEN": "x",
         "SHIPMATE_HEAD_SHA": head,

@@ -55,9 +55,10 @@ def check_run(**kw):
     return base
 
 
-def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells):
-    """An `external_id` record as pending-checks writes it. `plan_sha256=None` omits the
-    digest, `pr=None` the pull request, `cells=None` the run's planned cell count."""
+def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells, action="synchronize"):
+    """An `external_id` record as pending-checks writes it for a push's autoplan.
+    `plan_sha256=None` omits the digest, `pr=None` the pull request, `cells=None` the run's
+    planned cell count, `action=None` the event action."""
     record = {"fingerprint": "a" * 64, "plan_run": plan_run}
     if plan_sha256 is not None:
         record["plan_sha256"] = plan_sha256
@@ -65,18 +66,28 @@ def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells):
         record["pr"] = pr
     if cells is not None:
         record["cells"] = cells
+    if action is not None:
+        record["action"] = action
     return json.dumps(record)
 
 
 def _apply_check(
-    stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells, **kw
+    stack,
+    env="dev-eu",
+    plan_run="123456",
+    plan_sha256=PLAN_SHA,
+    pr=PR_NUMBER,
+    *,
+    cells,
+    action="synchronize",
+    **kw,
 ):
     """A pending App-authored apply check carrying its plan-run record."""
     return check_run(
         name=f"apply / {stack} / {env}",
         status="queued",
         conclusion=None,
-        external_id=_record(plan_run, plan_sha256, pr, cells=cells),
+        external_id=_record(plan_run, plan_sha256, pr, cells=cells, action=action),
         **kw,
     )
 

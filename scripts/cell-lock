@@ -569,9 +569,14 @@ def _verify_pull(repo, pr, head, where, run):
 
 
 def _plan_record(repo, head, name, run):
-    """The plan run the newest App-authored check named `name` on `head` records, or None."""
-    lines = check_runs(repo, head, run=run, name=name).splitlines()
-    return ag.plan_records(lines, os.environ.get("SHIPMATE_APP_ID", "")).get(name, (None,))[0]
+    """(plan run, event action) the newest App-authored check named `name` on `head` records,
+    each None when absent."""
+    lines, app_id = (
+        check_runs(repo, head, run=run, name=name).splitlines(),
+        os.environ.get("SHIPMATE_APP_ID", ""),
+    )
+    plan_run = ag.plan_records(lines, app_id).get(name, (None,))[0]
+    return plan_run, ag.plan_actions(lines, app_id).get(name)
 
 
 def _verify_auto(repo, head, provenance, env, stack, where, run):
@@ -586,7 +591,7 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
             f"{'not listed' if newest is None else f'run {newest}'}, not plan run {provenance}, "
             f"which this auto apply applies; {_RETRY}"
         )
-    recorded = _confirm(
+    recorded, action = _confirm(
         where,
         f"the cell's newest plan record names plan run {provenance}",
         lambda: _plan_record(repo, head, ag.check_name(stack, env), run),
@@ -596,6 +601,11 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
             f"::error::apply aborted for {where}: the cell's newest plan record names "
             f"{'no plan run' if recorded is None else f'plan run {recorded}'}, not plan run "
             f"{provenance}, which this auto apply applies; {_RETRY}"
+        )
+    if action not in ag.PUSH_ACTIONS:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: the cell's plan record names event action "
+            f"{action!r}, not a push (opened or synchronize); comment `shipmate apply`"
         )
     # The pusher's write access can be revoked while a wave waits on an approval.
     reason = _confirm(

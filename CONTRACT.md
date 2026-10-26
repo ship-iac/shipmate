@@ -1966,7 +1966,13 @@ on the pull request to apply it.``
   therefore refuses the run; `shipmate apply` applies it under the comment-time
   requirements. A newer autoplan of the head that published no apply check
   refuses it too, which the record-based binding of the bare and targeted forms
-  cannot see (§Apply-match fingerprint).
+  cannot see (§Apply-match fingerprint). Every cell's record must also name the
+  event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
+  of the head dispatches nothing yet becomes its newest autoplan, and whoever
+  clicked is no pusher. A record with no action, an older engine's, refuses too:
+  ``auto apply refused: the plan records of <cells> name no push event action
+  (opened or synchronize), so no push started that plan.`` The wave pre-apply
+  check repeats this on the cell's newest record.
 - **Pusher.** The plan run's `actor`, the pusher, must equal its
   `triggering_actor` and must have write access. A re-run of the autoplan keeps
   `actor` and names the re-runner as `triggering_actor`, so it refuses:
@@ -3127,8 +3133,9 @@ degrade to the workflow-run URL on no match.
 Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
 check, the `external_id` JSON record holds it alongside the id of the plan run
 that produced the cell, the number of the pull request that run planned, the
-digest of that cell's plan text, and the number of cells that run planned,
-below):
+digest of that cell's plan text, the number of cells that run planned, below,
+and `action`, the plan run's event action, empty when its payload names none, as
+a `shipmate plan` dispatch's does; §`apply_mode: auto` reads it):
 `sha256` over the sorted JSON of every non-empty
 `TF_VAR_*` environment variable (name→value) plus `TF_WORKSPACE` when it is set.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty

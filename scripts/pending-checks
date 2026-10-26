@@ -9,7 +9,9 @@ check. Each check's external_id is a JSON record of the TF_VAR fingerprint, the
 id of the plan run that produced the cell, the number of the pull request it
 planned, the sha256 of the plan text that run published, on either branch, and
 `cells`, the number of cells that run planned, against which apply judges whether
-the run published every check. That digest is computed here, over the whole
+the run published every check, and `action`, the plan run's event action (`""` when its
+payload names none, as a `shipmate plan` dispatch's does), which the auto apply requires
+to be a push's. That digest is computed here, over the whole
 plan.txt this job downloaded, never copied from the cell: it is what binds the
 reviewed text to the plan apply executes. The comment embeds a capped prefix of
 the same file, so the digest covers at least what a reviewer saw and often more.
@@ -35,7 +37,7 @@ import os
 import pathlib
 import sys
 
-from _shipmate import _load, cell_summaries, is_run_id, run_annotated
+from _shipmate import _load, cell_summaries, event_action, is_run_id, run_annotated
 
 ag = _load("apply-gate")
 gs = _load("gate-state")
@@ -60,9 +62,10 @@ def _plan_run():
     return plan_run
 
 
-def body(name, cell_json, cell, head_sha, plan_run, pr, cells):
+def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action):
     """The POST body for the cell summary `cell` at `cell_json`, whose apply check is `name`,
-    hashing the plan.txt beside it. `cells` is the number of cells the run planned."""
+    hashing the plan.txt beside it. `cells` is the number of cells the run planned, `action`
+    its event action."""
     txt = pathlib.Path(cell_json).with_name("plan.txt")
     if not txt.is_file():
         raise SystemExit(
@@ -83,6 +86,7 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells):
                 "plan_sha256": plan_sha256,
                 "pr": pr,
                 "cells": cells,
+                "action": action,
             }
         ),
         "output": {
@@ -146,8 +150,9 @@ def main():
         if todo:
             print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
         return
+    action = event_action()
     for name, cj, cell in todo:
-        print(json.dumps(body(name, cj, cell, head, plan_run, pr, len(cells))))
+        print(json.dumps(body(name, cj, cell, head, plan_run, pr, len(cells), action)))
 
 
 if __name__ == "__main__":

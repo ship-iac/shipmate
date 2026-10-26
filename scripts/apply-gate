@@ -207,6 +207,23 @@ def plan_records(check_run_lines, app_id):
     return out
 
 
+def plan_actions(check_run_lines, app_id):
+    """Map each App-authored apply check name to the `action` its newest record holds, None
+    when it holds none, as an older engine's does; callers compare it with `PUSH_ACTIONS`. A
+    name whose newest check carries no decodable record is absent. Read beside
+    `plan_records`, whose tuple every reader unpacks."""
+    out = {}
+    for name, run in latest_by_name(app_runs(check_run_lines, app_id)).items():
+        record = _decoded(run)
+        if record is not None:
+            out[name] = record.get("action")
+    return out
+
+
+#: The event actions of an autoplan a push started: only its plan applies automatically.
+PUSH_ACTIONS = ("opened", "synchronize")
+
+
 def incomplete_runs(check_run_lines, app_id):
     """Map each plan run that published only part of its apply checks to `(distinct names
     published, sorted distinct declared counts, whether any record has no valid count)`.

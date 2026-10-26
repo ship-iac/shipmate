@@ -474,6 +474,24 @@ def _malformed(what, e):
     )
 
 
+def refuse_pushed(runnable, actions):
+    """Refuse unless every cell in `runnable` records an event action in
+    `apply-gate.PUSH_ACTIONS` (`actions`, from `apply-gate.plan_actions`). A ready-for-review
+    or reopen autoplan of the same head dispatches no auto apply yet becomes the newest
+    autoplan, and its clicker is no pusher; a record with no action is an older engine's."""
+    bad = [
+        f"{ag.check_name(c['stack'], c['environment'])} ({actions.get(n)!r})"
+        for c in runnable
+        if actions.get(n := ag.check_name(c["stack"], c["environment"])) not in ag.PUSH_ACTIONS
+    ]
+    if bad:
+        raise SystemExit(
+            f"::error::auto apply refused: the plan records of {named(bad, _NAMED)} name no "
+            "push event action (opened or synchronize), so no push started that plan. "
+            + _AUTO_REMEDY
+        )
+
+
 def refuse_pusher(repo, plan_run):
     """Refuse unless `authorize.pusher_reason` admits the pusher of `plan_run`."""
     reason = az.pusher_reason(repo, plan_run, run=_run)
@@ -651,6 +669,7 @@ def bare_main(auto=False):
     if auto:
         provenance_run = ""
         if runnable:
+            refuse_pushed(runnable, ag.plan_actions(lines, app_id))
             refuse_pusher(repo, refuse_provenance(repo, head, runnable))
             provenance_run = runnable[0]["plan_run_id"]
         auto_outputs = {

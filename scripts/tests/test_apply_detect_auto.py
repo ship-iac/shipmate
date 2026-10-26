@@ -268,6 +268,38 @@ def test_a_rerun_by_anyone_but_the_apps_bot_refuses(tmp_path, monkeypatch, trigg
     )
 
 
+@pytest.mark.parametrize(
+    "action",
+    [
+        pytest.param("ready_for_review", id="ready"),
+        pytest.param("reopened", id="reopened"),
+        pytest.param("", id="dispatch"),
+        pytest.param(None, id="older-engine"),
+    ],
+)
+def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
+    """A ready-for-review or reopen autoplan of the head dispatches no auto apply but becomes
+    the newest autoplan; its clicker is no pusher. Nothing about the run or the pusher is read.
+
+    Mutation: drop `refuse_pushed` from `auto_main` (every row applies). Mutation: admit a
+    missing action (`actions.get(n) not in (*ag.PUSH_ACTIONS, None)`; older-engine applies)."""
+    calls = []
+    checks = [_check("stacks/app", "dev-eu", action=action)]
+    assert _refusal(tmp_path, monkeypatch, checks=checks, calls=calls) == (
+        f"::error::auto apply refused: the plan records of apply / stacks/app / dev-eu "
+        f"({action!r}) name no push event action (opened or synchronize), so no push started "
+        f"that plan. {REMEDY}"
+    )
+    assert not [c for c in calls if "/actions/" in c or "/collaborators/" in c]
+
+
+@pytest.mark.parametrize("action", ["opened", "synchronize"])
+def test_a_plan_a_push_started_applies(tmp_path, monkeypatch, action):
+    """Mutation: drop `opened` from `PUSH_ACTIONS` (the opened row refuses)."""
+    checks = [_check("stacks/app", "dev-eu", action=action)]
+    assert _applied(_run_auto(tmp_path, monkeypatch, checks=checks)) == [("stacks/app", "dev-eu")]
+
+
 def test_a_head_without_an_app_check_refuses(tmp_path, monkeypatch):
     """Mutation: drop the `if not slugs` refusal -- the actor refusal fires instead."""
     other = {"id": 15368, "slug": "github-actions"}
