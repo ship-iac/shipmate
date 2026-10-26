@@ -19,6 +19,7 @@ import tempfile
 
 from _shipmate import _load, _run, command_data, named, run_annotated, write_outputs
 
+ag = _load("apply-gate")
 ec = _load("env-config")
 wv = _load("waves")
 
@@ -27,11 +28,7 @@ _PR_EVENTS = ("pull_request", "pull_request_target")
 
 MATRIX_LIMIT = 256
 
-#: Where the consumer's workflow file must live. Three surfaces match this filename
-#: literally: `shipmate doctor` keys its fork-trigger exemption and its `shipmate.yml` probe on it,
-#: `actions/dispatch` sends every commented verb to it, and `scripts/onboard` renders it
-#: under this name. No plan-run lookup does — each reads a cell's own apply check.
-PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
+PLAN_WORKFLOW = ag.PLAN_WORKFLOW
 
 #: How many unmanaged stack paths the notice and the `unmanaged` output name; the rest are
 #: counted. The output crosses a job boundary in one environment variable, so it stays small.

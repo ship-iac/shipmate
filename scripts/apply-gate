@@ -24,6 +24,7 @@ queued duplicate below an older completed run).
 
 import json
 import os
+import posixpath
 import re
 import sys
 import urllib.parse
@@ -265,12 +266,15 @@ def _plan_run(record):
     return plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None
 
 
-#: The consumer's workflow file's basename; `build-matrix.PLAN_WORKFLOW` is its path.
-AUTOPLAN_WORKFLOW = "shipmate.yml"
+#: Where the consumer's workflow file must live. Three surfaces match this filename
+#: literally: `shipmate doctor` keys its fork-trigger exemption and its `shipmate.yml` probe on it,
+#: `actions/dispatch` sends every commented verb to it, and `scripts/onboard` renders it
+#: under this name. `newest_autoplan` lists its runs by basename.
+PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 
 def newest_autoplan(repo, head, *, run):
-    """The newest run id of `AUTOPLAN_WORKFLOW` started by `pull_request_target` on `head`, or
+    """The newest run id of `PLAN_WORKFLOW` started by `pull_request_target` on `head`, or
     None when none is listed. Every page is read."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
     listing = run(
@@ -278,7 +282,7 @@ def newest_autoplan(repo, head, *, run):
             "gh",
             "api",
             "--paginate",
-            f"repos/{repo}/actions/workflows/{AUTOPLAN_WORKFLOW}/runs?{query}",
+            f"repos/{repo}/actions/workflows/{posixpath.basename(PLAN_WORKFLOW)}/runs?{query}",
             "--jq",
             ".workflow_runs[].id",
         ]
