@@ -31,9 +31,10 @@ GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
 #: The guard job's whole step list per workflow, as `(if, ::error:: line)`. The bot-actor
 #: rejection runs first in both. `apply.yml` also refuses an `auto` dispatch reaching a caller job
-#: that does not pass `auto: true`, which would run the App's dispatch as a bare apply, and
-#: `auto: true` on any other run. A called workflow's `github` context is its caller's, so
-#: `github.event.inputs.verb` is the dispatch's own verb.
+#: that does not pass `auto: true`, which would run the App's dispatch as a bare apply,
+#: `auto: true` on any other run, and a dispatch without it whose verb is not `apply`, which
+#: fails closed when the dispatch inputs read empty. A called workflow's `github` context is its
+#: caller's, so `github.event.inputs.verb` is the dispatch's own verb.
 GUARD_STEPS = {
     "apply.yml": [
         (
@@ -62,6 +63,18 @@ GUARD_STEPS = {
             (
                 "::error::apply refused: the calling job passes 'auto: true', but this run is "
                 "not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
+            ),
+        ),
+        (
+            (
+                "${{ github.event_name == 'workflow_dispatch' && !inputs.auto "
+                "&& github.event.inputs.verb != 'apply' }}"
+            ),
+            (
+                "::error::apply refused: this run is not a dispatch with verb 'apply' and the "
+                "calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull "
+                "request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate "
+                "doctor names the difference)"
             ),
         ),
     ],
@@ -139,7 +152,8 @@ def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
 
     Mutations (each run, red): drop `&& !inputs.auto` from apply.yml's second step; replace
     `||` with `&&` in its third; delete the third step; swap `exit 1` for `exit 0` in the
-    second."""
+    second; `==` for `!=` in the fourth; drop `!inputs.auto` from the fourth (every auto run
+    refuses there); delete the fourth step."""
     for name, expected in GUARD_STEPS.items():
         steps = workflow_jobs(name)[GUARD_JOB]["steps"]
         got = [(step.get("if"), step.get("run")) for step in steps]
