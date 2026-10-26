@@ -521,13 +521,14 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-actions: write
-        permission-pull-requests: write
 
     - name: Dispatch an auto apply
       if: ${{ steps.autodecide.outputs.envs != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.autotoken.outputs.token }}
+        # The main mint's token: it holds `pull-requests: write` and exists when `autotoken` failed.
+        REPLY_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_AUTO_ENVS: ${{ steps.autodecide.outputs.envs }}
         # dispatch-body's inputs; no ENVIRONMENT, so the body carries no environment key.
         VERB: auto
@@ -537,20 +538,20 @@ runs:
       run: |
         set -euo pipefail
         scripts="$GITHUB_ACTION_PATH/../../scripts"
-        # Reviewer-facing degrade only: it warns and exits 0, and a failed dispatch replies with
-        # the remedy. With no token there is nothing to reply with.
-        if [ -z "${GH_TOKEN:-}" ]; then
-          echo "::warning::could not mint the auto apply dispatch token for $SHIPMATE_AUTO_ENVS; comment shipmate apply to apply"
+        # Reviewer-facing degrade only: a failed mint or dispatch warns, replies with the remedy
+        # and exits 0.
+        not_started() {
+          echo "::warning::$1 for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
+          text="auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
+            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply failure reply"
           exit 0
-        fi
+        }
+        [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
         if ! body=$(python3 "$scripts/dispatch-body") \
           || ! gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/shipmate.yml/dispatches" \
             --input - <<<"$body" >/dev/null; then
-          echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
-          text="auto apply not started: the dispatch failed; comment \`shipmate apply\`"
-          SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
-            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply failure reply"
-          exit 0
+          not_started "the auto apply dispatch"
         fi
         echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"
 

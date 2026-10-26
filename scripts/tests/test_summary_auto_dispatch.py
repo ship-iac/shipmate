@@ -129,7 +129,8 @@ def test_the_dispatch_steps_are_wired_exactly():
 
     Mutations: drop `&& steps.upsert.outputs.result != 'moved'`; add `ENVIRONMENT: x` to the
     dispatch step; drop `SHIPMATE_GITHUB_VARS` from the decision; drop the mint's `if:`; add
-    `permission-contents: read` to the mint; dispatch with `steps.token.outputs.token`."""
+    `permission-pull-requests: write` to the mint; dispatch with `steps.token.outputs.token`;
+    reply with `steps.autotoken.outputs.token`."""
     decide = step_by("summary", name=DECIDE)
     assert decide["id"] == "autodecide"
     assert decide["if"] == (
@@ -153,12 +154,12 @@ def test_the_dispatch_steps_are_wired_exactly():
         "owner": "${{ github.repository_owner }}",
         "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "write",
-        "permission-pull-requests": "write",
     }
     dispatch = step_by("summary", name=DISPATCH)
     assert dispatch["if"] == "${{ steps.autodecide.outputs.envs != '' }}"
     assert dispatch["env"] == {
         "GH_TOKEN": "${{ steps.autotoken.outputs.token }}",
+        "REPLY_TOKEN": "${{ steps.token.outputs.token }}",
         "SHIPMATE_AUTO_ENVS": "${{ steps.autodecide.outputs.envs }}",
         "VERB": "auto",
         "REF": "${{ inputs.head-sha }}",
@@ -178,6 +179,7 @@ elif [[ "$*" == *dispatches* ]]; then
   exit "$FAKE_DISPATCH_RC"
 elif [[ "$*" == *comments* ]]; then
   cat > "$REPLY_BODY"
+  printf '%s' "$GH_TOKEN" > "$REPLY_BODY.token"
 fi
 """
 
@@ -215,6 +217,7 @@ def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x"):  # noqa: S107 -
         "GITHUB_EVENT_NAME": "pull_request_target",
         "GITHUB_RUN_ATTEMPT": "1",
         "GH_TOKEN": token,
+        "REPLY_TOKEN": "main-token",
         "SHIPMATE_GITHUB_VARS": "",
         "SHIPMATE_IS_DRAFT": "false",
         "SHIPMATE_GATE_STATE": "pending",
@@ -265,16 +268,26 @@ def test_a_dispatch_sends_the_exact_body(tmp_path):
     }
 
 
+_REPLY_HEAD = [
+    "### shipmate apply",
+    "",
+    "🔴 failed: auto apply not started: the dispatch failed; comment `shipmate apply`",
+]
+
+
 @bash_only
-def test_a_failed_mint_warns_and_calls_nothing(tmp_path):
-    """Mutation: drop the empty-token branch (the dispatch is attempted)."""
+def test_a_failed_mint_replies_with_the_main_token_and_dispatches_nothing(tmp_path):
+    """Mutations: drop the empty-token check (the dispatch is attempted); reply with `GH_TOKEN`,
+    the empty dispatch token, in place of `REPLY_TOKEN`."""
     proc, calls, _ = _run(tmp_path, DISPATCH, token="")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert calls == []
-    assert proc.stdout == (
-        "::warning::could not mint the auto apply dispatch token for dev; comment shipmate apply "
-        "to apply\n"
+    assert _paths(calls) == ["repos/acme/demo/issues/42/comments"]
+    assert (
+        "::warning::the auto apply dispatch token mint for dev failed; comment shipmate apply to "
+        "apply" in proc.stdout
     )
+    assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
+    assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
 
 
 @bash_only
@@ -282,7 +295,7 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
     """The step makes no status or check-run call, so the gate stays as written.
 
     Mutations: `exit 1` in place of the failure branch's `exit 0`; drop the reply call; change
-    the reply text."""
+    the reply text; reply with `GH_TOKEN`, the dispatch token."""
     proc, calls, _ = _run(tmp_path, DISPATCH, dispatch_rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == [
@@ -293,9 +306,5 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
         "::warning::the auto apply dispatch for dev failed; comment shipmate apply to apply"
         in proc.stdout
     )
-    reply = (tmp_path / "reply.md").read_text(encoding="utf-8")
-    assert reply.splitlines()[:3] == [
-        "### shipmate apply",
-        "",
-        "🔴 failed: auto apply not started: the dispatch failed; comment `shipmate apply`",
-    ]
+    assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
+    assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
