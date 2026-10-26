@@ -122,6 +122,7 @@ jobs:
       head_sha: ${{ steps.d.outputs.head_sha }}
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
+      skipped_after: ${{ steps.d.outputs.skipped_after }}
       review_held_envs: ${{ steps.d.outputs.review_held_envs }}
       applied_exempt_envs: ${{ steps.d.outputs.applied_exempt_envs }}
       review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
@@ -131,6 +132,7 @@ jobs:
       provenance_run: ${{ steps.d.outputs.provenance_run }}
       base_sha: ${{ steps.d.outputs.base_sha }}
       overlap_cells: ${{ steps.d.outputs.overlap_cells }}
+      bare_envs: ${{ steps.d.outputs.bare_envs }}
       refusal: ${{ steps.d.outputs.refusal }}
     steps:
       - if: ${{ !inputs.auto }}
@@ -288,12 +290,14 @@ jobs:
           envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
           excluded-envs: ${{ needs.detect.outputs.excluded_envs }}
           skipped-envs: ${{ needs.detect.outputs.skipped_envs }}
+          skipped-after: ${{ needs.detect.outputs.skipped_after }}
           review-held-envs: ${{ needs.detect.outputs.review_held_envs }}
           applied-exempt-envs: ${{ needs.detect.outputs.applied_exempt_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
           locked-cells: ${{ needs.detect.outputs.locked_cells }}
           overlap-cells: ${{ needs.detect.outputs.overlap_cells }}
+          bare-envs: ${{ needs.detect.outputs.bare_envs }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
           env-order: ${{ needs.detect.outputs.env_order }}

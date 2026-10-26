@@ -225,6 +225,7 @@ def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
     assert "overlap_cells" not in parsed
+    assert "bare_envs" not in parsed
     assert reads == []
 
 
@@ -523,3 +524,33 @@ def test_an_unresolvable_merge_base_refuses_the_run(tmp_path, monkeypatch):
     assert _refusal(tmp_path, monkeypatch, base_changed=error) == (
         "::error::could not resolve the merge base"
     )
+
+
+def test_a_skipped_auto_environment_names_the_bare_environment_it_waits_on(tmp_path, monkeypatch):
+    """`dev` is bare, so the auto run leaves it to a bare apply and names it in `bare_envs`; `stg`
+    needs it and `prod` needs `stg`, so both skip and both name `dev`.
+
+    Mutation: name only the direct `needs` predecessors -- `prod` names none, red.
+    Mutation: write `bare_envs` as `[]` -- red."""
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        auto=("prod", "stg"),
+        other=("dev",),
+        order={"stg": ["dev"], "prod": ["stg"]},
+    )
+    assert _applied(parsed) == []
+    assert json.loads(parsed["skipped_envs"]) == ["prod", "stg"]
+    assert json.loads(parsed["skipped_after"]) == {"prod": ["dev"], "stg": ["dev"]}
+    assert json.loads(parsed["bare_envs"]) == ["dev"]
+
+
+def test_a_held_bare_environment_is_named_held_not_left_for_a_bare_apply(tmp_path, monkeypatch):
+    """Under REVIEW_REQUIRED the bare `stage` is held (its entry is not review-exempt), so it is
+    named on the held line alone; the auto `dev-eu` applies.
+
+    Mutation: leave `stopped` out of the `bare_envs` subtraction -- `stage` is named, red."""
+    parsed = _run_auto(tmp_path, monkeypatch, other=("stage",), decision="REVIEW_REQUIRED")
+    assert json.loads(parsed["review_held_envs"]) == ["stage"]
+    assert json.loads(parsed["bare_envs"]) == []
+    assert json.loads(parsed["skipped_after"]) == {}

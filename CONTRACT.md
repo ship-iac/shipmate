@@ -2747,11 +2747,21 @@ function, and the size budget never sheds a footer line — so the comment's mos
 actionable warning cannot be lost on either path. In the order they render:
 
 - **targeted** — ``🟡 <env>: left pending (targeted), comment `shipmate apply <env>` ``.
-- **skipped** — `⚪ <env>: skipped, ordered after an environment not fully
-  applying this run`. It names no cause, since being skipped can mean an
-  unapplied `targeted` environment, a held one, one holding a waiting cell, or
-  one holding a cell another pull request locks —
-  the targeted, held, locked and waiting lines carry that distinction instead.
+- **left pending (not auto)** — ``🟡 <env>: left pending (not `apply_mode: auto`),
+  comment `shipmate apply` ``, one per pending environment an `auto` apply leaves
+  to a bare apply because it is neither `auto`, `targeted` nor held
+  (`bare_envs`). Only the `auto` form renders it.
+- **skipped** — `⚪ <env>: skipped, waits on <pred> (<remedy>)`, more than one
+  predecessor separated by `; `. Each `<pred>` is a transitive `needs`
+  predecessor not fully applying for a cause of its own (`skipped_after`), and
+  `<remedy>` follows its kind: `` apply it first with `shipmate apply <pred>` `` for
+  a `targeted` one, `it is held until the pull request is approved` for a held
+  one (`` , then comment `shipmate apply <pred>` `` when also `targeted`), `a cell of
+  it does not apply this run; see its line below` for one holding a locked,
+  overlap or waiting cell, and otherwise, an `auto` apply's environment that is
+  not `auto`, `` comment `shipmate apply`, which applies them in order ``. A detect
+  that wrote no `skipped_after` renders the cause-agnostic `⚪ <env>: skipped,
+  ordered after an environment not fully applying this run`.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
   environment that is also `targeted` is listed once, here and not on a targeted
   line, with its command: ``⚪ prod: held, the review state does not permit
@@ -2915,7 +2925,9 @@ waiting cells are one line per blocker, keeping every blocker and its remedy;
 the `held:` remedy line and the locked lines are unchanged:
 
 - `` 🟡 left pending (targeted): <envs>; comment `shipmate apply <env>` for each ``
-- `⚪ skipped, ordered after an environment not fully applying this run: <envs>`
+- ``🟡 left pending (not `apply_mode: auto`): <envs>; comment `shipmate apply` ``
+- `⚪ skipped, waits on <preds>: <envs>`, one per distinct `<preds>` with its
+  remedies, as on the per-environment line
 - `⚪ held, the review state does not permit applying: <envs>`, followed by
   `` ; once the hold clears, comment `shipmate apply <env>` for <envs> `` naming
   the held environments that are also `targeted`, when there are any

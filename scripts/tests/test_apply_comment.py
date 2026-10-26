@@ -447,7 +447,9 @@ def test_the_footer_lines_of_the_all_environments_form():
 
     Mutation: `needs an approving review` in the held line -- red.
     Mutation: list every `excluded` env on a targeted line -- `sbx` appears twice, red.
-    Mutation: append a `gate: pending until every environment is applied` line -- red."""
+    Mutation: append a `gate: pending until every environment is applied` line -- red.
+    Without `skipped_after`, the skipped line is the cause-agnostic sentence. Mutation: render
+    `waits on ` in `_skipped_line` whatever `waits` holds -- red."""
     assert ac._footer_parts(["prod", "sbx"], ["stg"], ["dev", "sbx"]) == [
         "🟡 prod: left pending (targeted), comment `shipmate apply prod`",
         "⚪ stg: skipped, ordered after an environment not fully applying this run",
@@ -2432,4 +2434,104 @@ def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tm
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the base also changed the pending "
         f"cells' stacks {_MAIN_AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
+    )
+
+
+#: Every predecessor kind a skipped env can wait on: `tgt` targeted, `rev` held, `both` held and
+#: targeted, `lck` holding a locked cell, `dev` an auto run's bare env.
+_KINDS = {
+    "excluded": ["tgt", "both"],
+    "skipped": ["s1", "s2", "s3", "s4"],
+    "held": ["rev", "both"],
+    "locked": [{"stack": "stacks/app", "environment": "lck", "holder": 7}],
+    "skipped_after": {"s1": ["tgt"], "s2": ["rev", "both"], "s3": ["lck", "dev"], "s4": ["tgt"]},
+    "bare": ["dev"],
+}
+_S1 = "tgt (apply it first with `shipmate apply tgt`)"
+_S2 = (
+    "rev (it is held until the pull request is approved); both (it is held until the pull "
+    "request is approved, then comment `shipmate apply both`)"
+)
+_S3 = (
+    "lck (a cell of it does not apply this run; see its line below); dev (comment "
+    "`shipmate apply`, which applies them in order)"
+)
+_HELD_REMEDY_LINE = (
+    "held: get an approving review, or resolve or dismiss a requested-changes review. "
+    "The run log's apply-all-detect notice names the decision seen."
+)
+_LCK = (
+    "🔒 locked by #7: stacks/app / lck. Wait for #7 to merge or close, then re-plan, or comment "
+    "`shipmate unlock lck --evict`."
+)
+
+
+def test_a_skipped_env_names_each_predecessor_with_the_remedy_of_its_kind():
+    """Mutation: drop the cell-blocked branch from `_predecessor_remedy` -- `lck` gets `shipmate
+    apply`, red.
+    Mutation: return the bare-apply remedy for a targeted predecessor -- `tgt`, red.
+    Mutation: drop the `bare` lines from `_per_env_lines` -- red."""
+    assert ac._footer_parts(**_KINDS) == [
+        "🟡 tgt: left pending (targeted), comment `shipmate apply tgt`",
+        "🟡 dev: left pending (not `apply_mode: auto`), comment `shipmate apply`",
+        f"⚪ s1: skipped, waits on {_S1}",
+        f"⚪ s2: skipped, waits on {_S2}",
+        f"⚪ s3: skipped, waits on {_S3}",
+        f"⚪ s4: skipped, waits on {_S1}",
+        "⚪ rev: held, the review state does not permit applying",
+        (
+            "⚪ both: held, the review state does not permit applying; once it clears, comment "
+            "`shipmate apply both`"
+        ),
+        _HELD_REMEDY_LINE,
+        _LCK,
+    ]
+
+
+def test_the_compact_form_groups_skipped_envs_by_what_they_wait_on():
+    """Mutation: drop the `bare` line from `_grouped_lines` -- red.
+    Mutation: one skipped line per env in `_grouped_lines` -- s1 and s4 split, red."""
+    assert ac._footer_parts(**_KINDS, compact=True) == [
+        "🟡 left pending (targeted): tgt; comment `shipmate apply <env>` for each",
+        "🟡 left pending (not `apply_mode: auto`): dev; comment `shipmate apply`",
+        f"⚪ skipped, waits on {_S1}: s1, s4",
+        f"⚪ skipped, waits on {_S2}: s2",
+        f"⚪ skipped, waits on {_S3}: s3",
+        (
+            "⚪ held, the review state does not permit applying: rev, both; once the hold clears, "
+            "comment `shipmate apply <env>` for both"
+        ),
+        _HELD_REMEDY_LINE,
+        _LCK,
+    ]
+
+
+def test_the_skipped_and_bare_lines_escape_every_env_name():
+    """Mutation: drop `_esc` from the `skipped_after` predecessors -- red.
+    Mutation: drop `_esc` from `bare` -- red."""
+    assert ac._footer_parts([], ["s<1"], skipped_after={"s<1": ["d<2"]}, bare=["d<2"]) == [
+        "🟡 d&lt;2: left pending (not `apply_mode: auto`), comment `shipmate apply`",
+        (
+            "⚪ s&lt;1: skipped, waits on d&lt;2 (comment `shipmate apply`, which applies them in "
+            "order)"
+        ),
+    ]
+
+
+def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
+    monkeypatch, tmp_path
+):
+    """Mutation: read `SHIPMATE_SKIPPED_AFTER` under another name in `main` -- the
+    cause-agnostic line, red.
+    Mutation: read `SHIPMATE_BARE_ENVS` under another name in `main` -- no bare line, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", '["prod"]')
+    monkeypatch.setenv("SHIPMATE_SKIPPED_AFTER", '{"prod": ["dev"]}')
+    monkeypatch.setenv("SHIPMATE_BARE_ENVS", '["dev"]')
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🟢 no pending applies {_MAIN_AT}\n\n"
+        "🟡 dev: left pending (not `apply_mode: auto`), comment `shipmate apply`\n"
+        "⚪ prod: skipped, waits on dev (comment `shipmate apply`, which applies them in order)"
     )

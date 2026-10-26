@@ -596,7 +596,8 @@ def test_main_skips_only_the_successors_of_a_pending_targeted_env(tmp_path, monk
     after it, applies.
 
     Mutation: `stopped = pending_envs & set(held)` -- prod-eu applies, red.
-    Mutation: `stopped = set(targeted + held)` -- after-sbx is skipped, red."""
+    Mutation: `stopped = set(targeted + held)` -- after-sbx is skipped, red.
+    Mutation: leave `stopped` out of `skipped_after`'s blockers -- prod-eu names none, red."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -608,6 +609,7 @@ def test_main_skips_only_the_successors_of_a_pending_targeted_env(tmp_path, monk
     )
     assert json.loads(parsed["excluded_envs"]) == ["stage-eu"]
     assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["skipped_after"]) == {"prod-eu": ["stage-eu"]}
     assert _wave_envs(parsed) == ["after-sbx", "dev-eu"]
 
 
@@ -1061,7 +1063,9 @@ def test_main_skips_the_needs_successor_of_an_env_with_a_waiting_cell(tmp_path, 
     applying, so prod-eu, which needs it, is skipped and `box/prod-eu` does not apply.
 
     Mutation: compute `blocked_envs` once in `settle` (pass `stopped` for `unavailable`) --
-    prod-eu applies."""
+    prod-eu applies.
+    Mutation: leave the waiting cells' envs out of `skipped_after`'s blockers -- prod-eu names
+    none, red."""
     parsed = _cross_env(
         tmp_path,
         monkeypatch,
@@ -1076,6 +1080,7 @@ def test_main_skips_the_needs_successor_of_an_env_with_a_waiting_cell(tmp_path, 
     )
     assert _applied(parsed) == []
     assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["skipped_after"]) == {"prod-eu": ["dev-eu"]}
     assert json.loads(parsed["waiting_cells"]) == _PLATFORM_WAITS
     assert json.loads(parsed["excluded_envs"]) == ["dev-us"]
 
@@ -1321,11 +1326,38 @@ def test_main_skips_the_needs_successor_of_an_env_holding_a_locked_cell(tmp_path
     not fully applying, so prod-eu, which needs it, is skipped.
 
     Mutation: leave the locked cells' envs out of `settle`'s `unavailable` -- `box/prod-eu`
-    applies."""
+    applies.
+    Mutation: leave the held cells' envs out of `skipped_after`'s blockers -- prod-eu names
+    none, red."""
     parsed = _locked(tmp_path, monkeypatch, held(aad.cl, "stacks/workers", "dev-eu", 7))
     assert _applied(parsed) == [("stacks/dns", "dev-eu"), ("stacks/platform", "dev-eu")]
     assert json.loads(parsed["waiting_cells"]) == []
     assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["skipped_after"]) == {"prod-eu": ["dev-eu"]}
+
+
+def test_a_skipped_env_names_every_transitive_predecessor_with_a_cause_of_its_own(
+    tmp_path, monkeypatch
+):
+    """dev is targeted and pending; stg needs dev and holds a cell PR 7 locks; prod needs stg.
+    Both are skipped. prod names dev, two levels up, and stg, which is skipped and also locked,
+    so applying dev alone would not free prod.
+
+    Mutation: name only the direct `needs` predecessors -- prod names stg alone, red.
+    Mutation: subtract the skipped envs from the blockers -- prod names dev alone, red."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev", "prod", "stg"],
+        cells=3,
+        order={"stg": ["dev"], "prod": ["stg"]},
+        targeted=["dev"],
+        decision="APPROVED",
+        locks=held(aad.cl, "stacks/app", "stg", 7),
+    )
+    assert _wave_envs(parsed) == []
+    assert json.loads(parsed["skipped_envs"]) == ["prod", "stg"]
+    assert json.loads(parsed["skipped_after"]) == {"prod": ["dev", "stg"], "stg": ["dev"]}
 
 
 def test_main_applies_a_cell_the_applying_pull_request_holds(tmp_path, monkeypatch):

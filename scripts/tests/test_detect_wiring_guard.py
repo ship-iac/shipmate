@@ -98,6 +98,7 @@ _APPLY_DETECT_OUTPUTS = {
     "head_sha": "${{ steps.d.outputs.head_sha }}",
     "excluded_envs": "${{ steps.d.outputs.excluded_envs }}",
     "skipped_envs": "${{ steps.d.outputs.skipped_envs }}",
+    "skipped_after": "${{ steps.d.outputs.skipped_after }}",
     "review_held_envs": "${{ steps.d.outputs.review_held_envs }}",
     "applied_exempt_envs": "${{ steps.d.outputs.applied_exempt_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
@@ -107,6 +108,7 @@ _APPLY_DETECT_OUTPUTS = {
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
     "overlap_cells": "${{ steps.d.outputs.overlap_cells }}",
+    "bare_envs": "${{ steps.d.outputs.bare_envs }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
 }
 
@@ -220,7 +222,7 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
     orders environments by name; delete `locked_cells`; delete `provenance_run`; delete
-    `base_sha`; delete `overlap_cells`."""
+    `base_sha`; delete `overlap_cells`; delete `skipped_after`; delete `bare_envs`."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -290,6 +292,15 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.skipped_envs }}",
     },
+    "skipped_after": {
+        "description": (
+            "Bare and auto forms: JSON object mapping each env in skipped_envs to its transitive "
+            "`needs` predecessors not fully applying for a cause of their own (targeted, held, "
+            "holding a waiting, locked or overlap cell, or, under the auto form, not "
+            "`apply_mode: auto`). The targeted form writes none."
+        ),
+        "value": "${{ steps.d.outputs.skipped_after }}",
+    },
     "review_held_envs": {
         "description": (
             "Bare and auto forms: JSON list of envs held because the PR is not reviewed. The "
@@ -357,6 +368,13 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.overlap_cells }}",
     },
+    "bare_envs": {
+        "description": (
+            "Auto form only: JSON list of pending envs neither `apply_mode: auto`, targeted nor "
+            "held, left for a bare `shipmate apply`."
+        ),
+        "value": "${{ steps.d.outputs.bare_envs }}",
+    },
     "refusal": {
         "description": (
             "The first error of the `::error::` message that failed the step (a refusal or a "
@@ -375,5 +393,6 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     delete its `refusal` output; delete its `env_order` output; delete its `locked_cells`
     output; restore `skipped_envs`' description without the lock cause; delete its
     `provenance_run` output; delete its `base_sha` output; delete its `overlap_cells` output;
-    restore `skipped_envs`' description without the overlap cause."""
+    restore `skipped_envs`' description without the overlap cause; delete its `skipped_after`
+    output; delete its `bare_envs` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

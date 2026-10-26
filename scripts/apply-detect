@@ -521,7 +521,8 @@ def auto_main():
     run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
     pusher must have write access (`refuse_pusher`). Writes the bare outputs plus
     `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
-    on, empty when no pull request read was needed, and `overlap_cells`."""
+    on, empty when no pull request read was needed, `overlap_cells`, and `bare_envs`, the
+    pending environments neither `auto`, `targeted` nor held, left for a bare apply."""
     bare_main(auto=True)
 
 
@@ -554,7 +555,8 @@ def bare_main(auto=False):
       `apply_mode: auto` — are skipped with a notice
       (`skipped_after_targeted`, named for its first cause) — their ordering
       precondition cannot be met this run, exactly like a failed predecessor
-      level;
+      level. `skipped_after` maps each to its transitive predecessors not fully
+      applying for a cause of their own;
     - envs the PR's review decision does not authorize are held until it carries
       an approving review, dropped the same way; an entry holding
       `review: false` is exempt from that hold;
@@ -594,8 +596,9 @@ def bare_main(auto=False):
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(targeted + held)
-    if auto:
-        stopped |= pending_envs - set(bm.ec.auto_envs(table))
+    # Pending envs the auto form leaves to a bare apply: neither targeted nor held, not auto.
+    unselected = pending_envs - set(bm.ec.auto_envs(table)) - stopped if auto else set()
+    stopped |= unselected
     # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
     # waiting cell's remedy names it.
     candidates = [c for c in pending if c["environment"] not in stopped]
@@ -605,15 +608,12 @@ def bare_main(auto=False):
         base_sha = wait_mergeable(repo, pr_number, head)
         overlap = overlap_cells(candidates, bm.base_changed_stacks(base_sha))
     locked = locked_cells(repo, candidates, pr_number)
-    skipped, run, waiting = settle(
-        order,
-        stopped,
-        pending,
-        deps,
-        tags_by_stack,
-        levels,
-        {(c["stack"], c["environment"]) for c in [*locked, *overlap]},
-    )
+    holds = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
+    skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)
+    # A skipped env names the predecessors not fully applying for a cause of their own, each with
+    # a remedy of its kind; one skipped for nothing but its own predecessors is passed through.
+    blockers = stopped | {e for _, e in holds} | {w["environment"] for w in waiting}
+    skipped_after = {e: sorted(wv.predecessors(order, e) & blockers) for e in skipped}
     wv.refuse_inversions(
         run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
     )
@@ -635,6 +635,7 @@ def bare_main(auto=False):
             "provenance_run": provenance_run,
             "base_sha": base_sha,
             "overlap_cells": json.dumps(overlap),
+            "bare_envs": json.dumps(sorted(unselected)),
         }
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
@@ -676,6 +677,7 @@ def bare_main(auto=False):
         head_sha=head,
         excluded_envs=json.dumps(excluded),
         skipped_envs=json.dumps(skipped),
+        skipped_after=json.dumps(skipped_after),
         review_held_envs=json.dumps(held),
         applied_exempt_envs=json.dumps(applied_exempt),
         review_not_required_envs=json.dumps(no_review_required),
