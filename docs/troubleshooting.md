@@ -1673,10 +1673,10 @@ An `auto` environment applies only through the autoplan of a ready pull request
    comment's error fence; the entries below quote each one.
 3. The `auto` run in the Actions tab, for a run that posted no comment.
 
-Comment `shipmate apply` to apply what the `auto` run did not, under the
-comment-time apply requirements, except a cell held because the base changed its
-stack: update the branch from the base and push (§`⚪ held, the base changed
-these stacks after this branch left it`).
+Once the `auto` run has finished, comment `shipmate apply` to apply what it did
+not, under the comment-time apply requirements, except a cell held because the
+base changed its stack: update the branch from the base and push (§`⚪ held, the
+base changed these stacks after this branch left it`).
 
 ### `auto apply not started: the dispatch failed`
 
