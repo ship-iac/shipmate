@@ -1966,7 +1966,10 @@ on the pull request to apply it.``
   the pusher @<login>'s permission is `<permission>`.`` for `read` and `none`,
   and ``... and GitHub reported the pusher @<login>'s permission as `<permission>`,
   which this engine does not admit.`` for any other value. An unreadable
-  permission ends ``push again, or a writer comments `shipmate apply`.``
+  permission ends ``push again, or a writer comments `shipmate apply`.`` A
+  pusher whose login ends `[bot]` refuses without a read: ``not authorized: the
+  head was pushed by @<login>, a bot account, which auto never authorizes; a
+  writer comments `shipmate apply`.``
 
 With no cell to apply, neither the plan run nor the pusher is read.
 

@@ -1731,6 +1731,12 @@ permission other than `read`, `none`, `write` or `admin` reads ``GitHub reported
 the pusher @<login>'s permission as `<permission>`, which this engine does not
 admit``.
 
+### `not authorized: the head was pushed by @<login>, a bot account`
+
+The autoplan's pusher is a bot, such as `renovate[bot]`. `auto` never
+authorizes a bot's push: a bot has no repository permission to read. Nothing
+applied. A collaborator with write access comments `shipmate apply`.
+
 ### `auto apply refused: pull request #<n> head is <sha>, but this run applies <sha>`
 
 A push landed after the autoplan. The new head's autoplan decides its own

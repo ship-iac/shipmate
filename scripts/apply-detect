@@ -459,8 +459,14 @@ def refuse_provenance(repo, head, runnable):
 
 def refuse_pusher(repo, run):
     """Refuse unless `run`'s triggering actor, the pusher, has write access, decided by
-    `authorize._permission_reason`. A failed read is an unreadable permission."""
+    `authorize._permission_reason`. A failed read is an unreadable permission. A bot pusher
+    (`renovate[bot]`) has no collaborator permission to read and is refused on its own."""
     login = (run.get("triggering_actor") or {}).get("login") or ""
+    if login.endswith("[bot]"):
+        raise SystemExit(
+            f"::error::not authorized: the head was pushed by @{login}, a bot account, which "
+            "auto never authorizes; a writer comments `shipmate apply`."
+        )
     readable = _LOGIN.fullmatch(login) is not None
     permission = ""
     if readable:

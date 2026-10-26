@@ -444,7 +444,7 @@ def test_a_base_tip_that_cannot_be_read_refuses(tmp_path, monkeypatch, pull, tip
     )
 
 
-@pytest.mark.parametrize("actor", [None, {"login": "x[bot]"}])
+@pytest.mark.parametrize("actor", [None, {"login": "a b"}])
 def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monkeypatch, actor):
     """No `triggering_actor`, or a login outside `_LOGIN`, is never put into a URL.
 
@@ -456,6 +456,23 @@ def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monk
         "::error::not authorized: could not read the pusher's permission on this repository, "
         "so `shipmate apply` was not run. This run's log has the API response; push again, or "
         "a writer comments `shipmate apply`."
+    )
+
+
+def test_a_bot_pusher_refuses_naming_the_bot(tmp_path, monkeypatch):
+    """A bot's push never auto-applies, and its refusal says so rather than calling the
+    permission unreadable.
+
+    Mutation: drop the `[bot]` branch from `refuse_pusher` -- the unreadable wording, red."""
+    run = {
+        "id": int(RUN),
+        "event": "pull_request_target",
+        "head_sha": HEAD,
+        "triggering_actor": {"login": "renovate[bot]"},
+    }
+    assert _refusal(tmp_path, monkeypatch, run=run) == (
+        "::error::not authorized: the head was pushed by @renovate[bot], a bot account, which "
+        "auto never authorizes; a writer comments `shipmate apply`."
     )
 
 
