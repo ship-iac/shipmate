@@ -261,6 +261,26 @@ def test_check_runs_sends_this_whole_argv(jq, expected):
     ]
 
 
+def test_check_runs_narrows_to_one_name_url_encoded():
+    """A name holds spaces and slashes. Mutations, each run: drop the `name` query; quote the
+    name with the default `safe="/"`."""
+    calls, run = _recording()
+    check_runs("o/r", _SHA, run=run, name="apply / stacks/a / dev")
+    assert calls == [
+        [
+            "gh",
+            "api",
+            "--paginate",
+            (
+                f"repos/o/r/commits/{_SHA}/check-runs?filter=all&per_page=100"
+                "&check_name=apply%20%2F%20stacks%2Fa%20%2F%20dev"
+            ),
+            "--jq",
+            ".check_runs[]",
+        ]
+    ]
+
+
 @pytest.mark.parametrize("sha", ["A" * 40, "a" * 39, "../x"])
 def test_check_runs_refuses_a_bad_sha_before_any_call(sha):
     """Mutation: move `validate_head_sha` after the `run` call -- the double records a call."""

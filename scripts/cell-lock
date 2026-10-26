@@ -566,6 +566,12 @@ def _verify_pull(repo, pr, head, where, run):
     return pull
 
 
+def _plan_record(repo, head, name, run):
+    """The plan run the newest App-authored check named `name` on `head` records, or None."""
+    lines = check_runs(repo, head, run=run, name=name).splitlines()
+    return ag.plan_records(lines, os.environ.get("SHIPMATE_APP_ID", "")).get(name, (None,))[0]
+
+
 def _verify_auto(repo, head, provenance, env, stack, where, run):
     newest = _confirm(
         where,
@@ -581,9 +587,7 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
     recorded = _confirm(
         where,
         f"the cell's newest plan record names plan run {provenance}",
-        lambda: ag.plan_records(*_head_names(repo, run, head)).get(
-            ag.check_name(stack, env), (None,)
-        )[0],
+        lambda: _plan_record(repo, head, ag.check_name(stack, env), run),
     )
     if recorded != provenance:
         raise SystemExit(

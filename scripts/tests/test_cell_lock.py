@@ -1063,6 +1063,17 @@ WHERE = "apply aborted for `dev` / `stacks/auth`:"
 
 
 TIP_READ = ["gh", "api", f"repos/{REPO}/git/ref/heads/main"]
+RECORD_READ = [
+    "gh",
+    "api",
+    "--paginate",
+    (
+        f"repos/{REPO}/commits/{HEAD}/check-runs?filter=all&per_page=100"
+        "&check_name=apply%20%2F%20stacks%2Fauth%20%2F%20dev"
+    ),
+    "--jq",
+    ".check_runs[]",
+]
 
 
 def _pull(state="open", head=HEAD):
@@ -1208,9 +1219,10 @@ def test_verify_refuses_a_pull_request_it_cannot_read(monkeypatch, tmp_path, ans
 def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch, tmp_path):
     """The record check reads the newest record per name: an older check run recording another
     plan run is outvoted. Mutation: route `SHIPMATE_AUTO` `true` like `false` (the listing and
-    check-run reads are left unconsumed)."""
+    check-run reads are left unconsumed). Mutation: read the record with no `name` (an
+    unexpected call)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
-    gh.on(CHECK_RUNS_READ, _records("1", RUN))
+    gh.on(RECORD_READ, _records("1", RUN))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
 
@@ -1254,7 +1266,7 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
 def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path, records, named):
     """Mutation: drop the record comparison (both pass)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
-    gh.on(CHECK_RUNS_READ, _records(*records))
+    gh.on(RECORD_READ, _records(*records))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the cell's newest plan record names {named}, not plan run {RUN}, "
         f"which this auto apply applies; {RETRY}"
@@ -1276,7 +1288,7 @@ def test_verify_auto_refuses_a_provenance_it_cannot_read(monkeypatch, tmp_path, 
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
     gh.on(AUTOPLANS_READ, FAIL if failing == "list" else RUN)
     if failing == "check-runs":
-        gh.on(CHECK_RUNS_READ, FAIL)
+        gh.on(RECORD_READ, FAIL)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} could not confirm {what} (command failed (1): gh api); {RETRY}"
     )

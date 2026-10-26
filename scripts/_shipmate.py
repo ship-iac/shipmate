@@ -27,6 +27,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import urllib.parse
 from importlib.machinery import SourceFileLoader
 from typing import TypeGuard
 
@@ -317,8 +318,9 @@ def validate_head_sha(value, source="SHIPMATE_HEAD_SHA", *, annotate=True):
         raise SystemExit(f"::error::{message}" if annotate else message)
 
 
-def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None):
-    """Every check-run on `sha` as `gh api --jq` output: one `jq` projection per line.
+def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None, name=None):
+    """Every check-run on `sha`, or only those named `name`, as `gh api --jq` output: one `jq`
+    projection per line.
 
     `sha` is refused before any call unless it is a head SHA. `filter=all`, because a
     re-created check name keeps its older runs and `apply-gate` judges the newest per name, so
@@ -326,12 +328,15 @@ def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None):
     across every page, so a head with more than 100 checks drops none. `run` defaults to
     `_run`."""
     validate_head_sha(sha, "head SHA")
+    query = "filter=all&per_page=100"
+    if name is not None:
+        query += f"&check_name={urllib.parse.quote(name, safe='')}"
     return (run or _run)(
         [
             "gh",
             "api",
             "--paginate",
-            f"repos/{repo}/commits/{sha}/check-runs?filter=all&per_page=100",
+            f"repos/{repo}/commits/{sha}/check-runs?{query}",
             "--jq",
             jq,
         ]
