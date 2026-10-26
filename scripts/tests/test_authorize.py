@@ -764,3 +764,13 @@ def test_permission_reason_names_the_given_subject_and_retry():
         ),
         None,
     ]
+
+
+@pytest.mark.parametrize("state", ["unknown", ""])
+def test_a_mergeability_still_computing_keeps_the_commenters_remedy_by_default(state):
+    """Only `apply-detect`'s auto form passes `retry`. Mutation: `, then re-run` for ` and
+    re-run` in `_ready_reason` -- red."""
+    assert az._ready_reason({**PR_OK, "mergeable": None, "mergeable_state": state}) == (
+        "GitHub is still computing this PR's mergeability; wait a moment and re-run "
+        "`shipmate apply`."
+    )

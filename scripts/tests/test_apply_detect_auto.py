@@ -365,12 +365,13 @@ def test_a_pusher_with_write_permission_applies(tmp_path, monkeypatch):
 
 def test_mergeability_null_on_every_read_refuses_after_the_bound(tmp_path, monkeypatch):
     """Mutation: `_MERGEABLE_READS = 11` -- the read count reddens. Mutation: break on the first
-    read -- the read count reddens."""
+    read -- the read count reddens. Mutation: drop `retry=_AUTO_RETRY` from `wait_mergeable` --
+    the commenter's `re-run` wording, red."""
     calls, sleeps = [], []
     pull = {**PULL_OK, "mergeable": None, "mergeable_state": "unknown"}
     code = _refusal(tmp_path, monkeypatch, pulls=[pull] * 12, calls=calls, sleeps=sleeps)
     assert code == (
-        "::error::GitHub is still computing this PR's mergeability; wait a moment and re-run "
+        "::error::GitHub is still computing this PR's mergeability; wait a moment, then comment "
         "`shipmate apply`."
     )
     assert calls.count(f"repos/o/r/pulls/{PR_NUMBER}") == 12
@@ -467,10 +468,11 @@ def test_an_empty_autoplan_listing_refuses_naming_it(tmp_path, monkeypatch):
 
 
 def test_a_draft_refuses(tmp_path, monkeypatch):
-    """Mutation: drop the `_ready_reason` refusal -- the run applies."""
+    """Mutation: drop the `_ready_reason` refusal -- the run applies. Mutation: drop
+    `retry=_AUTO_RETRY` from `wait_mergeable` -- the commenter's wording, red."""
     assert _refusal(tmp_path, monkeypatch, pulls=[{**PULL_OK, "draft": True}]) == (
         "::error::not authorized: this pull request is a draft. A draft can be planned but not "
-        "applied. Mark it ready for review, then comment the apply again."
+        "applied. Mark it ready for review, then comment `shipmate apply`."
     )
 
 

@@ -65,6 +65,8 @@ _sleep = time.sleep
 #: A GitHub user login; nothing else is put into a URL.
 _LOGIN = re.compile(r"[A-Za-z0-9-]+")
 _AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
+# An auto run has no comment to repeat: its draft and mergeability refusals name the comment.
+_AUTO_RETRY = "comment `shipmate apply`"
 
 
 def paths_with_checks(env, candidate_paths, check_names):
@@ -495,7 +497,7 @@ def wait_mergeable(repo, pr_number, head):
             )
         if pr.get("mergeable") is not None:
             break
-    reason = az._head_repo_reason(pr) or az._ready_reason(pr)
+    reason = az._head_repo_reason(pr) or az._ready_reason(pr, retry=_AUTO_RETRY)
     if reason:
         raise SystemExit(f"::error::{reason}")
     try:

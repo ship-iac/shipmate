@@ -149,25 +149,25 @@ def _head_repo_reason(pr):
     return ""
 
 
-def _ready_reason(pr):
-    """Refusal text when the pull request is a draft or not mergeable, else ''."""
+def _ready_reason(pr, *, retry=None):
+    """Refusal text when the pull request is a draft or not mergeable, else ''. `retry`, when
+    given, replaces the draft and still-computing remedies' closing step, worded for a commenter
+    by default."""
     if pr.get("draft"):
         # Keyed on `draft`, not `mergeable_state`: that field has one slot and
         # reports "dirty" for a draft with conflicts, missing exactly the draft
         # most likely to be applied.
         return (
             "not authorized: this pull request is a draft. A draft can be planned but not "
-            "applied. Mark it ready for review, then comment the apply again."
+            f"applied. Mark it ready for review, then {retry or 'comment the apply again'}."
         )
     if not pr.get("mergeable"):
         state = pr.get("mergeable_state", "unknown")
         if state in ("", "unknown"):
             # GitHub computes mergeability asynchronously; null/unknown means
             # "not computed yet", NOT a real conflict — don't misattribute.
-            return (
-                "GitHub is still computing this PR's mergeability; "
-                "wait a moment and re-run `shipmate apply`."
-            )
+            then = f", then {retry}" if retry else " and re-run `shipmate apply`"
+            return f"GitHub is still computing this PR's mergeability; wait a moment{then}."
         return (
             f"PR is not mergeable (state: {state}); resolve conflicts "
             f"or branch-protection requirements first."
