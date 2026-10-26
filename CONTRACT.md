@@ -2690,7 +2690,9 @@ names an error. A job that failed without an `::error::` renders no fence.
   rows, the first that holds: `🔴 failed`,
   `⚪ nothing applied, environments are held for review`,
   `⚪ nothing applied, pending cells are locked`,
-  `⚪ nothing applied, cells wait on pending cells they run after`, or
+  `⚪ nothing applied, cells wait on pending cells they run after`,
+  `` ⚪ nothing applied, the pending environments are left for `shipmate apply` ``
+  (an `auto` apply that leaves a pending environment to a bare apply), or
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
