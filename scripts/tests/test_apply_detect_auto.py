@@ -496,7 +496,7 @@ def test_detect_grants_exactly_these_permissions():
 
 
 def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_successor(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
     """The base changed `stacks/app` (through a module, as the probe found Terramate reports it)
     since the merge base: both `stacks/app` cells are held, `prod`, which needs `dev-eu`, skips,
@@ -506,7 +506,8 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     Mutation: pass `settle` the locked cells alone -- `stacks/app / dev-eu` applies and `prod`
     runs, red.
     Mutation: write `overlap_cells` as `[]` -- red.
-    Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red."""
+    Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red.
+    Mutation: print `len(locked)` for the notice's `overlap=` -- red."""
     reads = []
     parsed = _run_auto(
         tmp_path,
@@ -526,6 +527,11 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     assert json.loads(parsed["locked_cells"]) == []
     assert reads == [BASE]
     assert parsed["base_sha"] == BASE
+    assert (
+        f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
+        "excluded_targeted=[] skipped_after_targeted=['prod'] review_held=[] waiting=0 locked=0 "
+        "overlap=2 applied_exempt=[] review_decision='NONE'"
+    ) in capsys.readouterr().out.splitlines()
 
 
 def test_a_run_the_base_changed_nothing_of_applies_every_cell(tmp_path, monkeypatch):

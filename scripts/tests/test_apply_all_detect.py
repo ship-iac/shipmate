@@ -936,7 +936,7 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
             f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, "
             "0] "
             "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 locked=0 "
-            "applied_exempt=[] "
+            "overlap=0 applied_exempt=[] "
             "review_decision='APPROVED'"
         )
     ]
@@ -1261,7 +1261,7 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 envlevels=[0, 0, 0, 0] "
         "excluded_targeted=['ex'] skipped_after_targeted=[] review_held=[] waiting=2 locked=0 "
-        "applied_exempt=[] review_decision='APPROVED'"
+        "overlap=0 applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
 
 
@@ -1317,7 +1317,7 @@ def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
         "excluded_targeted=[] skipped_after_targeted=['prod-eu'] review_held=[] waiting=1 "
-        "locked=1 applied_exempt=[] review_decision='APPROVED'"
+        "locked=1 overlap=0 applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
 
 

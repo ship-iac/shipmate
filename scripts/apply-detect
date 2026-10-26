@@ -677,7 +677,7 @@ def bare_main(auto=False):
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_targeted={excluded} skipped_after_targeted={skipped} "
-        f"review_held={held} waiting={len(waiting)} locked={len(locked)} "
+        f"review_held={held} waiting={len(waiting)} locked={len(locked)} overlap={len(overlap)} "
         f"applied_exempt={applied_exempt} "
         # The hold cause: an everything-held run is otherwise indistinguishable
         # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
