@@ -262,6 +262,10 @@ def merge_base(base, retry="Re-run the workflow"):
     raise SystemExit("::error::" + message)
 
 
+# Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
+_BASE_REMEDY = "Update the branch from the base and push"
+
+
 def base_changed_stacks(base_ref):
     """The stacks `base_ref` changed since its merge base with `HEAD`, a module's consumers
     included: Terramate's change detection, run in a detached worktree of `base_ref`. A plan of
@@ -278,10 +282,9 @@ def base_changed_stacks(base_ref):
             error = " | ".join(x.strip() for x in p.stderr.splitlines() if x.strip())
             raise SystemExit(
                 f"::error::could not fetch the base tip {base_ref} ({error or p.returncode}). "
-                "Push again, or comment `shipmate apply`."
+                f"{_BASE_REMEDY}."
             )
-    # A re-run of an auto apply refuses at its actor check.
-    since = merge_base(base_ref, retry="Push again, or comment `shipmate apply`")
+    since = merge_base(base_ref, retry=_BASE_REMEDY)
     tree = tempfile.mkdtemp(prefix="shipmate-base-")
     _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
     try:

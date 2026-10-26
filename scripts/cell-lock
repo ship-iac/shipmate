@@ -626,7 +626,7 @@ def _verify_cmd(repo, pr, run):
     if tip != base:
         raise SystemExit(
             f"::error::apply aborted for {where}: the base branch moved from {base} to {tip} "
-            f"since this auto apply was detected; {_RETRY}"
+            "since this auto apply was detected; update the branch from the base and push"
         )
     _verify_auto(repo, head, provenance, env, stack, where, run)
 

@@ -1995,8 +1995,8 @@ and the run the cell's newest plan record names, and the base tip, read from the
 branch ref, is still the one `detect` read. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
-environment approval refuses that wave; push, or comment `shipmate apply`, which
-re-runs `detect`.
+environment approval refuses that wave. Update the branch from the base and
+push: a bare `shipmate apply` runs no overlap check.
 
 **Visibility.** An `auto` run posts the apply result comment as a bare apply
 does, under `### shipmate apply`, also when it applies nothing: its verdict and

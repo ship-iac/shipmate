@@ -1218,11 +1218,12 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
 def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
     """The tip is the branch ref's; `base.sha` would read stale (`_pull`). Mutation: drop the
     base comparison (the cell passes). Mutation: return `pull["base"]["sha"]` from `base_tip`
-    (the stale sha refuses as the moved tip)."""
+    (the stale sha refuses as the moved tip). Mutation: end with `_RETRY`, which offers a bare
+    `shipmate apply` that skips the overlap check -- red."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip(OTHER))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the base branch moved from {BASE} to {OTHER} since this auto apply "
-        f"was detected; {RETRY}"
+        "was detected; update the branch from the base and push"
     )
 
 

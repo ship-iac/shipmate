@@ -3175,9 +3175,11 @@ def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkey
 
 
 def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
-    """The auto form's remedy: a re-run refuses at the auto actor check.
+    """The remedy is a push from the updated branch, never a bare `shipmate apply`, which runs
+    no overlap check.
 
-    Mutation: skip the fetch's exit status -- `merge_base` refuses instead, red."""
+    Mutation: skip the fetch's exit status -- `merge_base` refuses instead, red. Mutation: end
+    with "Push again, or comment `shipmate apply`." -- red."""
     _commit({"stacks/app/main.tf": "app\n"}, "common")
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
     missing = "f" * 40
@@ -3186,6 +3188,25 @@ def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkey
     assert e.value.code == (
         f"::error::could not fetch the base tip {missing} (fatal: 'origin' does not appear to be "
         "a git repository | fatal: Could not read from remote repository. | Please make sure you "
-        "have the correct access rights | and the repository exists.). Push again, or comment "
-        "`shipmate apply`."
+        "have the correct access rights | and the repository exists.). Update the branch from "
+        "the base and push."
+    )
+
+
+def test_base_changed_stacks_names_the_update_remedy_when_the_merge_base_fails(monkeypatch):
+    """Mutation: drop `retry=_BASE_REMEDY` from the `merge_base` call -- "Re-run the
+    workflow", red."""
+    tip = "c" * 40
+
+    def run(args, **kw):
+        code = 0 if args[1] == "cat-file" else 128
+        return subprocess.CompletedProcess(args, code, "", "fatal: bad object\n")
+
+    monkeypatch.setattr(bm.subprocess, "run", run)
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip)
+    assert e.value.code == (
+        f"::error::could not resolve the merge base of the pull request's base {tip} and its "
+        "head: fatal: bad object. Update the branch from the base and push; if it fails again, "
+        "the base commit is not reachable from this checkout."
     )

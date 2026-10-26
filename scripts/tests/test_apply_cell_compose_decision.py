@@ -290,14 +290,14 @@ def test_a_failed_pre_apply_check_names_its_own_refusal(monkeypatch, tmp_path):
         pre_apply="failure",
         pre_apply_refusal=(
             "apply aborted for `dev-eu` / `stacks/app`: the base branch moved from b to c since "
-            "this auto apply was detected; push, or comment `shipmate apply` on the pull request"
+            "this auto apply was detected; update the branch from the base and push"
         ),
     )
     assert (cell["result"], cell["reason"]) == (
         "blocked",
         (
-            "the base branch moved from b to c since this auto apply was detected; push, or "
-            "comment `shipmate apply` on the pull request"
+            "the base branch moved from b to c since this auto apply was detected; update the "
+            "branch from the base and push"
         ),
     )
 

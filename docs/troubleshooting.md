@@ -1749,8 +1749,11 @@ wording, with these remedies:
   only branches of this repository`` (or `in a deleted repository`): see
   §`shipmate applies and unlocks only branches of this repository`.
 - ``auto apply refused: could not read the base tip of pull request #<n>
-  (<why>)``, or `could not fetch the base tip <sha>`: the base branch's ref could
-  not be read or fetched. Comment `shipmate apply`, or push.
+  (<why>)``: the base branch's ref could not be read. Comment `shipmate apply`,
+  or push.
+- `could not fetch the base tip <sha>`: the base tip could not be fetched into
+  the checkout. Update the branch from the base and push. A bare
+  `shipmate apply` is no remedy: it runs no overlap check.
 
 ### `⚪ held, the base changed these stacks after this branch left it`
 
@@ -1821,7 +1824,8 @@ An `auto` cell also refuses when:
 - `the base branch moved from <sha> to <sha> since this auto apply was
   detected`: any push to the base branch refuses the wave, whatever the stack,
   because a wave cannot repeat `detect`'s per-stack overlap check before its
-  credentials. Push, or comment `shipmate apply`, which runs `detect` again.
+  credentials. Update the branch from the base and push. A bare
+  `shipmate apply` is no remedy: it runs no overlap check.
 - `the newest autoplan of <head> is run <n>, not plan run <p>, which this auto
   apply applies` (or `is not listed`), or `the cell's newest plan record names
   plan run <r>, not plan run <p>` (or `names no plan run`): a newer autoplan, or
@@ -1871,8 +1875,9 @@ holds; git's own error is in the `detect` annotation after the colon.
 
 An `auto` apply's `detect` computes the same merge base, between the base tip
 and the head, to find the stacks the base changed. It refuses with the same
-text, ending ``Push again, or comment `shipmate apply`; if it fails again, the
-base commit is not reachable from this checkout.``, and nothing applies.
+text, ending `Update the branch from the base and push; if it fails again, the
+base commit is not reachable from this checkout.`, and nothing applies. A bare
+`shipmate apply` is no remedy: it runs no overlap check.
 
 ### A pull request planned zero cells
 
