@@ -23,6 +23,7 @@ _SCRIPT_ENV = {
     "apply-detect": {
         "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_ENV": "${{ inputs.environment }}",
+        "SHIPMATE_AUTO": "${{ inputs.auto }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
@@ -63,6 +64,7 @@ _DETECT_STEPS = {
         "uses": "$/actions/apply-detect",
         "with": {
             "environment": "${{ inputs.environment }}",
+            "auto": "${{ inputs.auto }}",
             "head-sha": "${{ inputs.ref }}",
             "pr-number": "${{ inputs.pr_number }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -102,6 +104,8 @@ _APPLY_DETECT_OUTPUTS = {
     "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
     "locked_cells": "${{ steps.d.outputs.locked_cells }}",
     "env_order": "${{ steps.d.outputs.env_order }}",
+    "provenance_run": "${{ steps.d.outputs.provenance_run }}",
+    "base_sha": "${{ steps.d.outputs.base_sha }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
 }
 
@@ -125,7 +129,7 @@ _VARS_HOLDERS = {
 @pytest.mark.parametrize("action", sorted(_SCRIPT_ENV))
 def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(action):
     """Mutation: delete `SHIPMATE_REVIEW_DECISION` from `apply-detect`'s script step.
-    Mutation: delete `SHIPMATE_PR_NUMBER` from it."""
+    Mutation: delete `SHIPMATE_PR_NUMBER` from it. Mutation: delete `SHIPMATE_AUTO` from it."""
     doc = action_yaml(action)
     steps = [s for s in doc["runs"]["steps"] if "/../../scripts/" in str(s.get("run", ""))]
     assert len(steps) == 1, f"{action}: expected one script step, got {len(steps)}"
@@ -166,7 +170,9 @@ def test_the_detect_step_is_exactly_this_step(workflow, uses):
     """Mutation: delete the `github-vars:` line from `deploy.yml`'s detect step.
     Mutation: give `apply.yml`'s detect step an `if: ${{ inputs.environment != '' }}`.
     Mutation: delete `review-decision` from `apply.yml`'s detect step.
-    Mutation: delete `pr-number` from `apply.yml`'s detect step."""
+    Mutation: delete `pr-number` from `apply.yml`'s detect step.
+    Mutation: delete `auto` from `apply.yml`'s detect step; an unwired composite input is
+    silently ignored."""
     doc = workflow_yaml(workflow)
     steps = [s for s in doc["jobs"]["detect"]["steps"] if s.get("uses") == uses]
     assert len(steps) == 1, f"{workflow}: {len(steps)} {uses} steps"
@@ -192,7 +198,8 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
-    orders environments by name; delete `locked_cells`."""
+    orders environments by name; delete `locked_cells`; delete `provenance_run`; delete
+    `base_sha`."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -247,31 +254,31 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "excluded_envs": {
         "description": (
-            "Bare apply only: JSON list of targeted envs left pending, including held ones; the "
-            "comment lists a held one under the hold. The targeted form writes none."
+            "Bare and auto forms: JSON list of targeted envs left pending, including held ones; "
+            "the comment lists a held one under the hold. The targeted form writes none."
         ),
         "value": "${{ steps.d.outputs.excluded_envs }}",
     },
     "skipped_envs": {
         "description": (
-            "Bare apply only: JSON list of envs skipped because they are ordered after an env "
-            "not fully applying this run (held for review, excluded as targeted, holding a "
-            "waiting cell, or holding a cell another pull request locks). The targeted form "
-            "writes none."
+            "Bare and auto forms: JSON list of envs skipped because they are ordered after an "
+            "env not fully applying this run (held for review, excluded as targeted, holding a "
+            "waiting cell, holding a cell another pull request locks, or, under the auto form, "
+            "not `apply_mode: auto`). The targeted form writes none."
         ),
         "value": "${{ steps.d.outputs.skipped_envs }}",
     },
     "review_held_envs": {
         "description": (
-            "Bare apply only: JSON list of envs held because the PR is not reviewed. The "
+            "Bare and auto forms: JSON list of envs held because the PR is not reviewed. The "
             "targeted form writes none."
         ),
         "value": "${{ steps.d.outputs.review_held_envs }}",
     },
     "applied_exempt_envs": {
         "description": (
-            "Bare apply only: JSON list of envs applied without an approving review because "
-            "their entry holds `review: false`. The targeted form writes none."
+            "Bare and auto forms: JSON list of envs applied without an approving review "
+            "because their entry holds `review: false`. The targeted form writes none."
         ),
         "value": "${{ steps.d.outputs.applied_exempt_envs }}",
     },
@@ -305,6 +312,20 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.env_order }}",
     },
+    "provenance_run": {
+        "description": (
+            "Auto form only: the autoplan run every applied cell's record names; empty when no "
+            "cell applies."
+        ),
+        "value": "${{ steps.d.outputs.provenance_run }}",
+    },
+    "base_sha": {
+        "description": (
+            "Auto form only: the pull request's base tip, read after the mergeability wait; "
+            "empty when no cell applies."
+        ),
+        "value": "${{ steps.d.outputs.base_sha }}",
+    },
     "refusal": {
         "description": (
             "The first error of the `::error::` message that failed the step (a refusal or a "
@@ -321,5 +342,6 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
 def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
     delete its `refusal` output; delete its `env_order` output; delete its `locked_cells`
-    output; restore `skipped_envs`' description without the lock cause."""
+    output; restore `skipped_envs`' description without the lock cause; delete its
+    `provenance_run` output; delete its `base_sha` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

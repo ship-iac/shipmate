@@ -57,6 +57,8 @@ APPLY_INPUTS = {
     "ref": {"required": True, "type": "string"},
     "pr_number": {"required": True, "type": "string"},
     "runs_on": {"required": False, "default": "ubuntu-26.04-arm", "type": "string"},
+    # The consumer's `auto` job writes this as a literal; no job forwards a verb into it.
+    "auto": {"required": False, "type": "boolean", "default": False},
 }
 UNLOCK_INPUTS = {
     "environment": {"required": True, "type": "string"},

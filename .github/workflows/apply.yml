@@ -8,6 +8,8 @@ on:
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
       runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
+      # The consumer's `auto` job passes a literal `true`: the auto form of apply-detect.
+      auto: { required: false, type: boolean, default: false }
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
     # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
     secrets:
@@ -106,7 +108,7 @@ jobs:
     needs: [guard, review]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ inputs.runs_on }}
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, pull-requests: read }
     # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
     outputs:
       envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
@@ -126,6 +128,8 @@ jobs:
       waiting_cells: ${{ steps.d.outputs.waiting_cells }}
       locked_cells: ${{ steps.d.outputs.locked_cells }}
       env_order: ${{ steps.d.outputs.env_order }}
+      provenance_run: ${{ steps.d.outputs.provenance_run }}
+      base_sha: ${{ steps.d.outputs.base_sha }}
       refusal: ${{ steps.d.outputs.refusal }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -136,6 +140,7 @@ jobs:
         uses: $/actions/apply-detect
         with:
           environment: ${{ inputs.environment }}
+          auto: ${{ inputs.auto }}
           head-sha: ${{ inputs.ref }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

@@ -15,7 +15,7 @@ from _loader import WORKFLOWS, workflow_yaml
 #: comparison.
 EXPECTED_INPUTS = {
     "apply-env-level.yml": {"workflow_call": ["head_sha", "pr_number", "runs_on", "waves_json"]},
-    "apply.yml": {"workflow_call": ["environment", "pr_number", "ref", "runs_on"]},
+    "apply.yml": {"workflow_call": ["auto", "environment", "pr_number", "ref", "runs_on"]},
     "ci.yml": {},
     "comment-ops.yml": {"workflow_call": ["runs_on"]},
     "deploy.yml": {"workflow_call": ["runs_on"]},

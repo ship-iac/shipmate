@@ -571,7 +571,7 @@ jobs:
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: { contents: read, checks: read, pull-requests: read, actions: read, id-token: write }
     secrets: *engine-secrets
     with:
       environment: ${{ inputs.environment }}

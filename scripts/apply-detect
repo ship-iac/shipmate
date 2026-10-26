@@ -26,15 +26,24 @@ and the cells that run after it wait. Before any of that, the
 PR's review decision — read server-side by the `review` job, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
+
+`SHIPMATE_AUTO=true` selects the auto form, `auto_main`: the bare form over the
+`apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
+refuses unless the actor, the plan's provenance, the pusher's permission and the pull
+request's mergeability hold.
 """
 
 import json
 import os
+import re
+import sys
+import time
 
 from _shipmate import (
     _load,
     _run,
     check_runs,
+    gh_json,
     named,
     run_annotated,
     validate_head_sha,
@@ -48,6 +57,14 @@ az = _load("authorize")
 cl = _load("cell-lock")
 
 _NAMED = 10
+#: The auto form's mergeability wait: reads, and seconds between them. Unprobed: GitHub
+#: documents no bound on computing `mergeable` after a push.
+_MERGEABLE_READS = 12
+_MERGEABLE_WAIT = 5
+_sleep = time.sleep
+#: A GitHub user login; nothing else is put into a URL.
+_LOGIN = re.compile(r"[A-Za-z0-9-]+")
+_AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
 
 
 def paths_with_checks(env, candidate_paths, check_names):
@@ -348,7 +365,141 @@ def refuse_unreviewed(env, table, decision):
         raise SystemExit(f"::error::{reason}")
 
 
-def bare_main():
+def refuse_actor(lines, app_id, actor):
+    """Refuse unless `actor` is the bot login of the App that authored the head's checks.
+
+    The whole string, never a `[bot]` suffix: a `GITHUB_TOKEN` dispatch runs as
+    `github-actions[bot]`. The slug comes from the App-authored check runs, so a head with
+    none refuses."""
+    slugs = {(r.get("app") or {}).get("slug") for r in ag.app_runs(lines, app_id)}
+    if not slugs:
+        raise SystemExit(
+            "::error::auto apply refused: no check run on the head is authored by the shipmate "
+            "App, so its bot login is unknown. " + _AUTO_REMEDY
+        )
+    if actor not in {f"{s}[bot]" for s in slugs if s}:
+        raise SystemExit(
+            f"::error::auto apply refused: the run's actor is {actor!r}, not the shipmate App: "
+            "only the App dispatches an auto apply, after an autoplan. " + _AUTO_REMEDY
+        )
+
+
+def refuse_provenance(repo, head, runnable):
+    """The one plan run every cell in `runnable` records, read from the API, refused unless it
+    is the newest `pull_request_target` run of `shipmate.yml` on `head`.
+
+    A `shipmate plan` run is a `workflow_dispatch` the App sends, so its commenter is lost and
+    nothing authorizes it as the pusher; and a newer autoplan of the head that recorded no cell
+    must not leave an older one applying."""
+    runs = sorted({c["plan_run_id"] for c in runnable}, key=int)
+    if len(runs) > 1:
+        listed = "; ".join(
+            f"plan run {r}: "
+            + named(
+                [
+                    ag.check_name(c["stack"], c["environment"])
+                    for c in runnable
+                    if c["plan_run_id"] == r
+                ],
+                _NAMED,
+            )
+            for r in runs
+        )
+        raise SystemExit(
+            f"::error::auto apply refused: the cells to apply record different plan runs "
+            f"({listed}), so no one autoplan planned them all. " + _AUTO_REMEDY
+        )
+    run_id = runs[0]
+    run = gh_json(f"repos/{repo}/actions/runs/{run_id}", run=_run)
+    event, sha = run.get("event"), run.get("head_sha")
+    if event != "pull_request_target":
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} is a `{event}` run, not an "
+            "autoplan: an auto apply applies only the plan a push started. " + _AUTO_REMEDY
+        )
+    if sha != head:
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} planned {sha}, not the head "
+            f"{head}. " + _AUTO_REMEDY
+        )
+    query = f"event=pull_request_target&head_sha={head}&per_page=100"
+    listing = _run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{repo}/actions/workflows/shipmate.yml/runs?{query}",
+            "--jq",
+            ".workflow_runs[].id",
+        ]
+    )
+    newest = max(map(int, listing.split()), default=None)
+    if newest != int(run_id):
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} is not the newest autoplan of the "
+            f"head (run {newest} is). " + _AUTO_REMEDY
+        )
+    return run
+
+
+def refuse_pusher(repo, run):
+    """Refuse unless `run`'s triggering actor, the pusher, has write access, decided by
+    `authorize._permission_reason`. A failed read is an unreadable permission."""
+    login = (run.get("triggering_actor") or {}).get("login") or ""
+    readable = _LOGIN.fullmatch(login) is not None
+    permission = ""
+    if readable:
+        try:
+            body = gh_json(f"repos/{repo}/collaborators/{login}/permission", run=_run)
+            permission = body.get("permission")
+        except SystemExit as e:
+            print(str(e.code).removeprefix("::error::"), file=sys.stderr)
+    reason = az._permission_reason(
+        permission if isinstance(permission, str) else "",
+        "apply",
+        subject=f"the pusher @{login}" if readable else "the pusher",
+        retry="push again, or a writer comments `shipmate apply`",
+    )
+    if reason:
+        raise SystemExit(f"::error::{reason}")
+
+
+def wait_mergeable(repo, pr_number, head):
+    """The pull request, re-read until GitHub has computed `mergeable` or `_MERGEABLE_READS`
+    reads are spent, then refused by `authorize._ready_reason`. Every read refuses when the
+    head moved: the new head's autoplan decides its own apply."""
+    for i in range(_MERGEABLE_READS):
+        if i:
+            _sleep(_MERGEABLE_WAIT)
+        pr = gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run)
+        sha = (pr.get("head") or {}).get("sha")
+        if sha != head:
+            raise SystemExit(
+                f"::error::auto apply refused: pull request #{pr_number} head is {sha}, but this "
+                f"run applies {head}. The new head's autoplan decides its own apply."
+            )
+        if pr.get("mergeable") is not None:
+            break
+    reason = az._ready_reason(pr)
+    if reason:
+        raise SystemExit(f"::error::{reason}")
+    return pr
+
+
+def auto_main():
+    """The auto apply: `bare_main` over the `apply_mode: auto` environments' pending cells.
+
+    Every other pending environment counts as stopped in `settle`, so its `needs` successors
+    skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
+    bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
+    cell to apply, the plan run its records name must be the head's newest autoplan
+    (`refuse_provenance`), that run's pusher must have write access (`refuse_pusher`), and the
+    pull request must be ready and mergeable at this head (`wait_mergeable`). Writes the bare
+    outputs plus `provenance_run` and `base_sha`, both empty when no cell applies."""
+    bare_main(auto=True)
+
+
+def bare_main(auto=False):
     """The bare `shipmate apply` work set -> env-levels -> waves.
 
     The pre-merge equivalent of deploy-detect, sourced like the targeted form:
@@ -397,6 +548,8 @@ def bare_main():
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
     lines = _check_run_lines(repo, head)
+    if auto:
+        refuse_actor(lines, app_id, os.environ.get("GITHUB_ACTOR", ""))
     cells = cells_from_checks(apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
     table = bm.env_config(cells, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     cells = bm.stamp_rows(cells, table, "apply")
@@ -414,6 +567,8 @@ def bare_main():
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(targeted + held)
+    if auto:
+        stopped |= pending_envs - set(bm.ec.auto_envs(table))
     # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
     # waiting cell's remedy names it.
     locked = locked_cells(repo, [c for c in pending if c["environment"] not in stopped], pr_number)
@@ -437,6 +592,14 @@ def bare_main():
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
+    auto_outputs = {}
+    if auto:
+        provenance_run, base_sha = "", ""
+        if runnable:
+            refuse_pusher(repo, refuse_provenance(repo, head, runnable))
+            provenance_run = runnable[0]["plan_run_id"]
+            base_sha = wait_mergeable(repo, pr_number, head)["base"]["sha"]
+        auto_outputs = {"provenance_run": provenance_run, "base_sha": base_sha}
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_exempt = sorted(
@@ -484,10 +647,14 @@ def bare_main():
         locked_cells=json.dumps(locked),
         # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and locked cells.
         env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
+        **auto_outputs,
     )
 
 
 def main():
+    if os.environ.get("SHIPMATE_AUTO") == "true":
+        auto_main()
+        return
     env = os.environ["SHIPMATE_ENV"]
     # Routed before `refuse_unreviewed`: `_review_reason` reads an empty env as a bare
     # apply, exempt when any entry is review-exempt, so it must never reach the targeted refusal.
