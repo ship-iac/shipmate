@@ -2004,7 +2004,8 @@ push: a bare `shipmate apply` runs no overlap check.
 **Visibility.** An `auto` run posts the apply result comment as a bare apply
 does, under `### shipmate apply`, also when it applies nothing: its verdict and
 lines name why, and a run that applied nothing and left a pending environment
-for a bare apply or skipped one is never `🟢` (§Apply result comment). A
+for a bare apply, a `targeted` one or a skipped one is never `🟢` (§Apply result
+comment). A
 `detect` refusal shows in the comment's error fence.
 
 **Permissions.** The consumer's `auto` and `apply` jobs grant
@@ -2838,7 +2839,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   `⚪ nothing applied, the base also changed the pending cells' stacks`,
   `⚪ nothing applied, cells wait on pending cells they run after`,
   `⚪ nothing applied, the pending environments wait on the lines below` (an
-  `auto` apply that left a pending environment to a bare apply or skipped one; the
+  `auto` apply that left a pending environment to a bare apply, a `targeted` one
+  or a skipped one; the
   bare form keeps `🟢` for its targeted and skipped lines), or
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request

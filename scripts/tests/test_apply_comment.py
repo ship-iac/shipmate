@@ -2612,6 +2612,20 @@ def test_an_auto_run_whose_only_pending_work_is_skipped_after_a_targeted_env_is_
     )
 
 
+def test_an_auto_run_whose_only_pending_work_is_a_targeted_env_is_not_green():
+    """Nothing applied, no skipped or bare env: only the targeted `prod` is left. The bare
+    form keeps 🟢 for it.
+
+    Mutation: drop `*excluded` from `left` -- 🟢 no pending applies, red."""
+    body = ac.build_comment([], [], RUN_URL, ["prod"], [], "", "success", head_sha=SHA, auto=True)
+    assert body == (
+        "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
+        f"below {AT}\n\n"
+        "🟡 prod: left pending (targeted), comment `shipmate apply prod`"
+        "\n\n" + HINT
+    )
+
+
 def test_the_skipped_and_bare_lines_escape_every_env_name():
     """Mutation: drop `_esc` from the `skipped_after` predecessors -- red.
     Mutation: drop `_esc` from `bare` -- red."""
