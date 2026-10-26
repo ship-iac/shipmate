@@ -1305,12 +1305,12 @@ def _fork_trigger_warnings(ctx):
     access.
 
     The consumer's `shipmate.yml` is on this trigger by design and stays exempt. Its
-    comment-ops, deploy, apply and unlock jobs' `if:` expressions are false under
+    comment-ops, deploy, apply, auto and unlock jobs' `if:` expressions are false under
     `pull_request_target`, so those jobs do not run, and a job that does not run binds no
     environment and is handed no token. Its `plan` and `release` jobs do run, and bind
     `shipmate-engine` only in engine jobs that check out no pull request content: `release`
     has no checkout at all and only deletes lock refs. `_shipmate_yml_warnings` is what
-    watches those six `if:` expressions.
+    watches those seven `if:` expressions.
 
     Reads the consumer's workflow files at the commit under examination
     (`_contents_ref`): a pull request that *removes* the trigger must not still
@@ -1375,7 +1375,7 @@ def _shim_job_name_finding(doc, name, engine):
     for one.
 
     A file calling no `plan.yml` of `engine` draws nothing here: that absence is
-    `_routing_finding`'s zero-count finding."""
+    `_routing_finding`'s missing-job finding."""
     calls = _engine_calls(doc, engine, "plan.yml")
     if not calls:
         return []
@@ -1403,10 +1403,11 @@ def _shim_job_name_finding(doc, name, engine):
 #: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
 #: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
-#: The whole option list `actions/dispatch` can send, compared in order and as parsed
-#: options: a list missing `unlock` refuses that verb, and one carrying an extra offers a verb
-#: no `if:` selects. Read from `verb`'s own declaration, never another input's `options:`.
-_VERB_OPTION_LIST = ["plan", "apply", "unlock"]
+#: The whole option list the engine dispatches (`auto` from the autoplan, the rest from
+#: `actions/dispatch`), compared in order and as parsed options: a list missing `unlock`
+#: refuses that verb, and one carrying an extra offers a verb no `if:` selects. Read from
+#: `verb`'s own declaration, never another input's `options:`.
+_VERB_OPTION_LIST = ["plan", "apply", "unlock", "auto"]
 #: The same list as the findings render it. Derived, so there is one hand-written copy.
 _VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
 
@@ -1521,25 +1522,33 @@ def _dispatch_wiring_finding(doc, name):
     return _dispatch_input_findings(_mapping(trigger.get("inputs")), name)
 
 
-#: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
-#: calls. The consumer owns these six expressions and `docs/getting-started.md` publishes
-#: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
-#: skipped, which reads as success everywhere. Compared whole — normalised only for an
-#: enclosing quote pair, the optional `${{ }}` wrapper and whitespace — because a subset check
-#: would bless `github.event_name == 'workflow_dispatch'` alone, which sends every verb to
-#: every job.
+#: The callee and whole `if:` of each job of `shipmate.yml`, keyed by job id: `apply` and
+#: `auto` both call `apply.yml`. The consumer owns these seven expressions and
+#: `docs/getting-started.md` publishes them; a wrong one routes a verb nowhere and its
+#: dispatched run completes with every job skipped, which reads as success everywhere. Compared
+#: whole — normalised only for an enclosing quote pair, the optional `${{ }}` wrapper and
+#: whitespace — because a subset check would bless `github.event_name == 'workflow_dispatch'`
+#: alone, which sends every verb to every job.
 ROUTING_IFS = {
-    "plan.yml": (
-        "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
-        "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
+    "plan": (
+        "plan.yml",
+        (
+            "(github.event_name == 'pull_request_target' && github.event.action != 'closed') || "
+            "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
+        ),
     ),
-    "release.yml": (
-        "github.event_name == 'pull_request_target' && github.event.action == 'closed'"
+    "release": (
+        "release.yml",
+        "github.event_name == 'pull_request_target' && github.event.action == 'closed'",
     ),
-    "comment-ops.yml": "github.event_name == 'issue_comment'",
-    "deploy.yml": "github.event_name == 'push'",
-    "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
-    "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
+    "comment-ops": ("comment-ops.yml", "github.event_name == 'issue_comment'"),
+    "deploy": ("deploy.yml", "github.event_name == 'push'"),
+    "apply": ("apply.yml", "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'"),
+    "auto": ("apply.yml", "github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'"),
+    "unlock": (
+        "unlock.yml",
+        "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
+    ),
 }
 
 
@@ -1551,7 +1560,7 @@ def _normalize_if(value):
     so a consumer who writes `if: ${{ ... }}` — the shape `docs/getting-started.md` shipped
     before this file existed — must not be reported for a difference that is not one.
 
-    Only a MATCHING enclosing pair of quotes is dropped: five of the six expressions end
+    Only a MATCHING enclosing pair of quotes is dropped: six of the seven expressions end
     in a `'`, and stripping quote characters off both ends would mangle every one of them
     on both sides of the comparison, which stays green while the message is wrong."""
     v = value.strip()
@@ -1563,43 +1572,40 @@ def _normalize_if(value):
 
 
 def _routing_finding(doc, name, engine):
-    """One finding per `ROUTING_IFS` entry the file does not satisfy.
+    """One finding per `ROUTING_IFS` job the file lacks or selects by another `if:`, then one per
+    other job calling one of those engine workflows.
 
-    One file gates six jobs on the event, and a wrong gate is silent in both directions: a
+    One file gates seven jobs on the event, and a wrong gate is silent in both directions: a
     dispatched verb whose job never runs completes green with nothing done, and a job whose
     `if:` is too wide runs on an event it was never meant to see. Nothing else observes this.
-    `actions/dispatch` sees an accepted dispatch; the run page shows five skipped jobs beside
-    the one that ran, which is what a healthy run also shows."""
+    `actions/dispatch` sees an accepted dispatch; the run page shows six skipped jobs beside
+    the one that ran, which is what a healthy run also shows. Jobs are identified by id because
+    two of them call `apply.yml`; an extra caller either runs the work twice or is unreachable."""
     out = []
-    for callee, expected in ROUTING_IFS.items():
-        calls = _engine_calls(doc, engine, callee)
-        count = len(calls)
-        if count != 1:
+    for job_id, (callee, expected) in ROUTING_IFS.items():
+        job = dict(_engine_calls(doc, engine, callee)).get(job_id)
+        if job is None:
             out.append(
                 (
                     WARNING,
                     (
-                        f"`{name}` has {count} jobs calling the engine's `{callee}`: it needs "
-                        "exactly "
-                        "one, selected by the `if:` that routes its event. With none, the verb or "
-                        "event it serves reaches nothing and its run completes with every job "
-                        "skipped, which reads as success everywhere; with more than one, either "
-                        "the work runs twice or one of them is unreachable "
-                        "(docs/getting-started.md)."
+                        f"`{name}` has no `{job_id}` job calling the engine's `{callee}`. The verb "
+                        "or event it serves reaches nothing, and its run completes with every job "
+                        "skipped, which reads as success everywhere. Add the published "
+                        f"`{job_id}` job (docs/getting-started.md)."
                     ),
                 )
             )
             continue
-        found = calls[0][1].get("if")
+        found = job.get("if")
         if found is None:
             out.append(
                 (
                     WARNING,
                     (
-                        f"`{name}`'s job calling the engine's `{callee}` declares no `if:`, so it "
-                        "then runs on every one of this file's triggers, so a `push` starts a plan "
-                        f"and an `issue_comment` starts an apply. Add `if: {expected}` "
-                        "(docs/getting-started.md)."
+                        f"`{name}`'s `{job_id}` job declares no `if:`, so it runs on every one of "
+                        "this file's triggers: a `push` starts a plan and an `issue_comment` "
+                        f"starts an apply. Add `if: {expected}` (docs/getting-started.md)."
                     ),
                 )
             )
@@ -1608,10 +1614,8 @@ def _routing_finding(doc, name, engine):
                 (
                     WARNING,
                     (
-                        f"`{name}`'s job calling the engine's `{callee}` has an `if:` that is not "
-                        "a "
-                        f"single expression. Write `if: {expected}` "
-                        "(docs/getting-started.md)."
+                        f"`{name}`'s `{job_id}` job has an `if:` that is not a single expression. "
+                        f"Write `if: {expected}` (docs/getting-started.md)."
                     ),
                 )
             )
@@ -1620,7 +1624,7 @@ def _routing_finding(doc, name, engine):
                 (
                     WARNING,
                     (
-                        f"`{name}`'s job calling the engine's `{callee}` is selected by "
+                        f"`{name}`'s `{job_id}` job is selected by "
                         f"`{_normalize_if(str(_scalar(found)))}`, "
                         f"not `{_normalize_if(expected)}`. A wrong "
                         "expression routes a verb nowhere and its dispatched run completes with "
@@ -1629,6 +1633,70 @@ def _routing_finding(doc, name, engine):
                     ),
                 )
             )
+    return out + _extra_caller_findings(doc, name, engine)
+
+
+#: The `with:` the published `auto` job passes `apply.yml`, beside `runs_on`, which is the
+#: consumer's runner and any value. Without `auto: true` the App's dispatch would run as a bare
+#: apply; `apply.yml`'s `guard` refuses it, so every `auto` run fails.
+AUTO_WITH = {"auto": True, "ref": "${{ inputs.ref }}", "pr_number": "${{ inputs.pr_number }}"}
+
+
+def _normalize_with(value):
+    """A `with:` value with whitespace collapsed, and inside `${{ }}` trimmed to one space."""
+    if not isinstance(value, str):
+        return value
+    v = " ".join(value.split())
+    m = re.fullmatch(r"\$\{\{\s*(.*?)\s*\}\}", v)
+    return f"${{{{ {m[1]} }}}}" if m else v
+
+
+def _auto_with_finding(doc, name, engine):
+    """One finding when the `auto` job's `with:` is not `AUTO_WITH` plus an optional
+    `runs_on`, compared whole and naming each key that is missing, different or extra. A file
+    without the job draws nothing here: that is `_routing_finding`'s."""
+    job = dict(_engine_calls(doc, engine, "apply.yml")).get("auto")
+    if job is None:
+        return []
+    found = _mapping(job.get("with"))
+    wrong = [k for k, v in AUTO_WITH.items() if _normalize_with(_scalar(found.get(k))) != v]
+    wrong += [str(k) for k in found if k not in AUTO_WITH and k != "runs_on"]
+    if not wrong:
+        return []
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `auto` job does not pass `apply.yml` the published `with:`: "
+                f"{_and_list(wrong)} differ. Without `auto: true` the autoplan's dispatch is "
+                "refused by `apply.yml`'s `guard`, so no `apply_mode: auto` environment applies. "
+                "Write `auto: true`, `ref: ${{ inputs.ref }}`, "
+                "`pr_number: ${{ inputs.pr_number }}` and `runs_on: *runner` "
+                "(docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
+def _extra_caller_findings(doc, name, engine):
+    """One finding per job calling a `ROUTING_IFS` callee under an id the table does not route
+    to it."""
+    out = []
+    for callee in dict.fromkeys(c for c, _ in ROUTING_IFS.values()):
+        routed = [j for j, (c, _) in ROUTING_IFS.items() if c == callee]
+        out += [
+            (
+                WARNING,
+                (
+                    f"`{name}`'s `{job_id}` job calls the engine's `{callee}`, which the "
+                    f"published file calls only from {_and_list(routed)}: either the work runs "
+                    "twice or the job is unreachable. Remove it, or give it its published id "
+                    "(docs/getting-started.md)."
+                ),
+            )
+            for job_id, _ in _engine_calls(doc, engine, callee)
+            if job_id not in routed
+        ]
     return out
 
 
@@ -1696,10 +1764,10 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing, trigger-types and drift-call findings over the
-    consumer's `shipmate.yml` alone, in that order, from one read at the commit under
-    examination (`_contents_ref`): a pull request that fixes the file must not still be
-    reported for the old state.
+    """The job-name, dispatch-wiring, routing, `auto` `with:`, trigger-types and drift-call
+    findings over the consumer's `shipmate.yml` alone, in that order, from one read at the
+    commit under examination (`_contents_ref`): a pull request that fixes the file must not
+    still be reported for the old state.
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
@@ -1709,7 +1777,7 @@ def _shipmate_yml_warnings(ctx):
     receives no dispatch. A file that does not parse is `_workflow_parse_warnings`' one
     finding and draws none here.
 
-    Without the engine repository the three engine-anchored findings give way to one notice:
+    Without the engine repository the four engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring
     and the trigger types read no engine slug and still run."""
     ref = _contents_ref(ctx)
@@ -1732,6 +1800,7 @@ def _shipmate_yml_warnings(ctx):
         *_shim_job_name_finding(doc, name, engine),
         *_dispatch_wiring_finding(doc, name),
         *_routing_finding(doc, name, engine),
+        *_auto_with_finding(doc, name, engine),
         *_pr_target_types_finding(doc, name),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]

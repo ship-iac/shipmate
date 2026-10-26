@@ -24,10 +24,12 @@ queued duplicate below an older completed run).
 
 import json
 import os
+import posixpath
 import re
 import sys
+import urllib.parse
 
-from _shipmate import is_pr_number, is_run_id, run_annotated
+from _shipmate import gh_json, is_head_sha, is_pr_number, is_run_id, run_annotated
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
@@ -205,6 +207,23 @@ def plan_records(check_run_lines, app_id):
     return out
 
 
+def plan_actions(check_run_lines, app_id):
+    """Map each App-authored apply check name to the `action` its newest record holds, None
+    when it holds none, as an older engine's does; callers compare it with `PUSH_ACTIONS`. A
+    name whose newest check carries no decodable record is absent. Read beside
+    `plan_records`, whose tuple every reader unpacks."""
+    out = {}
+    for name, run in latest_by_name(app_runs(check_run_lines, app_id)).items():
+        record = _decoded(run)
+        if record is not None:
+            out[name] = record.get("action")
+    return out
+
+
+#: The event actions of an autoplan a push started: only its plan applies automatically.
+PUSH_ACTIONS = ("opened", "synchronize")
+
+
 def incomplete_runs(check_run_lines, app_id):
     """Map each plan run that published only part of its apply checks to `(distinct names
     published, sorted distinct declared counts, whether any record has no valid count)`.
@@ -262,6 +281,47 @@ def _plan_run(record):
     string."""
     plan_run = record.get("plan_run")
     return plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None
+
+
+#: Where the consumer's workflow file must live. Three surfaces match this filename
+#: literally: `shipmate doctor` keys its fork-trigger exemption and its `shipmate.yml` probe on it,
+#: `actions/dispatch` sends every commented verb to it, and `scripts/onboard` renders it
+#: under this name. `newest_autoplan` lists its runs by basename.
+PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
+
+
+def newest_autoplan(repo, head, *, run):
+    """The newest run id of `PLAN_WORKFLOW` started by `pull_request_target` on `head`, or
+    None when none is listed. Every page is read."""
+    query = f"event=pull_request_target&head_sha={head}&per_page=100"
+    listing = run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{repo}/actions/workflows/{posixpath.basename(PLAN_WORKFLOW)}/runs?{query}",
+            "--jq",
+            ".workflow_runs[].id",
+        ]
+    )
+    return max(map(int, listing.split()), default=None)
+
+
+def base_tip(repo, pull, *, run):
+    """The tip commit of the REST pull request `pull`'s base branch, read from the branch ref.
+    Not `pull["base"]["sha"]`: probed on a sample pull request, it kept the old tip for 20 s
+    and more after a push to the base, while the branch ref answered the new tip at once.
+    Raises `SystemExit` on a failed read or an answer that is not that branch's commit, and
+    `LookupError` or `TypeError` on a malformed pull request."""
+    branch = pull["base"]["ref"]
+    path = urllib.parse.quote(branch, safe="/")
+    ref = gh_json(f"repos/{repo}/git/ref/heads/{path}", run)
+    sha = ref["object"]["sha"]
+    if ref["ref"] != f"refs/heads/{branch}" or ref["object"]["type"] != "commit":
+        raise SystemExit(f"::error::{ref['ref']} is not the commit ref of branch {branch!r}")
+    if not is_head_sha(sha):
+        raise SystemExit(f"::error::branch {branch!r} points at {sha!r}, not a commit sha")
+    return sha
 
 
 def verdict(check_runs):

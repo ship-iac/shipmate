@@ -23,7 +23,11 @@ none (`CONTRACT.md` §Comment-ops). The unlock dispatch is not bound: it takes
 `{environment, ref}` and runs `tofu init` over that ref inside `<env>-apply`
 with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
 needs only write access and runs the same init over a pull request head; write
-access and the `<env>-apply` environment's reviewers bound both.
+access and the `<env>-apply` environment's reviewers bound both. It can also
+dispatch `verb: auto`, which `guard` admits and `detect` refuses: an `auto` run
+must run as the shipmate App's own bot login, compared whole, and a
+`GITHUB_TOKEN` dispatch runs as `github-actions[bot]` (`CONTRACT.md`
+§`apply_mode: auto`).
 
 Beyond those dispatches, two things a branch-pushed workflow *can* still do,
 absent the rest of this checklist:
@@ -77,7 +81,7 @@ uses lives in that one file, except each drift file's own `schedule` and
 `workflow_dispatch`, so what separates `shipmate.yml`'s jobs is not which file
 holds which trigger but each job's `if:` — a `pull_request_target`
 event selects the `plan` job, or on `closed` the `release` job, and no other. doctor's
-`shipmate.yml` probe compares all six of those expressions, whole, against the fence `getting-started.md` publishes. See
+`shipmate.yml` probe compares all seven of those expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 
 ## Checklist
@@ -190,6 +194,17 @@ closes the branch-authored-workflow path outright; everything else narrows it.
 
 Write access is also the grant that runs every comment verb but `help`: apply,
 unlock, plan and doctor. So review the list as you would the apply role.
+
+On an `apply_mode: auto` environment a push is enough. The plan run's `summary`
+job dispatches the `auto` apply with an App token, so it runs as the shipmate
+App, and `detect` refuses any other actor or triggering actor, so a human's
+re-run of it refuses. It is authorized as the pusher of the
+autoplan it applies, started by a push (`opened` or `synchronize`): that run's
+`actor`, which must also be its `triggering_actor`, and whose permission must be
+`write` or `admin`, decided by the same function that decides a commenter. It
+waits for no approving review, because the entry must hold `review: false`; the
+`<env>-apply` environment's required reviewers (§6) still gate each cell
+(`CONTRACT.md` §`apply_mode: auto`).
 
 ## 2. Restrict pushes that touch executable paths
 
@@ -459,10 +474,10 @@ enforcement.
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
 `split`, `review` and `command_hints` hold `true` or `false`, `apply_mode`
-holds `targeted` or `bare`, `max_parallel` holds a number, and all five refuse a
+holds `targeted`, `bare` or `auto`, `max_parallel` holds a number, and all five refuse a
 reference, so which
-environments share one binding, which a bare apply skips, which apply
-unreviewed, how many plan and drift cell jobs run at once and whether the plan
+environments share one binding, which a bare apply skips, which apply on a
+push, which apply unreviewed, how many plan and drift cell jobs run at once and whether the plan
 comment shows its commands stay merged commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
 out ([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
@@ -947,7 +962,7 @@ included, because it compares the policy names against the default branch alone.
 The documented file's jobs pass three secrets by name:
 `SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_ENCRYPTION_KEY` wherever the callee
 writes or reads an encrypted plan artifact or encrypted local state (the `plan`,
-`deploy` and `apply` jobs, and each drift file's `drift` job; `unlock` passes
+`deploy`, `apply` and `auto` jobs, and each drift file's `drift` job; `unlock` passes
 neither engine secret), and `SHIPMATE_SECRETS` on every job whose callee runs a
 cell. Nothing
 else crosses into a called workflow, because GHA forwards no secret a caller does

@@ -29,17 +29,65 @@ from _loader import workflow_jobs
 
 GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
-#: The rejected verb differs per workflow, so the error line is keyed by filename rather than a
-#: single shared constant.
-GUARD_ERROR_LINE = {
-    "apply.yml": (
-        "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' "
-        "on the pull request instead of running a direct workflow_dispatch"
-    ),
-    "unlock.yml": (
-        "::error::unlock refused: the dispatching actor is not a [bot]; comment "
-        "'shipmate unlock <env>' on the pull request instead of running a direct workflow_dispatch"
-    ),
+#: The guard job's whole step list per workflow, as `(if, ::error:: line)`. The bot-actor
+#: rejection runs first in both. `apply.yml` also refuses an `auto` dispatch reaching a caller job
+#: that does not pass `auto: true`, which would run the App's dispatch as a bare apply,
+#: `auto: true` on any other run, and a run without it that is not a dispatch with verb
+#: `apply`, which fails closed when the dispatch inputs read empty. A called workflow's `github`
+#: context is its caller's, so `github.event.inputs.verb` is the dispatch's own verb.
+GUARD_STEPS = {
+    "apply.yml": [
+        (
+            GUARD_IF,
+            (
+                "::error::apply refused: the dispatching actor is not a [bot]; comment "
+                "'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
+            ),
+        ),
+        (
+            (
+                "${{ github.event_name == 'workflow_dispatch' "
+                "&& github.event.inputs.verb == 'auto' && !inputs.auto }}"
+            ),
+            (
+                "::error::apply refused: this run was dispatched with verb 'auto', but the "
+                "calling job does not pass 'auto: true'; give the shipmate.yml 'auto' job the "
+                "published 'with:' block (shipmate doctor names the difference)"
+            ),
+        ),
+        (
+            (
+                "${{ inputs.auto && (github.event_name != 'workflow_dispatch' "
+                "|| github.event.inputs.verb != 'auto') }}"
+            ),
+            (
+                "::error::apply refused: the calling job passes 'auto: true', but this run is "
+                "not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
+            ),
+        ),
+        (
+            (
+                "${{ !inputs.auto && (github.event_name != 'workflow_dispatch' "
+                "|| github.event.inputs.verb != 'apply') }}"
+            ),
+            (
+                "::error::apply refused: this run is not a dispatch with verb 'apply' and the "
+                "calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull "
+                "request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate "
+                "doctor names the difference)"
+            ),
+        ),
+    ],
+    "unlock.yml": [
+        (
+            GUARD_IF,
+            (
+                "::error::unlock refused: the dispatching actor is not a [bot]; comment "
+                "'shipmate unlock <env>' on the pull request instead of running a direct "
+                "workflow_dispatch"
+            ),
+        ),
+    ],
 }
 #: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path waits on
 #: the `review` job that reads the pull request's review decision server-side. `unlock.yml`
@@ -98,23 +146,19 @@ def _needs(job):
 
 
 def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
-    # The rejection must be the guard job's one and only step, so nothing can run in that job
-    # before it. That is why it is not a step of `detect`, where `actions/checkout` of the
-    # dispatcher-supplied ref sits.
-    for name in DISPATCH_PATHS:
-        job = workflow_jobs(name)[GUARD_JOB]
-        steps = job["steps"]
-        assert len(steps) == 1, f"{name}: {GUARD_JOB} must carry exactly one step, got {len(steps)}"
-        step = steps[0]
-        assert step.get("if") == GUARD_IF, (
-            f"{name}: the guard step must have if: {GUARD_IF!r}, got {step.get('if')!r}"
-        )
-        run = step.get("run", "")
-        assert run.lstrip().startswith(f'echo "{GUARD_ERROR_LINE[name]}"'), (
-            f"{name}: guard step's run must begin with the ::error:: line, got {run!r}"
-        )
-        assert run.rstrip().endswith("exit 1"), (
-            f"{name}: guard step must actually fail, not just be conditioned: {run!r}"
+    """Each guard step's whole `if:` and whole run body, in order: the bot-actor rejection
+    first, so nothing runs in that job before it. That is why it is not a step of `detect`,
+    where `actions/checkout` of the dispatcher-supplied ref sits.
+
+    Mutations (each run, red): drop `&& !inputs.auto` from apply.yml's second step; replace
+    `||` with `&&` in its third; delete the third step; swap `exit 1` for `exit 0` in the
+    second; `==` for `!=` in the fourth; drop `!inputs.auto` from the fourth (every auto run
+    refuses there); `&&` for its `||` (a non-dispatch call passes); delete the fourth step."""
+    for name, expected in GUARD_STEPS.items():
+        steps = workflow_jobs(name)[GUARD_JOB]["steps"]
+        got = [(step.get("if"), step.get("run")) for step in steps]
+        assert got == [(cond, f'echo "{line}"\nexit 1\n') for cond, line in expected], (
+            f"{name}: {GUARD_JOB} steps differ from the pinned list: {got!r}"
         )
 
 

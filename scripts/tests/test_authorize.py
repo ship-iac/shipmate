@@ -736,3 +736,41 @@ def test_review_exemption_decision_table(decision, environment, expected):
     Mutation: drop the `in exempt_envs` clause -- the prod-eu row goes true.
     Mutation: drop `.casefold()` -- the `DEV-EU` row goes false."""
     assert az._review_exemption(decision, environment, frozenset({"dev-eu"})) is expected
+
+
+def test_permission_reason_names_the_given_subject_and_retry():
+    """The auto apply's wording; the policy is the commenter's.
+
+    Mutations: write `the commenter` back into the `read` refusal; into the unreadable one; into
+    the unadmitted one; write `comment again` back for `retry`."""
+    kw = {
+        "subject": "the pusher @k3np",
+        "retry": "push again, or a writer comments `shipmate apply`",
+    }
+    assert [az._permission_reason(p, "apply", **kw) for p in ("read", "", "maintain", "write")] == [
+        (
+            "not authorized: `shipmate apply` needs write access to this repository, and the "
+            "pusher @k3np's permission is `read`."
+        ),
+        (
+            "not authorized: could not read the pusher @k3np's permission on this repository, so "
+            "`shipmate apply` was not run. This run's log has the API response; push again, or a "
+            "writer comments `shipmate apply`."
+        ),
+        (
+            "not authorized: `shipmate apply` needs write access to this repository, and GitHub "
+            "reported the pusher @k3np's permission as `maintain`, which this engine does not "
+            "admit."
+        ),
+        None,
+    ]
+
+
+@pytest.mark.parametrize("state", ["unknown", ""])
+def test_a_mergeability_still_computing_keeps_the_commenters_remedy_by_default(state):
+    """Only `apply-detect`'s auto form passes `retry`. Mutation: `, then re-run` for ` and
+    re-run` in `_ready_reason` -- red."""
+    assert az._ready_reason({**PR_OK, "mergeable": None, "mergeable_state": state}) == (
+        "GitHub is still computing this PR's mergeability; wait a moment and re-run "
+        "`shipmate apply`."
+    )

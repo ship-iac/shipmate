@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an on-demand plan whose comment was created or updated collapses the started reply that links this run.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
 inputs:
   pr-number:
     description: Pull request number.
@@ -484,6 +484,76 @@ runs:
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi
+
+    - name: Decide whether to dispatch an auto apply
+      # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
+      # job first. A `moved` upsert means a newer head exists, whose own run decides.
+      if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
+      id: autodecide
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
+        SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}
+        SHIPMATE_COMMENT_MODE: ${{ steps.gate.outputs.comment_mode }}
+      run: |
+        set -euo pipefail
+        # Reviewer-facing degrade only: the gate is already written and nothing here touches it.
+        if ! envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" 2>decide.err); then
+          sed 's/^::error::/::warning::/' decide.err >&2
+          echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+          exit 0
+        fi
+        cat decide.err >&2
+        echo "envs=$envs" >> "$GITHUB_OUTPUT"
+
+    - name: Mint the auto apply dispatch token
+      if: ${{ steps.autodecide.outputs.envs != '' }}
+      id: autotoken
+      # Reviewer-facing degrade: a failed mint leaves the token empty, which the dispatch step
+      # reports. Its own token, so the summary's main token stays `actions: read`.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+
+    - name: Dispatch an auto apply
+      if: ${{ steps.autodecide.outputs.envs != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.autotoken.outputs.token }}
+        # The main mint's token: it holds `pull-requests: write` and exists when `autotoken` failed.
+        REPLY_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_AUTO_ENVS: ${{ steps.autodecide.outputs.envs }}
+        # dispatch-body's inputs; no ENVIRONMENT, so the body carries no environment key.
+        VERB: auto
+        REF: ${{ inputs.head-sha }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        scripts="$GITHUB_ACTION_PATH/../../scripts"
+        # Reviewer-facing degrade only: a failed mint or dispatch warns, replies with the remedy
+        # and exits 0.
+        not_started() {
+          echo "::warning::$1 for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
+          text="auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
+            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply failure reply"
+          exit 0
+        }
+        [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
+        if ! body=$(python3 "$scripts/dispatch-body") \
+          || ! gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/shipmate.yml/dispatches" \
+            --input - <<<"$body" >/dev/null; then
+          not_started "the auto apply dispatch"
+        fi
+        echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"
 
     - name: Collapse the started reply
       if: ${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' && (steps.upsert.outputs.result == 'created' || steps.upsert.outputs.result == 'updated') }}

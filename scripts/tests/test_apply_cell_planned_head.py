@@ -58,7 +58,7 @@ def test_the_step_is_attributable_in_the_cell_summary():
     # row belongs where its step does -- planned-head after download, before decrypt -- and a
     # partial check would not pin that.
     assert _failsafe_env_keys() == [
-        "CELL_LOCK_OUTCOME",
+        "PRE_APPLY_OUTCOME",
         "DOWNLOAD_OUTCOME",
         "PLANNED_HEAD_OUTCOME",
         "DECRYPT_OUTCOME",

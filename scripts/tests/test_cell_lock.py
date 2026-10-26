@@ -1043,17 +1043,99 @@ def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
 
 # --- verify --------------------------------------------------------------------------------------
 
+BASE = "f" * 40
+RUN = "4242"
+PULL_READ = ["gh", "api", f"repos/{REPO}/pulls/{PR}"]
+AUTOPLANS_READ = [
+    "gh",
+    "api",
+    "--paginate",
+    (
+        f"repos/{REPO}/actions/workflows/shipmate.yml/runs?event=pull_request_target"
+        f"&head_sha={HEAD}&per_page=100"
+    ),
+    "--jq",
+    ".workflow_runs[].id",
+]
+AUTO = {"SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN, "SHIPMATE_BASE_SHA": BASE}
+RETRY = "push, or comment `shipmate apply` on the pull request"
+WHERE = "apply aborted for `dev` / `stacks/auth`:"
 
-def _verify(monkeypatch, tmp_path, gh):
-    return _main(
-        monkeypatch, tmp_path, "verify", gh, {"SHIPMATE_ENV": "dev", "STACK": "stacks/auth"}
+
+TIP_READ = ["gh", "api", f"repos/{REPO}/git/ref/heads/main"]
+RECORD_READ = [
+    "gh",
+    "api",
+    "--paginate",
+    (
+        f"repos/{REPO}/commits/{HEAD}/check-runs?filter=all&per_page=100"
+        "&check_name=apply%20%2F%20stacks%2Fauth%20%2F%20dev"
+    ),
+    "--jq",
+    ".check_runs[]",
+]
+
+
+def _pull(state="open", head=HEAD, draft=False):
+    """A pull request whose `base.sha` is stale: probed on a sample pull request, it kept the
+    old tip for 20 s and more after a push to the base, so the check reads the branch ref."""
+    return json.dumps(
+        {
+            "state": state,
+            "draft": draft,
+            "head": {"sha": head},
+            "base": {"sha": "9" * 40, "ref": "main"},
+        }
     )
 
 
-def test_verify_passes_a_cell_our_pull_request_holds(monkeypatch, tmp_path):
-    """Mutation: refuse when the holder is our pull request (`held.pr != pr` for `==`)."""
+RUN_READ = ["gh", "api", f"repos/{REPO}/actions/runs/{RUN}"]
+PERMISSION_READ = ["gh", "api", f"repos/{REPO}/collaborators/k3np/permission"]
+
+
+def _plan_run(actor="k3np", trigger="k3np"):
+    return json.dumps({"actor": {"login": actor}, "triggering_actor": {"login": trigger}})
+
+
+def _tip(sha=BASE):
+    return json.dumps({"ref": "refs/heads/main", "object": {"sha": sha, "type": "commit"}})
+
+
+def _record(plan_run, run_id=1, action="synchronize"):
+    record = {"plan_run": plan_run} | ({} if action is None else {"action": action})
+    return {
+        **_check("apply / stacks/auth / dev", "queued", None, run_id=run_id),
+        "external_id": json.dumps(record),
+    }
+
+
+def _records(*plan_runs, action="synchronize"):
+    return jsonl(*(_record(r, i, action) for i, r in enumerate(plan_runs, 1)))
+
+
+def _held():
+    """A double answering the lock read with our pull request's lock."""
     gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
-    gh.on(commit_read(OLD), commit(OLD, message(PR, "dev", "stacks/auth")))
+    return gh.on(commit_read(OLD), commit(OLD, message(PR, "dev", "stacks/auth")))
+
+
+def _verify(monkeypatch, tmp_path, gh, env=None):
+    base = {"SHIPMATE_ENV": "dev", "STACK": "stacks/auth", "SHIPMATE_AUTO": "false"}
+    return _main(monkeypatch, tmp_path, "verify", gh, {**base, **(env or {})})
+
+
+def _verify_refusal(monkeypatch, tmp_path, gh, env=None):
+    with pytest.raises(SystemExit) as exc:
+        _verify(monkeypatch, tmp_path, gh, env)
+    assert gh.drained()
+    return exc.value.code
+
+
+def test_verify_passes_a_cell_our_pull_request_holds_at_the_head(monkeypatch, tmp_path):
+    """Outside the auto form the base tip is not read (the strict double refuses an extra read).
+    Mutation: refuse when the holder is our pull request (`held.pr != pr` for `==`). Mutation:
+    return before the pull request read (its queued answer is left unconsumed)."""
+    gh = _held().on(PULL_READ, _pull())
     assert _verify(monkeypatch, tmp_path, gh) == {}
     assert gh.drained()
 
@@ -1082,48 +1164,328 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
     gh = Gh().on(ref_read(AUTH_REF), listed)
     if msg is not None:
         gh.on(commit_read(OLD), commit(OLD, msg))
-    with pytest.raises(SystemExit) as exc:
-        _verify(monkeypatch, tmp_path, gh)
-    assert exc.value.code == (
-        f"::error::apply aborted for `dev` / `stacks/auth`: pull request #7 no longer holds its "
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == (
+        f"::error::{WHERE} pull request #7 no longer holds its "
         f"cell lock ({holder}); comment `shipmate apply` again to lock it or name its holder"
     )
-    assert gh.drained()
 
 
 @pytest.mark.parametrize(
-    ("commit_answer", "refusal"),
+    ("commit_answer", "why"),
     [
-        pytest.param(
-            FAIL,
-            "::error::could not read the cell lock on `dev` / `stacks/auth` "
-            "(command failed (1): gh api)",
-            id="read-fails",
-        ),
+        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
         *[
-            pytest.param(
-                SystemExit(code),
-                "::error::could not read the cell lock on `dev` / `stacks/auth` "
-                "(the lock read failed)",
-                id=f"read-exits-{code}",
-            )
+            pytest.param(SystemExit(code), "read failed", id=f"read-exits-{code}")
             for code in (None, 1)
         ],
+        pytest.param("{}", "KeyError('committer')", id="malformed"),
+    ],
+)
+def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, why):
+    """Mutations: re-raise the read's `SystemExit` unchanged in `_confirm` (read-fails loses the
+    cell); `str(exc.code)` for the `why` (read-fails keeps `::error::`, read-exits-* print
+    `(None)` and `(1)`); drop `LookupError` from `_confirm`'s second `except` (malformed escapes
+    as a `KeyError`)."""
+    gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == (
+        f"::error::{WHERE} could not confirm pull request #7 holds its cell lock ({why}); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("pull", "refusal"),
+    [
         pytest.param(
-            "{}",
-            "::error::could not read the cell lock on `dev` / `stacks/auth` "
-            "(KeyError('committer'))",
-            id="malformed",
+            _pull(head=OTHER),
+            f"pull request #7 is at {OTHER}, not at {HEAD}, the head this apply was requested "
+            f"for; {RETRY}",
+            id="head-moved",
+        ),
+        pytest.param(
+            _pull(state="closed"), "pull request #7 is closed; nothing applies", id="closed"
         ),
     ],
 )
-def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, refusal):
-    """Mutations: catch `SystemExit` around the read and pass (read-fails passes); re-raise
-    the read's `SystemExit` unchanged (read-fails loses the cell); quote a non-string exit
-    code (read-exits-* print `(None)` and `(1)`); return instead of refusing on a malformed
-    answer (malformed passes)."""
-    gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
-    with pytest.raises(SystemExit) as exc:
-        _verify(monkeypatch, tmp_path, gh)
-    assert exc.value.code == refusal
+def test_verify_refuses_a_pull_request_not_open_at_the_head(monkeypatch, tmp_path, pull, refusal):
+    """Mutation: drop the head comparison (head-moved passes). Mutation: drop the state
+    comparison (closed passes)."""
+    gh = _held().on(PULL_READ, pull)
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == f"::error::{WHERE} {refusal}"
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
+        pytest.param(json.dumps({"state": "open"}), "KeyError('head')", id="malformed"),
+    ],
+)
+def test_verify_refuses_a_pull_request_it_cannot_read(monkeypatch, tmp_path, answer, why):
+    """Mutation: answer a failed pull request read as open at the head (`except SystemExit:
+    return pull, "open", head` around `gh_json` in `_verify_pull`; read-fails passes).
+    Mutation: read the fields with `.get`, defaulting the head to `head` (malformed passes)."""
+    gh = _held().on(PULL_READ, answer)
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == (
+        f"::error::{WHERE} could not confirm pull request #7 is open at {HEAD} ({why}); {RETRY}"
+    )
+
+
+def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch, tmp_path):
+    """The record check reads the newest record per name: an older check run recording another
+    plan run is outvoted. Mutation: route `SHIPMATE_AUTO` `true` like `false` (the listing and
+    check-run reads are left unconsumed). Mutation: read the record with no `name` (an
+    unexpected call)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh.on(RECORD_READ, _records("1", RUN)).on(RUN_READ, _plan_run())
+    gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
+
+
+@pytest.mark.parametrize("action", ["ready_for_review", "", None])
+def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, action):
+    """A ready-for-review autoplan of the head can become the newest autoplan after detect.
+
+    Mutation: drop the action refusal from `_verify_auto` (the run read runs, unexpected)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh.on(RECORD_READ, _records(RUN, action=action))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the cell's plan record names event action {action!r}, not a push "
+        "(opened or synchronize); comment `shipmate apply`"
+    )
+
+
+@pytest.mark.parametrize("attempt", ["2", "", "1x", None])
+def test_verify_auto_refuses_a_later_run_attempt_before_any_read(monkeypatch, tmp_path, attempt):
+    """ "Re-run failed jobs" keeps the first attempt's passed detect, so its actor check never
+    runs again; the App never re-runs. Mutation: drop the attempt refusal (each row reaches the
+    lock read, unexpected). Mutation: compare `int(attempt) > 1` (the `""`, `1x` and unset rows
+    raise `ValueError`)."""
+    env = {**AUTO, "GITHUB_RUN_ATTEMPT": attempt}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        f"::error::{WHERE} an auto apply is never re-run (run attempt "
+        f"{(attempt or '')!r}): comment `shipmate apply`"
+    )
+
+
+def test_verify_outside_auto_passes_a_later_run_attempt(monkeypatch, tmp_path):
+    """Mutation: refuse a later attempt whatever `SHIPMATE_AUTO` (refuses)."""
+    gh = _held().on(PULL_READ, _pull())
+    assert _verify(monkeypatch, tmp_path, gh, {"GITHUB_RUN_ATTEMPT": "2"}) == {}
+
+
+def test_verify_auto_refuses_a_draft(monkeypatch, tmp_path):
+    """A pull request converted to draft while a wave waits is no longer ready to apply.
+
+    Mutation: drop the draft refusal (the base tip read runs, unexpected)."""
+    gh = _held().on(PULL_READ, _pull(draft=True))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} pull request #7 is a draft; mark it ready for review, then comment "
+        "`shipmate apply`"
+    )
+
+
+@pytest.mark.parametrize("draft", [None, "false"])
+def test_verify_auto_refuses_a_draft_state_that_is_not_a_boolean(monkeypatch, tmp_path, draft):
+    """Mutation: `if not isinstance(draft, bool)` dropped from `_draft` (both rows pass on to the
+    base tip read, unexpected)."""
+    gh = _held().on(PULL_READ, _pull(draft=draft))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm pull request #7 is ready for review "
+        f"(ValueError({f'draft is {draft!r}'!r})); {RETRY}"
+    )
+
+
+def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
+    """Mutation: return only for a non-draft (`auto == "false" and not pull["draft"]`; the
+    draft refuses)."""
+    gh = _held().on(PULL_READ, _pull(draft=True))
+    assert _verify(monkeypatch, tmp_path, gh) == {}
+
+
+def _pusher_gh(plan_run, permission=None):
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, plan_run)
+    if permission is not None:
+        gh.on(PERMISSION_READ, permission)
+    return gh
+
+
+@pytest.mark.parametrize(
+    ("plan_run", "permission", "reason"),
+    [
+        pytest.param(
+            _plan_run(),
+            json.dumps({"permission": "read"}),
+            "not authorized: `shipmate apply` needs write access to this repository, and the "
+            "pusher @k3np's permission is `read`.",
+            id="read",
+        ),
+        pytest.param(
+            _plan_run(),
+            FAIL,
+            "not authorized: could not read the pusher @k3np's permission on this repository, "
+            "so `shipmate apply` was not run. This run's log has the API response; push again, "
+            "or a writer comments `shipmate apply`.",
+            id="unreadable",
+        ),
+        pytest.param(
+            _plan_run(trigger="octocat"),
+            None,
+            "not authorized: the autoplan ran as @k3np but was triggered by @octocat, so it was "
+            "re-run, and auto authorizes only the push itself; a writer comments `shipmate "
+            "apply`.",
+            id="re-run",
+        ),
+    ],
+)
+def test_verify_auto_rereads_the_pushers_permission(
+    monkeypatch, tmp_path, plan_run, permission, reason
+):
+    """The wave decides the pusher with detect's function and wording.
+
+    Mutation: drop the pusher check from `_verify_auto` (every row passes)."""
+    gh = _pusher_gh(plan_run, permission)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == f"::error::{WHERE} {reason}"
+
+
+@pytest.mark.parametrize(
+    ("plan_run", "why"),
+    [
+        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
+        pytest.param(
+            '"x"', "AttributeError(\"'str' object has no attribute 'get'\")", id="malformed"
+        ),
+    ],
+)
+def test_verify_auto_refuses_a_pusher_it_cannot_read(monkeypatch, tmp_path, plan_run, why):
+    """Mutation: answer the run read's failure with no reason (`except SystemExit: return None`
+    around it; read-fails passes)."""
+    gh = _pusher_gh(plan_run)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm the pusher of plan run {RUN} may apply ({why}); "
+        f"{RETRY}"
+    )
+
+
+def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
+    """The tip is the branch ref's; `base.sha` would read stale (`_pull`). Mutation: drop the
+    base comparison (the cell passes). Mutation: return `pull["base"]["sha"]` from `base_tip`
+    (the stale sha refuses as the moved tip). Mutation: end with `_RETRY`, which offers a bare
+    `shipmate apply` that skips the overlap check -- red."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip(OTHER))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the base branch moved from {BASE} to {OTHER} since this auto apply "
+        "was detected; update the branch from the base and push"
+    )
+
+
+@pytest.mark.parametrize(
+    ("autoplans", "newest"),
+    [
+        pytest.param(f"{RUN}\n4243", "run 4243", id="newer"),
+        pytest.param("", "not listed", id="none"),
+    ],
+)
+def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
+    """Mutation: `min` for `max` in `newest_autoplan` (newer passes). Mutation: skip the
+    comparison when nothing is listed (`newest is not None and ...`: none passes)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the newest autoplan of {HEAD} is {newest}, not plan run {RUN}, which "
+        f"this auto apply applies; {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("records", "named"),
+    [
+        pytest.param((RUN, "4243"), "plan run 4243", id="newer-record"),
+        pytest.param((), "no plan run", id="no-record"),
+    ],
+)
+def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path, records, named):
+    """Mutation: drop the record comparison (both pass)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh.on(RECORD_READ, _records(*records))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the cell's newest plan record names {named}, not plan run {RUN}, "
+        f"which this auto apply applies; {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("failing", "what"),
+    [
+        pytest.param("list", f"plan run {RUN} is the newest autoplan of {HEAD}", id="list"),
+        pytest.param(
+            "check-runs", f"the cell's newest plan record names plan run {RUN}", id="check-runs"
+        ),
+    ],
+)
+def test_verify_auto_refuses_a_provenance_it_cannot_read(monkeypatch, tmp_path, failing, what):
+    """Mutation: answer a failed read with None in `_confirm` (`return None` for the raise;
+    list then reads "not listed", check-runs "no plan run")."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
+    gh.on(AUTOPLANS_READ, FAIL if failing == "list" else RUN)
+    if failing == "check-runs":
+        gh.on(RECORD_READ, FAIL)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm {what} (command failed (1): gh api); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
+        pytest.param(
+            json.dumps({"ref": "refs/heads/mainline", "object": {"sha": BASE, "type": "commit"}}),
+            "refs/heads/mainline is not the commit ref of branch 'main'",
+            id="other-ref",
+        ),
+    ],
+)
+def test_verify_auto_refuses_a_base_tip_it_cannot_read(monkeypatch, tmp_path, answer, why):
+    """Mutation: drop the ref-name check in `base_tip` (other-ref passes)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, answer)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm the base tip of pull request #7 ({why}); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param({"SHIPMATE_PROVENANCE_RUN": ""}, id="no-run"),
+        pytest.param({"SHIPMATE_BASE_SHA": ""}, id="no-base"),
+    ],
+)
+def test_verify_auto_refuses_without_its_plan_run_or_base_before_any_read(
+    monkeypatch, tmp_path, env
+):
+    """Mutation: drop the `is_run_id(provenance)` check (no-run reaches the lock read).
+    Mutation: drop the `is_head_sha(base)` check (no-base reaches the lock read)."""
+    got = {**AUTO, **env}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), got) == (
+        f"::error::{WHERE} an auto apply reached the wave without its plan run and base tip "
+        f"(got: {got['SHIPMATE_PROVENANCE_RUN']!r}, {got['SHIPMATE_BASE_SHA']!r}); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        pytest.param({"SHIPMATE_AUTO": ""}, id="auto-empty"),
+        pytest.param({"SHIPMATE_AUTO": "True"}, id="auto-cased"),
+        pytest.param({"SHIPMATE_HEAD_SHA": ""}, id="head-empty"),
+    ],
+)
+def test_verify_refuses_a_malformed_head_or_mode_before_any_read(monkeypatch, tmp_path, env):
+    """Mutation: drop the `auto not in` check (auto-empty and auto-cased run the non-auto
+    check). Mutation: drop the `is_head_sha(head)` check (head-empty reaches the lock read)."""
+    got = {"SHIPMATE_HEAD_SHA": HEAD, "SHIPMATE_AUTO": "false", **env}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        f"::error::{WHERE} SHIPMATE_HEAD_SHA must be a commit sha and SHIPMATE_AUTO true or "
+        f"false (got: {got['SHIPMATE_HEAD_SHA']!r}, {got['SHIPMATE_AUTO']!r})"
+    )

@@ -56,7 +56,7 @@ _EXPECTED = {
     "apply-cell": [
         "Inject identity variables",
         "Stack slug",
-        "Refuse a cell whose lock check did not pass",
+        "Refuse a cell whose pre-apply check did not pass",
         "Download reviewed plan artifact (fail-safe if missing)",
         "Verify the plan was produced from this commit",
         "Decrypt reviewed plan artifact",

@@ -27,9 +27,14 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds.
-- `verify`: read-only; refuses unless the pull request holds the lock on `STACK` in
-  `SHIPMATE_ENV`. A "Re-run failed jobs" of an apply re-runs its waves without `acquire`, so
-  each apply cell checks its lock here.
+- `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
+  `STACK` in `SHIPMATE_ENV` and is open at `SHIPMATE_HEAD_SHA`. With `SHIPMATE_AUTO` `true` it
+  also refuses unless `GITHUB_RUN_ATTEMPT` is `1`, the pull request is not a draft,
+  `SHIPMATE_PROVENANCE_RUN` is the head's newest autoplan and the run the cell's newest plan
+  record names, its pusher still passes
+  `authorize.pusher_reason`, and the base tip is still `SHIPMATE_BASE_SHA`. A "Re-run
+  failed jobs" of an apply re-runs its waves without `detect` or `acquire`, and a wave can wait
+  hours on an environment approval, so each apply cell checks here before its credentials.
 """
 
 import dataclasses
@@ -54,6 +59,7 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
+az = _load("authorize")
 ec = _load("env-config")
 
 LOCKS = "refs/shipmate/locks/"
@@ -506,21 +512,30 @@ def _marks_cmd(repo, pr, run):
     )
 
 
-def _verify_cmd(repo, pr, run):
-    env, stack = _env(os.environ.get("SHIPMATE_ENV", "")), os.environ.get("STACK", "")
-    ref, where = ref_name(env, stack), f"`{env}` / `{stack}`"
+_RETRY = "push, or comment `shipmate apply` on the pull request"
+
+
+def _confirm(where, what, read):
+    """`read()`, refused as an unconfirmed `what` when it fails or its answer is malformed."""
     try:
-        sha = _ref_sha(repo, ref, run)
-        held = None if sha is None else _lock(repo, ref, sha, run)
+        return read()
     except SystemExit as exc:
-        why = (
-            exc.code.removeprefix("::error::")
-            if isinstance(exc.code, str)
-            else "the lock read failed"
-        )
-        raise SystemExit(f"::error::could not read the cell lock on {where} ({why})") from None
-    except (LookupError, TypeError, ValueError) as exc:
-        raise SystemExit(f"::error::could not read the cell lock on {where} ({exc!r})") from None
+        why = exc.code.removeprefix("::error::") if isinstance(exc.code, str) else "read failed"
+    except (LookupError, TypeError, ValueError, AttributeError) as exc:
+        why = repr(exc)
+    raise SystemExit(
+        f"::error::apply aborted for {where}: could not confirm {what} ({why}); {_RETRY}"
+    ) from None
+
+
+def _verify_lock(repo, pr, env, stack, where, run):
+    ref = ref_name(env, stack)
+
+    def read():
+        sha = _ref_sha(repo, ref, run)
+        return None if sha is None else _lock(repo, ref, sha, run)
+
+    held = _confirm(where, f"pull request #{pr} holds its cell lock", read)
     if held is not None and held.pr == pr:
         return
     holder = (
@@ -532,6 +547,136 @@ def _verify_cmd(repo, pr, run):
         f"::error::apply aborted for {where}: pull request #{pr} no longer holds its cell lock "
         f"({holder}); comment `shipmate apply` again to lock it or name its holder"
     )
+
+
+def _verify_pull(repo, pr, head, where, run):
+    """The pull request, refused unless it is open at `head`."""
+
+    def read():
+        pull = gh_json(f"repos/{repo}/pulls/{pr}", run)
+        return pull, pull["state"], pull["head"]["sha"]
+
+    pull, state, sha = _confirm(where, f"pull request #{pr} is open at {head}", read)
+    if state != "open":
+        raise SystemExit(
+            f"::error::apply aborted for {where}: pull request #{pr} is {state}; nothing applies"
+        )
+    if sha != head:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: pull request #{pr} is at {sha}, not at {head}, "
+            f"the head this apply was requested for; {_RETRY}"
+        )
+    return pull
+
+
+def _plan_record(repo, head, name, run):
+    """(plan run, event action) the newest App-authored check named `name` on `head` records,
+    each None when absent."""
+    lines, app_id = (
+        check_runs(repo, head, run=run, name=name).splitlines(),
+        os.environ.get("SHIPMATE_APP_ID", ""),
+    )
+    plan_run = ag.plan_records(lines, app_id).get(name, (None,))[0]
+    return plan_run, ag.plan_actions(lines, app_id).get(name)
+
+
+def _verify_auto(repo, head, provenance, env, stack, where, run):
+    newest = _confirm(
+        where,
+        f"plan run {provenance} is the newest autoplan of {head}",
+        lambda: ag.newest_autoplan(repo, head, run=run),
+    )
+    if newest != int(provenance):
+        raise SystemExit(
+            f"::error::apply aborted for {where}: the newest autoplan of {head} is "
+            f"{'not listed' if newest is None else f'run {newest}'}, not plan run {provenance}, "
+            f"which this auto apply applies; {_RETRY}"
+        )
+    recorded, action = _confirm(
+        where,
+        f"the cell's newest plan record names plan run {provenance}",
+        lambda: _plan_record(repo, head, ag.check_name(stack, env), run),
+    )
+    if recorded != provenance:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: the cell's newest plan record names "
+            f"{'no plan run' if recorded is None else f'plan run {recorded}'}, not plan run "
+            f"{provenance}, which this auto apply applies; {_RETRY}"
+        )
+    if action not in ag.PUSH_ACTIONS:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: the cell's plan record names event action "
+            f"{action!r}, not a push (opened or synchronize); comment `shipmate apply`"
+        )
+    # The pusher's write access can be revoked while a wave waits on an approval.
+    reason = _confirm(
+        where,
+        f"the pusher of plan run {provenance} may apply",
+        lambda: az.pusher_reason(
+            repo, gh_json(f"repos/{repo}/actions/runs/{provenance}", run), run=run
+        ),
+    )
+    if reason:
+        raise SystemExit(f"::error::apply aborted for {where}: {reason}")
+
+
+def _draft(pull):
+    """`pull["draft"]`, raising `ValueError` unless it is a boolean: a missing state is no
+    proof of ready."""
+    draft = pull["draft"]
+    if not isinstance(draft, bool):
+        raise ValueError(f"draft is {draft!r}")
+    return draft
+
+
+def _verify_cmd(repo, pr, run):
+    env, stack = _env(os.environ.get("SHIPMATE_ENV", "")), os.environ.get("STACK", "")
+    where = f"`{env}` / `{stack}`"
+    head, auto, provenance, base = (
+        os.environ.get(k, "")
+        for k in (
+            "SHIPMATE_HEAD_SHA",
+            "SHIPMATE_AUTO",
+            "SHIPMATE_PROVENANCE_RUN",
+            "SHIPMATE_BASE_SHA",
+        )
+    )
+    if not is_head_sha(head) or auto not in ("true", "false"):
+        raise SystemExit(
+            f"::error::apply aborted for {where}: SHIPMATE_HEAD_SHA must be a commit sha and "
+            f"SHIPMATE_AUTO true or false (got: {head!r}, {auto!r})"
+        )
+    if auto == "true" and not (is_run_id(provenance) and is_head_sha(base)):
+        raise SystemExit(
+            f"::error::apply aborted for {where}: an auto apply reached the wave without its "
+            f"plan run and base tip (got: {provenance!r}, {base!r}); {_RETRY}"
+        )
+    # "Re-run failed jobs" reuses the passed detect, skipping its actor check; the App never
+    # re-runs, so a later attempt is a human's.
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    if auto == "true" and attempt != "1":
+        raise SystemExit(
+            f"::error::apply aborted for {where}: an auto apply is never re-run (run attempt "
+            f"{attempt!r}): comment `shipmate apply`"
+        )
+    _verify_lock(repo, pr, env, stack, where, run)
+    pull = _verify_pull(repo, pr, head, where, run)
+    if auto == "false":
+        return
+    if _confirm(where, f"pull request #{pr} is ready for review", lambda: _draft(pull)):
+        raise SystemExit(
+            f"::error::apply aborted for {where}: pull request #{pr} is a draft; mark it ready "
+            "for review, then comment `shipmate apply`"
+        )
+    tip = _confirm(
+        where, f"the base tip of pull request #{pr}", lambda: ag.base_tip(repo, pull, run=run)
+    )
+    if tip != base:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: the base branch moved from {base} to {tip} "
+            "since this auto apply was detected; update the branch from the base and push"
+        )
+    _verify_auto(repo, head, provenance, env, stack, where, run)
 
 
 COMMANDS = {

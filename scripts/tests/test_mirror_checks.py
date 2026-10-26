@@ -208,6 +208,9 @@ EXPECTED_STEP_NAMES = [
     "Upsert sticky comment",
     "Create apply checks (pending / no-changes)",
     "Create/refresh gate",
+    "Decide whether to dispatch an auto apply",
+    "Mint the auto apply dispatch token",
+    "Dispatch an auto apply",
     "Collapse the started reply",
 ]
 

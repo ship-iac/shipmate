@@ -36,7 +36,13 @@ def test_the_summary_collapse_runs_last_on_a_written_on_demand_plan_comment():
     `|| echo` fallback; `SHIPMATE_REPLY_VERB: apply`.
     """
     names = [s.get("name") for s in action_steps("summary")]
-    assert names[-2:] == ["Create/refresh gate", COLLAPSE]
+    assert names[-5:] == [
+        "Create/refresh gate",
+        "Decide whether to dispatch an auto apply",
+        "Mint the auto apply dispatch token",
+        "Dispatch an auto apply",
+        COLLAPSE,
+    ]
     collapse = step_by("summary", name=COLLAPSE)
     assert collapse["if"] == (
         "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true'"

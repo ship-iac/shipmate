@@ -34,7 +34,7 @@ import os
 import re
 import sys
 
-from _shipmate import run_annotated, write_outputs
+from _shipmate import gh_json, run_annotated, write_outputs
 
 
 def parse_exempt_envs(raw):
@@ -105,31 +105,87 @@ def _review_reason(review_decision, environment="", exempt_envs=frozenset()):
     return None
 
 
-def _permission_reason(permission, verb):
-    """Reject reason for the commenter's repository permission, or None to pass.
+def _permission_reason(permission, verb, *, subject="the commenter", retry="comment again"):
+    """Reject reason for `subject`'s repository permission, or None to pass.
 
     `write` and `admin` pass. Anything else refuses, and an unreadable value (empty, or
-    outside `[a-z]+`) is never quoted back. `fullmatch`, not `match` with `^...$`: `$`
-    matches before a trailing newline, so `"write\\n"` would pass the charset check. Route
-    `evict` is named by its command, `unlock --evict`."""
+    outside `[a-z]+`) is never quoted back; that refusal ends with `retry`. `fullmatch`, not
+    `match` with `^...$`: `$` matches before a trailing newline, so `"write\\n"` would pass
+    the charset check. Route `evict` is named by its command, `unlock --evict`."""
     verb = "unlock --evict" if verb == "evict" else verb
     if permission in ("write", "admin"):
         return None
     if permission in ("read", "none"):
         return (
             f"not authorized: `shipmate {verb}` needs write access to this repository, "
-            f"and the commenter's permission is `{permission}`."
+            f"and {subject}'s permission is `{permission}`."
         )
     if not re.fullmatch(r"[a-z]+", permission):
         return (
-            f"not authorized: could not read the commenter's permission on this repository, "
+            f"not authorized: could not read {subject}'s permission on this repository, "
             f"so `shipmate {verb}` was not run. This run's log has the API response; "
-            f"comment again."
+            f"{retry}."
         )
     return (
         f"not authorized: `shipmate {verb}` needs write access to this repository, and "
-        f"GitHub reported the commenter's permission as `{permission}`, which this engine "
+        f"GitHub reported {subject}'s permission as `{permission}`, which this engine "
         f"does not admit."
+    )
+
+
+#: A GitHub user login; nothing else is put into a URL.
+_LOGIN = re.compile(r"[A-Za-z0-9-]+")
+_PUSHER_RETRY = "push again, or a writer comments `shipmate apply`"
+
+
+def _login(user):
+    """`user["login"]` when `user` is a mapping holding a string login, else ""."""
+    login = user.get("login") if isinstance(user, dict) else None
+    return login if isinstance(login, str) else ""
+
+
+def pusher_reason(repo, plan_run, *, run):
+    """Reject reason for the pusher of `plan_run`, an autoplan's REST workflow run, or None.
+
+    The pusher is the run's `actor`, and `triggering_actor` must be the same login: a re-run
+    keeps `actor` and names whoever re-ran it, and a ready-for-review or reopen click is no
+    push either, though the run does not say which event action started it (the dispatching
+    summary admits only `opened` and `synchronize`). A bot login has no collaborator
+    permission to read and refuses. Otherwise `collaborators/<login>/permission`, read through
+    `run`, is decided by `_permission_reason`; a failed or malformed read is an unreadable
+    permission. A missing or empty login refuses first. `plan_run` must be a mapping."""
+    actor, trigger = (_login(plan_run.get(k)) for k in ("actor", "triggering_actor"))
+    if not (actor and trigger):
+        return (
+            "not authorized: the autoplan run names no actor or no triggering actor login, so "
+            "its pusher is unknown; a writer comments `shipmate apply`."
+        )
+    if actor != trigger:
+        return (
+            f"not authorized: the autoplan ran as @{actor} but was triggered by @{trigger}, so "
+            "it was re-run, and auto authorizes only the push itself; a writer comments "
+            "`shipmate apply`."
+        )
+    if actor.endswith("[bot]"):
+        return (
+            f"not authorized: the head was pushed by @{actor}, a bot account, which auto never "
+            "authorizes; a writer comments `shipmate apply`."
+        )
+    readable = _LOGIN.fullmatch(actor) is not None
+    permission = ""
+    if readable:
+        try:
+            body = gh_json(f"repos/{repo}/collaborators/{actor}/permission", run)
+            permission = body["permission"]
+        except SystemExit as e:
+            print(str(e.code).removeprefix("::error::"), file=sys.stderr)
+        except (LookupError, TypeError, ValueError) as e:
+            print(f"malformed permission body: {e!r}", file=sys.stderr)
+    return _permission_reason(
+        permission if isinstance(permission, str) else "",
+        "apply",
+        subject=f"the pusher @{actor}" if readable else "the pusher",
+        retry=_PUSHER_RETRY,
     )
 
 
@@ -145,6 +201,32 @@ def _head_repo_reason(pr):
         return (
             f"this pull request's head is in {where}; shipmate applies and unlocks only "
             "branches of this repository."
+        )
+    return ""
+
+
+def _ready_reason(pr, *, retry=None):
+    """Refusal text when the pull request is a draft or not mergeable, else ''. `retry`, when
+    given, replaces the draft and still-computing remedies' closing step, worded for a commenter
+    by default."""
+    if pr.get("draft"):
+        # Keyed on `draft`, not `mergeable_state`: that field has one slot and
+        # reports "dirty" for a draft with conflicts, missing exactly the draft
+        # most likely to be applied.
+        return (
+            "not authorized: this pull request is a draft. A draft can be planned but not "
+            f"applied. Mark it ready for review, then {retry or 'comment the apply again'}."
+        )
+    if not pr.get("mergeable"):
+        state = pr.get("mergeable_state", "unknown")
+        if state in ("", "unknown"):
+            # GitHub computes mergeability asynchronously; null/unknown means
+            # "not computed yet", NOT a real conflict — don't misattribute.
+            then = f", then {retry}" if retry else " and re-run `shipmate apply`"
+            return f"GitHub is still computing this PR's mergeability; wait a moment{then}."
+        return (
+            f"PR is not mergeable (state: {state}); resolve conflicts "
+            f"or branch-protection requirements first."
         )
     return ""
 
@@ -190,27 +272,9 @@ def decide(
         # none. See the docstring for why each check is inapplicable rather
         # than merely inconvenient.
         return True, ""
-    if pr.get("draft"):
-        # Keyed on `draft`, not `mergeable_state`: that field has one slot and
-        # reports "dirty" for a draft with conflicts, missing exactly the draft
-        # most likely to be applied.
-        return False, (
-            "not authorized: this pull request is a draft. A draft can be planned but not "
-            "applied. Mark it ready for review, then comment the apply again."
-        )
-    if not pr.get("mergeable"):
-        state = pr.get("mergeable_state", "unknown")
-        if state in ("", "unknown"):
-            # GitHub computes mergeability asynchronously; null/unknown means
-            # "not computed yet", NOT a real conflict — don't misattribute.
-            return False, (
-                "GitHub is still computing this PR's mergeability; "
-                "wait a moment and re-run `shipmate apply`."
-            )
-        return False, (
-            f"PR is not mergeable (state: {state}); resolve conflicts "
-            f"or branch-protection requirements first."
-        )
+    reason = _ready_reason(pr)
+    if reason:
+        return False, reason
     review_reason = _review_reason(review_decision, environment, exempt_envs)
     if review_reason:
         return False, review_reason

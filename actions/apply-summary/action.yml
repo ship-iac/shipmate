@@ -29,9 +29,13 @@ inputs:
     required: false
     default: ""
   skipped-envs:
-    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, holding a waiting cell, or holding a cell another pull request locks); all-environments form only. Empty = []."
+    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, holding a waiting cell, holding a cell another pull request locks, or, under the auto form, holding a cell the base also changed or not `apply_mode: auto`); all-environments form only. Empty = []."
     required: false
     default: ""
+  skipped-after:
+    description: "JSON object mapping each skipped environment to the predecessors it waits on (all-environments form only); the comment names each with the remedy of its kind. Empty = {}."
+    required: false
+    default: "{}"
   review-held-envs:
     description: JSON array of environments held until an approving review lands (all-environments form only). Empty = [].
     required: false
@@ -52,6 +56,18 @@ inputs:
     description: "JSON list of pending cells another pull request holds a cell lock on, each `{stack, environment, holder}` with the holder's pull request number, null when unknown (both forms); the comment names each holder and the remedy. Empty = []."
     required: false
     default: "[]"
+  overlap-cells:
+    description: "JSON list of pending cells the auto form left pending because the base changed their stack since the merge base, each `{stack, environment}`; the comment names them and the remedy, updating the branch from the base. Empty = []."
+    required: false
+    default: "[]"
+  bare-envs:
+    description: "JSON array of pending environments the auto form left for a bare `shipmate apply`, neither `apply_mode: auto`, targeted nor held; the comment names each. Empty = []."
+    required: false
+    default: "[]"
+  auto:
+    description: "'true' for the auto form of apply, whose comment is never green while it left a pending environment; empty or 'false' otherwise."
+    required: false
+    default: "false"
   detect-refusal:
     description: "apply-detect's `refusal` output: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
@@ -162,11 +178,15 @@ runs:
         SHIPMATE_RESULTS: ${{ inputs.results }}
         SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
         SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
+        SHIPMATE_SKIPPED_AFTER: ${{ inputs.skipped-after }}
         SHIPMATE_REVIEW_HELD_ENVS: ${{ inputs.review-held-envs }}
         SHIPMATE_APPLIED_EXEMPT_ENVS: ${{ inputs.applied-exempt-envs }}
         SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
         SHIPMATE_LOCKED_CELLS: ${{ inputs.locked-cells }}
+        SHIPMATE_OVERLAP_CELLS: ${{ inputs.overlap-cells }}
+        SHIPMATE_BARE_ENVS: ${{ inputs.bare-envs }}
+        SHIPMATE_AUTO: ${{ inputs.auto }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}

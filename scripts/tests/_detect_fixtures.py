@@ -55,9 +55,10 @@ def check_run(**kw):
     return base
 
 
-def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells):
-    """An `external_id` record as pending-checks writes it. `plan_sha256=None` omits the
-    digest, `pr=None` the pull request, `cells=None` the run's planned cell count."""
+def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells, action="synchronize"):
+    """An `external_id` record as pending-checks writes it for a push's autoplan.
+    `plan_sha256=None` omits the digest, `pr=None` the pull request, `cells=None` the run's
+    planned cell count, `action=None` the event action."""
     record = {"fingerprint": "a" * 64, "plan_run": plan_run}
     if plan_sha256 is not None:
         record["plan_sha256"] = plan_sha256
@@ -65,18 +66,28 @@ def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells):
         record["pr"] = pr
     if cells is not None:
         record["cells"] = cells
+    if action is not None:
+        record["action"] = action
     return json.dumps(record)
 
 
 def _apply_check(
-    stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells, **kw
+    stack,
+    env="dev-eu",
+    plan_run="123456",
+    plan_sha256=PLAN_SHA,
+    pr=PR_NUMBER,
+    *,
+    cells,
+    action="synchronize",
+    **kw,
 ):
     """A pending App-authored apply check carrying its plan-run record."""
     return check_run(
         name=f"apply / {stack} / {env}",
         status="queued",
         conclusion=None,
-        external_id=_record(plan_run, plan_sha256, pr, cells=cells),
+        external_id=_record(plan_run, plan_sha256, pr, cells=cells, action=action),
         **kw,
     )
 
@@ -92,23 +103,30 @@ def foreign_message(listed):
     )
 
 
-def partial_message(listed, *, rerun, several=False):
+def partial_message(listed, *, rerun, several=False, merged=False):
     """The refusal a detect raises when the runs and held-back cells `listed` name published
     only part of a run's apply checks; `rerun` when every run published fewer checks than its
-    one planned count, `several` when `listed` names more than one run."""
+    one planned count, `several` when `listed` names more than one run, `merged` for the
+    post-merge deploy, whose remedy is a new pull request."""
     it, runs = ("they", "runs") if several else ("it", "run")
+    head = (
+        f"::error::apply aborted: {listed}: the published apply checks do not match the cells "
+        f"{it} planned, so an ordering among them can be lost. "
+    )
+    if merged:
+        return head + (
+            "The pull request has merged, so a new pull request touching these stacks plans and "
+            "applies them."
+        )
     remedy = (
         f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if the "
         "refusal remains, push"
         if rerun
         else "Push"
     )
-    return (
-        f"::error::apply aborted: {listed}: the published apply checks do not match the cells "
-        f"{it} planned, so an ordering among them can be lost. {remedy} a commit to the pull "
-        "request, which plans and publishes every cell afresh, then apply again; if that pull "
-        "request has already merged, a new pull request touching these stacks plans and "
-        "applies them."
+    return head + (
+        f"{remedy} a commit to the pull request, which plans and publishes every cell afresh, "
+        "then apply again."
     )
 
 

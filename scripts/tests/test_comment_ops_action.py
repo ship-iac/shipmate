@@ -526,7 +526,10 @@ def test_both_doctor_token_mints_request_actions_read():
 
     Both sites, because they are separate mints: `actions/summary`'s token drives `annotate` mode on
     every plan run, `comment-ops`' `doctortoken` drives `report` mode on demand, and a fix applied
-    to only one leaves half the environment probes degraded."""
+    to only one leaves half the environment probes degraded. The `auto` dispatch mints its own
+    `actions: write` token (`autotoken`), so this one stays `read`.
+
+    Mutation: `permission-actions: write` on the summary mint."""
     assert _mint_with("comment-ops", "doctortoken").get("permission-actions") == "read"
     assert _mint_with("summary", "token").get("permission-actions") == "read"
 
@@ -1299,7 +1302,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
     holder fails too.
 
     Mutations: drop `SHIPMATE_GITHUB_VARS` from `Resolve gate configuration`'s `env:`, or from
-    `actions/summary`'s doctor step.
+    `actions/summary`'s doctor step or its auto dispatch decision.
     """
     bound = {
         (action, s["name"]): s["env"]["SHIPMATE_GITHUB_VARS"]
@@ -1317,6 +1320,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
             "summary",
             "Doctor: settings-drift warnings (annotations only, never blocks)",
         ): "${{ inputs.github-vars }}",
+        ("summary", "Decide whether to dispatch an auto apply"): "${{ inputs.github-vars }}",
     }
 
 

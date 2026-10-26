@@ -134,14 +134,18 @@ def blocked_envs(order, unavailable, envs):
     upstream was excluded), exactly like a failed predecessor level.
 
     `order` comes from `env-config`'s `env_order` on a table that passed `validate`."""
+    return {e for e in envs if predecessors(order, e) & unavailable}
 
-    def _hit(env, seen):
-        if env in seen:
-            return False
-        seen.add(env)
-        return any(p in unavailable or _hit(p, seen) for p in order.get(env, []))
 
-    return {e for e in envs if _hit(e, set())}
+def predecessors(order, env):
+    """Every env `env` is ordered after by `needs`, transitively, per `order`."""
+    seen, todo = set(), list(order.get(env, []))
+    while todo:
+        p = todo.pop()
+        if p not in seen:
+            seen.add(p)
+            todo.extend(order.get(p, []))
+    return seen
 
 
 def env_levels(order, envs):

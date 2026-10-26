@@ -8,6 +8,8 @@ on:
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
       runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
+      # The consumer's `auto` job passes a literal `true`: the auto form of apply-detect.
+      auto: { required: false, type: boolean, default: false }
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
     # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
     secrets:
@@ -29,6 +31,26 @@ jobs:
         if: ${{ !endsWith(github.actor, '[bot]') }}
         run: |
           echo "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
+          exit 1
+      # A called workflow's `github` context is its caller's, so these read the dispatch itself.
+      # A fence `auto` job without `auto: true` would otherwise run the App's dispatch as a bare
+      # apply, skipping the actor, provenance, pusher and overlap checks.
+      - name: Reject an auto dispatch that does not run the auto form
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto }}
+        run: |
+          echo "::error::apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'; give the shipmate.yml 'auto' job the published 'with:' block (shipmate doctor names the difference)"
+          exit 1
+      - name: Reject the auto form outside an auto dispatch
+        if: ${{ inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto') }}
+        run: |
+          echo "::error::apply refused: the calling job passes 'auto: true', but this run is not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
+          exit 1
+      # Fails closed: an unreadable `inputs` reads '' and refuses every bare and targeted apply,
+      # as does any call that is not a dispatch.
+      - name: Reject a bare or targeted apply outside an apply dispatch
+        if: ${{ !inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply') }}
+        run: |
+          echo "::error::apply refused: this run is not a dispatch with verb 'apply' and the calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate doctor names the difference)"
           exit 1
 
   review:
@@ -106,7 +128,7 @@ jobs:
     needs: [guard, review]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ inputs.runs_on }}
-    permissions: { contents: read, checks: read, actions: read }
+    permissions: { contents: read, checks: read, actions: read, pull-requests: read }
     # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
     outputs:
       envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
@@ -120,22 +142,36 @@ jobs:
       head_sha: ${{ steps.d.outputs.head_sha }}
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
+      skipped_after: ${{ steps.d.outputs.skipped_after }}
       review_held_envs: ${{ steps.d.outputs.review_held_envs }}
       applied_exempt_envs: ${{ steps.d.outputs.applied_exempt_envs }}
       review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
       waiting_cells: ${{ steps.d.outputs.waiting_cells }}
       locked_cells: ${{ steps.d.outputs.locked_cells }}
       env_order: ${{ steps.d.outputs.env_order }}
+      provenance_run: ${{ steps.d.outputs.provenance_run }}
+      base_sha: ${{ steps.d.outputs.base_sha }}
+      overlap_cells: ${{ steps.d.outputs.overlap_cells }}
+      bare_envs: ${{ steps.d.outputs.bare_envs }}
       refusal: ${{ steps.d.outputs.refusal }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: ${{ !inputs.auto }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.ref }}" }
+      # The auto form diffs the base tip from its merge base with the head, so it needs both
+      # histories. Two steps, not one depth expression: `0` is falsy in `&&`/`||`.
+      - if: ${{ inputs.auto }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
       - uses: $/actions/setup
         with: { tofu: "false" }
       - id: d
         uses: $/actions/apply-detect
         with:
           environment: ${{ inputs.environment }}
+          auto: ${{ inputs.auto }}
           head-sha: ${{ inputs.ref }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -178,12 +214,15 @@ jobs:
     needs: [guard, review, detect, lock]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, id-token: write }
+    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -206,6 +245,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -219,6 +261,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -232,6 +277,9 @@ jobs:
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
       pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
     secrets: *envlevel-secrets
 
   summary:
@@ -274,11 +322,15 @@ jobs:
           envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
           excluded-envs: ${{ needs.detect.outputs.excluded_envs }}
           skipped-envs: ${{ needs.detect.outputs.skipped_envs }}
+          skipped-after: ${{ needs.detect.outputs.skipped_after }}
           review-held-envs: ${{ needs.detect.outputs.review_held_envs }}
           applied-exempt-envs: ${{ needs.detect.outputs.applied_exempt_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
           locked-cells: ${{ needs.detect.outputs.locked_cells }}
+          overlap-cells: ${{ needs.detect.outputs.overlap_cells }}
+          bare-envs: ${{ needs.detect.outputs.bare_envs }}
+          auto: ${{ inputs.auto }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
           env-order: ${{ needs.detect.outputs.env_order }}

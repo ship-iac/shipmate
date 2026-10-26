@@ -26,15 +26,22 @@ and the cells that run after it wait. Before any of that, the
 PR's review decision — read server-side by the `review` job, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
+
+`SHIPMATE_AUTO=true` selects the auto form, `auto_main`: the bare form over the
+`apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
+refuses unless the actor, the plan's provenance, the pusher's permission and the pull
+request's mergeability hold, and holds a cell whose stack the base also changed.
 """
 
 import json
 import os
+import time
 
 from _shipmate import (
     _load,
     _run,
     check_runs,
+    gh_json,
     named,
     run_annotated,
     validate_head_sha,
@@ -48,6 +55,14 @@ az = _load("authorize")
 cl = _load("cell-lock")
 
 _NAMED = 10
+#: The auto form's mergeability wait: reads, and seconds between them. Unprobed: GitHub
+#: documents no bound on computing `mergeable` after a push.
+_MERGEABLE_READS = 12
+_MERGEABLE_WAIT = 5
+_sleep = time.sleep
+_AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
+# An auto run has no comment to repeat: its draft and mergeability refusals name the comment.
+_AUTO_RETRY = "comment `shipmate apply`"
 
 
 def paths_with_checks(env, candidate_paths, check_names):
@@ -96,12 +111,12 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
     check that exists. It refuses rather than applying unverified because an
     accepted absence is a guard the plan cell switches off by omitting a file.
 
-    The run, digest and partial-run refusals are shared by all three detects, so
-    they are worded for both paths: deploy's candidates come from the git diff
-    rather than from the checks, so a cell here may have no apply check
-    whatsoever, and its pull request is already merged — a remedy phrased as
-    "re-plan on this pull request" would send a post-merge operator to a pull
-    request that no longer accepts commits.
+    The run and digest refusals are shared by all three detects, so they are
+    worded for both paths: deploy's candidates come from the git diff rather than
+    from the checks, so a cell here may have no apply check whatsoever, and its
+    pull request is already merged — a remedy phrased as "re-plan on this pull
+    request" would send a post-merge operator to a pull request that no longer
+    accepts commits. The partial-run refusal words its remedy for the path instead.
 
     `pr_number` binds each record to the dispatching pull request, and only the
     pre-merge paths pass one: a cell whose check records another pull request,
@@ -153,17 +168,28 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
             "request shares this head commit, the newest plan decides which one may apply."
         )
     if cells:
-        refuse_incomplete(rows, records, ag.incomplete_runs(check_run_lines, app_id))
+        refuse_incomplete(
+            rows, records, ag.incomplete_runs(check_run_lines, app_id), merged=pr_number is None
+        )
     return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest, _ in rows]
 
 
 def _fact(published, counts, uncounted):
+    """Every cause `apply-gate.incomplete_runs` found for one run, joined with `and`: an
+    uncounted record, and a count that disagrees with another or with the checks published."""
+    facts = []
     if uncounted:
-        return f"records no planned cell count on {'some of ' if counts else ''}its apply checks"
-    if len(counts) == 1:
-        return f"published {_n(published, 'apply check')} for {_n(counts[0], 'planned cell')}"
-    listed = ", ".join(map(str, counts))
-    return f"records disagreeing planned cell counts ({listed}) on its apply checks"
+        facts.append(
+            f"records no planned cell count on {'some of ' if counts else ''}its apply checks"
+        )
+    if len(counts) > 1:
+        listed = ", ".join(map(str, counts))
+        facts.append(f"records disagreeing planned cell counts ({listed}) on its apply checks")
+    elif counts and counts[0] != published:
+        facts.append(
+            f"published {_n(published, 'apply check')} for {_n(counts[0], 'planned cell')}"
+        )
+    return " and ".join(facts)
 
 
 def _n(count, noun):
@@ -176,13 +202,14 @@ def _stopped_publishing(published, counts, uncounted):
     return not uncounted and len(counts) == 1 and published < counts[0]
 
 
-def refuse_incomplete(rows, records, incomplete):
+def refuse_incomplete(rows, records, incomplete, *, merged):
     """Refuse when a run that a cell to apply records, or the head's newest run, published only
     part of its apply checks (`apply-gate.incomplete_runs`). Each such run is named with its
     fact and the cells it holds back: the cells recording it, or every cell to apply when no
     cell records it (the newest run). Runs compare as integers, so `10` is newer than `9`.
     Called only with at least one cell, each recording a run, so the newest run exists. The
-    remedy offers re-running failed jobs only when every named run `_stopped_publishing`."""
+    remedy follows the pull request's state: open, it offers re-running failed jobs only when
+    every named run `_stopped_publishing`, then a push; `merged`, a new pull request."""
     candidates = {run for _, _, run, _, _ in rows}
     candidates.add(max((run for run, _, _ in records.values() if run), key=int))
     named_runs = sorted(candidates & incomplete.keys(), key=int)
@@ -195,18 +222,25 @@ def refuse_incomplete(rows, records, incomplete):
             f"plan run {run} {_fact(*incomplete[run])}, holding back {named(held, _NAMED)}"
         )
     it, runs = ("it", "run") if len(found) == 1 else ("they", "runs")
-    remedy = "Push"
-    if all(_stopped_publishing(*incomplete[run]) for run in named_runs):
+    if merged:
         remedy = (
-            f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if the "
-            "refusal remains, push"
+            "The pull request has merged, so a new pull request touching these stacks plans and "
+            "applies them."
+        )
+    else:
+        remedy = "Push"
+        if all(_stopped_publishing(*incomplete[run]) for run in named_runs):
+            remedy = (
+                f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if "
+                "the refusal remains, push"
+            )
+        remedy += (
+            " a commit to the pull request, which plans and publishes every cell afresh, then "
+            "apply again."
         )
     raise SystemExit(
         f"::error::apply aborted: {'; '.join(found)}: the published apply checks do not "
-        f"match the cells {it} planned, so an ordering among them can be lost. {remedy} a "
-        "commit to the pull request, which plans and publishes every cell afresh, then apply "
-        "again; if that pull request has already merged, a new pull request touching these "
-        "stacks plans and applies them."
+        f"match the cells {it} planned, so an ordering among them can be lost. {remedy}"
     )
 
 
@@ -256,10 +290,10 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
     skips and waiting cells.
 
     An env with a waiting cell, or a cell in `locked` ((stack, env) pairs another pull
-    request holds), is not fully applying, so it stops its `needs` successors like a stopped
-    env, and each new skip can make more cells wait. A locked cell never runs; the env's
-    ready cells still do: it joins `unavailable`, never `skipped`. `unavailable` only grows
-    over a finite set, so the loop ends."""
+    request holds, or the auto form's overlap cells), is not fully applying, so it stops its
+    `needs` successors like a stopped env, and each new skip can make more cells wait. A locked
+    cell never runs; the env's ready cells still do: it joins `unavailable`, never `skipped`.
+    `unavailable` only grows over a finite set, so the loop ends."""
     envs = {c["environment"] for c in pending} - stopped
     present = {(c["stack"], c["environment"]) for c in pending}
     lock_envs = {e for _, e in locked}
@@ -348,7 +382,185 @@ def refuse_unreviewed(env, table, decision):
         raise SystemExit(f"::error::{reason}")
 
 
-def bare_main():
+def refuse_actor(lines, app_id, actor, triggering_actor):
+    """Refuse unless `actor` and `triggering_actor` are the bot login of the App that authored
+    the head's checks.
+
+    The whole string, never a `[bot]` suffix: a `GITHUB_TOKEN` dispatch runs as
+    `github-actions[bot]`. The slug comes from the App-authored check runs, so a head with
+    none refuses. A human's "Re-run all jobs" keeps `actor` and makes the human
+    `triggering_actor`, so a re-run refuses."""
+    slugs = {(r.get("app") or {}).get("slug") for r in ag.app_runs(lines, app_id)}
+    if not slugs:
+        raise SystemExit(
+            "::error::auto apply refused: no check run on the head is authored by the shipmate "
+            "App, so its bot login is unknown. " + _AUTO_REMEDY
+        )
+    bots = {f"{s}[bot]" for s in slugs if s}
+    if actor not in bots:
+        raise SystemExit(
+            f"::error::auto apply refused: the run's actor is {actor!r}, not the shipmate App: "
+            "only the App dispatches an auto apply, after an autoplan. " + _AUTO_REMEDY
+        )
+    if triggering_actor not in bots:
+        raise SystemExit(
+            f"::error::auto apply refused: the run's triggering actor is {triggering_actor!r}, "
+            "not the shipmate App: a re-run of an auto apply never applies. " + _AUTO_REMEDY
+        )
+
+
+def refuse_provenance(repo, head, runnable):
+    """The one plan run every cell in `runnable` records, read from the API, refused unless it
+    is the newest `pull_request_target` run of `shipmate.yml` on `head`.
+
+    A `shipmate plan` run is a `workflow_dispatch` the App sends, so its commenter is lost and
+    nothing authorizes it as the pusher; and a newer autoplan of the head that recorded no cell
+    must not leave an older one applying."""
+    runs = sorted({c["plan_run_id"] for c in runnable}, key=int)
+    if len(runs) > 1:
+        listed = "; ".join(
+            f"plan run {r}: "
+            + named(
+                [
+                    ag.check_name(c["stack"], c["environment"])
+                    for c in runnable
+                    if c["plan_run_id"] == r
+                ],
+                _NAMED,
+            )
+            for r in runs
+        )
+        raise SystemExit(
+            f"::error::auto apply refused: the cells to apply record different plan runs "
+            f"({listed}), so no one autoplan planned them all. " + _AUTO_REMEDY
+        )
+    run_id = runs[0]
+    try:
+        run = gh_json(f"repos/{repo}/actions/runs/{run_id}", run=_run)
+        event, sha = run.get("event"), run.get("head_sha")
+    except (ValueError, AttributeError) as e:
+        raise _malformed(f"plan run {run_id}", e) from None
+    if event != "pull_request_target":
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} is a `{event}` run, not an "
+            "autoplan: an auto apply applies only the plan a push started. " + _AUTO_REMEDY
+        )
+    if sha != head:
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} planned {sha}, not the head "
+            f"{head}. " + _AUTO_REMEDY
+        )
+    try:
+        newest = ag.newest_autoplan(repo, head, run=_run)
+    except ValueError as e:
+        raise _malformed("autoplan listing", e) from None
+    if newest is None:
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} is not listed, and no autoplan run "
+            "of the head is listed. " + _AUTO_REMEDY
+        )
+    if newest != int(run_id):
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} is not the newest autoplan of the "
+            f"head (run {newest} is). " + _AUTO_REMEDY
+        )
+    return run
+
+
+def _malformed(what, e):
+    return SystemExit(
+        f"::error::auto apply refused: the {what} read returned a malformed answer ({e!r}). "
+        + _AUTO_REMEDY
+    )
+
+
+def refuse_pushed(runnable, actions):
+    """Refuse unless every cell in `runnable` records an event action in
+    `apply-gate.PUSH_ACTIONS` (`actions`, from `apply-gate.plan_actions`). A ready-for-review
+    or reopen autoplan of the same head dispatches no auto apply yet becomes the newest
+    autoplan, and its clicker is no pusher; a record with no action is an older engine's."""
+    bad = [
+        f"{ag.check_name(c['stack'], c['environment'])} ({actions.get(n)!r})"
+        for c in runnable
+        if actions.get(n := ag.check_name(c["stack"], c["environment"])) not in ag.PUSH_ACTIONS
+    ]
+    if bad:
+        raise SystemExit(
+            f"::error::auto apply refused: the plan records of {named(bad, _NAMED)} name no "
+            "push event action (opened or synchronize), so no push started that plan. "
+            + _AUTO_REMEDY
+        )
+
+
+def refuse_pusher(repo, plan_run):
+    """Refuse unless `authorize.pusher_reason` admits the pusher of `plan_run`."""
+    reason = az.pusher_reason(repo, plan_run, run=_run)
+    if reason:
+        raise SystemExit(f"::error::{reason}")
+
+
+def wait_mergeable(repo, pr_number, head):
+    """The pull request's base tip, after re-reading it until GitHub has computed `mergeable`
+    or `_MERGEABLE_READS` reads are spent, then refusing as `authorize.decide` does on its head
+    repository, draft and mergeable state. Every read refuses when the head moved: the new
+    head's autoplan decides its own apply. The base tip is the base branch's
+    (`apply-gate.base_tip`); one that cannot be read refuses."""
+    for i in range(_MERGEABLE_READS):
+        if i:
+            _sleep(_MERGEABLE_WAIT)
+        pr = gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run)
+        sha = (pr.get("head") or {}).get("sha")
+        if sha != head:
+            raise SystemExit(
+                f"::error::auto apply refused: pull request #{pr_number} head is {sha}, but this "
+                f"run applies {head}. The new head's autoplan decides its own apply."
+            )
+        if pr.get("mergeable") is not None:
+            break
+    reason = az._head_repo_reason(pr) or az._ready_reason(pr, retry=_AUTO_RETRY)
+    if reason:
+        raise SystemExit(f"::error::{reason}")
+    try:
+        return ag.base_tip(repo, pr, run=_run)
+    except SystemExit as e:
+        why = str(e.code).removeprefix("::error::")
+    except (LookupError, TypeError, AttributeError) as e:
+        why = repr(e)
+    raise SystemExit(
+        f"::error::auto apply refused: could not read the base tip of pull request "
+        f"#{pr_number} ({why}). " + _AUTO_REMEDY
+    )
+
+
+def overlap_cells(candidates, changed):
+    """`{stack, environment}` of each cell in `candidates` whose stack is in `changed`, the
+    stacks the base changed since the merge base: applying its plan would revert that change."""
+    return [
+        {"stack": c["stack"], "environment": c["environment"]}
+        for c in candidates
+        if c["stack"] in changed
+    ]
+
+
+def auto_main():
+    """The auto apply: `bare_main` over the `apply_mode: auto` environments' pending cells.
+
+    Every other pending environment counts as stopped in `settle`, so its `needs` successors
+    skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
+    bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
+    pending cell in an environment not stopped, the pull request must be ready and mergeable at
+    this head (`wait_mergeable`), and a cell whose stack the base changed since the merge base
+    (`build-matrix.base_changed_stacks`) is held in `overlap_cells`: it stays pending and stops
+    its environment's `needs` successors, as a locked cell does. With a cell to apply, the plan
+    run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
+    pusher must have write access (`refuse_pusher`). Writes the bare outputs plus
+    `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
+    on, empty when no pull request read was needed, `overlap_cells`, and `bare_envs`, the
+    pending environments neither `auto`, `targeted` nor held, left for a bare apply."""
+    bare_main(auto=True)
+
+
+def bare_main(auto=False):
     """The bare `shipmate apply` work set -> env-levels -> waves.
 
     The pre-merge equivalent of deploy-detect, sourced like the targeted form:
@@ -372,11 +584,13 @@ def bare_main():
       `shipmate apply <env>` completes them. `excluded_envs` names every one with
       pending work, including those also held for review;
     - envs ordered (transitively) after an env not fully applying this run — held,
-      excluded as targeted, holding a waiting cell, or holding a cell another pull request
-      locks — are skipped with a notice
+      excluded as targeted, holding a waiting cell, holding a cell another pull request
+      locks, or, under the auto form, holding a cell the base also changed or not
+      `apply_mode: auto` — are skipped with a notice
       (`skipped_after_targeted`, named for its first cause) — their ordering
       precondition cannot be met this run, exactly like a failed predecessor
-      level;
+      level. `skipped_after` maps each to its transitive predecessors not fully
+      applying for a cause of their own;
     - envs the PR's review decision does not authorize are held until it carries
       an approving review, dropped the same way; an entry holding
       `review: false` is exempt from that hold;
@@ -397,6 +611,13 @@ def bare_main():
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
     lines = _check_run_lines(repo, head)
+    if auto:
+        refuse_actor(
+            lines,
+            app_id,
+            os.environ.get("GITHUB_ACTOR", ""),
+            os.environ.get("GITHUB_TRIGGERING_ACTOR", ""),
+        )
     cells = cells_from_checks(apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
     table = bm.env_config(cells, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     cells = bm.stamp_rows(cells, table, "apply")
@@ -414,18 +635,25 @@ def bare_main():
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.targeted_envs(table)
     stopped = pending_envs & set(targeted + held)
+    # Pending envs the auto form leaves to a bare apply: neither targeted nor held, not auto.
+    unselected = pending_envs - set(bm.ec.auto_envs(table)) - stopped if auto else set()
+    stopped |= unselected
     # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
     # waiting cell's remedy names it.
-    locked = locked_cells(repo, [c for c in pending if c["environment"] not in stopped], pr_number)
-    skipped, run, waiting = settle(
-        order,
-        stopped,
-        pending,
-        deps,
-        tags_by_stack,
-        levels,
-        {(c["stack"], c["environment"]) for c in locked},
-    )
+    candidates = [c for c in pending if c["environment"] not in stopped]
+    overlap, base_sha = [], ""
+    if auto and candidates:
+        # One read: the wave re-check compares the base tip with the one overlap was computed on.
+        base_sha = wait_mergeable(repo, pr_number, head)
+        stacks = {c["stack"] for c in candidates}
+        overlap = overlap_cells(candidates, bm.base_changed_stacks(base_sha, stacks))
+    locked = locked_cells(repo, candidates, pr_number)
+    holds = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
+    skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)
+    # A skipped env names the predecessors not fully applying for a cause of their own, each with
+    # a remedy of its kind; one skipped for nothing but its own predecessors is passed through.
+    blockers = stopped | {e for _, e in holds} | {w["environment"] for w in waiting}
+    skipped_after = {e: sorted(wv.predecessors(order, e) & blockers) for e in skipped}
     wv.refuse_inversions(
         run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
     )
@@ -437,6 +665,19 @@ def bare_main():
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
+    auto_outputs = {}
+    if auto:
+        provenance_run = ""
+        if runnable:
+            refuse_pushed(runnable, ag.plan_actions(lines, app_id))
+            refuse_pusher(repo, refuse_provenance(repo, head, runnable))
+            provenance_run = runnable[0]["plan_run_id"]
+        auto_outputs = {
+            "provenance_run": provenance_run,
+            "base_sha": base_sha,
+            "overlap_cells": json.dumps(overlap),
+            "bare_envs": json.dumps(sorted(unselected)),
+        }
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_exempt = sorted(
@@ -465,7 +706,7 @@ def bare_main():
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_targeted={excluded} skipped_after_targeted={skipped} "
-        f"review_held={held} waiting={len(waiting)} locked={len(locked)} "
+        f"review_held={held} waiting={len(waiting)} locked={len(locked)} overlap={len(overlap)} "
         f"applied_exempt={applied_exempt} "
         # The hold cause: an everything-held run is otherwise indistinguishable
         # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
@@ -477,6 +718,7 @@ def bare_main():
         head_sha=head,
         excluded_envs=json.dumps(excluded),
         skipped_envs=json.dumps(skipped),
+        skipped_after=json.dumps(skipped_after),
         review_held_envs=json.dumps(held),
         applied_exempt_envs=json.dumps(applied_exempt),
         review_not_required_envs=json.dumps(no_review_required),
@@ -484,10 +726,14 @@ def bare_main():
         locked_cells=json.dumps(locked),
         # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and locked cells.
         env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
+        **auto_outputs,
     )
 
 
 def main():
+    if os.environ.get("SHIPMATE_AUTO") == "true":
+        auto_main()
+        return
     env = os.environ["SHIPMATE_ENV"]
     # Routed before `refuse_unreviewed`: `_review_reason` reads an empty env as a bare
     # apply, exempt when any entry is review-exempt, so it must never reach the targeted refusal.

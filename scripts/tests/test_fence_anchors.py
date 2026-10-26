@@ -26,7 +26,9 @@ def _jobs(name):
     return load_workflow_text(_fence_text(name))["jobs"]
 
 
-@pytest.mark.parametrize("job", ["plan", "release", "comment-ops", "deploy", "apply", "unlock"])
+@pytest.mark.parametrize(
+    "job", ["plan", "release", "comment-ops", "deploy", "apply", "auto", "unlock"]
+)
 def test_every_engine_job_runs_on_the_default_runner(job):
     """Mutations: `deploy`'s `*runner` replaced by `ubuntu-latest`; `comment-ops`'s `with:`
     deleted."""
@@ -37,20 +39,22 @@ def test_the_runner_is_chosen_once_through_an_anchor():
     """Mutation: `apply`'s `*runner` inlined as `ubuntu-26.04-arm`, which parses the same."""
     text = _fence_text("shipmate")
     assert text.count(f"runs_on: &runner {RUNNER}\n") == 1
-    assert text.count("runs_on: *runner\n") == 5
+    assert text.count("runs_on: *runner\n") == 6
 
 
 def test_engine_secrets_are_chosen_once_and_unlock_and_release_keep_their_own():
     """Mutations: `apply`'s block written out in full, which parses the same; `apply`'s block
-    written out without `SHIPMATE_SECRETS`; `unlock` aliased to `*engine-secrets`; `release`
-    aliased to `*engine-secrets`."""
+    written out without `SHIPMATE_SECRETS`; `auto`'s block written out without
+    `SHIPMATE_SECRETS`; `unlock` aliased to `*engine-secrets`; `release` aliased to
+    `*engine-secrets`."""
     text = _fence_text("shipmate")
     assert text.count("secrets: &engine-secrets\n") == 1
-    assert text.count("secrets: *engine-secrets\n") == 2
+    assert text.count("secrets: *engine-secrets\n") == 3
     jobs = _jobs("shipmate")
     assert jobs["plan"]["secrets"] == ENGINE_SECRETS
     assert jobs["deploy"]["secrets"] == ENGINE_SECRETS
     assert jobs["apply"]["secrets"] == ENGINE_SECRETS
+    assert jobs["auto"]["secrets"] == ENGINE_SECRETS
     assert jobs["unlock"]["secrets"] == {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
     assert jobs["release"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"
@@ -80,3 +84,35 @@ def test_a_release_run_is_never_cancelled():
 def test_drift_runs_on_the_default_runner():
     """Mutation: the drift fence's `runs_on:` line deleted."""
     assert (_jobs("shipmate drift")["drift"].get("with") or {}).get("runs_on") == RUNNER
+
+
+_APPLY_PERMISSIONS = {
+    "contents": "read",
+    "checks": "read",
+    "pull-requests": "read",
+    "actions": "read",
+    "id-token": "write",
+}
+
+
+def test_the_auto_job_is_the_apply_job_with_auto_set():
+    """The autoplan's dispatch selects `auto`, which calls `apply.yml` with `auto: true` and no
+    `environment`; both jobs grant the pull-request read that detect and the wave re-check need.
+
+    Mutations: `auto: true` dropped from `auto`'s `with:`; `pull-requests: read` dropped from
+    `apply`'s permissions; `auto`'s `if:` reading `'apply'`."""
+    jobs = _jobs("shipmate")
+    assert jobs["apply"]["permissions"] == _APPLY_PERMISSIONS
+    auto = dict(jobs["auto"])
+    assert auto.pop("uses").split("@", 1)[0] == "ship-iac/shipmate/.github/workflows/apply.yml"
+    assert auto == {
+        "if": "github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'",
+        "permissions": _APPLY_PERMISSIONS,
+        "secrets": ENGINE_SECRETS,
+        "with": {
+            "auto": True,
+            "ref": "${{ inputs.ref }}",
+            "pr_number": "${{ inputs.pr_number }}",
+            "runs_on": RUNNER,
+        },
+    }

@@ -53,7 +53,15 @@ EXPECTED_ENVLEVEL_WITH = {
         **extra,
     }
     for workflow, extra in (
-        ("apply.yml", {"pr_number": "${{ inputs.pr_number }}"}),
+        (
+            "apply.yml",
+            {
+                "pr_number": "${{ inputs.pr_number }}",
+                "auto": "${{ inputs.auto }}",
+                "provenance_run": "${{ needs.detect.outputs.provenance_run }}",
+                "base_sha": "${{ needs.detect.outputs.base_sha }}",
+            },
+        ),
         ("deploy.yml", {}),
     )
     for n in range(4)
@@ -99,6 +107,9 @@ def test_apply_env_level_takes_no_cap():
         "head_sha": {"required": True, "type": "string"},
         "runs_on": {"required": True, "type": "string"},
         "pr_number": {"required": False, "type": "string", "default": ""},
+        "auto": {"required": False, "type": "boolean", "default": False},
+        "provenance_run": {"required": False, "type": "string", "default": ""},
+        "base_sha": {"required": False, "type": "string", "default": ""},
     }
 
 

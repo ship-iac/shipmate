@@ -3115,3 +3115,192 @@ def test_a_refused_max_parallel_writes_no_matrix(monkeypatch, tmp_path):
     assert github_outputs(tmp_path / "out.txt") == {
         "refusal": "max_parallel is '0'; refused",
     }
+
+
+def _base_moved_a_module(git_repo):
+    """`main` changes only `modules/m` after `pr` branched, `pr` changes `stacks/app`: the shape
+    the overlap probe ran. Returns (merge base, base tip), with `pr` checked out."""
+    since = _commit({"modules/m/main.tf": "v1\n", "stacks/app/main.tf": "app\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/app/main.tf": "app edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "v2\n"}, "module only")
+    _git("checkout", "-q", "pr")
+    return since, tip
+
+
+def test_base_changed_stacks_lists_the_base_tips_changes_since_the_merge_base(
+    git_repo, monkeypatch
+):
+    """Terramate lists the changes in a detached worktree of the base tip, against the merge base,
+    and the worktree is removed after. The stub answers `stacks/app` as Terramate did for this
+    module-only change.
+
+    Mutation: drop `["-C", tree]` from `_list_stacks` -- the argv, red.
+    Mutation: add the worktree at `HEAD` -- the worktree holds the branch's module, red.
+    Mutation: pass `base_ref` to `_list_stacks` for the merge base -- the argv, red.
+    Mutation: return the directories of `git diff --name-only <merge base> <base>` -- a file path
+    intersection names `modules/m`, red.
+    Mutation: drop the `worktree remove` -- two worktrees are left, red."""
+    since, tip = _base_moved_a_module(git_repo)
+    real, seen = bm._run, []
+
+    def _run(args):
+        if args[0] != "terramate":
+            return real(args)
+        seen.append(args)
+        assert (pathlib.Path(args[2]) / "modules/m/main.tf").read_text() == "v2\n"
+        return "stacks/app\n"
+
+    monkeypatch.setattr(bm, "_run", _run)
+    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", since]]
+    assert len(_git("worktree", "list").splitlines()) == 1
+
+
+def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkeypatch, tmp_path):
+    """A base tip pushed after the checkout is absent from the clone; it is fetched from `origin`
+    by sha before the merge base. Mutation: drop the fetch -- `merge_base` refuses, red."""
+    since, tip = _base_moved_a_module(git_repo)
+    _git("config", "uploadpack.allowAnySHA1InWant", "true")
+    clone = tmp_path / "clone"
+    _git("clone", "-q", "--no-local", "--single-branch", "-b", "pr", str(git_repo), str(clone))
+    monkeypatch.chdir(clone)
+    assert subprocess.run(["git", "cat-file", "-e", tip], capture_output=True).returncode
+    real = bm._run
+    monkeypatch.setattr(
+        bm, "_run", lambda args: "stacks/app\n" if args[0] == "terramate" else real(args)
+    )
+    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+
+
+def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
+    git_repo, monkeypatch
+):
+    """Terramate lists only the stacks the base tip still has, so a stack the base deleted or
+    moved away is read from the diff. `stacks/go` is a prefix of `stacks/gone` but no parent.
+
+    Mutation: drop `| gone` from the return -- red.
+    Mutation: drop `"R"` from the statuses -- `stacks/old` missing, red.
+    Mutation: add the new path of a rename (`fields[i + 2]`) -- `stacks/old` missing, red.
+    Mutation: `p.startswith(s)` without the `/` -- `stacks/go` added, red.
+    Mutation: step 2 fields past a rename (`i += 2`) -- `stacks/zed`, deleted after it in path
+    order, missing, red."""
+    files = {f"stacks/{s}/main.tf": f"{s}\n" for s in ("gone", "old", "kept", "zed")}
+    _commit(files, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/kept/main.tf": "kept edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    _git("mv", "stacks/old", "stacks/new")
+    tip = _commit({"stacks/gone/main.tf": None, "stacks/zed/main.tf": None}, "delete, rename")
+    _git("checkout", "-q", "pr")
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
+    candidates = {"stacks/gone", "stacks/old", "stacks/kept", "stacks/go", "stacks/zed"}
+    assert bm.base_changed_stacks(tip, candidates) == {"stacks/gone", "stacks/old", "stacks/zed"}
+
+
+def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_holds(
+    git_repo, monkeypatch
+):
+    """git reports `main.tf`, never `./main.tf`, so the root stack `.` is matched by exclusion.
+
+    Mutation: drop the `stack == "."` branch of `_inside` (`.` never matches, red). Mutation:
+    return True for `.` (a deletion inside `stacks/app` alone holds the root too, red)."""
+    _commit({"main.tf": "root\n", "stacks/app/main.tf": "app\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/app/main.tf": "app edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    only_app = _commit({"stacks/app/main.tf": None}, "delete in a child stack")
+    root_too = _commit({"main.tf": None}, "delete in the root")
+    _git("checkout", "-q", "pr")
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
+    assert bm.base_changed_stacks(only_app, {".", "stacks/app"}) == {"stacks/app"}
+    assert bm.base_changed_stacks(root_too, {".", "stacks/app"}) == {".", "stacks/app"}
+
+
+@pytest.mark.parametrize(
+    ("base_change", "listed", "held"),
+    [
+        pytest.param(
+            {"stacks/a/main.tf": "base edit\n"},
+            "stacks/a\n",
+            {"stacks/a", "stacks/b"},
+            id="base-changed",
+        ),
+        pytest.param({"stacks/a/main.tf": None}, "", {"stacks/b"}, id="base-deleted"),
+        pytest.param({"other/x.tf": "base edit\n"}, "", set(), id="base-untouched"),
+    ],
+)
+def test_base_changed_stacks_follows_a_stack_the_branch_renamed(
+    git_repo, monkeypatch, base_change, listed, held
+):
+    """The branch renames `stacks/a` to `stacks/b`; the base commits `base_change`. The stub answers
+    Terramate's base-side listing with `listed`. A plan of `stacks/b` reverts the base's edit of
+    `stacks/a`, so the candidate `stacks/b` is held only when the base changed its old path.
+
+    Mutation: drop `followed` from the return (base-changed misses `stacks/b`, red). Mutation:
+    match the rename's old path against the candidate (`_inside(old, s, ...)`; base-changed misses
+    `stacks/b`, red). Mutation: hold on any rename (`or True`; base-untouched holds `stacks/b`,
+    red). Mutation: drop `old in moved` (base-deleted, which Terramate cannot list, misses
+    `stacks/b`, red)."""
+    _commit({"stacks/a/main.tf": "a\n", "other/x.tf": "x\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _git("mv", "stacks/a", "stacks/b")
+    _commit({}, "rename a to b")
+    _git("checkout", "-q", "main")
+    tip = _commit(base_change, "base edit")
+    _git("checkout", "-q", "pr")
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: listed if args[0] == "terramate" else real(args))
+    assert bm.base_changed_stacks(tip, {"stacks/b"}) == held
+
+
+def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
+    """A repository with `diff.renames=copies` makes `--find-renames` report copies too.
+
+    Mutation: step 3 fields past an `R` alone (`i += 3 if status == "R" else 2`) -- the copy's
+    new path is read as a status and `stacks/b`'s deletion is missed, red. Mutation: count a
+    copy's source (`status in ("D", "R", "C")`) -- `stacks/a` is added, red."""
+    out = "C075\0stacks/a/x.tf\0stacks/c/x.tf\0D\0stacks/b/y.tf\0"
+    monkeypatch.setattr(bm, "_run", lambda args: out)
+    assert bm._moved_from("s", "u") == {"stacks/b/y.tf"}
+
+
+def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
+    """The remedy is a push from the updated branch, never a bare `shipmate apply`, which runs
+    no overlap check.
+
+    Mutation: skip the fetch's exit status -- `merge_base` refuses instead, red. Mutation: end
+    with "Push again, or comment `shipmate apply`." -- red."""
+    _commit({"stacks/app/main.tf": "app\n"}, "common")
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
+    missing = "f" * 40
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(missing, set())
+    assert e.value.code == (
+        f"::error::could not fetch the base tip {missing} (fatal: 'origin' does not appear to be "
+        "a git repository | fatal: Could not read from remote repository. | Please make sure you "
+        "have the correct access rights | and the repository exists.). Update the branch from "
+        "the base and push."
+    )
+
+
+def test_base_changed_stacks_names_the_update_remedy_when_the_merge_base_fails(monkeypatch):
+    """Mutation: drop `retry=_BASE_REMEDY` from the `merge_base` call -- "Re-run the
+    workflow", red."""
+    tip = "c" * 40
+
+    def run(args, **kw):
+        code = 0 if args[1] == "cat-file" else 128
+        return subprocess.CompletedProcess(args, code, "", "fatal: bad object\n")
+
+    monkeypatch.setattr(bm.subprocess, "run", run)
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, set())
+    assert e.value.code == (
+        f"::error::could not resolve the merge base of the pull request's base {tip} and its "
+        "head: fatal: bad object. Update the branch from the base and push; if it fails again, "
+        "the base commit is not reachable from this checkout."
+    )

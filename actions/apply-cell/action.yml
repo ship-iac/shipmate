@@ -28,9 +28,13 @@ inputs:
     description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
-  cell-lock-outcome:
-    description: The outcome of the wave job's lock-verify step, which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
+  pre-apply-outcome:
+    description: The outcome of the wave job's pre-apply check (lock-verify), which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
     required: true
+  pre-apply-refusal:
+    description: The pre-apply check's refusal, which becomes the cell's blocked reason. Empty falls back to a reason that names no cause.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -54,18 +58,18 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
-    # Carries the wave job's lock check into this cell's blocked reason. The check ran before
-    # the cloud credentials, so a refused cell never assumed the apply role.
-    - name: Refuse a cell whose lock check did not pass
-      id: cell-lock
+    # Carries the wave job's pre-apply check into this cell's blocked reason. The check ran
+    # before the cloud credentials, so a refused cell never assumed the apply role.
+    - name: Refuse a cell whose pre-apply check did not pass
+      id: pre-apply
       shell: bash
       env:
         ENV: ${{ inputs.env }}
         STACK: ${{ inputs.stack }}
-        OUTCOME: ${{ inputs.cell-lock-outcome }}
+        OUTCOME: ${{ inputs.pre-apply-outcome }}
       run: |
         if [ "$OUTCOME" != success ] && [ "$OUTCOME" != skipped ]; then
-          echo "::error::apply aborted for $ENV/$STACK: the cell lock check did not pass (outcome: '$OUTCOME'); the job's lock check step names why"
+          echo "::error::apply aborted for $ENV/$STACK: the pre-apply check did not pass (outcome: '$OUTCOME'); the job's Pre-apply check step names why"
           exit 1
         fi
 
@@ -275,7 +279,8 @@ runs:
       env:
         STACK: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
-        CELL_LOCK_OUTCOME: ${{ steps.cell-lock.outcome }}
+        PRE_APPLY_OUTCOME: ${{ steps.pre-apply.outcome }}
+        PRE_APPLY_REFUSAL: ${{ inputs.pre-apply-refusal }}
         DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
         PLANNED_HEAD_OUTCOME: ${{ steps.planned-head.outcome }}
         DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
