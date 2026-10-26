@@ -464,14 +464,12 @@ def test_a_base_tip_that_cannot_be_read_refuses(tmp_path, monkeypatch, pull, tip
     )
 
 
-@pytest.mark.parametrize("actor", [None, {"login": "a b"}])
-def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monkeypatch, actor):
-    """No `actor` and `triggering_actor`, or a login outside `_LOGIN`, is never put into a URL.
+def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monkeypatch):
+    """A login outside `_LOGIN` is never put into a URL.
 
-    Mutation: `readable = True` -- both rows read `write` and apply."""
+    Mutation: `readable = True` -- reads `write` and applies."""
     run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
-    if actor is not None:
-        run["actor"] = run["triggering_actor"] = actor
+    run["actor"] = run["triggering_actor"] = {"login": "a b"}
     assert _refusal(tmp_path, monkeypatch, run=run) == (
         "::error::not authorized: could not read the pusher's permission on this repository, "
         "so `shipmate apply` was not run. This run's log has the API response; push again, or "
@@ -499,7 +497,7 @@ def test_a_bot_pusher_refuses_naming_the_bot(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     ("actor", "trigger"),
-    [("k3np", "octocat"), ("renovate[bot]", "k3np"), ("k3np", None)],
+    [("k3np", "octocat"), ("renovate[bot]", "k3np")],
 )
 def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
     tmp_path, monkeypatch, actor, trigger
@@ -508,19 +506,19 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
     no push authorizes it, and no permission is read.
 
     Mutation: drop the `actor != trigger` refusal -- the first row reads `write` and applies,
-    the second refuses as a bot, the third as unreadable.
+    the second refuses as a bot.
     Mutation: read the pusher from `triggering_actor` alone -- the same rows, red."""
     run = {
         "id": int(RUN),
         "event": "pull_request_target",
         "head_sha": HEAD,
         "actor": {"login": actor},
-        "triggering_actor": None if trigger is None else {"login": trigger},
+        "triggering_actor": {"login": trigger},
     }
     calls = []
     assert _refusal(tmp_path, monkeypatch, run=run, calls=calls) == (
         f"::error::not authorized: the autoplan ran as @{actor} but was triggered by "
-        f"@{trigger or ''}, so it was re-run, and auto authorizes only the push itself; a writer "
+        f"@{trigger}, so it was re-run, and auto authorizes only the push itself; a writer "
         "comments `shipmate apply`."
     )
     assert not [c for c in calls if "/collaborators/" in c]
@@ -551,6 +549,30 @@ def test_a_malformed_plan_run_read_refuses_without_a_traceback(
     assert _refusal(tmp_path, monkeypatch, **kw) == (
         f"::error::auto apply refused: the {what} read returned a malformed answer ({error}). "
         f"{REMEDY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("actor", "trigger"),
+    [
+        pytest.param(None, None, id="neither"),
+        pytest.param({"login": "k3np"}, None, id="no-trigger"),
+        pytest.param("k3np", "k3np", id="not-mappings"),
+        pytest.param({"login": ""}, {"login": ""}, id="empty"),
+        pytest.param({"login": 7}, {"login": 7}, id="not-a-string"),
+    ],
+)
+def test_a_missing_actor_login_refuses_as_malformed(tmp_path, monkeypatch, actor, trigger):
+    """Checked before the equality, so two missing logins are not the same pusher.
+
+    Mutation: drop the `not (actor and trigger)` refusal -- neither and empty read as
+    unreadable, no-trigger as a re-run, red. Mutation: drop `isinstance(login, str)` in `_login`
+    (not-a-string raises)."""
+    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
+    run.update({"actor": actor, "triggering_actor": trigger})
+    assert _refusal(tmp_path, monkeypatch, run=run) == (
+        "::error::not authorized: the autoplan run names no actor or no triggering actor login, "
+        "so its pusher is unknown; a writer comments `shipmate apply`."
     )
 
 

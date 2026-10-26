@@ -1759,6 +1759,12 @@ The autoplan's pusher is a bot, such as `renovate[bot]`. `auto` never
 authorizes a bot's push: a bot has no repository permission to read. Nothing
 applied. A collaborator with write access comments `shipmate apply`.
 
+### `not authorized: the autoplan run names no actor or no triggering actor login`
+
+The plan run's body lacks a login for its `actor` or its `triggering_actor`, so
+there is no pusher to authorize. Nothing applied. A collaborator with write
+access comments `shipmate apply`.
+
 ### `not authorized: the autoplan ran as @<login> but was triggered by @<login>`
 
 The autoplan was re-run, so its `triggering_actor` is whoever re-ran it, not the

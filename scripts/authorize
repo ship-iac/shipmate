@@ -138,6 +138,12 @@ _LOGIN = re.compile(r"[A-Za-z0-9-]+")
 _PUSHER_RETRY = "push again, or a writer comments `shipmate apply`"
 
 
+def _login(user):
+    """`user["login"]` when `user` is a mapping holding a string login, else ""."""
+    login = user.get("login") if isinstance(user, dict) else None
+    return login if isinstance(login, str) else ""
+
+
 def pusher_reason(repo, plan_run, *, run):
     """Reject reason for the pusher of `plan_run`, an autoplan's REST workflow run, or None.
 
@@ -147,9 +153,13 @@ def pusher_reason(repo, plan_run, *, run):
     summary admits only `opened` and `synchronize`). A bot login has no collaborator
     permission to read and refuses. Otherwise `collaborators/<login>/permission`, read through
     `run`, is decided by `_permission_reason`; a failed or malformed read is an unreadable
-    permission. A malformed `plan_run` raises `AttributeError` or `TypeError`."""
-    actor = (plan_run.get("actor") or {}).get("login") or ""
-    trigger = (plan_run.get("triggering_actor") or {}).get("login") or ""
+    permission. A missing or empty login refuses first. `plan_run` must be a mapping."""
+    actor, trigger = (_login(plan_run.get(k)) for k in ("actor", "triggering_actor"))
+    if not (actor and trigger):
+        return (
+            "not authorized: the autoplan run names no actor or no triggering actor login, so "
+            "its pusher is unknown; a writer comments `shipmate apply`."
+        )
     if actor != trigger:
         return (
             f"not authorized: the autoplan ran as @{actor} but was triggered by @{trigger}, so "
