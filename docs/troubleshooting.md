@@ -1656,16 +1656,22 @@ An `auto` environment applies only through the autoplan of a ready pull request
    apply`. When it dispatches nothing it logs `no auto apply dispatched:
    <reason>`: the run is not an autoplan (a `shipmate plan` run), it is a
    re-run, the pull request is a draft, the gate is not pending over a complete
-   plan, or no changed cell is in an `auto` environment. The step is skipped
-   when a newer plan run of the head superseded this one. A dispatch logs
-   `dispatched an auto apply of <envs> for PR #<n> (ref <sha>)`.
+   plan, or no changed cell is in an `auto` environment. When it cannot decide
+   (the table unreadable, a cell summary unparseable) it warns `could not decide
+   whether to dispatch an auto apply; no auto apply started` and posts no reply.
+   The step is skipped when a newer plan run of the head superseded this one, or
+   when the sticky comment upsert found the head moved: the new head's run
+   decides. The next step, `Dispatch an auto apply`, logs `dispatched an auto
+   apply of <envs> for PR #<n> (ref <sha>)`.
 2. The pull request's comments: the `auto apply not started` reply (below), or
    the `auto` run's apply result comment. A `detect` refusal sits in that
    comment's error fence; the entries below quote each one.
 3. The `auto` run in the Actions tab, for a run that posted no comment.
 
 Comment `shipmate apply` to apply what the `auto` run did not, under the
-comment-time apply requirements.
+comment-time apply requirements, except a cell held because the base changed its
+stack: update the branch from the base and push (§`⚪ held, the base changed
+these stacks after this branch left it`).
 
 ### `auto apply not started: the dispatch failed`
 
@@ -1715,7 +1721,10 @@ The `auto` run applies as the pusher of the autoplan, that run's
 collaborator with write access comments `shipmate apply`, or pushes. The
 permission is read with the `detect` job's `GITHUB_TOKEN`; when it cannot be
 read the refusal reads `could not read the pusher @<login>'s permission on this
-repository` and ends ``push again, or a writer comments `shipmate apply` ``.
+repository` and ends ``push again, or a writer comments `shipmate apply` ``. A
+permission other than `read`, `none`, `write` or `admin` reads ``GitHub reported
+the pusher @<login>'s permission as `<permission>`, which this engine does not
+admit``.
 
 ### `auto apply refused: pull request #<n> head is <sha>, but this run applies <sha>`
 
@@ -1725,11 +1734,15 @@ until GitHub has computed its mergeability, up to 12 reads 5 s apart, and every
 read compares the head. The other refusals from that read use the comment-time
 wording, with these remedies:
 
-- `GitHub is still computing this PR's mergeability`: still unknown after the
-  last read. Comment `shipmate apply`.
-- `this pull request is a draft` or `PR is not mergeable (state: <state>)`:
-  mark it ready, or resolve the conflict or requirement, then comment
-  `shipmate apply` or push.
+- ``GitHub is still computing this PR's mergeability; wait a moment, then
+  comment `shipmate apply` ``: still unknown after the last read.
+- ``this pull request is a draft. A draft can be planned but not applied. Mark it
+  ready for review, then comment `shipmate apply` ``, or `PR is not mergeable
+  (state: <state>)`: mark it ready, or resolve the conflict or requirement, then
+  comment `shipmate apply` or push.
+- ``this pull request's head is in `<repository>`; shipmate applies and unlocks
+  only branches of this repository`` (or `in a deleted repository`): see
+  §`shipmate applies and unlocks only branches of this repository`.
 - ``auto apply refused: could not read the base tip of pull request #<n>
   (<why>)``, or `could not fetch the base tip <sha>`: the base branch's ref could
   not be read or fetched. Comment `shipmate apply`, or push.
@@ -1766,7 +1779,9 @@ The `auto` apply result comment carries one of:
   `<env>` does not fully apply in this run, so `<env>`'s cells stay pending. The
   remedy follows the predecessor's kind: `` apply it first with `shipmate apply
   <pred>` `` for a `targeted` one, `it is held until the pull request is
-  approved` for a held one, `a cell of it does not apply this run; see its line
+  approved` for a held one, `` it is held until the pull request is approved,
+  then comment `shipmate apply <pred>` `` for one both held and `targeted`, `a
+  cell of it does not apply this run; see its line
   below` for one holding a locked, overlap or waiting cell, and
   `` comment `shipmate apply`, which applies them in order `` for an environment
   that is not `auto`. The run log's apply-all-detect notice lists these
@@ -1804,7 +1819,8 @@ An `auto` cell also refuses when:
   credentials. Push, or comment `shipmate apply`, which runs `detect` again.
 - `the newest autoplan of <head> is run <n>, not plan run <p>, which this auto
   apply applies` (or `is not listed`), or `the cell's newest plan record names
-  plan run <r>, not plan run <p>`: a newer plan of the head exists. Comment
+  plan run <r>, not plan run <p>` (or `names no plan run`): a newer autoplan, or
+  a newer plan of this cell, exists. Comment
   `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.

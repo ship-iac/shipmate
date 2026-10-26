@@ -1450,9 +1450,10 @@ code-owner review, last-push approval) is what the apply path waits for, and
 there is no owners parser here to disagree with it.
 
 A bare `shipmate apply` is authorized once at comment time, by the same six
-apply requirements. Comment time is never the whole review decision: both apply
+apply requirements. Comment time is never the whole review decision: both comment
 forms re-read `reviewDecision` server-side before anything applies (below), so
-an approval dismissed between the comment and the dispatch holds. Both forms
+an approval dismissed between the comment and the dispatch holds; the `auto`
+form re-reads it too. Both comment forms
 dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
 `environment` input selects the form `apply.yml` runs (set → targeted, empty → bare). Both
 share the same App-minted `workflow_dispatch` mechanism and the same per-env
@@ -1937,7 +1938,8 @@ on the pull request to apply it.``
   until GitHub reports `mergeable` as non-null, at most 12 reads 5 s apart.
   Every read refuses when the head is no longer `ref`: the new head's autoplan
   decides its own apply. The same-repository, draft and mergeable apply
-  requirements then decide in their comment-time wording, and a `mergeable`
+  requirements then decide in their comment-time wording, except that the draft
+  and still-computing refusals end ``comment `shipmate apply` ``. A `mergeable`
   still null after the last read refuses as still being computed.
 - **Base tip.** The base branch's tip is read from `git/ref/heads/<base.ref>`,
   never from the pull request's `base.sha`: on a probed pull request `base.sha`
@@ -1957,8 +1959,10 @@ on the pull request to apply it.``
   `collaborators/<login>/permission` and decided by
   `authorize._permission_reason`, the function that decides a commenter:
   ``not authorized: `shipmate apply` needs write access to this repository, and
-  the pusher @<login>'s permission is `<permission>`.`` An unreadable permission
-  ends ``push again, or a writer comments `shipmate apply`.``
+  the pusher @<login>'s permission is `<permission>`.`` for `read` and `none`,
+  and ``... and GitHub reported the pusher @<login>'s permission as `<permission>`,
+  which this engine does not admit.`` for any other value. An unreadable
+  permission ends ``push again, or a writer comments `shipmate apply`.``
 
 With no cell to apply, neither the plan run nor the pusher is read.
 
@@ -1976,8 +1980,10 @@ and targeted forms run no overlap check.
 **`needs` predecessors.** An `auto` environment whose `needs` predecessor does
 not fully apply this run is skipped, its checks pending, and the result comment
 names the predecessor with its remedy by kind: `` `shipmate apply <pred>` `` for a
-`targeted` one, an approving review for a held one, and `shipmate apply`
-otherwise (§Apply result comment).
+`targeted` one, an approving review for a held one, followed by
+`` `shipmate apply <pred>` `` when it is also `targeted`, `a cell of it does not
+apply this run; see its line below` for one holding a locked, overlap or waiting
+cell, and `shipmate apply` otherwise (§Apply result comment).
 
 **Wave re-check.** Each `auto` wave cell's pre-apply check (§Cell locks) also
 refuses unless the plan run `detect` bound is still the head's newest autoplan
@@ -3185,7 +3191,9 @@ evidence withheld every check. The newest-run test then sees the older complete
 run, and a bare or targeted apply applies that run's cells before the merge;
 the gate holds and names the newer run, but no apply reads the gate. An `auto` apply
 is not exposed to a newer autoplan: it reads the head's newest autoplan from the
-Actions runs listing, not from the records (§`apply_mode: auto`).
+Actions runs listing, not from the records (§`apply_mode: auto`). A newer
+`shipmate plan` run of the head that published no apply check is not an autoplan
+and is not listed, so the older autoplan's cells still apply.
 
 ## Consumer variables and secrets
 
@@ -3641,7 +3649,7 @@ One `- ` line per inverted pair. Four paths refuse, each over its own cells:
 | --- | --- | --- |
 | plan (not a drift sweep) | the plan matrix | the plan matrix |
 | bare `shipmate apply` | pending cells of every environment neither held, `targeted` nor skipped by `needs`, the skips a waiting or locked cell causes included; waiting cells count | every pending cell, held and `targeted` ones included |
-| `auto` apply | pending cells of every `apply_mode: auto` environment neither held, `targeted` nor skipped by `needs`, the skips a waiting, locked or overlap cell causes included; waiting cells count | every pending cell, of every environment |
+| `auto` apply | pending cells of every `apply_mode: auto` environment neither held nor skipped by `needs`, the skips a waiting, locked or overlap cell causes included; waiting cells count | every pending cell, of every environment |
 | merge deploy | every pending cell | every pending cell |
 
 A plan refusal holds the gate, and the gate description carries its first error,
