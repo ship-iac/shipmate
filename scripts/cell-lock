@@ -57,7 +57,6 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
-bm = _load("build-matrix")
 ec = _load("env-config")
 
 LOCKS = "refs/shipmate/locks/"
@@ -571,7 +570,7 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
     newest = _confirm(
         where,
         f"plan run {provenance} is the newest autoplan of {head}",
-        lambda: ag.newest_autoplan(repo, head, bm.PLAN_WORKFLOW, run=run),
+        lambda: ag.newest_autoplan(repo, head, run=run),
     )
     if newest != int(provenance):
         raise SystemExit(

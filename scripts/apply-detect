@@ -443,7 +443,7 @@ def refuse_provenance(repo, head, runnable):
             f"::error::auto apply refused: plan run {run_id} planned {sha}, not the head "
             f"{head}. " + _AUTO_REMEDY
         )
-    newest = ag.newest_autoplan(repo, head, bm.PLAN_WORKFLOW, run=_run)
+    newest = ag.newest_autoplan(repo, head, run=_run)
     if newest is None:
         raise SystemExit(
             f"::error::auto apply refused: plan run {run_id} is not listed, and no autoplan run "

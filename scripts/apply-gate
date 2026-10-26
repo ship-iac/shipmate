@@ -265,16 +265,20 @@ def _plan_run(record):
     return plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None
 
 
-def newest_autoplan(repo, head, workflow, *, run):
-    """The newest run id of the workflow file `workflow` started by `pull_request_target` on
-    `head`, or None when none is listed. Every page is read."""
+#: The consumer's workflow file's basename; `build-matrix.PLAN_WORKFLOW` is its path.
+AUTOPLAN_WORKFLOW = "shipmate.yml"
+
+
+def newest_autoplan(repo, head, *, run):
+    """The newest run id of `AUTOPLAN_WORKFLOW` started by `pull_request_target` on `head`, or
+    None when none is listed. Every page is read."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
     listing = run(
         [
             "gh",
             "api",
             "--paginate",
-            f"repos/{repo}/actions/workflows/{workflow.rsplit('/', 1)[-1]}/runs?{query}",
+            f"repos/{repo}/actions/workflows/{AUTOPLAN_WORKFLOW}/runs?{query}",
             "--jq",
             ".workflow_runs[].id",
         ]
