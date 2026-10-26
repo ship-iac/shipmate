@@ -1062,8 +1062,19 @@ RETRY = "push, or comment `shipmate apply` on the pull request"
 WHERE = "apply aborted for `dev` / `stacks/auth`:"
 
 
-def _pull(state="open", head=HEAD, base=BASE):
-    return json.dumps({"state": state, "head": {"sha": head}, "base": {"sha": base}})
+TIP_READ = ["gh", "api", f"repos/{REPO}/git/ref/heads/main"]
+
+
+def _pull(state="open", head=HEAD):
+    """A pull request whose `base.sha` is stale: probed on a sample pull request, it kept the
+    old tip for 20 s and more after a push to the base, so the check reads the branch ref."""
+    return json.dumps(
+        {"state": state, "head": {"sha": head}, "base": {"sha": "9" * 40, "ref": "main"}}
+    )
+
+
+def _tip(sha=BASE):
+    return json.dumps({"ref": "refs/heads/main", "object": {"sha": sha, "type": "commit"}})
 
 
 def _record(plan_run, run_id=1):
@@ -1096,10 +1107,10 @@ def _verify_refusal(monkeypatch, tmp_path, gh, env=None):
 
 
 def test_verify_passes_a_cell_our_pull_request_holds_at_the_head(monkeypatch, tmp_path):
-    """Outside the auto form a moved base passes. Mutation: refuse when the holder is our pull
-    request (`held.pr != pr` for `==`). Mutation: return before the pull request read (its
-    queued answer is left unconsumed)."""
-    gh = _held().on(PULL_READ, _pull(base=OTHER))
+    """Outside the auto form the base tip is not read (the strict double refuses an extra read).
+    Mutation: refuse when the holder is our pull request (`held.pr != pr` for `==`). Mutation:
+    return before the pull request read (its queued answer is left unconsumed)."""
+    gh = _held().on(PULL_READ, _pull())
     assert _verify(monkeypatch, tmp_path, gh) == {}
     assert gh.drained()
 
@@ -1157,22 +1168,24 @@ def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answ
 
 
 @pytest.mark.parametrize(
-    ("pull", "state", "sha"),
+    ("pull", "refusal"),
     [
-        pytest.param(_pull(head=OTHER), "open", OTHER, id="head-moved"),
-        pytest.param(_pull(state="closed"), "closed", HEAD, id="closed"),
+        pytest.param(
+            _pull(head=OTHER),
+            f"pull request #7 is at {OTHER}, not at {HEAD}, the head this apply was requested "
+            f"for; {RETRY}",
+            id="head-moved",
+        ),
+        pytest.param(
+            _pull(state="closed"), "pull request #7 is closed; nothing applies", id="closed"
+        ),
     ],
 )
-def test_verify_refuses_a_pull_request_not_open_at_the_head(
-    monkeypatch, tmp_path, pull, state, sha
-):
-    """Mutation: compare only the state (head-moved passes). Mutation: compare only the head
-    (closed passes)."""
+def test_verify_refuses_a_pull_request_not_open_at_the_head(monkeypatch, tmp_path, pull, refusal):
+    """Mutation: drop the head comparison (head-moved passes). Mutation: drop the state
+    comparison (closed passes)."""
     gh = _held().on(PULL_READ, pull)
-    assert _verify_refusal(monkeypatch, tmp_path, gh) == (
-        f"::error::{WHERE} pull request #7 is {state} at {sha}, not open at {HEAD}, the head "
-        f"this apply was requested for; {RETRY}"
-    )
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == f"::error::{WHERE} {refusal}"
 
 
 @pytest.mark.parametrize(
@@ -1184,8 +1197,8 @@ def test_verify_refuses_a_pull_request_not_open_at_the_head(
 )
 def test_verify_refuses_a_pull_request_it_cannot_read(monkeypatch, tmp_path, answer, why):
     """Mutation: answer a failed pull request read as open at the head (`except SystemExit:
-    return "open", head, ""` around `gh_json` in `_verify_pull`; read-fails passes). Mutation:
-    read the fields with `.get`, defaulting the head to `head` (malformed passes)."""
+    return pull, "open", head` around `gh_json` in `_verify_pull`; read-fails passes).
+    Mutation: read the fields with `.get`, defaulting the head to `head` (malformed passes)."""
     gh = _held().on(PULL_READ, answer)
     assert _verify_refusal(monkeypatch, tmp_path, gh) == (
         f"::error::{WHERE} could not confirm pull request #7 is open at {HEAD} ({why}); {RETRY}"
@@ -1196,15 +1209,17 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     """The record check reads the newest record per name: an older check run recording another
     plan run is outvoted. Mutation: route `SHIPMATE_AUTO` `true` like `false` (the listing and
     check-run reads are left unconsumed)."""
-    gh = _held().on(PULL_READ, _pull()).on(AUTOPLANS_READ, RUN)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
     gh.on(CHECK_RUNS_READ, _records("1", RUN))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
 
 
 def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
-    """Mutation: drop the base comparison (the cell passes)."""
-    gh = _held().on(PULL_READ, _pull(base=OTHER))
+    """The tip is the branch ref's; `base.sha` would read stale (`_pull`). Mutation: drop the
+    base comparison (the cell passes). Mutation: return `pull["base"]["sha"]` from `base_tip`
+    (the stale sha refuses as the moved tip)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip(OTHER))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the base branch moved from {BASE} to {OTHER} since this auto apply "
         f"was detected; {RETRY}"
@@ -1221,7 +1236,7 @@ def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
 def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
     """Mutation: `min` for `max` in `newest_autoplan` (newer passes). Mutation: skip the
     comparison when nothing is listed (`newest is not None and ...`: none passes)."""
-    gh = _held().on(PULL_READ, _pull()).on(AUTOPLANS_READ, autoplans)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the newest autoplan of {HEAD} is {newest}, not plan run {RUN}, which "
         f"this auto apply applies; {RETRY}"
@@ -1237,7 +1252,7 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
 )
 def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path, records, named):
     """Mutation: drop the record comparison (both pass)."""
-    gh = _held().on(PULL_READ, _pull()).on(AUTOPLANS_READ, RUN)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
     gh.on(CHECK_RUNS_READ, _records(*records))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the cell's newest plan record names {named}, not plan run {RUN}, "
@@ -1257,12 +1272,31 @@ def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path
 def test_verify_auto_refuses_a_provenance_it_cannot_read(monkeypatch, tmp_path, failing, what):
     """Mutation: answer a failed read with None in `_confirm` (`return None` for the raise;
     list then reads "not listed", check-runs "no plan run")."""
-    gh = _held().on(PULL_READ, _pull())
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
     gh.on(AUTOPLANS_READ, FAIL if failing == "list" else RUN)
     if failing == "check-runs":
         gh.on(CHECK_RUNS_READ, FAIL)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} could not confirm {what} (command failed (1): gh api); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
+        pytest.param(
+            json.dumps({"ref": "refs/heads/mainline", "object": {"sha": BASE, "type": "commit"}}),
+            "refs/heads/mainline is not the commit ref of branch 'main'",
+            id="other-ref",
+        ),
+    ],
+)
+def test_verify_auto_refuses_a_base_tip_it_cannot_read(monkeypatch, tmp_path, answer, why):
+    """Mutation: drop the ref-name check in `base_tip` (other-ref passes)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, answer)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm the base tip of pull request #7 ({why}); {RETRY}"
     )
 
 

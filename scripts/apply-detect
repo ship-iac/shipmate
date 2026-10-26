@@ -462,7 +462,8 @@ def wait_mergeable(repo, pr_number, head):
     """The pull request's base tip, after re-reading it until GitHub has computed `mergeable`
     or `_MERGEABLE_READS` reads are spent, then refusing as `authorize.decide` does on its head
     repository, draft and mergeable state. Every read refuses when the head moved: the new
-    head's autoplan decides its own apply. A missing base tip refuses."""
+    head's autoplan decides its own apply. The base tip is the base branch's
+    (`apply-gate.base_tip`); one that cannot be read refuses."""
     for i in range(_MERGEABLE_READS):
         if i:
             _sleep(_MERGEABLE_WAIT)
@@ -478,13 +479,16 @@ def wait_mergeable(repo, pr_number, head):
     reason = az._head_repo_reason(pr) or az._ready_reason(pr)
     if reason:
         raise SystemExit(f"::error::{reason}")
-    base = (pr.get("base") or {}).get("sha")
-    if not base:
-        raise SystemExit(
-            f"::error::auto apply refused: GitHub returned no base tip for pull request "
-            f"#{pr_number}. " + _AUTO_REMEDY
-        )
-    return base
+    try:
+        return ag.base_tip(repo, pr, run=_run)
+    except SystemExit as e:
+        why = str(e.code).removeprefix("::error::")
+    except (LookupError, TypeError, AttributeError) as e:
+        why = repr(e)
+    raise SystemExit(
+        f"::error::auto apply refused: could not read the base tip of pull request "
+        f"#{pr_number} ({why}). " + _AUTO_REMEDY
+    )
 
 
 def overlap_cells(candidates, changed):

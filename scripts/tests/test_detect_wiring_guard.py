@@ -354,9 +354,9 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "base_sha": {
         "description": (
-            "Auto form only: the pull request's base tip, read after the mergeability wait, "
-            "that overlap_cells was computed on; empty when no environment had a pending cell "
-            "to consider."
+            "Auto form only: the tip of the pull request's base branch, read from its ref after "
+            "the mergeability wait, that overlap_cells was computed on; empty when no "
+            "environment had a pending cell to consider."
         ),
         "value": "${{ steps.d.outputs.base_sha }}",
     },

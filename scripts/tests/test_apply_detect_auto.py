@@ -26,7 +26,7 @@ REMEDY = "Comment `shipmate apply` on the pull request to apply it."
 REPO = {"full_name": "o/r"}
 PULL_OK = {
     "head": {"sha": HEAD, "repo": REPO},
-    "base": {"sha": BASE, "repo": REPO},
+    "base": {"sha": BASE, "ref": "main", "repo": REPO},
     "mergeable": True,
     "mergeable_state": "clean",
     "draft": False,
@@ -51,9 +51,16 @@ def _permission_body(permission):
     return json.dumps({"permission": permission})
 
 
-def _github(checks, listing, run, permission, pulls, calls, argv):
+def _ref(tip):
+    if isinstance(tip, BaseException):
+        raise tip
+    return json.dumps({"ref": "refs/heads/main", "object": {"sha": tip, "type": "commit"}})
+
+
+def _github(checks, listing, run, permission, pulls, calls, argv, tip=BASE):
     """A `gh api` double answering each read `_run_auto` documents by its path prefix."""
     answers = [
+        ("repos/o/r/git/ref/heads/main", lambda: _ref(tip)),
         (f"repos/o/r/commits/{HEAD}/check-runs?", lambda: "\n".join(map(json.dumps, checks))),
         ("repos/o/r/actions/workflows/shipmate.yml/runs?", lambda: "\n".join(map(str, listing))),
         ("repos/o/r/actions/runs/", lambda: json.dumps(run)),
@@ -93,13 +100,15 @@ def _run_auto(
     argv=None,
     base_changed=(),
     base_reads=None,
+    tip=BASE,
 ):
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
     to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
     `RUN`, whose API body is an autoplan of `HEAD` pushed by `k3np`. `listing` is the head's
     autoplan run ids, `permission` the pusher's (an exception raises from the read), `pulls`
     the successive pull request reads, `base_changed` the stacks the base changed (an exception
-    raises from the read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
+    raises from the read), `tip` the base branch ref's commit (an exception raises from the
+    read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
     sleep to `sleeps`, each base tip the base-side detection is asked about to `base_reads`.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
@@ -136,6 +145,7 @@ def _run_auto(
         list(pulls or [PULL_OK]),
         [] if calls is None else calls,
         [] if argv is None else argv,
+        tip,
     )
 
     tree = {e: list(stacks) for e in envs}
@@ -395,12 +405,41 @@ def test_a_fork_head_refuses(tmp_path, monkeypatch):
     )
 
 
-def test_a_pull_request_without_a_base_tip_refuses(tmp_path, monkeypatch):
-    """Mutation: drop the missing-base refusal -- the run applies."""
-    pull = {**PULL_OK, "base": {"repo": REPO}}
-    assert _refusal(tmp_path, monkeypatch, pulls=[pull]) == (
-        f"::error::auto apply refused: GitHub returned no base tip for pull request "
-        f"#{PR_NUMBER}. {REMEDY}"
+def test_the_base_tip_is_the_branch_refs_not_the_pull_requests_base_sha(tmp_path, monkeypatch):
+    """Probed on a sample pull request: after a push to the base, `base.sha` kept the old tip
+    for 20 s and more while `git/ref/heads/<base.ref>` answered the new one at once, so overlap
+    computed on `base.sha` misses the base's newest change.
+
+    Mutation: return `pr["base"]["sha"]` from `wait_mergeable` -- overlap and `base_sha` use
+    the stale tip, red."""
+    reads, tip = [], "c" * 40
+    parsed = _run_auto(tmp_path, monkeypatch, base_reads=reads, tip=tip)
+    assert (reads, parsed["base_sha"]) == ([tip], tip)
+
+
+@pytest.mark.parametrize(
+    ("pull", "tip", "why"),
+    [
+        pytest.param(
+            {**PULL_OK, "base": {"sha": BASE, "repo": REPO}}, BASE, "KeyError('ref')", id="no-ref"
+        ),
+        pytest.param(
+            PULL_OK,
+            SystemExit("::error::command failed (1): gh api"),
+            "command failed (1): gh api",
+            id="read-fails",
+        ),
+        pytest.param(
+            PULL_OK, "main", "branch 'main' points at 'main', not a commit sha", id="bad-sha"
+        ),
+    ],
+)
+def test_a_base_tip_that_cannot_be_read_refuses(tmp_path, monkeypatch, pull, tip, why):
+    """Mutation: drop `LookupError` from the `except` (no-ref escapes as a KeyError). Mutation:
+    drop the `is_head_sha` refusal in `base_tip` (bad-sha applies)."""
+    assert _refusal(tmp_path, monkeypatch, pulls=[pull], tip=tip) == (
+        f"::error::auto apply refused: could not read the base tip of pull request "
+        f"#{PR_NUMBER} ({why}). {REMEDY}"
     )
 
 

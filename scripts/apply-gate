@@ -26,8 +26,9 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 
-from _shipmate import is_pr_number, is_run_id, run_annotated
+from _shipmate import gh_json, is_head_sha, is_pr_number, is_run_id, run_annotated
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
@@ -279,6 +280,23 @@ def newest_autoplan(repo, head, workflow, *, run):
         ]
     )
     return max(map(int, listing.split()), default=None)
+
+
+def base_tip(repo, pull, *, run):
+    """The tip commit of the REST pull request `pull`'s base branch, read from the branch ref.
+    Not `pull["base"]["sha"]`: probed on a sample pull request, it kept the old tip for 20 s
+    and more after a push to the base, while the branch ref answered the new tip at once.
+    Raises `SystemExit` on a failed read or an answer that is not that branch's commit, and
+    `LookupError` or `TypeError` on a malformed pull request."""
+    branch = pull["base"]["ref"]
+    path = urllib.parse.quote(branch, safe="/")
+    ref = gh_json(f"repos/{repo}/git/ref/heads/{path}", run)
+    sha = ref["object"]["sha"]
+    if ref["ref"] != f"refs/heads/{branch}" or ref["object"]["type"] != "commit":
+        raise SystemExit(f"::error::{ref['ref']} is not the commit ref of branch {branch!r}")
+    if not is_head_sha(sha):
+        raise SystemExit(f"::error::branch {branch!r} points at {sha!r}, not a commit sha")
+    return sha
 
 
 def verdict(check_runs):

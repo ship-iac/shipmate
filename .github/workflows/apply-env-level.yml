@@ -8,7 +8,8 @@ on:
       # Empty on the merge deploy, which ignores cell locks; set, each cell refuses unless that
       # pull request holds its lock.
       pr_number: { required: false, type: string, default: "" }
-      # The auto form's provenance, re-checked in each cell: detect's plan run and base tip.
+      # `auto` marks an auto apply; its pre-apply check then also compares `provenance_run`,
+      # detect's plan run, and `base_sha`, the base tip detect read.
       auto: { required: false, type: boolean, default: false }
       provenance_run: { required: false, type: string, default: "" }
       base_sha: { required: false, type: string, default: "" }

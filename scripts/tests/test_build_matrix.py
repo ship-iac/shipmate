@@ -3158,18 +3158,34 @@ def test_base_changed_stacks_lists_the_base_tips_changes_since_the_merge_base(
     assert len(_git("worktree", "list").splitlines()) == 1
 
 
-def test_base_changed_stacks_refuses_a_base_tip_the_clone_lacks(git_repo, monkeypatch):
+def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkeypatch, tmp_path):
+    """A base tip pushed after the checkout is absent from the clone; it is fetched from `origin`
+    by sha before the merge base. Mutation: drop the fetch -- `merge_base` refuses, red."""
+    since, tip = _base_moved_a_module(git_repo)
+    _git("config", "uploadpack.allowAnySHA1InWant", "true")
+    clone = tmp_path / "clone"
+    _git("clone", "-q", "--no-local", "--single-branch", "-b", "pr", str(git_repo), str(clone))
+    monkeypatch.chdir(clone)
+    assert subprocess.run(["git", "cat-file", "-e", tip], capture_output=True).returncode
+    real = bm._run
+    monkeypatch.setattr(
+        bm, "_run", lambda args: "stacks/app\n" if args[0] == "terramate" else real(args)
+    )
+    assert bm.base_changed_stacks(tip) == {"stacks/app"}
+
+
+def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
     """The auto form's remedy: a re-run refuses at the auto actor check.
 
-    Mutation: add the worktree before `merge_base` -- the stubbed `_run` is called, red.
-    Mutation: drop `retry=` from the `merge_base` call -- "Re-run the workflow", red."""
+    Mutation: skip the fetch's exit status -- `merge_base` refuses instead, red."""
     _commit({"stacks/app/main.tf": "app\n"}, "common")
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
     missing = "f" * 40
     with pytest.raises(SystemExit) as e:
         bm.base_changed_stacks(missing)
     assert e.value.code == (
-        f"::error::could not resolve the merge base of the pull request's base {missing} and its "
-        f"head: fatal: Not a valid commit name {missing}. Push again, or comment `shipmate "
-        "apply`; if it fails again, the base commit is not reachable from this checkout."
+        f"::error::could not fetch the base tip {missing} (fatal: 'origin' does not appear to be "
+        "a git repository | fatal: Could not read from remote repository. | Please make sure you "
+        "have the correct access rights | and the repository exists.). Push again, or comment "
+        "`shipmate apply`."
     )

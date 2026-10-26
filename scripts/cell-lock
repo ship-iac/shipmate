@@ -548,19 +548,23 @@ def _verify_lock(repo, pr, env, stack, where, run):
 
 
 def _verify_pull(repo, pr, head, where, run):
-    """The pull request's base tip, refused unless it is open at `head`."""
+    """The pull request, refused unless it is open at `head`."""
 
     def read():
         pull = gh_json(f"repos/{repo}/pulls/{pr}", run)
-        return pull["state"], pull["head"]["sha"], pull["base"]["sha"]
+        return pull, pull["state"], pull["head"]["sha"]
 
-    state, sha, tip = _confirm(where, f"pull request #{pr} is open at {head}", read)
-    if (state, sha) != ("open", head):
+    pull, state, sha = _confirm(where, f"pull request #{pr} is open at {head}", read)
+    if state != "open":
         raise SystemExit(
-            f"::error::apply aborted for {where}: pull request #{pr} is {state} at {sha}, not "
-            f"open at {head}, the head this apply was requested for; {_RETRY}"
+            f"::error::apply aborted for {where}: pull request #{pr} is {state}; nothing applies"
         )
-    return tip
+    if sha != head:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: pull request #{pr} is at {sha}, not at {head}, "
+            f"the head this apply was requested for; {_RETRY}"
+        )
+    return pull
 
 
 def _verify_auto(repo, head, provenance, env, stack, where, run):
@@ -613,9 +617,12 @@ def _verify_cmd(repo, pr, run):
             f"plan run and base tip (got: {provenance!r}, {base!r}); {_RETRY}"
         )
     _verify_lock(repo, pr, env, stack, where, run)
-    tip = _verify_pull(repo, pr, head, where, run)
+    pull = _verify_pull(repo, pr, head, where, run)
     if auto == "false":
         return
+    tip = _confirm(
+        where, f"the base tip of pull request #{pr}", lambda: ag.base_tip(repo, pull, run=run)
+    )
     if tip != base:
         raise SystemExit(
             f"::error::apply aborted for {where}: the base branch moved from {base} to {tip} "

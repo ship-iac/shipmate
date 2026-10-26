@@ -1840,11 +1840,11 @@ or a release after a close, takes it away), with
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
 and unless the pull request is open at the applied head. Under `apply_mode: auto`
 it also refuses unless the plan run detect bound is still the head's newest autoplan
-and the run the cell's newest plan record names, and the base tip is still the one
-detect read, whatever the stack. A read that fails refuses with
+and the run the cell's newest plan record names, and the base branch's tip, read from
+its ref, is still the one detect read, whatever the stack. A read that fails refuses with
 `` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
-or comment `shipmate apply` on the pull request ``, and every other refusal names its
-mismatch with the same remedy. A refused cell assumes no cloud role, and the apply
+or comment `shipmate apply` on the pull request ``, and every other mismatch names
+itself with the same remedy; a closed pull request refuses with `nothing applies`. A refused cell assumes no cloud role, and the apply
 result comment gives it the refusal, less its `apply aborted for` prefix, as the
 blocked reason, or `could not confirm the pull request still allows this apply (see
 the job log)` when no refusal arrived. The merge deploy passes no pull request, so

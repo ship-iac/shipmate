@@ -266,9 +266,21 @@ def base_changed_stacks(base_ref):
     """The stacks `base_ref` changed since its merge base with `HEAD`, a module's consumers
     included: Terramate's change detection, run in a detached worktree of `base_ref`. A plan of
     such a stack made on `HEAD` reverts the base's change. Refuses as `merge_base` does when the
-    merge base cannot be resolved, and on a failed worktree or listing."""
-    # A re-run of an auto apply refuses at its actor check; a base that moved since the
-    # checkout is fetched again by a new run.
+    merge base cannot be resolved, and on a failed worktree or listing. A `base_ref` the clone
+    lacks, a tip the base gained after the checkout, is fetched from `origin` first; a failed
+    fetch refuses."""
+    # S603/S607: fixed argvs, git from PATH as every other call here.
+    present = ["git", "cat-file", "-e", f"{base_ref}^{{commit}}"]  # noqa: S607
+    if subprocess.run(present, capture_output=True).returncode:  # noqa: S603
+        fetch = ["git", "fetch", "--quiet", "--no-tags", "origin", base_ref]  # noqa: S607
+        p = subprocess.run(fetch, capture_output=True, encoding="utf-8", errors="replace")  # noqa: S603
+        if p.returncode:
+            error = " | ".join(x.strip() for x in p.stderr.splitlines() if x.strip())
+            raise SystemExit(
+                f"::error::could not fetch the base tip {base_ref} ({error or p.returncode}). "
+                "Push again, or comment `shipmate apply`."
+            )
+    # A re-run of an auto apply refuses at its actor check.
     since = merge_base(base_ref, retry="Push again, or comment `shipmate apply`")
     tree = tempfile.mkdtemp(prefix="shipmate-base-")
     _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
