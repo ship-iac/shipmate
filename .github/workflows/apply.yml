@@ -45,9 +45,10 @@ jobs:
         run: |
           echo "::error::apply refused: the calling job passes 'auto: true', but this run is not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
           exit 1
-      # Fails closed: an unreadable `inputs` reads '' and refuses every bare and targeted apply.
+      # Fails closed: an unreadable `inputs` reads '' and refuses every bare and targeted apply,
+      # as does any call that is not a dispatch.
       - name: Reject a bare or targeted apply outside an apply dispatch
-        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.auto && github.event.inputs.verb != 'apply' }}
+        if: ${{ !inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply') }}
         run: |
           echo "::error::apply refused: this run is not a dispatch with verb 'apply' and the calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate doctor names the difference)"
           exit 1

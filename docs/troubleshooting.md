@@ -1704,9 +1704,9 @@ is not a dispatch with verb 'auto'``, means a job other than the published
 `auto` job passes `auto: true`. Remove it from that job.
 
 ``apply refused: this run is not a dispatch with verb 'apply' and the calling
-job does not pass 'auto: true'`` means a dispatch whose verb is not `apply`, or
-whose inputs could not be read, reached a job calling `apply.yml` without
-`auto: true`. Nothing applied. Give the `apply` job the published `if:` and
+job does not pass 'auto: true'`` means a run that is not a dispatch, or a
+dispatch whose verb is not `apply` or whose inputs could not be read, reached a
+job calling `apply.yml` without `auto: true`. Nothing applied. Give the `apply` job the published `if:` and
 comment `shipmate apply`.
 
 ### `auto apply refused: the run's actor is ...`, `the run's triggering actor is ...`, or `no check run on the head is authored by the shipmate App`

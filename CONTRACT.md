@@ -1919,8 +1919,8 @@ The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
 `auto: true`; `detect` takes nothing else from the dispatch. `apply.yml`'s
 `guard` refuses a `verb: auto` dispatch whose calling job does not pass
 `auto: true`, which would otherwise run it as a bare apply, `auto: true` on
-any other run, and a dispatch without `auto: true` whose verb is not exactly
-`apply`, unreadable dispatch inputs included; `shipmate doctor` compares the `auto` job's `with:` against the
+any other run, and a run without `auto: true` that is not a dispatch whose verb is
+exactly `apply`, unreadable dispatch inputs included; `shipmate doctor` compares the `auto` job's `with:` against the
 published one. A failed mint or
 dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply not
 started: the dispatch failed; comment `shipmate apply` ``. A run that cannot
