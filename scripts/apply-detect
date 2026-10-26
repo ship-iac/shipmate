@@ -113,12 +113,12 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
     check that exists. It refuses rather than applying unverified because an
     accepted absence is a guard the plan cell switches off by omitting a file.
 
-    The run, digest and partial-run refusals are shared by all three detects, so
-    they are worded for both paths: deploy's candidates come from the git diff
-    rather than from the checks, so a cell here may have no apply check
-    whatsoever, and its pull request is already merged — a remedy phrased as
-    "re-plan on this pull request" would send a post-merge operator to a pull
-    request that no longer accepts commits.
+    The run and digest refusals are shared by all three detects, so they are
+    worded for both paths: deploy's candidates come from the git diff rather than
+    from the checks, so a cell here may have no apply check whatsoever, and its
+    pull request is already merged — a remedy phrased as "re-plan on this pull
+    request" would send a post-merge operator to a pull request that no longer
+    accepts commits. The partial-run refusal words its remedy for the path instead.
 
     `pr_number` binds each record to the dispatching pull request, and only the
     pre-merge paths pass one: a cell whose check records another pull request,
@@ -170,17 +170,28 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
             "request shares this head commit, the newest plan decides which one may apply."
         )
     if cells:
-        refuse_incomplete(rows, records, ag.incomplete_runs(check_run_lines, app_id))
+        refuse_incomplete(
+            rows, records, ag.incomplete_runs(check_run_lines, app_id), merged=pr_number is None
+        )
     return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest, _ in rows]
 
 
 def _fact(published, counts, uncounted):
+    """Every cause `apply-gate.incomplete_runs` found for one run, joined with `and`: an
+    uncounted record, and a count that disagrees with another or with the checks published."""
+    facts = []
     if uncounted:
-        return f"records no planned cell count on {'some of ' if counts else ''}its apply checks"
-    if len(counts) == 1:
-        return f"published {_n(published, 'apply check')} for {_n(counts[0], 'planned cell')}"
-    listed = ", ".join(map(str, counts))
-    return f"records disagreeing planned cell counts ({listed}) on its apply checks"
+        facts.append(
+            f"records no planned cell count on {'some of ' if counts else ''}its apply checks"
+        )
+    if len(counts) > 1:
+        listed = ", ".join(map(str, counts))
+        facts.append(f"records disagreeing planned cell counts ({listed}) on its apply checks")
+    elif counts and counts[0] != published:
+        facts.append(
+            f"published {_n(published, 'apply check')} for {_n(counts[0], 'planned cell')}"
+        )
+    return " and ".join(facts)
 
 
 def _n(count, noun):
@@ -193,13 +204,14 @@ def _stopped_publishing(published, counts, uncounted):
     return not uncounted and len(counts) == 1 and published < counts[0]
 
 
-def refuse_incomplete(rows, records, incomplete):
+def refuse_incomplete(rows, records, incomplete, *, merged):
     """Refuse when a run that a cell to apply records, or the head's newest run, published only
     part of its apply checks (`apply-gate.incomplete_runs`). Each such run is named with its
     fact and the cells it holds back: the cells recording it, or every cell to apply when no
     cell records it (the newest run). Runs compare as integers, so `10` is newer than `9`.
     Called only with at least one cell, each recording a run, so the newest run exists. The
-    remedy offers re-running failed jobs only when every named run `_stopped_publishing`."""
+    remedy follows the pull request's state: open, it offers re-running failed jobs only when
+    every named run `_stopped_publishing`, then a push; `merged`, a new pull request."""
     candidates = {run for _, _, run, _, _ in rows}
     candidates.add(max((run for run, _, _ in records.values() if run), key=int))
     named_runs = sorted(candidates & incomplete.keys(), key=int)
@@ -212,18 +224,25 @@ def refuse_incomplete(rows, records, incomplete):
             f"plan run {run} {_fact(*incomplete[run])}, holding back {named(held, _NAMED)}"
         )
     it, runs = ("it", "run") if len(found) == 1 else ("they", "runs")
-    remedy = "Push"
-    if all(_stopped_publishing(*incomplete[run]) for run in named_runs):
+    if merged:
         remedy = (
-            f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if the "
-            "refusal remains, push"
+            "The pull request has merged, so a new pull request touching these stacks plans and "
+            "applies them."
+        )
+    else:
+        remedy = "Push"
+        if all(_stopped_publishing(*incomplete[run]) for run in named_runs):
+            remedy = (
+                f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if "
+                "the refusal remains, push"
+            )
+        remedy += (
+            " a commit to the pull request, which plans and publishes every cell afresh, then "
+            "apply again."
         )
     raise SystemExit(
         f"::error::apply aborted: {'; '.join(found)}: the published apply checks do not "
-        f"match the cells {it} planned, so an ordering among them can be lost. {remedy} a "
-        "commit to the pull request, which plans and publishes every cell afresh, then apply "
-        "again; if that pull request has already merged, a new pull request touching these "
-        "stacks plans and applies them."
+        f"match the cells {it} planned, so an ordering among them can be lost. {remedy}"
     )
 
 

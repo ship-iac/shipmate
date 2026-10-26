@@ -1004,8 +1004,8 @@ def test_a_run_whose_records_declare_no_count_refuses():
 
 def test_a_run_whose_records_disagree_on_the_count_refuses():
     """Both counts exceed the two published checks, yet no fact says a job failed, so no re-run
-    is offered. Mutations: `if counts:` for `if len(counts) == 1:` in `_fact` -- the fact reads
-    `published 2 apply checks for 3 planned cells`, red; drop `len(counts) == 1 and` from
+    is offered. Mutations: `if len(counts) > 2:` for `if len(counts) > 1:` in `_fact` -- the fact
+    reads `published 2 apply checks for 3 planned cells`, red; drop `len(counts) == 1 and` from
     `_stopped_publishing` -- the re-run clause appears, red."""
     lines = _lines(
         _apply_check("stacks/app", plan_run="42", cells=3),
@@ -1020,13 +1020,49 @@ def test_a_run_whose_records_disagree_on_the_count_refuses():
     )
 
 
-def test_a_run_with_one_uncounted_record_says_so():
-    """Run 42's two records: one declares 3 cells, one no count, so no re-run is offered.
-    Mutations: drop the uncounted branch from `_fact` -- `published 2 apply checks for 3
-    planned cells`, red; drop `'some of '` -- red; drop `not uncounted and` from
-    `_stopped_publishing` -- the re-run clause appears, red."""
+def test_a_run_with_one_uncounted_record_names_its_count_mismatch_too():
+    """Run 42's two records: one declares 3 cells, one no count, and 2 checks are published, so
+    both causes are named and no re-run is offered. Mutations: return after the first cause in
+    `_fact` -- the mismatch drops, red; drop the uncounted branch from `_fact` -- red; drop
+    `'some of '` -- red; drop `not uncounted and` from `_stopped_publishing` -- the re-run
+    clause appears, red."""
     lines = _lines(
         _apply_check("stacks/app", plan_run="42", cells=3),
+        _apply_check("stacks/dns", plan_run="42", cells=None, id=2),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        "plan run 42 records no planned cell count on some of its apply checks and published "
+        f"2 apply checks for 3 planned cells, holding back {_APP}, {_DNS}",
+        rerun=False,
+    )
+
+
+def test_a_run_with_one_uncounted_record_names_its_disagreeing_counts_too():
+    """Run 42's three records: 3 cells, 4 cells and no count. Mutation: return after the first
+    cause in `_fact` -- the disagreement drops, red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="42", cells=3),
+        _apply_check("stacks/dns", plan_run="42", cells=4, id=2),
+        _apply_check("stacks/c", plan_run="42", cells=None, id=3),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        "plan run 42 records no planned cell count on some of its apply checks and records "
+        f"disagreeing planned cell counts (3, 4) on its apply checks, holding back {_APP}, {_DNS}",
+        rerun=False,
+    )
+
+
+def test_a_run_with_one_uncounted_record_and_a_matching_count_names_only_the_uncounted():
+    """Run 42 declares 2 cells on one record, none on the other, and published 2 checks: the
+    count matches, so only the uncounted record is named. Mutation: drop `counts[0] !=
+    published` from `_fact` (`elif counts:`) -- `published 2 apply checks for 2 planned cells`
+    joins, red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="42", cells=2),
         _apply_check("stacks/dns", plan_run="42", cells=None, id=2),
     )
     with pytest.raises(SystemExit) as exc_info:

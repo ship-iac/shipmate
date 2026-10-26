@@ -336,8 +336,10 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
 
 def test_main_refuses_a_run_that_declares_more_cells_than_it_published(tmp_path, monkeypatch):
     """Each diff cell has its check, so the missing-run refusal stays silent; run 42 declares a
-    third cell this deploy cannot see. Mutation: delete the `refuse_incomplete` call in
-    `with_plan_runs` -- both cells deploy, red."""
+    third cell this deploy cannot see, and the remedy is a new pull request, never a re-run of
+    the merged pull request's plan run. Mutations: delete the `refuse_incomplete` call in
+    `with_plan_runs` -- both cells deploy, red; `merged=pr_number is not None` -- the re-run
+    remedy, red."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -352,6 +354,7 @@ def test_main_refuses_a_run_that_declares_more_cells_than_it_published(tmp_path,
         "plan run 42 published 2 apply checks for 3 planned cells, holding back "
         "apply / stacks/app / dev-eu, apply / stacks/dns / dev-eu",
         rerun=True,
+        merged=True,
     )
 
 
