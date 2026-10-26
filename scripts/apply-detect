@@ -35,8 +35,6 @@ request's mergeability hold, and holds a cell whose stack the base also changed.
 
 import json
 import os
-import re
-import sys
 import time
 
 from _shipmate import (
@@ -62,8 +60,6 @@ _NAMED = 10
 _MERGEABLE_READS = 12
 _MERGEABLE_WAIT = 5
 _sleep = time.sleep
-#: A GitHub user login; nothing else is put into a URL.
-_LOGIN = re.compile(r"[A-Za-z0-9-]+")
 _AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
 # An auto run has no comment to repeat: its draft and mergeability refusals name the comment.
 _AUTO_RETRY = "comment `shipmate apply`"
@@ -465,30 +461,9 @@ def refuse_provenance(repo, head, runnable):
     return run
 
 
-def refuse_pusher(repo, run):
-    """Refuse unless `run`'s triggering actor, the pusher, has write access, decided by
-    `authorize._permission_reason`. A failed read is an unreadable permission. A bot pusher
-    (`renovate[bot]`) has no collaborator permission to read and is refused on its own."""
-    login = (run.get("triggering_actor") or {}).get("login") or ""
-    if login.endswith("[bot]"):
-        raise SystemExit(
-            f"::error::not authorized: the head was pushed by @{login}, a bot account, which "
-            "auto never authorizes; a writer comments `shipmate apply`."
-        )
-    readable = _LOGIN.fullmatch(login) is not None
-    permission = ""
-    if readable:
-        try:
-            body = gh_json(f"repos/{repo}/collaborators/{login}/permission", run=_run)
-            permission = body.get("permission")
-        except SystemExit as e:
-            print(str(e.code).removeprefix("::error::"), file=sys.stderr)
-    reason = az._permission_reason(
-        permission if isinstance(permission, str) else "",
-        "apply",
-        subject=f"the pusher @{login}" if readable else "the pusher",
-        retry="push again, or a writer comments `shipmate apply`",
-    )
+def refuse_pusher(repo, plan_run):
+    """Refuse unless `authorize.pusher_reason` admits the pusher of `plan_run`."""
+    reason = az.pusher_reason(repo, plan_run, run=_run)
     if reason:
         raise SystemExit(f"::error::{reason}")
 
@@ -663,7 +638,13 @@ def bare_main(auto=False):
     if auto:
         provenance_run = ""
         if runnable:
-            refuse_pusher(repo, refuse_provenance(repo, head, runnable))
+            try:
+                refuse_pusher(repo, refuse_provenance(repo, head, runnable))
+            except (ValueError, AttributeError, TypeError) as e:
+                raise SystemExit(
+                    f"::error::auto apply refused: a plan run read returned a malformed answer "
+                    f"({e!r}). " + _AUTO_REMEDY
+                ) from None
             provenance_run = runnable[0]["plan_run_id"]
         auto_outputs = {
             "provenance_run": provenance_run,

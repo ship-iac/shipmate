@@ -8,6 +8,9 @@ any condition below fails, writing why to stderr. The summary dispatches `verb: 
 line is non-empty. Conditions, all from the environment:
 
 - `GITHUB_EVENT_NAME` is `pull_request_target`: only an autoplan dispatches.
+- the `action` of the event payload at `GITHUB_EVENT_PATH` is `opened` or `synchronize`: only
+  a push authorizes its pusher, never a ready-for-review or reopen click; an unreadable
+  payload dispatches nothing.
 - `GITHUB_RUN_ATTEMPT` is `1`: a re-run never starts a second `auto` run for the same head.
 - `SHIPMATE_IS_DRAFT` is not `true`.
 - gate-state's `SHIPMATE_GATE_STATE` and `SHIPMATE_COMMENT_MODE` are `pending` and `post`: the
@@ -17,6 +20,7 @@ The table is read last, through `env-config.read_table`, so a run that fails a c
 no API call. A refusal there exits 1 with `::error::`.
 """
 
+import json
 import os
 import sys
 
@@ -31,10 +35,12 @@ _SKEW = (
 )
 
 
-def skip_reason(*, event, attempt, is_draft, state, mode):
+def skip_reason(*, event, action, attempt, is_draft, state, mode):
     """Why this run dispatches no `auto` apply, or None when every condition holds."""
     if event != "pull_request_target":
         return f"a {event} run is not an autoplan"
+    if action not in ("opened", "synchronize"):
+        return f"the autoplan's event action is {action!r}, not a push (opened or synchronize)"
     if attempt != "1":
         return f"run attempt {attempt} is a re-run"
     if is_draft == "true":
@@ -42,6 +48,16 @@ def skip_reason(*, event, attempt, is_draft, state, mode):
     if (state, mode) != ("pending", "post"):
         return f"the gate is not pending over a complete plan (state {state!r}, mode {mode!r})"
     return None
+
+
+def event_action():
+    """The `action` of the event payload at `GITHUB_EVENT_PATH`, or "" when it cannot be read."""
+    try:
+        with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fh:
+            action = json.load(fh).get("action")
+    except (KeyError, OSError, ValueError, AttributeError):
+        return ""
+    return action if isinstance(action, str) else ""
 
 
 def changed_auto_envs(cells, auto):
@@ -52,6 +68,7 @@ def changed_auto_envs(cells, auto):
 def main():
     reason = skip_reason(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
+        action=event_action(),
         attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
         state=os.environ.get("SHIPMATE_GATE_STATE", ""),

@@ -34,7 +34,7 @@ import os
 import re
 import sys
 
-from _shipmate import run_annotated, write_outputs
+from _shipmate import gh_json, run_annotated, write_outputs
 
 
 def parse_exempt_envs(raw):
@@ -130,6 +130,52 @@ def _permission_reason(permission, verb, *, subject="the commenter", retry="comm
         f"not authorized: `shipmate {verb}` needs write access to this repository, and "
         f"GitHub reported {subject}'s permission as `{permission}`, which this engine "
         f"does not admit."
+    )
+
+
+#: A GitHub user login; nothing else is put into a URL.
+_LOGIN = re.compile(r"[A-Za-z0-9-]+")
+_PUSHER_RETRY = "push again, or a writer comments `shipmate apply`"
+
+
+def pusher_reason(repo, plan_run, *, run):
+    """Reject reason for the pusher of `plan_run`, an autoplan's REST workflow run, or None.
+
+    The pusher is the run's `actor`, and `triggering_actor` must be the same login: a re-run
+    keeps `actor` and names whoever re-ran it, and a ready-for-review or reopen click is no
+    push either, though the run does not say which event action started it (the dispatching
+    summary admits only `opened` and `synchronize`). A bot login has no collaborator
+    permission to read and refuses. Otherwise `collaborators/<login>/permission`, read through
+    `run`, is decided by `_permission_reason`; a failed or malformed read is an unreadable
+    permission. A malformed `plan_run` raises `AttributeError` or `TypeError`."""
+    actor = (plan_run.get("actor") or {}).get("login") or ""
+    trigger = (plan_run.get("triggering_actor") or {}).get("login") or ""
+    if actor != trigger:
+        return (
+            f"not authorized: the autoplan ran as @{actor} but was triggered by @{trigger}, so "
+            "it was re-run, and auto authorizes only the push itself; a writer comments "
+            "`shipmate apply`."
+        )
+    if actor.endswith("[bot]"):
+        return (
+            f"not authorized: the head was pushed by @{actor}, a bot account, which auto never "
+            "authorizes; a writer comments `shipmate apply`."
+        )
+    readable = _LOGIN.fullmatch(actor) is not None
+    permission = ""
+    if readable:
+        try:
+            body = gh_json(f"repos/{repo}/collaborators/{actor}/permission", run)
+            permission = body["permission"]
+        except SystemExit as e:
+            print(str(e.code).removeprefix("::error::"), file=sys.stderr)
+        except (LookupError, TypeError, ValueError) as e:
+            print(f"malformed permission body: {e!r}", file=sys.stderr)
+    return _permission_reason(
+        permission if isinstance(permission, str) else "",
+        "apply",
+        subject=f"the pusher @{actor}" if readable else "the pusher",
+        retry=_PUSHER_RETRY,
     )
 
 

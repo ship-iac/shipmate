@@ -1659,7 +1659,9 @@ An `auto` environment applies only through the autoplan of a ready pull request
 
 1. The plan run's `summary` job, step `Decide whether to dispatch an auto
    apply`. When it dispatches nothing it logs `no auto apply dispatched:
-   <reason>`: the run is not an autoplan (a `shipmate plan` run), it is a
+   <reason>`: the run is not an autoplan (a `shipmate plan` run), a push did not
+   start it (its event action is not `opened` or `synchronize`: the pull request
+   was marked ready for review or reopened), it is a
    re-run, the pull request is a draft, the gate is not pending over a complete
    plan, or no changed cell is in an `auto` environment. When it cannot decide
    (the table unreadable, a cell summary unparseable) it warns `could not decide
@@ -1741,8 +1743,8 @@ request to apply it.``:
 
 ### ``not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...``
 
-The `auto` run applies as the pusher of the autoplan, that run's
-`triggering_actor`, and the pusher lacks `write` or `admin`. Nothing applied. A
+The `auto` run applies as the pusher of the autoplan, that run's `actor`, and
+the pusher lacks `write` or `admin`. Nothing applied. A
 collaborator with write access comments `shipmate apply`, or pushes. The
 permission is read with the `detect` job's `GITHUB_TOKEN`; when it cannot be
 read the refusal reads `could not read the pusher @<login>'s permission on this
@@ -1756,6 +1758,18 @@ admit``.
 The autoplan's pusher is a bot, such as `renovate[bot]`. `auto` never
 authorizes a bot's push: a bot has no repository permission to read. Nothing
 applied. A collaborator with write access comments `shipmate apply`.
+
+### `not authorized: the autoplan ran as @<login> but was triggered by @<login>`
+
+The autoplan was re-run, so its `triggering_actor` is whoever re-ran it, not the
+pusher in its `actor`. `auto` authorizes only the push itself. Nothing applied.
+A collaborator with write access comments `shipmate apply`.
+
+### `auto apply refused: a plan run read returned a malformed answer (<error>)`
+
+The plan run or the autoplan listing came back in a shape `detect` cannot read.
+Nothing applied. Comment `shipmate apply`; when it recurs, the run's log has the
+API response.
 
 ### `auto apply refused: pull request #<n> head is <sha>, but this run applies <sha>`
 

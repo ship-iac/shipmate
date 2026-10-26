@@ -45,9 +45,15 @@ def _table(auto, other=(), order=None):
     return {"layout": "folder", "environments": entries}
 
 
+class _Raw(str):
+    """A permission read answered with this body verbatim."""
+
+
 def _permission_body(permission):
     if isinstance(permission, BaseException):
         raise permission
+    if isinstance(permission, _Raw):
+        return str(permission)
     return json.dumps({"permission": permission})
 
 
@@ -138,6 +144,7 @@ def _run_auto(
         "id": int(RUN),
         "event": "pull_request_target",
         "head_sha": HEAD,
+        "actor": {"login": "k3np"},
         "triggering_actor": {"login": "k3np"},
     }
     github = _github(
@@ -459,12 +466,12 @@ def test_a_base_tip_that_cannot_be_read_refuses(tmp_path, monkeypatch, pull, tip
 
 @pytest.mark.parametrize("actor", [None, {"login": "a b"}])
 def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monkeypatch, actor):
-    """No `triggering_actor`, or a login outside `_LOGIN`, is never put into a URL.
+    """No `actor` and `triggering_actor`, or a login outside `_LOGIN`, is never put into a URL.
 
     Mutation: `readable = True` -- both rows read `write` and apply."""
     run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
     if actor is not None:
-        run["triggering_actor"] = actor
+        run["actor"] = run["triggering_actor"] = actor
     assert _refusal(tmp_path, monkeypatch, run=run) == (
         "::error::not authorized: could not read the pusher's permission on this repository, "
         "so `shipmate apply` was not run. This run's log has the API response; push again, or "
@@ -476,16 +483,91 @@ def test_a_bot_pusher_refuses_naming_the_bot(tmp_path, monkeypatch):
     """A bot's push never auto-applies, and its refusal says so rather than calling the
     permission unreadable.
 
-    Mutation: drop the `[bot]` branch from `refuse_pusher` -- the unreadable wording, red."""
+    Mutation: drop the `[bot]` branch from `pusher_reason` -- the unreadable wording, red."""
     run = {
         "id": int(RUN),
         "event": "pull_request_target",
         "head_sha": HEAD,
+        "actor": {"login": "renovate[bot]"},
         "triggering_actor": {"login": "renovate[bot]"},
     }
     assert _refusal(tmp_path, monkeypatch, run=run) == (
         "::error::not authorized: the head was pushed by @renovate[bot], a bot account, which "
         "auto never authorizes; a writer comments `shipmate apply`."
+    )
+
+
+@pytest.mark.parametrize(
+    ("actor", "trigger"),
+    [("k3np", "octocat"), ("renovate[bot]", "k3np"), ("k3np", None)],
+)
+def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
+    tmp_path, monkeypatch, actor, trigger
+):
+    """A re-run of the autoplan keeps `actor` and names the re-runner as `triggering_actor`:
+    no push authorizes it, and no permission is read.
+
+    Mutation: drop the `actor != trigger` refusal -- the first row reads `write` and applies,
+    the second refuses as a bot, the third as unreadable.
+    Mutation: read the pusher from `triggering_actor` alone -- the same rows, red."""
+    run = {
+        "id": int(RUN),
+        "event": "pull_request_target",
+        "head_sha": HEAD,
+        "actor": {"login": actor},
+        "triggering_actor": None if trigger is None else {"login": trigger},
+    }
+    calls = []
+    assert _refusal(tmp_path, monkeypatch, run=run, calls=calls) == (
+        f"::error::not authorized: the autoplan ran as @{actor} but was triggered by "
+        f"@{trigger or ''}, so it was re-run, and auto authorizes only the push itself; a writer "
+        "comments `shipmate apply`."
+    )
+    assert not [c for c in calls if "/collaborators/" in c]
+
+
+@pytest.mark.parametrize(
+    ("kw", "error"),
+    [
+        pytest.param(
+            {"run": "x"}, "AttributeError(\"'str' object has no attribute 'get'\")", id="run"
+        ),
+        pytest.param(
+            {"listing": ("abc",)},
+            "ValueError(\"invalid literal for int() with base 10: 'abc'\")",
+            id="listing",
+        ),
+        pytest.param(
+            {
+                "run": {
+                    "id": int(RUN),
+                    "event": "pull_request_target",
+                    "head_sha": HEAD,
+                    "actor": "k3np",
+                }
+            },
+            "AttributeError(\"'str' object has no attribute 'get'\")",
+            id="actor",
+        ),
+    ],
+)
+def test_a_malformed_plan_run_read_refuses_without_a_traceback(tmp_path, monkeypatch, kw, error):
+    """Mutation: drop `AttributeError` from the `except` around `refuse_provenance` and
+    `refuse_pusher` (run and actor escape). Mutation: drop `ValueError` (listing escapes)."""
+    assert _refusal(tmp_path, monkeypatch, **kw) == (
+        f"::error::auto apply refused: a plan run read returned a malformed answer ({error}). "
+        f"{REMEDY}"
+    )
+
+
+@pytest.mark.parametrize("body", ["[]", "{}", "not json"])
+def test_a_malformed_permission_body_refuses_as_unreadable(tmp_path, monkeypatch, body):
+    """Mutation: drop `(LookupError, TypeError, ValueError)` from `pusher_reason`'s permission
+    read -- each row escapes as a malformed answer, red."""
+    assert _refusal(tmp_path, monkeypatch, permission=_Raw(body)) == (
+        "::error::not authorized: could not read the pusher @k3np's permission on this "
+        "repository, so `shipmate apply` was not run. This run's log has the API response; "
+        "push again, or a writer comments `shipmate apply`."
     )
 
 

@@ -45,18 +45,42 @@ def _gate(**overrides):
     return state or "", mode
 
 
-_AUTOPLAN = ("pull_request_target", "1", "")
+_AUTOPLAN = ("pull_request_target", "synchronize", "1", "")
+_NOT_A_PUSH = "not a push (opened or synchronize)"
 
-#: name -> (event, attempt, is_draft, decide overrides, whole reason); each row breaks one
-#: condition.
+#: name -> (event, action, attempt, is_draft, decide overrides, whole reason); each row breaks
+#: one condition.
 SKIPS = {
     "on-demand plan": (
-        ("workflow_dispatch", "1", ""),
+        ("workflow_dispatch", "", "1", ""),
         {},
         "a workflow_dispatch run is not an autoplan",
     ),
-    "re-run": (("pull_request_target", "2", ""), {}, "run attempt 2 is a re-run"),
-    "draft": (("pull_request_target", "1", "true"), {}, "the pull request is a draft"),
+    "ready for review": (
+        ("pull_request_target", "ready_for_review", "1", ""),
+        {},
+        f"the autoplan's event action is 'ready_for_review', {_NOT_A_PUSH}",
+    ),
+    "reopened": (
+        ("pull_request_target", "reopened", "1", ""),
+        {},
+        f"the autoplan's event action is 'reopened', {_NOT_A_PUSH}",
+    ),
+    "unreadable action": (
+        ("pull_request_target", "", "1", ""),
+        {},
+        f"the autoplan's event action is '', {_NOT_A_PUSH}",
+    ),
+    "re-run": (
+        ("pull_request_target", "synchronize", "2", ""),
+        {},
+        "run attempt 2 is a re-run",
+    ),
+    "draft": (
+        ("pull_request_target", "synchronize", "1", "true"),
+        {},
+        "the pull request is a draft",
+    ),
     "detect failed": (
         _AUTOPLAN,
         {"detect_result": "failure"},
@@ -93,23 +117,31 @@ SKIPS = {
 @pytest.mark.parametrize("name", list(SKIPS))
 def test_each_failed_condition_dispatches_nothing(name):
     """Mutations: delete any one `if` of `skip_reason` (its row reddens); compare only `state`
-    with `pending` (the draft-gate row reddens: a draft autoplan's gate is pending too)."""
-    (event, attempt, is_draft), overrides, reason = SKIPS[name]
+    with `pending` (the draft-gate row reddens: a draft autoplan's gate is pending too); admit
+    `reopened` (its row reddens)."""
+    (event, action, attempt, is_draft), overrides, reason = SKIPS[name]
     state, mode = _gate(**overrides)
-    got = ad.skip_reason(event=event, attempt=attempt, is_draft=is_draft, state=state, mode=mode)
+    got = ad.skip_reason(
+        event=event, action=action, attempt=attempt, is_draft=is_draft, state=state, mode=mode
+    )
     assert got == reason
 
 
-def test_every_condition_holding_dispatches():
-    """Mutation: compare `mode` with `nothing-changed` in place of `post`."""
+@pytest.mark.parametrize("action", ["opened", "synchronize"])
+def test_every_condition_holding_dispatches(action):
+    """Mutation: compare `mode` with `nothing-changed` in place of `post`. Mutation: drop
+    `opened` from the admitted actions."""
     state, mode = _gate()
     assert (state, mode) == ("pending", "post")
-    assert (
-        ad.skip_reason(
-            event="pull_request_target", attempt="1", is_draft="false", state=state, mode=mode
-        )
-        is None
+    got = ad.skip_reason(
+        event="pull_request_target",
+        action=action,
+        attempt="1",
+        is_draft="false",
+        state=state,
+        mode=mode,
     )
+    assert got is None
 
 
 def test_only_changed_cells_of_auto_environments_count():
@@ -186,8 +218,9 @@ fi
 TABLE = "environments:\n  dev:\n    apply_mode: auto\n    review: false\n  prod: {}\n"
 
 
-def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x"):  # noqa: S107 - a stub token, never sent
-    """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs)."""
+def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None):  # noqa: S107 - a stub token, never sent
+    """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
+    is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -201,6 +234,10 @@ def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x"):  # noqa: S107 -
     blob = {"encoding": "base64", "content": base64.b64encode(TABLE.encode()).decode()}
     out = tmp_path / "out"
     out.write_text("", encoding="utf-8")
+    payload = tmp_path / "event.json"
+    payload.write_text(
+        json.dumps({"action": "synchronize"}) if event is None else event, encoding="utf-8"
+    )
     env = {
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -215,6 +252,7 @@ def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x"):  # noqa: S107 -
         "GITHUB_SERVER_URL": "https://example.invalid",
         "GITHUB_RUN_ID": "999",
         "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(payload),
         "GITHUB_RUN_ATTEMPT": "1",
         "GH_TOKEN": token,
         "REPLY_TOKEN": "main-token",
@@ -252,6 +290,29 @@ def test_no_changed_auto_cell_decides_nothing(tmp_path):
     proc, _, outputs = _run(tmp_path, DECIDE, cells=[("dev", False), ("prod", True)])
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert outputs == {"envs": ""}
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("event", "action"),
+    [
+        pytest.param(json.dumps({"action": "ready_for_review"}), "'ready_for_review'", id="ready"),
+        pytest.param("not json", "''", id="unparseable"),
+        pytest.param(json.dumps(["synchronize"]), "''", id="not-an-object"),
+    ],
+)
+def test_an_autoplan_not_started_by_a_push_decides_nothing(tmp_path, event, action):
+    """The payload is read from `GITHUB_EVENT_PATH`; an unreadable one dispatches nothing and
+    makes no API call. Mutation: return `synchronize` from `event_action`'s `except` (the
+    unparseable and not-an-object rows dispatch). Mutation: pass `GITHUB_EVENT_NAME` as the
+    action (every row names `'pull_request_target'`)."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], event=event)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (calls, outputs) == ([], {"envs": ""})
+    assert (
+        f"no auto apply dispatched: the autoplan's event action is {action}, {_NOT_A_PUSH}"
+        in proc.stderr
+    )
 
 
 @bash_only

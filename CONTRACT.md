@@ -1903,6 +1903,9 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   upsert did not find the head moved;
 - the run is a `pull_request_target` run, an autoplan, on its first attempt: a
   `shipmate plan` run and a re-run dispatch nothing;
+- the event payload's `action` is `opened` or `synchronize`, a push: an autoplan
+  started by marking the pull request ready for review or reopening it, or with
+  an unreadable payload, dispatches nothing, and `shipmate apply` applies it;
 - the pull request is not a draft;
 - the gate is `pending` over a completely published plan with an apply check
   pending;
@@ -1962,8 +1965,14 @@ on the pull request to apply it.``
   requirements. A newer autoplan of the head that published no apply check
   refuses it too, which the record-based binding of the bare and targeted forms
   cannot see (§Apply-match fingerprint).
-- **Pusher.** The plan run's `triggering_actor`, the pusher, must have write
-  access. The permission is read with the `detect` job's `GITHUB_TOKEN` from
+- **Pusher.** The plan run's `actor`, the pusher, must equal its
+  `triggering_actor` and must have write access. A re-run of the autoplan keeps
+  `actor` and names the re-runner as `triggering_actor`, so it refuses:
+  ``not authorized: the autoplan ran as @<actor> but was triggered by
+  @<triggering actor>, so it was re-run, and auto authorizes only the push
+  itself; a writer comments `shipmate apply`.`` The run body carries no event
+  action, so a ready-for-review or reopen autoplan is kept out by the dispatch
+  condition above, not here. The permission is read with the `detect` job's `GITHUB_TOKEN` from
   `collaborators/<login>/permission` and decided by
   `authorize._permission_reason`, the function that decides a commenter:
   ``not authorized: `shipmate apply` needs write access to this repository, and

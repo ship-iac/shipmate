@@ -199,7 +199,8 @@ On an `apply_mode: auto` environment a push is enough. The plan run's `summary`
 job dispatches the `auto` apply with an App token, so it runs as the shipmate
 App, and `detect` refuses any other actor or triggering actor, so a human's
 re-run of it refuses. It is authorized as the pusher of the
-autoplan it applies: that run's `triggering_actor`, whose permission must be
+autoplan it applies, started by a push (`opened` or `synchronize`): that run's
+`actor`, which must also be its `triggering_actor`, and whose permission must be
 `write` or `admin`, decided by the same function that decides a commenter. It
 waits for no approving review, because the entry must hold `review: false`; the
 `<env>-apply` environment's required reviewers (§6) still gate each cell
