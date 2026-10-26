@@ -2560,7 +2560,7 @@ def test_a_cell_blocked_predecessor_gets_the_cell_remedy_even_when_held_and_targ
 def test_an_auto_run_that_leaves_every_pending_environment_for_a_bare_apply_is_not_green():
     """Nothing applied and the pending work is a bare env and the auto env that needs it.
 
-    Mutation: drop the `bare` branch from `_empty_verdict` -- 🟢 no pending applies with no
+    Mutation: drop the `left` branch from `_empty_verdict` -- 🟢 no pending applies with no
     hint, red."""
     body = ac.build_comment(
         [],
@@ -2573,12 +2573,41 @@ def test_an_auto_run_that_leaves_every_pending_environment_for_a_bare_apply_is_n
         head_sha=SHA,
         skipped_after={"prod": ["dev"]},
         bare=["dev"],
+        auto=True,
     )
     assert body == (
-        "### shipmate apply\n\n⚪ nothing applied, the pending environments are left for "
-        f"`shipmate apply` {AT}\n\n"
+        "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
+        f"below {AT}\n\n"
         "🟡 dev: left pending (not `apply_mode: auto`), comment `shipmate apply`\n"
         "⚪ prod: skipped, waits on dev (comment `shipmate apply`, which applies them in order)"
+        "\n\n" + HINT
+    )
+
+
+def test_an_auto_run_whose_only_pending_work_is_skipped_after_a_targeted_env_is_not_green():
+    """No `bare_envs`: `live` is skipped after the targeted `prod`. The bare form keeps 🟢
+    for the same dispositions (`test_the_short_form_of_an_empty_queue_keeps_the_targeted_and_
+    skipped_lines`).
+
+    Mutation: `left = list(bare)` -- 🟢 no pending applies, red.
+    Mutation: drop `if auto` from `left` -- the bare-form short-form test, red."""
+    body = ac.build_comment(
+        [],
+        [],
+        RUN_URL,
+        ["prod"],
+        ["live"],
+        "",
+        "success",
+        head_sha=SHA,
+        skipped_after={"live": ["prod"]},
+        auto=True,
+    )
+    assert body == (
+        "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
+        f"below {AT}\n\n"
+        "🟡 prod: left pending (targeted), comment `shipmate apply prod`\n"
+        "⚪ live: skipped, waits on prod (apply it first with `shipmate apply prod`)"
         "\n\n" + HINT
     )
 
@@ -2600,16 +2629,18 @@ def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
 ):
     """Mutation: read `SHIPMATE_SKIPPED_AFTER` under another name in `main` -- the
     cause-agnostic line, red.
-    Mutation: read `SHIPMATE_BARE_ENVS` under another name in `main` -- no bare line, red."""
+    Mutation: read `SHIPMATE_BARE_ENVS` under another name in `main` -- no bare line, red.
+    Mutation: read `SHIPMATE_AUTO` under another name in `main` -- 🟢, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", '["prod"]')
     monkeypatch.setenv("SHIPMATE_SKIPPED_AFTER", '{"prod": ["dev"]}')
     monkeypatch.setenv("SHIPMATE_BARE_ENVS", '["dev"]')
+    monkeypatch.setenv("SHIPMATE_AUTO", "true")
     assert _main_body(tmp_path) == (
-        "### shipmate apply dev-eu\n\n⚪ nothing applied, the pending environments are left for "
-        f"`shipmate apply` {_MAIN_AT}\n\n"
+        "### shipmate apply dev-eu\n\n⚪ nothing applied, the pending environments wait on the "
+        f"lines below {_MAIN_AT}\n\n"
         "🟡 dev: left pending (not `apply_mode: auto`), comment `shipmate apply`\n"
         "⚪ prod: skipped, waits on dev (comment `shipmate apply`, which applies them in order)"
         "\n\n" + HINT

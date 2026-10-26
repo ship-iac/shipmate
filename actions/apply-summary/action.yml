@@ -64,6 +64,10 @@ inputs:
     description: "JSON array of pending environments the auto form left for a bare `shipmate apply`, neither `apply_mode: auto`, targeted nor held; the comment names each. Empty = []."
     required: false
     default: "[]"
+  auto:
+    description: "'true' for the auto form of apply, whose comment is never green while it left a pending environment; empty or 'false' otherwise."
+    required: false
+    default: "false"
   detect-refusal:
     description: "apply-detect's `refusal` output: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
@@ -182,6 +186,7 @@ runs:
         SHIPMATE_LOCKED_CELLS: ${{ inputs.locked-cells }}
         SHIPMATE_OVERLAP_CELLS: ${{ inputs.overlap-cells }}
         SHIPMATE_BARE_ENVS: ${{ inputs.bare-envs }}
+        SHIPMATE_AUTO: ${{ inputs.auto }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
