@@ -1765,9 +1765,10 @@ The autoplan was re-run, so its `triggering_actor` is whoever re-ran it, not the
 pusher in its `actor`. `auto` authorizes only the push itself. Nothing applied.
 A collaborator with write access comments `shipmate apply`.
 
-### `auto apply refused: a plan run read returned a malformed answer (<error>)`
+### `auto apply refused: the <read> read returned a malformed answer (<error>)`
 
-The plan run or the autoplan listing came back in a shape `detect` cannot read.
+`<read>` is `plan run <n>` or `autoplan listing`: it came back in a shape `detect`
+cannot read.
 Nothing applied. Comment `shipmate apply`; when it recurs, the run's log has the
 API response.
 

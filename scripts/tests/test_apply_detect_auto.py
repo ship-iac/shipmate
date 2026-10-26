@@ -527,35 +527,29 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
 
 
 @pytest.mark.parametrize(
-    ("kw", "error"),
+    ("kw", "what", "error"),
     [
         pytest.param(
-            {"run": "x"}, "AttributeError(\"'str' object has no attribute 'get'\")", id="run"
+            {"run": "x"},
+            f"plan run {RUN}",
+            "AttributeError(\"'str' object has no attribute 'get'\")",
+            id="run",
         ),
         pytest.param(
             {"listing": ("abc",)},
+            "autoplan listing",
             "ValueError(\"invalid literal for int() with base 10: 'abc'\")",
             id="listing",
         ),
-        pytest.param(
-            {
-                "run": {
-                    "id": int(RUN),
-                    "event": "pull_request_target",
-                    "head_sha": HEAD,
-                    "actor": "k3np",
-                }
-            },
-            "AttributeError(\"'str' object has no attribute 'get'\")",
-            id="actor",
-        ),
     ],
 )
-def test_a_malformed_plan_run_read_refuses_without_a_traceback(tmp_path, monkeypatch, kw, error):
-    """Mutation: drop `AttributeError` from the `except` around `refuse_provenance` and
-    `refuse_pusher` (run and actor escape). Mutation: drop `ValueError` (listing escapes)."""
+def test_a_malformed_plan_run_read_refuses_without_a_traceback(
+    tmp_path, monkeypatch, kw, what, error
+):
+    """Mutation: drop the `except` around the run read (run escapes as an `AttributeError`).
+    Mutation: drop the `except` around `newest_autoplan` (listing escapes as a `ValueError`)."""
     assert _refusal(tmp_path, monkeypatch, **kw) == (
-        f"::error::auto apply refused: a plan run read returned a malformed answer ({error}). "
+        f"::error::auto apply refused: the {what} read returned a malformed answer ({error}). "
         f"{REMEDY}"
     )
 

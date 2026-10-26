@@ -435,8 +435,11 @@ def refuse_provenance(repo, head, runnable):
             f"({listed}), so no one autoplan planned them all. " + _AUTO_REMEDY
         )
     run_id = runs[0]
-    run = gh_json(f"repos/{repo}/actions/runs/{run_id}", run=_run)
-    event, sha = run.get("event"), run.get("head_sha")
+    try:
+        run = gh_json(f"repos/{repo}/actions/runs/{run_id}", run=_run)
+        event, sha = run.get("event"), run.get("head_sha")
+    except (ValueError, AttributeError) as e:
+        raise _malformed(f"plan run {run_id}", e) from None
     if event != "pull_request_target":
         raise SystemExit(
             f"::error::auto apply refused: plan run {run_id} is a `{event}` run, not an "
@@ -447,7 +450,10 @@ def refuse_provenance(repo, head, runnable):
             f"::error::auto apply refused: plan run {run_id} planned {sha}, not the head "
             f"{head}. " + _AUTO_REMEDY
         )
-    newest = ag.newest_autoplan(repo, head, run=_run)
+    try:
+        newest = ag.newest_autoplan(repo, head, run=_run)
+    except ValueError as e:
+        raise _malformed("autoplan listing", e) from None
     if newest is None:
         raise SystemExit(
             f"::error::auto apply refused: plan run {run_id} is not listed, and no autoplan run "
@@ -459,6 +465,13 @@ def refuse_provenance(repo, head, runnable):
             f"head (run {newest} is). " + _AUTO_REMEDY
         )
     return run
+
+
+def _malformed(what, e):
+    return SystemExit(
+        f"::error::auto apply refused: the {what} read returned a malformed answer ({e!r}). "
+        + _AUTO_REMEDY
+    )
 
 
 def refuse_pusher(repo, plan_run):
@@ -638,13 +651,7 @@ def bare_main(auto=False):
     if auto:
         provenance_run = ""
         if runnable:
-            try:
-                refuse_pusher(repo, refuse_provenance(repo, head, runnable))
-            except (ValueError, AttributeError, TypeError) as e:
-                raise SystemExit(
-                    f"::error::auto apply refused: a plan run read returned a malformed answer "
-                    f"({e!r}). " + _AUTO_REMEDY
-                ) from None
+            refuse_pusher(repo, refuse_provenance(repo, head, runnable))
             provenance_run = runnable[0]["plan_run_id"]
         auto_outputs = {
             "provenance_run": provenance_run,
