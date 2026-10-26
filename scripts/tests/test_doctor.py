@@ -1371,6 +1371,10 @@ _SHIPMATE_WF = (
     "  auto:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
+    "    with:\n"
+    "      auto: true\n"
+    "      ref: ${{ inputs.ref }}\n"
+    "      pr_number: ${{ inputs.pr_number }}\n"
     "  unlock:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/unlock.yml@{_SHA}\n"
@@ -4306,6 +4310,65 @@ def test_the_routing_probe_reports_a_missing_auto_job():
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _missing_job_text("auto", "apply.yml"))
     ]
+
+
+def _auto_with_text(keys):
+    return (
+        f"`shipmate.yml`'s `auto` job does not pass `apply.yml` the published `with:`: {keys} "
+        "differ. Without `auto: true` the autoplan's dispatch is refused by `apply.yml`'s "
+        "`guard`, so no `apply_mode: auto` environment applies. Write `auto: true`, "
+        "`ref: ${{ inputs.ref }}`, `pr_number: ${{ inputs.pr_number }}` and "
+        "`runs_on: *runner` (docs/getting-started.md)."
+    )
+
+
+def test_an_auto_job_without_auto_true_is_reported(monkeypatch):
+    """The fence `auto` job without `auto: true` would run the App's dispatch as a bare apply;
+    the probe runs it through `_shipmate_yml_warnings`, so the finder is registered.
+
+    Mutations: drop `_auto_with_finding` from `_shipmate_yml_warnings` -- red; drop `"auto"`
+    from `AUTO_WITH` -- red."""
+    line = "      auto: true\n"
+    assert _SHIPMATE_WF.count(line) == 1
+    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF.replace(line, "")})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == [
+        (doctor.WARNING, _auto_with_text("`auto`"))
+    ]
+
+
+def test_an_auto_job_with_a_wrong_or_extra_key_names_each():
+    """Compared whole: a wrong `ref` and an extra `environment` are each named, `runs_on`
+    is the consumer's and any value.
+
+    Mutations: drop the extra-key line from `_auto_with_finding` -- `environment` is not
+    named, red; drop `and k != "runs_on"` -- `runs_on` is named, red."""
+    text = _SHIPMATE_WF.replace(
+        "      ref: ${{ inputs.ref }}\n",
+        "      ref: ${{ github.sha }}\n      environment: dev\n      runs_on: big\n",
+    )
+    assert doctor._auto_with_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _auto_with_text("`ref` and `environment`"))
+    ]
+
+
+def test_an_auto_job_with_other_expression_spacing_is_silent():
+    """Mutation: return `value` unchanged from `_normalize_with` -- `${{inputs.ref}}` is
+    reported."""
+    text = _SHIPMATE_WF.replace(
+        "${{ inputs.ref }}\n      pr_number", "${{inputs.ref}}\n      pr_number"
+    )
+    assert text != _SHIPMATE_WF
+    assert doctor._auto_with_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
+
+
+def test_the_auto_with_is_the_published_three_keys():
+    """Mutation: set `auto` to `"true"` in `AUTO_WITH` -- red."""
+    assert doctor.AUTO_WITH == {
+        "auto": True,
+        "ref": "${{ inputs.ref }}",
+        "pr_number": "${{ inputs.pr_number }}",
+    }
 
 
 def test_the_routing_table_is_the_seven_published_expressions():

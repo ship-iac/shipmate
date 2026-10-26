@@ -1911,7 +1911,11 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
 The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
-`auto: true`; `detect` takes nothing else from the dispatch. A failed mint or
+`auto: true`; `detect` takes nothing else from the dispatch. `apply.yml`'s
+`guard` refuses a `verb: auto` dispatch whose calling job does not pass
+`auto: true`, which would otherwise run it as a bare apply, and `auto: true` on
+any other run; `shipmate doctor` compares the `auto` job's `with:` against the
+published one. A failed mint or
 dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply not
 started: the dispatch failed; comment `shipmate apply` ``. A run that cannot
 decide (the table unreadable, a cell summary unparseable) warns and posts no
@@ -2200,10 +2204,11 @@ The five jobs:
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — whether each file parses as YAML, stale engine
 pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
-and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing and `pull_request_target` types observe whether the plan comment's
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:` and `pull_request_target` types observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
-whether the job it reaches is the one that verb names, and whether every pull
-request event the fence routes starts a run, and whose fifth
+whether the job it reaches is the one that verb names, whether the autoplan's
+dispatch runs the auto form, and whether every pull
+request event the fence routes starts a run, and whose sixth
 check reports a drift job in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the

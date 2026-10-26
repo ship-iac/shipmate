@@ -99,11 +99,11 @@ live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds five checks, so an unreadable file
-  leaves all five unverified together. A call counts only when it names the
+  the commit under examination, feeds six checks, so an unreadable file
+  leaves all six unverified together. A call counts only when it names the
   engine repository doctor runs from, in any letter case: a fork, a renamed
   engine or a wrapper workflow does not count. When that repository could not
-  be determined, the job-name, routing and drift-call checks are a note
+  be determined, the job-name, routing, `auto` `with:` and drift-call checks are a note
   saying so, and the dispatch and trigger-types checks still run:
   - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
@@ -137,6 +137,11 @@ live probes.
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
+  - Whether its `auto` job passes `apply.yml` the fence's `with:`: `auto: true`,
+    `ref: ${{ inputs.ref }}` and `pr_number: ${{ inputs.pr_number }}`, compared
+    whole, plus a `runs_on` of any value. The finding names each key missing,
+    different or extra. Without `auto: true`, `apply.yml`'s `guard` refuses every
+    `verb: auto` dispatch, so no `apply_mode: auto` environment applies.
   - Whether its `pull_request_target` types are exactly the fence's `opened`,
     `synchronize`, `reopened`, `ready_for_review` and `closed`. A missing type
     starts no run for its event, and nothing else shows it: without `closed`,

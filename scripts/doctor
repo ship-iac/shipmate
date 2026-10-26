@@ -1636,6 +1636,48 @@ def _routing_finding(doc, name, engine):
     return out + _extra_caller_findings(doc, name, engine)
 
 
+#: The `with:` the published `auto` job passes `apply.yml`, beside `runs_on`, which is the
+#: consumer's runner and any value. Without `auto: true` the App's dispatch would run as a bare
+#: apply; `apply.yml`'s `guard` refuses it, so every `auto` run fails.
+AUTO_WITH = {"auto": True, "ref": "${{ inputs.ref }}", "pr_number": "${{ inputs.pr_number }}"}
+
+
+def _normalize_with(value):
+    """A `with:` value with whitespace collapsed, and inside `${{ }}` trimmed to one space."""
+    if not isinstance(value, str):
+        return value
+    v = " ".join(value.split())
+    m = re.fullmatch(r"\$\{\{\s*(.*?)\s*\}\}", v)
+    return f"${{{{ {m[1]} }}}}" if m else v
+
+
+def _auto_with_finding(doc, name, engine):
+    """One finding when the `auto` job's `with:` is not `AUTO_WITH` plus an optional
+    `runs_on`, compared whole and naming each key that is missing, different or extra. A file
+    without the job draws nothing here: that is `_routing_finding`'s."""
+    job = dict(_engine_calls(doc, engine, "apply.yml")).get("auto")
+    if job is None:
+        return []
+    found = _mapping(job.get("with"))
+    wrong = [k for k, v in AUTO_WITH.items() if _normalize_with(_scalar(found.get(k))) != v]
+    wrong += [str(k) for k in found if k not in AUTO_WITH and k != "runs_on"]
+    if not wrong:
+        return []
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `auto` job does not pass `apply.yml` the published `with:`: "
+                f"{_and_list(wrong)} differ. Without `auto: true` the autoplan's dispatch is "
+                "refused by `apply.yml`'s `guard`, so no `apply_mode: auto` environment applies. "
+                "Write `auto: true`, `ref: ${{ inputs.ref }}`, "
+                "`pr_number: ${{ inputs.pr_number }}` and `runs_on: *runner` "
+                "(docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
 def _extra_caller_findings(doc, name, engine):
     """One finding per job calling a `ROUTING_IFS` callee under an id the table does not route
     to it."""
@@ -1722,10 +1764,10 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing, trigger-types and drift-call findings over the
-    consumer's `shipmate.yml` alone, in that order, from one read at the commit under
-    examination (`_contents_ref`): a pull request that fixes the file must not still be
-    reported for the old state.
+    """The job-name, dispatch-wiring, routing, `auto` `with:`, trigger-types and drift-call
+    findings over the consumer's `shipmate.yml` alone, in that order, from one read at the
+    commit under examination (`_contents_ref`): a pull request that fixes the file must not
+    still be reported for the old state.
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
@@ -1735,7 +1777,7 @@ def _shipmate_yml_warnings(ctx):
     receives no dispatch. A file that does not parse is `_workflow_parse_warnings`' one
     finding and draws none here.
 
-    Without the engine repository the three engine-anchored findings give way to one notice:
+    Without the engine repository the four engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring
     and the trigger types read no engine slug and still run."""
     ref = _contents_ref(ctx)
@@ -1758,6 +1800,7 @@ def _shipmate_yml_warnings(ctx):
         *_shim_job_name_finding(doc, name, engine),
         *_dispatch_wiring_finding(doc, name),
         *_routing_finding(doc, name, engine),
+        *_auto_with_finding(doc, name, engine),
         *_pr_target_types_finding(doc, name),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]

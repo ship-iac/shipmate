@@ -32,6 +32,19 @@ jobs:
         run: |
           echo "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
           exit 1
+      # A called workflow's `github` context is its caller's, so these read the dispatch itself.
+      # A fence `auto` job without `auto: true` would otherwise run the App's dispatch as a bare
+      # apply, skipping the actor, provenance, pusher and overlap checks.
+      - name: Reject an auto dispatch that does not run the auto form
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto }}
+        run: |
+          echo "::error::apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'; give the shipmate.yml 'auto' job the published 'with:' block (shipmate doctor names the difference)"
+          exit 1
+      - name: Reject the auto form outside an auto dispatch
+        if: ${{ inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto') }}
+        run: |
+          echo "::error::apply refused: the calling job passes 'auto: true', but this run is not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
+          exit 1
 
   review:
     # Deliberately unconditional -- no `if:`. Running always closes the TOCTOU between the
