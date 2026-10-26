@@ -516,21 +516,22 @@ def _requested_permissions(mint_with):
     }
 
 
-def test_both_doctor_token_mints_can_read_actions():
+def test_both_doctor_token_mints_request_actions_read():
     """The environment probes read `repos/{repo}/environments` and, per environment,
     `.../environments/{name}`. The environments list has been observed working under a token without
     Actions read, but the per-environment read needs it on some configurations, and a degraded
     environment probe is invisible in the report except as a "could not verify" note.
-    `app/manifest.json` already declares `actions: write`, so neither level needs re-approval.
+    `app/manifest.json` already declares `actions: write`, so `actions: read` is a subset of the
+    installation's granted set and needs no re-approval.
 
     Both sites, because they are separate mints: `actions/summary`'s token drives `annotate` mode on
     every plan run, `comment-ops`' `doctortoken` drives `report` mode on demand, and a fix applied
-    to only one leaves half the environment probes degraded. The summary's is `write` because the
-    same token dispatches the `auto` apply.
+    to only one leaves half the environment probes degraded. The `auto` dispatch mints its own
+    `actions: write` token (`autotoken`), so this one stays `read`.
 
-    Mutations: `permission-actions: read` on the summary mint; drop it from `doctortoken`."""
+    Mutation: `permission-actions: write` on the summary mint."""
     assert _mint_with("comment-ops", "doctortoken").get("permission-actions") == "read"
-    assert _mint_with("summary", "token").get("permission-actions") == "write"
+    assert _mint_with("summary", "token").get("permission-actions") == "read"
 
 
 #: The permissions each doctor mint requests, hand-written. The plan-environment secret probe
@@ -541,7 +542,7 @@ _DOCTOR_MINT_PERMISSIONS = {
         "statuses": "write",
         "pull-requests": "write",
         "contents": "read",
-        "actions": "write",
+        "actions": "read",
         "environments": "read",
     },
     ("comment-ops", "doctortoken"): {
@@ -1301,7 +1302,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
     holder fails too.
 
     Mutations: drop `SHIPMATE_GITHUB_VARS` from `Resolve gate configuration`'s `env:`, or from
-    `actions/summary`'s doctor step or its auto dispatch step.
+    `actions/summary`'s doctor step or its auto dispatch decision.
     """
     bound = {
         (action, s["name"]): s["env"]["SHIPMATE_GITHUB_VARS"]
@@ -1319,7 +1320,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
             "summary",
             "Doctor: settings-drift warnings (annotations only, never blocks)",
         ): "${{ inputs.github-vars }}",
-        ("summary", "Dispatch an auto apply"): "${{ inputs.github-vars }}",
+        ("summary", "Decide whether to dispatch an auto apply"): "${{ inputs.github-vars }}",
     }
 
 

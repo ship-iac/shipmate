@@ -127,9 +127,10 @@ runs:
         permission-statuses: write
         permission-pull-requests: write
         permission-contents: read
-        # `write` dispatches the `auto` apply; doctor's environment probes' `/environments` reads
-        # need Actions read on some configurations. The manifest grants `actions: write`.
-        permission-actions: write
+        # Some configurations need Actions read for doctor's environment probes' `/environments`
+        # reads; without it they degrade to "could not verify". A subset of the manifest's
+        # `actions: write`, so no re-approval.
+        permission-actions: read
         # doctor's plan-environment secret probe lists `/environments/{name}/secrets`.
         permission-environments: read
 
@@ -484,10 +485,11 @@ runs:
           fi
         fi
 
-    - name: Dispatch an auto apply
+    - name: Decide whether to dispatch an auto apply
       # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
-      # job first, so only a written pending gate over published apply checks dispatches.
-      if: ${{ steps.hold.outputs.superseded != 'true' }}
+      # job first. A `moved` upsert means a newer head exists, whose own run decides.
+      if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
+      id: autodecide
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -495,6 +497,38 @@ runs:
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}
         SHIPMATE_COMMENT_MODE: ${{ steps.gate.outputs.comment_mode }}
+      run: |
+        set -euo pipefail
+        # Reviewer-facing degrade only: the gate is already written and nothing here touches it.
+        if ! envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" 2>decide.err); then
+          sed 's/^::error::/::warning::/' decide.err >&2
+          echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+          exit 0
+        fi
+        cat decide.err >&2
+        echo "envs=$envs" >> "$GITHUB_OUTPUT"
+
+    - name: Mint the auto apply dispatch token
+      if: ${{ steps.autodecide.outputs.envs != '' }}
+      id: autotoken
+      # Reviewer-facing degrade: a failed mint leaves the token empty, which the dispatch step
+      # reports. Its own token, so the summary's main token stays `actions: read`.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-pull-requests: write
+
+    - name: Dispatch an auto apply
+      if: ${{ steps.autodecide.outputs.envs != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.autotoken.outputs.token }}
+        SHIPMATE_AUTO_ENVS: ${{ steps.autodecide.outputs.envs }}
         # dispatch-body's inputs; no ENVIRONMENT, so the body carries no environment key.
         VERB: auto
         REF: ${{ inputs.head-sha }}
@@ -503,25 +537,22 @@ runs:
       run: |
         set -euo pipefail
         scripts="$GITHUB_ACTION_PATH/../../scripts"
-        # Reviewer-facing degrade only: the gate is already written and nothing here touches it.
-        # Each failure warns and exits 0; a failed dispatch also replies with the remedy.
-        if ! envs=$(python3 "$scripts/auto-dispatch" 2>decide.err); then
-          sed 's/^::error::/::warning::/' decide.err >&2
-          echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+        # Reviewer-facing degrade only: it warns and exits 0, and a failed dispatch replies with
+        # the remedy. With no token there is nothing to reply with.
+        if [ -z "${GH_TOKEN:-}" ]; then
+          echo "::warning::could not mint the auto apply dispatch token for $SHIPMATE_AUTO_ENVS; comment shipmate apply to apply"
           exit 0
         fi
-        cat decide.err >&2
-        [ -n "$envs" ] || exit 0
         if ! body=$(python3 "$scripts/dispatch-body") \
           || ! gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/shipmate.yml/dispatches" \
             --input - <<<"$body" >/dev/null; then
-          echo "::warning::the auto apply dispatch for $envs failed; comment shipmate apply to apply"
+          echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
           text="auto apply not started: the dispatch failed; comment \`shipmate apply\`"
           SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
             python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply failure reply"
           exit 0
         fi
-        echo "::notice title=dispatch::dispatched an auto apply of $envs for PR #$PR_NUMBER (ref $REF)"
+        echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"
 
     - name: Collapse the started reply
       if: ${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' && (steps.upsert.outputs.result == 'created' || steps.upsert.outputs.result == 'updated') }}

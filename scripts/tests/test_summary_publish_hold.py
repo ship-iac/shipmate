@@ -547,7 +547,11 @@ LATER_STEP_IFS = {
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_SUPERSEDED,
     GATE: NOT_SUPERSEDED,
-    "Dispatch an auto apply": NOT_SUPERSEDED,
+    "Decide whether to dispatch an auto apply": (
+        "${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
+    ),
+    "Mint the auto apply dispatch token": "${{ steps.autodecide.outputs.envs != '' }}",
+    "Dispatch an auto apply": "${{ steps.autodecide.outputs.envs != '' }}",
     "Collapse the started reply": (
         "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true'"
         " && (steps.upsert.outputs.result == 'created'"
