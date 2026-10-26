@@ -459,7 +459,7 @@ enforcement.
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
 `split`, `review` and `command_hints` hold `true` or `false`, `apply_mode`
-holds `targeted` or `bare`, `max_parallel` holds a number, and all five refuse a
+holds `targeted`, `bare` or `auto`, `max_parallel` holds a number, and all five refuse a
 reference, so which
 environments share one binding, which a bare apply skips, which apply
 unreviewed, how many plan and drift cell jobs run at once and whether the plan

@@ -247,7 +247,7 @@ def test_an_apply_mode_validates(value):
 
 
 _NOT_AN_APPLY_MODE = [
-    ("auto", "'auto'"),
+    ("Auto", "'Auto'"),
     ("true", "'true'"),
     ("Targeted", "'Targeted'"),
     ('""', "''"),
@@ -258,19 +258,63 @@ _NOT_AN_APPLY_MODE = [
 @pytest.mark.parametrize(
     ("written", "found"), _NOT_AN_APPLY_MODE, ids=range(len(_NOT_AN_APPLY_MODE))
 )
-def test_an_apply_mode_that_is_not_targeted_or_bare_refuses(written, found):
+def test_an_apply_mode_that_is_not_a_mode_refuses(written, found):
     """Any other value reads as set to a person and resolves as `bare`, which puts the
-    environment on a bare `shipmate apply`. `auto` is refused until an engine implements it.
+    environment on a bare `shipmate apply`.
 
-    Mutations: accept `auto` in `_APPLY_MODES` -- its case validates; drop the
-    `_check_apply_mode` call from `_check_environment` -- every case validates.
+    Mutation: drop the `_check_apply_mode` call from `_check_environment` -- every case
+    validates.
     """
     text = f"layout: folder\nenvironments:\n  dev-eu:\n    apply_mode: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
         env_config.validate_structure(env_config.load_config(text))
     assert str(excinfo.value) == (
-        f"::error::environments.dev-eu.apply_mode must be targeted or bare, got {found}."
+        f"::error::environments.dev-eu.apply_mode must be targeted, bare or auto, got {found}."
     )
+
+
+def test_an_auto_apply_mode_validates_with_review_false():
+    """Mutation: drop `auto` from `_APPLY_MODES` -- the value refusal fires."""
+    text = "layout: folder\nenvironments:\n  dev-eu:\n    apply_mode: auto\n    review: false\n"
+    table = env_config.load_config(text)
+    assert env_config.validate_structure(table) is table
+    assert table["environments"]["dev-eu"] == {"apply_mode": "auto", "review": False}
+
+
+@pytest.mark.parametrize("review", ["", "    review: true\n"], ids=["absent", "true"])
+def test_an_auto_apply_mode_without_review_false_refuses(review):
+    """An `auto` apply starts on a push, so it has no approving review to wait for.
+
+    Mutation: drop the `review` check from `_check_apply_mode` -- both rows validate.
+    """
+    text = f"layout: folder\nenvironments:\n  dev-eu:\n    apply_mode: auto\n{review}"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.load_config(text))
+    assert str(excinfo.value) == (
+        "::error::environments.dev-eu.apply_mode is auto, which requires review: false on the "
+        "same entry. An auto apply starts on a push and does not wait for an approving review."
+    )
+
+
+_MODES_TABLE = {
+    "environments": {
+        "dev-eu": {"apply_mode": "auto", "review": False},
+        "dev-us": {"apply_mode": "bare"},
+        "prod": {"apply_mode": "targeted"},
+        "qa": {},
+        "stage": {"apply_mode": "auto", "review": False},
+    }
+}
+
+
+def test_targeted_envs_leaves_an_auto_environment_on_a_bare_apply():
+    """Mutation: `targeted_envs` keeps every mode but `bare` -- the auto entries join prod."""
+    assert env_config.targeted_envs(_MODES_TABLE) == ["prod"]
+
+
+def test_auto_envs_names_exactly_the_auto_entries():
+    """Mutation: `auto_envs` returns the `targeted` entries -- `["prod"]`."""
+    assert env_config.auto_envs(_MODES_TABLE) == ["dev-eu", "stage"]
 
 
 @pytest.mark.parametrize(
@@ -290,7 +334,7 @@ def test_a_referenced_apply_mode_refuses_before_the_variable_is_read(written):
         env_config.validate_structure(env_config.parse_table(text, {"SECRETISH": "targeted"}))
     assert str(excinfo.value) == (
         "::error::environments.prod.apply_mode holds a variable reference, and it accepts "
-        "none. Write targeted or bare."
+        "none. Write targeted, bare or auto."
     )
 
 

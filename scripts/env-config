@@ -53,7 +53,7 @@ def runner_refusal():
 
 
 _FLAGS = ("split", "review")
-_APPLY_MODES = ("targeted", "bare")
+_APPLY_MODES = ("targeted", "bare", "auto")
 
 
 def load_config(text):
@@ -123,7 +123,7 @@ def _normalise_flags(env, entry):
         entry,
         "apply_mode",
         f"::error::environments.{env}.apply_mode holds a variable reference, and it accepts "
-        "none. Write targeted or bare.",
+        "none. Write targeted, bare or auto.",
     )
 
 
@@ -437,16 +437,24 @@ def _check_flags(entry, env, errors):
 
 
 def _check_apply_mode(entry, env, errors):
-    """`apply_mode` is exactly the string `targeted` or `bare`. Anything else reads as set to
-    a person and resolves as `bare`, which puts the environment on a bare `shipmate apply`.
+    """`apply_mode` is exactly the string `targeted`, `bare` or `auto`. Anything else reads as
+    set to a person and resolves as `bare`, which puts the environment on a bare
+    `shipmate apply`. `auto` also requires `review: false` on the entry: an `auto` apply
+    starts on a push, so it has no approving review to wait for.
 
     `load_config` refused any value holding a reference, so the value here is written in the
     file.
     """
     if "apply_mode" in entry and entry["apply_mode"] not in _APPLY_MODES:
         errors.append(
-            f"::error::environments.{env}.apply_mode must be targeted or bare, got "
+            f"::error::environments.{env}.apply_mode must be targeted, bare or auto, got "
             f"{entry['apply_mode']!r}."
+        )
+    elif entry.get("apply_mode") == "auto" and entry.get("review") is not False:
+        errors.append(
+            f"::error::environments.{env}.apply_mode is auto, which requires review: false on "
+            "the same entry. An auto apply starts on a push and does not wait for an approving "
+            "review."
         )
 
 
@@ -521,13 +529,20 @@ def command_hints(table):
 def targeted_envs(table):
     """Environments a bare `shipmate apply` skips: each needs its own `shipmate apply <env>`.
 
-    Only `apply_mode: targeted` holds one back; `validate_structure` refuses any value but
-    `targeted` and `bare`.
+    Only `apply_mode: targeted` holds one back; a bare apply reaches an `auto` environment
+    like a `bare` one. `validate_structure` refuses any value but `targeted`, `bare` and `auto`.
     """
+    return _mode_envs(table, "targeted")
+
+
+def auto_envs(table):
+    """Environments whose entry holds `apply_mode: auto`, sorted: a push applies them."""
+    return _mode_envs(table, "auto")
+
+
+def _mode_envs(table, mode):
     return sorted(
-        e
-        for e, entry in table.get("environments", {}).items()
-        if entry.get("apply_mode") == "targeted"
+        e for e, entry in table.get("environments", {}).items() if entry.get("apply_mode") == mode
     )
 
 

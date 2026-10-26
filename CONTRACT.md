@@ -505,7 +505,8 @@ as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pa
 `shipmate apply`, and `review: false` exempts it from the review requirement
 (§Comment-ops). `split` and `review` hold `true` or `false`, bare or quoted, and
 default to `true`: writing `false` gives something up. `apply_mode` holds
-`targeted` or `bare` and defaults to `bare`.
+`targeted`, `bare` or `auto` and defaults to `bare`; `auto` requires `review: false`
+on the same entry.
 
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
@@ -735,7 +736,7 @@ variable rows depend on the run as well as the file, so they are not structural.
 | For one workload, a role name on one path and a full ARN on the other | the account rule is per workload over both paths; write both as ARNs |
 | For one workload, a role name and no account | a name becomes `arn:aws:iam::<account>:role/<name>` and has no account to go in it |
 | For one workload, a full ARN and an account | an ARN carries its own account, so the file would hold two for one role |
-| `split` or `review` that is not `true` or `false`, or `apply_mode` that is not `targeted` or `bare` | any other value would otherwise resolve to the default: `split: no` binds the split pair the repository believes it gave up, `apply_mode: Targeted` puts the environment on a bare `shipmate apply`, and `review: no` leaves it under review. A variable reference refuses before it resolves, even one that would resolve to a valid value, so the refusal never quotes its value |
+| `split` or `review` that is not `true` or `false`, or `apply_mode` that is not `targeted`, `bare` or `auto` | any other value would otherwise resolve to the default: `split: no` binds the split pair the repository believes it gave up, `apply_mode: Targeted` puts the environment on a bare `shipmate apply`, and `review: no` leaves it under review. A variable reference refuses before it resolves, even one that would resolve to a valid value, so the refusal never quotes its value |
 | A `split: false` environment naming an identity that sets `aws.plan` | a shared environment is one GitHub Environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape | a string where a mapping is required, and the reverse |
@@ -1372,8 +1373,8 @@ environments (typically production) must always be named: their
 `apply / <stack> / <env>` checks stay pending under a bare apply — so
 `shipmate / gate` keeps gating the merge — until someone runs
 `shipmate apply <env>` for them. An entry without `apply_mode`, or with
-`apply_mode: bare`, is part of a bare apply. Any value but `targeted` or `bare`
-fails loud, `Targeted` and `true` included: read as `bare`, it would put the
+`apply_mode: bare` or `auto`, is part of a bare apply. Any value but
+`targeted`, `bare` or `auto` fails loud, `Targeted` and `true` included: read as `bare`, it would put the
 environment on a bare apply.
 
 `apply_mode` constrains the bare pre-merge `shipmate apply` only. The
