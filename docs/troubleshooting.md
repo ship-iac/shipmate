@@ -860,8 +860,8 @@ nothing.
   its cell lock` form reports. Comment `shipmate apply` again instead: the new
   run locks the cell again, or leaves it pending and names its holder.
 - A lock read that fails refuses with `` could not confirm pull request #<pr>
-  holds its cell lock (<why>) ``. §An apply cell refused: `apply aborted for
-  `<env>` / `<stack>`: ...` has it and the check's other refusals.
+  holds its cell lock (<why>) ``. §An apply cell refused: ``apply aborted for
+  `<env>` / `<stack>`: ...`` has it and the check's other refusals.
 
 ### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
 
@@ -1689,7 +1689,7 @@ included, was dispatched by something else. With no App-authored check on the
 head there is no slug to compare. Comment `shipmate apply` on the pull request,
 or push when the head carries no apply checks yet.
 
-### `auto apply refused: plan run <n> is a `<event>` run, not an autoplan`
+### ``auto apply refused: plan run <n> is a `<event>` run, not an autoplan``
 
 A cell's newest plan record names a run that a push did not start, usually a
 `shipmate plan` run (`workflow_dispatch`). An `auto` apply applies only an
@@ -1708,7 +1708,7 @@ request to apply it.``:
   `summary` dispatches again; when it published none, push.
 - `plan run <n> is not listed, and no autoplan run of the head is listed`.
 
-### `not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...`
+### ``not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...``
 
 The `auto` run applies as the pusher of the autoplan, that run's
 `triggering_actor`, and the pusher lacks `write` or `admin`. Nothing applied. A
@@ -1776,7 +1776,7 @@ When nothing applied, the verdict reads `⚪ nothing applied, the pending
 environments wait on the lines below`. Follow each line's remedy; once the
 predecessors have applied, comment `shipmate apply`, or push.
 
-### An apply cell refused: `apply aborted for `<env>` / `<stack>`: ...`
+### An apply cell refused: ``apply aborted for `<env>` / `<stack>`: ...``
 
 Every pre-merge apply cell, on every apply form, runs a read-only pre-apply check
 before its cloud credentials ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks):

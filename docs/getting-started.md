@@ -1115,7 +1115,7 @@ environments:
 
 Each autoplan of a ready pull request whose plan changes a cell in `dev-eu` then
 dispatches the fence's `auto` job, which applies that environment's pending
-cells as the pusher, when the pusher has write access. The table refuses
+cells when the pusher has write access; it runs as the shipmate App. The table refuses
 `apply_mode: auto` without `review: false`. A draft or unmergeable pull
 request, or one whose newest plan came from a `shipmate plan` comment, does not
 apply this way; comment `shipmate apply` instead. A cell whose stack the base
