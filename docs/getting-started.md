@@ -369,6 +369,7 @@ writing `false` gives something up. `apply_mode` is the one enum.
 | --- | --- | --- | --- | --- | --- | --- |
 | `review: false` (`true`) | — | On `REVIEW_REQUIRED`, applies it and holds the environments under review | Authorized on `REVIEW_REQUIRED` | — | Approving review not required; `CHANGES_REQUESTED` and an unknown or absent decision still refuse. Environment reviewers untouched. At 0 required approving reviews it changes nothing: an environment under review is then held only where a code-owner review is required | The approving review before a pre-merge apply |
 | `apply_mode: targeted` (`bare`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
+| `apply_mode: auto` (`bare`) | — | Applies it | — | — | Requires `review: false` on the entry. The autoplan applies it with no comment, authorized by the pusher's write access. Environment reviewers untouched | The comment before a pre-merge apply |
 | `split: false` (`true`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
 | `needs: [<env>]` (none) | Its applies, until the earlier env-levels complete (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
 | `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment, or after a cell another pull request locks, waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
@@ -376,7 +377,9 @@ writing `false` gives something up. `apply_mode` is the one enum.
 On a bare apply, an environment held for review, left out as `targeted`, holding a
 waiting cell, or holding a cell another pull request locks skips the environments
 ordered after it by `needs`, a review-exempt one included, and its cells that do not apply in the run make the cells ordered `after` them
-wait, which can skip more; §Env apply order computes the whole set.
+wait, which can skip more; §Env apply order computes the whole set. An `auto`
+apply adds two causes: an environment that is not `auto`, and one holding a cell
+whose stack the base also changed.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,
 §Env model for `split`, §Env apply order for `needs` and the waiting cells, §Fan-out for
@@ -816,6 +819,11 @@ applies every pending environment in `needs` order. The job reads
 the `inputs` context applies the declared default, which is what makes an
 omitted key read as the empty string.
 
+No comment lands on the `auto` job. A plan run's `summary` dispatches
+`verb: auto` after an autoplan that changes a cell of an `apply_mode: auto`
+environment, and the job calls `apply.yml` with `auto: true`
+(§Applying an environment after every push).
+
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
 `unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
 a state lock reads no plan artifact and mints no App token, so it declares neither
@@ -1073,7 +1081,7 @@ environments:
 ```
 
 Your workflow file needs no line for it, and neither does a repository setting.
-Comment-ops and both apply forms each resolve the flag themselves, from the file
+Comment-ops and every apply form each resolve the flag themselves, from the file
 on your **default branch** — so an edit takes effect when it merges, and a pull
 request cannot exempt itself. Set it on no entry and every environment keeps
 the ruleset's requirement.
@@ -1088,6 +1096,31 @@ What the exemption does and does not cover, including a bare `shipmate apply`
 on an unreviewed pull request, is in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops; how it compares with an environment's `required_reviewers` is in
 [`hardening.md`](hardening.md) §3–5.
+
+### Applying an environment after every push
+
+To apply a low-tier environment with no comment at all, set `apply_mode: auto`
+beside `review: false` on its entry:
+
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
+
+environments:
+  dev-eu:
+    region: eu-west-1
+    review: false
+    apply_mode: auto
+```
+
+Each autoplan of a ready pull request whose plan changes a cell in `dev-eu` then
+dispatches the fence's `auto` job, which applies that environment's pending
+cells as the pusher, when the pusher has write access. The table refuses
+`apply_mode: auto` without `review: false`. A draft or unmergeable pull
+request, or one whose newest plan came from a `shipmate plan` comment, does not
+apply this way; comment `shipmate apply` instead. A cell whose stack the base
+also changed stays pending until the branch is updated from the base. [`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto` has every
+condition, and [`troubleshooting.md`](troubleshooting.md) has each refusal.
 
 ### Further hardening
 

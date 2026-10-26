@@ -543,25 +543,29 @@ it planned. Three causes produce this:
 
 The message says what it found: `published <n> apply checks for <m> planned
 cells` (fewer or more checks than cells), `records no planned cell count`, or
-`records disagreeing planned cell counts`. `holding back` names the cells this
-apply would have run.
+`records disagreeing planned cell counts`. A run with a record that has no count
+names the other cause beside it, joined by `and`. `holding back` names the cells
+this apply would have run.
 
 Applying the published checks could lose an `after` ordering to a cell the apply
 cannot see, so the apply is refused ([`../CONTRACT.md`](../CONTRACT.md)
 §Apply-match fingerprint). When the summary job failed partway, its gate hold
 stays too, so the pull request cannot merge over the missing checks.
 
-When every run the message names published fewer apply checks than its one
-planned cell count, its summary job stopped partway, and the message says to
-re-run that run's failed jobs, then apply again: the re-run keeps the run id,
+On an open pull request, when every run the message names published fewer apply
+checks than its one planned cell count, its summary job stopped partway, and the
+message says to re-run that run's failed jobs, then apply again: the re-run keeps the run id,
 and its summary job publishes only the apply checks the run has not yet
 published. Do not use "Re-run all jobs", which can plan a different cell set and
 over-count.
 
 Otherwise, or if the refusal remains, push a commit to the pull request: the new
 head's plan run plans and publishes every cell afresh, and the apply proceeds
-once it completes. If the pull request has already merged, open a new pull
-request touching these stacks; it plans and applies them.
+once it completes.
+
+The post-merge deploy's message says the pull request has merged and names one
+remedy: open a new pull request touching these stacks; it plans and applies
+them.
 
 A `shipmate plan` comment re-plans the same head and may not clear this. If the
 re-plan no longer plans a cell of the partial run, that cell's newest apply check
@@ -855,8 +859,9 @@ nothing.
   refuses if this pull request no longer holds it, which the `no longer holds
   its cell lock` form reports. Comment `shipmate apply` again instead: the new
   run locks the cell again, or leaves it pending and names its holder.
-- A lock read that fails refuses with `` could not read the cell lock on
-  `<env>` / `<stack>` (<why>) ``. Re-run the job once the read succeeds.
+- A lock read that fails refuses with `` could not confirm pull request #<pr>
+  holds its cell lock (<why>) ``. §An apply cell refused: `apply aborted for
+  `<env>` / `<stack>`: ...` has it and the check's other refusals.
 
 ### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
 
@@ -935,7 +940,7 @@ backend's cached state, so nothing proceeds without it
 
 Set `SHIPMATE_ENCRYPTION_KEY` as a repository or organization secret, or as the
 same value on both `<env>-plan` and `<env>-apply`, and map it by name in the
-`secrets:` block of `shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of
+`secrets:` block of `shipmate.yml`'s `plan`, `deploy`, `apply` and `auto` jobs and of
 each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
 split environment alone reaches the wrong cells
 ([`getting-started.md`](getting-started.md) lists each placement).
@@ -1467,7 +1472,7 @@ stack ordering cycle through stacks/app, stacks/dns: a stack ordered after itsel
 ```
 
 The `after` and `before` entries of the named stacks form a loop, or one stack
-is `after` itself, so no stack on it can run first. The plan, both apply forms
+is `after` itself, so no stack on it can run first. The plan, every apply form
 and the merge deploy read the whole tree's run-graph and refuse before any cell
 runs, so the loop need not touch the pull request's own stacks, and a plan with
 no cell to plan refuses too.
@@ -1543,8 +1548,9 @@ in its compact form, `⚪ waiting on <stack> / <env> (<remedy>): <cells>`.
 
 The first cell runs after the second through `after`
 ([`../CONTRACT.md`](../CONTRACT.md) §Fan-out), and the second is pending and
-not applying in this run: another environment on a targeted apply, or a held,
-`targeted` or skipped environment on a bare one. On either form it can also be a
+not applying in this run: another environment on a targeted apply, a held,
+`targeted` or skipped environment on a bare one, and on an `auto` one also an
+environment that is not `auto` or a cell the base also changed. On every form it can also be a
 cell another pull request locks; that lock goes when its holder merges or closes,
 or with `shipmate unlock <env> --evict`, and a `🔒 locked by` line names its
 holder. The waiting cell's apply check
@@ -1556,6 +1562,9 @@ stays pending and the rest of the run applied. Follow the remedy:
   the lock with that comment.
 - ``it is locked by an unreadable lock; comment `shipmate unlock <env> --evict` ``:
   the lock names no holder, so no merge or close releases it; evict it.
+- `the base also changed it; update the branch from the base and push`: an
+  `auto` apply held the blocker (§`⚪ held, the base changed these stacks after
+  this branch left it`).
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
@@ -1638,6 +1647,168 @@ comment `shipmate plan`), then comment the apply again. A cell whose check
 already completed is not compared. The post-merge deploy does not read the
 record's pull request.
 
+### An `apply_mode: auto` environment did not apply after a push
+
+An `auto` environment applies only through the autoplan of a ready pull request
+([`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto`). Look in this order:
+
+1. The plan run's `summary` job, step `Decide whether to dispatch an auto
+   apply`. When it dispatches nothing it logs `no auto apply dispatched:
+   <reason>`: the run is not an autoplan (a `shipmate plan` run), it is a
+   re-run, the pull request is a draft, the gate is not pending over a complete
+   plan, or no changed cell is in an `auto` environment. The step is skipped
+   when a newer plan run of the head superseded this one. A dispatch logs
+   `dispatched an auto apply of <envs> for PR #<n> (ref <sha>)`.
+2. The pull request's comments: the `auto apply not started` reply (below), or
+   the `auto` run's apply result comment. A `detect` refusal sits in that
+   comment's error fence; the entries below quote each one.
+3. The `auto` run in the Actions tab, for a run that posted no comment.
+
+Comment `shipmate apply` to apply what the `auto` run did not, under the
+comment-time apply requirements.
+
+### `auto apply not started: the dispatch failed`
+
+The pull request carries ``🔴 failed: auto apply not started: the dispatch
+failed; comment `shipmate apply` ``. The plan run's `summary` job could not mint
+its dispatch token or the dispatch call failed; a `::warning::` on that run names
+which. The gate is unchanged and nothing applied. Comment `shipmate apply`.
+When it recurs, check the App's `actions: write` permission and reconcile
+`shipmate.yml` against the fence in [`getting-started.md`](getting-started.md)
+§The workflow file, which offers `auto` as a `verb` option and holds the `auto`
+job.
+
+### `auto apply refused: the run's actor is ...`, or `no check run on the head is authored by the shipmate App`
+
+The `auto` run's `detect` refused before any wave, and nothing applied. An
+`auto` run must run as the shipmate App's bot login, `<slug>[bot]` compared
+whole, where `<slug>` comes from the App-authored check runs on the head. Only a
+plan run's `summary` job dispatches `verb: auto`, with an App token; a run whose
+actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
+included, was dispatched by something else. With no App-authored check on the
+head there is no slug to compare. Comment `shipmate apply` on the pull request,
+or push when the head carries no apply checks yet.
+
+### `auto apply refused: plan run <n> is a `<event>` run, not an autoplan`
+
+A cell's newest plan record names a run that a push did not start, usually a
+`shipmate plan` run (`workflow_dispatch`). An `auto` apply applies only an
+autoplan: a `shipmate plan` run is dispatched by the App and does not carry the
+commenter, so there is no pusher to authorize. Comment `shipmate apply`, which
+applies that plan under the comment-time requirements.
+
+The same check refuses, each ending ``Comment `shipmate apply` on the pull
+request to apply it.``:
+
+- `the cells to apply record different plan runs (...)`: no one autoplan
+  planned every cell this run would apply.
+- `plan run <n> planned <sha>, not the head <sha>`.
+- `plan run <n> is not the newest autoplan of the head (run <m> is)`: a newer
+  autoplan of the same head exists. When it completes with apply checks its own
+  `summary` dispatches again; when it published none, push.
+- `plan run <n> is not listed, and no autoplan run of the head is listed`.
+
+### `not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...`
+
+The `auto` run applies as the pusher of the autoplan, that run's
+`triggering_actor`, and the pusher lacks `write` or `admin`. Nothing applied. A
+collaborator with write access comments `shipmate apply`, or pushes. The
+permission is read with the `detect` job's `GITHUB_TOKEN`; when it cannot be
+read the refusal reads `could not read the pusher @<login>'s permission on this
+repository` and ends ``push again, or a writer comments `shipmate apply` ``.
+
+### `auto apply refused: pull request #<n> head is <sha>, but this run applies <sha>`
+
+A push landed after the autoplan. The new head's autoplan decides its own
+apply; there is nothing to do. The `auto` run's `detect` reads the pull request
+until GitHub has computed its mergeability, up to 12 reads 5 s apart, and every
+read compares the head. The other refusals from that read use the comment-time
+wording, with these remedies:
+
+- `GitHub is still computing this PR's mergeability`: still unknown after the
+  last read. Comment `shipmate apply`.
+- `this pull request is a draft` or `PR is not mergeable (state: <state>)`:
+  mark it ready, or resolve the conflict or requirement, then comment
+  `shipmate apply` or push.
+- ``auto apply refused: could not read the base tip of pull request #<n>
+  (<why>)``, or `could not fetch the base tip <sha>`: the base branch's ref could
+  not be read or fetched. Comment `shipmate apply`, or push.
+
+### `⚪ held, the base changed these stacks after this branch left it`
+
+The `auto` apply result comment carries ``⚪ held, the base changed these
+stacks after this branch left it, so their plans would revert that change:
+<cells>. Update the branch from the base and push.`` Its verdict counts them as
+`N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
+pending cells' stacks` when nothing applied.
+
+The base branch changed those stacks, directly or through a module, since the
+branch left it. Each plan was made on the branch's tree, so applying it would
+revert the base's change. The held cells stay pending, a cell that runs after
+one waits with the remedy `the base also changed it; update the branch from the
+base and push`, and the environments ordered after their environment by `needs`
+are skipped (next entry). The rest applied.
+
+Update the branch from the base and push: the push re-plans on the new tree, and
+its autoplan dispatches again. Do not comment `shipmate apply` instead: the bare
+and targeted forms run no overlap check, so they apply the plan as reviewed and
+revert the base's change.
+
+### An `auto` apply skipped an environment, or left one pending
+
+The `auto` apply result comment carries one of:
+
+- ``🟡 <env>: left pending (not `apply_mode: auto`), comment `shipmate apply` ``:
+  `<env>` has pending cells and is neither `auto`, `targeted` nor held. An
+  `auto` run applies only `auto` environments; a bare `shipmate apply` applies
+  it.
+- `⚪ <env>: skipped, waits on <pred> (<remedy>)`: a `needs` predecessor of
+  `<env>` does not fully apply in this run, so `<env>`'s cells stay pending. The
+  remedy follows the predecessor's kind: `` apply it first with `shipmate apply
+  <pred>` `` for a `targeted` one, `it is held until the pull request is
+  approved` for a held one, `a cell of it does not apply this run; see its line
+  below` for one holding a locked, overlap or waiting cell, and
+  `` comment `shipmate apply`, which applies them in order `` for an environment
+  that is not `auto`. The run log's apply-all-detect notice lists these
+  environments as `skipped_after_targeted`.
+
+When nothing applied, the verdict reads `⚪ nothing applied, the pending
+environments wait on the lines below`. Follow each line's remedy; once the
+predecessors have applied, comment `shipmate apply`, or push.
+
+### An apply cell refused: `apply aborted for `<env>` / `<stack>`: ...`
+
+Every pre-merge apply cell, on every apply form, runs a read-only pre-apply check
+before its cloud credentials ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks):
+a "Re-run failed jobs" skips `detect`, and a wave can wait hours on an
+environment approval. The refused cell assumes no cloud role, its apply check
+stays pending, and the apply result comment gives it the refusal as its blocked
+reason. On every form it refuses when:
+
+- `pull request #<pr> no longer holds its cell lock (<why>)`: §A cell is
+  `locked by #<n>`.
+- `pull request #<pr> is <state>; nothing applies`: the pull request closed or
+  merged since `detect`. A merged pull request's cells apply through the merge
+  deploy.
+- `pull request #<pr> is at <sha>, not at <head>, the head this apply was
+  requested for`: a push landed since `detect`. Wait for the new head's plan,
+  then comment `shipmate apply`.
+- `could not confirm <what> (<why>)`: a read failed. Comment `shipmate apply`,
+  or push.
+
+An `auto` cell also refuses when:
+
+- `the base branch moved from <sha> to <sha> since this auto apply was
+  detected`: any push to the base branch refuses the wave, whatever the stack,
+  because a wave cannot repeat `detect`'s per-stack overlap check before its
+  credentials. Push, or comment `shipmate apply`, which runs `detect` again.
+- `the newest autoplan of <head> is run <n>, not plan run <p>, which this auto
+  apply applies` (or `is not listed`), or `the cell's newest plan record names
+  plan run <r>, not plan run <p>`: a newer plan of the head exists. Comment
+  `shipmate apply`, or push.
+- `an auto apply reached the wave without its plan run and base tip`: `detect`'s
+  outputs did not reach the wave. Comment `shipmate apply`.
+
 ### `the pull request's head shares no history with its base`
 
 The `detect` annotation reads:
@@ -1676,6 +1847,11 @@ holds; git's own error is in the `detect` annotation after the colon.
 2. If the new plan refuses again, the base commit is not reachable from the
    checkout; it may have been force-pushed away from the base branch. Update the
    branch from the base and push.
+
+An `auto` apply's `detect` computes the same merge base, between the base tip
+and the head, to find the stacks the base changed. It refuses with the same
+text, ending ``Push again, or comment `shipmate apply`; if it fails again, the
+base commit is not reachable from this checkout.``, and nothing applies.
 
 ### A pull request planned zero cells
 

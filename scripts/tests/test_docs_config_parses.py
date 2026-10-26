@@ -74,7 +74,7 @@ def test_each_page_holds_its_config_fences():
     assert found == {
         "CONTRACT.md": 3,
         "docs/aws.md": 2,
-        "docs/getting-started.md": 2,
+        "docs/getting-started.md": 3,
         "docs/hardening.md": 2,
     }
 

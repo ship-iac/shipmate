@@ -432,7 +432,7 @@ def test_each_page_holds_its_fences():
         ("docs/drift.md", "yaml"): 1,
         ("docs/getting-started.md", "bash"): 1,
         ("docs/getting-started.md", "json"): 2,
-        ("docs/getting-started.md", "yaml"): 4,
+        ("docs/getting-started.md", "yaml"): 5,
         ("docs/github-app.md", ""): 2,
         ("docs/github-app.md", "bash"): 7,
         ("docs/hardening.md", ""): 1,
