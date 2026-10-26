@@ -1821,7 +1821,8 @@ reason. On every form it refuses when:
   deploy.
 - `pull request #<pr> is at <sha>, not at <head>, the head this apply was
   requested for`: a push landed since `detect`. Wait for the new head's plan,
-  then comment `shipmate apply`.
+  then comment `shipmate apply`. Under `auto`, the new head's autoplan
+  dispatches its own apply; there is nothing to do.
 - `could not confirm <what> (<why>)`: a read failed. Comment `shipmate apply`,
   or push.
 
