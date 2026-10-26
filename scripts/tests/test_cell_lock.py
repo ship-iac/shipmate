@@ -1255,6 +1255,25 @@ def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, actio
     )
 
 
+@pytest.mark.parametrize("attempt", ["2", "", "1x", None])
+def test_verify_auto_refuses_a_later_run_attempt_before_any_read(monkeypatch, tmp_path, attempt):
+    """ "Re-run failed jobs" keeps the first attempt's passed detect, so its actor check never
+    runs again; the App never re-runs. Mutation: drop the attempt refusal (each row reaches the
+    lock read, unexpected). Mutation: compare `int(attempt) > 1` (the `""`, `1x` and unset rows
+    raise `ValueError`)."""
+    env = {**AUTO, "GITHUB_RUN_ATTEMPT": attempt}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        f"::error::{WHERE} an auto apply is never re-run (run attempt "
+        f"{(attempt or '')!r}): comment `shipmate apply`"
+    )
+
+
+def test_verify_outside_auto_passes_a_later_run_attempt(monkeypatch, tmp_path):
+    """Mutation: refuse a later attempt whatever `SHIPMATE_AUTO` (refuses)."""
+    gh = _held().on(PULL_READ, _pull())
+    assert _verify(monkeypatch, tmp_path, gh, {"GITHUB_RUN_ATTEMPT": "2"}) == {}
+
+
 def test_verify_auto_refuses_a_draft(monkeypatch, tmp_path):
     """A pull request converted to draft while a wave waits is no longer ready to apply.
 

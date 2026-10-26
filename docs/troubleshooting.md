@@ -1718,7 +1718,8 @@ plan run's `summary` job dispatches `verb: auto`, with an App token; a run whose
 actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
 included, was dispatched by something else. A "Re-run all jobs" of an `auto` run
 runs with the re-runner as its triggering actor and refuses; do not re-run an
-`auto` run. With no App-authored check on the head there is no slug to compare.
+`auto` run. "Re-run failed jobs" keeps the passed `detect`, so each wave cell
+refuses instead with `an auto apply is never re-run (run attempt '<n>')`. With no App-authored check on the head there is no slug to compare.
 Comment `shipmate apply` on the pull request, or push when the head carries no
 apply checks yet.
 
@@ -1889,6 +1890,9 @@ An `auto` cell also refuses when:
   `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
+- `an auto apply is never re-run (run attempt '<n>')`: the `auto` run was re-run
+  ("Re-run failed jobs" or "Re-run all jobs"); the App never re-runs one.
+  Comment `shipmate apply`.
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
 - a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),
