@@ -1252,6 +1252,17 @@ def test_verify_auto_refuses_a_draft(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize("draft", [None, "false"])
+def test_verify_auto_refuses_a_draft_state_that_is_not_a_boolean(monkeypatch, tmp_path, draft):
+    """Mutation: `if not isinstance(draft, bool)` dropped from `_draft` (both rows pass on to the
+    base tip read, unexpected)."""
+    gh = _held().on(PULL_READ, _pull(draft=draft))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm pull request #7 is ready for review "
+        f"(ValueError({f'draft is {draft!r}'!r})); {RETRY}"
+    )
+
+
 def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
     """Mutation: return only for a non-draft (`auto == "false" and not pull["draft"]`; the
     draft refuses)."""

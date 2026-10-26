@@ -609,6 +609,15 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
         raise SystemExit(f"::error::apply aborted for {where}: {reason}")
 
 
+def _draft(pull):
+    """`pull["draft"]`, raising `ValueError` unless it is a boolean: a missing state is no
+    proof of ready."""
+    draft = pull["draft"]
+    if not isinstance(draft, bool):
+        raise ValueError(f"draft is {draft!r}")
+    return draft
+
+
 def _verify_cmd(repo, pr, run):
     env, stack = _env(os.environ.get("SHIPMATE_ENV", "")), os.environ.get("STACK", "")
     where = f"`{env}` / `{stack}`"
@@ -635,7 +644,7 @@ def _verify_cmd(repo, pr, run):
     pull = _verify_pull(repo, pr, head, where, run)
     if auto == "false":
         return
-    if _confirm(where, f"pull request #{pr} is ready for review", lambda: pull["draft"]):
+    if _confirm(where, f"pull request #{pr} is ready for review", lambda: _draft(pull)):
         raise SystemExit(
             f"::error::apply aborted for {where}: pull request #{pr} is a draft; mark it ready "
             "for review, then comment `shipmate apply`"
