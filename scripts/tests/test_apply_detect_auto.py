@@ -110,7 +110,8 @@ def _run_auto(
     the successive pull request reads, `base_changed` the stacks the base changed (an exception
     raises from the read), `tip` the base branch ref's commit (an exception raises from the
     read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
-    sleep to `sleeps`, each base tip the base-side detection is asked about to `base_reads`.
+    sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the base-side detection is asked
+    about to `base_reads`.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
     out = tmp_path / "out"
@@ -169,8 +170,8 @@ def _run_auto(
     monkeypatch.setattr(aad, "_sleep", (sleeps if sleeps is not None else []).append)
     reads = [] if base_reads is None else base_reads
 
-    def _base_changed(base_ref):
-        reads.append(base_ref)
+    def _base_changed(base_ref, candidates):
+        reads.append((base_ref, sorted(candidates)))
         if isinstance(base_changed, BaseException):
             raise base_changed
         return set(base_changed)
@@ -427,7 +428,7 @@ def test_the_base_tip_is_the_branch_refs_not_the_pull_requests_base_sha(tmp_path
     the stale tip, red."""
     reads, tip = [], "c" * 40
     parsed = _run_auto(tmp_path, monkeypatch, base_reads=reads, tip=tip)
-    assert (reads, parsed["base_sha"]) == ([tip], tip)
+    assert (reads, parsed["base_sha"]) == ([(tip, ["stacks/app"])], tip)
 
 
 @pytest.mark.parametrize(
@@ -538,7 +539,8 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     runs, red.
     Mutation: write `overlap_cells` as `[]` -- red.
     Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red.
-    Mutation: print `len(locked)` for the notice's `overlap=` -- red."""
+    Mutation: print `len(locked)` for the notice's `overlap=` -- red.
+    Mutation: pass `base_changed_stacks` no candidate stacks (`set()`) -- red."""
     reads = []
     parsed = _run_auto(
         tmp_path,
@@ -556,7 +558,7 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     ]
     assert json.loads(parsed["skipped_envs"]) == ["prod"]
     assert json.loads(parsed["locked_cells"]) == []
-    assert reads == [BASE]
+    assert reads == [(BASE, ["stacks/app", "stacks/dns"])]
     assert parsed["base_sha"] == BASE
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "

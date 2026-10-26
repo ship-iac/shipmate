@@ -639,7 +639,8 @@ def bare_main(auto=False):
     if auto and candidates:
         # One read: the wave re-check compares the base tip with the one overlap was computed on.
         base_sha = wait_mergeable(repo, pr_number, head)
-        overlap = overlap_cells(candidates, bm.base_changed_stacks(base_sha))
+        stacks = {c["stack"] for c in candidates}
+        overlap = overlap_cells(candidates, bm.base_changed_stacks(base_sha, stacks))
     locked = locked_cells(repo, candidates, pr_number)
     holds = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)

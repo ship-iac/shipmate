@@ -3153,7 +3153,7 @@ def test_base_changed_stacks_lists_the_base_tips_changes_since_the_merge_base(
         return "stacks/app\n"
 
     monkeypatch.setattr(bm, "_run", _run)
-    assert bm.base_changed_stacks(tip) == {"stacks/app"}
+    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
     assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", since]]
     assert len(_git("worktree", "list").splitlines()) == 1
 
@@ -3171,7 +3171,33 @@ def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkey
     monkeypatch.setattr(
         bm, "_run", lambda args: "stacks/app\n" if args[0] == "terramate" else real(args)
     )
-    assert bm.base_changed_stacks(tip) == {"stacks/app"}
+    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+
+
+def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
+    git_repo, monkeypatch
+):
+    """Terramate lists only the stacks the base tip still has, so a stack the base deleted or
+    moved away is read from the diff. `stacks/go` is a prefix of `stacks/gone` but no parent.
+
+    Mutation: drop `| gone` from the return -- red.
+    Mutation: drop `"R"` from the statuses -- `stacks/old` missing, red.
+    Mutation: add the new path of a rename (`fields[i + 2]`) -- `stacks/old` missing, red.
+    Mutation: `p.startswith(s)` without the `/` -- `stacks/go` added, red.
+    Mutation: step 2 fields past a rename (`i += 2`) -- `stacks/zed`, deleted after it in path
+    order, missing, red."""
+    files = {f"stacks/{s}/main.tf": f"{s}\n" for s in ("gone", "old", "kept", "zed")}
+    _commit(files, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/kept/main.tf": "kept edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    _git("mv", "stacks/old", "stacks/new")
+    tip = _commit({"stacks/gone/main.tf": None, "stacks/zed/main.tf": None}, "delete, rename")
+    _git("checkout", "-q", "pr")
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
+    candidates = {"stacks/gone", "stacks/old", "stacks/kept", "stacks/go", "stacks/zed"}
+    assert bm.base_changed_stacks(tip, candidates) == {"stacks/gone", "stacks/old", "stacks/zed"}
 
 
 def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
@@ -3184,7 +3210,7 @@ def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkey
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
     missing = "f" * 40
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(missing)
+        bm.base_changed_stacks(missing, set())
     assert e.value.code == (
         f"::error::could not fetch the base tip {missing} (fatal: 'origin' does not appear to be "
         "a git repository | fatal: Could not read from remote repository. | Please make sure you "
@@ -3204,7 +3230,7 @@ def test_base_changed_stacks_names_the_update_remedy_when_the_merge_base_fails(m
 
     monkeypatch.setattr(bm.subprocess, "run", run)
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip)
+        bm.base_changed_stacks(tip, set())
     assert e.value.code == (
         f"::error::could not resolve the merge base of the pull request's base {tip} and its "
         "head: fatal: bad object. Update the branch from the base and push; if it fails again, "

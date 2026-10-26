@@ -1789,8 +1789,8 @@ stacks after this branch left it, so their plans would revert that change:
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
 pending cells' stacks` when nothing applied.
 
-The base branch changed those stacks, directly or through a module, since the
-branch left it. Each plan was made on the branch's tree, so applying it would
+The base branch changed those stacks, directly or through a module, or deleted
+or renamed files in them, since the branch left it. Each plan was made on the branch's tree, so applying it would
 revert the base's change. The held cells stay pending, a cell that runs after
 one waits with the remedy `the base also changed it; update the branch from the
 base and push`, and the environments ordered after their environment by `needs`
