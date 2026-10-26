@@ -428,12 +428,17 @@ def refuse_provenance(repo, head, runnable):
             "gh",
             "api",
             "--paginate",
-            f"repos/{repo}/actions/workflows/shipmate.yml/runs?{query}",
+            f"repos/{repo}/actions/workflows/{bm.PLAN_WORKFLOW.rsplit('/', 1)[-1]}/runs?{query}",
             "--jq",
             ".workflow_runs[].id",
         ]
     )
     newest = max(map(int, listing.split()), default=None)
+    if newest is None:
+        raise SystemExit(
+            f"::error::auto apply refused: plan run {run_id} is not listed, and no autoplan run "
+            "of the head is listed. " + _AUTO_REMEDY
+        )
     if newest != int(run_id):
         raise SystemExit(
             f"::error::auto apply refused: plan run {run_id} is not the newest autoplan of the "
@@ -465,9 +470,10 @@ def refuse_pusher(repo, run):
 
 
 def wait_mergeable(repo, pr_number, head):
-    """The pull request, re-read until GitHub has computed `mergeable` or `_MERGEABLE_READS`
-    reads are spent, then refused by `authorize._ready_reason`. Every read refuses when the
-    head moved: the new head's autoplan decides its own apply."""
+    """The pull request's base tip, after re-reading it until GitHub has computed `mergeable`
+    or `_MERGEABLE_READS` reads are spent, then refusing as `authorize.decide` does on its head
+    repository, draft and mergeable state. Every read refuses when the head moved: the new
+    head's autoplan decides its own apply. A missing base tip refuses."""
     for i in range(_MERGEABLE_READS):
         if i:
             _sleep(_MERGEABLE_WAIT)
@@ -480,10 +486,16 @@ def wait_mergeable(repo, pr_number, head):
             )
         if pr.get("mergeable") is not None:
             break
-    reason = az._ready_reason(pr)
+    reason = az._head_repo_reason(pr) or az._ready_reason(pr)
     if reason:
         raise SystemExit(f"::error::{reason}")
-    return pr
+    base = (pr.get("base") or {}).get("sha")
+    if not base:
+        raise SystemExit(
+            f"::error::auto apply refused: GitHub returned no base tip for pull request "
+            f"#{pr_number}. " + _AUTO_REMEDY
+        )
+    return base
 
 
 def auto_main():
@@ -598,7 +610,7 @@ def bare_main(auto=False):
         if runnable:
             refuse_pusher(repo, refuse_provenance(repo, head, runnable))
             provenance_run = runnable[0]["plan_run_id"]
-            base_sha = wait_mergeable(repo, pr_number, head)["base"]["sha"]
+            base_sha = wait_mergeable(repo, pr_number, head)
         auto_outputs = {"provenance_run": provenance_run, "base_sha": base_sha}
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.

@@ -111,8 +111,7 @@ def _permission_reason(permission, verb, *, subject="the commenter", retry="comm
     `write` and `admin` pass. Anything else refuses, and an unreadable value (empty, or
     outside `[a-z]+`) is never quoted back; that refusal ends with `retry`. `fullmatch`, not
     `match` with `^...$`: `$` matches before a trailing newline, so `"write\\n"` would pass
-    the charset check. Route `evict` is named by its command, `unlock --evict`. An auto apply
-    passes the pusher as `subject`, so the policy stays this one function."""
+    the charset check. Route `evict` is named by its command, `unlock --evict`."""
     verb = "unlock --evict" if verb == "evict" else verb
     if permission in ("write", "admin"):
         return None
@@ -151,8 +150,7 @@ def _head_repo_reason(pr):
 
 
 def _ready_reason(pr):
-    """Refusal text when the pull request is a draft or not mergeable, else ''. `decide` and
-    apply-detect's auto form both apply it."""
+    """Refusal text when the pull request is a draft or not mergeable, else ''."""
     if pr.get("draft"):
         # Keyed on `draft`, not `mergeable_state`: that field has one slot and
         # reports "dirty" for a draft with conflicts, missing exactly the draft

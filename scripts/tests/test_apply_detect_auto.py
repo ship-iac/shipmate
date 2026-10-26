@@ -23,9 +23,10 @@ BOT = "shipmate-iac[bot]"
 APP = {"id": int(APP_ID), "slug": "shipmate-iac"}
 RUN = "123456"
 REMEDY = "Comment `shipmate apply` on the pull request to apply it."
+REPO = {"full_name": "o/r"}
 PULL_OK = {
-    "head": {"sha": HEAD},
-    "base": {"sha": BASE},
+    "head": {"sha": HEAD, "repo": REPO},
+    "base": {"sha": BASE, "repo": REPO},
     "mergeable": True,
     "mergeable_state": "clean",
     "draft": False,
@@ -351,6 +352,47 @@ def test_a_read_whose_head_moved_refuses(tmp_path, monkeypatch):
     assert _refusal(tmp_path, monkeypatch, pulls=[pull, moved]) == (
         f"::error::auto apply refused: pull request #{PR_NUMBER} head is {'c' * 40}, but this "
         f"run applies {HEAD}. The new head's autoplan decides its own apply."
+    )
+
+
+def test_a_fork_head_refuses(tmp_path, monkeypatch):
+    """Mutation: drop `_head_repo_reason` from the final refusal -- the run applies."""
+    fork = {**PULL_OK, "head": {"sha": HEAD, "repo": {"full_name": "fork/r"}}}
+    assert _refusal(tmp_path, monkeypatch, pulls=[fork]) == (
+        "::error::this pull request's head is in `fork/r`; shipmate applies and unlocks only "
+        "branches of this repository."
+    )
+
+
+def test_a_pull_request_without_a_base_tip_refuses(tmp_path, monkeypatch):
+    """Mutation: drop the missing-base refusal -- the run applies."""
+    pull = {**PULL_OK, "base": {"repo": REPO}}
+    assert _refusal(tmp_path, monkeypatch, pulls=[pull]) == (
+        f"::error::auto apply refused: GitHub returned no base tip for pull request "
+        f"#{PR_NUMBER}. {REMEDY}"
+    )
+
+
+@pytest.mark.parametrize("actor", [None, {"login": "x[bot]"}])
+def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monkeypatch, actor):
+    """No `triggering_actor`, or a login outside `_LOGIN`, is never put into a URL.
+
+    Mutation: `readable = True` -- both rows read `write` and apply."""
+    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
+    if actor is not None:
+        run["triggering_actor"] = actor
+    assert _refusal(tmp_path, monkeypatch, run=run) == (
+        "::error::not authorized: could not read the pusher's permission on this repository, "
+        "so `shipmate apply` was not run. This run's log has the API response; push again, or "
+        "a writer comments `shipmate apply`."
+    )
+
+
+def test_an_empty_autoplan_listing_refuses_naming_it(tmp_path, monkeypatch):
+    """Mutation: drop the `newest is None` refusal -- it reads "(run None is)"."""
+    assert _refusal(tmp_path, monkeypatch, listing=()) == (
+        f"::error::auto apply refused: plan run {RUN} is not listed, and no autoplan run of the "
+        f"head is listed. {REMEDY}"
     )
 
 
