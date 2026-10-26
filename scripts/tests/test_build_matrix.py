@@ -3200,6 +3200,17 @@ def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
     assert bm.base_changed_stacks(tip, candidates) == {"stacks/gone", "stacks/old", "stacks/zed"}
 
 
+def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
+    """A repository with `diff.renames=copies` makes `--find-renames` report copies too.
+
+    Mutation: step 3 fields past an `R` alone (`i += 3 if status == "R" else 2`) -- the copy's
+    new path is read as a status and `stacks/b`'s deletion is missed, red. Mutation: count a
+    copy's source (`status in ("D", "R", "C")`) -- `stacks/a` is added, red."""
+    out = "C075\0stacks/a/x.tf\0stacks/c/x.tf\0D\0stacks/b/y.tf\0"
+    monkeypatch.setattr(bm, "_run", lambda args: out)
+    assert bm._moved_from("s", "u") == {"stacks/b/y.tf"}
+
+
 def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
     """The remedy is a push from the updated branch, never a bare `shipmate apply`, which runs
     no overlap check.

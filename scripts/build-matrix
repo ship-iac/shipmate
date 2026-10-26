@@ -300,7 +300,8 @@ def base_changed_stacks(base_ref, candidates):
 def _moved_from(since, until):
     """The old paths of the files `git diff --name-status --find-renames` reports deleted or
     renamed between `since` and `until`. `-z`: one NUL-separated field per status and path, so
-    no path is quoted; a rename carries its old path, then its new one."""
+    no path is quoted; a rename, or a copy under `diff.renames=copies`, carries its old path,
+    then its new one. A copy leaves its source in place, so it is not counted."""
     fields = _run(["git", "diff", "-z", "--name-status", "--find-renames", since, until]).split(
         "\0"
     )
@@ -309,7 +310,7 @@ def _moved_from(since, until):
         status = fields[i][:1]
         if status in ("D", "R"):
             moved.add(fields[i + 1])
-        i += 3 if status == "R" else 2
+        i += 3 if status in ("R", "C") else 2
     return moved
 
 
