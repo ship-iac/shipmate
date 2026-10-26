@@ -1076,12 +1076,25 @@ RECORD_READ = [
 ]
 
 
-def _pull(state="open", head=HEAD):
+def _pull(state="open", head=HEAD, draft=False):
     """A pull request whose `base.sha` is stale: probed on a sample pull request, it kept the
     old tip for 20 s and more after a push to the base, so the check reads the branch ref."""
     return json.dumps(
-        {"state": state, "head": {"sha": head}, "base": {"sha": "9" * 40, "ref": "main"}}
+        {
+            "state": state,
+            "draft": draft,
+            "head": {"sha": head},
+            "base": {"sha": "9" * 40, "ref": "main"},
+        }
     )
+
+
+RUN_READ = ["gh", "api", f"repos/{REPO}/actions/runs/{RUN}"]
+PERMISSION_READ = ["gh", "api", f"repos/{REPO}/collaborators/k3np/permission"]
+
+
+def _plan_run(actor="k3np", trigger="k3np"):
+    return json.dumps({"actor": {"login": actor}, "triggering_actor": {"login": trigger}})
 
 
 def _tip(sha=BASE):
@@ -1222,9 +1235,93 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     check-run reads are left unconsumed). Mutation: read the record with no `name` (an
     unexpected call)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
-    gh.on(RECORD_READ, _records("1", RUN))
+    gh.on(RECORD_READ, _records("1", RUN)).on(RUN_READ, _plan_run())
+    gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
+
+
+def test_verify_auto_refuses_a_draft(monkeypatch, tmp_path):
+    """A pull request converted to draft while a wave waits is no longer ready to apply.
+
+    Mutation: drop the draft refusal (the base tip read runs, unexpected)."""
+    gh = _held().on(PULL_READ, _pull(draft=True))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} pull request #7 is a draft; mark it ready for review, then comment "
+        "`shipmate apply`"
+    )
+
+
+def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
+    """Mutation: return only for a non-draft (`auto == "false" and not pull["draft"]`; the
+    draft refuses)."""
+    gh = _held().on(PULL_READ, _pull(draft=True))
+    assert _verify(monkeypatch, tmp_path, gh) == {}
+
+
+def _pusher_gh(plan_run, permission=None):
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, plan_run)
+    if permission is not None:
+        gh.on(PERMISSION_READ, permission)
+    return gh
+
+
+@pytest.mark.parametrize(
+    ("plan_run", "permission", "reason"),
+    [
+        pytest.param(
+            _plan_run(),
+            json.dumps({"permission": "read"}),
+            "not authorized: `shipmate apply` needs write access to this repository, and the "
+            "pusher @k3np's permission is `read`.",
+            id="read",
+        ),
+        pytest.param(
+            _plan_run(),
+            FAIL,
+            "not authorized: could not read the pusher @k3np's permission on this repository, "
+            "so `shipmate apply` was not run. This run's log has the API response; push again, "
+            "or a writer comments `shipmate apply`.",
+            id="unreadable",
+        ),
+        pytest.param(
+            _plan_run(trigger="octocat"),
+            None,
+            "not authorized: the autoplan ran as @k3np but was triggered by @octocat, so it was "
+            "re-run, and auto authorizes only the push itself; a writer comments `shipmate "
+            "apply`.",
+            id="re-run",
+        ),
+    ],
+)
+def test_verify_auto_rereads_the_pushers_permission(
+    monkeypatch, tmp_path, plan_run, permission, reason
+):
+    """The wave decides the pusher with detect's function and wording.
+
+    Mutation: drop the pusher check from `_verify_auto` (every row passes)."""
+    gh = _pusher_gh(plan_run, permission)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == f"::error::{WHERE} {reason}"
+
+
+@pytest.mark.parametrize(
+    ("plan_run", "why"),
+    [
+        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
+        pytest.param(
+            '"x"', "AttributeError(\"'str' object has no attribute 'get'\")", id="malformed"
+        ),
+    ],
+)
+def test_verify_auto_refuses_a_pusher_it_cannot_read(monkeypatch, tmp_path, plan_run, why):
+    """Mutation: answer the run read's failure with no reason (`except SystemExit: return None`
+    around it; read-fails passes)."""
+    gh = _pusher_gh(plan_run)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm the pusher of plan run {RUN} may apply ({why}); "
+        f"{RETRY}"
+    )
 
 
 def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):

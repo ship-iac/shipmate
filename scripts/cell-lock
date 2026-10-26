@@ -29,8 +29,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds.
 - `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
   `STACK` in `SHIPMATE_ENV` and is open at `SHIPMATE_HEAD_SHA`. With `SHIPMATE_AUTO` `true` it
-  also refuses unless `SHIPMATE_PROVENANCE_RUN` is the head's newest autoplan and the run the
-  cell's newest plan record names, and the base tip is still `SHIPMATE_BASE_SHA`. A "Re-run
+  also refuses unless the pull request is not a draft, `SHIPMATE_PROVENANCE_RUN` is the head's
+  newest autoplan and the run the cell's newest plan record names, its pusher still passes
+  `authorize.pusher_reason`, and the base tip is still `SHIPMATE_BASE_SHA`. A "Re-run
   failed jobs" of an apply re-runs its waves without `detect` or `acquire`, and a wave can wait
   hours on an environment approval, so each apply cell checks here before its credentials.
 """
@@ -57,6 +58,7 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
+az = _load("authorize")
 ec = _load("env-config")
 
 LOCKS = "refs/shipmate/locks/"
@@ -595,6 +597,16 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
             f"{'no plan run' if recorded is None else f'plan run {recorded}'}, not plan run "
             f"{provenance}, which this auto apply applies; {_RETRY}"
         )
+    # The pusher's write access can be revoked while a wave waits on an approval.
+    reason = _confirm(
+        where,
+        f"the pusher of plan run {provenance} may apply",
+        lambda: az.pusher_reason(
+            repo, gh_json(f"repos/{repo}/actions/runs/{provenance}", run), run=run
+        ),
+    )
+    if reason:
+        raise SystemExit(f"::error::apply aborted for {where}: {reason}")
 
 
 def _verify_cmd(repo, pr, run):
@@ -623,6 +635,11 @@ def _verify_cmd(repo, pr, run):
     pull = _verify_pull(repo, pr, head, where, run)
     if auto == "false":
         return
+    if _confirm(where, f"pull request #{pr} is ready for review", lambda: pull["draft"]):
+        raise SystemExit(
+            f"::error::apply aborted for {where}: pull request #{pr} is a draft; mark it ready "
+            "for review, then comment `shipmate apply`"
+        )
     tip = _confirm(
         where, f"the base tip of pull request #{pr}", lambda: ag.base_tip(repo, pull, run=run)
     )

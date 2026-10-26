@@ -1851,9 +1851,11 @@ or a release after a close, takes it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
 and unless the pull request is open at the applied head. Under `apply_mode: auto`
-it also refuses unless the plan run detect bound is still the head's newest autoplan
-and the run the cell's newest plan record names, and the base branch's tip, read from
-its ref, is still the one detect read, whatever the stack. A read that fails refuses with
+it also refuses unless the pull request is not a draft, the plan run detect bound is
+still the head's newest autoplan and the run the cell's newest plan record names, that
+run's pusher still passes detect's pusher check (§`apply_mode: auto`, same function and
+wording), and the base branch's tip, read from its ref, is still the one detect read,
+whatever the stack. Mergeability is not re-read: a base move refuses already. A read that fails refuses with
 `` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
 or comment `shipmate apply` on the pull request ``, and every other mismatch names
 itself with the same remedy; a closed pull request refuses with `nothing applies`. A refused cell assumes no cloud role, and the apply

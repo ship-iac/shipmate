@@ -1874,6 +1874,10 @@ An `auto` cell also refuses when:
   `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
+- `pull request #<pr> is a draft`: it was converted to draft since `detect`.
+  Mark it ready for review, then comment `shipmate apply`.
+- a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above):
+  the pusher's access changed since `detect`, read again before each cell.
 
 ### `the pull request's head shares no history with its base`
 
