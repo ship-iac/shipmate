@@ -1689,6 +1689,18 @@ When it recurs, check the App's `actions: write` permission and reconcile
 §The workflow file, which offers `auto` as a `verb` option and holds the `auto`
 job.
 
+### `apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'`
+
+The `guard` job of `apply.yml` refused the autoplan's dispatch because the
+`auto` job in `shipmate.yml` does not pass `auto: true`. Without it the run
+would be a bare apply with none of the `auto` checks. Nothing applied. Give the
+`auto` job the published `with:` block (`auto: true`, `ref`, `pr_number`,
+`runs_on`); `shipmate doctor` names each wrong key.
+
+The reverse, ``apply refused: the calling job passes 'auto: true', but this run
+is not a dispatch with verb 'auto'``, means a job other than the published
+`auto` job passes `auto: true`. Remove it from that job.
+
 ### `auto apply refused: the run's actor is ...`, or `no check run on the head is authored by the shipmate App`
 
 The `auto` run's `detect` refused before any wave, and nothing applied. An
