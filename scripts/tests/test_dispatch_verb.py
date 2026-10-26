@@ -240,17 +240,21 @@ def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_pa
     )
 
 
+@pytest.mark.parametrize("verb", ["bogus", "auto"])
 @bash_only
-def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_path):
-    """A verb outside {plan, apply, unlock} reaches no workflow, and says so.
+def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_path, verb):
+    """A verb outside {plan, apply, unlock} reaches no workflow, and says so. `auto` is a literal
+    row: only the plan summary may dispatch it, since the `auto` run's actor check trusts every
+    `auto` dispatch to come from there, and comment-ops dispatches through this action alone.
 
-    Mutations: add a fourth value to the `case` list; drop that arm's `say_no_run_started`.
+    Mutations: add `auto` to the `case` list (the `auto` row reddens); drop that arm's
+    `say_no_run_started`.
     """
-    result, argv = _run_dispatch(tmp_path, verb="bogus", gh_stub=RECORDING_GH_STUB)
+    result, argv = _run_dispatch(tmp_path, verb=verb, gh_stub=RECORDING_GH_STUB)
     output = result.stdout + result.stderr
     assert result.returncode != 0, "an unknown verb must be refused"
     assert _DISPATCH_PATH not in argv, f"an unknown verb must dispatch nothing: {argv!r}"
-    assert "::error::verb must be plan, apply or unlock (got: bogus)" in output, (
+    assert f"::error::verb must be plan, apply or unlock (got: {verb})" in output, (
         f"expected error message not found in output: {output}"
     )
     assert "/issues/42/comments" in argv and _RUN_URL in argv, (

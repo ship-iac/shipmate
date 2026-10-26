@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Decide whether a plan run's summary dispatches an `auto` apply, and print the environments
+that call for one.
+
+Prints, space-separated on one line, the `apply_mode: auto` environments of the default branch's
+table that hold a changed cell among this run's cell summaries (`cells/`); prints nothing when
+any condition below fails, writing why to stderr. The summary dispatches `verb: auto` when the
+line is non-empty. Conditions, all from the environment:
+
+- `GITHUB_EVENT_NAME` is `pull_request_target`: only an autoplan dispatches.
+- `GITHUB_RUN_ATTEMPT` is `1`: a re-run never starts a second `auto` run for the same head.
+- `SHIPMATE_IS_DRAFT` is not `true`.
+- gate-state's `SHIPMATE_GATE_STATE` and `SHIPMATE_COMMENT_MODE` are `pending` and `post`: the
+  plan published completely and nothing holds the gate, and an apply check is pending.
+
+The table is read last, through `env-config.read_table`, so a run that fails a condition makes
+no API call. A refusal there exits 1 with `::error::`.
+"""
+
+import os
+import sys
+
+from _shipmate import _load, cell_summaries, run_annotated
+
+ec = _load("env-config")
+
+_KEYS = ("stack", "environment", "changed")
+_SKEW = (
+    "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
+    "reference to one commit"
+)
+
+
+def skip_reason(*, event, attempt, is_draft, state, mode):
+    """Why this run dispatches no `auto` apply, or None when every condition holds."""
+    if event != "pull_request_target":
+        return f"a {event} run is not an autoplan"
+    if attempt != "1":
+        return f"run attempt {attempt} is a re-run"
+    if is_draft == "true":
+        return "the pull request is a draft"
+    if (state, mode) != ("pending", "post"):
+        return f"the gate is not pending over a complete plan (state {state!r}, mode {mode!r})"
+    return None
+
+
+def changed_auto_envs(cells, auto):
+    """The sorted environments in `auto` holding a changed cell of `cells`."""
+    return sorted({c["environment"] for c in cells if c["changed"]} & set(auto))
+
+
+def main():
+    reason = skip_reason(
+        event=os.environ.get("GITHUB_EVENT_NAME", ""),
+        attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+        is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
+        state=os.environ.get("SHIPMATE_GATE_STATE", ""),
+        mode=os.environ.get("SHIPMATE_COMMENT_MODE", ""),
+    )
+    if reason:
+        print(f"no auto apply dispatched: {reason}", file=sys.stderr)
+        return
+    cells = [
+        c for _, c in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
+    ]
+    envs = changed_auto_envs(cells, ec.auto_envs(ec.read_table()))
+    if not envs:
+        print(
+            "no auto apply dispatched: no changed cell is in an apply_mode auto environment",
+            file=sys.stderr,
+        )
+        return
+    print(" ".join(envs))
+
+
+if __name__ == "__main__":
+    run_annotated(main)

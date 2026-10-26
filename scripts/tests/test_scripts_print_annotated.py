@@ -18,6 +18,7 @@ SCRIPTS_EXPECTED = [
     "apply-gate",
     "apply-snapshot",
     "authorize",
+    "auto-dispatch",
     "build-matrix",
     "cell-lock",
     "collapse-reply",

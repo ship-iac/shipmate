@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an on-demand plan whose comment was created or updated collapses the started reply that links this run.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an autoplan's first attempt whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
 inputs:
   pr-number:
     description: Pull request number.
@@ -127,10 +127,9 @@ runs:
         permission-statuses: write
         permission-pull-requests: write
         permission-contents: read
-        # Some configurations need Actions read for doctor's environment probes' `/environments`
-        # reads; without it they degrade to "could not verify". A subset of the manifest's
-        # `actions: write`, so no re-approval.
-        permission-actions: read
+        # `write` dispatches the `auto` apply; doctor's environment probes' `/environments` reads
+        # need Actions read on some configurations. The manifest grants `actions: write`.
+        permission-actions: write
         # doctor's plan-environment secret probe lists `/environments/{name}/secrets`.
         permission-environments: read
 
@@ -484,6 +483,45 @@ runs:
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi
+
+    - name: Dispatch an auto apply
+      # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
+      # job first, so only a written pending gate over published apply checks dispatches.
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
+        SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}
+        SHIPMATE_COMMENT_MODE: ${{ steps.gate.outputs.comment_mode }}
+        # dispatch-body's inputs; no ENVIRONMENT, so the body carries no environment key.
+        VERB: auto
+        REF: ${{ inputs.head-sha }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        scripts="$GITHUB_ACTION_PATH/../../scripts"
+        # Reviewer-facing degrade only: the gate is already written and nothing here touches it.
+        # Each failure warns and exits 0; a failed dispatch also replies with the remedy.
+        if ! envs=$(python3 "$scripts/auto-dispatch" 2>decide.err); then
+          sed 's/^::error::/::warning::/' decide.err >&2
+          echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+          exit 0
+        fi
+        cat decide.err >&2
+        [ -n "$envs" ] || exit 0
+        if ! body=$(python3 "$scripts/dispatch-body") \
+          || ! gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/shipmate.yml/dispatches" \
+            --input - <<<"$body" >/dev/null; then
+          echo "::warning::the auto apply dispatch for $envs failed; comment shipmate apply to apply"
+          text="auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
+            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply failure reply"
+          exit 0
+        fi
+        echo "::notice title=dispatch::dispatched an auto apply of $envs for PR #$PR_NUMBER (ref $REF)"
 
     - name: Collapse the started reply
       if: ${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' && (steps.upsert.outputs.result == 'created' || steps.upsert.outputs.result == 'updated') }}

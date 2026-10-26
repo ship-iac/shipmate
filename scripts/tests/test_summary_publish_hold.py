@@ -547,6 +547,7 @@ LATER_STEP_IFS = {
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_SUPERSEDED,
     GATE: NOT_SUPERSEDED,
+    "Dispatch an auto apply": NOT_SUPERSEDED,
     "Collapse the started reply": (
         "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true'"
         " && (steps.upsert.outputs.result == 'created'"
