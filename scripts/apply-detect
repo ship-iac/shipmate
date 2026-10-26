@@ -386,22 +386,30 @@ def refuse_unreviewed(env, table, decision):
         raise SystemExit(f"::error::{reason}")
 
 
-def refuse_actor(lines, app_id, actor):
-    """Refuse unless `actor` is the bot login of the App that authored the head's checks.
+def refuse_actor(lines, app_id, actor, triggering_actor):
+    """Refuse unless `actor` and `triggering_actor` are the bot login of the App that authored
+    the head's checks.
 
     The whole string, never a `[bot]` suffix: a `GITHUB_TOKEN` dispatch runs as
     `github-actions[bot]`. The slug comes from the App-authored check runs, so a head with
-    none refuses."""
+    none refuses. A human's "Re-run all jobs" keeps `actor` and makes the human
+    `triggering_actor`, so a re-run refuses."""
     slugs = {(r.get("app") or {}).get("slug") for r in ag.app_runs(lines, app_id)}
     if not slugs:
         raise SystemExit(
             "::error::auto apply refused: no check run on the head is authored by the shipmate "
             "App, so its bot login is unknown. " + _AUTO_REMEDY
         )
-    if actor not in {f"{s}[bot]" for s in slugs if s}:
+    bots = {f"{s}[bot]" for s in slugs if s}
+    if actor not in bots:
         raise SystemExit(
             f"::error::auto apply refused: the run's actor is {actor!r}, not the shipmate App: "
             "only the App dispatches an auto apply, after an autoplan. " + _AUTO_REMEDY
+        )
+    if triggering_actor not in bots:
+        raise SystemExit(
+            f"::error::auto apply refused: the run's triggering actor is {triggering_actor!r}, "
+            "not the shipmate App: a re-run of an auto apply never applies. " + _AUTO_REMEDY
         )
 
 
@@ -598,7 +606,12 @@ def bare_main(auto=False):
     app_id = os.environ["SHIPMATE_APP_ID"]
     lines = _check_run_lines(repo, head)
     if auto:
-        refuse_actor(lines, app_id, os.environ.get("GITHUB_ACTOR", ""))
+        refuse_actor(
+            lines,
+            app_id,
+            os.environ.get("GITHUB_ACTOR", ""),
+            os.environ.get("GITHUB_TRIGGERING_ACTOR", ""),
+        )
     cells = cells_from_checks(apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
     table = bm.env_config(cells, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     cells = bm.stamp_rows(cells, table, "apply")

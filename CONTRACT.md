@@ -1933,10 +1933,13 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
 `auto apply refused:`, except the moved head's, ends ``Comment `shipmate apply`
 on the pull request to apply it.``
 
-- **Actor.** The run's `github.actor` must equal `<slug>[bot]`, compared whole,
-  where `<slug>` is the `app.slug` of the App-authored check runs on the head;
-  a head with no App-authored check refuses. A `GITHUB_TOKEN` dispatch runs as
-  `github-actions[bot]`, which the `guard` job admits and this check refuses.
+- **Actor.** The run's `github.actor` and `github.triggering_actor` must each
+  equal `<slug>[bot]`, compared whole, where `<slug>` is the `app.slug` of the
+  App-authored check runs on the head; a head with no App-authored check
+  refuses. A `GITHUB_TOKEN` dispatch runs as `github-actions[bot]`, which the
+  `guard` job admits and this check refuses. A human's "Re-run all jobs" of an
+  `auto` run makes the human its triggering actor, so the re-run refuses;
+  comment `shipmate apply` instead.
 - **Mergeability.** With a pending cell in an `auto` environment neither held
   nor `targeted`, `detect` reads the pull request
   until GitHub reports `mergeable` as non-null, at most 12 reads 5 s apart.

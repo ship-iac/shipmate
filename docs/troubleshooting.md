@@ -1701,16 +1701,18 @@ The reverse, ``apply refused: the calling job passes 'auto: true', but this run
 is not a dispatch with verb 'auto'``, means a job other than the published
 `auto` job passes `auto: true`. Remove it from that job.
 
-### `auto apply refused: the run's actor is ...`, or `no check run on the head is authored by the shipmate App`
+### `auto apply refused: the run's actor is ...`, `the run's triggering actor is ...`, or `no check run on the head is authored by the shipmate App`
 
 The `auto` run's `detect` refused before any wave, and nothing applied. An
 `auto` run must run as the shipmate App's bot login, `<slug>[bot]` compared
 whole, where `<slug>` comes from the App-authored check runs on the head. Only a
 plan run's `summary` job dispatches `verb: auto`, with an App token; a run whose
 actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
-included, was dispatched by something else. With no App-authored check on the
-head there is no slug to compare. Comment `shipmate apply` on the pull request,
-or push when the head carries no apply checks yet.
+included, was dispatched by something else. A "Re-run all jobs" of an `auto` run
+runs with the re-runner as its triggering actor and refuses; do not re-run an
+`auto` run. With no App-authored check on the head there is no slug to compare.
+Comment `shipmate apply` on the pull request, or push when the head carries no
+apply checks yet.
 
 ### ``auto apply refused: plan run <n> is a `<event>` run, not an autoplan``
 

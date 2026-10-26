@@ -88,6 +88,7 @@ def _run_auto(
     order=None,
     checks=None,
     actor=BOT,
+    triggering=BOT,
     decision="NONE",
     run=None,
     listing=(int(RUN),),
@@ -116,6 +117,7 @@ def _run_auto(
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_ACTOR": actor,
+        "GITHUB_TRIGGERING_ACTOR": triggering,
         "SHIPMATE_AUTO": flag,
         "SHIPMATE_ENV": "",
         "SHIPMATE_HEAD_SHA": HEAD,
@@ -245,6 +247,16 @@ def test_an_actor_that_is_not_the_apps_bot_refuses(tmp_path, monkeypatch, actor)
     assert _refusal(tmp_path, monkeypatch, actor=actor) == (
         f"::error::auto apply refused: the run's actor is {actor!r}, not the shipmate App: only "
         f"the App dispatches an auto apply, after an autoplan. {REMEDY}"
+    )
+
+
+@pytest.mark.parametrize("triggering", ["k3np", "github-actions[bot]", ""])
+def test_a_rerun_by_anyone_but_the_apps_bot_refuses(tmp_path, monkeypatch, triggering):
+    """A human's "Re-run all jobs" keeps the App as `actor` and makes the human the triggering
+    actor. Mutation: drop the `triggering_actor` refusal -- every row applies."""
+    assert _refusal(tmp_path, monkeypatch, triggering=triggering) == (
+        f"::error::auto apply refused: the run's triggering actor is {triggering!r}, not the "
+        f"shipmate App: a re-run of an auto apply never applies. {REMEDY}"
     )
 
 
