@@ -1820,7 +1820,8 @@ stacks after this branch left it, so their plans would revert that change:
 pending cells' stacks` when nothing applied.
 
 The base branch changed those stacks, directly or through a module, or deleted
-or renamed files in them, since the branch left it. Each plan was made on the branch's tree, so applying it would
+or renamed files in them, since the branch left it. A stack the branch renamed
+is held when the base changed its old path. Each plan was made on the branch's tree, so applying it would
 revert the base's change. The held cells stay pending, a cell that runs after
 one waits with the remedy `the base also changed it; update the branch from the
 base and push`, and the environments ordered after their environment by `needs`

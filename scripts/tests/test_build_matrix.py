@@ -3220,6 +3220,43 @@ def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_hold
     assert bm.base_changed_stacks(root_too, {".", "stacks/app"}) == {".", "stacks/app"}
 
 
+@pytest.mark.parametrize(
+    ("base_change", "listed", "held"),
+    [
+        pytest.param(
+            {"stacks/a/main.tf": "base edit\n"},
+            "stacks/a\n",
+            {"stacks/a", "stacks/b"},
+            id="base-changed",
+        ),
+        pytest.param({"stacks/a/main.tf": None}, "", {"stacks/b"}, id="base-deleted"),
+        pytest.param({"other/x.tf": "base edit\n"}, "", set(), id="base-untouched"),
+    ],
+)
+def test_base_changed_stacks_follows_a_stack_the_branch_renamed(
+    git_repo, monkeypatch, base_change, listed, held
+):
+    """The branch renames `stacks/a` to `stacks/b`; the base commits `base_change`. The stub answers
+    Terramate's base-side listing with `listed`. A plan of `stacks/b` reverts the base's edit of
+    `stacks/a`, so the candidate `stacks/b` is held only when the base changed its old path.
+
+    Mutation: drop `followed` from the return (base-changed misses `stacks/b`, red). Mutation:
+    match the rename's old path against the candidate (`_inside(old, s, ...)`; base-changed misses
+    `stacks/b`, red). Mutation: hold on any rename (`or True`; base-untouched holds `stacks/b`,
+    red). Mutation: drop `old in moved` (base-deleted, which Terramate cannot list, misses
+    `stacks/b`, red)."""
+    _commit({"stacks/a/main.tf": "a\n", "other/x.tf": "x\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _git("mv", "stacks/a", "stacks/b")
+    _commit({}, "rename a to b")
+    _git("checkout", "-q", "main")
+    tip = _commit(base_change, "base edit")
+    _git("checkout", "-q", "pr")
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: listed if args[0] == "terramate" else real(args))
+    assert bm.base_changed_stacks(tip, {"stacks/b"}) == held
+
+
 def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
     """A repository with `diff.renames=copies` makes `--find-renames` report copies too.
 

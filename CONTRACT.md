@@ -2002,7 +2002,9 @@ stack, directly or through a module, since the merge base of the base tip and th
 head: Terramate's change detection runs in a worktree of the base tip, from that
 merge base. Terramate lists only the stacks the base tip still has, so a stack
 whose files the base deleted or renamed since that merge base
-(`git diff --name-status --find-renames`) is held too. Applying its plan would revert the base's change (§Fan-out). A held
+(`git diff --name-status --find-renames`) is held too, and so is a stack holding
+a file the branch renamed from a path the base also changed (inside a stack the
+base-side detection lists, or a path the base deleted or renamed). Applying its plan would revert the base's change (§Fan-out). A held
 cell is not applied: its apply check and the gate stay pending, it stops its
 environment's `needs` successors as a locked cell does, a cell that runs after it
 waits, and the result comment names it with ``⚪ held, the base changed these stacks after this branch left

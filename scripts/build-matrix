@@ -268,7 +268,9 @@ def base_changed_stacks(base_ref, candidates):
     included: Terramate's change detection, run in a detached worktree of `base_ref`. A plan of
     such a stack made on `HEAD` reverts the base's change. Terramate lists only stacks the base
     still has, so each stack path in `candidates` that the base deleted or renamed a file
-    inside, read from `git diff --name-status`, is added. Refuses as `merge_base` does when the
+    inside, read from `git diff --name-status`, is added. So is each candidate holding a file
+    `HEAD` renamed from a path the base also changed: inside a stack the base-side detection
+    lists, or a path the base deleted or renamed. Refuses as `merge_base` does when the
     merge base cannot be resolved, and on a failed worktree, listing or diff. A `base_ref` the
     clone lacks, a tip the base gained after the checkout, is fetched from `origin` first; a
     failed fetch refuses."""
@@ -289,9 +291,18 @@ def base_changed_stacks(base_ref, candidates):
     tree = tempfile.mkdtemp(prefix="shipmate-base-")
     _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
     try:
-        return set(_list_stacks(False, since, tree)) | gone
+        listed = set(_list_stacks(False, since, tree))
     finally:
         _run(["git", "worktree", "remove", "--force", tree])
+    renamed = [(old, new) for status, old, new in _diff_records(since, "HEAD") if status == "R"]
+    followed = {
+        s
+        for s in candidates
+        for old, new in renamed
+        if _inside(new, s, candidates)
+        and (old in moved or any(_inside(old, b, listed) for b in listed))
+    }
+    return listed | gone | followed
 
 
 def _inside(path, stack, stacks):
@@ -303,21 +314,27 @@ def _inside(path, stack, stacks):
     return path.startswith(f"{stack}/")
 
 
-def _moved_from(since, until):
-    """The old paths of the files `git diff --name-status --find-renames` reports deleted or
-    renamed between `since` and `until`. `-z`: one NUL-separated field per status and path, so
-    no path is quoted; a rename, or a copy under `diff.renames=copies`, carries its old path,
-    then its new one. A copy leaves its source in place, so it is not counted."""
+def _diff_records(since, until):
+    """`(status letter, path, new path or None)` per record of `git diff --name-status
+    --find-renames` between `since` and `until`. `-z`: one NUL-separated field per status and
+    path, so no path is quoted; a rename, or a copy under `diff.renames=copies`, carries its old
+    path, then its new one."""
     fields = _run(["git", "diff", "-z", "--name-status", "--find-renames", since, until]).split(
         "\0"
     )
-    moved, i = set(), 0
+    records, i = [], 0
     while i < len(fields) - 1:
         status = fields[i][:1]
-        if status in ("D", "R"):
-            moved.add(fields[i + 1])
-        i += 3 if status in ("R", "C") else 2
-    return moved
+        pair = status in ("R", "C")
+        records.append((status, fields[i + 1], fields[i + 2] if pair else None))
+        i += 3 if pair else 2
+    return records
+
+
+def _moved_from(since, until):
+    """The old paths of the files deleted or renamed between `since` and `until`. A copy leaves
+    its source in place, so it is not counted."""
+    return {path for status, path, _ in _diff_records(since, until) if status in ("D", "R")}
 
 
 _METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')
