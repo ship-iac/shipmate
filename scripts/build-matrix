@@ -285,13 +285,22 @@ def base_changed_stacks(base_ref, candidates):
             )
     since = merge_base(base_ref, retry=_BASE_REMEDY)
     moved = _moved_from(since, base_ref)
-    gone = {s for s in candidates if any(p.startswith(f"{s}/") for p in moved)}
+    gone = {s for s in candidates if any(_inside(p, s, candidates) for p in moved)}
     tree = tempfile.mkdtemp(prefix="shipmate-base-")
     _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
     try:
         return set(_list_stacks(False, since, tree)) | gone
     finally:
         _run(["git", "worktree", "remove", "--force", tree])
+
+
+def _inside(path, stack, stacks):
+    """Whether the repository-relative `path` lies in `stack`'s directory. git names no `./`
+    prefix, so the root stack `.` holds every path no other stack of `stacks` holds; a path of a
+    stack missing from `stacks` counts as the root's, a hold too many, never too few."""
+    if stack == ".":
+        return not any(path.startswith(f"{s}/") for s in stacks if s != ".")
+    return path.startswith(f"{stack}/")
 
 
 def _moved_from(since, until):

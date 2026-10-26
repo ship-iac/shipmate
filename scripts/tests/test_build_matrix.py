@@ -3200,6 +3200,26 @@ def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
     assert bm.base_changed_stacks(tip, candidates) == {"stacks/gone", "stacks/old", "stacks/zed"}
 
 
+def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_holds(
+    git_repo, monkeypatch
+):
+    """git reports `main.tf`, never `./main.tf`, so the root stack `.` is matched by exclusion.
+
+    Mutation: drop the `stack == "."` branch of `_inside` (`.` never matches, red). Mutation:
+    return True for `.` (a deletion inside `stacks/app` alone holds the root too, red)."""
+    _commit({"main.tf": "root\n", "stacks/app/main.tf": "app\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/app/main.tf": "app edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    only_app = _commit({"stacks/app/main.tf": None}, "delete in a child stack")
+    root_too = _commit({"main.tf": None}, "delete in the root")
+    _git("checkout", "-q", "pr")
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
+    assert bm.base_changed_stacks(only_app, {".", "stacks/app"}) == {"stacks/app"}
+    assert bm.base_changed_stacks(root_too, {".", "stacks/app"}) == {".", "stacks/app"}
+
+
 def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
     """A repository with `diff.renames=copies` makes `--find-renames` report copies too.
 
