@@ -11,6 +11,7 @@ from _detect_fixtures import (
     forbid_shared_runner,
     held,
     stub_read_locks,
+    stub_read_table,
     wave_cells,
 )
 from _loader import github_outputs, load_script, workflow_jobs
@@ -37,11 +38,9 @@ def _check(stack, env, plan_run=RUN, **kw):
     return _apply_check(stack, env, plan_run, cells=kw.pop("cells", 1), app=APP, **kw)
 
 
-def _table(auto, other=(), order=None):
+def _table(auto, other=()):
     entries: dict[str, dict[str, Any]] = {e: {"apply_mode": "auto", "review": False} for e in auto}
     entries.update({e: {} for e in other})
-    for env, preds in (order or {}).items():
-        entries[env]["needs"] = list(preds)
     return {"layout": "folder", "environments": entries}
 
 
@@ -171,8 +170,7 @@ def _run_auto(
             {st: [] for st in stacks},
         ),
     )
-    table = _table(auto, other, order)
-    monkeypatch.setattr(aad.bm.ec, "read_table", lambda: json.loads(json.dumps(table)))
+    stub_read_table(monkeypatch, [aad.bm.ec], base=_table(auto, other), order=order)
     stub_read_locks(monkeypatch, aad.cl, locks)
     monkeypatch.setattr(aad, "_sleep", (sleeps if sleeps is not None else []).append)
     reads = [] if base_reads is None else base_reads
@@ -281,7 +279,7 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     """A ready-for-review or reopen autoplan of the head dispatches no auto apply but becomes
     the newest autoplan; its clicker is no pusher. Nothing about the run or the pusher is read.
 
-    Mutation: drop `refuse_pushed` from `auto_main` (every row applies). Mutation: admit a
+    Mutation: drop `refuse_pushed` from `bare_main` (every row applies). Mutation: admit a
     missing action (`actions.get(n) not in (*ag.PUSH_ACTIONS, None)`; older-engine applies)."""
     calls = []
     checks = [_check("stacks/app", "dev-eu", action=action)]

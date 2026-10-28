@@ -25,6 +25,7 @@ import sys
 
 from _shipmate import _load, cell_summaries, event_action, run_annotated
 
+ag = _load("apply-gate")
 ec = _load("env-config")
 
 _KEYS = ("stack", "environment", "changed")
@@ -38,7 +39,7 @@ def skip_reason(*, event, action, attempt, is_draft, state, mode):
     """Why this run dispatches no `auto` apply, or None when every condition holds."""
     if event != "pull_request_target":
         return f"a {event} run is not an autoplan"
-    if action not in ("opened", "synchronize"):
+    if action not in ag.PUSH_ACTIONS:
         return f"the autoplan's event action is {action!r}, not a push (opened or synchronize)"
     if attempt != "1":
         return f"run attempt {attempt} is a re-run"

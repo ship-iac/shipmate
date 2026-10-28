@@ -237,11 +237,11 @@ def test_event_payload_degrades_to_empty_dict(tmp_path):
 
     Mutation: return `payload` without the `isinstance(payload, dict)` check -- the list case
     returns `[1, 2]`."""
-    assert pf._event_payload("") == {}
-    assert pf._event_payload(str(tmp_path / "absent.json")) == {}
+    assert pf.event_payload("") == {}
+    assert pf.event_payload(str(tmp_path / "absent.json")) == {}
     bad = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
-    assert pf._event_payload(str(bad)) == {}
+    assert pf.event_payload(str(bad)) == {}
     listy = tmp_path / "list.json"
     listy.write_text("[1, 2]", encoding="utf-8")
-    assert pf._event_payload(str(listy)) == {}
+    assert pf.event_payload(str(listy)) == {}

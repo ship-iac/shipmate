@@ -263,14 +263,23 @@ def write_outputs(**pairs):
             fh.write(f"{name}={value}\n")
 
 
+def event_payload(path):
+    """The event payload at `path`, or {} when `path` is empty or the file cannot be read as a
+    JSON object."""
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def event_action():
     """The `action` of the event payload at `GITHUB_EVENT_PATH`, or "" when it cannot be read
     or names none, as a `workflow_dispatch` payload does."""
-    try:
-        with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as fh:
-            action = json.load(fh).get("action")
-    except (KeyError, OSError, ValueError, AttributeError):
-        return ""
+    action = event_payload(os.environ.get("GITHUB_EVENT_PATH", "")).get("action")
     return action if isinstance(action, str) else ""
 
 

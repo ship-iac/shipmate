@@ -27,7 +27,7 @@ PR's review decision — read server-side by the `review` job, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
 the run refuses.
 
-`SHIPMATE_AUTO=true` selects the auto form, `auto_main`: the bare form over the
+`SHIPMATE_AUTO=true` selects the auto form, `bare_main(auto=True)`: the bare form over the
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
 refuses unless the actor, the plan's provenance, the pusher's permission and the pull
 request's mergeability hold, and holds a cell whose stack the base also changed.
@@ -479,11 +479,8 @@ def refuse_pushed(runnable, actions):
     `apply-gate.PUSH_ACTIONS` (`actions`, from `apply-gate.plan_actions`). A ready-for-review
     or reopen autoplan of the same head dispatches no auto apply yet becomes the newest
     autoplan, and its clicker is no pusher; a record with no action is an older engine's."""
-    bad = [
-        f"{ag.check_name(c['stack'], c['environment'])} ({actions.get(n)!r})"
-        for c in runnable
-        if actions.get(n := ag.check_name(c["stack"], c["environment"])) not in ag.PUSH_ACTIONS
-    ]
+    names = [ag.check_name(c["stack"], c["environment"]) for c in runnable]
+    bad = [f"{n} ({actions.get(n)!r})" for n in names if actions.get(n) not in ag.PUSH_ACTIONS]
     if bad:
         raise SystemExit(
             f"::error::auto apply refused: the plan records of {named(bad, _NAMED)} name no "
@@ -542,24 +539,6 @@ def overlap_cells(candidates, changed):
     ]
 
 
-def auto_main():
-    """The auto apply: `bare_main` over the `apply_mode: auto` environments' pending cells.
-
-    Every other pending environment counts as stopped in `settle`, so its `needs` successors
-    skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
-    bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
-    pending cell in an environment not stopped, the pull request must be ready and mergeable at
-    this head (`wait_mergeable`), and a cell whose stack the base changed since the merge base
-    (`build-matrix.base_changed_stacks`) is held in `overlap_cells`: it stays pending and stops
-    its environment's `needs` successors, as a locked cell does. With a cell to apply, the plan
-    run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
-    pusher must have write access (`refuse_pusher`). Writes the bare outputs plus
-    `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
-    on, empty when no pull request read was needed, `overlap_cells`, and `bare_envs`, the
-    pending environments neither `auto`, `targeted` nor held, left for a bare apply."""
-    bare_main(auto=True)
-
-
 def bare_main(auto=False):
     """The bare `shipmate apply` work set -> env-levels -> waves.
 
@@ -601,6 +580,20 @@ def bare_main(auto=False):
     A pending cell another pull request locks (`locked_cells`) stays pending and applies
     nowhere, exactly like a waiting cell; it is named in `locked_cells`. Locks are read only
     in the envs neither held nor excluded as targeted.
+
+    `auto` is the auto form, over the `apply_mode: auto` environments' pending cells.
+    Every other pending environment counts as stopped in `settle`, so its `needs` successors
+    skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
+    bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
+    pending cell in an environment not stopped, the pull request must be ready and mergeable at
+    this head (`wait_mergeable`), and a cell whose stack the base changed since the merge base
+    (`build-matrix.base_changed_stacks`) is held in `overlap_cells`: it stays pending and stops
+    its environment's `needs` successors, as a locked cell does. With a cell to apply, the plan
+    run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
+    pusher must have write access (`refuse_pusher`). Writes the bare outputs plus
+    `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
+    on, empty when no pull request read was needed, `overlap_cells`, and `bare_envs`, the
+    pending environments neither `auto`, `targeted` nor held, left for a bare apply.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -732,7 +725,7 @@ def bare_main(auto=False):
 
 def main():
     if os.environ.get("SHIPMATE_AUTO") == "true":
-        auto_main()
+        bare_main(auto=True)
         return
     env = os.environ["SHIPMATE_ENV"]
     # Routed before `refuse_unreviewed`: `_review_reason` reads an empty env as a bare
