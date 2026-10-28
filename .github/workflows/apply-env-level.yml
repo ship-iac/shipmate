@@ -71,7 +71,7 @@ jobs:
       - name: Pre-apply check
         id: pre-apply
         if: ${{ inputs.pr_number != '' }}
-        uses: $/actions/lock-verify
+        uses: $/actions/pre-apply
         with:
           pr-number: ${{ inputs.pr_number }}
           env: ${{ matrix.environment }}

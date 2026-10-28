@@ -572,10 +572,8 @@ def _verify_pull(repo, pr, head, where, run):
 def _plan_record(repo, head, name, run):
     """(plan run, event action) the newest App-authored check named `name` on `head` records,
     each None when absent."""
-    lines, app_id = (
-        check_runs(repo, head, run=run, name=name).splitlines(),
-        os.environ.get("SHIPMATE_APP_ID", ""),
-    )
+    lines = check_runs(repo, head, run=run, name=name).splitlines()
+    app_id = os.environ.get("SHIPMATE_APP_ID", "")
     plan_run = ag.plan_records(lines, app_id).get(name, (None,))[0]
     return plan_run, ag.plan_actions(lines, app_id).get(name)
 
@@ -646,7 +644,8 @@ def _verify_cmd(repo, pr, run):
             f"::error::apply aborted for {where}: SHIPMATE_HEAD_SHA must be a commit sha and "
             f"SHIPMATE_AUTO true or false (got: {head!r}, {auto!r})"
         )
-    if auto == "true" and not (is_run_id(provenance) and is_head_sha(base)):
+    auto = auto == "true"
+    if auto and not (is_run_id(provenance) and is_head_sha(base)):
         raise SystemExit(
             f"::error::apply aborted for {where}: an auto apply reached the wave without its "
             f"plan run and base tip (got: {provenance!r}, {base!r}); {_RETRY}"
@@ -654,14 +653,14 @@ def _verify_cmd(repo, pr, run):
     # "Re-run failed jobs" reuses the passed detect, skipping its actor check; the App never
     # re-runs, so a later attempt is a human's.
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
-    if auto == "true" and attempt != "1":
+    if auto and attempt != "1":
         raise SystemExit(
             f"::error::apply aborted for {where}: an auto apply is never re-run (run attempt "
             f"{attempt!r}): comment `shipmate apply`"
         )
     _verify_lock(repo, pr, env, stack, where, run)
     pull = _verify_pull(repo, pr, head, where, run)
-    if auto == "false":
+    if not auto:
         return
     if _confirm(where, f"pull request #{pr} is ready for review", lambda: _draft(pull)):
         raise SystemExit(

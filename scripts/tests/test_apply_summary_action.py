@@ -137,10 +137,8 @@ _RENDER_ENV = {
     "SHIPMATE_APPLIED_EXEMPT_ENVS": "${{ inputs.applied-exempt-envs }}",
     "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
     "SHIPMATE_WAITING_CELLS": "${{ inputs.waiting-cells }}",
-    "SHIPMATE_LOCKED_CELLS": "${{ inputs.locked-cells }}",
-    "SHIPMATE_OVERLAP_CELLS": "${{ inputs.overlap-cells }}",
+    "SHIPMATE_HELD_CELLS": "${{ inputs.held-cells }}",
     "SHIPMATE_BARE_ENVS": "${{ inputs.bare-envs }}",
-    "SHIPMATE_AUTO": "${{ inputs.auto }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
     "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
@@ -167,16 +165,13 @@ def test_render_step_env_block_matches_the_expected_mapping():
     never names the refusal -- red.
     Mutation: drop `SHIPMATE_ENV_ORDER` from the render step, so the comment orders environments
     by name -- red.
-    Mutation: drop `SHIPMATE_LOCKED_CELLS` from the render step, so an all-locked run reads
-    `🟢 no pending applies` -- red.
+    Mutation: drop `SHIPMATE_HELD_CELLS` from the render step, so an all-locked or all-overlap
+    run reads `🟢 no pending applies` -- red.
     Mutation: drop `SHIPMATE_LOCK_REFUSAL` from the render step, so a refused lock job's comment
     never names the refusal -- red.
-    Mutation: drop `SHIPMATE_OVERLAP_CELLS` from the render step, so a run holding only overlap
-    cells reads `🟢 no pending applies` -- red.
     Mutation: drop `SHIPMATE_SKIPPED_AFTER` from the render step, so a skipped line names no
     predecessor -- red.
-    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red.
-    Mutation: drop `SHIPMATE_AUTO` from the render step -- red."""
+    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -290,10 +285,8 @@ def test_declared_inputs_are_exactly_these():
         "applied-exempt-envs",
         "review-not-required-envs",
         "waiting-cells",
-        "locked-cells",
-        "overlap-cells",
+        "held-cells",
         "bare-envs",
-        "auto",
         "detect-refusal",
         "lock-refusal",
         "env-order",
@@ -429,10 +422,8 @@ _APPLY_SUMMARY_WITH = {
     "applied-exempt-envs": "${{ needs.detect.outputs.applied_exempt_envs }}",
     "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
     "waiting-cells": "${{ needs.detect.outputs.waiting_cells }}",
-    "locked-cells": "${{ needs.detect.outputs.locked_cells }}",
-    "overlap-cells": "${{ needs.detect.outputs.overlap_cells }}",
+    "held-cells": "${{ needs.detect.outputs.held_cells }}",
     "bare-envs": "${{ needs.detect.outputs.bare_envs }}",
-    "auto": "${{ inputs.auto }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "env-order": "${{ needs.detect.outputs.env_order }}",
@@ -454,11 +445,9 @@ def test_apply_passes_apply_summary_exactly_this_with():
     -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
     Mutation: drop `env-order:` from the step's `with:` -- red.
-    Mutation: drop `locked-cells:` from the step's `with:` -- red.
-    Mutation: drop `overlap-cells:` from the step's `with:` -- red.
+    Mutation: drop `held-cells:` from the step's `with:` -- red.
     Mutation: drop `skipped-after:` from the step's `with:` -- red.
     Mutation: drop `bare-envs:` from the step's `with:` -- red.
-    Mutation: drop `auto:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red."""
     steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
@@ -493,17 +482,15 @@ def test_the_detect_refusal_input_is_optional_and_empty_by_default():
 def test_the_lock_inputs_are_optional_with_empty_defaults():
     """`deploy.yml` posts no apply comment; an empty value renders no lock line and no fence.
     Mutation: set `lock-refusal` `required: true` -- red.
-    Mutation: default `locked-cells` to `""` -- red.
-    Mutation: default `overlap-cells` to `""` -- red.
+    Mutation: default `held-cells` to `""` -- red.
     Mutation: default `skipped-after` to `[]` -- red.
     Mutation: default `bare-envs` to `""` -- red."""
     inputs = action_yaml("apply-summary")["inputs"]
     assert {
         name: {k: v for k, v in inputs[name].items() if k != "description"}
-        for name in ("locked-cells", "overlap-cells", "skipped-after", "bare-envs", "lock-refusal")
+        for name in ("held-cells", "skipped-after", "bare-envs", "lock-refusal")
     } == {
-        "locked-cells": {"required": False, "default": "[]"},
-        "overlap-cells": {"required": False, "default": "[]"},
+        "held-cells": {"required": False, "default": "[]"},
         "skipped-after": {"required": False, "default": "{}"},
         "bare-envs": {"required": False, "default": "[]"},
         "lock-refusal": {"required": False, "default": ""},

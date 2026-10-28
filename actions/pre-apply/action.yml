@@ -1,4 +1,4 @@
-name: shipmate lock-verify
+name: shipmate pre-apply
 description: >-
   The pre-apply check, read-only through scripts/cell-lock verify. Refuses unless the pull request
   holds the cell's lock and is open at the applied head; with auto true, also unless the pull

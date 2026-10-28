@@ -14,6 +14,8 @@ from _shipmate import (
     check_runs,
     command_data,
     command_property,
+    event_action,
+    event_payload,
     gate_check,
     is_head_sha,
     is_pr_number,
@@ -459,3 +461,40 @@ def test_run_annotated_writes_no_refusal_output_without_the_switch(monkeypatch, 
     """Mutation: write the output whatever `refusal_output` says -- red."""
     main = _raising("::error::first")
     assert _refusal_output(monkeypatch, tmp_path, main) == (1, b"")
+
+
+def test_event_payload_degrades_to_empty_dict(tmp_path):
+    """Each of these reaches pr-facts' main() as {}, which has neither a pull request nor a
+    `pr_number` and so refuses rather than emitting empty facts.
+
+    Mutation: return `payload` without the `isinstance(payload, dict)` check -- the list case
+    returns `[1, 2]`."""
+    assert event_payload("") == {}
+    assert event_payload(str(tmp_path / "absent.json")) == {}
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    assert event_payload(str(bad)) == {}
+    listy = tmp_path / "list.json"
+    listy.write_text("[1, 2]", encoding="utf-8")
+    assert event_payload(str(listy)) == {}
+
+
+@pytest.mark.parametrize(
+    ("body", "action"),
+    [
+        pytest.param(None, "", id="unset"),
+        pytest.param('{"action": "synchronize"}', "synchronize", id="push"),
+        pytest.param('{"action": 1}', "", id="not-a-string"),
+        pytest.param('{"inputs": {}}', "", id="dispatch"),
+    ],
+)
+def test_event_action_reads_the_payloads_action_or_empty(tmp_path, monkeypatch, body, action):
+    """Mutation: read `os.environ["GITHUB_EVENT_PATH"]` (the unset row raises KeyError).
+    Mutation: drop the `isinstance(action, str)` check (the not-a-string row returns 1)."""
+    if body is None:
+        monkeypatch.delenv("GITHUB_EVENT_PATH", raising=False)
+    else:
+        path = tmp_path / "event.json"
+        path.write_text(body, encoding="utf-8")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
+    assert event_action() == action

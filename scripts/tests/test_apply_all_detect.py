@@ -1299,11 +1299,11 @@ def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
     and prod-eu, which needs dev-eu, is skipped.
 
     Mutation: drop the `locked` filter from `settle`'s `run` -- `dns` applies. Mutation:
-    write `locked_cells=[]` -- red. Mutation: print `0` for `locked=` -- red."""
+    write `held_cells=[]` -- red. Mutation: print `0` for `locked=` -- red."""
     parsed = _locked(tmp_path, monkeypatch, held(aad.cl, "stacks/dns", "dev-eu", 7))
     assert _applied(parsed) == [("stacks/workers", "dev-eu")]
-    assert json.loads(parsed["locked_cells"]) == [
-        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
     assert json.loads(parsed["waiting_cells"]) == [
         {
@@ -1371,7 +1371,7 @@ def test_main_applies_a_cell_the_applying_pull_request_holds(tmp_path, monkeypat
         ("stacks/platform", "dev-eu"),
         ("stacks/workers", "dev-eu"),
     ]
-    assert json.loads(parsed["locked_cells"]) == []
+    assert json.loads(parsed["held_cells"]) == []
 
 
 def test_main_reads_the_locks_of_the_pending_cells_environments_only(tmp_path, monkeypatch):
@@ -1418,8 +1418,8 @@ def test_main_reads_no_locks_in_an_env_that_does_not_apply(tmp_path, monkeypatch
         **{"decision": "APPROVED", **stop},
     )
     assert reads == [("o/r", {"dev-eu"})]
-    assert json.loads(parsed["locked_cells"]) == [
-        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
 
 

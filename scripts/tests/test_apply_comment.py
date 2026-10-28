@@ -425,17 +425,21 @@ def test_the_short_form_of_an_all_held_run_says_nothing_applied():
 
 def test_the_short_form_of_an_empty_queue_keeps_the_targeted_and_skipped_lines():
     """The bare apply drops targeted envs from `runnable`, so a targeted-only-pending
-    repository is all-levels-empty and carries `excluded_envs` at once: the lines are the only
-    sign of it.
+    repository is all-levels-empty and carries `excluded_envs` at once: the verdict and the
+    lines are the only sign of it.
 
-    Mutation: render the footer lines only when there are rows -- red."""
+    Mutation: render the footer lines only when there are rows -- red.
+    Mutation: restore an `auto=False` parameter and `left = [...] if auto else ()` -- 🟢 no
+    pending applies, red."""
     body = ac.build_comment(
         [], [], RUN_URL, ["prod"], ["staging"], "", "success,skipped", head_sha=SHA
     )
     assert body == (
-        f"### shipmate apply\n\n🟢 no pending applies {AT}\n\n"
+        "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
+        f"below {AT}\n\n"
         "🟡 prod: left pending (targeted), comment `shipmate apply prod`\n"
         "⚪ staging: skipped, ordered after an environment not fully applying this run"
+        "\n\n" + HINT
     )
 
 
@@ -2181,7 +2185,7 @@ def test_main_renders_the_detect_refusal_from_the_render_step_env(monkeypatch, t
 
 
 def _locked(stack, env, holder):
-    return {"stack": stack, "environment": env, "holder": holder}
+    return {"stack": stack, "environment": env, "cause": "locked", "holder": holder}
 
 
 _LOCKS = [
@@ -2222,13 +2226,13 @@ def test_each_lock_holder_and_environment_gets_one_line_in_both_forms(compact):
     Mutation: return `holder` unconditionally from `_lock_holder` -- `#12` for the string, red.
     Mutation: drop `d["locked"]` from `_per_env_lines` -- the per-environment case, red.
     Mutation: drop `d["locked"]` from `_grouped_lines` -- the compact case, red."""
-    assert ac._footer_parts([], [], locked=_LOCKS, compact=compact) == _LOCK_LINES
+    assert ac._footer_parts([], [], held_cells=_LOCKS, compact=compact) == _LOCK_LINES
 
 
 def test_the_lock_lines_escape_every_name():
     """Mutation: drop `_md_name` from the locked cell's stack -- the team mention, red.
     Mutation: drop `_md_escape` from the locked cell's environment -- red."""
-    assert ac._footer_parts([], [], locked=[_locked("s@org/team<1", "e<2", 3)]) == [
+    assert ac._footer_parts([], [], held_cells=[_locked("s@org/team<1", "e<2", 3)]) == [
         (
             "🔒 locked by #3: s@<!-- -->org/team&lt;1 / e&lt;2. Wait for #3 to merge or close, "
             "then re-plan, or comment `shipmate unlock e&lt;2 --evict`."
@@ -2241,7 +2245,7 @@ def test_a_run_where_every_cell_is_locked_is_never_green():
 
     Mutation: drop the `locked` branch from `_empty_verdict` -- 🟢 no pending applies with no
     hint, red."""
-    assert _comment([], locked=[_locked("stacks/app", "dev-eu", 12)]) == (
+    assert _comment([], held_cells=[_locked("stacks/app", "dev-eu", 12)]) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, or "
         "comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
@@ -2278,7 +2282,7 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
     ]
     locked = [_locked("stacks/dns", "ops", 12), _locked("stacks/net", "ops", None)]
     body = ac.build_comment(
-        [], [], RUN_URL, ["ops"], [], "", "success", ["ops"], SHA, waiting, locked=locked
+        [], [], RUN_URL, ["ops"], [], "", "success", ["ops"], SHA, waiting, held_cells=locked
     )
     assert body == (
         f"### shipmate apply\n\n⚪ nothing applied, environments are held for review {AT}\n\n"
@@ -2300,12 +2304,12 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
 
 
 def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp_path):
-    """Mutation: drop the `SHIPMATE_LOCKED_CELLS` argument from `main`'s `build_comment` call --
+    """Mutation: drop the `SHIPMATE_HELD_CELLS` argument from `main`'s `build_comment` call --
     🟢 no pending applies, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
-    monkeypatch.setenv("SHIPMATE_LOCKED_CELLS", json.dumps([_locked("stacks/app", "dev-eu", 12)]))
+    monkeypatch.setenv("SHIPMATE_HELD_CELLS", json.dumps([_locked("stacks/app", "dev-eu", 12)]))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, or "
@@ -2345,7 +2349,7 @@ def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_ap
 
 
 def _overlap(stack, env):
-    return {"stack": stack, "environment": env}
+    return {"stack": stack, "environment": env, "cause": "overlap"}
 
 
 #: The overlap line for `stacks/app` and `stacks/db` in `dev-eu`, hand-written.
@@ -2361,13 +2365,13 @@ def test_the_overlap_cells_get_one_line_naming_them_and_the_remedy_in_both_forms
     """Mutation: drop `d["overlap"]` from `_per_env_lines` -- the per-environment case, red.
     Mutation: drop `d["overlap"]` from `_grouped_lines` -- the compact case, red."""
     overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
-    assert ac._footer_parts([], [], overlap=overlap, compact=compact) == [_OVERLAP_LINE]
+    assert ac._footer_parts([], [], held_cells=overlap, compact=compact) == [_OVERLAP_LINE]
 
 
 def test_the_overlap_line_escapes_every_name():
     """Mutation: drop `_md_name` from the overlap cell's stack -- the team mention, red.
     Mutation: drop `_md_escape` from the overlap cell's environment -- red."""
-    assert ac._footer_parts([], [], overlap=[_overlap("s@org/team<1", "e<2")]) == [
+    assert ac._footer_parts([], [], held_cells=[_overlap("s@org/team<1", "e<2")]) == [
         (
             "⚪ held, the base changed these stacks after this branch left it, so their plans "
             "would revert that change: s@<!-- -->org/team&lt;1 / e&lt;2. Update the branch from "
@@ -2382,7 +2386,7 @@ def test_a_run_whose_every_pending_cell_overlaps_the_base_is_never_green():
     Mutation: drop the `overlap` branch from `_empty_verdict` -- 🟢 no pending applies with no
     hint, red."""
     overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
-    assert _comment([], env="", overlap=overlap) == (
+    assert _comment([], env="", held_cells=overlap) == (
         "### shipmate apply\n\n⚪ nothing applied, the base also changed the pending cells' "
         f"stacks {AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
     )
@@ -2392,7 +2396,7 @@ def test_a_partly_applied_run_counts_its_overlap_cells():
     """Mutation: drop the overlap token from `_verdict` -- red.
     Mutation: drop the overlap `circles.append("⚪")` -- 🟢, red."""
     overlap = [_overlap("stacks/db", "dev-eu")]
-    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), (), overlap) == (
+    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), overlap) == (
         "⚪",
         f"⚪ 1 applied, 1 held (base changed) {AT}",
     )
@@ -2410,7 +2414,9 @@ def test_a_cell_waiting_on_an_overlap_cell_names_the_branch_update():
         _waits("stacks/a", "qa", "stacks/dns", "ops"),
         _waits("stacks/b", "qa", "stacks/vault", "ops"),
     ]
-    parts = ac._footer_parts(["ops"], [], ["ops"], waiting, overlap=[_overlap("stacks/dns", "ops")])
+    parts = ac._footer_parts(
+        ["ops"], [], ["ops"], waiting, held_cells=[_overlap("stacks/dns", "ops")]
+    )
     assert parts[-2:] == [
         (
             "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; the base also changed "
@@ -2424,13 +2430,13 @@ def test_a_cell_waiting_on_an_overlap_cell_names_the_branch_update():
 
 
 def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tmp_path):
-    """Mutation: drop the `SHIPMATE_OVERLAP_CELLS` argument from `main`'s `build_comment` call --
+    """Mutation: drop the `SHIPMATE_HELD_CELLS` argument from `main`'s `build_comment` call --
     🟢 no pending applies, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
-    monkeypatch.setenv("SHIPMATE_OVERLAP_CELLS", json.dumps(overlap))
+    monkeypatch.setenv("SHIPMATE_HELD_CELLS", json.dumps(overlap))
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the base also changed the pending "
         f"cells' stacks {_MAIN_AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
@@ -2445,8 +2451,7 @@ _KINDS = {
     "skipped": ["s1", "s2", "s3", "s4", "s5"],
     "held": ["rev", "both"],
     "waiting": [_waits("stacks/w", "wt", "stacks/t", "tgt")],
-    "locked": [{"stack": "stacks/app", "environment": "lck", "holder": 7}],
-    "overlap": [_overlap("stacks/o", "ovl")],
+    "held_cells": [_locked("stacks/app", "lck", 7), _overlap("stacks/o", "ovl")],
     "skipped_after": {
         "s1": ["tgt"],
         "s2": ["rev", "both"],
@@ -2541,7 +2546,7 @@ def test_a_cell_blocked_predecessor_gets_the_cell_remedy_even_when_held_and_targ
         ["ops"],
         ["s"],
         ["ops"],
-        locked=[{"stack": "stacks/a", "environment": "ops", "holder": 7}],
+        held_cells=[_locked("stacks/a", "ops", 7)],
         skipped_after={"s": ["ops"]},
     ) == [
         "⚪ s: skipped, waits on ops (a cell of it does not apply this run; see its line below)",
@@ -2557,7 +2562,7 @@ def test_a_cell_blocked_predecessor_gets_the_cell_remedy_even_when_held_and_targ
     ]
 
 
-def test_an_auto_run_that_leaves_every_pending_environment_for_a_bare_apply_is_not_green():
+def test_a_run_that_leaves_every_pending_environment_for_a_bare_apply_is_not_green():
     """Nothing applied and the pending work is a bare env and the auto env that needs it.
 
     Mutation: drop the `left` branch from `_empty_verdict` -- 🟢 no pending applies with no
@@ -2573,7 +2578,6 @@ def test_an_auto_run_that_leaves_every_pending_environment_for_a_bare_apply_is_n
         head_sha=SHA,
         skipped_after={"prod": ["dev"]},
         bare=["dev"],
-        auto=True,
     )
     assert body == (
         "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
@@ -2584,13 +2588,10 @@ def test_an_auto_run_that_leaves_every_pending_environment_for_a_bare_apply_is_n
     )
 
 
-def test_an_auto_run_whose_only_pending_work_is_skipped_after_a_targeted_env_is_not_green():
-    """No `bare_envs`: `live` is skipped after the targeted `prod`. The bare form keeps 🟢
-    for the same dispositions (`test_the_short_form_of_an_empty_queue_keeps_the_targeted_and_
-    skipped_lines`).
+def test_a_run_whose_only_pending_work_is_skipped_after_a_targeted_env_is_not_green():
+    """No `bare_envs`: `live` is skipped after the targeted `prod`.
 
-    Mutation: `left = list(bare)` -- 🟢 no pending applies, red.
-    Mutation: drop `if auto` from `left` -- the bare-form short-form test, red."""
+    Mutation: `left = list(bare)` -- 🟢 no pending applies, red."""
     body = ac.build_comment(
         [],
         [],
@@ -2601,7 +2602,6 @@ def test_an_auto_run_whose_only_pending_work_is_skipped_after_a_targeted_env_is_
         "success",
         head_sha=SHA,
         skipped_after={"live": ["prod"]},
-        auto=True,
     )
     assert body == (
         "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
@@ -2612,12 +2612,15 @@ def test_an_auto_run_whose_only_pending_work_is_skipped_after_a_targeted_env_is_
     )
 
 
-def test_an_auto_run_whose_only_pending_work_is_a_targeted_env_is_not_green():
-    """Nothing applied, no skipped or bare env: only the targeted `prod` is left. The bare
-    form keeps 🟢 for it.
+def test_a_bare_run_whose_only_pending_work_is_a_targeted_env_is_not_green():
+    """Nothing applied, no skipped or bare env: only the targeted `prod` is left, as a bare
+    `shipmate apply` leaves a repository whose one pending environment is `apply_mode:
+    targeted`.
 
-    Mutation: drop `*excluded` from `left` -- 🟢 no pending applies, red."""
-    body = ac.build_comment([], [], RUN_URL, ["prod"], [], "", "success", head_sha=SHA, auto=True)
+    Mutation: drop `*excluded` from `left` -- 🟢 no pending applies, red.
+    Mutation: restore an `auto=False` parameter and `left = [...] if auto else ()` -- 🟢 no
+    pending applies, red."""
+    body = ac.build_comment([], [], RUN_URL, ["prod"], [], "", "success", head_sha=SHA)
     assert body == (
         "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "
         f"below {AT}\n\n"
@@ -2643,15 +2646,13 @@ def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
 ):
     """Mutation: read `SHIPMATE_SKIPPED_AFTER` under another name in `main` -- the
     cause-agnostic line, red.
-    Mutation: read `SHIPMATE_BARE_ENVS` under another name in `main` -- no bare line, red.
-    Mutation: read `SHIPMATE_AUTO` under another name in `main` -- 🟢, red."""
+    Mutation: read `SHIPMATE_BARE_ENVS` under another name in `main` -- no bare line, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", '["prod"]')
     monkeypatch.setenv("SHIPMATE_SKIPPED_AFTER", '{"prod": ["dev"]}')
     monkeypatch.setenv("SHIPMATE_BARE_ENVS", '["dev"]')
-    monkeypatch.setenv("SHIPMATE_AUTO", "true")
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the pending environments wait on the "
         f"lines below {_MAIN_AT}\n\n"

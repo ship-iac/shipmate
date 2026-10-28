@@ -2866,10 +2866,9 @@ names an error. A job that failed without an `::error::` renders no fence.
   `⚪ nothing applied, pending cells are locked`,
   `⚪ nothing applied, the base also changed the pending cells' stacks`,
   `⚪ nothing applied, cells wait on pending cells they run after`,
-  `⚪ nothing applied, the pending environments wait on the lines below` (an
-  `auto` apply that left a pending environment to a bare apply, a `targeted` one
-  or a skipped one; the
-  bare form keeps `🟢` for its targeted and skipped lines), or
+  `⚪ nothing applied, the pending environments wait on the lines below` (a run
+  that left a pending environment to a bare apply, a `targeted` one or a skipped
+  one), or
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
@@ -2956,15 +2955,15 @@ actionable warning cannot be lost on either path. In the order they render:
   reaches this renderer.
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
   then re-plan, or comment `shipmate unlock <env> --evict`.``, one per pull
-  request `#<n>` holding a cell lock on pending cells of `<env>` (`locked_cells`),
-  naming each as `<stack> / <env>` comma-separated. A lock whose holder is
+  request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
+  with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
   unknown renders ``🔒 locked by an unreadable lock: <cells>. Comment
   `shipmate unlock <env> --evict`.`` Every form renders these lines.
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
   it, so their plans would revert that change: <cells>. Update the branch from
   the base and push.``, one line naming each of an `auto` apply's overlap cells
-  (`overlap_cells`, §`apply_mode: auto`) as `<stack> / <env>` comma-separated.
-  Only the `auto` form renders it.
+  (`held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
+  `<stack> / <env>` comma-separated. Only the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
   (§Fan-out) is pending and not applying this run; the second pair is that

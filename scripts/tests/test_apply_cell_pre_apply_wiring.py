@@ -39,7 +39,7 @@ WAVE_VERIFY = {
     "name": "Pre-apply check",
     "id": "pre-apply",
     "if": "${{ inputs.pr_number != '' }}",
-    "uses": "$/actions/lock-verify",
+    "uses": "$/actions/pre-apply",
     "with": {
         "pr-number": "${{ inputs.pr_number }}",
         "env": "${{ matrix.environment }}",
@@ -53,11 +53,11 @@ WAVE_VERIFY = {
 }
 
 
-def test_lock_verify_runs_the_pre_apply_check_with_the_job_token():
+def test_pre_apply_runs_the_check_with_the_job_token():
     """Mutations: read the token from `secrets.GITHUB_TOKEN`; run `cell-lock marks`; drop
     `SHIPMATE_AUTO` (every auto cell refuses as a malformed mode); drop the step `id` (the
     action's `refusal` output reads empty)."""
-    assert step_by("lock-verify", name="Pre-apply check") == VERIFY_STEP
+    assert step_by("pre-apply", name="Pre-apply check") == VERIFY_STEP
 
 
 def test_every_wave_checks_first_and_refuses_through_apply_cell():
@@ -98,9 +98,9 @@ def test_every_wave_checks_first_and_refuses_through_apply_cell():
     assert found == dict.fromkeys(WAVES, expected)
 
 
-def test_lock_verify_exposes_the_checks_refusal():
+def test_pre_apply_exposes_the_checks_refusal():
     """Mutation: point `refusal` at `steps.pre-apply.outputs.refusal` (no such inner step)."""
-    assert action_yaml("lock-verify")["outputs"]["refusal"]["value"] == (
+    assert action_yaml("pre-apply")["outputs"]["refusal"]["value"] == (
         "${{ steps.verify.outputs.refusal }}"
     )
 

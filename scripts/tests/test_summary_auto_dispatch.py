@@ -303,8 +303,9 @@ def test_no_changed_auto_cell_decides_nothing(tmp_path):
 )
 def test_an_autoplan_not_started_by_a_push_decides_nothing(tmp_path, event, action):
     """The payload is read from `GITHUB_EVENT_PATH`; an unreadable one dispatches nothing and
-    makes no API call. Mutation: return `synchronize` from `event_action`'s `except` (the
-    unparseable and not-an-object rows dispatch). Mutation: pass `GITHUB_EVENT_NAME` as the
+    makes no API call. Mutation: return `{"action": "synchronize"}` from
+    `_shipmate.event_payload`'s `except` (the unparseable row dispatches) or its non-object
+    fallback (the not-an-object row dispatches). Mutation: pass `GITHUB_EVENT_NAME` as the
     action (every row names `'pull_request_target'`)."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], event=event)
     assert proc.returncode == 0, proc.stdout + proc.stderr

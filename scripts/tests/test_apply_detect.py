@@ -889,7 +889,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "review_not_required_envs=[]\n"
         "waiting_cells=[]\n"
-        "locked_cells=[]\n"
+        "held_cells=[]\n"
         'env_order=["dev-eu"]\n'
     )
 
@@ -1341,12 +1341,12 @@ def test_a_cell_another_pull_request_holds_stays_pending_and_its_dependent_waits
     """PR 7 holds `dns`, so it applies nowhere, `platform` waits on it, `workers` applies.
 
     Mutation: pass `pending` instead of the lock-filtered cells to `waves.waiting_cells` and
-    `drop_waiting` in `main` -- `dns` applies. Mutation: write `locked_cells=[]` -- red.
+    `drop_waiting` in `main` -- `dns` applies. Mutation: write `held_cells=[]` -- red.
     Mutation: print `0` for the notice's `locked=` -- `locked=1` is absent."""
     parsed, applied = _locked_run(monkeypatch, tmp_path, held(ad.cl, "stacks/dns", "dev-eu", 7))
     assert applied == ["stacks/workers"]
-    assert json.loads(parsed["locked_cells"]) == [
-        {"stack": "stacks/dns", "environment": "dev-eu", "holder": 7}
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
     assert json.loads(parsed["waiting_cells"]) == [
         {
@@ -1369,7 +1369,7 @@ def test_a_cell_the_applying_pull_request_holds_applies(monkeypatch, tmp_path):
     lock = held(ad.cl, "stacks/dns", "dev-eu", int(PR_NUMBER))
     parsed, applied = _locked_run(monkeypatch, tmp_path, lock)
     assert applied == ["stacks/dns", "stacks/workers", "stacks/platform"]
-    assert json.loads(parsed["locked_cells"]) == []
+    assert json.loads(parsed["held_cells"]) == []
 
 
 def test_a_failed_lock_read_refuses_the_targeted_apply(monkeypatch, tmp_path):

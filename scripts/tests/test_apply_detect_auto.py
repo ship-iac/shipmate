@@ -11,6 +11,7 @@ from _detect_fixtures import (
     forbid_shared_runner,
     held,
     stub_read_locks,
+    stub_read_table,
     wave_cells,
 )
 from _loader import github_outputs, load_script, workflow_jobs
@@ -37,11 +38,9 @@ def _check(stack, env, plan_run=RUN, **kw):
     return _apply_check(stack, env, plan_run, cells=kw.pop("cells", 1), app=APP, **kw)
 
 
-def _table(auto, other=(), order=None):
+def _table(auto, other=()):
     entries: dict[str, dict[str, Any]] = {e: {"apply_mode": "auto", "review": False} for e in auto}
     entries.update({e: {} for e in other})
-    for env, preds in (order or {}).items():
-        entries[env]["needs"] = list(preds)
     return {"layout": "folder", "environments": entries}
 
 
@@ -171,8 +170,7 @@ def _run_auto(
             {st: [] for st in stacks},
         ),
     )
-    table = _table(auto, other, order)
-    monkeypatch.setattr(aad.bm.ec, "read_table", lambda: json.loads(json.dumps(table)))
+    stub_read_table(monkeypatch, [aad.bm.ec], base=_table(auto, other), order=order)
     stub_read_locks(monkeypatch, aad.cl, locks)
     monkeypatch.setattr(aad, "_sleep", (sleeps if sleeps is not None else []).append)
     reads = [] if base_reads is None else base_reads
@@ -244,7 +242,7 @@ def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
-    assert "overlap_cells" not in parsed
+    assert json.loads(parsed["held_cells"]) == []
     assert "bare_envs" not in parsed
     assert reads == []
 
@@ -281,7 +279,7 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     """A ready-for-review or reopen autoplan of the head dispatches no auto apply but becomes
     the newest autoplan; its clicker is no pusher. Nothing about the run or the pusher is read.
 
-    Mutation: drop `refuse_pushed` from `auto_main` (every row applies). Mutation: admit a
+    Mutation: drop `refuse_pushed` from `bare_main` (every row applies). Mutation: admit a
     missing action (`actions.get(n) not in (*ag.PUSH_ACTIONS, None)`; older-engine applies)."""
     calls = []
     checks = [_check("stacks/app", "dev-eu", action=action)]
@@ -384,7 +382,7 @@ def test_changes_requested_holds_every_environment(tmp_path, monkeypatch):
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", "")
     assert calls == [f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"]
-    assert json.loads(parsed["overlap_cells"]) == []
+    assert json.loads(parsed["held_cells"]) == []
 
 
 def test_a_pusher_with_read_permission_refuses(tmp_path, monkeypatch):
@@ -640,8 +638,8 @@ def test_a_locked_cell_stays_pending_as_on_a_bare_apply(tmp_path, monkeypatch):
     """Mutation: pass `frozenset()` for `locked` to `settle` -- the cell applies."""
     parsed = _run_auto(tmp_path, monkeypatch, locks=held(aad.cl, "stacks/app", "dev-eu", 7))
     assert _applied(parsed) == []
-    assert json.loads(parsed["locked_cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "holder": 7}
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
 
 
@@ -667,7 +665,7 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
 
     Mutation: pass `settle` the locked cells alone -- `stacks/app / dev-eu` applies and `prod`
     runs, red.
-    Mutation: write `overlap_cells` as `[]` -- red.
+    Mutation: write `held_cells` with no overlap cell -- red.
     Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red.
     Mutation: print `len(locked)` for the notice's `overlap=` -- red.
     Mutation: pass `base_changed_stacks` no candidate stacks (`set()`) -- red."""
@@ -682,12 +680,11 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
         base_reads=reads,
     )
     assert _applied(parsed) == [("stacks/dns", "dev-eu")]
-    assert json.loads(parsed["overlap_cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu"},
-        {"stack": "stacks/app", "environment": "prod"},
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"},
+        {"stack": "stacks/app", "environment": "prod", "cause": "overlap"},
     ]
     assert json.loads(parsed["skipped_envs"]) == ["prod"]
-    assert json.loads(parsed["locked_cells"]) == []
     assert reads == [(BASE, ["stacks/app", "stacks/dns"])]
     assert parsed["base_sha"] == BASE
     assert (
@@ -706,7 +703,7 @@ def test_a_run_the_base_changed_nothing_of_applies_every_cell(tmp_path, monkeypa
         base_changed={"stacks/other"},
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/dns", "dev-eu")]
-    assert json.loads(parsed["overlap_cells"]) == []
+    assert json.loads(parsed["held_cells"]) == []
 
 
 def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeypatch):
@@ -719,7 +716,9 @@ def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeyp
     parsed = _run_auto(tmp_path, monkeypatch, base_changed={"stacks/app"}, calls=calls)
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", BASE)
-    assert json.loads(parsed["overlap_cells"]) == [{"stack": "stacks/app", "environment": "dev-eu"}]
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"}
+    ]
     assert [c for c in calls if c.startswith("repos/o/r/actions/")] == []
 
 
@@ -762,3 +761,13 @@ def test_a_held_bare_environment_is_named_held_not_left_for_a_bare_apply(tmp_pat
     assert json.loads(parsed["review_held_envs"]) == ["stage"]
     assert json.loads(parsed["bare_envs"]) == []
     assert json.loads(parsed["skipped_after"]) == {}
+
+
+def test_a_cell_both_locked_and_overlapping_is_held_once_per_cause():
+    """Evicting the lock does not clear the overlap, so the comment must name both remedies.
+    Mutation: drop overlap cells already in `locked` (the overlap entry is gone)."""
+    cell = {"stack": "stacks/app", "environment": "dev"}
+    assert aad.held_cells([{**cell, "holder": 7}], [cell]) == [
+        {**cell, "holder": 7, "cause": "locked"},
+        {**cell, "cause": "overlap"},
+    ]
