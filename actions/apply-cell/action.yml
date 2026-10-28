@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ""
   pre-apply-outcome:
-    description: The outcome of the wave job's pre-apply check (lock-verify), which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
+    description: The outcome of the wave job's pre-apply check (pre-apply), which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
     required: true
   pre-apply-refusal:
     description: The pre-apply check's refusal, which becomes the cell's blocked reason. Empty falls back to a reason that names no cause.

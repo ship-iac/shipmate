@@ -57,11 +57,11 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/lock-release@main
       - if: false
-        uses: ship-iac/shipmate/actions/lock-verify@main
-      - if: false
         uses: ship-iac/shipmate/actions/plan-cell@main
       - if: false
         uses: ship-iac/shipmate/actions/pr-facts@main
+      - if: false
+        uses: ship-iac/shipmate/actions/pre-apply@main
       - if: false
         uses: ship-iac/shipmate/actions/python-yaml@main
       - if: false
