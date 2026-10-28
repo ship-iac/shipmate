@@ -1851,7 +1851,7 @@ The result comment of a bare `shipmate apply` or an `auto` apply carries one of:
   cell of it does not apply this run; see its line
   below` for one holding a locked, overlap (`auto` only) or waiting cell, and
   `` comment `shipmate apply`, which applies them in order `` for an environment
-  that is not `auto` (`auto` only). The run log's apply-all-detect notice lists these
+  an `auto` run leaves for a bare apply. The run log's apply-all-detect notice lists these
   environments as `skipped_after_targeted`.
 
 When nothing applied, the verdict reads `⚪ nothing applied, the pending
