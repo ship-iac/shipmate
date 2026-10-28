@@ -1832,14 +1832,16 @@ its autoplan dispatches again. Do not comment `shipmate apply` instead: the bare
 and targeted forms run no overlap check, so they apply the plan as reviewed and
 revert the base's change.
 
-### An `auto` apply skipped an environment, or left one pending
+### A bare or `auto` apply skipped an environment, or left one pending
 
-The `auto` apply result comment carries one of:
+The result comment of a bare `shipmate apply` or an `auto` apply carries one of:
 
-- ``🟡 <env>: left pending (not `apply_mode: auto`), comment `shipmate apply` ``:
-  `<env>` has pending cells and is neither `auto`, `targeted` nor held. An
-  `auto` run applies only `auto` environments; a bare `shipmate apply` applies
-  it.
+- ``🟡 <env>: left pending (targeted), comment `shipmate apply <env>` ``: `<env>`
+  holds `apply_mode: targeted`, so only `shipmate apply <env>` applies it.
+- ``🟡 <env>: left pending (not `apply_mode: auto`), comment `shipmate apply` ``
+  (`auto` only): `<env>` has pending cells and is neither `auto`, `targeted` nor
+  held. An `auto` run applies only `auto` environments; a bare `shipmate apply`
+  applies it.
 - `⚪ <env>: skipped, waits on <pred> (<remedy>)`: a `needs` predecessor of
   `<env>` does not fully apply in this run, so `<env>`'s cells stay pending. The
   remedy follows the predecessor's kind: `` apply it first with `shipmate apply

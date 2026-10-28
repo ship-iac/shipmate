@@ -761,3 +761,13 @@ def test_a_held_bare_environment_is_named_held_not_left_for_a_bare_apply(tmp_pat
     assert json.loads(parsed["review_held_envs"]) == ["stage"]
     assert json.loads(parsed["bare_envs"]) == []
     assert json.loads(parsed["skipped_after"]) == {}
+
+
+def test_a_cell_both_locked_and_overlapping_is_held_once_as_locked():
+    """Mutation: drop the `not in seen` filter from `held_cells` (the cell is listed twice)."""
+    cell = {"stack": "stacks/app", "environment": "dev"}
+    other = {"stack": "stacks/db", "environment": "dev"}
+    assert aad.held_cells([{**cell, "holder": "7"}], [cell, other]) == [
+        {**cell, "holder": "7", "cause": "locked"},
+        {**other, "cause": "overlap"},
+    ]
