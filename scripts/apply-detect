@@ -287,12 +287,9 @@ def locked_cells(repo, pending, pr_number):
 
 def held_cells(locked, overlap=()):
     """`locked` and `overlap` as one list, each cell tagged with its `cause`, `"locked"` or
-    `"overlap"`; a locked cell keeps its `holder`. A cell in both is listed once, as locked:
-    its lock clears first."""
-    seen = {(c["stack"], c["environment"]) for c in locked}
-    return [{**c, "cause": "locked"} for c in locked] + [
-        {**c, "cause": "overlap"} for c in overlap if (c["stack"], c["environment"]) not in seen
-    ]
+    `"overlap"`; a locked cell keeps its `holder`. A cell in both is listed once per cause, so
+    the comment names both remedies: evicting the lock does not clear the overlap."""
+    return [{**c, "cause": "locked"} for c in locked] + [{**c, "cause": "overlap"} for c in overlap]
 
 
 def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):

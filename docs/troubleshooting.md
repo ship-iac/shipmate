@@ -1849,9 +1849,9 @@ The result comment of a bare `shipmate apply` or an `auto` apply carries one of:
   approved` for a held one, `` it is held until the pull request is approved,
   then comment `shipmate apply <pred>` `` for one both held and `targeted`, `a
   cell of it does not apply this run; see its line
-  below` for one holding a locked, overlap or waiting cell, and
+  below` for one holding a locked, overlap (`auto` only) or waiting cell, and
   `` comment `shipmate apply`, which applies them in order `` for an environment
-  that is not `auto`. The run log's apply-all-detect notice lists these
+  that is not `auto` (`auto` only). The run log's apply-all-detect notice lists these
   environments as `skipped_after_targeted`.
 
 When nothing applied, the verdict reads `⚪ nothing applied, the pending
