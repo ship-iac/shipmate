@@ -21,7 +21,7 @@ It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
 which puts every cell at env-level 0 and leaves levels 1-3 empty. A cell that runs
 after a cell pending in another environment waits (`waves.waiting_cells`): it stays
 pending, `waiting_cells` names it, and the rest apply. A cell another pull request
-holds a cell lock on stays pending the same way, named in `locked_cells` (both forms),
+holds a cell lock on stays pending the same way, named in `held_cells` (both forms),
 and the cells that run after it wait. Before any of that, the
 PR's review decision — read server-side by the `review` job, narrowed by
 `review: false` on the environment's entry — must authorize this environment, or
@@ -283,6 +283,12 @@ def locked_cells(repo, pending, pr_number):
     Reads only the pending cells' environments; a failed read refuses the run."""
     locks = cl.read_locks(repo, {c["environment"] for c in pending}, run=_run)
     return cl.foreign(locks, pending, int(pr_number))
+
+
+def held_cells(locked, overlap=()):
+    """`locked` and `overlap` as one list, each cell tagged with its `cause`, `"locked"` or
+    `"overlap"`; a locked cell keeps its `holder`."""
+    return [{**c, "cause": "locked"} for c in locked] + [{**c, "cause": "overlap"} for c in overlap]
 
 
 def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
@@ -578,7 +584,7 @@ def bare_main(auto=False):
       each new skip can make more cells wait: `settle` runs both to one fixpoint.
 
     A pending cell another pull request locks (`locked_cells`) stays pending and applies
-    nowhere, exactly like a waiting cell; it is named in `locked_cells`. Locks are read only
+    nowhere, exactly like a waiting cell; it is named in `held_cells`. Locks are read only
     in the envs neither held nor excluded as targeted.
 
     `auto` is the auto form, over the `apply_mode: auto` environments' pending cells.
@@ -587,12 +593,12 @@ def bare_main(auto=False):
     bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
     pending cell in an environment not stopped, the pull request must be ready and mergeable at
     this head (`wait_mergeable`), and a cell whose stack the base changed since the merge base
-    (`build-matrix.base_changed_stacks`) is held in `overlap_cells`: it stays pending and stops
+    (`build-matrix.base_changed_stacks`) is named in `held_cells`: it stays pending and stops
     its environment's `needs` successors, as a locked cell does. With a cell to apply, the plan
     run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
     pusher must have write access (`refuse_pusher`). Writes the bare outputs plus
     `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
-    on, empty when no pull request read was needed, `overlap_cells`, and `bare_envs`, the
+    on, empty when no pull request read was needed, and `bare_envs`, the
     pending environments neither `auto`, `targeted` nor held, left for a bare apply.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
@@ -668,7 +674,6 @@ def bare_main(auto=False):
         auto_outputs = {
             "provenance_run": provenance_run,
             "base_sha": base_sha,
-            "overlap_cells": json.dumps(overlap),
             "bare_envs": json.dumps(sorted(unselected)),
         }
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
@@ -716,7 +721,7 @@ def bare_main(auto=False):
         applied_exempt_envs=json.dumps(applied_exempt),
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
-        locked_cells=json.dumps(locked),
+        held_cells=json.dumps(held_cells(locked, overlap)),
         # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and locked cells.
         env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
         **auto_outputs,
@@ -792,7 +797,7 @@ def main():
         head_sha=head,
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
-        locked_cells=json.dumps(locked),
+        held_cells=json.dumps(held_cells(locked)),
         env_order=json.dumps([env]),
     )
 

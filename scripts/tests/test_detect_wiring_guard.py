@@ -103,11 +103,10 @@ _APPLY_DETECT_OUTPUTS = {
     "applied_exempt_envs": "${{ steps.d.outputs.applied_exempt_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
     "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
-    "locked_cells": "${{ steps.d.outputs.locked_cells }}",
+    "held_cells": "${{ steps.d.outputs.held_cells }}",
     "env_order": "${{ steps.d.outputs.env_order }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
-    "overlap_cells": "${{ steps.d.outputs.overlap_cells }}",
     "bare_envs": "${{ steps.d.outputs.bare_envs }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
 }
@@ -221,8 +220,8 @@ def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
-    orders environments by name; delete `locked_cells`; delete `provenance_run`; delete
-    `base_sha`; delete `overlap_cells`; delete `skipped_after`; delete `bare_envs`."""
+    orders environments by name; delete `held_cells`; delete `provenance_run`; delete
+    `base_sha`; delete `skipped_after`; delete `bare_envs`."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -329,13 +328,16 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.waiting_cells }}",
     },
-    "locked_cells": {
+    "held_cells": {
         "description": (
-            "JSON list of pending cells another pull request holds a cell lock on, left pending "
-            "and not applying this run, each `{stack, environment, holder}` with the holder's "
-            "pull request number (null when the lock's holder is unknown); both forms."
+            "JSON list of pending cells left pending and not applying this run for a cause of "
+            "their own, each `{stack, environment, cause}`. `cause` is `locked` when another "
+            "pull request holds the cell's lock, and such a cell also carries `holder`, that "
+            "pull request's number (null when the lock's holder is unknown); both forms. "
+            "`cause` is `overlap` when the base changed the cell's stack since the merge base, "
+            "directly or through a module, so its plan would revert that change; auto form only."
         ),
-        "value": "${{ steps.d.outputs.locked_cells }}",
+        "value": "${{ steps.d.outputs.held_cells }}",
     },
     "env_order": {
         "description": (
@@ -355,18 +357,10 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     "base_sha": {
         "description": (
             "Auto form only: the tip of the pull request's base branch, read from its ref after "
-            "the mergeability wait, that overlap_cells was computed on; empty when no "
-            "environment had a pending cell to consider."
+            "the mergeability wait, that the overlap cells in held_cells were computed on; empty "
+            "when no environment had a pending cell to consider."
         ),
         "value": "${{ steps.d.outputs.base_sha }}",
-    },
-    "overlap_cells": {
-        "description": (
-            "Auto form only: JSON list of pending cells left pending because the base changed "
-            "their stack since the merge base, directly or through a module, each "
-            "`{stack, environment}`; their plans would revert that change."
-        ),
-        "value": "${{ steps.d.outputs.overlap_cells }}",
     },
     "bare_envs": {
         "description": (
@@ -390,9 +384,9 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
 
 def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
-    delete its `refusal` output; delete its `env_order` output; delete its `locked_cells`
+    delete its `refusal` output; delete its `env_order` output; delete its `held_cells`
     output; restore `skipped_envs`' description without the lock cause; delete its
-    `provenance_run` output; delete its `base_sha` output; delete its `overlap_cells` output;
-    restore `skipped_envs`' description without the overlap cause; delete its `skipped_after`
-    output; delete its `bare_envs` output."""
+    `provenance_run` output; delete its `base_sha` output; drop the overlap cause from
+    `held_cells`' description; restore `skipped_envs`' description without the overlap cause;
+    delete its `skipped_after` output; delete its `bare_envs` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

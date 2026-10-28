@@ -2955,15 +2955,15 @@ actionable warning cannot be lost on either path. In the order they render:
   reaches this renderer.
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
   then re-plan, or comment `shipmate unlock <env> --evict`.``, one per pull
-  request `#<n>` holding a cell lock on pending cells of `<env>` (`locked_cells`),
-  naming each as `<stack> / <env>` comma-separated. A lock whose holder is
+  request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
+  with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
   unknown renders ``🔒 locked by an unreadable lock: <cells>. Comment
   `shipmate unlock <env> --evict`.`` Every form renders these lines.
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
   it, so their plans would revert that change: <cells>. Update the branch from
   the base and push.``, one line naming each of an `auto` apply's overlap cells
-  (`overlap_cells`, §`apply_mode: auto`) as `<stack> / <env>` comma-separated.
-  Only the `auto` form renders it.
+  (`held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
+  `<stack> / <env>` comma-separated. Only the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
   (§Fan-out) is pending and not applying this run; the second pair is that

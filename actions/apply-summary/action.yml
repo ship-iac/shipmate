@@ -52,12 +52,8 @@ inputs:
     description: "JSON list of cells left pending because a cell they run after is pending and not applying this run, each with that cell (both forms); the comment names each cell's blocker and its remedy."
     required: false
     default: "[]"
-  locked-cells:
-    description: "JSON list of pending cells another pull request holds a cell lock on, each `{stack, environment, holder}` with the holder's pull request number, null when unknown (both forms); the comment names each holder and the remedy. Empty = []."
-    required: false
-    default: "[]"
-  overlap-cells:
-    description: "JSON list of pending cells the auto form left pending because the base changed their stack since the merge base, each `{stack, environment}`; the comment names them and the remedy, updating the branch from the base. Empty = []."
+  held-cells:
+    description: "JSON list of pending cells left pending for a cause of their own, each `{stack, environment, cause}`. `cause` is `locked` when another pull request holds the cell's lock, with `holder` its pull request number, null when unknown (both forms); the comment names each holder and the remedy. `cause` is `overlap` when the auto form left the cell pending because the base changed its stack since the merge base; the comment names them and the remedy, updating the branch from the base. Empty = []."
     required: false
     default: "[]"
   bare-envs:
@@ -179,8 +175,7 @@ runs:
         SHIPMATE_APPLIED_EXEMPT_ENVS: ${{ inputs.applied-exempt-envs }}
         SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
-        SHIPMATE_LOCKED_CELLS: ${{ inputs.locked-cells }}
-        SHIPMATE_OVERLAP_CELLS: ${{ inputs.overlap-cells }}
+        SHIPMATE_HELD_CELLS: ${{ inputs.held-cells }}
         SHIPMATE_BARE_ENVS: ${{ inputs.bare-envs }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}

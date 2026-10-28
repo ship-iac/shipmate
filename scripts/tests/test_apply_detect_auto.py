@@ -242,7 +242,7 @@ def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
-    assert "overlap_cells" not in parsed
+    assert json.loads(parsed["held_cells"]) == []
     assert "bare_envs" not in parsed
     assert reads == []
 
@@ -382,7 +382,7 @@ def test_changes_requested_holds_every_environment(tmp_path, monkeypatch):
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", "")
     assert calls == [f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"]
-    assert json.loads(parsed["overlap_cells"]) == []
+    assert json.loads(parsed["held_cells"]) == []
 
 
 def test_a_pusher_with_read_permission_refuses(tmp_path, monkeypatch):
@@ -638,8 +638,8 @@ def test_a_locked_cell_stays_pending_as_on_a_bare_apply(tmp_path, monkeypatch):
     """Mutation: pass `frozenset()` for `locked` to `settle` -- the cell applies."""
     parsed = _run_auto(tmp_path, monkeypatch, locks=held(aad.cl, "stacks/app", "dev-eu", 7))
     assert _applied(parsed) == []
-    assert json.loads(parsed["locked_cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "holder": 7}
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
 
 
@@ -665,7 +665,7 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
 
     Mutation: pass `settle` the locked cells alone -- `stacks/app / dev-eu` applies and `prod`
     runs, red.
-    Mutation: write `overlap_cells` as `[]` -- red.
+    Mutation: write `held_cells` with no overlap cell -- red.
     Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red.
     Mutation: print `len(locked)` for the notice's `overlap=` -- red.
     Mutation: pass `base_changed_stacks` no candidate stacks (`set()`) -- red."""
@@ -680,12 +680,11 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
         base_reads=reads,
     )
     assert _applied(parsed) == [("stacks/dns", "dev-eu")]
-    assert json.loads(parsed["overlap_cells"]) == [
-        {"stack": "stacks/app", "environment": "dev-eu"},
-        {"stack": "stacks/app", "environment": "prod"},
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"},
+        {"stack": "stacks/app", "environment": "prod", "cause": "overlap"},
     ]
     assert json.loads(parsed["skipped_envs"]) == ["prod"]
-    assert json.loads(parsed["locked_cells"]) == []
     assert reads == [(BASE, ["stacks/app", "stacks/dns"])]
     assert parsed["base_sha"] == BASE
     assert (
@@ -704,7 +703,7 @@ def test_a_run_the_base_changed_nothing_of_applies_every_cell(tmp_path, monkeypa
         base_changed={"stacks/other"},
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/dns", "dev-eu")]
-    assert json.loads(parsed["overlap_cells"]) == []
+    assert json.loads(parsed["held_cells"]) == []
 
 
 def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeypatch):
@@ -717,7 +716,9 @@ def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeyp
     parsed = _run_auto(tmp_path, monkeypatch, base_changed={"stacks/app"}, calls=calls)
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", BASE)
-    assert json.loads(parsed["overlap_cells"]) == [{"stack": "stacks/app", "environment": "dev-eu"}]
+    assert json.loads(parsed["held_cells"]) == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"}
+    ]
     assert [c for c in calls if c.startswith("repos/o/r/actions/")] == []
 
 

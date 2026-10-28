@@ -36,6 +36,7 @@ section below names the SHA the release tags.
 - The review-exempt reply to a targeted `shipmate apply` and the matching apply-log notice say `review-exempt` and `review: false` where they said `ungated` and `gated: false`; the no-review notice names `review: true`; `onboard` labels shared environments `shared (split: false):` where it printed `shared:`.
 - **A `shipmate plan` dispatch queues behind a plan run of the same pull request in flight instead of cancelling it, so a draft run started before the comment no longer ends cancelled.** A push, open or reopen run, or a re-run of one, still cancels. The re-pin in the first bullet carries it, or reconcile the two lines by hand (the `cancel-in-progress` line and the comment above it).
 - The composite action `actions/lock-verify` is renamed `actions/pre-apply`: it runs every pre-apply check, not only the lock.
+- `apply-detect`'s `locked_cells` and `overlap_cells` outputs, and `apply-summary`'s `locked-cells` and `overlap-cells` inputs, are one `held_cells` output and one `held-cells` input: each cell carries a `cause`, `locked` or `overlap`, and a locked cell its `holder`. The apply result comment is unchanged.
 
 ### Fixed
 
