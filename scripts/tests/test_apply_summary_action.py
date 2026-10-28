@@ -140,7 +140,6 @@ _RENDER_ENV = {
     "SHIPMATE_LOCKED_CELLS": "${{ inputs.locked-cells }}",
     "SHIPMATE_OVERLAP_CELLS": "${{ inputs.overlap-cells }}",
     "SHIPMATE_BARE_ENVS": "${{ inputs.bare-envs }}",
-    "SHIPMATE_AUTO": "${{ inputs.auto }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
     "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
@@ -175,8 +174,7 @@ def test_render_step_env_block_matches_the_expected_mapping():
     cells reads `🟢 no pending applies` -- red.
     Mutation: drop `SHIPMATE_SKIPPED_AFTER` from the render step, so a skipped line names no
     predecessor -- red.
-    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red.
-    Mutation: drop `SHIPMATE_AUTO` from the render step -- red."""
+    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -293,7 +291,6 @@ def test_declared_inputs_are_exactly_these():
         "locked-cells",
         "overlap-cells",
         "bare-envs",
-        "auto",
         "detect-refusal",
         "lock-refusal",
         "env-order",
@@ -432,7 +429,6 @@ _APPLY_SUMMARY_WITH = {
     "locked-cells": "${{ needs.detect.outputs.locked_cells }}",
     "overlap-cells": "${{ needs.detect.outputs.overlap_cells }}",
     "bare-envs": "${{ needs.detect.outputs.bare_envs }}",
-    "auto": "${{ inputs.auto }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "env-order": "${{ needs.detect.outputs.env_order }}",
@@ -458,7 +454,6 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: drop `overlap-cells:` from the step's `with:` -- red.
     Mutation: drop `skipped-after:` from the step's `with:` -- red.
     Mutation: drop `bare-envs:` from the step's `with:` -- red.
-    Mutation: drop `auto:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red."""
     steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")

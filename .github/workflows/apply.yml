@@ -330,7 +330,6 @@ jobs:
           locked-cells: ${{ needs.detect.outputs.locked_cells }}
           overlap-cells: ${{ needs.detect.outputs.overlap_cells }}
           bare-envs: ${{ needs.detect.outputs.bare_envs }}
-          auto: ${{ inputs.auto }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
           env-order: ${{ needs.detect.outputs.env_order }}

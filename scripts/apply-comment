@@ -486,8 +486,8 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=(), locked=(), o
     cells are locked and `N held (base changed)` for overlap cells; the circle is the worst of
     the rows' and, when any of those three is present, ⚪, or 🔴 for a failed run. Without rows:
     `🔴 failed`, the held sentence, the locked sentence, the overlap sentence, the waiting
-    sentence, the left sentence when `left` names an environment (the auto form's environments
-    left for a bare apply, `targeted` or skipped), or `🟢 no pending applies`. Then
+    sentence, the left sentence when `left` names an environment (left for a bare apply,
+    `targeted` or skipped), or `🟢 no pending applies`. Then
     `provenance`. The circle is returned with the line so the footer decision reads it, never
     the rendered text.
 
@@ -865,7 +865,6 @@ def build_comment(
     overlap=(),
     skipped_after=None,
     bare=(),
-    auto=False,
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
     order of `order` its `sc.env_heading` (`1 cell, ` or `N cells, `, then the verdict's
@@ -878,10 +877,8 @@ def build_comment(
     verdict. `locked` is detect's `locked_cells`: the verdict counts them and the footer lines
     name each holder. `overlap` is the auto form's `overlap_cells`: the verdict counts them and a
     footer line names them. `skipped_after` and `bare` are detect's: the skipped lines name each
-    predecessor, and a line names each environment left for a bare apply. Under `auto`, a run
-    that applied nothing and left a `bare`, `targeted` or skipped environment is never 🟢; the
-    bare and targeted forms keep their verdicts, since there a skip follows a pending targeted
-    line.
+    predecessor, and a line names each environment left for a bare apply. A run that applied
+    nothing and left a `bare`, `targeted` or skipped environment is never 🟢.
 
     Every row is guaranteed its bare line: the space all headings and remaining rows' bare lines
     need is reserved up front, together, so an early giant apply.txt cannot starve a later row.
@@ -889,7 +886,7 @@ def build_comment(
     blocked reasons and with one footer line per disposition, the lock lines, and one per waiting
     blocker; past that a SystemExit names the cause."""
     failed = _results_failed(results_csv)
-    left = [*bare, *excluded, *skipped] if auto else ()
+    left = [*bare, *excluded, *skipped]
     circle, verdict = _verdict(
         rows, failed, held, head_sha, run_url, waiting, locked, overlap, left
     )
@@ -980,7 +977,6 @@ def main():
         json.loads(os.environ.get("SHIPMATE_OVERLAP_CELLS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_SKIPPED_AFTER") or "{}"),
         json.loads(os.environ.get("SHIPMATE_BARE_ENVS") or "[]"),
-        os.environ.get("SHIPMATE_AUTO") == "true",
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
