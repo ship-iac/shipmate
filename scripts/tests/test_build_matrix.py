@@ -3477,10 +3477,10 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
     )
 
 
-def test_merge_pins_are_the_rename_settings():
+def test_merge_pins_are_the_rename_content_driver_and_isolation_settings():
     """0 is git's default rename limit, not unlimited, so the pin is the highest limit.
 
-    Mutation: `merge.renameLimit=0` -- red."""
+    Mutation: `merge.renameLimit=0` -- red. Mutation: drop `GIT_ATTR_NOSYSTEM` -- red."""
     assert bm._MERGE_PINS == (
         "-c",
         "merge.renames=true",
@@ -3488,7 +3488,121 @@ def test_merge_pins_are_the_rename_settings():
         "merge.directoryRenames=conflict",
         "-c",
         "merge.renameLimit=32767",
+        "-c",
+        "merge.default=text",
+        "-c",
+        "core.attributesFile=",
+        "-c",
+        "safe.directory=*",
     )
+    assert {
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": bm.os.devnull,
+        "GIT_ATTR_NOSYSTEM": "1",
+    } == bm._MERGE_ENV
+
+
+_KEEP_HEAD = ("merge.keep-head.driver", "cp %B %A")
+# Per route: `git config` argvs run before the commits, env set after them; `{tmp}` is tmp_path.
+_DRIVER_ROUTES = {
+    "default-driver": ([_KEEP_HEAD, ("merge.default", "keep-head")], {}),
+    "attributes-file": ([_KEEP_HEAD, ("core.attributesFile", "{tmp}/attributes")], {}),
+    "text-driver-redefined": ([], {"HOME": "{tmp}/home"}),
+    "xdg-attributes": ([], {"XDG_CONFIG_HOME": "{tmp}/xdg"}),
+    "env-config-count": (
+        [],
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "merge.text.driver",
+            "GIT_CONFIG_VALUE_0": "cp %B %A",
+        },
+    ),
+    "env-config-parameters": ([], {"GIT_CONFIG_PARAMETERS": "'merge.text.driver'='cp %B %A'"}),
+    "replace-ref-base": ([], {"GIT_REPLACE_REF_BASE": "refs/evil/"}),
+    "dubious-owner": (
+        [("--global", "safe.directory", "*")],
+        {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"},
+    ),
+}
+
+
+@pytest.mark.parametrize("route", list(_DRIVER_ROUTES))
+def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch, tmp_path, route):
+    """Git config selects a driver that keeps the branch's side of every file: repository config
+    as the default driver or through an attributes file, the runner's `~/.gitconfig` or
+    inherited `GIT_CONFIG_*` env by redefining the `text` driver. An XDG attributes file selects
+    `binary`, which conflicts. The base prepends a line to a module the branch wires `stacks/s`
+    to, the branch appends one; the merge still holds both edits, so `stacks/s` is held. An
+    inherited `GIT_REPLACE_REF_BASE` replaces the base's blob with the merge base's, so the base
+    side looks unchanged and the merge resolves to HEAD's tree. `dubious-owner` uses no driver:
+    the workspace belongs to another user and only the runner's global `safe.directory` admits
+    it.
+
+    Mutation: drop `merge.default=text` -- `default-driver` merges to HEAD's tree, red.
+    Mutation: drop `core.attributesFile=` -- `attributes-file` merges to HEAD's tree and
+    `xdg-attributes` conflicts, red.
+    Mutation: drop `GIT_CONFIG_GLOBAL` -- `text-driver-redefined` merges to HEAD's tree, red.
+    Mutation: pass `{**os.environ, **_MERGE_ENV}` -- `env-config-count`, `env-config-parameters`
+    and `replace-ref-base` merge to HEAD's tree, red.
+    Mutation: drop `safe.directory=*` -- `dubious-owner` merge-tree dies on ownership, red.
+    Mutation: drop only `GIT_CONFIG*` and `GIT_ATTR*` -- `replace-ref-base` merges to HEAD's
+    tree, red."""
+    (tmp_path / "attributes").write_bytes(b"* merge=keep-head\n")
+    (tmp_path / "xdg/git").mkdir(parents=True)
+    (tmp_path / "xdg/git/attributes").write_bytes(b"* merge=binary\n")
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home/.gitconfig").write_bytes(b'[merge "text"]\n\tdriver = cp %B %A\n')
+    configs, env = _DRIVER_ROUTES[route]
+    for argv in configs:
+        _git("config", *(a.format(tmp=tmp_path.as_posix()) for a in argv))
+    _commit({"modules/m/main.tf": "a\nb\nc\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"modules/m/main.tf": "a\nb\nc\nhead\n", "stacks/s/mod.tf": "wire\n"}, "wire")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "base\na\nb\nc\n"}, "base")
+    _git("checkout", "-q", "pr")
+    if route == "replace-ref-base":
+        _git(
+            "update-ref",
+            f"refs/evil/{_git('rev-parse', f'{tip}:modules/m/main.tf').strip()}",
+            _git("rev-parse", f"{tip}~1:modules/m/main.tf").strip(),
+        )
+    for k, v in env.items():
+        monkeypatch.setenv(k, v.format(tmp=tmp_path.as_posix()))
+        if k.startswith("GIT_TEST_"):
+            # merge-tree drops every inherited `GIT_*`; a real foreign owner is not env-borne.
+            monkeypatch.setitem(bm._MERGE_ENV, k, v)
+
+    def listing(tree):
+        assert (tree / "modules/m/main.tf").read_text() == "base\na\nb\nc\nhead\n"
+        return "stacks/s\n"
+
+    seen = _merge_stub(monkeypatch, listing)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", head]]
+
+
+def test_base_changed_stacks_ignores_an_inherited_attribute_source(git_repo, monkeypatch):
+    """`GIT_ATTR_SOURCE` names a tree whose `.gitattributes` selects `union`, which would resolve
+    the base's and the branch's edits of one line silently; the merge ignores it and refuses
+    the conflict.
+
+    Mutation: pass `{**os.environ, **_MERGE_ENV}` -- the union merge holds `stacks/s`, red."""
+    _commit({"modules/m/main.tf": "a\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "attrs")
+    _commit({".gitattributes": "* merge=union\n"}, "attrs")
+    _git("checkout", "-q", "main")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"modules/m/main.tf": "head\n", "stacks/s/mod.tf": "wire\n"}, "wire")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "base\n"}, "base")
+    _git("checkout", "-q", "pr")
+    monkeypatch.setenv("GIT_ATTR_SOURCE", "attrs")
+    _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/s"})
+    assert "CONFLICT (content): Merge conflict in modules/m/main.tf" in str(e.value.code)
 
 
 def _merge_tree_answers(monkeypatch, result):

@@ -262,14 +262,32 @@ def merge_base(base, retry="Re-run the workflow"):
 
 # Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
 _BASE_REMEDY = "Update the branch from the base and push"
-# `-c` outranks global, system and repo config, so runner config cannot change which stacks are
-# held. `merge.renames` also covers the `diff.renames` it falls back to; 32767 because 0 means
-# git's default limit.
+# Pinned against repository config so it cannot change which stacks are held. Empty
+# `core.attributesFile` also drops XDG attributes; `safe.directory=*` disables the ownership check
+# for this step, because isolation drops the runner's exemption.
 _MERGE_PINS = (
-    *("-c", "merge.renames=true"),
+    *("-c", "merge.renames=true"),  # Also covers the `diff.renames` it falls back to.
     *("-c", "merge.directoryRenames=conflict"),
-    *("-c", "merge.renameLimit=32767"),
+    *("-c", "merge.renameLimit=32767"),  # 32767 because 0 means git's default limit.
+    *("-c", "merge.default=text"),
+    *("-c", "core.attributesFile="),
+    *("-c", "safe.directory=*"),
 )
+_MERGE_ENV = {
+    "LC_ALL": "C",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_ATTR_NOSYSTEM": "1",
+}
+
+
+def _merge_env():
+    """merge-tree's environment, which ignores runner global and system config and system
+    attributes so none changes which stacks are held. merge-tree runs in the working directory's
+    own repository and needs no inherited git variable, so every `GIT_*` one is dropped. A caller
+    relying on `GIT_DIR` or `GIT_OBJECT_DIRECTORY` would break the following `commit-tree`, which
+    keeps them; none does."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | _MERGE_ENV
 
 
 def base_changed_stacks(base_ref, candidates):
@@ -321,7 +339,7 @@ def _merge_stacks(base_ref, candidates):
             capture_output=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, "LC_ALL": "C"},
+            env=_merge_env(),
         )
         cause = _merge_tree_failure(p)
         if cause is None:
