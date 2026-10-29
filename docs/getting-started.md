@@ -1122,8 +1122,10 @@ cells when the pusher has write access; it runs as the shipmate App. The table r
 request, one whose newest plan came from a `shipmate plan` comment, or one just
 marked ready for review or reopened, does not apply this way; comment `shipmate apply` instead. A cell whose stack the merge
 of the base into the branch changes, or removes files in, stays pending until the
-branch is updated from the base; a merge conflict refuses the run. [`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto` has every
-condition, and [`troubleshooting.md`](troubleshooting.md) has each refusal.
+branch is updated from the base; a merge conflict, or a failure to read the base
+or run that detection, refuses the run ([`troubleshooting.md`](troubleshooting.md)).
+[`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto` has every condition, and
+[`troubleshooting.md`](troubleshooting.md) has each refusal.
 
 ### Further hardening
 

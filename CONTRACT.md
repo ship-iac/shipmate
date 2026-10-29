@@ -1009,8 +1009,8 @@ the apply-match fingerprint by construction — it hashes only non-empty
 **Every calling job whose callee runs a cell must grant `id-token: write`, cloud
 or not.** GitHub caps a called workflow's permissions at each `uses:` boundary,
 so the `plan`, `drift`, `deploy`, `apply`, `auto` and `unlock` jobs of the
-consumer's `shipmate.yml` grant it; its `comment-ops` job does not, because no
-job in engine `comment-ops.yml` requests it. This applies to a consumer that
+consumer's `shipmate.yml` grant it; its `comment-ops` and `release` jobs do
+not, because no job in engine `comment-ops.yml` or `release.yml` requests it. This applies to a consumer that
 uses no cloud credentials whatsoever: without the grant the run fails at
 workflow-resolution time, the same failure mode `apply-env-level.yml` already
 documents for its `checks: read` requirement. The grant belongs on the calling
@@ -2040,11 +2040,12 @@ apply this run; see its line below` for one holding a locked, overlap or waiting
 cell, and `shipmate apply` otherwise (§Apply result comment).
 
 **Wave re-check.** Each `auto` wave cell's pre-apply check (§Cell locks) also
-refuses unless the plan run `detect` bound is still the head's newest autoplan,
-a `pull_request_target` run of the head, and the run the cell's newest plan
-record names, the pull request is still not a draft, the pusher still
-passes the pusher check above, and the base tip, read from the branch ref, is
-still the one `detect` read. The base comparison is whole-branch,
+refuses unless the run attempt is `1`, the plan run `detect` bound is still the
+head's newest autoplan, a `pull_request_target` run of the head, and the run the
+cell's newest plan record names, that record names a push event action
+(`opened` or `synchronize`), the pull request is still not a draft, the pusher
+still passes the pusher check above, and the base tip, read from the branch
+ref, is still the one `detect` read. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
 environment approval refuses that wave. Update the branch from the base and

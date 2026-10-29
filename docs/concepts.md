@@ -126,8 +126,8 @@ is refused rather than refreshed. A cell already applied has a completed apply
 check, so the post-merge deploy skips it. Applies run in waves along the
 Terramate `after` DAG, across environments as well as inside one
 ([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply order), and a
-comment-triggered apply and a post-merge deploy share one concurrency group per
-stack × environment, so they never race on the same cell.
+comment-triggered apply, an `auto` apply and a post-merge deploy share one
+concurrency group per stack × environment, so they never race on the same cell.
 
 A cell one open pull request applied is locked to it until it merges or closes,
 so a second pull request's re-plan cannot roll that apply back: its apply leaves

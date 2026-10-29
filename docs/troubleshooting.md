@@ -1671,7 +1671,7 @@ record's pull request.
 
 An `auto` environment applies without a comment only through the autoplan of a
 ready pull request ([`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto`); a
-bare `shipmate apply` also applies it. Look in this order:
+bare or targeted `shipmate apply` also applies it. Look in this order:
 
 1. The plan run's `summary` job, step `Decide whether to dispatch an auto
    apply`. When it dispatches nothing it logs `no auto apply dispatched:

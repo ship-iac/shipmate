@@ -341,7 +341,7 @@ actual work here:
   policy.** Under `pull_request_target` *every* job in the plan run, the
   checkout-bearing `plan` matrix job included, evaluates at
   `refs/heads/<base>` and therefore satisfies the policy. And the `plan` job's
-  `environment:` is branch-authored data: it is `matrix.environment`, which
+  `environment:` is branch-authored data: it is `matrix.env_binding`, which
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
   pull request picks the environment its plan cells bind (`<env>-plan`, or the
   bare `<env>` for a `split: false` entry). Detect refuses the name
