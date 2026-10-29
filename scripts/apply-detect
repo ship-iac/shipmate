@@ -30,7 +30,8 @@ the run refuses.
 `SHIPMATE_AUTO=true` selects the auto form, `bare_main(auto=True)`: the bare form over the
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
 refuses unless the actor, the plan's provenance, the pusher's permission and the pull
-request's mergeability hold, and holds a cell whose stack the base also changed.
+request's mergeability hold, and holds a cell whose stack the merge of the base into the
+branch changes.
 """
 
 import json
