@@ -1997,29 +1997,26 @@ on the pull request to apply it.``
 
 With no cell to apply, neither the plan run nor the pusher is read.
 
-**Overlap.** A cell `detect` would apply is held when the base branch changed its
-stack, directly or through a module, since the merge base of the base tip and the
-head. Terramate's change detection runs twice in one worktree. The base-side
-listing runs on the base tip from that merge base and finds the module consumers
-the base's tree knows. The head-side listing runs on the merge of the base tip
-into the head (`git merge-tree`, with `merge.directoryRenames=conflict`), from the
-head, so the base's changes are the only changes it sees; it finds a stack the
-branch wires to a module the base changed, which consumes that module only on the
-branch's tree. It holds no stack the branch alone wires for a base change the
-branch already holds; the base-side listing still holds a stack the base changed,
-whether or not the branch holds that change. The head-side listing is skipped when
-the base changed no file. A merge conflict anywhere in the repository, not only in
-a stack, refuses the whole run, a file the base added under a directory the branch
-renamed included: the pull request's mergeable flag is read before the base tip,
-so a base commit landing between the two reads can conflict. When the merge
-conflicts or the listing fails, `detect` refuses with ``change detection on the
-merge of the base into the branch failed: <cause>. Update the branch from the base
-and push.`` and nothing applies; `<cause>` is git's conflict lines, or the failed
-step's error. Terramate lists only the stacks the base tip still has, so a stack
-whose files the base deleted or renamed since that merge base (`git diff
---name-status --find-renames`) is held too, and so is a stack holding a file the
-branch renamed from a path inside a stack the base-side detection lists. Applying
-its plan would revert the base's change (§Fan-out).
+**Overlap.** A cell `detect` would apply is held when merging the base tip into
+the head changes its stack, directly or through a module it sources on the merged
+tree. Terramate's change detection runs once: on the merge of the base tip into
+the head (`git merge-tree`, with `merge.directoryRenames=conflict`), committed as
+a child of the head and checked out in one worktree, from the head. It is skipped
+when the base changed no file since the merge base of the base tip and the head.
+A stack is not held for a base change the branch already holds, which changes
+nothing in the merge. A base edit of a file in a stack the branch renamed reaches
+the stack's new path in the merge, so the renamed stack is held; a base delete or
+rename of that file is a merge conflict. A merge conflict anywhere in the
+repository, not only in a stack, refuses the whole run before any checkout, a file
+the base added under a directory the branch renamed included: the pull request's
+mergeable flag is read before the base tip, so a base commit landing between the
+two reads can conflict. When the merge conflicts or the listing fails, `detect`
+refuses with ``change detection on the merge of the base into the branch failed:
+<cause>. Update the branch from the base and push.`` and nothing applies;
+`<cause>` is git's conflict lines, or the failed step's error. Terramate lists
+only the stacks the merge still has, so a stack whose files the base deleted or
+renamed since that merge base (`git diff --name-status --find-renames`) is held
+too. Applying a held cell's plan would revert the base's change (§Fan-out).
 A held cell is not applied: its apply check and the gate stay pending, it stops its
 environment's `needs` successors as a locked cell does, a cell that runs after it
 waits, and the result comment names it with ``⚪ held, the base changed these

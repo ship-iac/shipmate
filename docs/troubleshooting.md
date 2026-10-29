@@ -1591,15 +1591,22 @@ environment applies that cell again. Follow
 
 A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
 the blocker's environment is held or ordered by `needs`, because the targeted form's comment
-receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
-verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
-`⚪ nothing applied, pending cells are locked or the base also changed their
-stacks` when a pending cell is locked and an `auto` apply also holds a cell the
-base changed, `⚪ nothing applied, pending cells are locked` when a pending
-cell is locked and none is held because the base changed it, or `⚪ nothing
-applied, the base also changed the pending cells' stacks` when an `auto` apply
-holds a cell the base changed and no pending cell is locked; the last three take
-precedence over the waiting verdict.
+receives no held or skipped environments. A run that applies no cell reads the
+first of these verdicts that holds:
+
+- `🔴 failed`: the run failed.
+- `⚪ nothing applied, environments are held for review`.
+- `⚪ nothing applied, pending cells are locked or the base also changed their
+  stacks`: a pending cell is locked, and an `auto` apply holds a cell the base
+  changed.
+- `⚪ nothing applied, pending cells are locked`: a pending cell is locked.
+- `⚪ nothing applied, the base also changed the pending cells' stacks`: an
+  `auto` apply holds a cell the base changed.
+- `⚪ nothing applied, cells wait on pending cells they run after`.
+- `⚪ nothing applied, the pending environments wait on the lines below`: the
+  run left a pending environment to a bare apply, a `targeted` one or a skipped
+  one.
+- `🟢 no pending applies`.
 
 ### A stack's plan does not show its upstream stack's change
 
@@ -1829,14 +1836,16 @@ locks counts under `N locked` instead, and a run that applied nothing and holds
 a locked cell reads `⚪ nothing applied, pending cells are locked or the base
 also changed their stacks`.
 
-The base branch changed those stacks, directly or through a module (on the
-base's tree, or on its merge into the branch), or deleted or renamed files in
-them, since the branch left it. A stack the branch renamed is held when the base
-edited its old path; a base deletion of it is a merge conflict and refuses. Each plan was made on the branch's tree, so applying it
-would revert the base's change. The held cells stay pending, a cell that runs after
-one waits with the remedy `the base also changed it; update the branch from the
-base and push`, and the environments ordered after their environment by `needs`
-are skipped (next entry). The rest applied.
+Merging the base into the branch changes those stacks, directly or through a
+module they source, or the base deleted or renamed files in them since the
+branch left it. A stack is not held for a base change the branch already holds.
+A stack the branch renamed is held when the base edited a file under its old
+path; a base delete or rename of that file is a merge conflict and refuses. Each
+plan was made on the branch's tree, so applying it would revert the base's
+change. The held cells stay pending, a cell that runs after one waits with the
+remedy `the base also changed it; update the branch from the base and push`, and
+the environments ordered after their environment by `needs` are skipped (next
+entry). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
 its autoplan dispatches again. Do not comment `shipmate apply` instead: the bare
@@ -1957,15 +1966,17 @@ An `auto` apply's `detect` computes the same merge base, between the base tip
 and the head, to find the stacks the base changed. It refuses with the same
 text, ending `Update the branch from the base and push; if it fails again, the
 base commit is not reachable from this checkout.`, and nothing applies. It also
-runs change detection on the merge of the base into the branch, to find a stack
-the branch wires to a module the base changed. When the merge conflicts or that
-detection fails, it refuses with `change detection on the merge of the base into
-the branch failed: <cause>. Update the branch from the base and push.`, and
-nothing applies; `<cause>` is git's conflict lines, or the failed step's error. A
-conflict anywhere in the repository refuses, not only in a stack, and so does a
-file the base added under a directory the branch renamed: a base commit can land
-after GitHub reported the pull request mergeable. A bare
-`shipmate apply` is no remedy for either refusal: it runs no overlap check.
+runs change detection on the merge of the base into the branch, to find the
+stacks the merge changes. When the merge conflicts or that detection fails, it
+refuses with `change detection on the merge of the base into the branch failed:
+<cause>. Update the branch from the base and push.`, and nothing applies;
+`<cause>` is git's conflict lines, or the failed step's error. A conflict
+anywhere in the repository refuses, not only in a stack, and so does a file the
+base added under a directory the branch renamed: a base commit can land after
+GitHub reported the pull request mergeable. A git usage error as `<cause>`
+means the runner's git is older than 2.38 ([`../CONTRACT.md`](../CONTRACT.md)
+§Runner prerequisites). A bare `shipmate apply` is no remedy for either refusal:
+it runs no overlap check.
 
 ### A pull request planned zero cells
 
