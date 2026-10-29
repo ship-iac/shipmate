@@ -3418,15 +3418,50 @@ def test_base_changed_stacks_refuses_a_merge_conflict_before_any_worktree(git_re
     assert [a for a in seen if "worktree" in a] == []
 
 
-def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(git_repo, monkeypatch):
+_LINES = "".join(f"line {n}\n" for n in range(8))
+_EXACT = ({"modules/m/main.tf": "m\n"}, None)
+# Four renames past a limit of 1, each with an appended line so no exact match pairs them.
+_INEXACT = (
+    {f"modules/m/f{n}.tf": f"{n}\n{_LINES}" for n in range(1, 5)},
+    {f"modules/m2/g{n}.tf": f"{n}\n{_LINES}edit\n" for n in range(1, 5)},
+)
+
+
+@pytest.mark.parametrize(
+    ("scope", "config", "files"),
+    [
+        pytest.param(None, None, _EXACT, id="default"),
+        pytest.param("repo", "merge.renames=false", _EXACT, id="merge-renames-false"),
+        pytest.param("repo", "diff.renames=false", _EXACT, id="diff-renames-false"),
+        pytest.param("repo", "merge.renameLimit=1", _INEXACT, id="rename-limit-1"),
+        pytest.param("global", "merge.renames=false", _EXACT, id="global-merge-renames-false"),
+    ],
+)
+def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
+    git_repo, monkeypatch, scope, config, files
+):
     """The branch renames `modules/m` to `modules/m2` and wires `stacks/s` to it; the base adds
     `modules/m/variables.tf`. git's rename detection would move the file into `modules/m2`; the
-    pinned `merge.directoryRenames=conflict` makes it a conflict instead.
+    pinned `merge.directoryRenames=conflict` makes it a conflict instead. A runner config that
+    skips rename detection would leave the file under `modules/m` and hold nothing; the pins
+    keep the conflict.
 
-    Mutation: `-c merge.directoryRenames=true` -- the merge succeeds and holds `stacks/s`, red."""
-    _commit({"modules/m/main.tf": "m\n", "stacks/s/main.tf": "s\n"}, "common")
+    Mutation: `-c merge.directoryRenames=true` -- the merge succeeds and holds `stacks/s`, red.
+    Mutation: drop `-c merge.renames=true` -- the three `false` rows merge cleanly, red.
+    Mutation: drop `-c merge.renameLimit=32767` -- the rename-limit row merges cleanly, red."""
+    common, renamed = files
+    if scope == "repo":
+        _git("config", *config.split("="))
+    elif scope == "global":
+        key, value = config.split("=")
+        section, name = key.split(".")
+        (git_repo.parent / "gitconfig").write_text(f"[{section}]\n\t{name} = {value}\n")
+    _commit({**common, "stacks/s/main.tf": "s\n"}, "common")
     _git("checkout", "-q", "-b", "pr")
-    _git("mv", "modules/m", "modules/m2")
+    if renamed is None:
+        _git("mv", "modules/m", "modules/m2")
+    else:
+        _commit({**dict.fromkeys(common), **renamed}, "rename")
     head = _commit({"stacks/s/mod.tf": "wire m2\n"}, "rename and wire")
     _git("checkout", "-q", "main")
     tip = _commit({"modules/m/variables.tf": "v\n"}, "base adds")
@@ -3439,6 +3474,20 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(git_
         "CONFLICT (file location): modules/m/variables.tf added in "
         f"{tip} inside a directory that was renamed in {head}, suggesting it should perhaps be "
         "moved to modules/m2/variables.tf. Update the branch from the base and push."
+    )
+
+
+def test_merge_pins_are_the_rename_settings():
+    """0 is git's default rename limit, not unlimited, so the pin is the highest limit.
+
+    Mutation: `merge.renameLimit=0` -- red."""
+    assert bm._MERGE_PINS == (
+        "-c",
+        "merge.renames=true",
+        "-c",
+        "merge.directoryRenames=conflict",
+        "-c",
+        "merge.renameLimit=32767",
     )
 
 
