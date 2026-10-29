@@ -282,9 +282,11 @@ _MERGE_ENV = {
 
 
 def _merge_env():
-    """merge-tree's environment: the caller's, with every inherited `GIT_*` variable dropped and
-    runner global and system config and system attributes ignored, so none changes which stacks
-    are held. It runs in apply-detect's full clone, which needs no inherited git variable."""
+    """merge-tree's environment, which ignores runner global and system config and system
+    attributes so none changes which stacks are held. merge-tree runs in the working directory's
+    own repository and needs no inherited git variable, so every `GIT_*` one is dropped. A caller
+    relying on `GIT_DIR` or `GIT_OBJECT_DIRECTORY` would break the following `commit-tree`, which
+    keeps them; none does."""
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | _MERGE_ENV
 
 

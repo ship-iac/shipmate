@@ -3532,18 +3532,19 @@ def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch
     """Git config selects a driver that keeps the branch's side of every file: repository config
     as the default driver or through an attributes file, the runner's `~/.gitconfig` or
     inherited `GIT_CONFIG_*` env by redefining the `text` driver. An XDG attributes file selects
-    `binary`, which conflicts. An inherited `GIT_REPLACE_REF_BASE` swaps the base's blob for the
-    merge base's. The base prepends a line to a module the branch wires `stacks/s`
-    to, the branch appends one; the merge still holds both edits, so `stacks/s` is held.
-    `dubious-owner` uses no driver: the workspace belongs to another user and only the runner's
-    global `safe.directory` admits it.
+    `binary`, which conflicts. The base prepends a line to a module the branch wires `stacks/s`
+    to, the branch appends one; the merge still holds both edits, so `stacks/s` is held. An
+    inherited `GIT_REPLACE_REF_BASE` replaces the base's blob with the merge base's, so the base
+    side looks unchanged and the merge resolves to HEAD's tree. `dubious-owner` uses no driver:
+    the workspace belongs to another user and only the runner's global `safe.directory` admits
+    it.
 
     Mutation: drop `merge.default=text` -- `default-driver` merges to HEAD's tree, red.
     Mutation: drop `core.attributesFile=` -- `attributes-file` merges to HEAD's tree and
     `xdg-attributes` conflicts, red.
     Mutation: drop `GIT_CONFIG_GLOBAL` -- `text-driver-redefined` merges to HEAD's tree, red.
-    Mutation: pass `{**os.environ, **_MERGE_ENV}` -- both `env-config-*` rows merge to HEAD's
-    tree, red.
+    Mutation: pass `{**os.environ, **_MERGE_ENV}` -- `env-config-count`, `env-config-parameters`
+    and `replace-ref-base` merge to HEAD's tree, red.
     Mutation: drop `safe.directory=*` -- `dubious-owner` merge-tree dies on ownership, red.
     Mutation: drop only `GIT_CONFIG*` and `GIT_ATTR*` -- `replace-ref-base` merges to HEAD's
     tree, red."""
@@ -3561,11 +3562,12 @@ def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch
     _git("checkout", "-q", "main")
     tip = _commit({"modules/m/main.tf": "base\na\nb\nc\n"}, "base")
     _git("checkout", "-q", "pr")
-    _git(
-        "update-ref",
-        f"refs/evil/{_git('rev-parse', f'{tip}:modules/m/main.tf').strip()}",
-        _git("rev-parse", f"{tip}~1:modules/m/main.tf").strip(),
-    )
+    if route == "replace-ref-base":
+        _git(
+            "update-ref",
+            f"refs/evil/{_git('rev-parse', f'{tip}:modules/m/main.tf').strip()}",
+            _git("rev-parse", f"{tip}~1:modules/m/main.tf").strip(),
+        )
     for k, v in env.items():
         monkeypatch.setenv(k, v.format(tmp=tmp_path.as_posix()))
         if k.startswith("GIT_TEST_"):
