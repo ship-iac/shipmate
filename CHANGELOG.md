@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.53.0] — 2026-10-29
 
+Tags `b8cb366`.
+
 ### Changed — BREAKING
 
 Re-pin in one commit (`docs/releasing.md` §Re-pin a consumer): run `python <engine>/scripts/repin <consumer> v0.53.0 --write-fence`, rename the table keys below in `.github/shipmate-config.yml`, and grant the App `contents: write` before the re-pin merges. `--write-fence` writes nothing when the push trigger holds more than one plain branch (exit 2): then apply the diff it prints to `shipmate.yml` by hand.
