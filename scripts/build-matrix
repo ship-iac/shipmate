@@ -265,26 +265,20 @@ _BASE_REMEDY = "Update the branch from the base and push"
 
 def base_changed_stacks(base_ref, candidates):
     """The stacks `base_ref` changed since its merge base with `HEAD`, a module's consumers
-    included. A plan of such a stack made on `HEAD` reverts the base's change. Two Terramate
-    listings run in one detached worktree:
+    included, so that a plan of them made on `HEAD` reverts the base's change. Terramate's
+    change detection runs once, on the merge of `base_ref` into `HEAD` (`git merge-tree`),
+    committed as a child of `HEAD` and checked out in a detached worktree, against `HEAD`: it
+    lists each stack whose files, or a module it sources on the merged tree, the merge changes.
+    A base change the branch already holds changes nothing in the merge, so it holds no stack.
+    Any merge conflict refuses with git's conflict lines before any checkout, a file the base
+    added under a directory the branch renamed included, and so does a base delete or rename of
+    a file the branch renamed. The listing is skipped when the base changed no file.
 
-    - Base: change detection on `base_ref` against the merge base, which finds the consumers
-      the base's tree knows.
-    - Head: change detection on the merge of `base_ref` into `HEAD` (`git merge-tree`),
-      committed as a child of `HEAD`, against `HEAD`. A stack the branch wires to a module the
-      base changed consumes that module only on the branch's tree, so only this listing finds
-      it. A stack the branch alone wires is not held for a base change the branch already
-      holds; the base listing still holds a stack the base changed, held change or not. Any
-      merge conflict refuses with git's conflict lines, a file the base added under a directory
-      the branch renamed included. The listing is skipped when the base changed no file.
-
-    Terramate lists only stacks the base still has, so each stack path in `candidates` that the
-    base deleted or renamed a file inside, read from `git diff --name-status`, is added. So is
-    each candidate holding a file `HEAD` renamed from a path inside a stack the base listing
-    names. Refuses as `merge_base` does when the merge base cannot be resolved, and on a failed
-    worktree, base listing or diff; a failed head-side step refuses with its error. A
-    `base_ref` the clone lacks, a tip the base gained after the checkout, is fetched from
-    `origin` first; a failed fetch refuses."""
+    Terramate lists only stacks the merge still has, so each stack path in `candidates` that the
+    base deleted or renamed a file inside, read from `git diff --name-status`, is added. Refuses
+    as `merge_base` does when the merge base cannot be resolved, and on a failed diff; a failed
+    merge step refuses with its error. A `base_ref` the clone lacks, a tip the base gained after
+    the checkout, is fetched from `origin` first; a failed fetch refuses."""
     # S603/S607: fixed argvs, git from PATH as every other call here.
     present = ["git", "cat-file", "-e", f"{base_ref}^{{commit}}"]  # noqa: S607
     if subprocess.run(present, capture_output=True).returncode:  # noqa: S603
@@ -298,57 +292,53 @@ def base_changed_stacks(base_ref, candidates):
             )
     since = merge_base(base_ref, retry=_BASE_REMEDY)
     records = _diff_records(since, base_ref)
-    moved = _moved_from(records)
-    gone = {s for s in candidates if any(_inside(p, s, candidates) for p in moved)}
-    renamed = [(old, new) for status, old, new in _diff_records(since, "HEAD") if status == "R"]
-    tree = tempfile.mkdtemp(prefix="shipmate-base-")
-    _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
-    try:
-        listed = set(_list_stacks(False, since, tree))
-        wired = _overlay_stacks(tree, base_ref) if records else set()
-    finally:
-        _run(["git", "worktree", "remove", "--force", tree])
-    followed = {
-        s
-        for s in candidates
-        for old, new in renamed
-        if _inside(new, s, candidates) and any(_inside(old, b, listed) for b in listed)
-    }
-    return listed | wired | gone | followed
+    gone = {s for s in candidates if any(_inside(p, s, candidates) for p in _moved_from(records))}
+    return (_merge_stacks(base_ref) if records else set()) | gone
 
 
-def _overlay_stacks(tree, base_ref):
-    """`base_changed_stacks`' head-side listing in the worktree `tree`: the merge of `base_ref`
-    into `HEAD`, committed on `HEAD`, checked out and listed against `HEAD`. A merge conflict
-    refuses with git's conflict lines, any other failure with its error."""
+def _merge_stacks(base_ref):
+    """`base_changed_stacks`' listing: the merge of `base_ref` into `HEAD`, committed on `HEAD`,
+    checked out in a detached worktree and listed against `HEAD`. A merge conflict refuses with
+    git's conflict lines before the worktree is added, any other failure with its error."""
+    head = _run(["git", "rev-parse", "HEAD"]).strip()
     # Not `run`: git prints a conflict on stdout. The pinned directoryRenames keeps a runner's
-    # `false` from silently missing a stack wired to a module the branch moved.
+    # `false` from silently missing a stack wired to a module the branch moved. LC_ALL=C: git
+    # localizes `CONFLICT`, which the cause is read by.
     # S603/S607: a fixed argv, git from PATH as every other call here.
     merge = ["git", "-c", "merge.directoryRenames=conflict", "merge-tree", "--write-tree"]
-    args = [*merge, base_ref, "HEAD"]
-    p = subprocess.run(args, capture_output=True, encoding="utf-8", errors="replace")  # noqa: S603
+    p = subprocess.run(  # noqa: S603
+        [*merge, base_ref, head],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "LC_ALL": "C"},
+    )
     if p.returncode:
         lines = [x.strip() for x in p.stdout.splitlines() if x.startswith("CONFLICT")]
         if p.returncode != 1 or not lines:
             lines = [x.strip() for x in p.stderr.splitlines() if x.strip()]
-        _overlay_refusal(" | ".join(lines) or f"git merge-tree exited {p.returncode}")
+        _merge_refusal(" | ".join(lines) or f"git merge-tree exited {p.returncode}")
+    merged = next(iter(p.stdout.split()), "")
+    if not merged:
+        _merge_refusal("git merge-tree printed no tree")
+    tree = tempfile.mkdtemp(prefix="shipmate-merge-")
     try:
-        head = run(["git", "rev-parse", "HEAD"]).strip()
-        git = ["git", "-C", tree]
         ident = ["-c", "user.name=shipmate", "-c", "user.email=shipmate@invalid"]
-        merged = p.stdout.splitlines()[0]
-        commit = [*git, *ident, "-c", "commit.gpgsign=false", "commit-tree", merged, "-p", head]
+        commit = ["git", *ident, "-c", "commit.gpgsign=false", "commit-tree", merged, "-p", head]
         sha = run([*commit, "-m", "overlay"]).strip()
-        run([*git, "checkout", "--quiet", "--force", "--detach", sha])
-        return set(_list_stacks(False, head, tree))
+        run(["git", "worktree", "add", "--quiet", "--detach", tree, sha])
+        try:
+            return set(_list_stacks(False, head, tree))
+        finally:
+            run(["git", "worktree", "remove", "--force", tree])
     except (SystemExit, OSError) as e:
         message = str(e.code if isinstance(e, SystemExit) else e).removeprefix("::error::")
-        _overlay_refusal(
+        _merge_refusal(
             " | ".join(x.strip() for x in message.splitlines()[1:] if x.strip()) or message
         )
 
 
-def _overlay_refusal(cause):
+def _merge_refusal(cause):
     raise SystemExit(
         "::error::change detection on the merge of the base into the branch failed: "
         f"{cause.removesuffix('.')}. {_BASE_REMEDY}."

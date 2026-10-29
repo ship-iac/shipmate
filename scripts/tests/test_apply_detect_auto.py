@@ -115,7 +115,7 @@ def _run_auto(
     the successive pull request reads, `base_changed` the stacks the base changed (an exception
     raises from the read), `tip` the base branch ref's commit (an exception raises from the
     read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
-    sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the base-side detection is asked
+    sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap detection is asked
     about to `base_reads`.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
