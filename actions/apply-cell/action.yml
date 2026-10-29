@@ -49,9 +49,9 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
-    # Carries the pre-apply check, run before the cloud credentials, into the blocked reason. A
-    # refused wave skipped checkout and setup, so every step before this one must need neither,
-    # or its failure skips this step and the blocked reason loses the refusal.
+    # Carries the pre-apply refusal into the blocked reason; the check ran before the cloud
+    # credentials, so a refused cell never assumed the apply role. A refused wave skipped checkout
+    # and setup: a step above this one that needs them hides the refusal.
     - name: Refuse a cell whose pre-apply check did not pass
       id: pre-apply
       shell: bash

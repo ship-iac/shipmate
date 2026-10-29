@@ -2868,7 +2868,8 @@ def test_the_defaults_name_each_auto_environment_after_the_apply_mode_line():
 
 
 def test_a_long_auto_list_is_cut_between_env_names():
-    """Mutation: render the auto list as `', '.join(autos)` -- all twenty names show."""
+    """Mutations: render the auto list as `', '.join(autos)` -- all twenty names show; raise its
+    limit from 400 to 450 -- twelve names show."""
     name = "environment-with-a-long-name-{:02d}".format
     table = {"environments": {name(i): {"apply_mode": "auto", "review": False} for i in range(20)}}
     assert doctor._config_defaults(table)[2] == (

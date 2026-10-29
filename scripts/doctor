@@ -1944,7 +1944,7 @@ def _budgeted(groups, head, sep, budget, overflow):
 def _config_defaults(table):
     """Three or four notices: the three tolerant defaults, echoed whether they are set or not,
     and after `apply_mode` one naming the `apply_mode: auto` environments, only when an entry
-    sets it, so a caller cannot address the `max_parallel` line by position.
+    sets it, which shifts the `max_parallel` line from index 2 to 3.
 
     No absence here is invalid, so no validator can report any of them. `needs` and
     `apply_mode` decide what a comment can do, and `max_parallel` how many plan and drift cell
