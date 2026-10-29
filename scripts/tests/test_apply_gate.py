@@ -654,3 +654,59 @@ def test_newest_autoplan_raises_value_error_on_a_malformed_line(line):
     int)`; bool-id returns). Mutation: drop the key check (no-head-sha returns)."""
     with pytest.raises(ValueError):
         _newest(json.dumps(_listed(5)), line)
+
+
+_OTHER = "b" * 40
+_PUSHED = {"x": ("7", "synchronize"), "y": ("7", "opened")}
+
+
+@pytest.mark.parametrize(
+    ("newest", "cells", "expected"),
+    [
+        pytest.param(_listed(7), _PUSHED, None, id="pass"),
+        pytest.param(_listed(7), {}, None, id="pass-no-cells"),
+        pytest.param(None, _PUSHED, ("unlisted", None), id="unlisted"),
+        pytest.param(_listed(8), _PUSHED, ("newer", 8), id="newer"),
+        pytest.param(_listed(6), _PUSHED, ("newer", 6), id="older"),
+        pytest.param(_listed(8, event="workflow_dispatch"), {}, ("newer", 8), id="newer-first"),
+        pytest.param(
+            _listed(7, event="workflow_dispatch"),
+            _PUSHED,
+            ("event", "workflow_dispatch"),
+            id="event",
+        ),
+        pytest.param(
+            _listed(7, event="push", head_sha=_OTHER), {}, ("event", "push"), id="event-first"
+        ),
+        pytest.param(_listed(7, head_sha=_OTHER), _PUSHED, ("head", _OTHER), id="head"),
+        pytest.param(
+            _listed(7, head_sha=_OTHER), {"x": ("8", None)}, ("head", _OTHER), id="head-first"
+        ),
+        pytest.param(
+            _listed(7),
+            {"x": ("7", "synchronize"), "y": ("8", "synchronize"), "z": (None, "opened")},
+            ("record", [("y", "8"), ("z", None)]),
+            id="record",
+        ),
+        pytest.param(
+            _listed(7),
+            {"x": ("7", "ready_for_review"), "y": ("8", "synchronize")},
+            ("record", [("y", "8")]),
+            id="record-first",
+        ),
+        pytest.param(
+            _listed(7),
+            {"x": ("7", "ready_for_review"), "y": ("7", "synchronize"), "z": ("7", None)},
+            ("action", [("x", "ready_for_review"), ("z", None)]),
+            id="action",
+        ),
+    ],
+)
+def test_provenance_reason_names_the_first_failing_check(newest, cells, expected):
+    """Plan run "7" of `_HEAD`. Mutation: drop the `newest is None` check (unlisted raises
+    `TypeError`). Mutation: drop the id check, or `<` for `!=` (newer and older pass or refuse
+    otherwise). Mutation: drop the event check (event passes). Mutation: drop the head check
+    (head passes). Mutation: drop the record check (record passes). Mutation: drop the action
+    check, or `==` for `!=` in the record check (action passes, or pass refuses). Mutation:
+    test the event before the id (newer-first reads `event`)."""
+    assert ag.provenance_reason(newest, "7", _HEAD, cells) == expected

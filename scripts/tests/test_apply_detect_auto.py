@@ -63,16 +63,19 @@ def _ref(tip):
 
 
 def _listed(entry):
-    """One listing line: an autoplan of `HEAD` by `k3np` for an int id, a str verbatim."""
+    """One listing line: an autoplan of `HEAD` by `k3np`, of id `entry` for an int, of id `RUN`
+    with `entry`'s keys over it for a dict; a str verbatim."""
     if isinstance(entry, str):
         return entry
     login = {"login": "k3np"}
-    run = {"id": entry, "event": "pull_request_target", "head_sha": HEAD}
-    return json.dumps(run | {"actor": login, "triggering_actor": login})
+    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
+    run |= {"actor": login, "triggering_actor": login}
+    return json.dumps(run | entry if isinstance(entry, dict) else run | {"id": entry})
 
 
-def _github(checks, listing, run, permission, pulls, calls, argv, tip=BASE):
-    """A `gh api` double answering each read `_run_auto` documents by its path prefix."""
+def _github(checks, listing, permission, pulls, calls, argv, tip=BASE):
+    """A `gh api` double answering each read `_run_auto` documents by its path prefix; any
+    other read, a single-run `actions/runs/<id>` read among them, fails the test."""
     answers = [
         ("repos/o/r/git/ref/heads/main", lambda: _ref(tip)),
         (f"repos/o/r/commits/{HEAD}/check-runs?", lambda: "\n".join(map(json.dumps, checks))),
@@ -80,7 +83,6 @@ def _github(checks, listing, run, permission, pulls, calls, argv, tip=BASE):
             "repos/o/r/actions/workflows/shipmate.yml/runs?",
             lambda: "\n".join(map(_listed, listing)),
         ),
-        ("repos/o/r/actions/runs/", lambda: json.dumps(run)),
         ("repos/o/r/collaborators/", lambda: _permission_body(permission)),
         (f"repos/o/r/pulls/{PR_NUMBER}", lambda: json.dumps(pulls.pop(0))),
     ]
@@ -90,7 +92,9 @@ def _github(checks, listing, run, permission, pulls, calls, argv, tip=BASE):
         path = next(a for a in args if a.startswith("repos/"))
         calls.append(path)
         argv.append(args)
-        return next(answer for prefix, answer in answers if path.startswith(prefix))()
+        answer = next((a for prefix, a in answers if path.startswith(prefix)), None)
+        assert answer is not None, f"unexpected read: {args}"
+        return answer()
 
     return _run
 
@@ -107,7 +111,6 @@ def _run_auto(
     actor=BOT,
     triggering=BOT,
     decision="NONE",
-    run=None,
     listing=(int(RUN),),
     permission="write",
     pulls=None,
@@ -122,8 +125,8 @@ def _run_auto(
 ):
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
     to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
-    `RUN`, whose API body is an autoplan of `HEAD` pushed by `k3np`. `listing` is the head's
-    autoplan run ids (a str is a raw line), `permission` the pusher's (an exception raises from
+    `RUN`, listed as an autoplan of `HEAD` pushed by `k3np`. `listing` is the head's listed
+    autoplans, one `_listed` entry each, `permission` the pusher's (an exception raises from
     the read), `pulls` the successive pull request reads, `base_changed` the stacks the base
     changed (an exception raises from the read), `tip` the base branch ref's commit (an
     exception raises from the read). Each `gh api` path goes to `calls`, its whole argv to
@@ -151,17 +154,9 @@ def _run_auto(
         if checks is not None
         else [_check(st, e, cells=planned) for e in envs for st in stacks]
     )
-    run = run or {
-        "id": int(RUN),
-        "event": "pull_request_target",
-        "head_sha": HEAD,
-        "actor": {"login": "k3np"},
-        "triggering_actor": {"login": "k3np"},
-    }
     github = _github(
         checks,
         listing,
-        run,
         permission,
         list(pulls or [PULL_OK]),
         [] if calls is None else calls,
@@ -289,10 +284,11 @@ def test_a_rerun_by_anyone_but_the_apps_bot_refuses(tmp_path, monkeypatch, trigg
 )
 def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     """A ready-for-review or reopen autoplan of the head dispatches no auto apply but becomes
-    the newest autoplan; its clicker is no pusher. Nothing about the run or the pusher is read.
+    the newest autoplan; its clicker is no pusher. The listing is read; no single run and no
+    permission is.
 
-    Mutation: drop `refuse_pushed` from `bare_main` (every row applies). Mutation: admit a
-    missing action (`actions.get(n) not in (*ag.PUSH_ACTIONS, None)`; older-engine applies)."""
+    Mutation: drop the action check from `provenance_reason` (every row applies). Mutation:
+    admit a missing action (`act not in (*PUSH_ACTIONS, None)`; older-engine applies)."""
     calls = []
     checks = [_check("stacks/app", "dev-eu", action=action)]
     assert _refusal(tmp_path, monkeypatch, checks=checks, calls=calls) == (
@@ -300,7 +296,7 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
         f"({action!r}) name no push event action (opened or synchronize), so no push started "
         f"that plan. {REMEDY}"
     )
-    assert not [c for c in calls if "/actions/" in c or "/collaborators/" in c]
+    assert not [c for c in calls if "/actions/runs/" in c or "/collaborators/" in c]
 
 
 @pytest.mark.parametrize("action", ["opened", "synchronize"])
@@ -323,20 +319,47 @@ def test_a_head_without_an_app_check_refuses(tmp_path, monkeypatch):
 
 
 def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypatch):
-    """Mutation: drop the `event` refusal -- the run applies."""
-    run = {"id": int(RUN), "event": "workflow_dispatch", "head_sha": HEAD}
-    assert _refusal(tmp_path, monkeypatch, run=run) == (
-        f"::error::auto apply refused: plan run {RUN} is a `workflow_dispatch` run, not an "
-        f"autoplan: an auto apply applies only the plan a push started. {REMEDY}"
+    """A `shipmate plan` run is a `workflow_dispatch`, never in the `pull_request_target`
+    listing, which holds the head's earlier autoplan.
+
+    Mutation: drop the id check from `provenance_reason` -- the run applies."""
+    assert _refusal(tmp_path, monkeypatch, listing=(int(RUN) - 1,)) == (
+        f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
+        f"(run {int(RUN) - 1} is). {REMEDY}"
     )
 
 
 def test_a_record_from_another_head_refuses(tmp_path, monkeypatch):
-    """Mutation: drop the `head_sha` refusal -- the run applies."""
-    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": BASE}
-    assert _refusal(tmp_path, monkeypatch, run=run) == (
-        f"::error::auto apply refused: plan run {RUN} planned {BASE}, not the head {HEAD}. {REMEDY}"
+    """A run of another head is not in this head's listing.
+
+    Mutation: drop the `newest is None` check from `provenance_reason` -- a `TypeError`
+    escapes."""
+    assert _refusal(tmp_path, monkeypatch, listing=()) == (
+        f"::error::auto apply refused: plan run {RUN} is not listed, and no autoplan run of the "
+        f"head is listed. {REMEDY}"
     )
+
+
+@pytest.mark.parametrize(
+    ("entry", "refusal"),
+    [
+        pytest.param(
+            {"event": "workflow_dispatch"},
+            f"plan run {RUN} is a `workflow_dispatch` run, not an autoplan: an auto apply "
+            "applies only the plan a push started.",
+            id="event",
+        ),
+        pytest.param(
+            {"head_sha": BASE}, f"plan run {RUN} planned {BASE}, not the head {HEAD}.", id="head"
+        ),
+    ],
+)
+def test_a_listed_run_the_listing_filter_should_drop_refuses(tmp_path, monkeypatch, entry, refusal):
+    """The listing's `event=` and `head_sha=` filters are GitHub's, so the listed object is
+    checked again. Mutation: drop the event check from `provenance_reason` (event applies).
+    Mutation: drop the head check (head applies)."""
+    code = _refusal(tmp_path, monkeypatch, listing=(entry,))
+    assert code == f"::error::auto apply refused: {refusal} {REMEDY}"
 
 
 def test_a_record_older_than_the_heads_newest_autoplan_refuses(tmp_path, monkeypatch):
@@ -510,9 +533,8 @@ def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monk
     """A login outside `_LOGIN` is never put into a URL.
 
     Mutation: `readable = True` -- reads `write` and applies."""
-    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
-    run["actor"] = run["triggering_actor"] = {"login": "a b"}
-    assert _refusal(tmp_path, monkeypatch, run=run) == (
+    entry = {"actor": {"login": "a b"}, "triggering_actor": {"login": "a b"}}
+    assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (
         "::error::not authorized: could not read the pusher's permission on this repository, "
         "so `shipmate apply` was not run. This run's log has the API response; push again, or "
         "a writer comments `shipmate apply`."
@@ -524,14 +546,8 @@ def test_a_bot_pusher_refuses_naming_the_bot(tmp_path, monkeypatch):
     permission unreadable.
 
     Mutation: drop the `[bot]` branch from `pusher_reason` -- the unreadable wording, red."""
-    run = {
-        "id": int(RUN),
-        "event": "pull_request_target",
-        "head_sha": HEAD,
-        "actor": {"login": "renovate[bot]"},
-        "triggering_actor": {"login": "renovate[bot]"},
-    }
-    assert _refusal(tmp_path, monkeypatch, run=run) == (
+    entry = {"actor": {"login": "renovate[bot]"}, "triggering_actor": {"login": "renovate[bot]"}}
+    assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (
         "::error::not authorized: the head was pushed by @renovate[bot], a bot account, which "
         "auto never authorizes; a writer comments `shipmate apply`."
     )
@@ -550,15 +566,9 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
     Mutation: drop the `actor != trigger` refusal -- the first row reads `write` and applies,
     the second refuses as a bot.
     Mutation: read the pusher from `triggering_actor` alone -- the same rows, red."""
-    run = {
-        "id": int(RUN),
-        "event": "pull_request_target",
-        "head_sha": HEAD,
-        "actor": {"login": actor},
-        "triggering_actor": {"login": trigger},
-    }
+    entry = {"actor": {"login": actor}, "triggering_actor": {"login": trigger}}
     calls = []
-    assert _refusal(tmp_path, monkeypatch, run=run, calls=calls) == (
+    assert _refusal(tmp_path, monkeypatch, listing=(entry,), calls=calls) == (
         f"::error::not authorized: the autoplan ran as @{actor} but was triggered by "
         f"@{trigger}, so it was re-run, and auto authorizes only the push itself; a writer "
         "comments `shipmate apply`."
@@ -570,12 +580,6 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
     ("kw", "what", "error"),
     [
         pytest.param(
-            {"run": "x"},
-            f"plan run {RUN}",
-            "AttributeError(\"'str' object has no attribute 'get'\")",
-            id="run",
-        ),
-        pytest.param(
             {"listing": ("abc",)},
             "autoplan listing",
             "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')",
@@ -586,8 +590,8 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
 def test_a_malformed_plan_run_read_refuses_without_a_traceback(
     tmp_path, monkeypatch, kw, what, error
 ):
-    """Mutation: drop the `except` around the run read (run escapes as an `AttributeError`).
-    Mutation: drop the `except` around `newest_autoplan` (listing escapes as a `ValueError`)."""
+    """Mutation: drop the `except` around `newest_autoplan` (listing escapes as a
+    `ValueError`)."""
     assert _refusal(tmp_path, monkeypatch, **kw) == (
         f"::error::auto apply refused: the {what} read returned a malformed answer ({error}). "
         f"{REMEDY}"
@@ -610,9 +614,8 @@ def test_a_missing_actor_login_refuses_as_malformed(tmp_path, monkeypatch, actor
     Mutation: drop the `not (actor and trigger)` refusal -- neither and empty read as
     unreadable, no-trigger as a re-run, red. Mutation: drop `isinstance(login, str)` in `_login`
     (not-a-string raises)."""
-    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
-    run.update({"actor": actor, "triggering_actor": trigger})
-    assert _refusal(tmp_path, monkeypatch, run=run) == (
+    entry = {"actor": actor, "triggering_actor": trigger}
+    assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (
         "::error::not authorized: the autoplan run names no actor or no triggering actor login, "
         "so its pusher is unknown; a writer comments `shipmate apply`."
     )

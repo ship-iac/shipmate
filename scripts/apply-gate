@@ -295,8 +295,10 @@ _LISTED_KEYS = ("id", "event", "head_sha", "actor", "triggering_actor")
 
 def newest_autoplan(repo, head, *, run):
     """The listed run of `PLAN_WORKFLOW` started by `pull_request_target` on `head` with the
-    greatest `id`, as an object of `_LISTED_KEYS`, or None when none is listed. Every page is
-    read. Raises `ValueError` on a line that is not such an object or whose `id` is not an
+    greatest `id`, or None when none is listed. Every page is read. The run is the listing's
+    object cut to `_LISTED_KEYS`: its integer `id`, `event`, `head_sha`, and the `actor` and
+    `triggering_actor` user objects `authorize.pusher_reason` reads, which equal a single-run
+    read's. Raises `ValueError` on a line that is not such an object or whose `id` is not an
     integer."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
     listing = run(
@@ -316,6 +318,37 @@ def newest_autoplan(repo, head, *, run):
         if type(listed["id"]) is not int:
             raise ValueError(f"run id is {listed['id']!r}")
     return max(runs, key=lambda listed: listed["id"], default=None)
+
+
+def provenance_reason(newest, plan_run, head, cells):
+    """The first provenance check the auto apply of `plan_run`, a decimal run id, on `head`
+    fails, as `(cause, detail)`, or None when every check passes. Pure: each caller words the
+    cause itself from `detail`.
+
+    `newest` is `newest_autoplan`'s object or None. `cells` maps each check name to the
+    `(recorded plan run or None, event action or None)` its record holds, possibly empty;
+    failing names are reported in its order. Checks, in this order:
+
+    - `("unlisted", None)`: `newest` is None.
+    - `("newer", newest["id"])`: the newest autoplan is another run, older or newer.
+    - `("event", newest["event"])`: it is not a `pull_request_target` run; the listing's
+      `event=` filter should already exclude one.
+    - `("head", newest["head_sha"])`: it planned another commit than `head`.
+    - `("record", [(name, recorded), ...])`: cells recording another plan run.
+    - `("action", [(name, action), ...])`: cells whose action is not in `PUSH_ACTIONS`."""
+    if newest is None:
+        return "unlisted", None
+    if newest["id"] != int(plan_run):
+        return "newer", newest["id"]
+    if newest["event"] != "pull_request_target":
+        return "event", newest["event"]
+    if newest["head_sha"] != head:
+        return "head", newest["head_sha"]
+    records = [(name, run) for name, (run, _) in cells.items() if run != plan_run]
+    if records:
+        return "record", records
+    actions = [(name, act) for name, (_, act) in cells.items() if act not in PUSH_ACTIONS]
+    return ("action", actions) if actions else None
 
 
 def base_tip(repo, pull, *, run):

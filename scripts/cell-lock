@@ -584,39 +584,44 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
         f"plan run {provenance} is the newest autoplan of {head}",
         lambda: ag.newest_autoplan(repo, head, run=run),
     )
-    listed = None if newest is None else newest["id"]
-    if listed != int(provenance):
-        raise SystemExit(
-            f"::error::apply aborted for {where}: the newest autoplan of {head} is "
-            f"{'not listed' if listed is None else f'run {listed}'}, not plan run {provenance}, "
-            f"which this auto apply applies; {_RETRY}"
-        )
-    recorded, action = _confirm(
+    reason = ag.provenance_reason(newest, provenance, head, {})
+    _refuse_provenance(where, head, provenance, reason)
+    name = ag.check_name(stack, env)
+    record = _confirm(
         where,
         f"the cell's newest plan record names plan run {provenance}",
-        lambda: _plan_record(repo, head, ag.check_name(stack, env), run),
+        lambda: _plan_record(repo, head, name, run),
     )
-    if recorded != provenance:
-        raise SystemExit(
-            f"::error::apply aborted for {where}: the cell's newest plan record names "
-            f"{'no plan run' if recorded is None else f'plan run {recorded}'}, not plan run "
-            f"{provenance}, which this auto apply applies; {_RETRY}"
-        )
-    if action not in ag.PUSH_ACTIONS:
-        raise SystemExit(
-            f"::error::apply aborted for {where}: the cell's plan record names event action "
-            f"{action!r}, not a push (opened or synchronize); comment `shipmate apply`"
-        )
+    reason = ag.provenance_reason(newest, provenance, head, {name: record})
+    _refuse_provenance(where, head, provenance, reason)
     # The pusher's write access can be revoked while a wave waits on an approval.
-    reason = _confirm(
-        where,
-        f"the pusher of plan run {provenance} may apply",
-        lambda: az.pusher_reason(
-            repo, gh_json(f"repos/{repo}/actions/runs/{provenance}", run), run=run
-        ),
-    )
+    reason = az.pusher_reason(repo, newest, run=run)
     if reason:
         raise SystemExit(f"::error::apply aborted for {where}: {reason}")
+
+
+def _refuse_provenance(where, head, provenance, reason):
+    """Refuse the cell at `where` with `apply-gate.provenance_reason`'s `reason` for plan run
+    `provenance`; return when it is None."""
+    if reason is None:
+        return
+    cause, detail = reason
+    applies = f"not plan run {provenance}, which this auto apply applies; {_RETRY}"
+    if cause in ("unlisted", "newer"):
+        why = f"the newest autoplan of {head} is "
+        why += f"{'not listed' if detail is None else f'run {detail}'}, {applies}"
+    elif cause in ("event", "head"):
+        why = f"the newest autoplan of {head} is not a pull_request_target run of it; {_RETRY}"
+    elif cause == "record":
+        recorded = detail[0][1]
+        why = "the cell's newest plan record names "
+        why += f"{'no plan run' if recorded is None else f'plan run {recorded}'}, {applies}"
+    else:
+        why = (
+            f"the cell's plan record names event action {detail[0][1]!r}, not a push (opened "
+            "or synchronize); comment `shipmate apply`"
+        )
+    raise SystemExit(f"::error::apply aborted for {where}: {why}")
 
 
 def _draft(pull):

@@ -1089,26 +1089,20 @@ def _pull(state="open", head=HEAD, draft=False):
     )
 
 
-RUN_READ = ["gh", "api", f"repos/{REPO}/actions/runs/{RUN}"]
-
-
-def _autoplans(*ids):
-    """The listing's lines: one autoplan of `HEAD` by `k3np` per id."""
+def _autoplans(*ids, **keys):
+    """The listing's lines: one autoplan of `HEAD` by `k3np` per id, with `keys` over each."""
     login = {"login": "k3np"}
     return "\n".join(
         json.dumps(
             {"id": int(i), "event": "pull_request_target", "head_sha": HEAD}
             | {"actor": login, "triggering_actor": login}
+            | keys
         )
         for i in ids
     )
 
 
 PERMISSION_READ = ["gh", "api", f"repos/{REPO}/collaborators/k3np/permission"]
-
-
-def _plan_run(actor="k3np", trigger="k3np"):
-    return json.dumps({"actor": {"login": actor}, "triggering_actor": {"login": trigger}})
 
 
 def _tip(sha=BASE):
@@ -1250,8 +1244,7 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     check-run reads are left unconsumed). Mutation: read the record with no `name` (an
     unexpected call)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
-    gh.on(RECORD_READ, _records("1", RUN)).on(RUN_READ, _plan_run())
-    gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    gh.on(RECORD_READ, _records("1", RUN)).on(PERMISSION_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
 
@@ -1260,7 +1253,8 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
 def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, action):
     """A ready-for-review autoplan of the head can become the newest autoplan after detect.
 
-    Mutation: drop the action refusal from `_verify_auto` (the run read runs, unexpected)."""
+    Mutation: drop the action check from `provenance_reason` (the permission read runs,
+    unexpected)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
@@ -1317,26 +1311,26 @@ def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
     assert _verify(monkeypatch, tmp_path, gh) == {}
 
 
-def _pusher_gh(plan_run, permission=None):
-    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
-    gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, plan_run)
+def _pusher_gh(autoplans, permission=None):
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
+    gh.on(RECORD_READ, _records(RUN))
     if permission is not None:
         gh.on(PERMISSION_READ, permission)
     return gh
 
 
 @pytest.mark.parametrize(
-    ("plan_run", "permission", "reason"),
+    ("autoplans", "permission", "reason"),
     [
         pytest.param(
-            _plan_run(),
+            _autoplans(RUN),
             json.dumps({"permission": "read"}),
             "not authorized: `shipmate apply` needs write access to this repository, and the "
             "pusher @k3np's permission is `read`.",
             id="read",
         ),
         pytest.param(
-            _plan_run(),
+            _autoplans(RUN),
             FAIL,
             "not authorized: could not read the pusher @k3np's permission on this repository, "
             "so `shipmate apply` was not run. This run's log has the API response; push again, "
@@ -1344,7 +1338,7 @@ def _pusher_gh(plan_run, permission=None):
             id="unreadable",
         ),
         pytest.param(
-            _plan_run(trigger="octocat"),
+            _autoplans(RUN, triggering_actor={"login": "octocat"}),
             None,
             "not authorized: the autoplan ran as @k3np but was triggered by @octocat, so it was "
             "re-run, and auto authorizes only the push itself; a writer comments `shipmate "
@@ -1354,32 +1348,13 @@ def _pusher_gh(plan_run, permission=None):
     ],
 )
 def test_verify_auto_rereads_the_pushers_permission(
-    monkeypatch, tmp_path, plan_run, permission, reason
+    monkeypatch, tmp_path, autoplans, permission, reason
 ):
-    """The wave decides the pusher with detect's function and wording.
+    """The wave decides the pusher of the listed autoplan with detect's function and wording.
 
     Mutation: drop the pusher check from `_verify_auto` (every row passes)."""
-    gh = _pusher_gh(plan_run, permission)
+    gh = _pusher_gh(autoplans, permission)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == f"::error::{WHERE} {reason}"
-
-
-@pytest.mark.parametrize(
-    ("plan_run", "why"),
-    [
-        pytest.param(FAIL, "command failed (1): gh api", id="read-fails"),
-        pytest.param(
-            '"x"', "AttributeError(\"'str' object has no attribute 'get'\")", id="malformed"
-        ),
-    ],
-)
-def test_verify_auto_refuses_a_pusher_it_cannot_read(monkeypatch, tmp_path, plan_run, why):
-    """Mutation: answer the run read's failure with no reason (`except SystemExit: return None`
-    around it; read-fails passes)."""
-    gh = _pusher_gh(plan_run)
-    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} could not confirm the pusher of plan run {RUN} may apply ({why}); "
-        f"{RETRY}"
-    )
 
 
 def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
@@ -1408,6 +1383,28 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the newest autoplan of {HEAD} is {newest}, not plan run {RUN}, which "
         f"this auto apply applies; {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        pytest.param({"event": "workflow_dispatch"}, id="event"),
+        pytest.param({"head_sha": OTHER}, id="head"),
+    ],
+)
+def test_verify_auto_refuses_a_listed_run_the_listing_filter_should_drop(
+    monkeypatch, tmp_path, keys
+):
+    """The listing's `event=` and `head_sha=` filters are GitHub's, so the listed object is
+    checked again, before the record read. Mutation: drop the event check from
+    `provenance_reason` (event reads the record, unexpected). Mutation: drop the head check
+    (head reads the record, unexpected)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
+    gh.on(AUTOPLANS_READ, _autoplans(RUN, **keys))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the newest autoplan of {HEAD} is not a pull_request_target run of it; "
+        f"{RETRY}"
     )
 
 

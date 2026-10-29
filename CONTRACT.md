@@ -1961,13 +1961,15 @@ on the pull request to apply it.``
   never from the pull request's `base.sha`: on a probed pull request `base.sha`
   kept the old tip for 20 s and more after a push to the base, while the branch
   ref answered the new tip at once. An unreadable tip refuses.
-- **Provenance.** Every cell to apply must record one plan run; that run's
-  `event` must be `pull_request_target`, its `head_sha` the head, and it must be
-  the newest run listed by
+- **Provenance.** Every cell to apply must record one plan run, and it must
+  be the newest run listed by
   `actions/workflows/shipmate.yml/runs?event=pull_request_target&head_sha=<head>`,
-  every page read. A cell whose newest plan record is a `shipmate plan` run
-  therefore refuses the run; `shipmate apply` applies it under the comment-time
-  requirements. A newer autoplan of the head that published no apply check
+  every page read; that listed run's `event` must also be `pull_request_target`
+  and its `head_sha` the head. A `shipmate plan` run is a `workflow_dispatch`,
+  never listed, so a cell whose newest plan record names one refuses the run as
+  ``plan run <n> is not the newest autoplan of the head (run <m> is)`` or, with
+  no autoplan of the head listed, ``plan run <n> is not listed``; `shipmate
+  apply` applies it under the comment-time requirements. A newer autoplan of the head that published no apply check
   refuses it too, which the record-based binding of the bare and targeted forms
   cannot see (§Apply-match fingerprint). Every cell's record must also name the
   event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
@@ -1976,12 +1978,12 @@ on the pull request to apply it.``
   ``auto apply refused: the plan records of <cells> name no push event action
   (opened or synchronize), so no push started that plan.`` The wave pre-apply
   check repeats this on the cell's newest record.
-- **Pusher.** The plan run's `actor`, the pusher, must equal its
+- **Pusher.** The listed run's `actor`, the pusher, must equal its
   `triggering_actor` and must have write access. A re-run of the autoplan keeps
   `actor` and names the re-runner as `triggering_actor`, so it refuses:
   ``not authorized: the autoplan ran as @<actor> but was triggered by
   @<triggering actor>, so it was re-run, and auto authorizes only the push
-  itself; a writer comments `shipmate apply`.`` The run body carries no event
+  itself; a writer comments `shipmate apply`.`` The listed run carries no event
   action, so a ready-for-review or reopen autoplan is kept out by the dispatch
   condition above, not here. The permission is read with the `detect` job's `GITHUB_TOKEN` from
   `collaborators/<login>/permission` and decided by
@@ -1995,7 +1997,7 @@ on the pull request to apply it.``
   head was pushed by @<login>, a bot account, which auto never authorizes; a
   writer comments `shipmate apply`.``
 
-With no cell to apply, neither the plan run nor the pusher is read.
+With no cell to apply, neither the autoplan listing nor the pusher is read.
 
 **Overlap.** A cell `detect` would apply is held when merging the base tip into
 the head changes its stack, directly or through a module it sources on the merged
@@ -2035,8 +2037,9 @@ apply this run; see its line below` for one holding a locked, overlap or waiting
 cell, and `shipmate apply` otherwise (§Apply result comment).
 
 **Wave re-check.** Each `auto` wave cell's pre-apply check (§Cell locks) also
-refuses unless the plan run `detect` bound is still the head's newest autoplan
-and the run the cell's newest plan record names, and the base tip, read from the
+refuses unless the plan run `detect` bound is still the head's newest autoplan,
+a `pull_request_target` run of the head, and the run the cell's newest plan
+record names, and the base tip, read from the
 branch ref, is still the one `detect` read. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
