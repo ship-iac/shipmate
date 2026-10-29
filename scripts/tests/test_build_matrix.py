@@ -3418,12 +3418,27 @@ def test_base_changed_stacks_refuses_a_merge_conflict_before_any_worktree(git_re
     assert [a for a in seen if "worktree" in a] == []
 
 
-def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(git_repo, monkeypatch):
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(None, id="default"),
+        pytest.param("merge.renames", id="merge-renames-false"),
+        pytest.param("diff.renames", id="diff-renames-false"),
+    ],
+)
+def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
+    git_repo, monkeypatch, config
+):
     """The branch renames `modules/m` to `modules/m2` and wires `stacks/s` to it; the base adds
     `modules/m/variables.tf`. git's rename detection would move the file into `modules/m2`; the
-    pinned `merge.directoryRenames=conflict` makes it a conflict instead.
+    pinned `merge.directoryRenames=conflict` makes it a conflict instead. A repository `false`
+    for `merge.renames`, or for `diff.renames` it defaults to, would skip rename detection and
+    leave the file under `modules/m`; the pinned `merge.renames=true` keeps the conflict.
 
-    Mutation: `-c merge.directoryRenames=true` -- the merge succeeds and holds `stacks/s`, red."""
+    Mutation: `-c merge.directoryRenames=true` -- the merge succeeds and holds `stacks/s`, red.
+    Mutation: drop `-c merge.renames=true` -- both `false` rows merge cleanly, red."""
+    if config:
+        _git("config", config, "false")
     _commit({"modules/m/main.tf": "m\n", "stacks/s/main.tf": "s\n"}, "common")
     _git("checkout", "-q", "-b", "pr")
     _git("mv", "modules/m", "modules/m2")

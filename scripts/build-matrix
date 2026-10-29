@@ -305,10 +305,11 @@ def _merge_stacks(base_ref, candidates):
     failure with its error."""
     try:
         head = run(["git", "rev-parse", "HEAD"]).strip()
-        # Not `run`: git prints a conflict on stdout. The pinned directoryRenames keeps a
-        # runner's `false` from silently missing a stack wired to a module the branch moved.
+        # Not `run`: git prints a conflict on stdout. Both rename settings are pinned: a runner's
+        # `false` for either silently misses a stack wired to a module the branch moved.
         # LC_ALL=C: git localizes `CONFLICT`, which the cause is read by.
-        merge = ["git", "-c", "merge.directoryRenames=conflict", "merge-tree", "--write-tree"]
+        pin = ["-c", "merge.renames=true", "-c", "merge.directoryRenames=conflict"]
+        merge = ["git", *pin, "merge-tree", "--write-tree"]
         p = subprocess.run(  # noqa: S603
             [*merge, base_ref, head],
             capture_output=True,
