@@ -262,13 +262,15 @@ def merge_base(base, retry="Re-run the workflow"):
 
 # Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
 _BASE_REMEDY = "Update the branch from the base and push"
-# `-c` outranks global, system and repo config, so runner config cannot change which stacks are
-# held. `merge.renames` also covers the `diff.renames` it falls back to; 32767 because 0 means
-# git's default limit.
+# `-c` outranks runner config, so it cannot change rename detection or the content merge driver,
+# hence which stacks are held; a repository `.gitattributes` driver is the consumer's choice.
+# `merge.renames` also covers the `diff.renames` it falls back to; 0 means git's default limit.
 _MERGE_PINS = (
     *("-c", "merge.renames=true"),
     *("-c", "merge.directoryRenames=conflict"),
     *("-c", "merge.renameLimit=32767"),
+    *("-c", "merge.default=text"),
+    *("-c", "core.attributesFile="),
 )
 
 

@@ -3477,7 +3477,7 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
     )
 
 
-def test_merge_pins_are_the_rename_settings():
+def test_merge_pins_are_the_rename_and_content_driver_settings():
     """0 is git's default rename limit, not unlimited, so the pin is the highest limit.
 
     Mutation: `merge.renameLimit=0` -- red."""
@@ -3488,7 +3488,42 @@ def test_merge_pins_are_the_rename_settings():
         "merge.directoryRenames=conflict",
         "-c",
         "merge.renameLimit=32767",
+        "-c",
+        "merge.default=text",
+        "-c",
+        "core.attributesFile=",
     )
+
+
+@pytest.mark.parametrize("route", ["default-driver", "attributes-file"])
+def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch, tmp_path, route):
+    """The runner's git config selects a driver that keeps the branch's side of every file, as
+    the default driver or through a global attributes file. The base prepends a line to a module
+    the branch wires `stacks/s` to, the branch appends one; the merge still holds both edits, so
+    `stacks/s` is held.
+
+    Mutation: drop `merge.default=text` -- `default-driver` merges to HEAD's tree, red.
+    Mutation: drop `core.attributesFile=` -- `attributes-file` merges to HEAD's tree, red."""
+    _git("config", "--global", "merge.keep-head.driver", "cp %B %A")
+    if route == "default-driver":
+        _git("config", "--global", "merge.default", "keep-head")
+    else:
+        (tmp_path / "attributes").write_bytes(b"* merge=keep-head\n")
+        _git("config", "--global", "core.attributesFile", str(tmp_path / "attributes"))
+    _commit({"modules/m/main.tf": "a\nb\nc\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"modules/m/main.tf": "a\nb\nc\nhead\n", "stacks/s/mod.tf": "wire\n"}, "wire")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "base\na\nb\nc\n"}, "base")
+    _git("checkout", "-q", "pr")
+
+    def listing(tree):
+        assert (tree / "modules/m/main.tf").read_text() == "base\na\nb\nc\nhead\n"
+        return "stacks/s\n"
+
+    seen = _merge_stub(monkeypatch, listing)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", head]]
 
 
 def _merge_tree_answers(monkeypatch, result):
