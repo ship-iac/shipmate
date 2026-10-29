@@ -262,6 +262,14 @@ def merge_base(base, retry="Re-run the workflow"):
 
 # Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
 _BASE_REMEDY = "Update the branch from the base and push"
+# Runner config must not change which stacks are held: the merge ignores global and system
+# config, and these pin the keys against repo config. `merge.renames` also covers the
+# `diff.renames` it falls back to.
+_MERGE_PINS = (
+    *("-c", "merge.renames=true"),
+    *("-c", "merge.directoryRenames=conflict"),
+    *("-c", "merge.renameLimit=0"),
+)
 
 
 def base_changed_stacks(base_ref, candidates):
@@ -305,17 +313,20 @@ def _merge_stacks(base_ref, candidates):
     failure with its error."""
     try:
         head = run(["git", "rev-parse", "HEAD"]).strip()
-        # Not `run`: git prints a conflict on stdout. Both rename settings are pinned: a runner's
-        # `false` for either silently misses a stack wired to a module the branch moved.
+        # Not `run`: git prints a conflict on stdout.
         # LC_ALL=C: git localizes `CONFLICT`, which the cause is read by.
-        pin = ["-c", "merge.renames=true", "-c", "merge.directoryRenames=conflict"]
-        merge = ["git", *pin, "merge-tree", "--write-tree"]
+        merge = ["git", *_MERGE_PINS, "merge-tree", "--write-tree"]
         p = subprocess.run(  # noqa: S603
             [*merge, base_ref, head],
             capture_output=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, "LC_ALL": "C"},
+            env={
+                **os.environ,
+                "LC_ALL": "C",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+            },
         )
         cause = _merge_tree_failure(p)
         if cause is None:

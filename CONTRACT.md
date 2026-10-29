@@ -2005,10 +2005,11 @@ With no cell to apply, neither the autoplan listing nor the pusher is read.
 **Overlap.** A cell `detect` would apply is held when merging the base tip into
 the head changes its stack, directly or through a module it sources on the merged
 tree. Terramate's change detection runs once: on the merge of the base tip into
-the head (`git merge-tree`, with `merge.renames=true` and
-`merge.directoryRenames=conflict`), committed as a child of the head and checked
-out in one worktree, from the head. It is skipped when the base changed no file
-since the merge base of the base tip and the head.
+the head (`git merge-tree`, ignoring the runner's global and system git config
+and pinning `merge.renames=true`, `merge.directoryRenames=conflict` and
+`merge.renameLimit=0`), committed as a child of the head and checked out in one
+worktree, from the head. It is skipped when the base changed no file since the
+merge base of the base tip and the head.
 A stack is not held for a base change the branch already holds, which changes
 nothing in the merge. A base edit of a file in a stack the branch renamed is
 held, or refused as a conflict when git does not pair the rename (below its
