@@ -1819,7 +1819,8 @@ stacks after this branch left it, so their plans would revert that change:
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
 pending cells' stacks` when nothing applied.
 
-The base branch changed those stacks, directly or through a module, or deleted
+The base branch changed those stacks, directly or through a module (including
+one only the branch wires the stack to), or deleted
 or renamed files in them, since the branch left it. A stack the branch renamed
 is held when the base changed its old path. Each plan was made on the branch's tree, so applying it would
 revert the base's change. The held cells stay pending, a cell that runs after
@@ -1945,8 +1946,13 @@ holds; git's own error is in the `detect` annotation after the colon.
 An `auto` apply's `detect` computes the same merge base, between the base tip
 and the head, to find the stacks the base changed. It refuses with the same
 text, ending `Update the branch from the base and push; if it fails again, the
-base commit is not reachable from this checkout.`, and nothing applies. A bare
-`shipmate apply` is no remedy: it runs no overlap check.
+base commit is not reachable from this checkout.`, and nothing applies. It also
+runs change detection on the branch's tree with the base's changed files written
+over it, to find a stack the branch wires to a module the base changed. When that
+fails, it refuses with `change detection on the branch's tree with the base's
+changes written over it failed: <cause>. Update the branch from the base and
+push.`, and nothing applies; `<cause>` is the failed step's error. A bare
+`shipmate apply` is no remedy for either refusal: it runs no overlap check.
 
 ### A pull request planned zero cells
 

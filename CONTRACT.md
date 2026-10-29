@@ -1999,10 +1999,23 @@ With no cell to apply, neither the plan run nor the pusher is read.
 
 **Overlap.** A cell `detect` would apply is held when the base branch changed its
 stack, directly or through a module, since the merge base of the base tip and the
-head: Terramate's change detection runs in a worktree of the base tip, from that
-merge base. Terramate lists only the stacks the base tip still has, so a stack
+head. Terramate's change detection runs twice in one worktree. The base-side
+listing runs on the base tip from that merge base and finds the module consumers
+the base's tree knows. The head-side listing runs on the head with the base's
+changed files written over it, from the head, so the overlaid files are the only
+changes it sees; it finds a stack the branch wires to a module the base changed,
+which consumes that module only on the branch's tree. A base path the branch
+renamed is written at the branch's path, matched by the exact rename record. A
+base path is not written when an ancestor directory existed at the merge base and
+is gone on the head, when it is a directory on the head, or when an ancestor is a
+file on the head. A file the base added under a directory the branch renamed is
+therefore not covered: no rename record names it. The head-side listing is skipped
+when the base changed no file. When it fails, `detect` refuses with ``change
+detection on the branch's tree with the base's changes written over it failed:
+<cause>. Update the branch from the base and push.`` and nothing applies.
+Terramate lists only the stacks the base tip still has, so a stack
 whose files the base deleted or renamed since that merge base
-(`git diff --name-status --find-renames`) is held too, and so is a stack holding
+(`git diff --raw --find-renames`) is held too, and so is a stack holding
 a file the branch renamed from a path the base also changed (inside a stack the
 base-side detection lists, or a path the base deleted or renamed). Applying its plan would revert the base's change (§Fan-out). A held
 cell is not applied: its apply check and the gate stay pending, it stops its
