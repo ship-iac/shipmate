@@ -1591,8 +1591,8 @@ environment applies that cell again. Follow
 
 A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
 the blocker's environment is held or ordered by `needs`, because the targeted form's comment
-receives no held or skipped environments. A run with no cell result rows (no
-cell attempted) reads the first of these verdicts that holds:
+receives no held or skipped environments. A run with no cell result rows, not even
+`not attempted` ones, reads the first of these verdicts that holds:
 
 - `🔴 failed`: the run failed.
 - `⚪ nothing applied, environments are held for review`.
@@ -1831,7 +1831,7 @@ The `auto` apply result comment carries ``⚪ held, the base changed these
 stacks after this branch left it, so their plans would revert that change:
 <cells>. Update the branch from the base and push.`` Its verdict counts them as
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
-pending cells' stacks` when the run has no cell result rows (no cell attempted).
+pending cells' stacks` when the run has no cell result rows at all.
 A cell another pull request also locks counts under `N locked` instead, and a
 run with no cell result rows that holds a locked cell reads `⚪ nothing applied,
 pending cells are locked or the base also changed their stacks`.

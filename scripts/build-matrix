@@ -14,6 +14,7 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import tempfile
 
@@ -279,7 +280,8 @@ def base_changed_stacks(base_ref, candidates):
     Terramate lists only stacks the merge still has, so each stack path in `candidates` holding
     a file the merge deletes or renames away from `HEAD`, read from `git diff --name-status`, is
     added. Refuses as `merge_base` does when the merge base cannot be resolved, and on a failed
-    diff; a failed merge step refuses with its error. A `base_ref` the clone lacks, a tip the
+    diff from the merge base to the base tip; a failed merge step, the diff from `HEAD` to the
+    merge included, refuses with its error. A `base_ref` the clone lacks, a tip the
     base gained after the checkout, is fetched from `origin` first; a failed fetch refuses."""
     # S603/S607: fixed argvs, git from PATH as every other call here.
     present = ["git", "cat-file", "-e", f"{base_ref}^{{commit}}"]  # noqa: S607
@@ -325,7 +327,11 @@ def _merge_stacks(base_ref, candidates):
             moved = _moved_from(_diff_records(head, sha))
             gone = {s for s in candidates if any(_inside(x, s, candidates) for x in moved)}
             tree = tempfile.mkdtemp(prefix="shipmate-merge-")
-            run(["git", "worktree", "add", "--quiet", "--detach", tree, sha])
+            try:
+                run(["git", "worktree", "add", "--quiet", "--detach", tree, sha])
+            except SystemExit:
+                shutil.rmtree(tree, ignore_errors=True)
+                raise
             try:
                 return set(_list_stacks(False, head, tree)) | gone
             finally:
