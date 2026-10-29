@@ -1969,14 +1969,15 @@ on the pull request to apply it.``
   and its `head_sha` the head. A `shipmate plan` run is a `workflow_dispatch`,
   never listed, so a cell whose newest plan record names one refuses the run as
   ``plan run <n> is not the newest autoplan of the head (run <m> is)`` or, with
-  no autoplan of the head listed, ``plan run <n> is not listed``; `shipmate
+  no autoplan of the head listed, ``plan run <n> is not listed, and no autoplan
+  run of the head is listed``; `shipmate
   apply` applies it under the comment-time requirements. A newer autoplan of
   the head that published no apply check refuses it too, which the record-based
   binding of the bare and targeted forms cannot see (§Apply-match
   fingerprint). Every cell's record must also name the
   event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
   of the head dispatches nothing yet becomes its newest autoplan, and whoever
-  clicked is no pusher. A record with no action, an older engine's, refuses too:
+  clicked is no pusher. A record with no action refuses too:
   ``auto apply refused: the plan records of <cells> name no push event action
   (opened or synchronize), so no push started that plan.`` The wave pre-apply
   check repeats this on the cell's newest record.
