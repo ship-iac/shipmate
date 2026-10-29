@@ -62,12 +62,24 @@ def _ref(tip):
     return json.dumps({"ref": "refs/heads/main", "object": {"sha": tip, "type": "commit"}})
 
 
+def _listed(entry):
+    """One listing line: an autoplan of `HEAD` by `k3np` for an int id, a str verbatim."""
+    if isinstance(entry, str):
+        return entry
+    login = {"login": "k3np"}
+    run = {"id": entry, "event": "pull_request_target", "head_sha": HEAD}
+    return json.dumps(run | {"actor": login, "triggering_actor": login})
+
+
 def _github(checks, listing, run, permission, pulls, calls, argv, tip=BASE):
     """A `gh api` double answering each read `_run_auto` documents by its path prefix."""
     answers = [
         ("repos/o/r/git/ref/heads/main", lambda: _ref(tip)),
         (f"repos/o/r/commits/{HEAD}/check-runs?", lambda: "\n".join(map(json.dumps, checks))),
-        ("repos/o/r/actions/workflows/shipmate.yml/runs?", lambda: "\n".join(map(str, listing))),
+        (
+            "repos/o/r/actions/workflows/shipmate.yml/runs?",
+            lambda: "\n".join(map(_listed, listing)),
+        ),
         ("repos/o/r/actions/runs/", lambda: json.dumps(run)),
         ("repos/o/r/collaborators/", lambda: _permission_body(permission)),
         (f"repos/o/r/pulls/{PR_NUMBER}", lambda: json.dumps(pulls.pop(0))),
@@ -111,12 +123,12 @@ def _run_auto(
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
     to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
     `RUN`, whose API body is an autoplan of `HEAD` pushed by `k3np`. `listing` is the head's
-    autoplan run ids, `permission` the pusher's (an exception raises from the read), `pulls`
-    the successive pull request reads, `base_changed` the stacks the base changed (an exception
-    raises from the read), `tip` the base branch ref's commit (an exception raises from the
-    read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
-    sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap detection is asked
-    about to `base_reads`.
+    autoplan run ids (a str is a raw line), `permission` the pusher's (an exception raises from
+    the read), `pulls` the successive pull request reads, `base_changed` the stacks the base
+    changed (an exception raises from the read), `tip` the base branch ref's commit (an
+    exception raises from the read). Each `gh api` path goes to `calls`, its whole argv to
+    `argv`, each sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap
+    detection is asked about to `base_reads`.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
     out = tmp_path / "out"
@@ -353,7 +365,7 @@ def test_the_autoplan_listing_reads_every_page(tmp_path, monkeypatch):
                 f"&head_sha={HEAD}&per_page=100"
             ),
             "--jq",
-            ".workflow_runs[].id",
+            ".workflow_runs[] | {id, event, head_sha, actor, triggering_actor} | tojson",
         ]
     ]
 
@@ -566,7 +578,7 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
         pytest.param(
             {"listing": ("abc",)},
             "autoplan listing",
-            "ValueError(\"invalid literal for int() with base 10: 'abc'\")",
+            "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')",
             id="listing",
         ),
     ],
@@ -618,7 +630,7 @@ def test_a_malformed_permission_body_refuses_as_unreadable(tmp_path, monkeypatch
 
 
 def test_an_empty_autoplan_listing_refuses_naming_it(tmp_path, monkeypatch):
-    """Mutation: drop the `newest is None` refusal -- it reads "(run None is)"."""
+    """Mutation: drop the `newest is None` refusal -- a `TypeError` escapes."""
     assert _refusal(tmp_path, monkeypatch, listing=()) == (
         f"::error::auto apply refused: plan run {RUN} is not listed, and no autoplan run of the "
         f"head is listed. {REMEDY}"

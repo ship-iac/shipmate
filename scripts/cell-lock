@@ -584,10 +584,11 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
         f"plan run {provenance} is the newest autoplan of {head}",
         lambda: ag.newest_autoplan(repo, head, run=run),
     )
-    if newest != int(provenance):
+    listed = None if newest is None else newest["id"]
+    if listed != int(provenance):
         raise SystemExit(
             f"::error::apply aborted for {where}: the newest autoplan of {head} is "
-            f"{'not listed' if newest is None else f'run {newest}'}, not plan run {provenance}, "
+            f"{'not listed' if listed is None else f'run {listed}'}, not plan run {provenance}, "
             f"which this auto apply applies; {_RETRY}"
         )
     recorded, action = _confirm(

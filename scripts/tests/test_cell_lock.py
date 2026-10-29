@@ -1055,7 +1055,7 @@ AUTOPLANS_READ = [
         f"&head_sha={HEAD}&per_page=100"
     ),
     "--jq",
-    ".workflow_runs[].id",
+    ".workflow_runs[] | {id, event, head_sha, actor, triggering_actor} | tojson",
 ]
 AUTO = {"SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN, "SHIPMATE_BASE_SHA": BASE}
 RETRY = "push, or comment `shipmate apply` on the pull request"
@@ -1090,6 +1090,20 @@ def _pull(state="open", head=HEAD, draft=False):
 
 
 RUN_READ = ["gh", "api", f"repos/{REPO}/actions/runs/{RUN}"]
+
+
+def _autoplans(*ids):
+    """The listing's lines: one autoplan of `HEAD` by `k3np` per id."""
+    login = {"login": "k3np"}
+    return "\n".join(
+        json.dumps(
+            {"id": int(i), "event": "pull_request_target", "head_sha": HEAD}
+            | {"actor": login, "triggering_actor": login}
+        )
+        for i in ids
+    )
+
+
 PERMISSION_READ = ["gh", "api", f"repos/{REPO}/collaborators/k3np/permission"]
 
 
@@ -1235,7 +1249,7 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     plan run is outvoted. Mutation: route `SHIPMATE_AUTO` `true` like `false` (the listing and
     check-run reads are left unconsumed). Mutation: read the record with no `name` (an
     unexpected call)."""
-    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records("1", RUN)).on(RUN_READ, _plan_run())
     gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
@@ -1247,7 +1261,7 @@ def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, actio
     """A ready-for-review autoplan of the head can become the newest autoplan after detect.
 
     Mutation: drop the action refusal from `_verify_auto` (the run read runs, unexpected)."""
-    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the cell's plan record names event action {action!r}, not a push "
@@ -1304,7 +1318,7 @@ def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
 
 
 def _pusher_gh(plan_run, permission=None):
-    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, plan_run)
     if permission is not None:
         gh.on(PERMISSION_READ, permission)
@@ -1383,8 +1397,8 @@ def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     ("autoplans", "newest"),
     [
-        pytest.param(f"{RUN}\n4243", "run 4243", id="newer"),
-        pytest.param("", "not listed", id="none"),
+        pytest.param(_autoplans(RUN, "4243"), "run 4243", id="newer"),
+        pytest.param(_autoplans(), "not listed", id="none"),
     ],
 )
 def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
@@ -1406,7 +1420,7 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
 )
 def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path, records, named):
     """Mutation: drop the record comparison (both pass)."""
-    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, RUN)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(*records))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the cell's newest plan record names {named}, not plan run {RUN}, "
@@ -1427,7 +1441,7 @@ def test_verify_auto_refuses_a_provenance_it_cannot_read(monkeypatch, tmp_path, 
     """Mutation: answer a failed read with None in `_confirm` (`return None` for the raise;
     list then reads "not listed", check-runs "no plan run")."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
-    gh.on(AUTOPLANS_READ, FAIL if failing == "list" else RUN)
+    gh.on(AUTOPLANS_READ, FAIL if failing == "list" else _autoplans(RUN))
     if failing == "check-runs":
         gh.on(RECORD_READ, FAIL)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (

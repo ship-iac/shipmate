@@ -580,3 +580,77 @@ def test_incomplete_runs(lines, expected):
     first declared count (disagreeing); skip a record with no valid count instead of marking
     its run (uncounted-sibling); `False` for `None in counts[run]` (uncounted-sibling)."""
     assert ag.incomplete_runs(lines, "999") == expected
+
+
+_HEAD = "a" * 40
+
+
+def _listed(run_id, **extra):
+    return {
+        "id": run_id,
+        "event": "pull_request_target",
+        "head_sha": _HEAD,
+        "actor": {"login": "k3np"},
+        "triggering_actor": {"login": "k3np"},
+    } | extra
+
+
+def _newest(*lines):
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        return "\n".join(lines)
+
+    return ag.newest_autoplan("o/r", _HEAD, run=run), argv
+
+
+def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
+    """Lines from two pages, the greatest id neither first nor last. Mutation: `min` for `max`
+    (run 5). Mutation: return the id instead of the object."""
+    newest, argv = _newest(
+        json.dumps(_listed(5)), json.dumps(_listed(12, event="x")), json.dumps(_listed(7))
+    )
+    assert newest == {
+        "id": 12,
+        "event": "x",
+        "head_sha": _HEAD,
+        "actor": {"login": "k3np"},
+        "triggering_actor": {"login": "k3np"},
+    }
+    assert argv == [
+        [
+            "gh",
+            "api",
+            "--paginate",
+            (
+                "repos/o/r/actions/workflows/shipmate.yml/runs?event=pull_request_target"
+                f"&head_sha={_HEAD}&per_page=100"
+            ),
+            "--jq",
+            ".workflow_runs[] | {id, event, head_sha, actor, triggering_actor} | tojson",
+        ]
+    ]
+
+
+def test_newest_autoplan_of_an_empty_listing_is_none():
+    """Mutation: `default=0` for `default=None` in the `max`."""
+    assert _newest()[0] is None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        pytest.param("7", id="not-an-object"),
+        pytest.param(json.dumps(_listed(True)), id="bool-id"),
+        pytest.param(
+            json.dumps({k: v for k, v in _listed(12).items() if k != "head_sha"}), id="no-head-sha"
+        ),
+    ],
+)
+def test_newest_autoplan_raises_value_error_on_a_malformed_line(line):
+    """Both callers wrap `ValueError` only. Mutation: drop the `isinstance(listed, dict)` check
+    (not-an-object raises `TypeError`). Mutation: accept a bool id (`isinstance(listed["id"],
+    int)`; bool-id returns). Mutation: drop the key check (no-head-sha returns)."""
+    with pytest.raises(ValueError):
+        _newest(json.dumps(_listed(5)), line)

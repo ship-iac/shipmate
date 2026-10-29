@@ -467,10 +467,10 @@ def refuse_provenance(repo, head, runnable):
             f"::error::auto apply refused: plan run {run_id} is not listed, and no autoplan run "
             "of the head is listed. " + _AUTO_REMEDY
         )
-    if newest != int(run_id):
+    if newest["id"] != int(run_id):
         raise SystemExit(
             f"::error::auto apply refused: plan run {run_id} is not the newest autoplan of the "
-            f"head (run {newest} is). " + _AUTO_REMEDY
+            f"head (run {newest['id']} is). " + _AUTO_REMEDY
         )
     return run
 
