@@ -8,7 +8,7 @@ consumed, so a write a test expects cannot silently go missing.
 import json
 
 import pytest
-from _detect_fixtures import listed_autoplan
+from _detect_fixtures import autoplans_read, listed_autoplan
 from _loader import github_outputs, jsonl, load_script
 
 cl = load_script("cell-lock")
@@ -1047,20 +1047,7 @@ def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
 BASE = "f" * 40
 RUN = "4242"
 PULL_READ = ["gh", "api", f"repos/{REPO}/pulls/{PR}"]
-AUTOPLANS_READ = [
-    "gh",
-    "api",
-    "--paginate",
-    (
-        f"repos/{REPO}/actions/workflows/shipmate.yml/runs?event=pull_request_target"
-        f"&head_sha={HEAD}&per_page=100"
-    ),
-    "--jq",
-    (
-        ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
-        "triggering_actor: {login: .triggering_actor.login}} | tojson"
-    ),
-]
+AUTOPLANS_READ = autoplans_read(REPO, HEAD)
 AUTO = {"SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN, "SHIPMATE_BASE_SHA": BASE}
 RETRY = "push, or comment `shipmate apply` on the pull request"
 WHERE = "apply aborted for `dev` / `stacks/auth`:"
@@ -1396,6 +1383,11 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
             f"the newest autoplan of {HEAD} is a run of {OTHER}, not of {HEAD}",
             id="head",
         ),
+        pytest.param(
+            {"head_sha": None},
+            f"the newest autoplan of {HEAD} is a run of missing, not of {HEAD}",
+            id="null-head",
+        ),
     ],
 )
 def test_verify_auto_refuses_a_listed_run_the_listing_filter_should_drop(
@@ -1404,7 +1396,8 @@ def test_verify_auto_refuses_a_listed_run_the_listing_filter_should_drop(
     """The listing's `event=` and `head_sha=` filters are GitHub's, so the listed object is
     checked again, before the record read. Mutation: drop the event check from
     `provenance_reason` (event reads the record, unexpected). Mutation: drop the head check
-    (head reads the record, unexpected). Mutation: word `head` as `event` (head red)."""
+    (head reads the record, unexpected). Mutation: word `head` as `event` (head red).
+    Mutation: render the head sha as given (null-head reads `None`)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
     gh.on(AUTOPLANS_READ, _autoplans(RUN, **keys))
     code = _verify_refusal(monkeypatch, tmp_path, gh, AUTO)

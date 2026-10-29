@@ -469,11 +469,11 @@ def _provenance_text(run_id, head, cause, detail):
         return f"plan run {run_id} is not the newest autoplan of the head (run {detail} is)."
     if cause == "event":
         return (
-            f"plan run {run_id} is a `{detail}` run, not an autoplan: an auto apply applies "
-            "only the plan a push started."
+            f"plan run {run_id} is a `{_or_missing(detail)}` run, not an autoplan: an auto "
+            "apply applies only the plan a push started."
         )
     if cause == "head":
-        return f"plan run {run_id} planned {detail}, not the head {head}."
+        return f"plan run {run_id} planned {_or_missing(detail)}, not the head {head}."
     if cause == "record":
         return (
             f"the plan records of {named([n for n, _ in detail], _NAMED)} name other plan runs "
@@ -484,6 +484,11 @@ def _provenance_text(run_id, head, cause, detail):
         f"the plan records of {named(bad, _NAMED)} name no push event action (opened or "
         "synchronize), so no push started that plan."
     )
+
+
+def _or_missing(value):
+    """`value`, or `missing` when the listed run gave it null."""
+    return "missing" if value is None else value
 
 
 def _malformed(what, e):

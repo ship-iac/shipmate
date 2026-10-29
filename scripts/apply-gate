@@ -297,9 +297,11 @@ def newest_autoplan(repo, head, *, run):
     """The listed run of `PLAN_WORKFLOW` started by `pull_request_target` on `head` with the
     greatest `id`, or None when none is listed. Every page is read. The run is the listing's
     object cut to `_LISTED_KEYS`: its integer `id`, `event`, `head_sha`, and `actor` and
-    `triggering_actor` as `{"login": ...}`, the logins `authorize.pusher_reason` reads, which
-    equal a single-run read's. Raises `ValueError` on a line that is not such an object or
-    whose `id` is not an integer."""
+    `triggering_actor`, which the projection always emits as `{"login": ...}` mappings, the
+    login null when GitHub gives none. A missing actor so reaches `authorize.pusher_reason`
+    and refuses there, never as a malformed listing. The logins equal a single-run read's.
+    Raises `ValueError` on a line that is not such an object or whose `id` is not an
+    integer."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
     listing = run(
         [

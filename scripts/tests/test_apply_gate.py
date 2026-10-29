@@ -2,7 +2,7 @@ import io
 import json
 
 import pytest
-from _detect_fixtures import listed_autoplan
+from _detect_fixtures import autoplans_read, listed_autoplan
 from _loader import load_script
 
 ag = load_script("apply-gate")
@@ -586,10 +586,6 @@ def test_incomplete_runs(lines, expected):
 _HEAD = "a" * 40
 
 
-def _listed(run_id, **keys):
-    return listed_autoplan(run_id, _HEAD, **keys)
-
-
 def _newest(*lines):
     argv = []
 
@@ -604,7 +600,9 @@ def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
     """Lines from two pages, the greatest id neither first nor last. Mutation: `min` for `max`
     (run 5). Mutation: return the id instead of the object."""
     newest, argv = _newest(
-        json.dumps(_listed(5)), json.dumps(_listed(12, event="x")), json.dumps(_listed(7))
+        json.dumps(listed_autoplan(5, _HEAD)),
+        json.dumps(listed_autoplan(12, _HEAD, event="x")),
+        json.dumps(listed_autoplan(7, _HEAD)),
     )
     assert newest == {
         "id": 12,
@@ -613,22 +611,7 @@ def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
         "actor": {"login": "k3np"},
         "triggering_actor": {"login": "k3np"},
     }
-    assert argv == [
-        [
-            "gh",
-            "api",
-            "--paginate",
-            (
-                "repos/o/r/actions/workflows/shipmate.yml/runs?event=pull_request_target"
-                f"&head_sha={_HEAD}&per_page=100"
-            ),
-            "--jq",
-            (
-                ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
-                "triggering_actor: {login: .triggering_actor.login}} | tojson"
-            ),
-        ]
-    ]
+    assert argv == [autoplans_read("o/r", _HEAD)]
 
 
 def test_newest_autoplan_of_an_empty_listing_is_none():
@@ -640,9 +623,10 @@ def test_newest_autoplan_of_an_empty_listing_is_none():
     "line",
     [
         pytest.param("7", id="not-an-object"),
-        pytest.param(json.dumps(_listed(True)), id="bool-id"),
+        pytest.param(json.dumps(listed_autoplan(True, _HEAD)), id="bool-id"),
         pytest.param(
-            json.dumps({k: v for k, v in _listed(12).items() if k != "head_sha"}), id="no-head-sha"
+            json.dumps({k: v for k, v in listed_autoplan(12, _HEAD).items() if k != "head_sha"}),
+            id="no-head-sha",
         ),
     ],
 )
@@ -651,7 +635,7 @@ def test_newest_autoplan_raises_value_error_on_a_malformed_line(line):
     (not-an-object raises `TypeError`). Mutation: accept a bool id (`isinstance(listed["id"],
     int)`; bool-id returns). Mutation: drop the key check (no-head-sha returns)."""
     with pytest.raises(ValueError):
-        _newest(json.dumps(_listed(5)), line)
+        _newest(json.dumps(listed_autoplan(5, _HEAD)), line)
 
 
 _OTHER = "b" * 40
@@ -661,39 +645,49 @@ _PUSHED = {"x": ("7", "synchronize"), "y": ("7", "opened")}
 @pytest.mark.parametrize(
     ("newest", "cells", "expected"),
     [
-        pytest.param(_listed(7), _PUSHED, None, id="pass"),
-        pytest.param(_listed(7), {}, None, id="pass-no-cells"),
+        pytest.param(listed_autoplan(7, _HEAD), _PUSHED, None, id="pass"),
+        pytest.param(listed_autoplan(7, _HEAD), {}, None, id="pass-no-cells"),
         pytest.param(None, _PUSHED, ("unlisted", None), id="unlisted"),
-        pytest.param(_listed(8), _PUSHED, ("newer", 8), id="newer"),
-        pytest.param(_listed(6), _PUSHED, ("newer", 6), id="older"),
-        pytest.param(_listed(8, event="workflow_dispatch"), {}, ("newer", 8), id="newer-first"),
+        pytest.param(listed_autoplan(8, _HEAD), _PUSHED, ("newer", 8), id="newer"),
+        pytest.param(listed_autoplan(6, _HEAD), _PUSHED, ("newer", 6), id="older"),
         pytest.param(
-            _listed(7, event="workflow_dispatch"),
+            listed_autoplan(8, _HEAD, event="workflow_dispatch"), {}, ("newer", 8), id="newer-first"
+        ),
+        pytest.param(
+            listed_autoplan(7, _HEAD, event="workflow_dispatch"),
             _PUSHED,
             ("event", "workflow_dispatch"),
             id="event",
         ),
         pytest.param(
-            _listed(7, event="push", head_sha=_OTHER), {}, ("event", "push"), id="event-first"
+            listed_autoplan(7, _HEAD, event="push", head_sha=_OTHER),
+            {},
+            ("event", "push"),
+            id="event-first",
         ),
-        pytest.param(_listed(7, head_sha=_OTHER), _PUSHED, ("head", _OTHER), id="head"),
         pytest.param(
-            _listed(7, head_sha=_OTHER), {"x": ("8", None)}, ("head", _OTHER), id="head-first"
+            listed_autoplan(7, _HEAD, head_sha=_OTHER), _PUSHED, ("head", _OTHER), id="head"
         ),
         pytest.param(
-            _listed(7),
+            listed_autoplan(7, _HEAD, head_sha=_OTHER),
+            {"x": ("8", None)},
+            ("head", _OTHER),
+            id="head-first",
+        ),
+        pytest.param(
+            listed_autoplan(7, _HEAD),
             {"x": ("7", "synchronize"), "y": ("8", "synchronize"), "z": (None, "opened")},
             ("record", [("y", "8"), ("z", None)]),
             id="record",
         ),
         pytest.param(
-            _listed(7),
+            listed_autoplan(7, _HEAD),
             {"x": ("7", "ready_for_review"), "y": ("8", "synchronize")},
             ("record", [("y", "8")]),
             id="record-first",
         ),
         pytest.param(
-            _listed(7),
+            listed_autoplan(7, _HEAD),
             {"x": ("7", "ready_for_review"), "y": ("7", "synchronize"), "z": ("7", None)},
             ("action", [("x", "ready_for_review"), ("z", None)]),
             id="action",
@@ -712,4 +706,4 @@ def test_provenance_reason_names_the_first_failing_check(newest, cells, expected
 
 def test_provenance_reason_compares_run_ids_as_strings():
     """A record `"07"` names no run 7. Mutation: `newest["id"] != int(plan_run)` (passes)."""
-    assert ag.provenance_reason(_listed(7), "07", _HEAD, {}) == ("newer", 7)
+    assert ag.provenance_reason(listed_autoplan(7, _HEAD), "07", _HEAD, {}) == ("newer", 7)

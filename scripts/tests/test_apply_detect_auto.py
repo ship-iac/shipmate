@@ -8,6 +8,7 @@ from _detect_fixtures import (
     APP_ID,
     PR_NUMBER,
     _apply_check,
+    autoplans_read,
     forbid_shared_runner,
     held,
     listed_autoplan,
@@ -25,10 +26,7 @@ BOT = "shipmate-iac[bot]"
 APP = {"id": int(APP_ID), "slug": "shipmate-iac"}
 RUN = "123456"
 REMEDY = "Comment `shipmate apply` on the pull request to apply it."
-LISTING = (
-    "repos/o/r/actions/workflows/shipmate.yml/runs?event=pull_request_target"
-    f"&head_sha={HEAD}&per_page=100"
-)
+LISTING = autoplans_read("o/r", HEAD)
 REPO = {"full_name": "o/r"}
 PULL_OK = {
     "head": {"sha": HEAD, "repo": REPO},
@@ -301,7 +299,7 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
         f"({action!r}) name no push event action (opened or synchronize), so no push started "
         f"that plan. {REMEDY}"
     )
-    assert LISTING in calls
+    assert LISTING[3] in calls
     assert not [c for c in calls if "/collaborators/" in c]
 
 
@@ -347,12 +345,19 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
         pytest.param(
             {"head_sha": BASE}, f"plan run {RUN} planned {BASE}, not the head {HEAD}.", id="head"
         ),
+        pytest.param(
+            {"event": None},
+            f"plan run {RUN} is a `missing` run, not an autoplan: an auto apply applies only "
+            "the plan a push started.",
+            id="null-event",
+        ),
     ],
 )
 def test_a_listed_run_the_listing_filter_should_drop_refuses(tmp_path, monkeypatch, entry, refusal):
     """The listing's `event=` and `head_sha=` filters are GitHub's, so the listed object is
     checked again. Mutation: drop the event check from `provenance_reason` (event applies).
-    Mutation: drop the head check (head applies)."""
+    Mutation: drop the head check (head applies). Mutation: `_or_missing` returns its value
+    (null-event reads `None`)."""
     code = _refusal(tmp_path, monkeypatch, listing=(entry,))
     assert code == f"::error::auto apply refused: {refusal} {REMEDY}"
 
@@ -373,22 +378,7 @@ def test_the_autoplan_listing_reads_every_page(tmp_path, monkeypatch):
     query."""
     argv = []
     _run_auto(tmp_path, monkeypatch, argv=argv)
-    assert [a for a in argv if any("/actions/workflows/" in x for x in a)] == [
-        [
-            "gh",
-            "api",
-            "--paginate",
-            (
-                "repos/o/r/actions/workflows/shipmate.yml/runs?event=pull_request_target"
-                f"&head_sha={HEAD}&per_page=100"
-            ),
-            "--jq",
-            (
-                ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
-                "triggering_actor: {login: .triggering_actor.login}} | tojson"
-            ),
-        ]
-    ]
+    assert [a for a in argv if any("/actions/workflows/" in x for x in a)] == [LISTING]
 
 
 def test_cells_recording_two_runs_refuse(tmp_path, monkeypatch):
@@ -599,18 +589,20 @@ def test_a_malformed_plan_run_read_refuses_without_a_traceback(
 @pytest.mark.parametrize(
     ("actor", "trigger"),
     [
-        pytest.param(None, None, id="neither"),
-        pytest.param({"login": "k3np"}, None, id="no-trigger"),
-        pytest.param("k3np", "k3np", id="not-mappings"),
+        pytest.param({"login": None}, {"login": None}, id="null"),
+        pytest.param({"login": "k3np"}, {"login": None}, id="no-trigger"),
         pytest.param({"login": ""}, {"login": ""}, id="empty"),
         pytest.param({"login": 7}, {"login": 7}, id="not-a-string"),
     ],
 )
-def test_a_missing_actor_login_refuses_as_malformed(tmp_path, monkeypatch, actor, trigger):
-    """Checked before the equality, so two missing logins are not the same pusher.
+def test_a_missing_actor_login_refuses_naming_the_unknown_pusher(
+    tmp_path, monkeypatch, actor, trigger
+):
+    """The listing's projection always emits `{"login": ...}`, null when GitHub gives none.
+    Checked before the equality, so two missing logins are not the same pusher.
 
-    Mutation: drop the `not (actor and trigger)` refusal -- neither and empty read as
-    unreadable, no-trigger as a re-run, red. Mutation: drop `isinstance(login, str)` in `_login`
+    Mutation: drop the `not (actor and trigger)` refusal -- null and empty read as unreadable,
+    no-trigger as a re-run, red. Mutation: drop `isinstance(login, str)` in `_login`
     (not-a-string raises)."""
     entry = {"actor": actor, "triggering_actor": trigger}
     assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (

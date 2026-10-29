@@ -1780,9 +1780,10 @@ applied. A collaborator with write access comments `shipmate apply`.
 
 ### `not authorized: the autoplan run names no actor or no triggering actor login`
 
-The autoplan's run object in the Actions runs listing lacks a login for its
-`actor` or its `triggering_actor`, so there is no pusher to authorize. Nothing applied. A collaborator with write
-access comments `shipmate apply`.
+In the autoplan's run object from the Actions runs listing, its `actor` or
+`triggering_actor` login is missing or empty, so there is no pusher to
+authorize. Nothing applied. A collaborator with write access comments
+`shipmate apply`.
 
 ### `not authorized: the autoplan ran as @<login> but was triggered by @<login>`
 
