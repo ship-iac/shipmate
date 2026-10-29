@@ -10,6 +10,7 @@ from _detect_fixtures import (
     _apply_check,
     forbid_shared_runner,
     held,
+    listed_autoplan,
     stub_read_locks,
     stub_read_table,
     wave_cells,
@@ -24,6 +25,10 @@ BOT = "shipmate-iac[bot]"
 APP = {"id": int(APP_ID), "slug": "shipmate-iac"}
 RUN = "123456"
 REMEDY = "Comment `shipmate apply` on the pull request to apply it."
+LISTING = (
+    "repos/o/r/actions/workflows/shipmate.yml/runs?event=pull_request_target"
+    f"&head_sha={HEAD}&per_page=100"
+)
 REPO = {"full_name": "o/r"}
 PULL_OK = {
     "head": {"sha": HEAD, "repo": REPO},
@@ -67,10 +72,8 @@ def _listed(entry):
     with `entry`'s keys over it for a dict; a str verbatim."""
     if isinstance(entry, str):
         return entry
-    login = {"login": "k3np"}
-    run = {"id": int(RUN), "event": "pull_request_target", "head_sha": HEAD}
-    run |= {"actor": login, "triggering_actor": login}
-    return json.dumps(run | entry if isinstance(entry, dict) else run | {"id": entry})
+    keys = entry if isinstance(entry, dict) else {"id": entry}
+    return json.dumps(listed_autoplan(int(RUN), HEAD, **keys))
 
 
 def _github(checks, listing, permission, pulls, calls, argv, tip=BASE):
@@ -284,11 +287,13 @@ def test_a_rerun_by_anyone_but_the_apps_bot_refuses(tmp_path, monkeypatch, trigg
 )
 def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     """A ready-for-review or reopen autoplan of the head dispatches no auto apply but becomes
-    the newest autoplan; its clicker is no pusher. The listing is read; no single run and no
-    permission is.
+    the newest autoplan; its clicker is no pusher. The listing is read, the permission is not;
+    `_github` fails a single-run read.
 
     Mutation: drop the action check from `provenance_reason` (every row applies). Mutation:
-    admit a missing action (`act not in (*PUSH_ACTIONS, None)`; older-engine applies)."""
+    admit a missing action (`act not in (*PUSH_ACTIONS, None)`; older-engine applies).
+    Mutation: answer `newest` with the bound run instead of reading the listing (no listing
+    call, red)."""
     calls = []
     checks = [_check("stacks/app", "dev-eu", action=action)]
     assert _refusal(tmp_path, monkeypatch, checks=checks, calls=calls) == (
@@ -296,7 +301,8 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
         f"({action!r}) name no push event action (opened or synchronize), so no push started "
         f"that plan. {REMEDY}"
     )
-    assert not [c for c in calls if "/actions/runs/" in c or "/collaborators/" in c]
+    assert LISTING in calls
+    assert not [c for c in calls if "/collaborators/" in c]
 
 
 @pytest.mark.parametrize("action", ["opened", "synchronize"])
@@ -377,7 +383,10 @@ def test_the_autoplan_listing_reads_every_page(tmp_path, monkeypatch):
                 f"&head_sha={HEAD}&per_page=100"
             ),
             "--jq",
-            ".workflow_runs[] | {id, event, head_sha, actor, triggering_actor} | tojson",
+            (
+                ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
+                "triggering_actor: {login: .triggering_actor.login}} | tojson"
+            ),
         ]
     ]
 

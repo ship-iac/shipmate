@@ -610,8 +610,11 @@ def _refuse_provenance(where, head, provenance, reason):
     if cause in ("unlisted", "newer"):
         why = f"the newest autoplan of {head} is "
         why += f"{'not listed' if detail is None else f'run {detail}'}, {applies}"
-    elif cause in ("event", "head"):
-        why = f"the newest autoplan of {head} is not a pull_request_target run of it; {_RETRY}"
+    elif cause == "event":
+        why = f"the newest autoplan of {head} is a `{detail}` run, not a pull_request_target "
+        why += f"run; {_RETRY}"
+    elif cause == "head":
+        why = f"the newest autoplan of {head} is a run of {detail}, not of {head}; {_RETRY}"
     elif cause == "record":
         recorded = detail[0][1]
         why = "the cell's newest plan record names "

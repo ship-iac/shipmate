@@ -8,6 +8,7 @@ consumed, so a write a test expects cannot silently go missing.
 import json
 
 import pytest
+from _detect_fixtures import listed_autoplan
 from _loader import github_outputs, jsonl, load_script
 
 cl = load_script("cell-lock")
@@ -1055,7 +1056,10 @@ AUTOPLANS_READ = [
         f"&head_sha={HEAD}&per_page=100"
     ),
     "--jq",
-    ".workflow_runs[] | {id, event, head_sha, actor, triggering_actor} | tojson",
+    (
+        ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
+        "triggering_actor: {login: .triggering_actor.login}} | tojson"
+    ),
 ]
 AUTO = {"SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN, "SHIPMATE_BASE_SHA": BASE}
 RETRY = "push, or comment `shipmate apply` on the pull request"
@@ -1091,15 +1095,7 @@ def _pull(state="open", head=HEAD, draft=False):
 
 def _autoplans(*ids, **keys):
     """The listing's lines: one autoplan of `HEAD` by `k3np` per id, with `keys` over each."""
-    login = {"login": "k3np"}
-    return "\n".join(
-        json.dumps(
-            {"id": int(i), "event": "pull_request_target", "head_sha": HEAD}
-            | {"actor": login, "triggering_actor": login}
-            | keys
-        )
-        for i in ids
-    )
+    return "\n".join(json.dumps(listed_autoplan(int(i), HEAD, **keys)) for i in ids)
 
 
 PERMISSION_READ = ["gh", "api", f"repos/{REPO}/collaborators/k3np/permission"]
@@ -1387,25 +1383,32 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
 
 
 @pytest.mark.parametrize(
-    "keys",
+    ("keys", "refusal"),
     [
-        pytest.param({"event": "workflow_dispatch"}, id="event"),
-        pytest.param({"head_sha": OTHER}, id="head"),
+        pytest.param(
+            {"event": "workflow_dispatch"},
+            f"the newest autoplan of {HEAD} is a `workflow_dispatch` run, not a "
+            "pull_request_target run",
+            id="event",
+        ),
+        pytest.param(
+            {"head_sha": OTHER},
+            f"the newest autoplan of {HEAD} is a run of {OTHER}, not of {HEAD}",
+            id="head",
+        ),
     ],
 )
 def test_verify_auto_refuses_a_listed_run_the_listing_filter_should_drop(
-    monkeypatch, tmp_path, keys
+    monkeypatch, tmp_path, keys, refusal
 ):
     """The listing's `event=` and `head_sha=` filters are GitHub's, so the listed object is
     checked again, before the record read. Mutation: drop the event check from
     `provenance_reason` (event reads the record, unexpected). Mutation: drop the head check
-    (head reads the record, unexpected)."""
+    (head reads the record, unexpected). Mutation: word `head` as `event` (head red)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
     gh.on(AUTOPLANS_READ, _autoplans(RUN, **keys))
-    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the newest autoplan of {HEAD} is not a pull_request_target run of it; "
-        f"{RETRY}"
-    )
+    code = _verify_refusal(monkeypatch, tmp_path, gh, AUTO)
+    assert code == f"::error::{WHERE} {refusal}; {RETRY}"
 
 
 @pytest.mark.parametrize(

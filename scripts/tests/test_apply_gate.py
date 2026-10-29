@@ -2,6 +2,7 @@ import io
 import json
 
 import pytest
+from _detect_fixtures import listed_autoplan
 from _loader import load_script
 
 ag = load_script("apply-gate")
@@ -585,14 +586,8 @@ def test_incomplete_runs(lines, expected):
 _HEAD = "a" * 40
 
 
-def _listed(run_id, **extra):
-    return {
-        "id": run_id,
-        "event": "pull_request_target",
-        "head_sha": _HEAD,
-        "actor": {"login": "k3np"},
-        "triggering_actor": {"login": "k3np"},
-    } | extra
+def _listed(run_id, **keys):
+    return listed_autoplan(run_id, _HEAD, **keys)
 
 
 def _newest(*lines):
@@ -628,7 +623,10 @@ def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
                 f"&head_sha={_HEAD}&per_page=100"
             ),
             "--jq",
-            ".workflow_runs[] | {id, event, head_sha, actor, triggering_actor} | tojson",
+            (
+                ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
+                "triggering_actor: {login: .triggering_actor.login}} | tojson"
+            ),
         ]
     ]
 
@@ -710,3 +708,8 @@ def test_provenance_reason_names_the_first_failing_check(newest, cells, expected
     check, or `==` for `!=` in the record check (action passes, or pass refuses). Mutation:
     test the event before the id (newer-first reads `event`)."""
     assert ag.provenance_reason(newest, "7", _HEAD, cells) == expected
+
+
+def test_provenance_reason_compares_run_ids_as_strings():
+    """A record `"07"` names no run 7. Mutation: `newest["id"] != int(plan_run)` (passes)."""
+    assert ag.provenance_reason(_listed(7), "07", _HEAD, {}) == ("newer", 7)
