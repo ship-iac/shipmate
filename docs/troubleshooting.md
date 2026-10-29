@@ -737,8 +737,9 @@ exclusions, and at most 10 cell jobs at once per plan and drift sweep. A file
 that sets `apply_mode: targeted` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
 warns. `shipmate doctor` echoes all three on every report for exactly this reason,
-and names each `apply_mode: auto` environment, which a push applies with no
-approving review and no comment; read them before merging.
+and names each `apply_mode: auto` environment, which a push to a ready pull request
+applies after a complete autoplan, with no approving review and no comment; read them
+before merging.
 
 **Editing them on a branch does not change what that branch applies.**
 `needs`, `apply_mode`, `max_parallel` and `command_hints` are read from the default

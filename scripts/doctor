@@ -1404,8 +1404,8 @@ def _shim_job_name_finding(doc, name, engine):
 #: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
 #: Every verb the engine dispatches (`auto` from the autoplan, the rest from `actions/dispatch`),
-#: compared in order as `verb`'s own parsed options: a missing `unlock` refuses that verb, and an
-#: extra offers a verb no `if:` selects.
+#: compared in order with `verb`'s own parsed options, never another input's: a missing `unlock`
+#: refuses that verb, and an extra offers a verb no `if:` selects.
 _VERB_OPTION_LIST = ["plan", "apply", "unlock", "auto"]
 #: The same list as the findings render it. Derived, so there is one hand-written copy.
 _VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
@@ -1942,8 +1942,9 @@ def _budgeted(groups, head, sep, budget, overflow):
 
 
 def _config_defaults(table):
-    """The three tolerant defaults, echoed whether they are set or not, and after `apply_mode`
-    the environments an entry sets to `apply_mode: auto`, only when one does.
+    """Three or four notices: the three tolerant defaults, echoed whether they are set or not,
+    and after `apply_mode` one naming the `apply_mode: auto` environments, only when an entry
+    sets it, so a caller cannot address the `max_parallel` line by position.
 
     No absence here is invalid, so no validator can report any of them. `needs` and
     `apply_mode` decide what a comment can do, and `max_parallel` how many plan and drift cell
@@ -1967,7 +1968,7 @@ def _config_defaults(table):
         "; ",
         400,
     )
-    return [
+    notices = [
         (
             NOTICE,
             f"`needs` orders {shown}: a bare `shipmate apply` applies "
@@ -1986,25 +1987,19 @@ def _config_defaults(table):
             else "`apply_mode`: no environment is `targeted`, so every environment applies on a "
             "bare `shipmate apply`, production included.",
         ),
-        *(
-            [
-                (
-                    NOTICE,
-                    _Rendered(
-                        f"`apply_mode: auto` on {_md_escape(_fit_items(autos, ', ', 400))}: a "
-                        "push applies their changed cells after a complete autoplan of a ready "
-                        "pull request, with no approving review and no comment."
-                    ),
-                )
-            ]
-            if autos
-            else []
-        ),
         (
             NOTICE,
             f"{cap_head} each plan and drift sweep runs at most {cap} cell jobs at once.",
         ),
     ]
+    if autos:
+        auto_line = _Rendered(
+            f"`apply_mode: auto` on {_md_escape(_fit_items(autos, ', ', 400))}: a push applies "
+            "their changed cells after a complete autoplan of a ready pull request, with no "
+            "approving review and no comment."
+        )
+        notices.insert(2, (NOTICE, auto_line))
+    return notices
 
 
 def _config_table(ctx):

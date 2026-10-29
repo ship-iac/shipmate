@@ -2867,6 +2867,26 @@ def test_the_defaults_name_each_auto_environment_after_the_apply_mode_line():
     ]
 
 
+def test_a_long_auto_list_is_cut_between_env_names():
+    """Mutation: render the auto list as `', '.join(autos)` -- all twenty names show."""
+    name = "environment-with-a-long-name-{:02d}".format
+    table = {"environments": {name(i): {"apply_mode": "auto", "review": False} for i in range(20)}}
+    assert doctor._config_defaults(table)[2] == (
+        doctor.NOTICE,
+        (
+            "`apply_mode: auto` on "
+            "environment-with-a-long-name-00, environment-with-a-long-name-01, "
+            "environment-with-a-long-name-02, environment-with-a-long-name-03, "
+            "environment-with-a-long-name-04, environment-with-a-long-name-05, "
+            "environment-with-a-long-name-06, environment-with-a-long-name-07, "
+            "environment-with-a-long-name-08, environment-with-a-long-name-09, "
+            "environment-with-a-long-name-10"
+            " … and 9 more: a push applies their changed cells after a complete autoplan of a "
+            "ready pull request, with no approving review and no comment."
+        ),
+    )
+
+
 def test_the_shim_job_name_row_keeps_the_engine_placeholders():
     """Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;stack&gt;` shows."""
     text = _SHIPMATE_WF.replace("    name: plan\n", "    name: terraform\n", 1)
