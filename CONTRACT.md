@@ -2004,19 +2004,21 @@ the head (`git merge-tree`, with `merge.directoryRenames=conflict`), committed a
 a child of the head and checked out in one worktree, from the head. It is skipped
 when the base changed no file since the merge base of the base tip and the head.
 A stack is not held for a base change the branch already holds, which changes
-nothing in the merge. A base edit of a file in a stack the branch renamed reaches
-the stack's new path in the merge, so the renamed stack is held; a base delete or
-rename of that file is a merge conflict. A merge conflict anywhere in the
-repository, not only in a stack, refuses the whole run before any checkout, a file
-the base added under a directory the branch renamed included: the pull request's
-mergeable flag is read before the base tip, so a base commit landing between the
-two reads can conflict. When the merge conflicts or the listing fails, `detect`
+nothing in the merge. A base edit of a file in a stack the branch renamed is
+held, or refused as a conflict when git does not pair the rename (below its
+similarity threshold, a modify/delete conflict); a base delete of that file, or a
+base rename of it to another path, is a merge conflict. A merge conflict
+anywhere in the repository, not only in a stack, refuses the whole run before any
+checkout, a file the base added under a directory the branch renamed included:
+the pull request's mergeable flag is read before the base tip, so a base commit
+landing between the two reads can conflict. When the merge conflicts or the listing fails, `detect`
 refuses with ``change detection on the merge of the base into the branch failed:
 <cause>. Update the branch from the base and push.`` and nothing applies;
 `<cause>` is git's conflict lines, or the failed step's error. Terramate lists
-only the stacks the merge still has, so a stack whose files the base deleted or
-renamed since that merge base (`git diff --name-status --find-renames`) is held
-too. Applying a held cell's plan would revert the base's change (§Fan-out).
+only the stacks the merge still has, so a stack in which the merge deletes or
+renames away files the head has (`git diff --name-status --find-renames` from the
+head to the merge) is held too. Applying a held cell's plan would revert the
+base's change (§Fan-out).
 A held cell is not applied: its apply check and the gate stay pending, it stops its
 environment's `needs` successors as a locked cell does, a cell that runs after it
 waits, and the result comment names it with ``⚪ held, the base changed these

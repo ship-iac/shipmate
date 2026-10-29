@@ -1591,8 +1591,8 @@ environment applies that cell again. Follow
 
 A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
 the blocker's environment is held or ordered by `needs`, because the targeted form's comment
-receives no held or skipped environments. A run that applies no cell reads the
-first of these verdicts that holds:
+receives no held or skipped environments. A run with no cell result rows (no
+cell attempted) reads the first of these verdicts that holds:
 
 - `🔴 failed`: the run failed.
 - `⚪ nothing applied, environments are held for review`.
@@ -1831,16 +1831,17 @@ The `auto` apply result comment carries ``⚪ held, the base changed these
 stacks after this branch left it, so their plans would revert that change:
 <cells>. Update the branch from the base and push.`` Its verdict counts them as
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
-pending cells' stacks` when nothing applied. A cell another pull request also
-locks counts under `N locked` instead, and a run that applied nothing and holds
-a locked cell reads `⚪ nothing applied, pending cells are locked or the base
-also changed their stacks`.
+pending cells' stacks` when the run has no cell result rows (no cell attempted).
+A cell another pull request also locks counts under `N locked` instead, and a
+run with no cell result rows that holds a locked cell reads `⚪ nothing applied,
+pending cells are locked or the base also changed their stacks`.
 
-Merging the base into the branch changes those stacks, directly or through a
-module they source, or the base deleted or renamed files in them since the
-branch left it. A stack is not held for a base change the branch already holds.
-A stack the branch renamed is held when the base edited a file under its old
-path; a base delete or rename of that file is a merge conflict and refuses. Each
+The merge of the base into the branch changes those stacks, directly or
+through a module they source, or removes files in them. A stack is not held for
+a base change the branch already holds. When the base edited a file in a stack
+the branch renamed, the stack is held, or refused as a conflict when git does
+not pair the rename; a base delete of that file, or a base rename of it to
+another path, is a merge conflict and refuses. Each
 plan was made on the branch's tree, so applying it would revert the base's
 change. The held cells stay pending, a cell that runs after one waits with the
 remedy `the base also changed it; update the branch from the base and push`, and
@@ -1973,10 +1974,10 @@ refuses with `change detection on the merge of the base into the branch failed:
 `<cause>` is git's conflict lines, or the failed step's error. A conflict
 anywhere in the repository refuses, not only in a stack, and so does a file the
 base added under a directory the branch renamed: a base commit can land after
-GitHub reported the pull request mergeable. When `<cause>` is a git usage or
-unknown-option error, check the runner's git against the 2.38 floor
-([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites). A bare `shipmate apply` is no remedy for either refusal:
-it runs no overlap check.
+GitHub reported the pull request mergeable. If the runner's git is older than
+2.38 (`git --version`), merge-tree fails here; see
+[`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites. A bare `shipmate apply`
+is no remedy for either refusal: it runs no overlap check.
 
 ### A pull request planned zero cells
 

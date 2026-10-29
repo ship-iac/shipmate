@@ -538,7 +538,8 @@ def wait_mergeable(repo, pr_number, head):
 
 def overlap_cells(candidates, changed):
     """`{stack, environment}` of each cell in `candidates` whose stack is in `changed`, the
-    stacks the base changed since the merge base: applying its plan would revert that change."""
+    stacks the merge of the base into the branch changes, directly or through a module they
+    source, or removes files in: applying its plan would revert that change."""
     return [
         {"stack": c["stack"], "environment": c["environment"]}
         for c in candidates
@@ -593,7 +594,8 @@ def bare_main(auto=False):
     skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
     bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
     pending cell in an environment not stopped, the pull request must be ready and mergeable at
-    this head (`wait_mergeable`), and a cell whose stack the base changed since the merge base
+    this head (`wait_mergeable`), and a cell whose stack the merge of the base into the branch
+    changes, directly or through a module it sources, or removes files in
     (`build-matrix.base_changed_stacks`) is named in `held_cells`: it stays pending and stops
     its environment's `needs` successors, as a locked cell does. With a cell to apply, the plan
     run its records name must be the head's newest autoplan (`refuse_provenance`) and that run's
