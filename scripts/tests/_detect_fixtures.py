@@ -41,6 +41,33 @@ def forbid_shared_runner(monkeypatch):
     monkeypatch.setattr(_shipmate, "_run", _bypassed)
 
 
+def listed_autoplan(run_id, head, **keys):
+    """One run object of the autoplan listing as `apply-gate.newest_autoplan`'s `--jq`
+    projects it: a `pull_request_target` run of `head` pushed by `k3np`, `keys` over it."""
+    login = {"login": "k3np"}
+    run = {"id": run_id, "event": "pull_request_target", "head_sha": head}
+    return run | {"actor": login, "triggering_actor": login} | keys
+
+
+def autoplans_read(repo, head):
+    """The argv `apply-gate.newest_autoplan` lists `head`'s autoplans in `repo` with,
+    hand-written."""
+    return [
+        "gh",
+        "api",
+        "--paginate",
+        (
+            f"repos/{repo}/actions/workflows/shipmate.yml/runs?event=pull_request_target"
+            f"&head_sha={head}&per_page=100"
+        ),
+        "--jq",
+        (
+            ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
+            "triggering_actor: {login: .triggering_actor.login}} | tojson"
+        ),
+    ]
+
+
 def check_run(**kw):
     """One check-run object as the detects' `--jq` projection emits it."""
     base = {

@@ -290,9 +290,18 @@ def _plan_run(record):
 PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 
+_LISTED_KEYS = ("id", "event", "head_sha", "actor", "triggering_actor")
+
+
 def newest_autoplan(repo, head, *, run):
-    """The newest run id of `PLAN_WORKFLOW` started by `pull_request_target` on `head`, or
-    None when none is listed. Every page is read."""
+    """The listed run of `PLAN_WORKFLOW` started by `pull_request_target` on `head` with the
+    greatest `id`, or None when none is listed. Every page is read. The run is the listing's
+    object cut to `_LISTED_KEYS`: its integer `id`, `event`, `head_sha`, and `actor` and
+    `triggering_actor`, which the projection always emits as `{"login": ...}` mappings, the
+    login null when GitHub gives none. A missing actor so reaches `authorize.pusher_reason`
+    and refuses there, never as a malformed listing. The logins equal a single-run read's.
+    Raises `ValueError` on a line that is not such an object or whose `id` is not an
+    integer."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
     listing = run(
         [
@@ -301,10 +310,52 @@ def newest_autoplan(repo, head, *, run):
             "--paginate",
             f"repos/{repo}/actions/workflows/{posixpath.basename(PLAN_WORKFLOW)}/runs?{query}",
             "--jq",
-            ".workflow_runs[].id",
+            (
+                ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
+                "triggering_actor: {login: .triggering_actor.login}} | tojson"
+            ),
         ]
     )
-    return max(map(int, listing.split()), default=None)
+    runs = [json.loads(line) for line in listing.splitlines() if line.strip()]
+    for listed in runs:
+        if not isinstance(listed, dict) or any(k not in listed for k in _LISTED_KEYS):
+            raise ValueError(f"not a listed run: {listed!r}")
+        if type(listed["id"]) is not int:
+            raise ValueError(f"run id is {listed['id']!r}")
+    return max(runs, key=lambda listed: listed["id"], default=None)
+
+
+def provenance_reason(newest, plan_run, head, cells):
+    """The first provenance check the auto apply of `plan_run`, a decimal run id, on `head`
+    fails, as `(cause, detail)`, or None when every check passes. Pure: each caller words the
+    cause itself from `detail`.
+
+    `newest` is `newest_autoplan`'s object or None. `cells` maps each check name to the
+    `(recorded plan run or None, event action or None)` its record holds, possibly empty;
+    failing names are reported in its order. Checks, in this order:
+
+    - `("unlisted", None)`: `newest` is None.
+    - `("newer", newest["id"])`: the newest autoplan is another run, older or newer. Ids
+      compare as strings: `is_run_id` admits a leading zero, and a record `"0123"` names no
+      run 123.
+    - `("event", newest["event"])`: it is not a `pull_request_target` run; the listing's
+      `event=` filter should already exclude one.
+    - `("head", newest["head_sha"])`: it planned another commit than `head`.
+    - `("record", [(name, recorded), ...])`: cells recording another plan run.
+    - `("action", [(name, action), ...])`: cells whose action is not in `PUSH_ACTIONS`."""
+    if newest is None:
+        return "unlisted", None
+    if str(newest["id"]) != plan_run:
+        return "newer", newest["id"]
+    if newest["event"] != "pull_request_target":
+        return "event", newest["event"]
+    if newest["head_sha"] != head:
+        return "head", newest["head_sha"]
+    records = [(name, run) for name, (run, _) in cells.items() if run != plan_run]
+    if records:
+        return "record", records
+    actions = [(name, act) for name, (_, act) in cells.items() if act not in PUSH_ACTIONS]
+    return ("action", actions) if actions else None
 
 
 def base_tip(repo, pull, *, run):
