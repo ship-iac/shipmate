@@ -1969,9 +1969,10 @@ on the pull request to apply it.``
   never listed, so a cell whose newest plan record names one refuses the run as
   ``plan run <n> is not the newest autoplan of the head (run <m> is)`` or, with
   no autoplan of the head listed, ``plan run <n> is not listed``; `shipmate
-  apply` applies it under the comment-time requirements. A newer autoplan of the head that published no apply check
-  refuses it too, which the record-based binding of the bare and targeted forms
-  cannot see (§Apply-match fingerprint). Every cell's record must also name the
+  apply` applies it under the comment-time requirements. A newer autoplan of
+  the head that published no apply check refuses it too, which the record-based
+  binding of the bare and targeted forms cannot see (§Apply-match
+  fingerprint). Every cell's record must also name the
   event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
   of the head dispatches nothing yet becomes its newest autoplan, and whoever
   clicked is no pusher. A record with no action, an older engine's, refuses too:

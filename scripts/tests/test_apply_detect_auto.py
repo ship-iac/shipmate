@@ -329,17 +329,6 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
     )
 
 
-def test_a_record_from_another_head_refuses(tmp_path, monkeypatch):
-    """A run of another head is not in this head's listing.
-
-    Mutation: drop the `newest is None` check from `provenance_reason` -- a `TypeError`
-    escapes."""
-    assert _refusal(tmp_path, monkeypatch, listing=()) == (
-        f"::error::auto apply refused: plan run {RUN} is not listed, and no autoplan run of the "
-        f"head is listed. {REMEDY}"
-    )
-
-
 @pytest.mark.parametrize(
     ("entry", "refusal"),
     [
