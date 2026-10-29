@@ -3477,10 +3477,10 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
     )
 
 
-def test_merge_pins_are_the_rename_and_content_driver_settings():
+def test_merge_pins_are_the_rename_content_driver_and_isolation_settings():
     """0 is git's default rename limit, not unlimited, so the pin is the highest limit.
 
-    Mutation: `merge.renameLimit=0` -- red."""
+    Mutation: `merge.renameLimit=0` -- red. Mutation: drop `GIT_ATTR_NOSYSTEM` -- red."""
     assert bm._MERGE_PINS == (
         "-c",
         "merge.renames=true",
@@ -3492,30 +3492,66 @@ def test_merge_pins_are_the_rename_and_content_driver_settings():
         "merge.default=text",
         "-c",
         "core.attributesFile=",
+        "-c",
+        "safe.directory=*",
     )
+    assert {
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": bm.os.devnull,
+        "GIT_ATTR_NOSYSTEM": "1",
+    } == bm._MERGE_ENV
 
 
-@pytest.mark.parametrize("route", ["default-driver", "attributes-file"])
+@pytest.mark.parametrize(
+    "route",
+    [
+        "default-driver",
+        "attributes-file",
+        "text-driver-redefined",
+        "xdg-attributes",
+        "dubious-owner",
+    ],
+)
 def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch, tmp_path, route):
-    """The runner's git config selects a driver that keeps the branch's side of every file, as
-    the default driver or through a global attributes file. The base prepends a line to a module
-    the branch wires `stacks/s` to, the branch appends one; the merge still holds both edits, so
-    `stacks/s` is held.
+    """Git config selects a driver that keeps the branch's side of every file: repository config
+    as the default driver or through an attributes file, global config by redefining the `text`
+    driver, or an XDG attributes file. The base prepends a line to a module the branch wires
+    `stacks/s` to, the branch appends one; the merge still holds both edits, so `stacks/s` is
+    held. `dubious-owner` uses no driver: the workspace belongs to another user and only the
+    runner's global `safe.directory` admits it.
 
     Mutation: drop `merge.default=text` -- `default-driver` merges to HEAD's tree, red.
-    Mutation: drop `core.attributesFile=` -- `attributes-file` merges to HEAD's tree, red."""
-    _git("config", "--global", "merge.keep-head.driver", "cp %B %A")
+    Mutation: drop `core.attributesFile=` -- `attributes-file` merges to HEAD's tree, red.
+    Mutation: drop `GIT_CONFIG_GLOBAL` -- `text-driver-redefined` merges to HEAD's tree, red.
+    Mutation: drop `core.attributesFile=` and `GIT_CONFIG_GLOBAL` -- `xdg-attributes` merges to
+    HEAD's tree, red.
+    Mutation: drop `safe.directory=*` -- `dubious-owner` merge-tree dies on ownership, red."""
+    keep_head = ("merge.keep-head.driver", "cp %B %A")
     if route == "default-driver":
-        _git("config", "--global", "merge.default", "keep-head")
-    else:
+        _git("config", *keep_head)
+        _git("config", "merge.default", "keep-head")
+    elif route == "attributes-file":
         (tmp_path / "attributes").write_bytes(b"* merge=keep-head\n")
-        _git("config", "--global", "core.attributesFile", str(tmp_path / "attributes"))
+        _git("config", *keep_head)
+        _git("config", "core.attributesFile", str(tmp_path / "attributes"))
+    elif route == "text-driver-redefined":
+        _git("config", "--global", "merge.text.driver", "cp %B %A")
+    elif route == "xdg-attributes":
+        (tmp_path / "xdg/git").mkdir(parents=True)
+        (tmp_path / "xdg/git/attributes").write_bytes(b"* merge=keep-head\n")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        _git("config", "--global", *keep_head)
+    else:
+        _git("config", "--global", "safe.directory", "*")
     _commit({"modules/m/main.tf": "a\nb\nc\n", "stacks/s/main.tf": "s\n"}, "common")
     _git("checkout", "-q", "-b", "pr")
     head = _commit({"modules/m/main.tf": "a\nb\nc\nhead\n", "stacks/s/mod.tf": "wire\n"}, "wire")
     _git("checkout", "-q", "main")
     tip = _commit({"modules/m/main.tf": "base\na\nb\nc\n"}, "base")
     _git("checkout", "-q", "pr")
+    if route == "dubious-owner":
+        monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
 
     def listing(tree):
         assert (tree / "modules/m/main.tf").read_text() == "base\na\nb\nc\nhead\n"
