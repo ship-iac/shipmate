@@ -262,13 +262,13 @@ def merge_base(base, retry="Re-run the workflow"):
 
 # Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
 _BASE_REMEDY = "Update the branch from the base and push"
-# The merge ignores runner global/system config and system attributes, so they cannot change which
-# stacks are held; these pins cover repository config, and `safe.directory` because isolation drops
-# the runner's. `merge.renames` also covers `diff.renames`; 32767 because 0 means git's default.
+# Runner global/system config, system attributes and inherited env-borne config and attribute
+# sources are dropped and repo config pinned, so none changes which stacks are held. Empty
+# `core.attributesFile` drops XDG attributes; `safe.directory=*` restores the ownership exemption.
 _MERGE_PINS = (
-    *("-c", "merge.renames=true"),
+    *("-c", "merge.renames=true"),  # Also covers the `diff.renames` it falls back to.
     *("-c", "merge.directoryRenames=conflict"),
-    *("-c", "merge.renameLimit=32767"),
+    *("-c", "merge.renameLimit=32767"),  # 32767 because 0 means git's default limit.
     *("-c", "merge.default=text"),
     *("-c", "core.attributesFile="),
     *("-c", "safe.directory=*"),
@@ -330,7 +330,10 @@ def _merge_stacks(base_ref, candidates):
             capture_output=True,
             encoding="utf-8",
             errors="replace",
-            env={**os.environ, **_MERGE_ENV},
+            env={
+                k: v for k, v in os.environ.items() if not k.startswith(("GIT_CONFIG", "GIT_ATTR"))
+            }
+            | _MERGE_ENV,
         )
         cause = _merge_tree_failure(p)
         if cause is None:
