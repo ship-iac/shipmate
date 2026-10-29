@@ -3444,13 +3444,11 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
     `modules/m/variables.tf`. git's rename detection would move the file into `modules/m2`; the
     pinned `merge.directoryRenames=conflict` makes it a conflict instead. A runner config that
     skips rename detection would leave the file under `modules/m` and hold nothing; the pins
-    and the ignored global config keep the conflict.
+    keep the conflict.
 
     Mutation: `-c merge.directoryRenames=true` -- the merge succeeds and holds `stacks/s`, red.
-    Mutation: drop `-c merge.renames=true` -- both repo `false` rows merge cleanly, red.
-    Mutation: drop `-c merge.renameLimit=0` -- the rename-limit row merges cleanly, red.
-    Mutation: drop `GIT_CONFIG_GLOBAL=os.devnull` and `-c merge.renames=true` -- the global row
-    merges cleanly, red."""
+    Mutation: drop `-c merge.renames=true` -- the three `false` rows merge cleanly, red.
+    Mutation: drop `-c merge.renameLimit=32767` -- the rename-limit row merges cleanly, red."""
     common, renamed = files
     if scope == "repo":
         _git("config", *config.split("="))
@@ -3476,6 +3474,20 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
         "CONFLICT (file location): modules/m/variables.tf added in "
         f"{tip} inside a directory that was renamed in {head}, suggesting it should perhaps be "
         "moved to modules/m2/variables.tf. Update the branch from the base and push."
+    )
+
+
+def test_merge_pins_are_the_rename_settings():
+    """0 is git's default rename limit, not unlimited, so the pin is the highest limit.
+
+    Mutation: `merge.renameLimit=0` -- red."""
+    assert bm._MERGE_PINS == (
+        "-c",
+        "merge.renames=true",
+        "-c",
+        "merge.directoryRenames=conflict",
+        "-c",
+        "merge.renameLimit=32767",
     )
 
 

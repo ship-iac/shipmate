@@ -262,13 +262,13 @@ def merge_base(base, retry="Re-run the workflow"):
 
 # Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
 _BASE_REMEDY = "Update the branch from the base and push"
-# Runner config must not change which stacks are held: the merge ignores global and system
-# config, and these pin the keys against repo config. `merge.renames` also covers the
-# `diff.renames` it falls back to.
+# `-c` outranks global, system and repo config, so runner config cannot change which stacks are
+# held. `merge.renames` also covers the `diff.renames` it falls back to; 32767 because 0 means
+# git's default limit.
 _MERGE_PINS = (
     *("-c", "merge.renames=true"),
     *("-c", "merge.directoryRenames=conflict"),
-    *("-c", "merge.renameLimit=0"),
+    *("-c", "merge.renameLimit=32767"),
 )
 
 
@@ -321,12 +321,7 @@ def _merge_stacks(base_ref, candidates):
             capture_output=True,
             encoding="utf-8",
             errors="replace",
-            env={
-                **os.environ,
-                "LC_ALL": "C",
-                "GIT_CONFIG_NOSYSTEM": "1",
-                "GIT_CONFIG_GLOBAL": os.devnull,
-            },
+            env={**os.environ, "LC_ALL": "C"},
         )
         cause = _merge_tree_failure(p)
         if cause is None:
