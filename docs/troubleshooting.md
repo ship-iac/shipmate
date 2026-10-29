@@ -899,8 +899,8 @@ The merged pull request still holds those locks, and other pull requests' applie
 leave the cells pending. Re-run the deploy's failed jobs. Each run releases every
 lock the merged pull request holds whose cell has no pending apply check, so a
 re-run releases what the failed one owed, whatever else it re-applies. A failed
-mint after a release that added `contents: write` is the un-accepted permission
-request ([`github-app.md`](github-app.md) §Re-approve after permission changes).
+mint is the App lacking `contents: write`, or an installation that has not
+accepted it ([`github-app.md`](github-app.md) §Re-approve after permission changes).
 
 ### A cell stays locked after its pull request closed
 
@@ -1794,8 +1794,7 @@ A collaborator with write access comments `shipmate apply`.
 ### `auto apply refused: the plan records of <cells> name no push event action`
 
 The newest plan of the head was not started by a push: the pull request was
-marked ready for review or reopened after the push, or the plan came from an
-engine that records no event action. Nothing applied. Comment `shipmate apply`.
+marked ready for review or reopened after the push. Nothing applied. Comment `shipmate apply`.
 A wave cell refuses the same way with `the cell's plan record names event action
 <action>, not a push (opened or synchronize)`.
 
@@ -1972,7 +1971,8 @@ holds; git's own error is in the `detect` annotation after the colon.
    branch from the base and push.
 
 An `auto` apply's `detect` computes the same merge base, between the base tip
-and the head, to find the stacks the base changed. It refuses with the same
+and the head, to tell whether the base changed any file since the branch left it.
+It refuses with the same
 text, ending `Update the branch from the base and push; if it fails again, the
 base commit is not reachable from this checkout.`, and nothing applies. It also
 runs change detection on the merge of the base into the branch, to find the
@@ -2039,11 +2039,7 @@ fence in [`getting-started.md`](getting-started.md) §The workflow file.
 A newer plan run of the same pull request (a push, open or reopen, or a re-run
 of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, `plan / gate-hold`, the `plan / <env> / <stack>` matrix
-check) stay red or cancelled on the head. Under a fence older than the one in
-[`getting-started.md`](getting-started.md) §The workflow file, a `shipmate plan`
-dispatch cancels it too; re-pin with
-`python <engine>/scripts/repin <consumer> <tag> --write-fence` to make a
-dispatch wait.
+check) stay red or cancelled on the head.
 
 After the newer plan run has finished, re-run the cancelled run:
 `gh run rerun <id>`. Not before: the re-run re-enters the `plan-<pr>`

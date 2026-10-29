@@ -851,7 +851,8 @@ open: that is the scope GitHub documents for `contents: write`, not something
 probed here. Two limits were probed on 2026-10-24: such a token cannot add a file under
 `.github/workflows` (403) and cannot move the default branch under its ruleset
 (422). The engine requests `contents: write`
-only in the jobs that write a cell lock, all bound to `shipmate-engine`
+only in the jobs that write a cell lock, all bound to `shipmate-engine`, and in
+`shipmate doctor`'s probe of the whole permission set, whose token nothing reads
 (`docs/github-app.md` §Reference).
 
 **The multi-repo cost, stated plainly.** GitHub has no org-level environment
