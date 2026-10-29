@@ -2830,6 +2830,43 @@ def test_the_targeted_row_escapes_the_names_and_keeps_the_engine_placeholder():
     )
 
 
+def test_the_defaults_name_each_auto_environment_after_the_apply_mode_line():
+    """`apply_mode: auto` applies on a push with no review, so the defaults echo names each such
+    environment, sorted and escaped, directly after the `apply_mode` line, and the rows render the
+    escaped names once.
+
+    Mutations: drop the notice; render `ec.targeted_envs` in its place; drop the `sorted` in
+    env-config `_mode_envs`; drop the `_md_escape`; drop the `_Rendered` -- `&amp;lt;` shows;
+    append the notice after the `max_parallel` line.
+    """
+    table = {
+        "environments": {
+            "zeta": {"apply_mode": "auto", "review": False},
+            "a<b": {"apply_mode": "auto", "review": False},
+            "dev": {},
+        }
+    }
+    assert [doctor._finding_row(*f) for f in doctor._config_defaults(table)] == [
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} {text}"
+        for text in (
+            (
+                "`needs`: declared by no environment, so every environment sits at one level, "
+                "and a bare `shipmate apply` applies them all together."
+            ),
+            (
+                "`apply_mode`: no environment is `targeted`, so every environment applies on a "
+                "bare `shipmate apply`, production included."
+            ),
+            (
+                "`apply_mode: auto` on a&lt;b, zeta: a push applies their changed cells after a "
+                "complete autoplan of a ready pull request, with no approving review and no "
+                "comment."
+            ),
+            _MAX_PARALLEL_UNSET[1],
+        )
+    ]
+
+
 def test_the_shim_job_name_row_keeps_the_engine_placeholders():
     """Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;stack&gt;` shows."""
     text = _SHIPMATE_WF.replace("    name: plan\n", "    name: terraform\n", 1)

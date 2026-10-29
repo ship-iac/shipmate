@@ -38,15 +38,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Inject identity variables
-      shell: bash
-      env:
-        SHIPMATE_TF_VARS: ${{ inputs.tf-vars }}
-        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
-        SHIPMATE_SECRETS: ${{ inputs.consumer-secrets }}
-        STACK: ${{ inputs.stack }}
-      run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
-
     - name: Stack slug
       id: ids
       shell: bash
@@ -58,8 +49,9 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
-    # Carries the wave job's pre-apply check into this cell's blocked reason. The check ran
-    # before the cloud credentials, so a refused cell never assumed the apply role.
+    # Carries the wave job's pre-apply check into this cell's blocked reason. A refused wave
+    # skipped checkout and setup, so every step before this one must need neither, or its
+    # failure skips this step and the blocked reason loses the refusal.
     - name: Refuse a cell whose pre-apply check did not pass
       id: pre-apply
       shell: bash
@@ -72,6 +64,15 @@ runs:
           echo "::error::apply aborted for $ENV/$STACK: the pre-apply check did not pass (outcome: '$OUTCOME'); the job's Pre-apply check step names why"
           exit 1
         fi
+
+    - name: Inject identity variables
+      shell: bash
+      env:
+        SHIPMATE_TF_VARS: ${{ inputs.tf-vars }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_SECRETS: ${{ inputs.consumer-secrets }}
+        STACK: ${{ inputs.stack }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
 
     - name: Download reviewed plan artifact (fail-safe if missing)
       id: download

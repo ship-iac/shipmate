@@ -1403,10 +1403,9 @@ def _shim_job_name_finding(doc, name, engine):
 #: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
 #: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
-#: The whole option list the engine dispatches (`auto` from the autoplan, the rest from
-#: `actions/dispatch`), compared in order and as parsed options: a list missing `unlock`
-#: refuses that verb, and one carrying an extra offers a verb no `if:` selects. Read from
-#: `verb`'s own declaration, never another input's `options:`.
+#: Every verb the engine dispatches (`auto` from the autoplan, the rest from `actions/dispatch`),
+#: compared in order as `verb`'s own parsed options: a missing `unlock` refuses that verb, and an
+#: extra offers a verb no `if:` selects.
 _VERB_OPTION_LIST = ["plan", "apply", "unlock", "auto"]
 #: The same list as the findings render it. Derived, so there is one hand-written copy.
 _VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
@@ -1943,7 +1942,8 @@ def _budgeted(groups, head, sep, budget, overflow):
 
 
 def _config_defaults(table):
-    """The three tolerant defaults, echoed whether they are set or not.
+    """The three tolerant defaults, echoed whether they are set or not, and after `apply_mode`
+    the environments an entry sets to `apply_mode: auto`, only when one does.
 
     No absence here is invalid, so no validator can report any of them. `needs` and
     `apply_mode` decide what a comment can do, and `max_parallel` how many plan and drift cell
@@ -1957,6 +1957,7 @@ def _config_defaults(table):
     """
     order = ec.env_order(table)
     envs = ec.targeted_envs(table)
+    autos = ec.auto_envs(table)
     cap = ec.max_parallel(table)
     cap_head = (
         f"`max_parallel: {cap}`:" if "max_parallel" in table else "`max_parallel`: not set, so"
@@ -1984,6 +1985,20 @@ def _config_defaults(table):
             if envs
             else "`apply_mode`: no environment is `targeted`, so every environment applies on a "
             "bare `shipmate apply`, production included.",
+        ),
+        *(
+            [
+                (
+                    NOTICE,
+                    _Rendered(
+                        f"`apply_mode: auto` on {_md_escape(_fit_items(autos, ', ', 400))}: a "
+                        "push applies their changed cells after a complete autoplan of a ready "
+                        "pull request, with no approving review and no comment."
+                    ),
+                )
+            ]
+            if autos
+            else []
         ),
         (
             NOTICE,
@@ -2068,9 +2083,9 @@ _config_warnings.parses_yaml = True
 def config_status(ctx):
     """The report's environment-table section: the verdict, the variable-references notice,
     the resolved roles, the AWS accounts each GitHub Environment's subject reaches and the
-    tolerant defaults, or nothing when there is no sound table to describe —
-    `_config_warnings` reports that case instead, and a status section beside a refusal
-    would read as a second opinion.
+    tolerant defaults with any `apply_mode: auto` environments, or nothing when there is no
+    sound table to describe — `_config_warnings` reports that case instead, and a status
+    section beside a refusal would read as a second opinion.
 
     The examined commit's table is read a second time rather than shared with the probe:
     the only table `ctx` carries is the default branch's (`_default_branch_table`), and it
