@@ -851,7 +851,7 @@ open: that is the scope GitHub documents for `contents: write`, not something
 probed here. Two limits were probed on 2026-10-24: such a token cannot add a file under
 `.github/workflows` (403) and cannot move the default branch under its ruleset
 (422). The engine requests `contents: write`
-only in the jobs that write a cell lock, all bound to `shipmate-engine`, and in
+only in jobs bound to `shipmate-engine`: those that write a cell lock, and
 `shipmate doctor`'s probe of the whole permission set, whose token nothing reads
 (`docs/github-app.md` §Reference).
 

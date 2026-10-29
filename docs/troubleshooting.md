@@ -899,8 +899,9 @@ The merged pull request still holds those locks, and other pull requests' applie
 leave the cells pending. Re-run the deploy's failed jobs. Each run releases every
 lock the merged pull request holds whose cell has no pending apply check, so a
 re-run releases what the failed one owed, whatever else it re-applies. A failed
-mint is the App lacking `contents: write`, or an installation that has not
-accepted it ([`github-app.md`](github-app.md) §Re-approve after permission changes).
+mint names its cause; when the App lacks `contents: write`, or the installation
+has not accepted it, see [`github-app.md`](github-app.md) §Re-approve after
+permission changes.
 
 ### A cell stays locked after its pull request closed
 
@@ -1794,9 +1795,11 @@ A collaborator with write access comments `shipmate apply`.
 ### `auto apply refused: the plan records of <cells> name no push event action`
 
 The newest plan of the head was not started by a push: the pull request was
-marked ready for review or reopened after the push. Nothing applied. Comment `shipmate apply`.
-A wave cell refuses the same way with `the cell's plan record names event action
-<action>, not a push (opened or synchronize)`.
+marked ready for review or reopened after the push, or the cell's plan record
+names no event action. Nothing applied. Comment `shipmate apply`. A wave cell
+refuses the same way with `the cell's plan record names event action <action>,
+not a push (opened or synchronize)`, where `<action>` is quoted
+(`'ready_for_review'`), or `None` for a record without one.
 
 ### `auto apply refused: the <read> read returned a malformed answer (<error>)`
 
@@ -1971,10 +1974,11 @@ holds; git's own error is in the `detect` annotation after the colon.
    branch from the base and push.
 
 An `auto` apply's `detect` computes the same merge base, between the base tip
-and the head, to tell whether the base changed any file since the branch left it.
-It refuses with the same
-text, ending `Update the branch from the base and push; if it fails again, the
-base commit is not reachable from this checkout.`, and nothing applies. It also
+and the head, to tell whether the base changed any file since the branch left
+it. It refuses with the same text, ending `Update the branch from the base and
+push; if it fails again, the base commit is not reachable from this checkout.`,
+and nothing applies; a failed diff from that merge base to the base tip refuses
+with git's error. It also
 runs change detection on the merge of the base into the branch, to find the
 stacks the merge changes. When the merge conflicts or that detection fails, it
 refuses with `change detection on the merge of the base into the branch failed:
