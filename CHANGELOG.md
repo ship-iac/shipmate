@@ -12,16 +12,16 @@ section below names the SHA the release tags.
 
 ### Changed — BREAKING
 
-Re-pin in one commit (`docs/releasing.md` §Re-pin a consumer): run `python <engine>/scripts/repin <consumer> v0.53.0 --write-fence`, rename the table keys below in `.github/shipmate-config.yml`, and grant the App `contents: write` before the re-pin merges.
+Re-pin in one commit (`docs/releasing.md` §Re-pin a consumer): run `python <engine>/scripts/repin <consumer> v0.53.0 --write-fence`, rename the table keys below in `.github/shipmate-config.yml`, and grant the App `contents: write` before the re-pin merges. `--write-fence` writes nothing when the push trigger holds more than one plain branch (exit 2): then apply the diff it prints to `shipmate.yml` by hand.
 
-- **The `shipmate.yml` fence changes, and `scripts/repin --write-fence` writes it.** The `pull_request_target` types gain `closed`, the `plan` job's `if:` excludes `closed`, a new `release` job calls `release.yml` on `closed`, and `run-name` names it `release`. The `verb` input gains the option `auto`, a new `auto` job calls `apply.yml` with `auto: true` on `verb: auto`, and the `apply` and `auto` jobs grant `pull-requests: read`, which every apply needs: each wave cell reads the pull request, and the `auto` form's `detect` does too. Without the grant every `shipmate apply` run fails at startup. `shipmate doctor` compares seven job `if:` expressions, keyed by job id.
-- **The App needs `contents: write`, to write the cell lock refs.** Add Contents: Read and write in the App's settings and accept the installation's pending permission request (`docs/github-app.md`). Without it every `shipmate apply` refuses at its `lock` job.
-- **Environment table keys are renamed; the old spellings refuse as unknown keys.** Rename them in `.github/shipmate-config.yml` in the re-pin commit:
+- **The `shipmate.yml` fence changes, and `scripts/repin --write-fence` writes it.** The `plan` job's `cancel-in-progress` becomes `${{ github.event_name == 'pull_request_target' && github.event.action != 'ready_for_review' }}` (`shipmate doctor` does not compare it). The `pull_request_target` types gain `closed`, the `plan` job's `if:` excludes `closed`, a new `release` job calls `release.yml` on `closed`, and `run-name` names it `release`. The `verb` input gains the option `auto`, a new `auto` job calls `apply.yml` with `auto: true` on `verb: auto`, and the `apply` and `auto` jobs grant `pull-requests: read`, which every apply needs: each wave cell reads the pull request, and the `auto` form's `detect` does too. Without the grant every `shipmate apply` run fails at startup. `shipmate doctor` compares seven job `if:` expressions, keyed by job id.
+- **The App needs `contents: write`, to write the cell lock refs.** Change the App's Contents permission from Read-only to Read and write and accept the installation's pending permission request (`docs/github-app.md`). Without it every `shipmate apply` refuses at its `lock` job, and the `release` job, the merge deploy's lock release and `shipmate unlock <env> --evict` fail.
+- **Environment table keys are renamed; the old spellings refuse as unknown keys, whatever their value.** Rename them in `.github/shipmate-config.yml` in the re-pin commit, and delete an old key set to its default (`shared: false`, `gated: true`, `explicit: false`):
   - `shared: true` → `split: false`
   - `gated: false` → `review: false`
   - `explicit: true` → `apply_mode: targeted`
   - `tf_vars:` → `vars:`
-  - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
+- **The `apply-all-detect` log notice renames its fields** `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` to `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`. Update anything that parses the notice.
 - **A runner that runs an `apply_mode: auto` detect needs `git` ≥ 2.38** (`git merge-tree --write-tree`; `CONTRACT.md` §Runner prerequisites). GitHub-hosted runners carry it; check a self-hosted runner's `git --version`.
 
 ### Added
