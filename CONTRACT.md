@@ -1852,7 +1852,8 @@ or a release after a close, takes it away), with
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
 and unless the pull request is open at the applied head. Under `apply_mode: auto`
 it also refuses unless the run attempt is `1`, the pull request is not a draft, the plan run detect bound is
-still the head's newest autoplan and the run the cell's newest plan record names, that
+still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
+cell's newest plan record names, that
 run's pusher still passes detect's pusher check (§`apply_mode: auto`, same function and
 wording), and the base branch's tip, read from its ref, is still the one detect read,
 whatever the stack. Mergeability is not re-read: a base move refuses already. A read that fails refuses with

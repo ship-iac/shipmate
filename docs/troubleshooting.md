@@ -1737,29 +1737,28 @@ refuses instead with `an auto apply is never re-run (run attempt '<n>')`. With n
 Comment `shipmate apply` on the pull request, or push when the head carries no
 apply checks yet.
 
-### ``auto apply refused: plan run <n> is a `<event>` run, not an autoplan``
+### `auto apply refused: plan run <n> is not the newest autoplan of the head (run <m> is)`
 
 `detect` reads the head's autoplans from the Actions runs listing
 (`event=pull_request_target`, `head_sha=<head>`), and the newest one listed
-must be the plan run every cell records. This refusal, and its sibling ``plan
-run <n> planned <sha>, not the head <sha>``, mean the listing returned a run
-outside its own filter. Comment `shipmate apply`.
+must be the plan run every cell records. Usually plan run `<n>` is a `shipmate
+plan` run (`workflow_dispatch`), which is never listed: the App dispatches it,
+and it does not carry the commenter, so there is no pusher to authorize. Comment
+`shipmate apply`, which applies that plan under the comment-time requirements.
+Otherwise a newer autoplan of the same head exists: when it completes with apply
+checks its own `summary` dispatches again; when it published none, push.
 
 The same check refuses, each ending ``Comment `shipmate apply` on the pull
 request to apply it.``:
 
-- `the cells to apply record different plan runs (...)`: no one autoplan
-  planned every cell this run would apply.
-- `plan run <n> is not the newest autoplan of the head (run <m> is)`: a newer
-  autoplan of the same head exists, or plan run `<n>` is a `shipmate plan` run
-  (`workflow_dispatch`), which is never listed. When a newer autoplan completes
-  with apply checks its own `summary` dispatches again; when it published none,
-  push. For a `shipmate plan` run, comment `shipmate apply`, which applies that
-  plan under the comment-time requirements: the App dispatches a `shipmate plan`
-  run, which does not carry the commenter, so there is no pusher to authorize.
 - `plan run <n> is not listed, and no autoplan run of the head is listed`: no
   push planned the head, as when only a `shipmate plan` run did. Comment
   `shipmate apply`.
+- `the cells to apply record different plan runs (...)`: no one autoplan
+  planned every cell this run would apply.
+- ``plan run <n> is a `<event>` run, not an autoplan`` or `plan run <n> planned
+  <sha>, not the head <sha>`: the listing returned a run outside its own
+  `event=` or `head_sha=` filter. Comment `shipmate apply`.
 
 ### ``not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...``
 
@@ -1781,8 +1780,8 @@ applied. A collaborator with write access comments `shipmate apply`.
 
 ### `not authorized: the autoplan run names no actor or no triggering actor login`
 
-The plan run's body lacks a login for its `actor` or its `triggering_actor`, so
-there is no pusher to authorize. Nothing applied. A collaborator with write
+The autoplan's run object in the Actions runs listing lacks a login for its
+`actor` or its `triggering_actor`, so there is no pusher to authorize. Nothing applied. A collaborator with write
 access comments `shipmate apply`.
 
 ### `not authorized: the autoplan ran as @<login> but was triggered by @<login>`
@@ -1916,7 +1915,8 @@ An `auto` cell also refuses when:
   plan run <r>, not plan run <p>` (or `names no plan run`): a newer autoplan, or
   a newer plan of this cell, exists. Comment
   `shipmate apply`, or push.
-- `the newest autoplan of <head> is not a pull_request_target run of it`: the
+- ``the newest autoplan of <head> is a `<event>` run, not a pull_request_target
+  run`` or `the newest autoplan of <head> is a run of <sha>, not of <head>`: the
   Actions runs listing returned a run outside its own `event=` or `head_sha=`
   filter. Comment `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
