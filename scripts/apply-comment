@@ -675,11 +675,12 @@ def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_af
     `waiting` and `held_cells` come from both forms: each waiting cell becomes an escaped
     `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`, its remedy
     the lock's when its blocker is a `locked` cell, the branch update when it is an `overlap`
-    cell; the locked cells become their rendered lines, and the overlap cells, only the auto
-    form's, their line. A held env that is also targeted is listed under `held` only, and under
-    `held_targeted` for its command. Each skipped env becomes `(env, waits)`, `waits` naming
-    every predecessor `skipped_after` gives it with `_predecessor_remedy`, or empty when it gives
-    none. `bare` is the auto form's envs left for a bare apply."""
+    cell, and both joined by "; ", the lock's first, when it is both; the locked cells become
+    their rendered lines, and the overlap cells, only the auto form's, their line. A held env
+    that is also targeted is listed under `held` only, and under `held_targeted` for its
+    command. Each skipped env becomes `(env, waits)`, `waits` naming every predecessor
+    `skipped_after` gives it with `_predecessor_remedy`, or empty when it gives none. `bare`
+    is the auto form's envs left for a bare apply."""
     locked, overlap = _of_cause(held_cells, "locked"), _of_cause(held_cells, "overlap")
     holders = {(c["stack"], c["environment"]): _lock_holder(c["holder"]) for c in locked}
     based = {(c["stack"], c["environment"]) for c in overlap}
@@ -891,8 +892,9 @@ def build_comment(
     and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it is header,
     verdict, footer lines and footer. A non-empty `refusal`, the first error of the `::error::`
     that failed detect or the lock job on one line, sits in `sc.reason_fence` directly under the
-    verdict. `held_cells` is detect's: the verdict counts each cause, the footer lines name each
-    locked cell's holder, and a footer line names the auto form's overlap cells. `skipped_after`
+    verdict. `held_cells` is detect's: the verdict counts each cause, a cell under both once
+    under `locked`, the footer lines name each locked cell's holder, and a footer line names
+    the auto form's overlap cells. `skipped_after`
     and `bare` are detect's: the skipped lines name each predecessor, and a line names each
     environment left for a bare apply. A run that applied nothing and left a `bare`, `targeted`
     or skipped environment is never 🟢.

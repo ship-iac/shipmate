@@ -2013,17 +2013,17 @@ therefore not covered: no rename record names it. The head-side listing is skipp
 when the base changed no file. When it fails, `detect` refuses with ``change
 detection on the branch's tree with the base's changes written over it failed:
 <cause>. Update the branch from the base and push.`` and nothing applies.
-Terramate lists only the stacks the base tip still has, so a stack
-whose files the base deleted or renamed since that merge base
-(`git diff --raw --find-renames`) is held too, and so is a stack holding
-a file the branch renamed from a path the base also changed (inside a stack the
-base-side detection lists, or a path the base deleted or renamed). Applying its plan would revert the base's change (§Fan-out). A held
-cell is not applied: its apply check and the gate stay pending, it stops its
+Terramate lists only the stacks the base tip still has, so a stack whose files the
+base deleted or renamed since that merge base (`git diff --raw --find-renames`) is
+held too, and so is a stack holding a file the branch renamed from a path the base
+also changed (inside a stack the base-side detection lists, or a path the base
+deleted or renamed). Applying its plan would revert the base's change (§Fan-out).
+A held cell is not applied: its apply check and the gate stay pending, it stops its
 environment's `needs` successors as a locked cell does, a cell that runs after it
-waits, and the result comment names it with ``⚪ held, the base changed these stacks after this branch left
-it, so their plans would revert that change: <cells>. Update the branch from the
-base and push.`` The push re-plans, and its autoplan dispatches again. The bare
-and targeted forms run no overlap check.
+waits, and the result comment names it with ``⚪ held, the base changed these
+stacks after this branch left it, so their plans would revert that change:
+<cells>. Update the branch from the base and push.`` The push re-plans, and its
+autoplan dispatches again. The bare and targeted forms run no overlap check.
 
 **`needs` predecessors.** An `auto` environment whose `needs` predecessor does
 not fully apply this run is skipped, its checks pending, and the result comment

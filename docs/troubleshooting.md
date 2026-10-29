@@ -1593,9 +1593,10 @@ A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
 the blocker's environment is held or ordered by `needs`, because the targeted form's comment
 receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
 verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
-`⚪ nothing applied, pending cells are locked` when a pending cell is locked, or
 `⚪ nothing applied, pending cells are locked or the base also changed their
-stacks` when an `auto` apply also holds a cell the base changed.
+stacks` when a pending cell is locked and an `auto` apply also holds a cell the
+base changed, or `⚪ nothing applied, pending cells are locked` when a pending
+cell is locked and none is held because the base changed it.
 
 ### A stack's plan does not show its upstream stack's change
 
@@ -1826,10 +1827,10 @@ a locked cell reads `⚪ nothing applied, pending cells are locked or the base
 also changed their stacks`.
 
 The base branch changed those stacks, directly or through a module (including
-one only the branch wires the stack to), or deleted
-or renamed files in them, since the branch left it. A stack the branch renamed
-is held when the base changed its old path. Each plan was made on the branch's tree, so applying it would
-revert the base's change. The held cells stay pending, a cell that runs after
+one only the branch wires the stack to), or deleted or renamed files in them,
+since the branch left it. A stack the branch renamed is held when the base
+changed its old path. Each plan was made on the branch's tree, so applying it
+would revert the base's change. The held cells stay pending, a cell that runs after
 one waits with the remedy `the base also changed it; update the branch from the
 base and push`, and the environments ordered after their environment by `needs`
 are skipped (next entry). The rest applied.
