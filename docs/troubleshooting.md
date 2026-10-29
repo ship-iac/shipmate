@@ -163,7 +163,8 @@ live probes.
   verdict names them as unchecked. A valid file also gets its `needs`, `apply_mode` and `max_parallel`
   values read back, absent ones included: `apply_mode: targeted` set on no entry is
   legitimate configuration that no validator can question, and it means a bare
-  `shipmate apply` applies production too. Each variable reference is resolved
+  `shipmate apply` applies production too. Each environment set to
+  `apply_mode: auto` is named on one more line, which is absent when none is. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
   finding, which is how a pull request adding it learns before the merge.
   Execution keeps reading the default branch's copy — this reports, it changes
@@ -735,8 +736,10 @@ and `max_parallel` are optional and take tolerant defaults — no ordering, no
 exclusions, and at most 10 cell jobs at once per plan and drift sweep. A file
 that sets `apply_mode: targeted` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
-warns. `shipmate doctor` echoes all three on every report for exactly this reason;
-read them before merging.
+warns. `shipmate doctor` echoes all three on every report for exactly this reason,
+and names each `apply_mode: auto` environment, which a push to a ready pull request
+applies after a complete autoplan, with no approving review and no comment; read them
+before merging.
 
 **Editing them on a branch does not change what that branch applies.**
 `needs`, `apply_mode`, `max_parallel` and `command_hints` are read from the default

@@ -10,6 +10,11 @@ provider cache check and save follow the `cell-init` call, so a failed state loc
 skips that save; accepted, because the cell has already failed and the cost is one re-download
 on the next sweep.
 
+In apply-cell the pre-apply refusal follows only `Stack slug`: a refused wave skipped checkout and
+setup, so a step before the refusal that needs either fails first and skips it, and the cell's
+blocked reason loses the refusal. `Stack slug` stays pure bash and stays first, because the apply
+summary artifact is named from its slug.
+
 The whole ordered list of step names per cell, hand-written, so a moved, dropped or added step
 reds here.
 """
@@ -54,9 +59,9 @@ _EXPECTED = {
         "Upload drift summary",
     ],
     "apply-cell": [
-        "Inject identity variables",
         "Stack slug",
         "Refuse a cell whose pre-apply check did not pass",
+        "Inject identity variables",
         "Download reviewed plan artifact (fail-safe if missing)",
         "Verify the plan was produced from this commit",
         "Decrypt reviewed plan artifact",
@@ -78,5 +83,6 @@ _EXPECTED = {
 @pytest.mark.parametrize("cell", sorted(_EXPECTED))
 def test_each_cell_runs_its_steps_in_the_expected_order(cell):
     """Mutations: swap `Initialize the stack` and `Restore provider cache` in `cell-init`; swap
-    `Locate state` and `Restore state` in `cell-init`."""
+    `Locate state` and `Restore state` in `cell-init`; move `Inject identity variables` back above
+    the pre-apply refusal in `apply-cell`; move that refusal above `Stack slug` in `apply-cell`."""
     assert [s.get("name") for s in action_steps(cell)] == _EXPECTED[cell]
