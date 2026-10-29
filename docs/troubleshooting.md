@@ -1973,9 +1973,9 @@ refuses with `change detection on the merge of the base into the branch failed:
 `<cause>` is git's conflict lines, or the failed step's error. A conflict
 anywhere in the repository refuses, not only in a stack, and so does a file the
 base added under a directory the branch renamed: a base commit can land after
-GitHub reported the pull request mergeable. A git usage error as `<cause>`
-means the runner's git is older than 2.38 ([`../CONTRACT.md`](../CONTRACT.md)
-§Runner prerequisites). A bare `shipmate apply` is no remedy for either refusal:
+GitHub reported the pull request mergeable. When `<cause>` is a git usage or
+unknown-option error, check the runner's git against the 2.38 floor
+([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites). A bare `shipmate apply` is no remedy for either refusal:
 it runs no overlap check.
 
 ### A pull request planned zero cells
