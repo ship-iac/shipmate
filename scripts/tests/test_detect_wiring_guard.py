@@ -334,8 +334,9 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
             "their own, each `{stack, environment, cause}`. `cause` is `locked` when another "
             "pull request holds the cell's lock, and such a cell also carries `holder`, that "
             "pull request's number (null when the lock's holder is unknown); both forms. "
-            "`cause` is `overlap` when the base changed the cell's stack since the merge base, "
-            "directly or through a module, so its plan would revert that change; auto form only. "
+            "`cause` is `overlap` when the merge of the base into the branch changes the cell's "
+            "stack, directly or through a module it sources, or removes files in it, so its plan "
+            "would revert that change; auto form only. "
             "A cell both locked and overlapping is listed once per cause."
         ),
         "value": "${{ steps.d.outputs.held_cells }}",

@@ -53,7 +53,7 @@ inputs:
     required: false
     default: "[]"
   held-cells:
-    description: "JSON list of pending cells left pending for a cause of their own, each `{stack, environment, cause}`. `cause` is `locked` when another pull request holds the cell's lock, with `holder` its pull request number, null when unknown (both forms); the comment names each holder and the remedy. `cause` is `overlap` when the auto form left the cell pending because the base changed its stack since the merge base; the comment names them and the remedy, updating the branch from the base. Empty = []."
+    description: "JSON list of pending cells left pending for a cause of their own, each `{stack, environment, cause}`. `cause` is `locked` when another pull request holds the cell's lock, with `holder` its pull request number, null when unknown (both forms); the comment names each holder and the remedy. `cause` is `overlap` when the auto form left the cell pending because the merge of the base into the branch changes its stack, directly or through a module it sources, or removes files in it; the comment names them and the remedy, updating the branch from the base. Empty = []."
     required: false
     default: "[]"
   bare-envs:

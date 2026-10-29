@@ -1569,7 +1569,8 @@ stays pending and the rest of the run applied. Follow the remedy:
   the lock names no holder, so no merge or close releases it; evict it.
 - `the base also changed it; update the branch from the base and push`: an
   `auto` apply held the blocker (§`⚪ held, the base changed these stacks after
-  this branch left it`).
+  this branch left it`). A blocker that is also locked names the lock's remedy
+  first, then this one; clear both.
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
@@ -1590,9 +1591,22 @@ environment applies that cell again. Follow
 
 A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
 the blocker's environment is held or ordered by `needs`, because the targeted form's comment
-receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
-verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
-`⚪ nothing applied, pending cells are locked` when a pending cell is locked.
+receives no held or skipped environments. A run with no cell result rows, not even
+`not attempted` ones, reads the first of these verdicts that holds:
+
+- `🔴 failed`: the run failed.
+- `⚪ nothing applied, environments are held for review`.
+- `⚪ nothing applied, pending cells are locked or the base also changed their
+  stacks`: a pending cell is locked, and an `auto` apply holds a cell the base
+  changed.
+- `⚪ nothing applied, pending cells are locked`: a pending cell is locked.
+- `⚪ nothing applied, the base also changed the pending cells' stacks`: an
+  `auto` apply holds a cell the base changed.
+- `⚪ nothing applied, cells wait on pending cells they run after`.
+- `⚪ nothing applied, the pending environments wait on the lines below`: the
+  run left a pending environment to a bare apply, a `targeted` one or a skipped
+  one.
+- `🟢 no pending applies`.
 
 ### A stack's plan does not show its upstream stack's change
 
@@ -1817,15 +1831,22 @@ The `auto` apply result comment carries ``⚪ held, the base changed these
 stacks after this branch left it, so their plans would revert that change:
 <cells>. Update the branch from the base and push.`` Its verdict counts them as
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
-pending cells' stacks` when nothing applied.
+pending cells' stacks` when the run has no cell result rows at all.
+A cell another pull request also locks counts under `N locked` instead, and a
+run with no cell result rows that holds a locked cell reads `⚪ nothing applied,
+pending cells are locked or the base also changed their stacks`.
 
-The base branch changed those stacks, directly or through a module, or deleted
-or renamed files in them, since the branch left it. A stack the branch renamed
-is held when the base changed its old path. Each plan was made on the branch's tree, so applying it would
-revert the base's change. The held cells stay pending, a cell that runs after
-one waits with the remedy `the base also changed it; update the branch from the
-base and push`, and the environments ordered after their environment by `needs`
-are skipped (next entry). The rest applied.
+The merge of the base into the branch changes those stacks, directly or
+through a module they source, or removes files in them. A stack is not held for
+a base change the branch already holds. When the base edited a file in a stack
+the branch renamed, the stack is held, or refused as a conflict when git does
+not pair the rename; a base delete of that file, or a base rename of it to
+another path, is a merge conflict and refuses. Each
+plan was made on the branch's tree, so applying it would revert the base's
+change. The held cells stay pending, a cell that runs after one waits with the
+remedy `the base also changed it; update the branch from the base and push`, and
+the environments ordered after their environment by `needs` are skipped (next
+entry). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
 its autoplan dispatches again. Do not comment `shipmate apply` instead: the bare
@@ -1945,8 +1966,18 @@ holds; git's own error is in the `detect` annotation after the colon.
 An `auto` apply's `detect` computes the same merge base, between the base tip
 and the head, to find the stacks the base changed. It refuses with the same
 text, ending `Update the branch from the base and push; if it fails again, the
-base commit is not reachable from this checkout.`, and nothing applies. A bare
-`shipmate apply` is no remedy: it runs no overlap check.
+base commit is not reachable from this checkout.`, and nothing applies. It also
+runs change detection on the merge of the base into the branch, to find the
+stacks the merge changes. When the merge conflicts or that detection fails, it
+refuses with `change detection on the merge of the base into the branch failed:
+<cause>. Update the branch from the base and push.`, and nothing applies;
+`<cause>` is git's conflict lines, or the failed step's error. A conflict
+anywhere in the repository refuses, not only in a stack, and so does a file the
+base added under a directory the branch renamed: a base commit can land after
+GitHub reported the pull request mergeable. If the runner's git is older than
+2.38 (`git --version`), merge-tree fails here; see
+[`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites. A bare `shipmate apply`
+is no remedy for either refusal: it runs no overlap check.
 
 ### A pull request planned zero cells
 

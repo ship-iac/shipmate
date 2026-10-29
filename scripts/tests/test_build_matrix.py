@@ -3129,33 +3129,63 @@ def _base_moved_a_module(git_repo):
     return since, tip
 
 
-def test_base_changed_stacks_lists_the_base_tips_changes_since_the_merge_base(
-    git_repo, monkeypatch
-):
-    """Terramate lists the changes in a detached worktree of the base tip, against the merge base,
-    and the worktree is removed after. The stub answers `stacks/app` as Terramate did for this
-    module-only change.
-
-    Mutation: drop `["-C", tree]` from `_list_stacks` -- the argv, red.
-    Mutation: add the worktree at `HEAD` -- the worktree holds the branch's module, red.
-    Mutation: pass `base_ref` to `_list_stacks` for the merge base -- the argv, red.
-    Mutation: return the directories of `git diff --name-only <merge base> <base>` -- a file path
-    intersection names `modules/m`, red.
-    Mutation: drop the `worktree remove` -- two worktrees are left, red."""
-    since, tip = _base_moved_a_module(git_repo)
+def _merge_stub(monkeypatch, listing):
+    """Stubs Terramate: each listing calls `listing(tree)` and answers what it returns. Returns
+    the terramate argvs seen."""
     real, seen = bm._run, []
 
     def _run(args):
         if args[0] != "terramate":
             return real(args)
         seen.append(args)
-        assert (pathlib.Path(args[2]) / "modules/m/main.tf").read_text() == "v2\n"
-        return "stacks/app\n"
+        return listing(pathlib.Path(args[2]))
 
     monkeypatch.setattr(bm, "_run", _run)
-    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
-    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", since]]
+    return seen
+
+
+def test_base_changed_stacks_lists_head_stacks_wired_to_a_module_the_base_changed(
+    git_repo, monkeypatch
+):
+    """The branch wires `stacks/s` to `modules/m`; the base edits `main.tf` and deletes `old.tf`
+    there. Only the branch's tree knows `stacks/s` consumes the module; the one listing, run on
+    the merge of the base into HEAD as a child of HEAD, against HEAD, finds it. The caller's
+    checkout is untouched.
+
+    Mutation: drop the merge listing from the union -- the result is empty, red.
+    Mutation: commit the base tip's tree instead of the merged one -- `mod.tf` is missing, red.
+    Mutation: drop `-p <head>` from `commit-tree` -- the merge commit has no parent, red.
+    Mutation: list the merge with `-B <merge base>` -- the argv, red.
+    Mutation: restore a listing on a worktree of the base tip -- that worktree's `HEAD^` is not
+    the head, red.
+    Mutation: drop the `finally` worktree removal -- two worktrees are left, red."""
+    _commit(
+        {"modules/m/main.tf": "v1\n", "modules/m/old.tf": "old\n", "stacks/s/main.tf": "s\n"},
+        "common",
+    )
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"stacks/s/mod.tf": "wire\n"}, "wire")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "v2\n", "modules/m/old.tf": None}, "base")
+    _git("checkout", "-q", "pr")
+    index = _git("ls-files", "-s")
+
+    def listing(tree):
+        assert _git("-C", str(tree), "rev-parse", "HEAD^").strip() == head
+        assert (tree / "modules/m/main.tf").is_file()
+        assert (tree / "modules/m/main.tf").read_text() == "v2\n"
+        assert not (tree / "modules/m/old.tf").exists()
+        assert (tree / "stacks/s/mod.tf").is_file()
+        assert (tree / "stacks/s/mod.tf").read_text() == "wire\n"
+        return "stacks/s\n"
+
+    seen = _merge_stub(monkeypatch, listing)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", head]]
     assert len(_git("worktree", "list").splitlines()) == 1
+    assert _git("rev-parse", "HEAD").strip() == head
+    assert _git("ls-files", "-s") == index
+    assert _git("status", "--porcelain", "--untracked-files=all") == ""
 
 
 def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkeypatch, tmp_path):
@@ -3207,9 +3237,9 @@ def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_hold
 
     Mutation: drop the `stack == "."` branch of `_inside` (`.` never matches, red). Mutation:
     return True for `.` (a deletion inside `stacks/app` alone holds the root too, red)."""
-    _commit({"main.tf": "root\n", "stacks/app/main.tf": "app\n"}, "common")
+    _commit({"main.tf": "root\n", "stacks/app/main.tf": "app\n", "stacks/app/x.tf": "x\n"}, "c")
     _git("checkout", "-q", "-b", "pr")
-    _commit({"stacks/app/main.tf": "app edit\n"}, "pr")
+    _commit({"stacks/app/x.tf": "x edit\n"}, "pr")
     _git("checkout", "-q", "main")
     only_app = _commit({"stacks/app/main.tf": None}, "delete in a child stack")
     root_too = _commit({"main.tf": None}, "delete in the root")
@@ -3221,40 +3251,48 @@ def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_hold
 
 
 @pytest.mark.parametrize(
-    ("base_change", "listed", "held"),
+    ("base_change", "held"),
     [
+        pytest.param({"stacks/a/main.tf": "base edit\n"}, {"stacks/b"}, id="base-edited"),
         pytest.param(
-            {"stacks/a/main.tf": "base edit\n"},
-            "stacks/a\n",
-            {"stacks/a", "stacks/b"},
-            id="base-changed",
+            {"stacks/a/main.tf": None},
+            "::error::change detection on the merge of the base into the branch failed: "
+            "CONFLICT (rename/delete): stacks/a/main.tf renamed to stacks/b/main.tf in {head}, "
+            "but deleted in {tip}. Update the branch from the base and push.",
+            id="base-deleted",
         ),
-        pytest.param({"stacks/a/main.tf": None}, "", {"stacks/b"}, id="base-deleted"),
-        pytest.param({"other/x.tf": "base edit\n"}, "", set(), id="base-untouched"),
     ],
 )
-def test_base_changed_stacks_follows_a_stack_the_branch_renamed(
-    git_repo, monkeypatch, base_change, listed, held
+def test_base_changed_stacks_holds_a_stack_the_branch_renamed(
+    git_repo, monkeypatch, base_change, held
 ):
-    """The branch renames `stacks/a` to `stacks/b`; the base commits `base_change`. The stub answers
-    Terramate's base-side listing with `listed`. A plan of `stacks/b` reverts the base's edit of
-    `stacks/a`, so the candidate `stacks/b` is held only when the base changed its old path.
+    """The branch renames `stacks/a` to `stacks/b`; the base commits `base_change`. git's merge
+    carries a base edit of `stacks/a/main.tf` to `stacks/b/main.tf`, so the listing finds
+    `stacks/b`; a base deletion of it is a merge conflict and refuses.
 
-    Mutation: drop `followed` from the return (base-changed misses `stacks/b`, red). Mutation:
-    match the rename's old path against the candidate (`_inside(old, s, ...)`; base-changed misses
-    `stacks/b`, red). Mutation: hold on any rename (`or True`; base-untouched holds `stacks/b`,
-    red). Mutation: drop `old in moved` (base-deleted, which Terramate cannot list, misses
-    `stacks/b`, red)."""
+    Mutation: commit the base tip's tree instead of the merged one -- `stacks/a` is back, red.
+    Mutation: ignore merge-tree's exit status -- base-deleted returns instead of refusing,
+    red."""
     _commit({"stacks/a/main.tf": "a\n", "other/x.tf": "x\n"}, "common")
     _git("checkout", "-q", "-b", "pr")
     _git("mv", "stacks/a", "stacks/b")
-    _commit({}, "rename a to b")
+    head = _commit({}, "rename a to b")
     _git("checkout", "-q", "main")
     tip = _commit(base_change, "base edit")
     _git("checkout", "-q", "pr")
-    real = bm._run
-    monkeypatch.setattr(bm, "_run", lambda args: listed if args[0] == "terramate" else real(args))
-    assert bm.base_changed_stacks(tip, {"stacks/b"}) == held
+
+    def listing(tree):
+        assert not (tree / "stacks/a").exists()
+        assert (tree / "stacks/b/main.tf").read_text() == "base edit\n"
+        return "stacks/b\n"
+
+    _merge_stub(monkeypatch, listing)
+    if isinstance(held, set):
+        assert bm.base_changed_stacks(tip, {"stacks/b"}) == held
+        return
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/b"})
+    assert e.value.code == held.format(head=head, tip=tip)
 
 
 def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
@@ -3265,7 +3303,255 @@ def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
     copy's source (`status in ("D", "R", "C")`) -- `stacks/a` is added, red."""
     out = "C075\0stacks/a/x.tf\0stacks/c/x.tf\0D\0stacks/b/y.tf\0"
     monkeypatch.setattr(bm, "_run", lambda args: out)
-    assert bm._moved_from("s", "u") == {"stacks/b/y.tf"}
+    assert bm._moved_from(bm._diff_records("s", "u")) == {"stacks/b/y.tf"}
+
+
+def test_base_changed_stacks_holds_nothing_when_the_branch_holds_the_base_change_and_more(
+    git_repo, monkeypatch
+):
+    """The base fixes `modules/m/main.tf`; the branch cherry-picks the fix, edits the file
+    further and wires `stacks/s` to the module. The merged tree is HEAD's, so nothing is held and
+    nothing is committed, checked out or listed.
+
+    Mutation: drop the early return -- the merge is listed, red. Mutation: commit the base tip's
+    tree instead of the merged one -- it is listed, red."""
+    _commit({"modules/m/main.tf": "a\nb\nc\nd\ne\n", "stacks/s/main.tf": "s\n"}, "c")
+    _git("checkout", "-q", "-b", "pr")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "a\nB\nc\nd\ne\n"}, "base fix")
+    _git("checkout", "-q", "pr")
+    # `-x`: a cherry-pick in the same second as its source would reproduce the source's sha.
+    _git("cherry-pick", "-x", tip)
+    _commit({"modules/m/main.tf": "a\nB\nc\nd\nE\n", "stacks/s/mod.tf": "wire\n"}, "more")
+    listed = _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
+    seen = _spy_git(monkeypatch)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+    assert listed == []
+    assert ["git", "rev-parse", "HEAD"] in seen  # Not vacuous: the spy records.
+    assert [a for a in seen if "commit-tree" in a or "worktree" in a] == []
+
+
+def test_base_changed_stacks_holds_no_stack_for_a_removal_the_branch_holds(git_repo, monkeypatch):
+    """The base deletes `stacks/s/old.tf` and edits `other/x.tf`; the branch cherry-picks the
+    deletion. The merge removes nothing from HEAD, so `stacks/s` is not held, though the base
+    deleted a file in it since the merge base.
+
+    Mutation: read the removed files from the merge base to the base tip instead of from HEAD to
+    the merge -- `stacks/s` is held, red."""
+    files = {"stacks/s/main.tf": "s\n", "stacks/s/old.tf": "old\n", "other/x.tf": "x\n"}
+    _commit(files, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _git("checkout", "-q", "main")
+    drop = _commit({"stacks/s/old.tf": None}, "base deletes")
+    tip = _commit({"other/x.tf": "x edit\n"}, "base edits")
+    _git("checkout", "-q", "pr")
+    _git("cherry-pick", "-x", drop)
+
+    def listing(tree):
+        assert (tree / "other/x.tf").read_text() == "x edit\n"  # Not vacuous: the merge is listed.
+        return ""
+
+    _merge_stub(monkeypatch, listing)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+
+
+def test_base_changed_stacks_refuses_a_failed_head_read_as_a_merge_step(git_repo, monkeypatch):
+    """A failed `git rev-parse HEAD` is a merge step: it refuses with the merge refusal, its
+    stderr as the cause, and the update remedy.
+
+    Mutation: read `HEAD` before the `try` through `_run` -- the bare command failure, red."""
+    _, tip = _base_moved_a_module(git_repo)
+    real = bm.run
+
+    def run(args, **kw):
+        if args == ["git", "rev-parse", "HEAD"]:
+            raise SystemExit("command failed (128): git rev-parse HEAD\nfatal: bad HEAD")
+        return real(args, **kw)
+
+    monkeypatch.setattr(bm, "run", run)
+    monkeypatch.setattr(bm, "_run", lambda args: bm.run(args) if args[0] == "git" else "")
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: fatal: bad "
+        "HEAD. Update the branch from the base and push."
+    )
+
+
+def _spy_git(monkeypatch):
+    """Records every argv `bm.run` and `bm._run` are given; returns the list."""
+    seen = []
+    for name in ("run", "_run"):
+        real = getattr(bm, name)
+
+        def spy(args, _real=real, **kw):
+            seen.append(args)
+            return _real(args, **kw)
+
+        monkeypatch.setattr(bm, name, spy)
+    return seen
+
+
+def test_base_changed_stacks_refuses_a_merge_conflict_before_any_worktree(git_repo, monkeypatch):
+    """The branch deletes `stacks/a`; the base edits `stacks/a/main.tf`. The merge conflicts, the
+    refusal names git's conflict line, and no worktree was ever added.
+
+    Mutation: ignore merge-tree's exit status -- the merge is listed and nothing refuses, red.
+    Mutation: read the cause from stderr alone -- `git merge-tree exited 1`, red.
+    Mutation: run merge-tree after the `worktree add` -- the add is recorded, red."""
+    _commit({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"stacks/a/main.tf": None}, "delete a")
+    _git("checkout", "-q", "main")
+    tip = _commit({"stacks/a/main.tf": "a edit\n"}, "base edit")
+    _git("checkout", "-q", "pr")
+    seen = _spy_git(monkeypatch)
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/b"})
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: "
+        f"CONFLICT (modify/delete): stacks/a/main.tf deleted in {head} and modified in {tip}.  "
+        f"Version {tip} of stacks/a/main.tf left in tree. Update the branch from the base and "
+        "push."
+    )
+    assert ["git", "rev-parse", "HEAD"] in seen  # Not vacuous: the spy records.
+    assert [a for a in seen if "worktree" in a] == []
+
+
+def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(git_repo, monkeypatch):
+    """The branch renames `modules/m` to `modules/m2` and wires `stacks/s` to it; the base adds
+    `modules/m/variables.tf`. git's rename detection would move the file into `modules/m2`; the
+    pinned `merge.directoryRenames=conflict` makes it a conflict instead.
+
+    Mutation: `-c merge.directoryRenames=true` -- the merge succeeds and holds `stacks/s`, red."""
+    _commit({"modules/m/main.tf": "m\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _git("mv", "modules/m", "modules/m2")
+    head = _commit({"stacks/s/mod.tf": "wire m2\n"}, "rename and wire")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/variables.tf": "v\n"}, "base adds")
+    _git("checkout", "-q", "pr")
+    _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/s"})
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: "
+        "CONFLICT (file location): modules/m/variables.tf added in "
+        f"{tip} inside a directory that was renamed in {head}, suggesting it should perhaps be "
+        "moved to modules/m2/variables.tf. Update the branch from the base and push."
+    )
+
+
+def _merge_tree_answers(monkeypatch, result):
+    """Stubs `bm.subprocess.run` for merge-tree alone, answering `result(argv)`. Returns the
+    keyword arguments of each merge-tree call."""
+    real, calls = subprocess.run, []
+
+    def run(args, **kw):
+        if "merge-tree" not in args:
+            return real(args, **kw)
+        calls.append(kw)
+        return result(args)
+
+    monkeypatch.setattr(bm.subprocess, "run", run)
+    return calls
+
+
+def test_base_changed_stacks_refuses_a_failed_merge_with_its_stderr(git_repo, monkeypatch):
+    """A merge-tree exit other than 1 is no conflict; its cause is git's stderr.
+
+    Mutation: read the cause from stdout's `CONFLICT` lines on every nonzero exit, dropping the
+    stderr fallback -- `git merge-tree exited 128`, red."""
+    _, tip = _base_moved_a_module(git_repo)
+    failed = subprocess.CompletedProcess([], 128, "", "fatal: bad object x\n")
+    _merge_tree_answers(monkeypatch, lambda args: failed)
+    _merge_stub(monkeypatch, lambda tree: "stacks/app\n")
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: fatal: bad "
+        "object x. Update the branch from the base and push."
+    )
+
+
+def test_base_changed_stacks_runs_merge_tree_in_the_c_locale(git_repo, monkeypatch):
+    """git localizes `CONFLICT`, which the refusal's cause is read by, so merge-tree runs with
+    `LC_ALL=C` on top of the caller's environment.
+
+    Mutation: drop the `env=` argument -- the call carries no environment, red.
+    Mutation: pass `{"LC_ALL": "C"}` alone -- `PATH` is missing, red."""
+    _, tip = _base_moved_a_module(git_repo)
+    calls = _merge_tree_answers(
+        monkeypatch, lambda args: subprocess.CompletedProcess(args, 1, "", "fatal: x\n")
+    )
+    with pytest.raises(SystemExit):
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert len(calls) == 1
+    env = calls[0].get("env") or {}
+    assert env.get("LC_ALL") == "C"
+    assert env.get("PATH") == bm.os.environ["PATH"]
+
+
+def test_base_changed_stacks_refuses_a_merge_tree_that_printed_no_tree(git_repo, monkeypatch):
+    """Exit 0 with nothing on stdout names no tree to commit; it refuses, never raises an
+    `IndexError` or lists anything.
+
+    Mutation: `_merge_tree_failure` returns None on every exit 0 -- `IndexError`, red."""
+    _, tip = _base_moved_a_module(git_repo)
+    _merge_tree_answers(monkeypatch, lambda args: subprocess.CompletedProcess(args, 0, "", ""))
+    seen = _merge_stub(monkeypatch, lambda tree: "stacks/app\n")
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: git "
+        "merge-tree printed no tree. Update the branch from the base and push."
+    )
+    assert seen == []
+
+
+def test_base_changed_stacks_refuses_when_the_merge_listing_fails(git_repo, monkeypatch):
+    """A failed listing refuses with Terramate's stderr, never holds: a hold would name the base
+    as the cause for stacks it never touched.
+
+    Mutation: catch the failure and return the `gone` stacks only -- no refusal, red.
+    Mutation: use the error's first line instead of its stderr -- the cause names the command,
+    red.
+    Mutation: remove the worktree only on success -- two worktrees are left, red."""
+    _, tip = _base_moved_a_module(git_repo)
+
+    def listing(tree):
+        raise SystemExit(
+            f"::error::command failed (1): terramate -C {tree} list --changed -B x\n"
+            "Error: duplicated ID found on stacks"
+        )
+
+    _merge_stub(monkeypatch, listing)
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: Error: "
+        "duplicated ID found on stacks. Update the branch from the base and push."
+    )
+    assert len(_git("worktree", "list").splitlines()) == 1
+
+
+def test_base_changed_stacks_lists_nothing_when_the_base_changed_nothing(git_repo, monkeypatch):
+    """A base tip that changed no file since the merge base has nothing to merge into HEAD, so
+    merge-tree does not run.
+
+    Mutation: drop the empty-diff skip -- a merge-tree call, red."""
+    _commit({"stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/s/main.tf": "s edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    _git("commit", "-q", "--allow-empty", "-m", "empty")
+    tip = _git("rev-parse", "HEAD").strip()
+    _git("checkout", "-q", "pr")
+    seen = _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
+    merges = _merge_tree_answers(monkeypatch, lambda args: pytest.fail("merge-tree ran"))
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+    assert seen == []
+    assert merges == []
 
 
 def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):

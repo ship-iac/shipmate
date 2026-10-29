@@ -1997,20 +1997,34 @@ on the pull request to apply it.``
 
 With no cell to apply, neither the plan run nor the pusher is read.
 
-**Overlap.** A cell `detect` would apply is held when the base branch changed its
-stack, directly or through a module, since the merge base of the base tip and the
-head: Terramate's change detection runs in a worktree of the base tip, from that
-merge base. Terramate lists only the stacks the base tip still has, so a stack
-whose files the base deleted or renamed since that merge base
-(`git diff --name-status --find-renames`) is held too, and so is a stack holding
-a file the branch renamed from a path the base also changed (inside a stack the
-base-side detection lists, or a path the base deleted or renamed). Applying its plan would revert the base's change (§Fan-out). A held
-cell is not applied: its apply check and the gate stay pending, it stops its
+**Overlap.** A cell `detect` would apply is held when merging the base tip into
+the head changes its stack, directly or through a module it sources on the merged
+tree. Terramate's change detection runs once: on the merge of the base tip into
+the head (`git merge-tree`, with `merge.directoryRenames=conflict`), committed as
+a child of the head and checked out in one worktree, from the head. It is skipped
+when the base changed no file since the merge base of the base tip and the head.
+A stack is not held for a base change the branch already holds, which changes
+nothing in the merge. A base edit of a file in a stack the branch renamed is
+held, or refused as a conflict when git does not pair the rename (below its
+similarity threshold, a modify/delete conflict); a base delete of that file, or a
+base rename of it to another path, is a merge conflict. A merge conflict
+anywhere in the repository, not only in a stack, refuses the whole run before any
+checkout, a file the base added under a directory the branch renamed included:
+the pull request's mergeable flag is read before the base tip, so a base commit
+landing between the two reads can conflict. When the merge conflicts or the listing fails, `detect`
+refuses with ``change detection on the merge of the base into the branch failed:
+<cause>. Update the branch from the base and push.`` and nothing applies;
+`<cause>` is git's conflict lines, or the failed step's error. Terramate lists
+only the stacks the merge still has, so a stack in which the merge deletes or
+renames away files the head has (`git diff --name-status --find-renames` from the
+head to the merge) is held too. Applying a held cell's plan would revert the
+base's change (§Fan-out).
+A held cell is not applied: its apply check and the gate stay pending, it stops its
 environment's `needs` successors as a locked cell does, a cell that runs after it
-waits, and the result comment names it with ``⚪ held, the base changed these stacks after this branch left
-it, so their plans would revert that change: <cells>. Update the branch from the
-base and push.`` The push re-plans, and its autoplan dispatches again. The bare
-and targeted forms run no overlap check.
+waits, and the result comment names it with ``⚪ held, the base changed these
+stacks after this branch left it, so their plans would revert that change:
+<cells>. Update the branch from the base and push.`` The push re-plans, and its
+autoplan dispatches again. The bare and targeted forms run no overlap check.
 
 **`needs` predecessors.** An `auto` environment whose `needs` predecessor does
 not fully apply this run is skipped, its checks pending, and the result comment
@@ -2348,7 +2362,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
-  PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
+  PyYAML ≥ 6 importable by it), `git` ≥ 2.38 (the `auto` overlap check runs
+  `git merge-tree --write-tree`), `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
   coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate download
   with it; `apply-cell` hashes the rendered plan from stdin and reads the first
   field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on
@@ -2852,7 +2867,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   zero counts omitted, joined by `, `, then `N waiting` when cells wait (see
   the waiting line below), `N locked` when another pull request locks
   pending cells (see the locked line below) and `N held (base changed)` for an
-  `auto` apply's overlap cells (see the overlap line below). When the job-level `SHIPMATE_RESULTS`
+  `auto` apply's overlap cells that are not also locked, so a cell under both
+  causes counts once, under `N locked` (see the overlap line below). When the job-level `SHIPMATE_RESULTS`
   outcome signals a failure and no row is failed or blocked, a bare `failed`
   leads the counts, so an apply run that dies before any cell reports (a
   missing/denied apply environment, a job-level cancel) still surfaces a
@@ -2863,6 +2879,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   (🔴, 🟠, 🟡, ⚪, 🟢 in that order), so such a run is never 🟢. With no
   rows, the first that holds: `🔴 failed`,
   `⚪ nothing applied, environments are held for review`,
+  `⚪ nothing applied, pending cells are locked or the base also changed their
+  stacks` (a locked cell and an overlap cell, the same cell or not),
   `⚪ nothing applied, pending cells are locked`,
   `⚪ nothing applied, the base also changed the pending cells' stacks`,
   `⚪ nothing applied, cells wait on pending cells they run after`,
@@ -2973,8 +2991,10 @@ actionable warning cannot be lost on either path. In the order they render:
   comment `shipmate unlock <env> --evict` `` when another pull request locks
   the blocker cell (`` it is locked by an unreadable lock; comment
   `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
-  else holds its environment, else `the base also changed it; update the branch
-  from the base and push` when the blocker is an overlap cell, else
+  else holds its environment, followed by `; the base also changed it; update
+  the branch from the base and push` when the blocker is also an overlap cell,
+  else `the base also changed it; update the branch from the base and push`
+  when the blocker is an overlap cell, else
   `` it is held until the pull request is approved, then comment
   `shipmate apply <env>` `` when the blocker's environment is held and
   `targeted`, `it is held until the pull request is approved` when it is held,

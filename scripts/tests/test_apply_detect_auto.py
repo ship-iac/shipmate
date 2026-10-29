@@ -115,7 +115,7 @@ def _run_auto(
     the successive pull request reads, `base_changed` the stacks the base changed (an exception
     raises from the read), `tip` the base branch ref's commit (an exception raises from the
     read). Each `gh api` path goes to `calls`, its whole argv to `argv`, each
-    sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the base-side detection is asked
+    sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap detection is asked
     about to `base_reads`.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
@@ -658,10 +658,10 @@ def test_detect_grants_exactly_these_permissions():
 def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_successor(
     tmp_path, monkeypatch, capsys
 ):
-    """The base changed `stacks/app` (through a module, as the probe found Terramate reports it)
-    since the merge base: both `stacks/app` cells are held, `prod`, which needs `dev-eu`, skips,
-    and the unrelated `stacks/dns` applies in `dev-eu`. The overlap is computed on the base tip
-    the pull request read returned, which is the `base_sha` written.
+    """The merge of the base into the branch changes `stacks/app` (through a module, as the probe
+    found Terramate reports it): both `stacks/app` cells are held, `prod`, which needs `dev-eu`,
+    skips, and the unrelated `stacks/dns` applies in `dev-eu`. The overlap is computed on the base
+    tip the pull request read returned, which is the `base_sha` written.
 
     Mutation: pass `settle` the locked cells alone -- `stacks/app / dev-eu` applies and `prod`
     runs, red.
