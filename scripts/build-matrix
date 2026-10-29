@@ -270,23 +270,21 @@ def base_changed_stacks(base_ref, candidates):
 
     - Base: change detection on `base_ref` against the merge base, which finds the consumers
       the base's tree knows.
-    - Head: change detection on `HEAD` with the base's changed files written over it, against
-      `HEAD`. A stack the branch wires to a module the base changed consumes that module only
-      on the branch's tree, so only this listing finds it. A base path the branch renamed is
-      written at the branch's path, matched by the exact rename record. A path is skipped when
-      an ancestor directory existed at the merge base and is gone on `HEAD` (writing it would
-      recreate an orphan or duplicate stack), when it is a directory on `HEAD`, or when an
-      ancestor is a file on `HEAD`. Not covered: a file the base added under a directory the
-      branch renamed; no rename record names it, so it is skipped as under a removed directory.
-      The listing is skipped when the base changed no file.
+    - Head: change detection on the merge of `base_ref` into `HEAD` (`git merge-tree`),
+      committed as a child of `HEAD`, against `HEAD`. A stack the branch wires to a module the
+      base changed consumes that module only on the branch's tree, so only this listing finds
+      it. A stack the branch alone wires is not held for a base change the branch already
+      holds; the base listing still holds a stack the base changed, held change or not. Any
+      merge conflict refuses with git's conflict lines, a file the base added under a directory
+      the branch renamed included. The listing is skipped when the base changed no file.
 
     Terramate lists only stacks the base still has, so each stack path in `candidates` that the
-    base deleted or renamed a file inside, read from `git diff --raw`, is added. So is each
-    candidate holding a file `HEAD` renamed from a path the base also changed: inside a stack
-    the base listing names, or a path the base deleted or renamed. Refuses as `merge_base` does
-    when the merge base cannot be resolved, and on a failed worktree, base listing or diff; a
-    failed head-side step refuses with its error. A `base_ref` the clone lacks, a tip the base
-    gained after the checkout, is fetched from `origin` first; a failed fetch refuses."""
+    base deleted or renamed a file inside, read from `git diff --name-status`, is added. So is
+    each candidate holding a file `HEAD` renamed from a path inside a stack the base listing
+    names. Refuses as `merge_base` does when the merge base cannot be resolved, and on a failed
+    worktree, base listing or diff; a failed head-side step refuses with its error. A
+    `base_ref` the clone lacks, a tip the base gained after the checkout, is fetched from
+    `origin` first; a failed fetch refuses."""
     # S603/S607: fixed argvs, git from PATH as every other call here.
     present = ["git", "cat-file", "-e", f"{base_ref}^{{commit}}"]  # noqa: S607
     if subprocess.run(present, capture_output=True).returncode:  # noqa: S603
@@ -302,76 +300,59 @@ def base_changed_stacks(base_ref, candidates):
     records = _diff_records(since, base_ref)
     moved = _moved_from(records)
     gone = {s for s in candidates if any(_inside(p, s, candidates) for p in moved)}
-    renamed = [(old, new) for status, old, new, *_ in _diff_records(since, "HEAD") if status == "R"]
+    renamed = [(old, new) for status, old, new in _diff_records(since, "HEAD") if status == "R"]
     tree = tempfile.mkdtemp(prefix="shipmate-base-")
     _run(["git", "worktree", "add", "--quiet", "--detach", tree, base_ref])
     try:
         listed = set(_list_stacks(False, since, tree))
-        wired = _overlay_stacks(tree, since, records, dict(renamed)) if records else set()
+        wired = _overlay_stacks(tree, base_ref) if records else set()
     finally:
         _run(["git", "worktree", "remove", "--force", tree])
     followed = {
         s
         for s in candidates
         for old, new in renamed
-        if _inside(new, s, candidates)
-        and (old in moved or any(_inside(old, b, listed) for b in listed))
+        if _inside(new, s, candidates) and any(_inside(old, b, listed) for b in listed)
     }
     return listed | wired | gone | followed
 
 
-def _overlay_stacks(tree, since, records, head_renames):
-    """`base_changed_stacks`' head-side listing in the worktree `tree`: `records` (the base's
-    `_diff_records` since `since`) written over `HEAD` through the worktree's own index, so no
-    path reaches git as a pathspec, committed, checked out and listed against `HEAD`. Any failure
-    refuses with its stderr."""
+def _overlay_stacks(tree, base_ref):
+    """`base_changed_stacks`' head-side listing in the worktree `tree`: the merge of `base_ref`
+    into `HEAD`, committed on `HEAD`, checked out and listed against `HEAD`. A merge conflict
+    refuses with git's conflict lines, any other failure with its error."""
+    # Not `run`: git prints a conflict on stdout. The pinned directoryRenames keeps a runner's
+    # `false` from silently missing a stack wired to a module the branch moved.
+    # S603/S607: a fixed argv, git from PATH as every other call here.
+    merge = ["git", "-c", "merge.directoryRenames=conflict", "merge-tree", "--write-tree"]
+    args = [*merge, base_ref, "HEAD"]
+    p = subprocess.run(args, capture_output=True, encoding="utf-8", errors="replace")  # noqa: S603
+    if p.returncode:
+        lines = [x.strip() for x in p.stdout.splitlines() if x.startswith("CONFLICT")]
+        if p.returncode != 1 or not lines:
+            lines = [x.strip() for x in p.stderr.splitlines() if x.strip()]
+        _overlay_refusal(" | ".join(lines) or f"git merge-tree exited {p.returncode}")
     try:
         head = run(["git", "rev-parse", "HEAD"]).strip()
-        removed = _tree_paths(since, "-d") - (head_dirs := _tree_paths(head, "-d"))
-        head_files = _tree_paths(head)
-
-        def kept(target):
-            parts = target.split("/")
-            ancestors = {"/".join(parts[:k]) for k in range(1, len(parts))}
-            return target not in head_dirs and not ancestors & (removed | head_files)
-
-        # Deletions first: a deletion and a write of one target must end as the write.
-        lines = [
-            f"0 {_ZERO_SHA}\t{head_renames.get(path, path)}"
-            for status, path, *_ in records
-            if status in ("D", "R")
-        ] + [
-            f"{mode} {sha}\t{head_renames.get(new or path, new or path)}"
-            for status, path, new, mode, sha in records
-            if status != "D"
-        ]
-        index = "".join(f"{line}\0" for line in lines if kept(line.split("\t", 1)[1]))
         git = ["git", "-C", tree]
-        run([*git, "checkout", "--quiet", "--force", "--detach", head])
-        run([*git, "update-index", "-z", "--index-info"], stdin=index)
-        overlay = run([*git, "write-tree"]).strip()
         ident = ["-c", "user.name=shipmate", "-c", "user.email=shipmate@invalid"]
-        commit = [*git, *ident, "-c", "commit.gpgsign=false", "commit-tree", overlay, "-p", head]
+        merged = p.stdout.splitlines()[0]
+        commit = [*git, *ident, "-c", "commit.gpgsign=false", "commit-tree", merged, "-p", head]
         sha = run([*commit, "-m", "overlay"]).strip()
-        # update-index already dropped the base-deleted paths, so the checkout would take them
-        # for untracked files and leave them on disk.
-        run([*git, "read-tree", head])
         run([*git, "checkout", "--quiet", "--force", "--detach", sha])
         return set(_list_stacks(False, head, tree))
     except (SystemExit, OSError) as e:
         message = str(e.code if isinstance(e, SystemExit) else e).removeprefix("::error::")
-        cause = " | ".join(x.strip() for x in message.splitlines()[1:] if x.strip()) or message
-        raise SystemExit(
-            "::error::change detection on the branch's tree with the base's changes written over "
-            f"it failed: {cause}. {_BASE_REMEDY}."
-        ) from None
+        _overlay_refusal(
+            " | ".join(x.strip() for x in message.splitlines()[1:] if x.strip()) or message
+        )
 
 
-def _tree_paths(commit, *flags):
-    """The paths of `commit`'s tree, recursively: blobs, or with `-d` directories."""
-    return set(run(["git", "ls-tree", "-r", *flags, "-z", "--name-only", commit]).split("\0")) - {
-        ""
-    }
+def _overlay_refusal(cause):
+    raise SystemExit(
+        "::error::change detection on the merge of the base into the branch failed: "
+        f"{cause.removesuffix('.')}. {_BASE_REMEDY}."
+    ) from None
 
 
 def _inside(path, stack, stacks):
@@ -384,18 +365,18 @@ def _inside(path, stack, stacks):
 
 
 def _diff_records(since, until):
-    """`(status letter, path, new path or None, destination mode, destination blob sha)` per
-    record of `git diff --raw --find-renames` between `since` and `until`. `-z`: the metadata and
-    each path are one NUL-separated field, so no path is quoted; a rename, or a copy under
-    `diff.renames=copies`, carries its old path, then its new one. A deletion's destination is
-    mode `000000` and the all-zero sha."""
-    args = ["git", "diff", "-z", "--raw", "--find-renames", "--no-abbrev", since, until]
-    fields = _run(args).split("\0")
+    """`(status letter, path, new path or None)` per record of `git diff --name-status
+    --find-renames` between `since` and `until`. `-z`: one NUL-separated field per status and
+    path, so no path is quoted; a rename, or a copy under `diff.renames=copies`, carries its old
+    path, then its new one."""
+    fields = _run(["git", "diff", "-z", "--name-status", "--find-renames", since, until]).split(
+        "\0"
+    )
     records, i = [], 0
     while i < len(fields) - 1:
-        _, mode, _, sha, status = fields[i].split()
-        pair = status[:1] in ("R", "C")
-        records.append((status[:1], fields[i + 1], fields[i + 2] if pair else None, mode, sha))
+        status = fields[i][:1]
+        pair = status in ("R", "C")
+        records.append((status, fields[i + 1], fields[i + 2] if pair else None))
         i += 3 if pair else 2
     return records
 
@@ -403,7 +384,7 @@ def _diff_records(since, until):
 def _moved_from(records):
     """The old paths of the files deleted or renamed in `_diff_records`' `records`. A copy leaves
     its source in place, so it is not counted."""
-    return {path for status, path, *_ in records if status in ("D", "R")}
+    return {path for status, path, _ in records if status in ("D", "R")}
 
 
 _METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')
