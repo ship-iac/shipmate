@@ -3519,6 +3519,7 @@ _DRIVER_ROUTES = {
         },
     ),
     "env-config-parameters": ([], {"GIT_CONFIG_PARAMETERS": "'merge.text.driver'='cp %B %A'"}),
+    "replace-ref-base": ([], {"GIT_REPLACE_REF_BASE": "refs/evil/"}),
     "dubious-owner": (
         [("--global", "safe.directory", "*")],
         {"GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"},
@@ -3531,7 +3532,8 @@ def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch
     """Git config selects a driver that keeps the branch's side of every file: repository config
     as the default driver or through an attributes file, the runner's `~/.gitconfig` or
     inherited `GIT_CONFIG_*` env by redefining the `text` driver. An XDG attributes file selects
-    `binary`, which conflicts. The base prepends a line to a module the branch wires `stacks/s`
+    `binary`, which conflicts. An inherited `GIT_REPLACE_REF_BASE` swaps the base's blob for the
+    merge base's. The base prepends a line to a module the branch wires `stacks/s`
     to, the branch appends one; the merge still holds both edits, so `stacks/s` is held.
     `dubious-owner` uses no driver: the workspace belongs to another user and only the runner's
     global `safe.directory` admits it.
@@ -3542,7 +3544,9 @@ def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch
     Mutation: drop `GIT_CONFIG_GLOBAL` -- `text-driver-redefined` merges to HEAD's tree, red.
     Mutation: pass `{**os.environ, **_MERGE_ENV}` -- both `env-config-*` rows merge to HEAD's
     tree, red.
-    Mutation: drop `safe.directory=*` -- `dubious-owner` merge-tree dies on ownership, red."""
+    Mutation: drop `safe.directory=*` -- `dubious-owner` merge-tree dies on ownership, red.
+    Mutation: drop only `GIT_CONFIG*` and `GIT_ATTR*` -- `replace-ref-base` merges to HEAD's
+    tree, red."""
     (tmp_path / "attributes").write_bytes(b"* merge=keep-head\n")
     (tmp_path / "xdg/git").mkdir(parents=True)
     (tmp_path / "xdg/git/attributes").write_bytes(b"* merge=binary\n")
@@ -3557,8 +3561,16 @@ def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch
     _git("checkout", "-q", "main")
     tip = _commit({"modules/m/main.tf": "base\na\nb\nc\n"}, "base")
     _git("checkout", "-q", "pr")
+    _git(
+        "update-ref",
+        f"refs/evil/{_git('rev-parse', f'{tip}:modules/m/main.tf').strip()}",
+        _git("rev-parse", f"{tip}~1:modules/m/main.tf").strip(),
+    )
     for k, v in env.items():
         monkeypatch.setenv(k, v.format(tmp=tmp_path.as_posix()))
+        if k.startswith("GIT_TEST_"):
+            # merge-tree drops every inherited `GIT_*`; a real foreign owner is not env-borne.
+            monkeypatch.setitem(bm._MERGE_ENV, k, v)
 
     def listing(tree):
         assert (tree / "modules/m/main.tf").read_text() == "base\na\nb\nc\nhead\n"

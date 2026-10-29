@@ -2006,15 +2006,16 @@ With no cell to apply, neither the autoplan listing nor the pusher is read.
 the head changes its stack, directly or through a module it sources on the
 merged tree. Terramate's change detection runs once: on the merge of the base
 tip into the head (`git merge-tree`), committed as a child of the head and
-checked out in one worktree, from the head. The merge-tree step ignores the
-runner's global and system git config, system and XDG attributes and inherited
-`GIT_CONFIG*` and `GIT_ATTR*` variables, and pins `merge.renames=true`,
+checked out in one worktree, from the head. The merge-tree step drops every
+inherited `GIT_*` variable, ignores the runner's global and system git config
+and system and XDG attributes, and pins `merge.renames=true`,
 `merge.directoryRenames=conflict`, `merge.renameLimit=32767`,
 `merge.default=text` and an empty `core.attributesFile` on its command line
-against repository config; `safe.directory=*` restores the runner's ownership
-exemption that this isolation drops. The listing's own git and Terramate calls
-run with normal config. The engine's own checkout (`.git/config`,
-`.git/info/attributes`) and the consumer's tracked `.gitattributes` (for example
+against repository config; `safe.directory=*` disables the ownership check for
+this step, because the isolation drops the runner's exemption. The merge step's
+own `commit-tree`, `git diff` and `git worktree add`, and the listing's git and
+Terramate calls, run with normal config. The engine checkout's `.git/config` and
+`.git/info/attributes` and the consumer's tracked `.gitattributes` (for example
 `merge=union`) still shape the merge, as the consumer chose. Detection is
 skipped when the base changed no file since the merge base of the base tip and
 the head. A stack is not held for a base change the branch already holds, which
