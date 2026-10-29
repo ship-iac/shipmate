@@ -8,7 +8,21 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.53.0] — 2026-10-29
+
+### Changed — BREAKING
+
+Re-pin in one commit (`docs/releasing.md` §Re-pin a consumer): run `python <engine>/scripts/repin <consumer> v0.53.0 --write-fence`, rename the table keys below in `.github/shipmate-config.yml`, and grant the App `contents: write` before the re-pin merges.
+
+- **The `shipmate.yml` fence changes, and `scripts/repin --write-fence` writes it.** The `pull_request_target` types gain `closed`, the `plan` job's `if:` excludes `closed`, a new `release` job calls `release.yml` on `closed`, and `run-name` names it `release`. The `verb` input gains the option `auto`, a new `auto` job calls `apply.yml` with `auto: true` on `verb: auto`, and the `apply` and `auto` jobs grant `pull-requests: read`, which every apply needs: each wave cell reads the pull request, and the `auto` form's `detect` does too. Without the grant every `shipmate apply` run fails at startup. `shipmate doctor` compares seven job `if:` expressions, keyed by job id.
+- **The App needs `contents: write`, to write the cell lock refs.** Add Contents: Read and write in the App's settings and accept the installation's pending permission request (`docs/github-app.md`). Without it every `shipmate apply` refuses at its `lock` job.
+- **Environment table keys are renamed; the old spellings refuse as unknown keys.** Rename them in `.github/shipmate-config.yml` in the re-pin commit:
+  - `shared: true` → `split: false`
+  - `gated: false` → `review: false`
+  - `explicit: true` → `apply_mode: targeted`
+  - `tf_vars:` → `vars:`
+  - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
+- **A runner that runs an `apply_mode: auto` detect needs `git` ≥ 2.38** (`git merge-tree --write-tree`; `CONTRACT.md` §Runner prerequisites). GitHub-hosted runners carry it; check a self-hosted runner's `git --version`.
 
 ### Added
 
@@ -23,15 +37,6 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **Breaking:** the fence's `pull_request_target` types gain `closed`, the `plan` job's `if:` excludes `closed`, a new `release` job calls `release.yml` on `closed`, and `run-name` names it `release`.
-- **Breaking:** the fence's `verb` input gains the option `auto`, a new `auto` job calls `apply.yml` with `auto: true` on `verb: auto`, and the `apply` and `auto` jobs grant `pull-requests: read`, which every apply needs: each wave cell reads the pull request, and the `auto` form's `detect` does too. Without the grant every `shipmate apply` run fails at startup. `shipmate doctor` compares seven job `if:` expressions, keyed by job id.
-- **Breaking:** the App needs `contents: write`, to write the cell lock refs. Without it every `shipmate apply` refuses at its `lock` job.
-- **Breaking:** environment table keys renamed; the old spellings refuse as unknown keys.
-  - `shared: true` → `split: false`
-  - `gated: false` → `review: false`
-  - `explicit: true` → `apply_mode: targeted`
-  - `tf_vars:` → `vars:`
-  - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
 - **Bare-apply comment line `left pending (explicit)` reads `left pending (targeted)`.**
 - The review-exempt reply to a targeted `shipmate apply` and the matching apply-log notice say `review-exempt` and `review: false` where they said `ungated` and `gated: false`; the no-review notice names `review: true`; `onboard` labels shared environments `shared (split: false):` where it printed `shared:`.
 - **A `shipmate plan` dispatch queues behind a plan run of the same pull request in flight instead of cancelling it, so a draft run started before the comment no longer ends cancelled.** A push, open or reopen run, or a re-run of one, still cancels.
