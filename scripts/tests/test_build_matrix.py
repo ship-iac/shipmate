@@ -3154,7 +3154,11 @@ def test_base_changed_stacks_lists_the_base_tips_changes_since_the_merge_base(
 
     monkeypatch.setattr(bm, "_run", _run)
     assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
-    assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", since]]
+    head = _git("rev-parse", "HEAD").strip()
+    assert seen == [
+        ["terramate", "-C", seen[0][2], "list", "--changed", "-B", since],
+        ["terramate", "-C", seen[0][2], "list", "--changed", "-B", head],
+    ]
     assert len(_git("worktree", "list").splitlines()) == 1
 
 
@@ -3260,12 +3264,261 @@ def test_base_changed_stacks_follows_a_stack_the_branch_renamed(
 def test_moved_from_reads_a_copy_record_as_three_fields(monkeypatch):
     """A repository with `diff.renames=copies` makes `--find-renames` report copies too.
 
-    Mutation: step 3 fields past an `R` alone (`i += 3 if status == "R" else 2`) -- the copy's
-    new path is read as a status and `stacks/b`'s deletion is missed, red. Mutation: count a
+    Mutation: step 3 fields past an `R` alone (`i += 3 if status[:1] == "R" else 2`) -- the
+    copy's new path is read as a record's metadata and does not unpack, red. Mutation: count a
     copy's source (`status in ("D", "R", "C")`) -- `stacks/a` is added, red."""
-    out = "C075\0stacks/a/x.tf\0stacks/c/x.tf\0D\0stacks/b/y.tf\0"
+    a, b, z = "a" * 40, "b" * 40, "0" * 40
+    out = (
+        f":100644 100644 {a} {b} C075\0stacks/a/x.tf\0stacks/c/x.tf\0"
+        f":100644 000000 {a} {z} D\0stacks/b/y.tf\0"
+    )
     monkeypatch.setattr(bm, "_run", lambda args: out)
-    assert bm._moved_from("s", "u") == {"stacks/b/y.tf"}
+    assert bm._moved_from(bm._diff_records("s", "u")) == {"stacks/b/y.tf"}
+
+
+def _overlay_stub(monkeypatch, since, base, overlay):
+    """Stubs Terramate: the listing against `since` answers `base`; the overlay listing calls
+    `overlay(tree)` and answers what it returns. Returns the terramate argvs seen."""
+    real, seen = bm._run, []
+
+    def _run(args):
+        if args[0] != "terramate":
+            return real(args)
+        seen.append(args)
+        return base if args[-1] == since else overlay(pathlib.Path(args[2]))
+
+    monkeypatch.setattr(bm, "_run", _run)
+    return seen
+
+
+def test_base_changed_stacks_lists_head_stacks_wired_to_a_module_the_base_changed(
+    git_repo, monkeypatch
+):
+    """The branch wires `stacks/s` to `modules/m`; the base edits `main.tf` and deletes `old.tf`
+    there. Only the branch's tree knows `stacks/s` consumes the module, so the base-side listing
+    is empty and the overlay listing, run on HEAD with the base's changes written over it, finds
+    it. The caller's checkout is untouched.
+
+    Mutation: drop `wired` from the union -- the result is empty, red.
+    Mutation: feed no write lines -- `main.tf` is v1 in the overlay, red.
+    Mutation: feed no deletion lines -- `old.tf` is in the overlay, red.
+    Mutation: drop the `read-tree` before the overlay checkout -- `old.tf` stays on disk, red.
+    Mutation: list the overlay with `-B <merge base>` -- the argvs and the result, red.
+    Mutation: drop the `finally` worktree removal -- two worktrees are left, red."""
+    since = _commit(
+        {"modules/m/main.tf": "v1\n", "modules/m/old.tf": "old\n", "stacks/s/main.tf": "s\n"},
+        "common",
+    )
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"stacks/s/mod.tf": "wire\n"}, "wire")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/main.tf": "v2\n", "modules/m/old.tf": None}, "base")
+    _git("checkout", "-q", "pr")
+    index = _git("ls-files", "-s")
+
+    def overlay(tree):
+        assert (tree / "modules/m/main.tf").is_file()
+        assert (tree / "modules/m/main.tf").read_text() == "v2\n"
+        assert not (tree / "modules/m/old.tf").exists()
+        assert (tree / "stacks/s/mod.tf").is_file()
+        assert (tree / "stacks/s/mod.tf").read_text() == "wire\n"
+        return "stacks/s\n"
+
+    seen = _overlay_stub(monkeypatch, since, "", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+    tree = seen[0][2]
+    assert seen == [
+        ["terramate", "-C", tree, "list", "--changed", "-B", since],
+        ["terramate", "-C", tree, "list", "--changed", "-B", head],
+    ]
+    assert len(_git("worktree", "list").splitlines()) == 1
+    assert _git("rev-parse", "HEAD").strip() == head
+    assert _git("ls-files", "-s") == index
+    assert _git("status", "--porcelain", "--untracked-files=all") == ""
+
+
+def test_base_changed_stacks_follows_a_module_file_the_branch_renamed(git_repo, monkeypatch):
+    """The branch moves `modules/m/main.tf` to `modules/m2/core.tf`; the base edits one line of
+    the old path. The edit lands at the branch's path through the exact rename record.
+
+    Mutation: drop the `head_renames` lookup -- the write targets `modules/m` (a directory the
+    branch removed, so skipped) and `core.tf` keeps the branch's text, red."""
+    lines = [f"line {n}\n" for n in range(10)]
+    since = _commit({"modules/m/main.tf": "".join(lines), "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _git("mv", "modules/m", "modules/m2")
+    _git("mv", "modules/m2/main.tf", "modules/m2/core.tf")
+    _commit({"stacks/s/mod.tf": "wire m2\n"}, "rename and wire")
+    _git("checkout", "-q", "main")
+    edited = "".join(["edited\n", *lines[1:]])
+    tip = _commit({"modules/m/main.tf": edited}, "base edit")
+    _git("checkout", "-q", "pr")
+
+    def overlay(tree):
+        assert (tree / "modules/m2/core.tf").is_file()
+        assert (tree / "modules/m2/core.tf").read_text() == edited
+        assert not (tree / "modules/m/main.tf").exists()
+        return "stacks/s\n"
+
+    _overlay_stub(monkeypatch, since, "", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+
+
+def test_base_changed_stacks_skips_a_directory_the_branch_removed(git_repo, monkeypatch):
+    """The branch deletes `stacks/a`; the base edits a file in it. Writing it back would recreate
+    an orphan stack (or a duplicate stack ID beside a renamed copy).
+
+    Mutation: drop the `removed_dirs` skip -- `stacks/a` is recreated, red."""
+    since = _commit({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/a/main.tf": None}, "delete a")
+    _git("checkout", "-q", "main")
+    tip = _commit({"stacks/a/main.tf": "a edit\n"}, "base edit")
+    _git("checkout", "-q", "pr")
+
+    def overlay(tree):
+        assert not (tree / "stacks/a").exists()
+        assert (tree / "stacks/b/main.tf").exists()
+        return ""
+
+    _overlay_stub(monkeypatch, since, "", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/b"}) == set()
+
+
+def test_base_changed_stacks_keeps_a_directory_new_on_the_base(git_repo, monkeypatch):
+    """The base adds `modules/m/policies/x.rego`; the branch never had that directory.
+
+    Mutation: skip a target whose parent directory HEAD lacks, instead of one the branch
+    removed -- `x.rego` is missing, red."""
+    since = _commit({"modules/m/main.tf": "m\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/s/main.tf": "s edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/policies/x.rego": "rule\n"}, "base adds")
+    _git("checkout", "-q", "pr")
+
+    def overlay(tree):
+        assert (tree / "modules/m/policies/x.rego").is_file()
+        assert (tree / "modules/m/policies/x.rego").read_text() == "rule\n"
+        return ""
+
+    _overlay_stub(monkeypatch, since, "", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+
+
+def test_base_changed_stacks_skips_a_path_the_branch_turned_into_a_directory(git_repo, monkeypatch):
+    """The branch replaces the file `modules/m/x.tf` with a directory; the base edits the file.
+    `update-index` would replace the branch's whole subtree with the base's file.
+
+    Mutation: drop the skip of a target that is a directory on HEAD -- `x.tf/y.tf` is gone, red."""
+    since = _commit({"modules/m/x.tf": "x\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"modules/m/x.tf": None, "modules/m/x.tf/y.tf": "y\n"}, "file to directory")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/x.tf": "x edit\n"}, "base edit")
+    _git("checkout", "-q", "pr")
+
+    def overlay(tree):
+        assert (tree / "modules/m/x.tf/y.tf").is_file()
+        assert (tree / "modules/m/x.tf/y.tf").read_text() == "y\n"
+        return ""
+
+    _overlay_stub(monkeypatch, since, "", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+
+
+def test_base_changed_stacks_skips_a_path_under_a_file_the_branch_holds(git_repo, monkeypatch):
+    """The branch adds the file `modules/m/x`; the base adds `modules/m/x/y.tf`. Writing the
+    base's file would replace the branch's file with a directory.
+
+    Mutation: drop the skip of a target with an ancestor that is a file on HEAD -- `modules/m/x`
+    is a directory, red."""
+    since = _commit({"modules/m/main.tf": "m\n", "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"modules/m/x": "x\n"}, "file")
+    _git("checkout", "-q", "main")
+    tip = _commit({"modules/m/x/y.tf": "y\n"}, "base adds")
+    _git("checkout", "-q", "pr")
+
+    def overlay(tree):
+        assert (tree / "modules/m/x").is_file()
+        assert (tree / "modules/m/x").read_text() == "x\n"
+        return ""
+
+    _overlay_stub(monkeypatch, since, "", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+
+
+def test_base_changed_stacks_lists_nothing_extra_when_the_branch_holds_the_base_change(
+    git_repo, monkeypatch
+):
+    """The branch cherry-picks the base's only commit, a rename with a one-line edit. The base's
+    deletion of `a.tf` maps through the branch's own rename onto `b.tf`, which the base also
+    writes: the overlay equals HEAD, its commit is empty, and nothing is refused.
+
+    Mutation: feed the write lines before the deletion lines -- `b.tf` is deleted, red."""
+    lines = [f"line {n}\n" for n in range(10)]
+    since = _commit({"modules/m/a.tf": "".join(lines), "stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/s/main.tf": "s edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    _git("mv", "modules/m/a.tf", "modules/m/b.tf")
+    tip = _commit({"modules/m/b.tf": "".join(["edited\n", *lines[1:]])}, "rename")
+    _git("checkout", "-q", "pr")
+    _git("cherry-pick", tip)
+    assert _git("diff", "--name-status", since, "HEAD").splitlines()[0].startswith("R")
+    assert "modules/m/b.tf" in _git("diff", "--name-status", since, "HEAD")
+    head_b = _git("show", "HEAD:modules/m/b.tf")
+
+    def overlay(tree):
+        assert (tree / "modules/m/b.tf").is_file()
+        assert (tree / "modules/m/b.tf").read_text() == head_b
+        return ""
+
+    _overlay_stub(monkeypatch, since, "stacks/s\n", overlay)
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+
+
+def test_base_changed_stacks_refuses_when_the_overlay_listing_fails(git_repo, monkeypatch):
+    """A failed overlay listing refuses with Terramate's stderr, never holds: a hold would name
+    the base as the cause for stacks it never touched.
+
+    Mutation: catch the failure and return the base listing only -- no refusal, red.
+    Mutation: use the error's first line instead of its stderr -- the cause names the command,
+    red.
+    Mutation: remove the worktree only on success -- two worktrees are left, red."""
+    since, tip = _base_moved_a_module(git_repo)
+
+    def overlay(tree):
+        raise SystemExit(
+            f"::error::command failed (1): terramate -C {tree} list --changed -B x\n"
+            "Error: duplicated ID found on stacks"
+        )
+
+    _overlay_stub(monkeypatch, since, "stacks/app\n", overlay)
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert e.value.code == (
+        "::error::change detection on the branch's tree with the base's changes written over it "
+        "failed: Error: duplicated ID found on stacks. Update the branch from the base and push."
+    )
+    assert len(_git("worktree", "list").splitlines()) == 1
+
+
+def test_base_changed_stacks_runs_one_listing_when_the_base_changed_nothing(git_repo, monkeypatch):
+    """A base tip that changed no file since the merge base has nothing to write over HEAD.
+
+    Mutation: drop the empty-diff skip -- a second terramate call, red."""
+    since = _commit({"stacks/s/main.tf": "s\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/s/main.tf": "s edit\n"}, "pr")
+    _git("checkout", "-q", "main")
+    _git("commit", "-q", "--allow-empty", "-m", "empty")
+    tip = _git("rev-parse", "HEAD").strip()
+    _git("checkout", "-q", "pr")
+    seen = _overlay_stub(monkeypatch, since, "", lambda tree: "")
+    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+    assert len(seen) == 1
 
 
 def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
