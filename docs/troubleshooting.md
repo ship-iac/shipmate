@@ -1569,7 +1569,8 @@ stays pending and the rest of the run applied. Follow the remedy:
   the lock names no holder, so no merge or close releases it; evict it.
 - `the base also changed it; update the branch from the base and push`: an
   `auto` apply held the blocker (§`⚪ held, the base changed these stacks after
-  this branch left it`).
+  this branch left it`). A blocker that is also locked names the lock's remedy
+  first, then this one; clear both.
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
@@ -1592,7 +1593,9 @@ A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
 the blocker's environment is held or ordered by `needs`, because the targeted form's comment
 receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
 verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
-`⚪ nothing applied, pending cells are locked` when a pending cell is locked.
+`⚪ nothing applied, pending cells are locked` when a pending cell is locked, or
+`⚪ nothing applied, pending cells are locked or the base also changed their
+stacks` when an `auto` apply also holds a cell the base changed.
 
 ### A stack's plan does not show its upstream stack's change
 
@@ -1817,7 +1820,10 @@ The `auto` apply result comment carries ``⚪ held, the base changed these
 stacks after this branch left it, so their plans would revert that change:
 <cells>. Update the branch from the base and push.`` Its verdict counts them as
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
-pending cells' stacks` when nothing applied.
+pending cells' stacks` when nothing applied. A cell another pull request also
+locks counts under `N locked` instead, and a run that applied nothing and holds
+a locked cell reads `⚪ nothing applied, pending cells are locked or the base
+also changed their stacks`.
 
 The base branch changed those stacks, directly or through a module (including
 one only the branch wires the stack to), or deleted

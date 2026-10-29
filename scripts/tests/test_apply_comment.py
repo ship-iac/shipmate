@@ -2429,6 +2429,64 @@ def test_a_cell_waiting_on_an_overlap_cell_names_the_branch_update():
     ]
 
 
+def test_a_cell_waiting_on_a_locked_overlap_cell_names_both_remedies():
+    """detect lists a cell once per cause, so a blocker both locked and overlapping the base
+    needs the lock released and the branch updated.
+
+    Mutation: return the lock remedy alone when the blocker is locked -- red."""
+    held_cells = [_locked("stacks/dns", "ops", 7), _overlap("stacks/dns", "ops")]
+    waiting = [_waits("stacks/a", "qa", "stacks/dns", "ops")]
+    assert ac._footer_parts([], [], [], waiting, held_cells=held_cells)[-1] == (
+        "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #7; wait "
+        "for #7 to merge or close, then re-plan, or comment `shipmate unlock ops --evict`; the "
+        "base also changed it; update the branch from the base and push"
+    )
+
+
+_BOTH_VERDICT = (
+    "### shipmate apply\n\n⚪ nothing applied, pending cells are locked or the base also changed "
+    f"their stacks {AT}\n\n"
+)
+
+
+def test_a_run_whose_only_cell_is_locked_and_overlaps_the_base_names_both_causes():
+    """Mutation: return the locked sentence before checking for an overlap cell -- red."""
+    held_cells = [_locked("stacks/app", "dev-eu", 12), _overlap("stacks/app", "dev-eu")]
+    assert _comment([], env="", held_cells=held_cells) == (
+        _BOTH_VERDICT
+        + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, "
+        "or comment `shipmate unlock dev-eu --evict`.\n"
+        "⚪ held, the base changed these stacks after this branch left it, so their plans would "
+        "revert that change: stacks/app / dev-eu. Update the branch from the base and push.\n\n"
+        + HINT
+    )
+
+
+def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes():
+    """The both-causes sentence does not need the two causes on one cell.
+
+    Mutation: require a cell under both causes for the both-causes sentence -- the locked
+    sentence, red."""
+    held_cells = [_locked("stacks/app", "dev-eu", 12), _overlap("stacks/db", "dev-eu")]
+    assert _comment([], env="", held_cells=held_cells) == (
+        _BOTH_VERDICT
+        + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, "
+        "or comment `shipmate unlock dev-eu --evict`.\n"
+        "⚪ held, the base changed these stacks after this branch left it, so their plans would "
+        "revert that change: stacks/db / dev-eu. Update the branch from the base and push.\n\n"
+        + HINT
+    )
+
+
+def test_a_partly_applied_run_counts_a_locked_overlap_cell_once():
+    """Mutation: count every overlap cell, locked or not -- `1 held (base changed)`, red."""
+    held_cells = [_locked("stacks/db", "dev-eu", 12), _overlap("stacks/db", "dev-eu")]
+    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), held_cells) == (
+        "⚪",
+        f"⚪ 1 applied, 1 locked {AT}",
+    )
+
+
 def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tmp_path):
     """Mutation: drop the `SHIPMATE_HELD_CELLS` argument from `main`'s `build_comment` call --
     🟢 no pending applies, red."""

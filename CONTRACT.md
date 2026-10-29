@@ -2865,7 +2865,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   zero counts omitted, joined by `, `, then `N waiting` when cells wait (see
   the waiting line below), `N locked` when another pull request locks
   pending cells (see the locked line below) and `N held (base changed)` for an
-  `auto` apply's overlap cells (see the overlap line below). When the job-level `SHIPMATE_RESULTS`
+  `auto` apply's overlap cells that are not also locked, so a cell under both
+  causes counts once, under `N locked` (see the overlap line below). When the job-level `SHIPMATE_RESULTS`
   outcome signals a failure and no row is failed or blocked, a bare `failed`
   leads the counts, so an apply run that dies before any cell reports (a
   missing/denied apply environment, a job-level cancel) still surfaces a
@@ -2876,6 +2877,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   (🔴, 🟠, 🟡, ⚪, 🟢 in that order), so such a run is never 🟢. With no
   rows, the first that holds: `🔴 failed`,
   `⚪ nothing applied, environments are held for review`,
+  `⚪ nothing applied, pending cells are locked or the base also changed their
+  stacks` (a locked cell and an overlap cell, the same cell or not),
   `⚪ nothing applied, pending cells are locked`,
   `⚪ nothing applied, the base also changed the pending cells' stacks`,
   `⚪ nothing applied, cells wait on pending cells they run after`,
@@ -2986,8 +2989,10 @@ actionable warning cannot be lost on either path. In the order they render:
   comment `shipmate unlock <env> --evict` `` when another pull request locks
   the blocker cell (`` it is locked by an unreadable lock; comment
   `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
-  else holds its environment, else `the base also changed it; update the branch
-  from the base and push` when the blocker is an overlap cell, else
+  else holds its environment, followed by `; the base also changed it; update
+  the branch from the base and push` when the blocker is also an overlap cell,
+  else `the base also changed it; update the branch from the base and push`
+  when the blocker is an overlap cell, else
   `` it is held until the pull request is approved, then comment
   `shipmate apply <env>` `` when the blocker's environment is held and
   `targeted`, `it is held until the pull request is approved` when it is held,
