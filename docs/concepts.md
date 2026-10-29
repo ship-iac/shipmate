@@ -118,15 +118,16 @@ settings that bound that, see [`hardening.md`](hardening.md).
 
 shipmate follows a serverless plan→store→review→apply model: the reviewed plan
 is stored and applied verbatim, with no server or database. An apply, pre-merge
-by comment or post-merge by the `deploy` job, downloads the reviewed `.otplan`,
+by comment (or, for an `apply_mode: auto` environment, by the autoplan) or
+post-merge by the `deploy` job, downloads the reviewed `.otplan`,
 verifies it against the commit and the variables it was planned with, and
 applies that exact plan. It never re-plans: a plan that state has moved under
 is refused rather than refreshed. A cell already applied has a completed apply
 check, so the post-merge deploy skips it. Applies run in waves along the
 Terramate `after` DAG, across environments as well as inside one
 ([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply order), and a
-comment-triggered apply and a post-merge deploy share one concurrency group per
-stack × environment, so they never race on the same cell.
+comment-triggered apply, an `auto` apply and a post-merge deploy share one
+concurrency group per stack × environment, so they never race on the same cell.
 
 A cell one open pull request applied is locked to it until it merges or closes,
 so a second pull request's re-plan cannot roll that apply back: its apply leaves
@@ -148,7 +149,8 @@ cells assume the identity's `aws.plan` role, or its `aws.apply` in a shared
 environment, while running branch-authored code —
 bounded by that role's trust policy and nothing in the engine. See
 [`CONTRACT.md`](../CONTRACT.md) §State backend and §AWS OIDC for the semantics,
-including why every calling job but `comment-ops` grants `id-token: write`, and
+including why every calling job but `comment-ops` and `release` grants
+`id-token: write`, and
 [`hardening.md`](hardening.md) §7–9 for the exposure.
 
 One model note vs a hosted service: with no server-side queue, GHA can drop a
