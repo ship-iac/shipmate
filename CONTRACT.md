@@ -1853,8 +1853,8 @@ cell lock (<why>); comment `shipmate apply` again to lock it or name its holder 
 and unless the pull request is open at the applied head. Under `apply_mode: auto`
 it also refuses unless the run attempt is `1`, the pull request is not a draft, the plan run detect bound is
 still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
-cell's newest plan record names, that
-run's pusher still passes detect's pusher check (§`apply_mode: auto`, same function and
+cell's newest plan record names, that record names a push event action (`opened` or
+`synchronize`), the plan run's pusher still passes detect's pusher check (§`apply_mode: auto`, same function and
 wording), and the base branch's tip, read from its ref, is still the one detect read,
 whatever the stack. Mergeability is not re-read: a base move refuses already. A read that fails refuses with
 `` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
@@ -2042,8 +2042,9 @@ cell, and `shipmate apply` otherwise (§Apply result comment).
 **Wave re-check.** Each `auto` wave cell's pre-apply check (§Cell locks) also
 refuses unless the plan run `detect` bound is still the head's newest autoplan,
 a `pull_request_target` run of the head, and the run the cell's newest plan
-record names, and the base tip, read from the
-branch ref, is still the one `detect` read. The base comparison is whole-branch,
+record names, the pull request is still not a draft, the pusher still
+passes the pusher check above, and the base tip, read from the branch ref, is
+still the one `detect` read. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
 environment approval refuses that wave. Update the branch from the base and
@@ -2104,8 +2105,8 @@ satisfies its default-branch-only policy for a different reason.
 
 **The calling job's name is a contract literal.** Each job displays its verb:
 `plan` carries `name: plan`, `comment-ops` `name: comment`, `deploy`
-`name: deploy`, and a drift file's `drift` job `name: sweep`; `release`, `apply`
-and `unlock` carry no `name:` and display as their job id.
+`name: deploy`, and a drift file's `drift` job `name: sweep`; `release`, `apply`,
+`auto` and `unlock` carry no `name:` and display as their job id.
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 only a plan job named `plan` produces `plan / <env> / <stack>` plan
 cells and the `plan / summary`, `plan / facts` and `plan / detect`
@@ -2349,7 +2350,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `docs/hardening.md`.
 - The engine holds no pins of itself. Every engine step calls its action as `$/actions/<name>`,
   which GitHub resolves in this repository at the commit the consumer's `uses:` resolved to, so
-  the consumer's one pin names the whole tree that runs. The consumer surface is the six
+  the consumer's one pin names the whole tree that runs. The consumer surface is the seven
   reusable workflows; the composite actions are engine-internal.
 - Every engine reference moves in one change: a repository that bumps some refs and leaves
   others behind runs two engine versions against one contract.

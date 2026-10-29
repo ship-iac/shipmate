@@ -77,15 +77,15 @@ tool's config as a *lower bound* on the real graph, not as the graph: one
 migration that audited the OpenTofu code instead of porting the config went from
 6 declared edges to 105, and from 2 wave levels to 6.
 
-Three detect jobs report the shape as a `::notice::` line — stack count, `after`
+Four detect jobs report the shape as a `::notice::` line — stack count, `after`
 edge count, wave levels, and how many stacks would apply concurrently. A reader
 who knows the repository can judge that last number immediately; nobody else
-can. Exactly three print it: the detect jobs of a dispatched `shipmate apply <env>`,
-of a bare `shipmate apply`, and of the post-merge deploy, so it arrives after the
-plan review that would have been the place to fix the graph. A plan run does not
-print it — seeing no such line there says nothing about the graph. Before that
-point the equivalent is `terramate experimental run-graph --label stack.dir` run
-locally.
+can. Exactly four print it: the detect jobs of a dispatched `shipmate apply <env>`,
+of a bare `shipmate apply`, of the `auto` apply, and of the post-merge deploy, so
+it arrives after the plan review that would have been the place to fix the graph.
+A plan run does not print it — seeing no such line there says nothing about the
+graph. Before that point the equivalent is
+`terramate experimental run-graph --label stack.dir` run locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
 else; [Before you start](#before-you-start) covers adopting a repository whose
@@ -667,8 +667,8 @@ run naming the actual value. Keep new inputs optional for the same reason — `r
 default a new input drifts back to, and it reopens this exactly.
 
 `id-token: write` is there for the cells' cloud credentials, on every job whose
-callee runs one — that is every job but `comment-ops`, whose callee asks for no
-such scope, and it applies to consumers with no cloud credentials at all. The
+callee runs one — that is every job but `comment-ops` and `release`, whose
+callees ask for no such scope, and it applies to consumers with no cloud credentials at all. The
 engine runs `aws-actions/configure-aws-credentials` in the `plan` job, gated on
 a role resolving non-empty. That role is the `aws.plan` of the identity the
 environment names in the table, read from the default branch, and nothing but
@@ -949,7 +949,7 @@ are lowercase, so the cell lowercases the suffix: `TF_VAR_ENDPOINT` →
 **`SHIPMATE_VARS` costs no workflow edit.** It is a GitHub variable, so it
 arrives like any other one — nothing to declare, nothing to map. Only
 `SHIPMATE_SECRETS` touches `shipmate.yml`, because only secrets cross the
-declaration boundary; the four cell-running jobs of `shipmate.yml` and each
+declaration boundary; the five cell-running jobs of `shipmate.yml` and each
 drift file's `drift` job already carry its line, and the comment on the `plan`
 job's line says why deleting it breaks the channel — the others carry the same
 line without a comment.
@@ -1120,8 +1120,9 @@ dispatches the fence's `auto` job, which applies that environment's pending
 cells when the pusher has write access; it runs as the shipmate App. The table refuses
 `apply_mode: auto` without `review: false`. A draft or unmergeable pull
 request, one whose newest plan came from a `shipmate plan` comment, or one just
-marked ready for review or reopened, does not apply this way; comment `shipmate apply` instead. A cell whose stack the base
-also changed stays pending until the branch is updated from the base. [`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto` has every
+marked ready for review or reopened, does not apply this way; comment `shipmate apply` instead. A cell whose stack the merge
+of the base into the branch changes, or removes files in, stays pending until the
+branch is updated from the base; a merge conflict refuses the run. [`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto` has every
 condition, and [`troubleshooting.md`](troubleshooting.md) has each refusal.
 
 ### Further hardening

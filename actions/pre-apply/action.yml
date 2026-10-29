@@ -1,8 +1,8 @@
 name: shipmate pre-apply
 description: >-
   The pre-apply check, read-only through scripts/cell-lock verify. Refuses unless the pull request
-  holds the cell's lock and is open at the applied head; with auto true, also unless the pull
-  request is not a draft, the provenance run is still the head's newest autoplan and the run
+  holds the cell's lock and is open at the applied head; with auto true, also unless the run
+  attempt is 1, the pull request is not a draft, the provenance run is still the head's newest autoplan and the run
   the cell's newest plan record names, its pusher still has write access, and the base tip is
   still the one detect read. A read that fails refuses too. Reads the
   job's GITHUB_TOKEN, which needs contents:read and pull-requests:read, and, with auto true,

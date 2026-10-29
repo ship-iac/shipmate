@@ -314,11 +314,11 @@ un-approved request, not a code or config bug. A mint that requests the new
 scope fails outright, so what breaks is whatever requests it. `shipmate doctor`
 mints a token requesting the manifest's whole set and reports that mint failing
 on any missing permission. A scope the plan run's `summary` mint requests stops
-every plan run writing apply checks or a `shipmate / gate` status. For
-`contents: write`, plans keep running, and every
-mint that writes a cell lock fails: every `shipmate apply` refuses at its `lock`
-job, and the `release` job, the deploy's lock release and
-`shipmate unlock <env> --evict` fail.
+every plan run writing apply checks or a `shipmate / gate` status. An App or
+installation without `contents: write` still runs plans, but every mint that
+writes a cell lock fails: every `shipmate apply` refuses at its `lock` job, and
+the `release` job, the deploy's lock release and `shipmate unlock <env> --evict`
+fail.
 
 ## Key-exposure boundary
 
@@ -347,8 +347,8 @@ actual work here:
   bare `<env>` for a `split: false` entry). Detect refuses the name
   `shipmate-engine`, so no cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
-  is named in exactly one job of engine `plan.yml`, the one that checks nothing
-  out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
+  is named only in the `summary` and `gate-hold` jobs of engine `plan.yml`,
+  neither of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
   names the secret in the `secrets:` block of each job that passes it, and
   `pull_request_target` runs the base copy of that file rather than the pull
   request's own. A dispatched `shipmate plan` is the same shape one ref along:
@@ -358,7 +358,7 @@ actual work here:
   never by anything the pull request writes.
 
   **The constraint that follows: no job in engine `plan.yml` other than
-  `summary` may reference a `shipmate-engine` secret.** Adding one hands it to a
+  `summary` and `gate-hold` may reference a `shipmate-engine` secret.** Adding one hands it to a
   plan cell whose environment the branch chooses.
   `scripts/tests/test_cells_hold_no_app_key.py` is the guard.
 - **A `push` to a non-default branch cannot reach the key.** Measured, not

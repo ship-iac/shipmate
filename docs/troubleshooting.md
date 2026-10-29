@@ -1669,8 +1669,9 @@ record's pull request.
 
 ### An `apply_mode: auto` environment did not apply after a push
 
-An `auto` environment applies only through the autoplan of a ready pull request
-([`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto`). Look in this order:
+An `auto` environment applies without a comment only through the autoplan of a
+ready pull request ([`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto`); a
+bare `shipmate apply` also applies it. Look in this order:
 
 1. The plan run's `summary` job, step `Decide whether to dispatch an auto
    apply`. When it dispatches nothing it logs `no auto apply dispatched:
@@ -1827,9 +1828,6 @@ wording, with these remedies:
 - ``auto apply refused: could not read the base tip of pull request #<n>
   (<why>)``: the base branch's ref could not be read. Comment `shipmate apply`,
   or push.
-- `could not fetch the base tip <sha>`: the base tip could not be fetched into
-  the checkout. Update the branch from the base and push. A bare
-  `shipmate apply` is no remedy: it runs no overlap check.
 
 ### `⚪ held, the base changed these stacks after this branch left it`
 
@@ -1978,7 +1976,9 @@ and the head, to tell whether the base changed any file since the branch left
 it. It refuses with the same text, ending `Update the branch from the base and
 push; if it fails again, the base commit is not reachable from this checkout.`,
 and nothing applies; a failed diff from that merge base to the base tip refuses
-with git's error. It also
+with git's error. A base tip missing from the checkout that cannot be fetched
+into it refuses with `could not fetch the base tip <sha> (<why>). Update the
+branch from the base and push.`, and nothing applies. It also
 runs change detection on the merge of the base into the branch, to find the
 stacks the merge changes. When the merge conflicts or that detection fails, it
 refuses with `change detection on the merge of the base into the branch failed:
@@ -1989,7 +1989,7 @@ base added under a directory the branch renamed: a base commit can land after
 GitHub reported the pull request mergeable. If the runner's git is older than
 2.38 (`git --version`), merge-tree fails here; see
 [`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites. A bare `shipmate apply`
-is no remedy for either refusal: it runs no overlap check.
+is no remedy for any of these refusals: it runs no overlap check.
 
 ### A pull request planned zero cells
 

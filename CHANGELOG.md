@@ -22,9 +22,9 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **Breaking:** the fence's `pull_request_target` types gain `closed`, the `plan` job's `if:` excludes `closed`, a new `release` job calls `release.yml` on `closed`, and `run-name` names it `release`. Re-pin `shipmate.yml` with `python <engine>/scripts/repin <consumer> <tag> --write-fence` after reading the diff it prints; that one re-pin also carries the `auto` job and the `cancel-in-progress` change below. Without it no lock of a pull request closed without merging is released.
-- **Breaking:** the fence's `verb` input gains the option `auto`, a new `auto` job calls `apply.yml` with `auto: true` on `verb: auto`, and the `apply` and `auto` jobs grant `pull-requests: read`, which every apply needs: `detect` and each wave cell read the pull request. Without the grant every `shipmate apply` run fails at startup. `shipmate doctor` compares seven job `if:` expressions, keyed by job id. The re-pin in the first bullet carries it.
-- **Breaking:** the App needs `contents: write`, to write the cell lock refs. Add it in the registered App's settings and accept the installation's permission request (`docs/github-app.md` §Re-approve after permission changes). Until then every `shipmate apply` refuses at its `lock` job.
+- **Breaking:** the fence's `pull_request_target` types gain `closed`, the `plan` job's `if:` excludes `closed`, a new `release` job calls `release.yml` on `closed`, and `run-name` names it `release`.
+- **Breaking:** the fence's `verb` input gains the option `auto`, a new `auto` job calls `apply.yml` with `auto: true` on `verb: auto`, and the `apply` and `auto` jobs grant `pull-requests: read`, which every apply needs: each wave cell reads the pull request, and the `auto` form's `detect` does too. Without the grant every `shipmate apply` run fails at startup. `shipmate doctor` compares seven job `if:` expressions, keyed by job id.
+- **Breaking:** the App needs `contents: write`, to write the cell lock refs.
 - **Breaking:** environment table keys renamed; the old spellings refuse as unknown keys.
   - `shared: true` → `split: false`
   - `gated: false` → `review: false`
@@ -33,7 +33,7 @@ section below names the SHA the release tags.
   - `apply-all-detect` notice fields `excluded_explicit`, `skipped_after_explicit`, `applied_ungated` → `excluded_targeted`, `skipped_after_targeted`, `applied_exempt`
 - **Bare-apply comment line `left pending (explicit)` reads `left pending (targeted)`.**
 - The review-exempt reply to a targeted `shipmate apply` and the matching apply-log notice say `review-exempt` and `review: false` where they said `ungated` and `gated: false`; the no-review notice names `review: true`; `onboard` labels shared environments `shared (split: false):` where it printed `shared:`.
-- **A `shipmate plan` dispatch queues behind a plan run of the same pull request in flight instead of cancelling it, so a draft run started before the comment no longer ends cancelled.** A push, open or reopen run, or a re-run of one, still cancels. The re-pin in the first bullet carries it, or reconcile the two lines by hand (the `cancel-in-progress` line and the comment above it).
+- **A `shipmate plan` dispatch queues behind a plan run of the same pull request in flight instead of cancelling it, so a draft run started before the comment no longer ends cancelled.** A push, open or reopen run, or a re-run of one, still cancels.
 
 ### Fixed
 
