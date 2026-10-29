@@ -2001,23 +2001,25 @@ With no cell to apply, neither the plan run nor the pusher is read.
 stack, directly or through a module, since the merge base of the base tip and the
 head. Terramate's change detection runs twice in one worktree. The base-side
 listing runs on the base tip from that merge base and finds the module consumers
-the base's tree knows. The head-side listing runs on the head with the base's
-changed files written over it, from the head, so the overlaid files are the only
-changes it sees; it finds a stack the branch wires to a module the base changed,
-which consumes that module only on the branch's tree. A base path the branch
-renamed is written at the branch's path, matched by the exact rename record. A
-base path is not written when an ancestor directory existed at the merge base and
-is gone on the head, when it is a directory on the head, or when an ancestor is a
-file on the head. A file the base added under a directory the branch renamed is
-therefore not covered: no rename record names it. The head-side listing is skipped
-when the base changed no file. When it fails, `detect` refuses with ``change
-detection on the branch's tree with the base's changes written over it failed:
-<cause>. Update the branch from the base and push.`` and nothing applies.
-Terramate lists only the stacks the base tip still has, so a stack whose files the
-base deleted or renamed since that merge base (`git diff --raw --find-renames`) is
-held too, and so is a stack holding a file the branch renamed from a path the base
-also changed (inside a stack the base-side detection lists, or a path the base
-deleted or renamed). Applying its plan would revert the base's change (§Fan-out).
+the base's tree knows. The head-side listing runs on the merge of the base tip
+into the head (`git merge-tree`, with `merge.directoryRenames=conflict`), from the
+head, so the base's changes are the only changes it sees; it finds a stack the
+branch wires to a module the base changed, which consumes that module only on the
+branch's tree. It holds no stack the branch alone wires for a base change the
+branch already holds; the base-side listing still holds a stack the base changed,
+whether or not the branch holds that change. The head-side listing is skipped when
+the base changed no file. A merge conflict anywhere in the repository, not only in
+a stack, refuses the whole run, a file the base added under a directory the branch
+renamed included: the pull request's mergeable flag is read before the base tip,
+so a base commit landing between the two reads can conflict. When the merge
+conflicts or the listing fails, `detect` refuses with ``change detection on the
+merge of the base into the branch failed: <cause>. Update the branch from the base
+and push.`` and nothing applies; `<cause>` is git's conflict lines, or the failed
+step's error. Terramate lists only the stacks the base tip still has, so a stack
+whose files the base deleted or renamed since that merge base (`git diff
+--name-status --find-renames`) is held too, and so is a stack holding a file the
+branch renamed from a path inside a stack the base-side detection lists. Applying
+its plan would revert the base's change (§Fan-out).
 A held cell is not applied: its apply check and the gate stay pending, it stops its
 environment's `needs` successors as a locked cell does, a cell that runs after it
 waits, and the result comment names it with ``⚪ held, the base changed these
@@ -2361,7 +2363,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
-  PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
+  PyYAML ≥ 6 importable by it), `git` ≥ 2.38 (the `auto` overlap check runs
+  `git merge-tree --write-tree`), `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
   coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate download
   with it; `apply-cell` hashes the rendered plan from stdin and reads the first
   field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on

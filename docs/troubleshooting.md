@@ -1595,8 +1595,11 @@ receives no held or skipped environments. A run in which every cell waits applie
 verdict reads `⚪ nothing applied, cells wait on pending cells they run after`, or
 `⚪ nothing applied, pending cells are locked or the base also changed their
 stacks` when a pending cell is locked and an `auto` apply also holds a cell the
-base changed, or `⚪ nothing applied, pending cells are locked` when a pending
-cell is locked and none is held because the base changed it.
+base changed, `⚪ nothing applied, pending cells are locked` when a pending
+cell is locked and none is held because the base changed it, or `⚪ nothing
+applied, the base also changed the pending cells' stacks` when an `auto` apply
+holds a cell the base changed and no pending cell is locked; the last three take
+precedence over the waiting verdict.
 
 ### A stack's plan does not show its upstream stack's change
 
@@ -1826,9 +1829,9 @@ locks counts under `N locked` instead, and a run that applied nothing and holds
 a locked cell reads `⚪ nothing applied, pending cells are locked or the base
 also changed their stacks`.
 
-The base branch changed those stacks, directly or through a module (including
-one only the branch wires the stack to), or deleted or renamed files in them,
-since the branch left it. A stack the branch renamed is held when the base
+The base branch changed those stacks, directly or through a module (on the
+base's tree, or on its merge into the branch), or deleted or renamed files in
+them, since the branch left it. A stack the branch renamed is held when the base
 changed its old path. Each plan was made on the branch's tree, so applying it
 would revert the base's change. The held cells stay pending, a cell that runs after
 one waits with the remedy `the base also changed it; update the branch from the
@@ -1954,11 +1957,14 @@ An `auto` apply's `detect` computes the same merge base, between the base tip
 and the head, to find the stacks the base changed. It refuses with the same
 text, ending `Update the branch from the base and push; if it fails again, the
 base commit is not reachable from this checkout.`, and nothing applies. It also
-runs change detection on the branch's tree with the base's changed files written
-over it, to find a stack the branch wires to a module the base changed. When that
-fails, it refuses with `change detection on the branch's tree with the base's
-changes written over it failed: <cause>. Update the branch from the base and
-push.`, and nothing applies; `<cause>` is the failed step's error. A bare
+runs change detection on the merge of the base into the branch, to find a stack
+the branch wires to a module the base changed. When the merge conflicts or that
+detection fails, it refuses with `change detection on the merge of the base into
+the branch failed: <cause>. Update the branch from the base and push.`, and
+nothing applies; `<cause>` is git's conflict lines, or the failed step's error. A
+conflict anywhere in the repository refuses, not only in a stack, and so does a
+file the base added under a directory the branch renamed: a base commit can land
+after GitHub reported the pull request mergeable. A bare
 `shipmate apply` is no remedy for either refusal: it runs no overlap check.
 
 ### A pull request planned zero cells
