@@ -341,6 +341,18 @@ def test_retried_re_raises_a_4xx_at_once(sleeps, capsys):
     assert (exc.value.code, len(calls), sleeps, capsys.readouterr()) == (message, 1, [], ("", ""))
 
 
+def test_retried_ignores_transient_text_in_the_argv_line(sleeps):
+    """A gate description is consumer text on the argv line. Mutation: search the whole message
+    in `is_transient` -> a second call."""
+    message = (
+        "::error::command failed (1): gh api x -f description=HTTP 503\ngh: Not Found (HTTP 404)"
+    )
+    calls, call = _failing(message)
+    with pytest.raises(SystemExit) as exc:
+        _shipmate.retried(call)
+    assert (exc.value.code, len(calls), sleeps) == (message, 1, [])
+
+
 def test_retried_gives_up_after_three_attempts_with_the_last_failure(sleeps, capsys):
     """Mutations, each run: `RETRY_DELAYS = ()` (one attempt) -> the first message, one call;
     `RETRY_DELAYS = (2, 5, 9)` -> a fourth call returns `x`."""

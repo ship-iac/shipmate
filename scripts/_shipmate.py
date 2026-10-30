@@ -196,8 +196,11 @@ _sleep = time.sleep
 
 
 def is_transient(exc):
-    """True when `exc`, a `SystemExit`, carries a `TRANSIENT` failure message."""
-    return isinstance(exc.code, str) and TRANSIENT.search(exc.code) is not None
+    """True when `exc`, a `SystemExit`, carries a `TRANSIENT` failure under its first line: that
+    line is the argv, which can carry a consumer's text."""
+    if not isinstance(exc.code, str):
+        return False
+    return TRANSIENT.search("\n".join(exc.code.splitlines()[1:])) is not None
 
 
 def warn_retry(exc):
@@ -208,11 +211,11 @@ def warn_retry(exc):
     sys.stderr.flush()
 
 
-def retried(call):
+def retried(call, before_retry=None):
     """`call()`, called again after each `RETRY_DELAYS` sleep while it raises a transient
-    `SystemExit` (`is_transient`), each retry warned (`warn_retry`). Any other `SystemExit`
-    re-raises at once; the third transient one re-raises unchanged. For reads only: a write can
-    land and still fail, so a blind retry can overwrite what another run wrote since."""
+    `SystemExit` (`is_transient`), each retry warned (`warn_retry`). `before_retry`, when given,
+    runs after each sleep and may raise to stop. Any other `SystemExit` re-raises at once; the
+    third transient one re-raises unchanged."""
     for delay in RETRY_DELAYS:
         try:
             return call()
@@ -221,6 +224,8 @@ def retried(call):
                 raise
             warn_retry(e)
         _sleep(delay)
+        if before_retry:
+            before_retry()
     return call()
 
 
