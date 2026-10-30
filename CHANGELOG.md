@@ -16,6 +16,7 @@ section below names the SHA the release tags.
 - **A plan comment says why no `auto` apply follows an autoplan not started by a push.** When a pull request marked ready or reopened changes a cell of an `apply_mode: auto` environment that no other pull request locks, the comment carries ``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.`` under its verdict. The `summary` job reads the `auto` environments from `detect`'s new `auto_envs` output instead of reading the table again.
 - **The plan comment's `shipmate commands` section names ``shipmate unlock <env> --evict`` for each environment holding a changed cell it marks `🔒 locked by`**, beside `shipmate apply`, which applies nothing for a locked cell.
 - An `apply_mode: auto` apply's result comment says, under its verdict, that the run was dispatched as an auto apply, and names the pusher `detect` admitted.
+- An `apply_mode: auto` apply's result comment says, under its verdict, that the run was dispatched as an auto apply, and names the login that triggered its autoplan when `detect` admitted it.
 
 ## [0.53.0] — 2026-10-29
 

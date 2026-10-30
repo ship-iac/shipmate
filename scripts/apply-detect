@@ -499,11 +499,12 @@ def _malformed(what, e):
 
 
 def refuse_pusher(repo, newest):
-    """Refuse unless `authorize.pusher_reason` admits the pusher of `newest`, the listed
-    autoplan."""
+    """The login `authorize.pusher_reason` admits as the pusher of `newest`, the listed
+    autoplan; refuses unless it admits one."""
     reason = az.pusher_reason(repo, newest, run=_run)
     if reason:
         raise SystemExit(f"::error::{reason}")
+    return az._login(newest.get("actor"))
 
 
 def wait_mergeable(repo, pr_number, head):
@@ -678,9 +679,8 @@ def bare_main(auto=False):
         if runnable:
             actions = ag.plan_actions(lines, app_id)
             newest = refuse_provenance(repo, head, runnable, actions)
-            refuse_pusher(repo, newest)
+            pusher = refuse_pusher(repo, newest)
             provenance_run = runnable[0]["plan_run_id"]
-            pusher = newest["actor"]["login"]
         auto_outputs = {
             "provenance_run": provenance_run,
             "pusher": pusher,

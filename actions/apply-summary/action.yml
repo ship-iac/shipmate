@@ -77,7 +77,7 @@ inputs:
     required: false
     default: "false"
   pusher:
-    description: "apply-detect's `pusher` output: the login the auto form admitted as the pusher, which the auto line names. Empty renders the line without it."
+    description: "apply-detect's `pusher` output: the login the auto form admitted as the pusher, which the auto line names as the login that triggered the autoplan. Empty renders the line without it."
     required: false
     default: ""
   results:

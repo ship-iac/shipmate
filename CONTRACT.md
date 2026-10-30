@@ -2079,8 +2079,13 @@ lines name why, and a run that applied nothing and left a pending environment
 for a bare apply, a `targeted` one or a skipped one is never `🟢` (§Apply result
 comment). A
 `detect` refusal shows in the comment's error fence. Under the verdict line, the
-comment says ``dispatched as an `apply_mode: auto` apply`` and, when `detect`
-admitted the pusher, adds ``, pushed by @<login>``.
+comment says ``dispatched as an `apply_mode: auto` apply``. When `detect` wrote
+the login that triggered the listed autoplan (the opener for `opened`, the
+pusher for `synchronize`), the line goes on
+``, after an autoplan triggered by @<!-- -->`<login>` ``: the login sits in a
+code span after `@<!-- -->`, so it mentions nobody. `detect` writes the login
+only when it ends with a cell to apply, so a refusal anywhere in `detect`, the
+pusher check included, leaves it out.
 
 **Permissions.** The consumer's `auto` and `apply` jobs grant
 `pull-requests: read`: `detect` and the wave pre-apply check read the pull
@@ -2888,11 +2893,11 @@ is the signal. The started-run reply may link it (§Comment-ops says when).
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, an `auto` run's line
-(§`apply_mode: auto`), the error fence, one line
-or fold-out per row, the notes, the footer lines, and, under any verdict but 🟢,
-the help hint ``Comment `shipmate help` for the available commands.`` A 🟢
-comment has no footer. A run with no rows to render is the header, the verdict
-line, an `auto` run's line, the error fence, the footer lines and, under any verdict but 🟢,
+(§`apply_mode: auto`), the error fence, one line or fold-out per row, the notes,
+the footer lines, and, under any verdict but 🟢, the help hint
+``Comment `shipmate help` for the available commands.`` A 🟢 comment has no
+footer. A run with no rows to render is the header, the verdict line, an `auto`
+run's line, the error fence, the footer lines and, under any verdict but 🟢,
 the hint. The error fence shows when `detect` or the `lock` job failed with an
 `::error::` (a refusal or a failed tool or API call): its first error on one
 line, in a plain code fence, cut at 4,000 characters and fenced longer than any
