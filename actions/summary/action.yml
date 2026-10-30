@@ -92,9 +92,19 @@ inputs:
   command-hints:
     description: >-
       build-matrix's `command_hints` output, read from the default branch's table. `true` ends
-      the plan comment with a folded section naming `shipmate apply` and `shipmate help`, when a
-      cell changed and the pull request is not a draft. Anything else (empty when detect is
-      skipped) leaves it out.
+      the plan comment with a folded section naming `shipmate apply`, `shipmate unlock <env>
+      --evict` for each environment holding a changed cell another pull request holds, and
+      `shipmate help`, when a cell changed and the pull request is not a draft. Anything else
+      (empty when detect is skipped) leaves it out.
+    required: false
+    default: ""
+  auto-envs:
+    description: >-
+      build-matrix's `auto_envs` output: JSON [env, ...], the default branch table's
+      `apply_mode: auto` environments. The auto apply decision reads it, and the plan comment
+      says why no auto apply follows an autoplan that changed a cell of one. Empty (detect
+      skipped or refused) dispatches nothing, with a warning, and renders no line; a value that
+      is not a list of names renders none and warns.
     required: false
     default: ""
 runs:
@@ -294,6 +304,7 @@ runs:
         SHIPMATE_LOST_ENV_TAGS: ${{ inputs.lost-env-tags }}
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_COMMAND_HINTS: ${{ inputs.command-hints }}
+        SHIPMATE_AUTO_ENVS_TABLE: ${{ inputs.auto-envs }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
         # failure still carries a full list.
@@ -492,8 +503,7 @@ runs:
       id: autodecide
       shell: bash
       env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_AUTO_ENVS_TABLE: ${{ inputs.auto-envs }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}
         SHIPMATE_COMMENT_MODE: ${{ steps.gate.outputs.comment_mode }}

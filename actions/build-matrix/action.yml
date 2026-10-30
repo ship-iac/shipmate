@@ -61,6 +61,9 @@ outputs:
   command_hints:
     description: The table's `command_hints` from the default branch, `true` or `false` (`false` when unset). Read by the plan summary to end the comment with its command section.
     value: ${{ steps.build.outputs.command_hints }}
+  auto_envs:
+    description: 'JSON [env, ...]: the default branch table''s `apply_mode: auto` environments, sorted; `[]` when none. Read by the plan summary to decide an auto apply and to say in the plan comment why none follows.'
+    value: ${{ steps.build.outputs.auto_envs }}
   cells:
     description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells, and by the plan summary to name the planned cells that left no cell summary; on a plan, where a `tags` filter is refused, it names exactly the matrix''s cells. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` job fails at its "Upsert / close drift issues" step before the script starts, after every cell has planned.'
     value: ${{ steps.build.outputs.cells }}

@@ -355,8 +355,9 @@ and `environments`, caps how many cells one plan or drift sweep runs at once ([`
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
 `command_hints: true` ends each plan comment with a changed cell, on a pull
-request that is not a draft, with a folded section naming `shipmate apply` and
-`shipmate help`; it is off when absent.
+request that is not a draft, with a folded section naming `shipmate apply`,
+`shipmate unlock <env> --evict` for an environment holding a locked changed cell,
+and `shipmate help`; it is off when absent.
 
 **What each environment and ordering key does.** Four are keys of an `environments` entry;
 `after` is a Terramate stack attribute (`after = [...]` in the stack block). In the

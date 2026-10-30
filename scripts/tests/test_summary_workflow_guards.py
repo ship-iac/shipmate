@@ -49,6 +49,7 @@ EXPECTED_SUMMARY_WITH = {
     "lost-env-tags": "${{ needs.detect.outputs.lost }}",
     "env-order": "${{ needs.detect.outputs.env_order }}",
     "command-hints": "${{ needs.detect.outputs.command_hints }}",
+    "auto-envs": "${{ needs.detect.outputs.auto_envs }}",
 }
 #: `detect`'s whole outputs map: `unmanaged`, `refusal` and `cells` are what the `with:` above
 #: passes on.
@@ -58,6 +59,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "count": "${{ steps.matrix.outputs.count }}",
     "max_parallel": "${{ steps.matrix.outputs.max_parallel }}",
     "command_hints": "${{ steps.matrix.outputs.command_hints }}",
+    "auto_envs": "${{ steps.matrix.outputs.auto_envs }}",
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "lost": "${{ steps.matrix.outputs.lost }}",
     "refusal": "${{ steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}",
@@ -120,7 +122,9 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named.
     Mutation: drop the `env-order:` line -> the comment orders environments by name.
     Mutation: drop the `command-hints:` line, `detect`'s `command_hints` output or the action's
-    `command-hints` input -> the comment never shows its command section."""
+    `command-hints` input -> the comment never shows its command section.
+    Mutation: drop the `auto-envs:` line, `detect`'s `auto_envs` output or the action's
+    `auto-envs` input -> no auto apply is ever dispatched."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

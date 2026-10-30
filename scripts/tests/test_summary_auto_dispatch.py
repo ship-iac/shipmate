@@ -6,7 +6,6 @@ The gate conditions are fed from `gate-state.decide`'s real outputs, so a change
 `decide` returns for a held, cancelled, draft or nothing-changed run reaches these rows.
 """
 
-import base64
 import json
 import os
 
@@ -46,7 +45,6 @@ def _gate(**overrides):
 
 
 _AUTOPLAN = ("pull_request_target", "synchronize", "1", "")
-_NOT_A_PUSH = "not a push (opened or synchronize)"
 
 #: name -> (event, action, attempt, is_draft, decide overrides, whole reason); each row breaks
 #: one condition.
@@ -59,17 +57,22 @@ SKIPS = {
     "ready for review": (
         ("pull_request_target", "ready_for_review", "1", ""),
         {},
-        f"the autoplan's event action is 'ready_for_review', {_NOT_A_PUSH}",
+        "this plan was started by marking the pull request ready, not by a push",
     ),
     "reopened": (
         ("pull_request_target", "reopened", "1", ""),
         {},
-        f"the autoplan's event action is 'reopened', {_NOT_A_PUSH}",
+        "this plan was started by reopening the pull request, not by a push",
     ),
     "unreadable action": (
         ("pull_request_target", "", "1", ""),
         {},
-        f"the autoplan's event action is '', {_NOT_A_PUSH}",
+        "this plan's event could not be read",
+    ),
+    "other action": (
+        ("pull_request_target", "edited", "1", ""),
+        {},
+        "this plan was started by the `edited` event, not by a push",
     ),
     "re-run": (
         ("pull_request_target", "synchronize", "2", ""),
@@ -116,9 +119,12 @@ SKIPS = {
 
 @pytest.mark.parametrize("name", list(SKIPS))
 def test_each_failed_condition_dispatches_nothing(name):
-    """Mutations: delete any one `if` of `skip_reason` (its row reddens); compare only `state`
-    with `pending` (the draft-gate row reddens: a draft autoplan's gate is pending too); admit
-    `reopened` (its row reddens)."""
+    """The reasons are compared whole: the plan comment shows the action reasons verbatim.
+
+    Mutations: delete any one `if` of `action_reason` or `skip_reason` (its row reddens); compare
+    only `state` with `pending` (the draft-gate row reddens: a draft autoplan's gate is pending
+    too); admit `reopened` (its row reddens); swap the `ready_for_review` and `reopened` reasons
+    (both rows redden)."""
     (event, action, attempt, is_draft), overrides, reason = SKIPS[name]
     state, mode = _gate(**overrides)
     got = ad.skip_reason(
@@ -160,7 +166,7 @@ def test_the_dispatch_steps_are_wired_exactly():
     dispatch-body adds that key when it is set, and `auto` takes none.
 
     Mutations: drop `&& steps.upsert.outputs.result != 'moved'`; add `ENVIRONMENT: x` to the
-    dispatch step; drop `SHIPMATE_GITHUB_VARS` from the decision; drop the mint's `if:`; add
+    dispatch step; drop `SHIPMATE_AUTO_ENVS_TABLE` from the decision; drop the mint's `if:`; add
     `permission-pull-requests: write` to the mint; dispatch with `steps.token.outputs.token`;
     reply with `steps.autotoken.outputs.token`."""
     decide = step_by("summary", name=DECIDE)
@@ -169,8 +175,7 @@ def test_the_dispatch_steps_are_wired_exactly():
         "${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
     )
     assert decide["env"] == {
-        "GH_TOKEN": "${{ steps.token.outputs.token }}",
-        "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+        "SHIPMATE_AUTO_ENVS_TABLE": "${{ inputs.auto-envs }}",
         "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
         "SHIPMATE_GATE_STATE": "${{ steps.gate.outputs.state }}",
         "SHIPMATE_COMMENT_MODE": "${{ steps.gate.outputs.comment_mode }}",
@@ -200,13 +205,11 @@ def test_the_dispatch_steps_are_wired_exactly():
     }
 
 
-# A stub, not `_GH_RECORDER`: that one discards stdin and answers the contents read with no blob.
+# A stub, not `_GH_RECORDER`: that one discards stdin.
 _GH = """\
 #!/bin/bash
 printf '%s\\n' "$@" -- >> "$CALLS"
-if [[ "$*" == *contents/.github/shipmate-config.yml* ]]; then
-  printf '%s' "$FAKE_CONTENTS"
-elif [[ "$*" == *dispatches* ]]; then
+if [[ "$*" == *dispatches* ]]; then
   cat > "$DISPATCH_BODY"
   exit "$FAKE_DISPATCH_RC"
 elif [[ "$*" == *comments* ]]; then
@@ -215,12 +218,11 @@ elif [[ "$*" == *comments* ]]; then
 fi
 """
 
-TABLE = "environments:\n  dev:\n    apply_mode: auto\n    review: false\n  prod: {}\n"
 
-
-def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None):  # noqa: S107 - a stub token, never sent
+def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None, auto='["dev"]'):  # noqa: S107 - a stub token, never sent
     """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
-    is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default."""
+    is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default; `auto` is
+    build-matrix's `auto_envs` output."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -231,7 +233,6 @@ def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None):  # 
         d.mkdir(parents=True)
         cell = {"stack": f"s{i}", "environment": env, "changed": changed}
         (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
-    blob = {"encoding": "base64", "content": base64.b64encode(TABLE.encode()).decode()}
     out = tmp_path / "out"
     out.write_text("", encoding="utf-8")
     payload = tmp_path / "event.json"
@@ -244,7 +245,6 @@ def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None):  # 
         "CALLS": str(tmp_path / "calls"),
         "DISPATCH_BODY": str(tmp_path / "dispatch.json"),
         "REPLY_BODY": str(tmp_path / "reply.md"),
-        "FAKE_CONTENTS": json.dumps(blob),
         "FAKE_DISPATCH_RC": str(dispatch_rc),
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "GITHUB_OUTPUT": str(out),
@@ -256,7 +256,7 @@ def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None):  # 
         "GITHUB_RUN_ATTEMPT": "1",
         "GH_TOKEN": token,
         "REPLY_TOKEN": "main-token",
-        "SHIPMATE_GITHUB_VARS": "",
+        "SHIPMATE_AUTO_ENVS_TABLE": auto,
         "SHIPMATE_IS_DRAFT": "false",
         "SHIPMATE_GATE_STATE": "pending",
         "SHIPMATE_COMMENT_MODE": "post",
@@ -277,11 +277,28 @@ def _paths(calls):
 
 @bash_only
 def test_a_changed_auto_cell_decides_to_dispatch(tmp_path):
-    """Mutation: write `envs=` with no value."""
+    """The auto set comes from `SHIPMATE_AUTO_ENVS_TABLE`; the decision makes no API call.
+
+    Mutations: write `envs=` with no value; restore `ec.auto_envs(ec.read_table())` (the stub
+    answers the contents read with nothing, the read fails and a call is recorded)."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True), ("prod", True)])
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert _paths(calls) == ["repos/acme/demo/contents/.github/shipmate-config.yml"]
-    assert outputs == {"envs": "dev"}
+    assert (calls, outputs) == ([], {"envs": "dev"})
+
+
+@bash_only
+@pytest.mark.parametrize("auto", ["", "not json", '{"dev": 1}', '["dev", 1]'])
+def test_a_missing_or_malformed_auto_set_decides_nothing_and_warns(tmp_path, auto):
+    """Toward no apply: the step degrades the refusal to warnings and writes no `envs`.
+
+    Mutation: treat a malformed value as `[]` (the step succeeds, `envs` is written empty)."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], auto=auto)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (calls, outputs) == ([], {})
+    assert (proc.stderr.splitlines(), proc.stdout.splitlines()) == (
+        ["::warning::SHIPMATE_AUTO_ENVS_TABLE is not a JSON list of environment names"],
+        ["::warning::could not decide whether to dispatch an auto apply; no auto apply started"],
+    )
 
 
 @bash_only
@@ -294,26 +311,29 @@ def test_no_changed_auto_cell_decides_nothing(tmp_path):
 
 @bash_only
 @pytest.mark.parametrize(
-    ("event", "action"),
+    ("event", "reason"),
     [
-        pytest.param(json.dumps({"action": "ready_for_review"}), "'ready_for_review'", id="ready"),
-        pytest.param("not json", "''", id="unparseable"),
-        pytest.param(json.dumps(["synchronize"]), "''", id="not-an-object"),
+        pytest.param(
+            json.dumps({"action": "ready_for_review"}),
+            "this plan was started by marking the pull request ready, not by a push",
+            id="ready",
+        ),
+        pytest.param("not json", "this plan's event could not be read", id="unparseable"),
+        pytest.param(
+            json.dumps(["synchronize"]), "this plan's event could not be read", id="not-an-object"
+        ),
     ],
 )
-def test_an_autoplan_not_started_by_a_push_decides_nothing(tmp_path, event, action):
+def test_an_autoplan_not_started_by_a_push_decides_nothing(tmp_path, event, reason):
     """The payload is read from `GITHUB_EVENT_PATH`; an unreadable one dispatches nothing and
     makes no API call. Mutation: return `{"action": "synchronize"}` from
     `_shipmate.event_payload`'s `except` (the unparseable row dispatches) or its non-object
     fallback (the not-an-object row dispatches). Mutation: pass `GITHUB_EVENT_NAME` as the
-    action (every row names `'pull_request_target'`)."""
+    action (every row names the `pull_request_target` event)."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], event=event)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (calls, outputs) == ([], {"envs": ""})
-    assert (
-        f"no auto apply dispatched: the autoplan's event action is {action}, {_NOT_A_PUSH}"
-        in proc.stderr
-    )
+    assert proc.stderr.splitlines() == [f"no auto apply dispatched: {reason}"]
 
 
 @bash_only

@@ -511,8 +511,9 @@ on the same entry.
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
 a plan comment with a changed cell on a pull request that is not a draft ends
-with a folded `shipmate commands` section naming `shipmate apply` and `shipmate
-help` (§Plan comment). It changes no plan or apply.
+with a folded `shipmate commands` section naming `shipmate apply`, `shipmate
+unlock <env> --evict` for each environment holding a changed cell another pull
+request holds, and `shipmate help` (§Plan comment). It changes no plan or apply.
 
 **`max_parallel` caps the plan and drift matrices.** It is a whole number from
 1 to 256, and 10 when absent: each plan matrix and drift sweep runs at most that
@@ -1925,8 +1926,19 @@ exactly `apply`, unreadable dispatch inputs included; `shipmate doctor` compares
 published one. A failed mint or
 dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply not
 started: the dispatch failed; comment `shipmate apply` ``. A run that cannot
-decide (the table unreadable, a cell summary unparseable) warns and posts no
-reply. Neither changes the gate.
+decide (`detect`'s `auto_envs` output missing or malformed, a cell summary
+unparseable) warns and posts no reply. Neither changes the gate.
+
+When an autoplan of a pull request that is not a draft changes a cell of an
+`auto` environment that no other pull request locks, but a push did not start
+it, its plan comment says why no `auto` apply follows, under the verdict:
+``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.``,
+whatever `command_hints` is. A re-run of such an autoplan keeps the
+line: no attempt of it dispatches. A `shipmate plan` run carries no such line: it
+cannot tell whether an `auto` apply of the head is running. Known limit: an
+autoplan started by converting the pull request to a draft and back, or by
+closing and reopening it, on the same head while an earlier `auto` apply of it
+runs shows the line although that apply is running.
 
 **What an `auto` run applies.** It passes `apply.yml`'s `guard` and `review`
 jobs as any apply dispatch does (§Comment-ops), then `detect` runs the bare form
@@ -2663,7 +2675,9 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
-line, the verdict line, a blank line, the doctor line and a blank line when
+line, the verdict line, a blank line, the auto apply line and a blank line when
+an autoplan not started by a push changed a cell of an `auto` environment
+(§`apply_mode: auto`), the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
 line when it untags a stack / environment pair, then per environment its
@@ -2689,6 +2703,11 @@ Comment `shipmate help` for every command.
 
 </details>
 ```
+
+When the comment marks a changed cell `🔒 locked by`, the section adds, before
+the `shipmate help` paragraph, one paragraph per such environment, sorted:
+``Comment `shipmate unlock <env> --evict` to take a cell another pull request
+holds.``
 
 The held body and a body with no changed cell never carry it. The held body
 above ends with the hint. `doctor` records its decision once, as its `warned`
