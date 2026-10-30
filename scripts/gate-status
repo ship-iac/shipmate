@@ -137,9 +137,10 @@ def post(sha, state, description, before_retry=None):
     """Write the gate; a transient failure retries through `retried`, `before_retry` with it. A
     repeated POST of a status that landed only adds an identical history entry.
 
-    Known ceiling: a retry with no `before_retry` re-posts over a hold another run wrote during
-    the sleeps, as a first POST already can over one written just before it (`gate-hold` writes
-    outside the gate group). Only `refresh` re-checks, and only before each retry.
+    Known ceiling: a retry re-posts over a hold its `before_retry` does not see, as a first POST
+    already can over one written just before it (`gate-hold` writes outside the gate group). The
+    `post` command re-runs `refuse-newer` and `refresh` its own hold check; `hold` and `deploy`
+    re-check nothing.
 
     Newlines in `description` become spaces: a status description is one line, and `is_transient`
     reads every line after the argv as gh's stderr."""
@@ -214,7 +215,8 @@ _COMMANDS = {
     "newest": (0, _newest),
     "refuse-newer": (0, _refuse_newer),
     "checks": (1, _checks),
-    "post": (2, post),
+    # The summary writes after `refuse-newer`; a retried write re-runs it first.
+    "post": (2, lambda sha, state, desc: post(sha, state, desc, lambda: _refuse_newer(sha))),
     "hold": (1, lambda sha, description: post(sha, "failure", description)),
     "refresh": (0, refresh),
     "deploy": (2, lambda sha, detect, results: post(sha, *deploy_verdict(detect, results))),

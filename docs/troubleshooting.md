@@ -1686,10 +1686,11 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    (`detect`'s `auto_envs` output missing or malformed, a cell summary
    unparseable) it warns `could not decide whether to dispatch an auto apply; no
    auto apply started` and posts no reply. Separately, when an autoplan of a
-   pull request that is not a draft was not started by a push (it was marked
-   ready or reopened, or its event could not be read) and a changed cell of an
-   `auto` environment is not locked by another pull request, the plan comment
-   says so under its verdict, on every attempt of that run:
+   pull request that is not a draft was not started by a push (marking it
+   ready, reopening it or another non-push event started it, or its event could
+   not be read) and a changed cell of an `auto` environment is not locked by
+   another pull request, the plan comment says so under its verdict, on every
+   attempt of that run:
    ``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.``
    The step is skipped when a newer plan run of the head superseded this one, or
    when the sticky comment upsert found the head moved: the new head's run

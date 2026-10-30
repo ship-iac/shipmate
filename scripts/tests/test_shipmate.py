@@ -312,11 +312,19 @@ def _failing(*messages):
     return calls, call
 
 
-@pytest.mark.parametrize("message", [_BAD_GATEWAY, _REFUSED], ids=["502", "connection-refused"])
+#: Go's net/http message for a connection the server closed mid-response.
+_EOF = (
+    '::error::command failed (1): gh api x\nGet "https://api.github.com/repos/o/r/statuses/x": EOF'
+)
+
+
+@pytest.mark.parametrize(
+    "message", [_BAD_GATEWAY, _REFUSED, _EOF], ids=["502", "connection-refused", "eof"]
+)
 def test_retried_calls_again_after_a_transient_failure(message, sleeps, capsys):
     """Mutations, each run: drop the `HTTP 5xx` alternative from `TRANSIENT` -> the 502
-    re-raises; drop `connection refused` -> the probe's message re-raises; write the warning to
-    stdout -> the streams swap."""
+    re-raises; drop `connection refused` -> the probe's message re-raises; drop `: EOF$` -> the
+    EOF message re-raises; write the warning to stdout -> the streams swap."""
     calls, call = _failing(message)
     assert _shipmate.retried(call) == "x"
     head = "%0A".join(message.removeprefix("::error::").splitlines()[:2])

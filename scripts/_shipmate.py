@@ -189,6 +189,9 @@ def _run(args):
 TRANSIENT = re.compile(
     r"HTTP 5\d\d|Something went wrong|connection refused|connection reset|i/o timeout"
     r"|TLS handshake timeout|unexpected EOF|unexpected end of JSON input"
+    # Go's net/http transport errors as gh prints them: `Get "<url>": EOF` and the rest.
+    r"|: EOF$|Client\.Timeout exceeded|context deadline exceeded|GOAWAY",
+    re.MULTILINE,
 )
 #: The sleeps before the second and third attempts.
 RETRY_DELAYS = (2, 5)
