@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.53.1] — 2026-10-30
 
+Tags `639755d`.
+
 ### Fixed
 
 - A transient `gh` failure (a 5xx, a dropped connection, a truncated body) of a `shipmate / gate` read or write or a check-run listing is retried twice, 2 and 5 seconds apart, each retry with a warning. Before retrying its write, the plan summary re-checks for a newer run's hold, and a gate refresh for any hold.
