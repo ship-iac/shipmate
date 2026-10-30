@@ -13,8 +13,9 @@ check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the hea
 the one check-runs listing every reader of a head's checks uses, the ruleset, environment and
 ``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
 ``cell.json`` summaries, builds this run's page link, joins a capped list of names and parses a
-list of cell names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow
-loader, both importing PyYAML only when first called.
+list of cell names. It retries a ``gh`` read that failed transiently. It parses YAML: the
+strings-only config loader and the YAML 1.2 workflow loader, both importing PyYAML only when
+first called.
 """
 
 import functools
@@ -27,6 +28,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 import urllib.parse
 from importlib.machinery import SourceFileLoader
 from typing import TypeGuard
@@ -179,6 +181,47 @@ def _run(args):
         return run(args)
     except SystemExit as e:
         raise SystemExit(f"::error::{e}") from None
+
+
+#: gh's text for a failure a later attempt can outlast; never a 4xx, whose answer a retry keeps.
+#: Captured raw from gh: `connection refused`. Quoted by a consumer: `Something went wrong`,
+#: `TLS handshake timeout`, `unexpected end of JSON input`. The rest: 5xx and Go transport errors.
+TRANSIENT = re.compile(
+    r"HTTP 5\d\d|Something went wrong|connection refused|connection reset|i/o timeout"
+    r"|TLS handshake timeout|unexpected EOF|unexpected end of JSON input"
+)
+#: The sleeps before the second and third attempts.
+RETRY_DELAYS = (2, 5)
+_sleep = time.sleep
+
+
+def is_transient(exc):
+    """True when `exc`, a `SystemExit`, carries a `TRANSIENT` failure message."""
+    return isinstance(exc.code, str) and TRANSIENT.search(exc.code) is not None
+
+
+def warn_retry(exc):
+    """Print `exc`'s first two lines (the command and gh's first stderr line) as one `::warning::`
+    on stderr, never stdout: `gate-status checks` writes data there."""
+    head = "\n".join(str(exc.code).removeprefix("::error::").splitlines()[:2])
+    sys.stderr.write(f"::warning::{command_data(head)}\n")
+    sys.stderr.flush()
+
+
+def retried(call):
+    """`call()`, called again after each `RETRY_DELAYS` sleep while it raises a transient
+    `SystemExit` (`is_transient`), each retry warned (`warn_retry`). Any other `SystemExit`
+    re-raises at once; the third transient one re-raises unchanged. For reads only: a write can
+    land and still fail, so a blind retry can overwrite what another run wrote since."""
+    for delay in RETRY_DELAYS:
+        try:
+            return call()
+        except SystemExit as e:
+            if not is_transient(e):
+                raise
+            warn_retry(e)
+        _sleep(delay)
+    return call()
 
 
 def command_data(s):
@@ -346,21 +389,13 @@ def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None, name=None):
     re-created check name keeps its older runs and `apply-gate` judges the newest per name, so
     every reader must see the same set. `--paginate --jq` prints one JSON object per line
     across every page, so a head with more than 100 checks drops none. `run` defaults to
-    `_run`."""
+    `_run`. A transient failure is retried (`retried`)."""
     validate_head_sha(sha, "head SHA")
     query = "filter=all&per_page=100"
     if name is not None:
         query += f"&check_name={urllib.parse.quote(name, safe='')}"
-    return (run or _run)(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/{repo}/commits/{sha}/check-runs?{query}",
-            "--jq",
-            jq,
-        ]
-    )
+    args = ["gh", "api", "--paginate", f"repos/{repo}/commits/{sha}/check-runs?{query}", "--jq", jq]
+    return retried(lambda: (run or _run)(args))
 
 
 def named(items, cap):

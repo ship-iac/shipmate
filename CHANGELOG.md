@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Fixed
+
+- A transient `gh` failure (a 5xx, a dropped connection, a truncated body) of the `shipmate / gate` write or a check-run listing is retried twice, 2 and 5 seconds apart, each retry with a warning; a gate write reads the gate back before it retries, so it neither reports a write that landed as failed nor posts over another run's hold.
+
 ## [0.53.0] — 2026-10-29
 
 Tags `b8cb366`.

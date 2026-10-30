@@ -13,6 +13,7 @@ argv of every call it accepts.
 import json
 import os
 
+import _shipmate
 import pytest
 from _loader import SCRIPTS, bash_only, load_script, run_with_gate_gh
 
@@ -471,3 +472,113 @@ def test_a_multi_line_failure_prints_as_one_escaped_annotation(tmp_path):
         f"::error::command failed (1): gh {argv}%0Aunexpected gh call: {argv}\n",
         [STATUSES_ARGV],
     )
+
+
+_BAD_GATEWAY = "command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)"
+_RETRY_WARNING = "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+
+
+@pytest.fixture
+def in_process(monkeypatch):
+    """`gate-status` called in this process: its env set and every retry sleep recorded."""
+    for name in ("GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "GITHUB_RUN_ID"):
+        monkeypatch.setenv(name, ENV[name])
+    slept = []
+    monkeypatch.setattr(_shipmate, "_sleep", slept.append)
+    return slept
+
+
+def test_checks_keeps_a_retry_warning_off_its_stdout(in_process, monkeypatch, capsys):
+    """Stdout is the JSONL listing `apply-gate.parse_jsonl` reads, so a stray line fails it.
+    Mutation: write `warn_retry`'s line to stdout -> the warning leads the listing."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise SystemExit(_BAD_GATEWAY)
+        return "{}\n"
+
+    monkeypatch.setattr(gs, "run", run)
+    gs.main(["checks", SHA, ".check_runs[]"])
+    assert capsys.readouterr() == ("{}\n", _RETRY_WARNING)
+    assert (len(calls), in_process) == (2, [2])
+
+
+def _posting(monkeypatch, newest):
+    """`gs._run` failing the first POST with a 502 and answering the statuses read with
+    `newest`, a gate `(state, run id)`, or failing the read when it is None. Returns the calls."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args[2] == f"repos/acme/demo/statuses/{SHA}":
+            if sum(a[2] == args[2] for a in calls) == 1:
+                raise SystemExit(f"::error::{_BAD_GATEWAY}")
+            return "{}"
+        if newest is None:
+            raise SystemExit(
+                "::error::command failed (1): gh api statuses\ngh: Forbidden (HTTP 403)"
+            )
+        state, run_id = newest
+        return _lines(_status("shipmate / gate", state, _run_url(run_id)))
+
+    monkeypatch.setattr(gs, "_run", run)
+    return calls
+
+
+_POST = ["gh", *_status_argv("pending", "the reason")]
+_READ = ["gh", *STATUSES_ARGV]
+
+
+def test_post_retries_when_the_newest_gate_is_neither_its_own_nor_a_hold(
+    in_process, monkeypatch, capsys
+):
+    """Mutations, each run: re-raise every POST failure -> the 502 raises; return on any newest
+    gate -> one POST."""
+    calls = _posting(monkeypatch, ("pending", "41"))
+    gs.post(SHA, "pending", "the reason")
+    assert (calls, in_process, capsys.readouterr()) == (
+        [_POST, _READ, _POST],
+        [2],
+        ("", _RETRY_WARNING),
+    )
+
+
+def test_post_stops_when_the_failed_post_landed(in_process, monkeypatch):
+    """The newest gate is this run's (999) own `pending`. Mutation: drop the re-read -> a second
+    POST."""
+    calls = _posting(monkeypatch, ("pending", "999"))
+    gs.post(SHA, "pending", "the reason")
+    assert calls == [_POST, _READ]
+
+
+def test_post_retries_over_its_own_hold(in_process, monkeypatch):
+    """The summary holds the gate while it publishes, then posts over that hold. Mutation: exit
+    `HELD` over any `failure`, this run's (999) included -> `SystemExit(3)`, one POST."""
+    calls = _posting(monkeypatch, ("failure", "999"))
+    gs.post(SHA, "pending", "the reason")
+    assert calls == [_POST, _READ, _POST]
+
+
+def test_post_exits_held_over_an_older_runs_hold(in_process, monkeypatch, capsys):
+    """`gate-hold` writes from a run of any id, so a hold by a lower run id stands too. Mutations,
+    each run: drop the re-read -> a second POST buries the hold; count only a `failure` by a
+    higher run id, as `newer_hold` does -> a second POST."""
+    calls = _posting(monkeypatch, ("failure", "42"))
+    with pytest.raises(SystemExit) as exc:
+        gs.post(SHA, "pending", "the reason")
+    assert (exc.value.code, calls, capsys.readouterr()) == (
+        gs.HELD,
+        [_POST, _READ],
+        (HELD, _RETRY_WARNING),
+    )
+
+
+def test_post_fails_with_its_own_failure_when_the_read_back_fails(in_process, monkeypatch):
+    """A failed read is no evidence either way. Mutation: let the read's failure propagate ->
+    the 403 read error instead of the POST's 502."""
+    calls = _posting(monkeypatch, None)
+    with pytest.raises(SystemExit) as exc:
+        gs.post(SHA, "pending", "the reason")
+    assert (exc.value.code, calls) == (f"::error::{_BAD_GATEWAY}", [_POST, _READ])

@@ -2185,7 +2185,10 @@ head. Read the `detect` job's `::error::` annotation. A refusal states its
 cause: search this page for its text. A `command failed` annotation names the
 command that failed (`gh api`, `terramate`, `git`) and carries its stderr; for
 that case only, re-run the deploy once, and if it fails the same way, that
-stderr is the cause. When no annotation but `Process completed with exit code`
+stderr is the cause. A transient failure (a 5xx, a dropped connection, a
+truncated body) of the `shipmate / gate` write or a check-run listing is retried
+twice first, each retry logged as a warning naming the command and gh's first
+stderr line. When no annotation but `Process completed with exit code`
 names the cause, read the failed step's log: a traceback or a failed checkout or
 setup step shows there.
 
