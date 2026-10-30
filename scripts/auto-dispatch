@@ -5,7 +5,8 @@ that call for one.
 Prints, space-separated on one line, the `apply_mode: auto` environments of the default branch's
 table that hold a changed cell among this run's cell summaries (`cells/`); prints nothing when
 any condition below fails, writing why to stderr. The summary dispatches `verb: auto` when the
-line is non-empty. Conditions, all from the environment:
+line is non-empty. The plan comment shows `trigger_reason`'s reason verbatim, so each one reads
+as a sentence to the pull request's reader. Conditions, all from the environment:
 
 - `GITHUB_EVENT_NAME` is `pull_request_target`: only an autoplan dispatches.
 - the `action` of the event payload at `GITHUB_EVENT_PATH` is `opened` or `synchronize`: only
@@ -16,17 +17,17 @@ line is non-empty. Conditions, all from the environment:
 - gate-state's `SHIPMATE_GATE_STATE` and `SHIPMATE_COMMENT_MODE` are `pending` and `post`: the
   plan published completely and nothing holds the gate, and an apply check is pending.
 
-The table is read last, through `env-config.read_table`, so a run that fails a condition makes
-no API call. A refusal there exits 1 with `::error::`.
+The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
+(a JSON list of names); a missing or malformed value exits 1 with `::error::`.
 """
 
+import json
 import os
 import sys
 
 from _shipmate import _load, cell_summaries, event_action, run_annotated
 
 ag = _load("apply-gate")
-ec = _load("env-config")
 
 _KEYS = ("stack", "environment", "changed")
 _SKEW = (
@@ -35,16 +36,34 @@ _SKEW = (
 )
 
 
-def skip_reason(*, event, action, attempt, is_draft, state, mode):
-    """Why this run dispatches no `auto` apply, or None when every condition holds."""
+_ACTION_REASONS = {
+    "ready_for_review": "this plan was started by marking the pull request ready, not by a push",
+    "reopened": "this plan was started by reopening the pull request, not by a push",
+    "": "this plan's event could not be read",
+}
+
+
+def trigger_reason(*, event, action, attempt, is_draft):
+    """Why this run's event dispatches no `auto` apply, or None when it is an autoplan's first
+    attempt, started by a push, on a pull request that is not a draft."""
     if event != "pull_request_target":
-        return f"a {event} run is not an autoplan"
+        return "this run is not an autoplan"
     if action not in ag.PUSH_ACTIONS:
-        return f"the autoplan's event action is {action!r}, not a push (opened or synchronize)"
+        return _ACTION_REASONS.get(
+            action, f"this plan was started by the `{action}` event, not by a push"
+        )
     if attempt != "1":
-        return f"run attempt {attempt} is a re-run"
+        return "this run is a re-run"
     if is_draft == "true":
         return "the pull request is a draft"
+    return None
+
+
+def skip_reason(*, event, action, attempt, is_draft, state, mode):
+    """Why this run dispatches no `auto` apply, or None when every condition holds."""
+    reason = trigger_reason(event=event, action=action, attempt=attempt, is_draft=is_draft)
+    if reason:
+        return reason
     if (state, mode) != ("pending", "post"):
         return f"the gate is not pending over a complete plan (state {state!r}, mode {mode!r})"
     return None
@@ -53,6 +72,18 @@ def skip_reason(*, event, action, attempt, is_draft, state, mode):
 def changed_auto_envs(cells, auto):
     """The sorted environments in `auto` holding a changed cell of `cells`."""
     return sorted({c["environment"] for c in cells if c["changed"]} & set(auto))
+
+
+def auto_set(raw):
+    """build-matrix's `auto_envs` output `raw`, a JSON list of environment names, or None when it
+    is not that shape."""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(value, list) and all(isinstance(e, str) for e in value):
+        return value
+    return None
 
 
 def main():
@@ -70,7 +101,12 @@ def main():
     cells = [
         c for _, c in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
     ]
-    envs = changed_auto_envs(cells, ec.auto_envs(ec.read_table()))
+    auto = auto_set(os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", ""))
+    if auto is None:
+        raise SystemExit(
+            "::error::SHIPMATE_AUTO_ENVS_TABLE is not a JSON list of environment names"
+        )
+    envs = changed_auto_envs(cells, auto)
     if not envs:
         print(
             "no auto apply dispatched: no changed cell is in an apply_mode auto environment",

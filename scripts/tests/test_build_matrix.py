@@ -1378,7 +1378,8 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     """Mutation: delete the `refusal` output -- the gate never names a detect error.
     Mutation: delete the `env_order` output -- the plan comment orders environments by name.
-    Mutation: delete the `command_hints` output -- the plan comment never shows its commands."""
+    Mutation: delete the `command_hints` output -- the plan comment never shows its commands.
+    Mutation: delete or rename the `auto_envs` output -- no auto apply is ever dispatched."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
@@ -1389,6 +1390,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "count": "${{ steps.build.outputs.count }}",
         "max_parallel": "${{ steps.build.outputs.max_parallel }}",
         "command_hints": "${{ steps.build.outputs.command_hints }}",
+        "auto_envs": "${{ steps.build.outputs.auto_envs }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
         "lost": "${{ steps.build.outputs.lost }}",
@@ -2459,6 +2461,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "count": "1",
         "max_parallel": "10",
         "command_hints": "false",
+        "auto_envs": "[]",
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
         "lost": "",
@@ -2495,6 +2498,32 @@ def test_detect_writes_the_tables_command_hints(monkeypatch, tmp_path, table, ex
     outputs, _ = _run_main(monkeypatch, tmp_path, _PR_ENV, head_sha="cafe1234", table=table)
     assert outputs["count"] == "1"  # Not vacuous: a cell exists.
     assert outputs["command_hints"] == expected
+
+
+@pytest.mark.parametrize(
+    ("modes", "expected"),
+    [({"a": "auto", "b": "auto", "c": "bare"}, '["a", "b"]'), ({"a": "bare"}, "[]")],
+    ids=["two-auto", "none"],
+)
+def test_detect_writes_the_tables_auto_envs(monkeypatch, tmp_path, modes, expected):
+    """The plan summary reads this output to decide an auto apply and to say why none follows.
+
+    Mutation: write every table environment -- "two-auto" names `c`, "none" names `a`. Mutation:
+    write `command_hints`' value -- both rows read "false"."""
+    table = {
+        "layout": "folder",
+        "environments": {e: {"apply_mode": m, "review": False} for e, m in modes.items()},
+    }
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        cells=(("stacks/app", "a"),),
+        head_sha="cafe1234",
+        table=table,
+    )
+    assert outputs["count"] == "1"  # Not vacuous: a cell exists.
+    assert outputs["auto_envs"] == expected
 
 
 def _git(*args):

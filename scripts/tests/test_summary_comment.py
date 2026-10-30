@@ -439,6 +439,55 @@ def test_the_command_section_never_shrinks_a_cut_plan():
     assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True) == (without, False, False)
 
 
+def _evict(env):
+    return f"Comment `shipmate unlock {env} --evict` to take a cell another pull request holds.\n\n"
+
+
+#: `COMMANDS` with one evict paragraph per environment, hand-written.
+_EVICT_DEV_EU = COMMANDS.replace(
+    "Comment `shipmate help`", _evict("dev-eu") + "Comment `shipmate help`"
+)
+
+
+def test_the_command_section_without_a_locked_cell_is_unchanged():
+    """Mutation: always add an evict line (`sorted(locked | {"dev-eu"})`) -- red."""
+    assert sc.commands(set()) == COMMANDS
+
+
+def test_the_command_section_names_the_evict_command_for_a_locked_environment():
+    """Mutation: drop the evict line from `commands` -- red."""
+    locks = {"stacks/app / dev-eu": 12}
+    without = sc.build_comment(_LOCK_CELLS, CHECKS, RUN_URL, SHA, locks=locks)[0]
+    assert sc.build_comment(_LOCK_CELLS, CHECKS, RUN_URL, SHA, hints=True, locks=locks) == (
+        without + "\n\n" + _EVICT_DEV_EU,
+        False,
+        False,
+    )
+
+
+def test_the_command_section_names_each_locked_environment_once_sorted():
+    """Two locked cells in `dev-eu`, one in `prod`. Mutation: `sorted(locked, reverse=True)` --
+    red."""
+    cells = [*_LOCK_CELLS, (_cell(environment="prod"), None)]
+    locks = {"stacks/app / dev-eu": 12, "stacks/db / dev-eu": None, "stacks/app / prod": 3}
+    body = sc.build_comment(cells, CHECKS, RUN_URL, SHA, hints=True, locks=locks)[0]
+    assert body.endswith(
+        "\n\n"
+        + COMMANDS.replace(
+            "Comment `shipmate help`", _evict("dev-eu") + _evict("prod") + "Comment `shipmate help`"
+        )
+    )
+
+
+def test_a_lock_on_an_unchanged_cell_names_no_evict_command():
+    """An unchanged cell has nothing to apply, so its lock blocks nothing. Mutation: drop
+    `cell["changed"] and` from `_lock_key` -- red."""
+    body = sc.build_comment(
+        _LOCK_CELLS, CHECKS, RUN_URL, SHA, hints=True, locks={"stacks/dns / dev-eu": 9}
+    )[0]
+    assert body.endswith("\n\n" + COMMANDS)
+
+
 def test_without_an_env_order_environments_sort_by_name(tmp_path):
     """Mutation: dropping `sorted` from the environments `order` does not name -- `prod`, the
     first read, comes first."""
@@ -610,10 +659,19 @@ def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     shipmate command; the `[bot]` loop guard would ignore it, but relying on that alone is one
     deletion away from a retrigger loop.
 
-    Mutation: start a line of `COMMANDS` with `shipmate apply` -- red."""
+    Mutations: start a line of `commands` with `shipmate apply`, or its evict line with
+    `shipmate unlock` -- red."""
     cp = load_script("comment-parse")
     cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b"), None)]
-    for line in sc.build_comment(cells, {}, RUN_URL, SHA, hints=True)[0].splitlines():
+    auto = sc.auto_line(
+        [c for c, _ in cells], ["dev-eu"], **_AUTOPLAN | {"action": "ready_for_review"}
+    )
+    body = sc.build_comment(
+        cells, {}, RUN_URL, SHA, hints=True, locks={"stacks/app / dev-eu": 1}, auto=auto
+    )[0]
+    assert "--evict" in body
+    assert auto in body.splitlines()
+    for line in body.splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
 
 
@@ -1201,7 +1259,8 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name. Mutation:
     # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
     # empty. Mutation: dropping `SHIPMATE_COMMAND_HINTS` or `SHIPMATE_IS_DRAFT` -- the command
-    # section never shows, or shows on a draft.
+    # section never shows, or shows on a draft. Mutation: dropping `SHIPMATE_AUTO_ENVS_TABLE` --
+    # the comment never says why no auto apply follows.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -1209,13 +1268,14 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
         "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
         "SHIPMATE_COMMAND_HINTS": "${{ inputs.command-hints }}",
+        "SHIPMATE_AUTO_ENVS_TABLE": "${{ inputs.auto-envs }}",
         "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
         "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
         "SHIPMATE_LOCKS": "${{ steps.marks.outputs.locks }}",
     }
-    # Mutation: `required: true` on any of the five (GitHub does not enforce it, but it
+    # Mutation: `required: true` on any of the six (GitHub does not enforce it, but it
     # misdocuments a draft run).
     for name in (
         "unmanaged-stacks",
@@ -1223,6 +1283,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "planned-cell-names",
         "env-order",
         "command-hints",
+        "auto-envs",
     ):
         decl = load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {
@@ -1894,4 +1955,174 @@ def test_a_failed_marks_read_warns_and_the_step_passes(tmp_path):
         0,
         "::warning::could not read the cell locks; the plan comment marks no locked cell\n",
         "::warning::lock read failed\n",
+    )
+
+
+#: `auto_line`'s run facts for an autoplan's first attempt started by a push.
+_AUTOPLAN = {
+    "event": "pull_request_target",
+    "action": "synchronize",
+    "attempt": "1",
+    "is_draft": "false",
+}
+_REMEDY = "push a commit, or comment `shipmate apply`."
+
+
+def _auto(reason):
+    return f"⚪ auto apply not started: {reason}; {_REMEDY}"
+
+
+_AUTO_CELLS = [(_cell(environment="dev"), "  + one"), (_cell(changed=False, stack="b"), None)]
+
+
+@pytest.mark.parametrize(
+    ("action", "line"),
+    [
+        (
+            "ready_for_review",
+            _auto("this plan was started by marking the pull request ready, not by a push"),
+        ),
+        ("reopened", _auto("this plan was started by reopening the pull request, not by a push")),
+        ("", _auto("this plan's event could not be read")),
+        ("edited", _auto("this plan was started by the `edited` event, not by a push")),
+    ],
+    ids=["ready", "reopened", "unreadable", "other"],
+)
+def test_an_autoplan_not_started_by_a_push_says_why_no_auto_apply_follows(action, line):
+    """Mutation: swap the `ready_for_review` and `reopened` reasons in auto-dispatch -- red."""
+    cells = [c for c, _ in _AUTO_CELLS]
+    assert sc.auto_line(cells, ["dev"], **_AUTOPLAN | {"action": action}) == line
+
+
+def test_the_auto_line_sits_under_the_verdict():
+    """Mutation: drop the `PUSH_ACTIONS` check from `trigger_reason` -- no line, red."""
+    auto = sc.auto_line(
+        [c for c, _ in _AUTO_CELLS], ["dev"], **_AUTOPLAN | {"action": "ready_for_review"}
+    )
+    assert sc.build_comment(_AUTO_CELLS, CHECKS, RUN_URL, SHA, auto=auto)[0] == (
+        HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
+        "⚪ auto apply not started: this plan was started by marking the pull request ready, not "
+        f"by a push; {_REMEDY}\n\n"
+        "#### dev: 1 cell, 1 changed\n\n"
+        f"<details><summary>{_bare_app(RUN_URL)}</summary>\n\n```diff\n+   one\n```\n"
+        "</details>\n\n"
+        "#### dev-eu: 1 cell, 0 changed\n\n"
+        '🟢 b: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+@pytest.mark.parametrize(
+    "facts",
+    [
+        pytest.param({"event": "workflow_dispatch", "action": ""}, id="on-demand"),
+        pytest.param({"event": "pull_request", "action": "ready_for_review"}, id="pull-request"),
+        pytest.param(
+            {"event": "workflow_dispatch", "action": "", "is_draft": "true"}, id="on-demand-draft"
+        ),
+    ],
+)
+def test_a_run_that_is_not_an_autoplan_says_nothing_about_an_auto_apply(facts):
+    """An on-demand plan may run while an auto apply of the head is applying, and a
+    `pull_request` consumer's push would get a remedy that never works. Mutation: drop the event
+    condition from `auto_line` -- red."""
+    cells = [c for c, _ in _AUTO_CELLS]
+    assert sc.auto_line(cells, ["dev"], **_AUTOPLAN | facts) == ""
+
+
+def test_an_autoplan_of_a_draft_says_nothing_about_an_auto_apply():
+    """Mutation: drop the draft condition from `auto_line` -- the draft reason renders, red."""
+    cells = [c for c, _ in _AUTO_CELLS]
+    assert sc.auto_line(cells, ["dev"], **_AUTOPLAN | {"is_draft": "true"}) == ""
+
+
+def test_a_re_run_says_nothing_about_an_auto_apply():
+    """The comment cannot know whether attempt 1 dispatched. Mutation: drop the attempt condition
+    from `auto_line` -- the ready reason renders, red."""
+    cells = [c for c, _ in _AUTO_CELLS]
+    facts = _AUTOPLAN | {"action": "ready_for_review", "attempt": "2"}
+    assert sc.auto_line(cells, ["dev"], **facts) == ""
+
+
+def test_a_push_started_autoplan_says_nothing_about_an_auto_apply():
+    """It dispatches. Mutation: `trigger_reason` returns a reason in place of None -- red."""
+    assert sc.auto_line([c for c, _ in _AUTO_CELLS], ["dev"], **_AUTOPLAN) == ""
+
+
+@pytest.mark.parametrize(
+    "cells",
+    [
+        pytest.param([_cell(environment="prod")], id="changed-only-elsewhere"),
+        pytest.param(
+            [_cell(environment="dev", changed=False), _cell(environment="prod")],
+            id="unchanged-auto-cell",
+        ),
+    ],
+)
+def test_no_changed_cell_of_an_auto_environment_says_nothing(cells):
+    """Mutations: render for any changed cell (`any(c["changed"] for c in cells)`) -- the first
+    row renders; drop `if c["changed"]` from `changed_auto_envs` -- the second row renders."""
+    facts = _AUTOPLAN | {"action": "ready_for_review"}
+    assert sc.auto_line(cells, ["dev"], **facts) == ""
+
+
+def test_the_auto_line_stays_in_a_body_over_the_size_budget():
+    """The line is an outcome, not a hint: it is counted in the head, never dropped with the
+    command section. Mutation: append it after the cells only when the body stays within
+    SIZE_BUDGET, as the command section is -- red."""
+    cells = [(_cell(environment="dev"), None)]
+    cells += [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(135)]
+    auto = sc.auto_line(
+        [c for c, _ in cells], ["dev"], **_AUTOPLAN | {"action": "ready_for_review"}
+    )
+    body = sc.build_comment(cells, {}, RUN_URL, SHA, auto=auto)[0]
+    assert len(body) > sc.SIZE_BUDGET
+    assert body.split("\n\n")[2] == auto
+
+
+def test_main_says_why_no_auto_apply_follows(tmp_path, monkeypatch):
+    """Mutations: drop the `SHIPMATE_AUTO_ENVS_TABLE` read from `main`; pass `GITHUB_EVENT_NAME`
+    as the action -- no line, red."""
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
+    (tmp_path / "run").mkdir()
+    for name, value in {
+        "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(payload),
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHIPMATE_IS_DRAFT": "false",
+        "SHIPMATE_AUTO_ENVS_TABLE": '["dev-eu"]',
+    }.items():
+        monkeypatch.setenv(name, value)
+    _run_main(tmp_path / "run", monkeypatch, [_cell()])
+    assert (tmp_path / "run" / "comment.md").read_text(encoding="utf-8") == (
+        _UNMARKED_LOCK_BODY.replace(
+            f"{MAIN_AT}\n\n",
+            f"{MAIN_AT}\n\n⚪ auto apply not started: this plan was started by marking the pull "
+            f"request ready, not by a push; {_REMEDY}\n\n",
+        )
+    )
+
+
+@pytest.mark.parametrize("raw", ["not json", '{"dev-eu": 1}', '["dev-eu", 1]'])
+def test_main_warns_once_and_says_nothing_for_a_malformed_auto_set(
+    tmp_path, monkeypatch, capsys, raw
+):
+    """Mutation: drop the warning -- red; accept any JSON list (`["dev-eu", 1]` renders the
+    line) -- red."""
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
+    (tmp_path / "run").mkdir()
+    for name, value in {
+        "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(payload),
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHIPMATE_IS_DRAFT": "false",
+        "SHIPMATE_AUTO_ENVS_TABLE": raw,
+    }.items():
+        monkeypatch.setenv(name, value)
+    _run_main(tmp_path / "run", monkeypatch, [_cell()])
+    assert (tmp_path / "run" / "comment.md").read_text(encoding="utf-8") == _UNMARKED_LOCK_BODY
+    assert capsys.readouterr().out == (
+        "::warning::auto-envs is not a JSON list of environment names; the plan comment says "
+        "nothing about an auto apply\n"
     )

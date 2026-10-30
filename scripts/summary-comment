@@ -29,8 +29,13 @@ unless `command_hints` is on, and shows only where the reader has something to d
 refusal or a failure, under an apply or doctor verdict that is not 🟢. A plan comment carries it
 only when the gate is held.
 With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
-that is not a draft ends with the `COMMANDS` section, when the body has room for it under
-SIZE_BUDGET; it never shrinks a cell.
+that is not a draft ends with the `commands` section, when the body has room for it under
+SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply` and `shipmate help`, and
+`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked.
+
+An autoplan's first attempt that changed a cell of an `apply_mode: auto` environment but was not
+started by a push says so in a line under the verdict (`auto_line`), whatever `command_hints` is:
+auto-dispatch's `trigger_reason` and its remedy.
 """
 
 import glob
@@ -49,11 +54,13 @@ from _shipmate import (
     cell_summaries,
     command_data,
     current_run_url,
+    event_action,
     is_head_sha,
     run_annotated,
     write_outputs,
 )
 
+ad = _load("auto-dispatch")
 ag = _load("apply-gate")
 
 MARKER = "<!-- shipmate:summary -->"
@@ -61,13 +68,6 @@ MARKER = "<!-- shipmate:summary -->"
 # would make the comment a command. It names no doctor output, so no comment carrying it gains a
 # coupling to doctor; the module docstring says where the hint shows.
 FOOTER_HINT = "Comment `shipmate help` for the available commands."
-#: Hand-written once. No line starts with `shipmate`, so the section is not itself a command.
-COMMANDS = (
-    "<details><summary>shipmate commands</summary>\n\n"
-    "Comment `shipmate apply` to apply this plan.\n\n"
-    "Comment `shipmate help` for every command.\n\n"
-    "</details>"
-)
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
@@ -315,14 +315,54 @@ def lock_who(holder):
     return f"#{holder}" if holder is not None else "an unreadable lock"
 
 
+def _lock_key(cell, locks):
+    """`cell`'s `<stack> / <env>` key in `locks` when it is changed and another pull request
+    holds it, else None."""
+    key = f"{cell['stack']} / {cell['environment']}"
+    return key if cell["changed"] and key in locks else None
+
+
 def _plan_line(cell, url, locks):
     """A cell's bare line; a changed cell another pull request holds ends with `🔒 locked by`
     and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys)."""
     line = cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
-    key = f"{cell['stack']} / {cell['environment']}"
-    if cell["changed"] and key in locks:
+    if key := _lock_key(cell, locks):
         line += f" 🔒 locked by {lock_who(locks[key])}"
     return line
+
+
+def commands(locked):
+    """The folded command section: `shipmate apply`, then per environment of `locked`, sorted,
+    its `shipmate unlock <env> --evict`, then `shipmate help`. No line starts with `shipmate`, so
+    the section is not itself a command."""
+    evict = "".join(
+        f"Comment `shipmate unlock {_md_escape(e)} --evict` to take a cell another pull request "
+        "holds.\n\n"
+        for e in sorted(locked)
+    )
+    return (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply` to apply this plan.\n\n"
+        f"{evict}"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
+
+
+AUTO_REMEDY = "push a commit, or comment `shipmate apply`."
+
+
+def auto_line(cells, auto, *, event, action, attempt, is_draft):
+    """`⚪ auto apply not started: <reason>; ` and `AUTO_REMEDY` when a changed cell of `cells` is
+    in `auto` and this run is an autoplan's first attempt on a pull request that is not a draft,
+    with `trigger_reason` naming why it dispatches nothing; else empty. Any other run renders
+    nothing: an on-demand plan or a re-run cannot tell from here whether an auto apply follows."""
+    if event != "pull_request_target" or attempt != "1" or is_draft == "true":
+        return ""
+    if not ad.changed_auto_envs(cells, auto):
+        return ""
+    reason = ad.trigger_reason(event=event, action=action, attempt=attempt, is_draft=is_draft)
+    return f"⚪ auto apply not started: {reason}; {AUTO_REMEDY}" if reason else ""
 
 
 def fold(line, body, limit, trailer, cut, lang="diff"):
@@ -505,26 +545,30 @@ def build_comment(
     order=(),
     hints=False,
     locks=None,
+    auto="",
 ):
-    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, `doctor_line` of
-    `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when
-    each count is not zero, then per environment in `by_env` order of `order` its `env_heading`
-    (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell with plan
-    text, else its bare line, which names no environment). No footer: the verdict links the
-    run, and neither plan verdict asks anything. With `hints`, a body with a changed cell ends
-    with `COMMANDS` when the whole body stays within SIZE_BUDGET, and leaves it out silently
-    otherwise, after every cell is sized, so it never shrinks one. `locks` (`lock_marks`) marks
-    the changed cells another pull request holds. Every cell is guaranteed its
-    bare line: the space all headings and remaining cells' bare lines need is reserved up
-    front, so an early giant plan cannot starve a later cell. Each of the three lines yields,
-    with a warning, when the headings and bare lines leave it no room under HARD_CAP. Returns
-    `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
+    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `auto_line` `auto`,
+    `doctor_line` of `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line
+    of `lost` when each count is not zero, then per environment in `by_env` order of `order` its
+    `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed
+    cell with plan text, else its bare line, which names no environment). No footer: the verdict
+    links the run, and neither plan verdict asks anything. With `hints`, a body with a changed
+    cell ends with `commands` when the whole body stays within SIZE_BUDGET, and leaves it out
+    silently otherwise, after every cell is sized, so it never shrinks one. `locks`
+    (`lock_marks`) marks the changed cells another pull request holds, and `commands` names their
+    environments. Every cell is guaranteed its bare line: the space all headings and remaining
+    cells' bare lines need is reserved up front, so an early giant plan cannot starve a later
+    cell. Each of the four lines yields, with a warning, when the headings and bare lines leave
+    it no room under HARD_CAP. Returns `(body, unmanaged_named, lost_named)`, each flag saying
+    whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
-    entries = _entries(cells, order, checks, run_url, locks or {})
+    locks = locks or {}
+    entries = _entries(cells, order, checks, run_url, locks)
     bares = [e[0] for e in entries]
     named = []
     for line, what in (
+        (auto, "auto apply not started"),
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
         (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
         (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),
@@ -551,8 +595,9 @@ def build_comment(
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
-    if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(COMMANDS) <= SIZE_BUDGET:
-        body = f"{body}\n\n{COMMANDS}"
+    section = commands({c["environment"] for c in meta if _lock_key(c, locks)})
+    if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
+        body = f"{body}\n\n{section}"
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
@@ -561,7 +606,7 @@ def build_comment(
             "::error::the plan comment's cell lines alone exceed the 65,536-char comment "
             "cap, shorten stack/env display names"
         )
-    return body, *named[1:]
+    return body, *named[2:]
 
 
 _STR_KEYS = ("stack", "environment")
@@ -780,6 +825,14 @@ def main():
     )
     # Reviewer-facing only: anything but doctor's count renders no line.
     warnings = os.environ.get("SHIPMATE_DOCTOR_WARNINGS", "")
+    raw = os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", "")
+    auto = ad.auto_set(raw) if raw else []
+    if auto is None:
+        print(
+            "::warning::auto-envs is not a JSON list of environment names; the plan comment "
+            "says nothing about an auto apply"
+        )
+        auto = []
     body, named, lost_named = build_comment(
         cells,
         checks,
@@ -793,6 +846,14 @@ def main():
         hints=os.environ.get("SHIPMATE_COMMAND_HINTS") == "true"
         and os.environ.get("SHIPMATE_IS_DRAFT") != "true",
         locks=lock_marks(os.environ.get("SHIPMATE_LOCKS", "")),
+        auto=auto_line(
+            [c for c, _ in cells],
+            auto,
+            event=os.environ.get("GITHUB_EVENT_NAME", ""),
+            action=event_action(),
+            attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+            is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
+        ),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
