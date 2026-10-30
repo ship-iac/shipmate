@@ -575,3 +575,20 @@ def test_post_flattens_a_multi_line_description(in_process, monkeypatch):
     monkeypatch.setattr(gs, "_run", lambda args: calls.append(args) or "{}")
     gs.post(SHA, "failure", "held:\nHTTP 503  twice")
     assert calls == [["gh", *_status_argv("failure", "held: HTTP 503 twice")]]
+
+
+def test_the_post_command_stops_when_a_newer_run_holds_before_its_retry(in_process, monkeypatch):
+    """The summary's `post` runs after `refuse-newer`; a newer run's hold can land while the write
+    retries. Mutation: map `post` to `post` with no `before_retry` -> the second POST lands."""
+    calls = _flaky_run(monkeypatch, [("failure", "1000")])
+    with pytest.raises(SystemExit) as exc:
+        gs.main(["post", SHA, "pending", "the reason"])
+    assert (exc.value.code, calls) == (gs.NEWER, [_POST, _READ, _READ])
+
+
+def test_the_post_command_writes_again_when_no_newer_run_holds(in_process, monkeypatch):
+    """An older run's hold is no newer hold. Mutation: map `post`'s `before_retry` to one that
+    exits `NEWER` on any `failure` gate -> no second POST."""
+    calls = _flaky_run(monkeypatch, [("failure", "1")])
+    gs.main(["post", SHA, "pending", "the reason"])
+    assert calls == [_POST, _READ, _READ, _POST]
