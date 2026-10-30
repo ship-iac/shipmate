@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- A transient `gh` failure (a 5xx, a dropped connection, a truncated body) of a `shipmate / gate` read or write or a check-run listing is retried twice, 2 and 5 seconds apart, each retry with a warning.
+- A transient `gh` failure (a 5xx, a dropped connection, a truncated body) of a `shipmate / gate` read or write or a check-run listing is retried twice, 2 and 5 seconds apart, each retry with a warning. Only a gate refresh re-checks for another run's hold before retrying its write.
 
 ## [0.53.0] — 2026-10-29
 

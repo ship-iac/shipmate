@@ -565,3 +565,13 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
         [_READ, green, _READ],
         (HELD, _RETRY_WARNING),
     )
+
+
+def test_post_flattens_a_multi_line_description(in_process, monkeypatch):
+    """Every line after the argv reads as gh's stderr to `is_transient`, so a description line
+    reading `HTTP 503` would retry a 4xx. Mutation: post `description[:140]` -> the argv keeps
+    the newline."""
+    calls = []
+    monkeypatch.setattr(gs, "_run", lambda args: calls.append(args) or "{}")
+    gs.post(SHA, "failure", "held:\nHTTP 503  twice")
+    assert calls == [["gh", *_status_argv("failure", "held: HTTP 503 twice")]]

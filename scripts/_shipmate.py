@@ -215,7 +215,8 @@ def retried(call, before_retry=None):
     """`call()`, called again after each `RETRY_DELAYS` sleep while it raises a transient
     `SystemExit` (`is_transient`), each retry warned (`warn_retry`). `before_retry`, when given,
     runs after each sleep and may raise to stop. Any other `SystemExit` re-raises at once; the
-    third transient one re-raises unchanged."""
+    third transient one re-raises unchanged. A write can land and still fail, so a retried write
+    can overwrite what another run wrote since; a caller that must not passes `before_retry`."""
     for delay in RETRY_DELAYS:
         try:
             return call()
