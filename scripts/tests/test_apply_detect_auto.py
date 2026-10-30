@@ -403,7 +403,7 @@ def test_changes_requested_holds_every_environment(tmp_path, monkeypatch):
     )
     assert json.loads(parsed["review_held_envs"]) == ["dev-eu", "prod"]
     assert _applied(parsed) == []
-    assert (parsed["provenance_run"], parsed["base_sha"]) == ("", "")
+    assert (parsed["provenance_run"], parsed["base_sha"], parsed["pusher"]) == ("", "", "")
     assert calls == [f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"]
     assert json.loads(parsed["held_cells"]) == []
 
@@ -434,6 +434,15 @@ def test_a_pusher_with_write_permission_applies(tmp_path, monkeypatch):
     parsed = _run_auto(tmp_path, monkeypatch, calls=calls)
     assert _applied(parsed) == [("stacks/app", "dev-eu")]
     assert "repos/o/r/collaborators/k3np/permission" in calls
+
+
+def test_the_pusher_output_is_the_admitted_autoplans_actor_not_this_runs(tmp_path, monkeypatch):
+    """This run's actor and triggering actor are the App's bot; the listed autoplan's actor,
+    the pusher the permission check admitted, is `k3np`.
+
+    Mutation: write `os.environ["GITHUB_ACTOR"]` as `pusher` -- red."""
+    parsed = _run_auto(tmp_path, monkeypatch, actor=BOT, triggering=BOT)
+    assert parsed["pusher"] == "k3np"
 
 
 def test_mergeability_null_on_every_read_refuses_after_the_bound(tmp_path, monkeypatch):

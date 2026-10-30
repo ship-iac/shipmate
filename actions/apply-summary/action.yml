@@ -72,6 +72,14 @@ inputs:
     description: "apply-detect's `env_order` output: JSON [env, ...] in apply order. The comment puts one heading per environment in this order, and any environment it does not name after them by name. Empty (detect refused) orders every environment by name; a value that is not a list of names does too, and warns."
     required: false
     default: ""
+  auto:
+    description: "'true' for an `apply_mode: auto` run: the comment says so under the verdict line, refused or not."
+    required: false
+    default: "false"
+  pusher:
+    description: "apply-detect's `pusher` output: the login the auto form admitted as the pusher, which the auto line names as the login that triggered the autoplan. Empty renders the line without it."
+    required: false
+    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
@@ -180,6 +188,8 @@ runs:
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
+        SHIPMATE_AUTO: ${{ inputs.auto }}
+        SHIPMATE_PUSHER: ${{ inputs.pusher }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}

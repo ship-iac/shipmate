@@ -150,6 +150,7 @@ jobs:
       held_cells: ${{ steps.d.outputs.held_cells }}
       env_order: ${{ steps.d.outputs.env_order }}
       provenance_run: ${{ steps.d.outputs.provenance_run }}
+      pusher: ${{ steps.d.outputs.pusher }}
       base_sha: ${{ steps.d.outputs.base_sha }}
       bare_envs: ${{ steps.d.outputs.bare_envs }}
       refusal: ${{ steps.d.outputs.refusal }}
@@ -331,6 +332,8 @@ jobs:
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
           env-order: ${{ needs.detect.outputs.env_order }}
+          auto: ${{ inputs.auto }}
+          pusher: ${{ needs.detect.outputs.pusher }}
           results: ${{ join(needs.*.result, ',') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

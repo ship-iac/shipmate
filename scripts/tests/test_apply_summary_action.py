@@ -142,6 +142,8 @@ _RENDER_ENV = {
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
     "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
+    "SHIPMATE_AUTO": "${{ inputs.auto }}",
+    "SHIPMATE_PUSHER": "${{ inputs.pusher }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
@@ -171,7 +173,10 @@ def test_render_step_env_block_matches_the_expected_mapping():
     never names the refusal -- red.
     Mutation: drop `SHIPMATE_SKIPPED_AFTER` from the render step, so a skipped line names no
     predecessor -- red.
-    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red."""
+    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red.
+    Mutation: drop `SHIPMATE_AUTO` from the render step, so an auto run's comment never says
+    so -- red.
+    Mutation: drop `SHIPMATE_PUSHER` from the render step -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -290,6 +295,8 @@ def test_declared_inputs_are_exactly_these():
         "detect-refusal",
         "lock-refusal",
         "env-order",
+        "auto",
+        "pusher",
         "results",
         "head-sha",
         "app-id",
@@ -427,6 +434,8 @@ _APPLY_SUMMARY_WITH = {
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "env-order": "${{ needs.detect.outputs.env_order }}",
+    "auto": "${{ inputs.auto }}",
+    "pusher": "${{ needs.detect.outputs.pusher }}",
     "results": "${{ join(needs.*.result, ',') }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
@@ -448,7 +457,9 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: drop `held-cells:` from the step's `with:` -- red.
     Mutation: drop `skipped-after:` from the step's `with:` -- red.
     Mutation: drop `bare-envs:` from the step's `with:` -- red.
-    Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red."""
+    Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
+    Mutation: drop `auto:` from the step's `with:` -- red.
+    Mutation: drop `pusher:` from the step's `with:` -- red."""
     steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
@@ -484,14 +495,18 @@ def test_the_lock_inputs_are_optional_with_empty_defaults():
     Mutation: set `lock-refusal` `required: true` -- red.
     Mutation: default `held-cells` to `""` -- red.
     Mutation: default `skipped-after` to `[]` -- red.
-    Mutation: default `bare-envs` to `""` -- red."""
+    Mutation: default `bare-envs` to `""` -- red.
+    Mutation: default `auto` to `"true"` -- red.
+    Mutation: set `pusher` `required: true` -- red."""
     inputs = action_yaml("apply-summary")["inputs"]
     assert {
         name: {k: v for k, v in inputs[name].items() if k != "description"}
-        for name in ("held-cells", "skipped-after", "bare-envs", "lock-refusal")
+        for name in ("held-cells", "skipped-after", "bare-envs", "lock-refusal", "auto", "pusher")
     } == {
         "held-cells": {"required": False, "default": "[]"},
         "skipped-after": {"required": False, "default": "{}"},
         "bare-envs": {"required": False, "default": "[]"},
         "lock-refusal": {"required": False, "default": ""},
+        "auto": {"required": False, "default": "false"},
+        "pusher": {"required": False, "default": ""},
     }

@@ -2134,6 +2134,67 @@ def test_an_empty_detect_refusal_leaves_the_failed_comment_unchanged(refusal):
     assert body == f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n" + HINT
 
 
+def test_an_auto_run_names_itself_and_its_autoplans_trigger_under_the_verdict():
+    """Mutation: drop the auto line from `build_comment` -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "", "success", head_sha=SHA, auto_dispatched=True, pusher="k3np"
+    )
+    assert body == (
+        f"### shipmate apply\n\n🟢 no pending applies {AT}\n\n"
+        "dispatched as an `apply_mode: auto` apply, after an autoplan triggered by @<!-- -->`k3np`"
+    )
+
+
+def test_an_auto_run_refused_at_detect_says_auto_without_a_login_above_the_fence():
+    """Detect refused before it wrote a login, so `pusher` is empty: the line still says
+    the run is an auto apply.
+
+    Mutation: render the line only when `pusher` is non-empty -- red."""
+    body = ac.build_comment(
+        [],
+        [],
+        RUN_URL,
+        [],
+        [],
+        "",
+        "success,success,failure",
+        head_sha=SHA,
+        refusal=_REFUSAL,
+        auto_dispatched=True,
+    )
+    assert body == (
+        f"### shipmate apply\n\n🔴 failed {AT}\n\n"
+        "dispatched as an `apply_mode: auto` apply\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )
+
+
+def test_a_run_that_is_not_auto_has_no_auto_line_even_with_a_pusher():
+    """Mutation: render the auto line whatever `auto_dispatched` is -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "", "success", head_sha=SHA, auto_dispatched=False, pusher="k3np"
+    )
+    assert body == f"### shipmate apply\n\n🟢 no pending applies {AT}"
+
+
+def test_main_renders_the_auto_line_from_the_render_step_env(monkeypatch, tmp_path):
+    """Mutation: read `SHIPMATE_AUTO` under another name in `main` -- no line, red.
+    Mutation: read `SHIPMATE_PUSHER` under another name in `main` -- no pusher, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
+    monkeypatch.setenv("SHIPMATE_AUTO", "true")
+    monkeypatch.setenv("SHIPMATE_PUSHER", "k3np")
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply\n\n🟢 no pending applies {_MAIN_AT}\n\n"
+        "dispatched as an `apply_mode: auto` apply, after an autoplan triggered by @<!-- -->`k3np`"
+    )
+
+
 def test_a_failed_cell_with_no_detect_refusal_renders_no_fence():
     """Detect succeeded and a cell failed: the rows carry the failure and no refusal block shows.
     Mutation: render the fence when `refusal` is empty -- an empty fence appears under the
