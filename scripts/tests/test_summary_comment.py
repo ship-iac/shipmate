@@ -368,7 +368,7 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     )
 
 
-#: The command section, hand-written: never `sc.COMMANDS`, which would pass whatever the
+#: The command section, hand-written: never `sc.commands(set())`, which would pass whatever the
 #: module says.
 COMMANDS = (
     "<details><summary>shipmate commands</summary>\n\n"
@@ -431,8 +431,8 @@ def test_the_command_section_never_shrinks_a_cut_plan():
     """A plan cut against SIZE_BUDGET keeps every character it has without hints, and the
     section yields to it.
 
-    Mutation: add `len(COMMANDS) + 2` to `reserve` when `hints` -- the plan is cut shorter and
-    the section shows, red."""
+    Mutation: add `len(commands(set())) + 2` to `reserve` when `hints` -- the plan is cut
+    shorter and the section shows, red."""
     cells = [(_cell(), "\n".join(f"  + r{i:04}{'x' * 20}" for i in range(3000)))]
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert "_Truncated, [full plan in the check run]" in without
@@ -664,7 +664,7 @@ def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     cp = load_script("comment-parse")
     cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b"), None)]
     auto = sc.auto_line(
-        [c for c, _ in cells], ["dev-eu"], **_AUTOPLAN | {"action": "ready_for_review"}
+        [c for c, _ in cells], ["dev-eu"], {}, **_AUTOPLAN | {"action": "ready_for_review"}
     )
     body = sc.build_comment(
         cells, {}, RUN_URL, SHA, hints=True, locks={"stacks/app / dev-eu": 1}, auto=auto
@@ -1547,7 +1547,8 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
 def test_the_held_body_carries_no_command_section(tmp_path, monkeypatch):
     """The held body already ends with its hint, and a held gate has nothing to apply.
 
-    Mutation: `_held_main` appending `COMMANDS` when `SHIPMATE_COMMAND_HINTS` is `true` -- red."""
+    Mutation: `_held_main` appending `commands(set())` when `SHIPMATE_COMMAND_HINTS` is `true`
+    -- red."""
     monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
     _held_main(tmp_path, monkeypatch, "held")
     assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
@@ -1958,13 +1959,8 @@ def test_a_failed_marks_read_warns_and_the_step_passes(tmp_path):
     )
 
 
-#: `auto_line`'s run facts for an autoplan's first attempt started by a push.
-_AUTOPLAN = {
-    "event": "pull_request_target",
-    "action": "synchronize",
-    "attempt": "1",
-    "is_draft": "false",
-}
+#: `auto_line`'s run facts for an autoplan started by a push.
+_AUTOPLAN = {"event": "pull_request_target", "action": "synchronize", "is_draft": "false"}
 _REMEDY = "push a commit, or comment `shipmate apply`."
 
 
@@ -1991,13 +1987,13 @@ _AUTO_CELLS = [(_cell(environment="dev"), "  + one"), (_cell(changed=False, stac
 def test_an_autoplan_not_started_by_a_push_says_why_no_auto_apply_follows(action, line):
     """Mutation: swap the `ready_for_review` and `reopened` reasons in auto-dispatch -- red."""
     cells = [c for c, _ in _AUTO_CELLS]
-    assert sc.auto_line(cells, ["dev"], **_AUTOPLAN | {"action": action}) == line
+    assert sc.auto_line(cells, ["dev"], {}, **_AUTOPLAN | {"action": action}) == line
 
 
 def test_the_auto_line_sits_under_the_verdict():
-    """Mutation: drop the `PUSH_ACTIONS` check from `trigger_reason` -- no line, red."""
+    """Mutation: `action_reason` returns None for every action -- no line, red."""
     auto = sc.auto_line(
-        [c for c, _ in _AUTO_CELLS], ["dev"], **_AUTOPLAN | {"action": "ready_for_review"}
+        [c for c, _ in _AUTO_CELLS], ["dev"], {}, **_AUTOPLAN | {"action": "ready_for_review"}
     )
     assert sc.build_comment(_AUTO_CELLS, CHECKS, RUN_URL, SHA, auto=auto)[0] == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
@@ -2026,26 +2022,20 @@ def test_a_run_that_is_not_an_autoplan_says_nothing_about_an_auto_apply(facts):
     `pull_request` consumer's push would get a remedy that never works. Mutation: drop the event
     condition from `auto_line` -- red."""
     cells = [c for c, _ in _AUTO_CELLS]
-    assert sc.auto_line(cells, ["dev"], **_AUTOPLAN | facts) == ""
+    assert sc.auto_line(cells, ["dev"], {}, **_AUTOPLAN | facts) == ""
 
 
 def test_an_autoplan_of_a_draft_says_nothing_about_an_auto_apply():
-    """Mutation: drop the draft condition from `auto_line` -- the draft reason renders, red."""
+    """An autoplan of a draft writes no comment, and marking it ready replans. Mutation: drop the
+    draft condition from `auto_line` -- the ready reason renders, red."""
     cells = [c for c, _ in _AUTO_CELLS]
-    assert sc.auto_line(cells, ["dev"], **_AUTOPLAN | {"is_draft": "true"}) == ""
-
-
-def test_a_re_run_says_nothing_about_an_auto_apply():
-    """The comment cannot know whether attempt 1 dispatched. Mutation: drop the attempt condition
-    from `auto_line` -- the ready reason renders, red."""
-    cells = [c for c, _ in _AUTO_CELLS]
-    facts = _AUTOPLAN | {"action": "ready_for_review", "attempt": "2"}
-    assert sc.auto_line(cells, ["dev"], **facts) == ""
+    facts = _AUTOPLAN | {"action": "ready_for_review", "is_draft": "true"}
+    assert sc.auto_line(cells, ["dev"], {}, **facts) == ""
 
 
 def test_a_push_started_autoplan_says_nothing_about_an_auto_apply():
-    """It dispatches. Mutation: `trigger_reason` returns a reason in place of None -- red."""
-    assert sc.auto_line([c for c, _ in _AUTO_CELLS], ["dev"], **_AUTOPLAN) == ""
+    """It dispatches. Mutation: `action_reason` returns a reason for a push action -- red."""
+    assert sc.auto_line([c for c, _ in _AUTO_CELLS], ["dev"], {}, **_AUTOPLAN) == ""
 
 
 @pytest.mark.parametrize(
@@ -2062,7 +2052,27 @@ def test_no_changed_cell_of_an_auto_environment_says_nothing(cells):
     """Mutations: render for any changed cell (`any(c["changed"] for c in cells)`) -- the first
     row renders; drop `if c["changed"]` from `changed_auto_envs` -- the second row renders."""
     facts = _AUTOPLAN | {"action": "ready_for_review"}
-    assert sc.auto_line(cells, ["dev"], **facts) == ""
+    assert sc.auto_line(cells, ["dev"], {}, **facts) == ""
+
+
+#: Two changed `dev` cells.
+_TWO_DEV = [_cell(environment="dev"), _cell(environment="dev", stack="stacks/db")]
+
+
+def test_an_auto_cell_another_pull_request_locks_says_nothing():
+    """A locked cell applies on no trigger. Mutation: keep every cell in `free` (drop the
+    `_lock_key` filter) -- red."""
+    locks = {"stacks/app / dev": 3, "stacks/db / dev": None}
+    facts = _AUTOPLAN | {"action": "ready_for_review"}
+    assert sc.auto_line(_TWO_DEV, ["dev"], locks, **facts) == ""
+
+
+def test_one_unlocked_auto_cell_keeps_the_line():
+    """Mutation: drop every cell from `free` when any is locked -- red."""
+    facts = _AUTOPLAN | {"action": "ready_for_review"}
+    assert sc.auto_line(_TWO_DEV, ["dev"], {"stacks/app / dev": 3}, **facts) == _auto(
+        "this plan was started by marking the pull request ready, not by a push"
+    )
 
 
 def test_the_auto_line_stays_in_a_body_over_the_size_budget():
@@ -2072,23 +2082,26 @@ def test_the_auto_line_stays_in_a_body_over_the_size_budget():
     cells = [(_cell(environment="dev"), None)]
     cells += [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(135)]
     auto = sc.auto_line(
-        [c for c, _ in cells], ["dev"], **_AUTOPLAN | {"action": "ready_for_review"}
+        [c for c, _ in cells], ["dev"], {}, **_AUTOPLAN | {"action": "ready_for_review"}
     )
     body = sc.build_comment(cells, {}, RUN_URL, SHA, auto=auto)[0]
     assert len(body) > sc.SIZE_BUDGET
     assert body.split("\n\n")[2] == auto
 
 
-def test_main_says_why_no_auto_apply_follows(tmp_path, monkeypatch):
-    """Mutations: drop the `SHIPMATE_AUTO_ENVS_TABLE` read from `main`; pass `GITHUB_EVENT_NAME`
-    as the action -- no line, red."""
+@pytest.mark.parametrize("attempt", ["1", "2"])
+def test_main_says_why_no_auto_apply_follows(tmp_path, monkeypatch, attempt):
+    """A run not started by a push dispatches on no attempt, so a re-run keeps the line.
+    Mutations: drop the `SHIPMATE_AUTO_ENVS_TABLE` read from `main`; pass `GITHUB_EVENT_NAME`
+    as the action -- no line, red. Mutation: restore the attempt guard (render only when
+    `GITHUB_RUN_ATTEMPT` is `1`) -- the attempt-2 row, red."""
     payload = tmp_path / "event.json"
     payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
     (tmp_path / "run").mkdir()
     for name, value in {
         "GITHUB_EVENT_NAME": "pull_request_target",
         "GITHUB_EVENT_PATH": str(payload),
-        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_RUN_ATTEMPT": attempt,
         "SHIPMATE_IS_DRAFT": "false",
         "SHIPMATE_AUTO_ENVS_TABLE": '["dev-eu"]',
     }.items():

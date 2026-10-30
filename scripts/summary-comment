@@ -33,9 +33,9 @@ that is not a draft ends with the `commands` section, when the body has room for
 SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply` and `shipmate help`, and
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked.
 
-An autoplan's first attempt that changed a cell of an `apply_mode: auto` environment but was not
-started by a push says so in a line under the verdict (`auto_line`), whatever `command_hints` is:
-auto-dispatch's `trigger_reason` and its remedy.
+An autoplan not started by a push that changed an unlocked cell of an `apply_mode: auto`
+environment says so in a line under the verdict (`auto_line`), whatever `command_hints` is:
+auto-dispatch's `action_reason` and its remedy.
 """
 
 import glob
@@ -336,8 +336,7 @@ def commands(locked):
     its `shipmate unlock <env> --evict`, then `shipmate help`. No line starts with `shipmate`, so
     the section is not itself a command."""
     evict = "".join(
-        f"Comment `shipmate unlock {_md_escape(e)} --evict` to take a cell another pull request "
-        "holds.\n\n"
+        f"Comment `shipmate unlock {e} --evict` to take a cell another pull request holds.\n\n"
         for e in sorted(locked)
     )
     return (
@@ -352,17 +351,19 @@ def commands(locked):
 AUTO_REMEDY = "push a commit, or comment `shipmate apply`."
 
 
-def auto_line(cells, auto, *, event, action, attempt, is_draft):
-    """`⚪ auto apply not started: <reason>; ` and `AUTO_REMEDY` when a changed cell of `cells` is
-    in `auto` and this run is an autoplan's first attempt on a pull request that is not a draft,
-    with `trigger_reason` naming why it dispatches nothing; else empty. Any other run renders
-    nothing: an on-demand plan or a re-run cannot tell from here whether an auto apply follows."""
-    if event != "pull_request_target" or attempt != "1" or is_draft == "true":
+def auto_line(cells, auto, locks, *, event, action, is_draft):
+    """`⚪ auto apply not started: <reason>; ` and `AUTO_REMEDY` when this run is an autoplan of a
+    pull request that is not a draft, its event action is not a push (`action_reason` names
+    why, the same on every attempt), and a changed cell of `cells` in `auto` is not locked by
+    another pull request (`locks`); else empty. A locked cell applies on no trigger, and an
+    on-demand plan cannot tell whether an auto apply of the head is running."""
+    if event != "pull_request_target" or is_draft == "true":
         return ""
-    if not ad.changed_auto_envs(cells, auto):
+    reason = ad.action_reason(action)
+    free = [c for c in cells if not _lock_key(c, locks)]
+    if not reason or not ad.changed_auto_envs(free, auto):
         return ""
-    reason = ad.trigger_reason(event=event, action=action, attempt=attempt, is_draft=is_draft)
-    return f"⚪ auto apply not started: {reason}; {AUTO_REMEDY}" if reason else ""
+    return f"⚪ auto apply not started: {reason}; {AUTO_REMEDY}"
 
 
 def fold(line, body, limit, trailer, cut, lang="diff"):
@@ -833,6 +834,7 @@ def main():
             "says nothing about an auto apply"
         )
         auto = []
+    locks = lock_marks(os.environ.get("SHIPMATE_LOCKS", ""))
     body, named, lost_named = build_comment(
         cells,
         checks,
@@ -845,13 +847,13 @@ def main():
         # `shipmate apply` refuses a draft, so an on-demand plan of one must not invite it.
         hints=os.environ.get("SHIPMATE_COMMAND_HINTS") == "true"
         and os.environ.get("SHIPMATE_IS_DRAFT") != "true",
-        locks=lock_marks(os.environ.get("SHIPMATE_LOCKS", "")),
+        locks=locks,
         auto=auto_line(
             [c for c, _ in cells],
             auto,
+            locks,
             event=os.environ.get("GITHUB_EVENT_NAME", ""),
             action=event_action(),
-            attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
             is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
         ),
     )

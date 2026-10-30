@@ -5,8 +5,9 @@ that call for one.
 Prints, space-separated on one line, the `apply_mode: auto` environments of the default branch's
 table that hold a changed cell among this run's cell summaries (`cells/`); prints nothing when
 any condition below fails, writing why to stderr. The summary dispatches `verb: auto` when the
-line is non-empty. The plan comment shows `trigger_reason`'s reason verbatim, so each one reads
-as a sentence to the pull request's reader. Conditions, all from the environment:
+line is non-empty. The plan comment shows `action_reason`'s reason verbatim, so each one reads
+as a sentence to the pull request's reader; the other reasons are log-only. Conditions, all
+from the environment:
 
 - `GITHUB_EVENT_NAME` is `pull_request_target`: only an autoplan dispatches.
 - the `action` of the event payload at `GITHUB_EVENT_PATH` is `opened` or `synchronize`: only
@@ -43,27 +44,26 @@ _ACTION_REASONS = {
 }
 
 
-def trigger_reason(*, event, action, attempt, is_draft):
-    """Why this run's event dispatches no `auto` apply, or None when it is an autoplan's first
-    attempt, started by a push, on a pull request that is not a draft."""
-    if event != "pull_request_target":
-        return "this run is not an autoplan"
-    if action not in ag.PUSH_ACTIONS:
-        return _ACTION_REASONS.get(
-            action, f"this plan was started by the `{action}` event, not by a push"
-        )
-    if attempt != "1":
-        return "this run is a re-run"
-    if is_draft == "true":
-        return "the pull request is a draft"
-    return None
+def action_reason(action):
+    """Why an autoplan started by the event action `action` dispatches no `auto` apply on any
+    attempt, or None for a push."""
+    if action in ag.PUSH_ACTIONS:
+        return None
+    return _ACTION_REASONS.get(
+        action, f"this plan was started by the `{action}` event, not by a push"
+    )
 
 
 def skip_reason(*, event, action, attempt, is_draft, state, mode):
     """Why this run dispatches no `auto` apply, or None when every condition holds."""
-    reason = trigger_reason(event=event, action=action, attempt=attempt, is_draft=is_draft)
-    if reason:
+    if event != "pull_request_target":
+        return f"a {event} run is not an autoplan"
+    if reason := action_reason(action):
         return reason
+    if attempt != "1":
+        return f"run attempt {attempt} is a re-run"
+    if is_draft == "true":
+        return "the pull request is a draft"
     if (state, mode) != ("pending", "post"):
         return f"the gate is not pending over a complete plan (state {state!r}, mode {mode!r})"
     return None

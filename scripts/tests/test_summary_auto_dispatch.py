@@ -52,7 +52,7 @@ SKIPS = {
     "on-demand plan": (
         ("workflow_dispatch", "", "1", ""),
         {},
-        "this run is not an autoplan",
+        "a workflow_dispatch run is not an autoplan",
     ),
     "ready for review": (
         ("pull_request_target", "ready_for_review", "1", ""),
@@ -77,7 +77,7 @@ SKIPS = {
     "re-run": (
         ("pull_request_target", "synchronize", "2", ""),
         {},
-        "this run is a re-run",
+        "run attempt 2 is a re-run",
     ),
     "draft": (
         ("pull_request_target", "synchronize", "1", "true"),
@@ -119,9 +119,9 @@ SKIPS = {
 
 @pytest.mark.parametrize("name", list(SKIPS))
 def test_each_failed_condition_dispatches_nothing(name):
-    """The reasons are compared whole: the plan comment shows them verbatim.
+    """The reasons are compared whole: the plan comment shows the action reasons verbatim.
 
-    Mutations: delete any one `if` of `trigger_reason` or `skip_reason` (its row reddens); compare
+    Mutations: delete any one `if` of `action_reason` or `skip_reason` (its row reddens); compare
     only `state` with `pending` (the draft-gate row reddens: a draft autoplan's gate is pending
     too); admit `reopened` (its row reddens); swap the `ready_for_review` and `reopened` reasons
     (both rows redden)."""

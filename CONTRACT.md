@@ -1929,12 +1929,16 @@ started: the dispatch failed; comment `shipmate apply` ``. A run that cannot
 decide (`detect`'s `auto_envs` output missing or malformed, a cell summary
 unparseable) warns and posts no reply. Neither changes the gate.
 
-When an autoplan's first attempt on a pull request that is not a draft changes a
-cell of an `auto` environment but a push did not start it, its plan comment says
-why no `auto` apply follows, under the verdict: ``⚪ auto apply not started:
-<reason>; push a commit, or comment `shipmate apply`.``, whatever
-`command_hints` is. A re-run and a `shipmate plan` run carry no such line: the
-comment cannot tell whether an earlier attempt dispatched.
+When an autoplan of a pull request that is not a draft changes a cell of an
+`auto` environment that no other pull request locks, but a push did not start
+it, its plan comment says why no `auto` apply follows, under the verdict:
+``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate
+apply`.``, whatever `command_hints` is. A re-run of such an autoplan keeps the
+line: no attempt of it dispatches. A `shipmate plan` run carries no such line: it
+cannot tell whether an `auto` apply of the head is running. Known limit: an
+autoplan started by converting the pull request to a draft and back, or by
+closing and reopening it, on the same head while an earlier `auto` apply of it
+runs shows the line although that apply is running.
 
 **What an `auto` run applies.** It passes `apply.yml`'s `guard` and `review`
 jobs as any apply dispatch does (§Comment-ops), then `detect` runs the bare form
