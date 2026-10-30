@@ -106,6 +106,7 @@ _APPLY_DETECT_OUTPUTS = {
     "held_cells": "${{ steps.d.outputs.held_cells }}",
     "env_order": "${{ steps.d.outputs.env_order }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
+    "pusher": "${{ steps.d.outputs.pusher }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
     "bare_envs": "${{ steps.d.outputs.bare_envs }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
@@ -221,7 +222,7 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
     orders environments by name; delete `held_cells`; delete `provenance_run`; delete
-    `base_sha`; delete `skipped_after`; delete `bare_envs`."""
+    `base_sha`; delete `skipped_after`; delete `bare_envs`; delete `pusher`."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -356,6 +357,14 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.provenance_run }}",
     },
+    "pusher": {
+        "description": (
+            "Auto form only: the login of that autoplan run's `actor`, after the pusher check "
+            "admits it; empty when no cell applies. Read by the apply result comment to name the "
+            "pusher."
+        ),
+        "value": "${{ steps.d.outputs.pusher }}",
+    },
     "base_sha": {
         "description": (
             "Auto form only: the tip of the pull request's base branch, read from its ref after "
@@ -390,5 +399,6 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     output; restore `skipped_envs`' description without the lock cause; delete its
     `provenance_run` output; delete its `base_sha` output; drop the overlap cause from
     `held_cells`' description; restore `skipped_envs`' description without the overlap cause;
-    delete its `skipped_after` output; delete its `bare_envs` output."""
+    delete its `skipped_after` output; delete its `bare_envs` output; delete its `pusher`
+    output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

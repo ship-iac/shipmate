@@ -429,8 +429,7 @@ def test_the_short_form_of_an_empty_queue_keeps_the_targeted_and_skipped_lines()
     lines are the only sign of it.
 
     Mutation: render the footer lines only when there are rows -- red.
-    Mutation: restore an `auto=False` parameter and `left = [...] if auto else ()` -- 🟢 no
-    pending applies, red."""
+    Mutation: `left = [...] if auto else ()` -- 🟢 no pending applies, red."""
     body = ac.build_comment(
         [], [], RUN_URL, ["prod"], ["staging"], "", "success,skipped", head_sha=SHA
     )
@@ -2134,6 +2133,67 @@ def test_an_empty_detect_refusal_leaves_the_failed_comment_unchanged(refusal):
     assert body == f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n" + HINT
 
 
+def test_an_auto_run_names_itself_and_its_pusher_under_the_verdict():
+    """Mutation: drop the auto line from `build_comment` -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "", "success", head_sha=SHA, auto=True, pusher="k3np"
+    )
+    assert body == (
+        f"### shipmate apply\n\n🟢 no pending applies {AT}\n\n"
+        "dispatched as an `apply_mode: auto` apply, pushed by @<!-- -->`k3np`"
+    )
+
+
+def test_an_auto_run_refused_at_detect_says_auto_without_a_pusher_above_the_fence():
+    """Detect refused before it admitted a pusher, so `pusher` is empty: the line still says
+    the run is an auto apply.
+
+    Mutation: render the line only when `pusher` is non-empty -- red."""
+    body = ac.build_comment(
+        [],
+        [],
+        RUN_URL,
+        [],
+        [],
+        "",
+        "success,success,failure",
+        head_sha=SHA,
+        refusal=_REFUSAL,
+        auto=True,
+    )
+    assert body == (
+        f"### shipmate apply\n\n🔴 failed {AT}\n\n"
+        "dispatched as an `apply_mode: auto` apply\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )
+
+
+def test_a_run_that_is_not_auto_has_no_auto_line_even_with_a_pusher():
+    """Mutation: render the auto line whatever `auto` is -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "", "success", head_sha=SHA, auto=False, pusher="k3np"
+    )
+    assert body == f"### shipmate apply\n\n🟢 no pending applies {AT}"
+
+
+def test_main_renders_the_auto_line_from_the_render_step_env(monkeypatch, tmp_path):
+    """Mutation: read `SHIPMATE_AUTO` under another name in `main` -- no line, red.
+    Mutation: read `SHIPMATE_PUSHER` under another name in `main` -- no pusher, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
+    monkeypatch.setenv("SHIPMATE_AUTO", "true")
+    monkeypatch.setenv("SHIPMATE_PUSHER", "k3np")
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply\n\n🟢 no pending applies {_MAIN_AT}\n\n"
+        "dispatched as an `apply_mode: auto` apply, pushed by @<!-- -->`k3np`"
+    )
+
+
 def test_a_failed_cell_with_no_detect_refusal_renders_no_fence():
     """Detect succeeded and a cell failed: the rows carry the failure and no refusal block shows.
     Mutation: render the fence when `refusal` is empty -- an empty fence appears under the
@@ -2676,8 +2736,7 @@ def test_a_bare_run_whose_only_pending_work_is_a_targeted_env_is_not_green():
     targeted`.
 
     Mutation: drop `*excluded` from `left` -- 🟢 no pending applies, red.
-    Mutation: restore an `auto=False` parameter and `left = [...] if auto else ()` -- 🟢 no
-    pending applies, red."""
+    Mutation: `left = [...] if auto else ()` -- 🟢 no pending applies, red."""
     body = ac.build_comment([], [], RUN_URL, ["prod"], [], "", "success", head_sha=SHA)
     assert body == (
         "### shipmate apply\n\n⚪ nothing applied, the pending environments wait on the lines "

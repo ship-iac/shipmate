@@ -2078,7 +2078,9 @@ does, under `### shipmate apply`, also when it applies nothing: its verdict and
 lines name why, and a run that applied nothing and left a pending environment
 for a bare apply, a `targeted` one or a skipped one is never `🟢` (§Apply result
 comment). A
-`detect` refusal shows in the comment's error fence.
+`detect` refusal shows in the comment's error fence. Under the verdict line, the
+comment says ``dispatched as an `apply_mode: auto` apply`` and, when `detect`
+admitted the pusher, adds ``, pushed by @<login>``.
 
 **Permissions.** The consumer's `auto` and `apply` jobs grant
 `pull-requests: read`: `detect` and the wave pre-apply check read the pull
@@ -2885,11 +2887,12 @@ turned draft since the comment) posts no comment and writes no gate: the red run
 is the signal. The started-run reply may link it (§Comment-ops says when).
 
 Structure, in order, blank lines between the parts, each part present only when
-it has content: the header, the verdict line, the error fence, one line
+it has content: the header, the verdict line, an `auto` run's line
+(§`apply_mode: auto`), the error fence, one line
 or fold-out per row, the notes, the footer lines, and, under any verdict but 🟢,
 the help hint ``Comment `shipmate help` for the available commands.`` A 🟢
 comment has no footer. A run with no rows to render is the header, the verdict
-line, the error fence, the footer lines and, under any verdict but 🟢,
+line, an `auto` run's line, the error fence, the footer lines and, under any verdict but 🟢,
 the hint. The error fence shows when `detect` or the `lock` job failed with an
 `::error::` (a refusal or a failed tool or API call): its first error on one
 line, in a plain code fence, cut at 4,000 characters and fenced longer than any

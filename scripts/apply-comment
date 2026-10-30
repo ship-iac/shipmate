@@ -867,6 +867,12 @@ def _compact(head, rows, urls, notes, parts, hint):
     return "\n\n".join(p for p in (head, "\n".join(lines), _tail(notes, parts, hint)) if p)
 
 
+def _auto_line(pusher):
+    """The line under an `auto` run's verdict, naming `pusher` when it is non-empty."""
+    by = f", pushed by @<!-- -->`{pusher}`" if pusher else ""
+    return f"dispatched as an `apply_mode: auto` apply{by}"
+
+
 def build_comment(
     rows,
     jobs,
@@ -883,6 +889,9 @@ def build_comment(
     held_cells=(),
     skipped_after=None,
     bare=(),
+    *,
+    auto=False,
+    pusher="",
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
     order of `order` its `sc.env_heading` (`1 cell, ` or `N cells, `, then the verdict's
@@ -891,8 +900,9 @@ def build_comment(
     environment), the notes, the footer lines,
     and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it is header,
     verdict, footer lines and footer. A non-empty `refusal`, the first error of the `::error::`
-    that failed detect or the lock job on one line, sits in `sc.reason_fence` directly under the
-    verdict. `held_cells` is detect's: the verdict counts each cause, a cell under both once
+    that failed detect or the lock job on one line, sits in `sc.reason_fence` under the
+    verdict. An `auto` run puts `_auto_line(pusher)` directly under the verdict, above any
+    fence. `held_cells` is detect's: the verdict counts each cause, a cell under both once
     under `locked`, the footer lines name each locked cell's holder, and a footer line names
     the auto form's overlap cells. `skipped_after`
     and `bare` are detect's: the skipped lines name each predecessor, and a line names each
@@ -907,9 +917,9 @@ def build_comment(
     failed = _results_failed(results_csv)
     left = [*bare, *excluded, *skipped]
     circle, verdict = _verdict(rows, failed, held, head_sha, run_url, waiting, held_cells, left)
-    head = f"{sc.header('apply', env_name)}\n\n{verdict}"
-    if refusal:
-        head = f"{head}\n\n{sc.reason_fence(refusal)}"
+    fence = refusal and sc.reason_fence(refusal)
+    auto_line = auto and _auto_line(pusher)
+    head = "\n\n".join(p for p in (sc.header("apply", env_name), verdict, auto_line, fence) if p)
     hint = sc.footer_hint(circle)
     notes = (
         _lock_note(rows, env_name),
@@ -993,6 +1003,8 @@ def main():
         json.loads(os.environ.get("SHIPMATE_HELD_CELLS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_SKIPPED_AFTER") or "{}"),
         json.loads(os.environ.get("SHIPMATE_BARE_ENVS") or "[]"),
+        auto=os.environ.get("SHIPMATE_AUTO") == "true",
+        pusher=os.environ.get("SHIPMATE_PUSHER", ""),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

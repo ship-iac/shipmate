@@ -604,7 +604,8 @@ def bare_main(auto=False):
     records must name one plan run that `apply-gate.provenance_reason` admits against the
     head's newest autoplan listed (`refuse_provenance`), and that listed run's pusher must have
     write access (`refuse_pusher`). Writes the bare outputs plus
-    `provenance_run`, empty when no cell applies, `base_sha`, the base tip overlap was computed
+    `provenance_run` and `pusher`, that run's `actor` login, both empty when no cell applies,
+    `base_sha`, the base tip overlap was computed
     on, empty when no pull request read was needed, and `bare_envs`, the
     pending environments neither `auto`, `targeted` nor held, left for a bare apply.
     """
@@ -673,13 +674,16 @@ def bare_main(auto=False):
     bm.refuse_workload_gaps(runnable, table)
     auto_outputs = {}
     if auto:
-        provenance_run = ""
+        provenance_run = pusher = ""
         if runnable:
             actions = ag.plan_actions(lines, app_id)
-            refuse_pusher(repo, refuse_provenance(repo, head, runnable, actions))
+            newest = refuse_provenance(repo, head, runnable, actions)
+            refuse_pusher(repo, newest)
             provenance_run = runnable[0]["plan_run_id"]
+            pusher = newest["actor"]["login"]
         auto_outputs = {
             "provenance_run": provenance_run,
+            "pusher": pusher,
             "base_sha": base_sha,
             "bare_envs": json.dumps(sorted(unselected)),
         }
