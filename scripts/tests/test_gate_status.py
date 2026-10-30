@@ -584,3 +584,11 @@ def test_the_post_command_stops_when_a_newer_run_holds_before_its_retry(in_proce
     with pytest.raises(SystemExit) as exc:
         gs.main(["post", SHA, "pending", "the reason"])
     assert (exc.value.code, calls) == (gs.NEWER, [_POST, _READ, _READ])
+
+
+def test_the_post_command_writes_again_when_no_newer_run_holds(in_process, monkeypatch):
+    """An older run's hold is no newer hold. Mutation: map `post`'s `before_retry` to one that
+    exits `NEWER` on any `failure` gate -> no second POST."""
+    calls = _flaky_run(monkeypatch, [("failure", "1")])
+    gs.main(["post", SHA, "pending", "the reason"])
+    assert calls == [_POST, _READ, _READ, _POST]

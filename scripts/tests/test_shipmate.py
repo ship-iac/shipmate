@@ -312,7 +312,7 @@ def _failing(*messages):
     return calls, call
 
 
-#: Go's net/http message for a connection the server closed mid-response.
+#: Not captured: Go's `url.Error` form (`<Op> "<URL>": <Err>`) for a connection closed mid-response.
 _EOF = (
     '::error::command failed (1): gh api x\nGet "https://api.github.com/repos/o/r/statuses/x": EOF'
 )
@@ -615,3 +615,27 @@ def test_event_action_reads_the_payloads_action_or_empty(tmp_path, monkeypatch, 
         path.write_text(body, encoding="utf-8")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(path))
     assert event_action() == action
+
+
+@pytest.mark.parametrize(
+    ("stderr", "transient"),
+    [
+        ('Get "https://api.github.com/x": EOF', True),
+        (
+            'Get "https://api.github.com/x": net/http: request canceled (Client.Timeout exceeded)',
+            True,
+        ),
+        ('Post "https://api.github.com/x": context deadline exceeded', True),
+        (
+            'Get "https://api.github.com/x": http2: server sent GOAWAY and closed the connection',
+            True,
+        ),
+        ("gh: parse error: EOF marker missing (HTTP 422)", False),
+    ],
+    ids=["eof", "client-timeout", "deadline", "goaway", "eof-mid-line"],
+)
+def test_the_go_transport_errors_are_transient(stderr, transient):
+    """Mutations, each run: drop one of `: EOF$`, `Client.Timeout exceeded`, `context deadline
+    exceeded`, `GOAWAY` -> its row; drop the `$` anchor -> `eof-mid-line`."""
+    exc = SystemExit(f"::error::command failed (1): gh api x\n{stderr}")
+    assert _shipmate.is_transient(exc) is transient

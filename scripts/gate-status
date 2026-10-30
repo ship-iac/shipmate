@@ -19,7 +19,8 @@ except in `checks`. A call that fails transiently retries twice, each retry warn
 `refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
 its write retries: each caller decides whether a hold fails its step. `refuse-newer` prints its
 refusal as an `::error::` line and exits `NEWER`, so a caller tells a newer run from a failed
-read (exit 1). `checks` serves `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends
+read (exit 1); `post` re-runs it before each retry, so it can exit `NEWER` too. `checks`
+serves `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends
 on any host, and a malformed `<sha>` or a failed listing exits 1 unannotated: a caller that
 degrades prints the only annotation as a warning, and a fail-closed caller prints its own
 `::error::`.

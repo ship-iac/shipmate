@@ -103,8 +103,8 @@ inputs:
       build-matrix's `auto_envs` output: JSON [env, ...], the default branch table's
       `apply_mode: auto` environments. The auto apply decision reads it, and the plan comment
       says why no auto apply follows an autoplan that changed a cell of one. Empty (detect
-      skipped or refused) renders no line; the dispatch decision then stops at its draft or gate
-      condition first, and warns only when it reaches the value. A value that is not a list of
+      skipped or refused) renders no line; the dispatch decision then stops at an earlier
+      condition, and warns only when it reaches the value. A value that is not a list of
       names renders none and warns.
     required: false
     default: ""
