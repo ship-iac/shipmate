@@ -2082,7 +2082,7 @@ comment). A
 comment says ``dispatched as an `apply_mode: auto` apply``. When `detect` wrote
 the login that triggered the listed autoplan (the opener for `opened`, the
 pusher for `synchronize`), the line goes on
-``, after an autoplan triggered by @<!-- -->`<login>` ``: the login sits in a
+`` , after an autoplan triggered by @<!-- -->`<login>` ``: the login sits in a
 code span after `@<!-- -->`, so it mentions nobody. `detect` writes the login
 only when it ends with a cell to apply, so a refusal anywhere in `detect`, the
 pusher check included, leaves it out.

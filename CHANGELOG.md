@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 - **The plan comment's `shipmate commands` section names ``shipmate unlock <env> --evict`` for each environment holding a changed cell it marks `🔒 locked by`**, beside `shipmate apply`, which applies nothing for a locked cell.
 - An `apply_mode: auto` apply's result comment says, under its verdict, that the run was dispatched as an auto apply, and names the pusher `detect` admitted.
 - An `apply_mode: auto` apply's result comment says, under its verdict, that the run was dispatched as an auto apply, and names the login that triggered its autoplan when `detect` admitted it.
+- An `apply_mode: auto` apply's result comment says, under its verdict, that the run was dispatched as an auto apply, and names the login that triggered its autoplan when `detect` admitted that login.
 
 ## [0.53.0] — 2026-10-29
 
