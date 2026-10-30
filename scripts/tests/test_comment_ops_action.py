@@ -1302,7 +1302,8 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
     holder fails too.
 
     Mutations: drop `SHIPMATE_GITHUB_VARS` from `Resolve gate configuration`'s `env:`, or from
-    `actions/summary`'s doctor step or its auto dispatch decision.
+    `actions/summary`'s doctor step; give it back to the auto dispatch decision, which reads
+    `detect`'s `auto_envs` instead of the table.
     """
     bound = {
         (action, s["name"]): s["env"]["SHIPMATE_GITHUB_VARS"]
@@ -1320,7 +1321,6 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
             "summary",
             "Doctor: settings-drift warnings (annotations only, never blocks)",
         ): "${{ inputs.github-vars }}",
-        ("summary", "Decide whether to dispatch an auto apply"): "${{ inputs.github-vars }}",
     }
 
 
