@@ -13,6 +13,7 @@ argv of every call it accepts.
 import json
 import os
 
+import _shipmate
 import pytest
 from _loader import SCRIPTS, bash_only, load_script, run_with_gate_gh
 
@@ -471,3 +472,106 @@ def test_a_multi_line_failure_prints_as_one_escaped_annotation(tmp_path):
         f"::error::command failed (1): gh {argv}%0Aunexpected gh call: {argv}\n",
         [STATUSES_ARGV],
     )
+
+
+_BAD_GATEWAY = "command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)"
+_RETRY_WARNING = "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+
+
+@pytest.fixture
+def in_process(monkeypatch):
+    """`gate-status` called in this process: its env set and every retry sleep recorded."""
+    for name in ("GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "GITHUB_RUN_ID"):
+        monkeypatch.setenv(name, ENV[name])
+    slept = []
+    monkeypatch.setattr(_shipmate, "_sleep", slept.append)
+    return slept
+
+
+def test_checks_keeps_a_retry_warning_off_its_stdout(in_process, monkeypatch, capsys):
+    """Stdout is the JSONL listing `apply-gate.parse_jsonl` reads, so a stray line fails it.
+    Mutation: write `warn_retry`'s line to stdout -> the warning leads the listing."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise SystemExit(_BAD_GATEWAY)
+        return "{}\n"
+
+    monkeypatch.setattr(gs, "run", run)
+    gs.main(["checks", SHA, ".check_runs[]"])
+    assert capsys.readouterr() == ("{}\n", _RETRY_WARNING)
+    assert (len(calls), in_process) == (2, [2])
+
+
+_POST = ["gh", *_status_argv("pending", "the reason")]
+_READ = ["gh", *STATUSES_ARGV]
+
+
+def _flaky_run(monkeypatch, statuses):
+    """`gs._run` failing the first call of each argv with a 502 and answering a statuses read
+    with the next of `statuses`, each a gate `(state, run id)`. Returns the calls."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if calls.count(args) == 1:
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        if args == _READ:
+            state, run_id = statuses.pop(0)
+            return _lines(_status("shipmate / gate", state, _run_url(run_id)))
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    return calls
+
+
+def test_post_retries_a_transient_failure(in_process, monkeypatch, capsys):
+    """Mutation: `_run(args)` without `retried` in `post` -> the 502 raises."""
+    calls = _flaky_run(monkeypatch, [])
+    gs.post(SHA, "pending", "the reason")
+    assert (calls, in_process, capsys.readouterr()) == ([_POST, _POST], [2], ("", _RETRY_WARNING))
+
+
+def test_gates_retries_a_transient_failure(in_process, monkeypatch):
+    """Mutation: `_run(args)` without `retried` in `_gates` -> the 502 raises."""
+    calls = _flaky_run(monkeypatch, [("failure", "42")])
+    assert (gs.newest_gate(SHA), calls, in_process) == (("failure", "42"), [_READ, _READ], [2])
+
+
+def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, monkeypatch, capsys):
+    """Read pending, the green POST 502s, the re-read finds a hold. Mutation: drop `refresh`'s
+    `before_retry` -> the second POST greens over the hold."""
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setattr(gs, "check_runs", lambda *_: DONE)
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _READ:
+            state = "pending" if len(calls) == 1 else "failure"
+            return _lines(_status("shipmate / gate", state, _run_url(42)))
+        if calls.count(args) == 1:
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    green = ["gh", *GREEN]
+    with pytest.raises(SystemExit) as exc:
+        gs.refresh(SHA)
+    assert (exc.value.code, calls, capsys.readouterr()) == (
+        gs.HELD,
+        [_READ, green, _READ],
+        (HELD, _RETRY_WARNING),
+    )
+
+
+def test_post_flattens_a_multi_line_description(in_process, monkeypatch):
+    """Every line after the argv reads as gh's stderr to `is_transient`, so a description line
+    reading `HTTP 503` would retry a 4xx. Mutation: post `description[:140]` -> the argv keeps
+    the newline."""
+    calls = []
+    monkeypatch.setattr(gs, "_run", lambda args: calls.append(args) or "{}")
+    gs.post(SHA, "failure", "held:\nHTTP 503  twice")
+    assert calls == [["gh", *_status_argv("failure", "held: HTTP 503 twice")]]

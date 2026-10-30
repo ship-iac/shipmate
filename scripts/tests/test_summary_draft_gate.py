@@ -222,13 +222,14 @@ def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
     warning and no line of gh's stderr starts a command of its own.
 
     Mutations: decode `%0A` in the step, indented or not -> `::warning::injected` on its own
-    line; strip the prefix (`sed 's/^::error:://'`) -> the error is no warning."""
-    stderr = "HTTP 502: bad gateway\n::warning::injected\nretry 100%0A later"
+    line; strip the prefix (`sed 's/^::error:://'`) -> the error is no warning. A 403, because a
+    transient error retries with real sleeps that a subprocess cannot patch."""
+    stderr = "HTTP 403: forbidden\n::warning::injected\nretry 100%0A later"
     proc, _ = _run_gate(tmp_path, "post", "pending", checks_rc=1, checks_stderr=stderr)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     escaped = (
         f"::warning::command failed (1): gh {' '.join(CHECKS_ARGV)}"
-        "%0AHTTP 502: bad gateway%0A::warning::injected%0Aretry 100%250A later"
+        "%0AHTTP 403: forbidden%0A::warning::injected%0Aretry 100%250A later"
     )
     step_warning = (
         f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "

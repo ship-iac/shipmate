@@ -15,12 +15,14 @@ a stale one when a commit carries two plan runs, which blocks the merge forever.
 `target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
 `GITHUB_RUN_ID`, and `SHIPMATE_APP_ID` for `refresh`. A `<sha>` that is not 40 lowercase hex
 characters is refused before any API call. A failed API call exits 1 with an `::error::` line,
-except in `checks`. `refresh` over a hold prints why, unannotated, and exits `HELD`: each caller
-decides whether a hold fails its step. `refuse-newer` prints its refusal as an `::error::` line
-and exits `NEWER`, so a caller tells a newer run from a failed read (exit 1). `checks` serves
-`_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends on any host, and a malformed
-`<sha>` or a failed listing exits 1 unannotated: a caller that degrades prints the only
-annotation as a warning, and a fail-closed caller prints its own `::error::`.
+except in `checks`. A call that fails transiently retries twice, each retry warned on stderr.
+`refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
+its write retries: each caller decides whether a hold fails its step. `refuse-newer` prints its
+refusal as an `::error::` line and exits `NEWER`, so a caller tells a newer run from a failed
+read (exit 1). `checks` serves `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends
+on any host, and a malformed `<sha>` or a failed listing exits 1 unannotated: a caller that
+degrades prints the only annotation as a warning, and a fail-closed caller prints its own
+`::error::`.
 """
 
 import os
@@ -34,6 +36,7 @@ from _shipmate import (
     check_runs,
     current_run_url,
     is_run_id,
+    retried,
     run,
     run_annotated,
     validate_head_sha,
@@ -78,16 +81,15 @@ def _gates(sha):
     The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none. The
     statuses listing is paginated: a head with many other contexts can push its gate past the
     first page."""
-    out = _run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/{_repo()}/commits/{sha}/statuses?per_page=100",
-            "--jq",
-            _STATUSES_JQ,
-        ]
-    )
+    args = [
+        "gh",
+        "api",
+        "--paginate",
+        f"repos/{_repo()}/commits/{sha}/statuses?per_page=100",
+        "--jq",
+        _STATUSES_JQ,
+    ]
+    out = retried(lambda: _run(args))
     gates = []
     for status in ag.parse_jsonl(out.splitlines()):
         if status.get("context") == GATE_CONTEXT:
@@ -120,22 +122,41 @@ def newer_hold(sha):
     return max(runs) if runs else None
 
 
-def post(sha, state, description):
-    _run(
-        [
-            "gh",
-            "api",
-            f"repos/{_repo()}/statuses/{sha}",
-            "-f",
-            f"state={state}",
-            "-f",
-            f"context={GATE_CONTEXT}",
-            "-f",
-            f"description={description[:140]}",
-            "-f",
-            f"target_url={current_run_url()}",
-        ]
-    )
+def _refuse_held(sha):
+    newest = newest_gate(sha)
+    if newest and newest[0] == "failure":
+        print(
+            f"{GATE_CONTEXT} is held for {sha}; its status description on the pull request names "
+            "the cause. A hold clears only when a new plan run rewrites the gate: comment "
+            "shipmate plan, or push."
+        )
+        raise SystemExit(HELD)
+
+
+def post(sha, state, description, before_retry=None):
+    """Write the gate; a transient failure retries through `retried`, `before_retry` with it. A
+    repeated POST of a status that landed only adds an identical history entry.
+
+    Known ceiling: a retry with no `before_retry` re-posts over a hold another run wrote during
+    the sleeps, as a first POST already can over one written just before it (`gate-hold` writes
+    outside the gate group). Only `refresh` re-checks, and only before each retry.
+
+    Newlines in `description` become spaces: a status description is one line, and `is_transient`
+    reads every line after the argv as gh's stderr."""
+    args = [
+        "gh",
+        "api",
+        f"repos/{_repo()}/statuses/{sha}",
+        "-f",
+        f"state={state}",
+        "-f",
+        f"context={GATE_CONTEXT}",
+        "-f",
+        f"description={' '.join(description.split())[:140]}",
+        "-f",
+        f"target_url={current_run_url()}",
+    ]
+    retried(lambda: _run(args), before_retry)
 
 
 def refresh(sha):
@@ -155,15 +176,13 @@ def refresh(sha):
             f"apply checks on {sha} are not all done ({len(open_)} open); the gate is left as it is"
         )
         return
-    newest = newest_gate(sha)
-    if newest and newest[0] == "failure":
-        print(
-            f"{GATE_CONTEXT} is held for {sha}; its status description on the pull request names "
-            "the cause. A hold clears only when a new plan run rewrites the gate: comment "
-            "shipmate plan, or push."
-        )
-        raise SystemExit(HELD)
-    post(sha, "success", "all applies complete, nothing left to apply")
+    _refuse_held(sha)
+    post(
+        sha,
+        "success",
+        "all applies complete, nothing left to apply",
+        before_retry=lambda: _refuse_held(sha),
+    )
 
 
 def _newest(sha):

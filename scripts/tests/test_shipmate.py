@@ -283,6 +283,115 @@ def test_check_runs_narrows_to_one_name_url_encoded():
     ]
 
 
+_BAD_GATEWAY = "::error::command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)\nretry 50%"
+#: PROBE: gh's message for a refused connection, captured raw from a run behind a dead proxy.
+_REFUSED = (
+    "::error::command failed (1): gh api x\n"
+    'Get "https://api.github.com/repos/o/r/commits/x/check-runs?filter=all&per_page=100": '
+    "proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused"
+)
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    slept = []
+    monkeypatch.setattr(_shipmate, "_sleep", slept.append)
+    return slept
+
+
+def _failing(*messages):
+    """A call raising each of `messages` in turn, then returning `"x"`; and its call count."""
+    calls = []
+
+    def call(*_):
+        calls.append(None)
+        if len(calls) <= len(messages):
+            raise SystemExit(messages[len(calls) - 1])
+        return "x"
+
+    return calls, call
+
+
+@pytest.mark.parametrize("message", [_BAD_GATEWAY, _REFUSED], ids=["502", "connection-refused"])
+def test_retried_calls_again_after_a_transient_failure(message, sleeps, capsys):
+    """Mutations, each run: drop the `HTTP 5xx` alternative from `TRANSIENT` -> the 502
+    re-raises; drop `connection refused` -> the probe's message re-raises; write the warning to
+    stdout -> the streams swap."""
+    calls, call = _failing(message)
+    assert _shipmate.retried(call) == "x"
+    head = "%0A".join(message.removeprefix("::error::").splitlines()[:2])
+    assert (len(calls), sleeps, capsys.readouterr()) == (2, [2], ("", f"::warning::{head}\n"))
+
+
+def test_retried_warns_the_command_and_first_stderr_line_whole(sleeps, capsys):
+    """Mutations, each run: keep `::error::` -> a nested prefix; print every line -> `retry 50%25`
+    trails; skip `command_data` -> a raw newline."""
+    _shipmate.retried(_failing(_BAD_GATEWAY)[1])
+    assert capsys.readouterr().err == (
+        "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+    )
+
+
+def test_retried_re_raises_a_4xx_at_once(sleeps, capsys):
+    """Mutation: add an `HTTP 4xx` alternative to `TRANSIENT` -> a second call and a sleep."""
+    message = "::error::command failed (1): gh api x\ngh: Not Found (HTTP 404)"
+    calls, call = _failing(message)
+    with pytest.raises(SystemExit) as exc:
+        _shipmate.retried(call)
+    assert (exc.value.code, len(calls), sleeps, capsys.readouterr()) == (message, 1, [], ("", ""))
+
+
+def test_retried_ignores_transient_text_in_the_argv_line(sleeps):
+    """A gate description is consumer text on the argv line. Mutation: search the whole message
+    in `is_transient` -> a second call."""
+    message = (
+        "::error::command failed (1): gh api x -f description=HTTP 503\ngh: Not Found (HTTP 404)"
+    )
+    calls, call = _failing(message)
+    with pytest.raises(SystemExit) as exc:
+        _shipmate.retried(call)
+    assert (exc.value.code, len(calls), sleeps) == (message, 1, [])
+
+
+def test_retried_gives_up_after_three_attempts_with_the_last_failure(sleeps, capsys):
+    """Mutations, each run: `RETRY_DELAYS = ()` (one attempt) -> the first message, one call;
+    `RETRY_DELAYS = (2, 5, 9)` -> a fourth call returns `x`."""
+    messages = [
+        f"::error::command failed (1): gh api x\ngh: Server Error (HTTP 50{i})" for i in (0, 2, 3)
+    ]
+    calls, call = _failing(*messages)
+    with pytest.raises(SystemExit) as exc:
+        _shipmate.retried(call)
+    assert (exc.value.code, len(calls), sleeps) == (messages[2], 3, [2, 5])
+    assert capsys.readouterr().err == (
+        "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 500)\n"
+        "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 502)\n"
+    )
+
+
+def test_check_runs_retries_a_transient_failure_through_the_injected_run(sleeps):
+    """The double takes `(args)` alone, as every injected `run` does. Mutation: call
+    `(run or _run)(args)` without `retried` -> the 502 raises."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise SystemExit(_BAD_GATEWAY)
+        return "listing"
+
+    assert check_runs("o/r", _SHA, run=run) == "listing"
+    argv = [
+        "gh",
+        "api",
+        "--paginate",
+        f"repos/o/r/commits/{_SHA}/check-runs?filter=all&per_page=100",
+        "--jq",
+        ".check_runs[]",
+    ]
+    assert (calls, sleeps) == ([argv, argv], [2])
+
+
 @pytest.mark.parametrize("sha", ["A" * 40, "a" * 39, "../x"])
 def test_check_runs_refuses_a_bad_sha_before_any_call(sha):
     """Mutation: move `validate_head_sha` after the `run` call -- the double records a call."""
