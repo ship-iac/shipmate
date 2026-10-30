@@ -1932,8 +1932,8 @@ unparseable) warns and posts no reply. Neither changes the gate.
 When an autoplan of a pull request that is not a draft changes a cell of an
 `auto` environment that no other pull request locks, but a push did not start
 it, its plan comment says why no `auto` apply follows, under the verdict:
-``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate
-apply`.``, whatever `command_hints` is. A re-run of such an autoplan keeps the
+``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.``,
+whatever `command_hints` is. A re-run of such an autoplan keeps the
 line: no attempt of it dispatches. A `shipmate plan` run carries no such line: it
 cannot tell whether an `auto` apply of the head is running. Known limit: an
 autoplan started by converting the pull request to a draft and back, or by

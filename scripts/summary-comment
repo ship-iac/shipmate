@@ -33,8 +33,9 @@ that is not a draft ends with the `commands` section, when the body has room for
 SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply` and `shipmate help`, and
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked.
 
-An autoplan not started by a push that changed an unlocked cell of an `apply_mode: auto`
-environment says so in a line under the verdict (`auto_line`), whatever `command_hints` is:
+An autoplan of a pull request that is not a draft, not started by a push, that changed a cell of
+an `apply_mode: auto` environment no other pull request locks says so in a line under the verdict
+(`auto_line`), whatever `command_hints` is:
 auto-dispatch's `action_reason` and its remedy.
 """
 
@@ -360,8 +361,9 @@ def auto_line(cells, auto, locks, *, event, action, is_draft):
     if event != "pull_request_target" or is_draft == "true":
         return ""
     reason = ad.action_reason(action)
-    free = [c for c in cells if not _lock_key(c, locks)]
-    if not reason or not ad.changed_auto_envs(free, auto):
+    if not reason:
+        return ""
+    if not ad.changed_auto_envs([c for c in cells if not _lock_key(c, locks)], auto):
         return ""
     return f"⚪ auto apply not started: {reason}; {AUTO_REMEDY}"
 

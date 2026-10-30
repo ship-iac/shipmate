@@ -2139,3 +2139,24 @@ def test_main_warns_once_and_says_nothing_for_a_malformed_auto_set(
         "::warning::auto-envs is not a JSON list of environment names; the plan comment says "
         "nothing about an auto apply\n"
     )
+
+
+def test_main_gives_no_auto_line_for_a_cell_another_pull_request_locks(tmp_path, monkeypatch):
+    """`main` passes the `SHIPMATE_LOCKS` marks to `auto_line`. Mutation: call `auto_line` with
+    `{}` for the locks in `main` -- the locked cell renders the line, red."""
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
+    (tmp_path / "run").mkdir()
+    for name, value in {
+        "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(payload),
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHIPMATE_IS_DRAFT": "false",
+        "SHIPMATE_AUTO_ENVS_TABLE": '["dev-eu"]',
+        "SHIPMATE_LOCKS": '{"stacks/app / dev-eu": 12}',
+    }.items():
+        monkeypatch.setenv(name, value)
+    _run_main(tmp_path / "run", monkeypatch, [_cell()])
+    body = (tmp_path / "run" / "comment.md").read_text(encoding="utf-8")
+    assert "🔒 locked by #12" in body
+    assert "auto apply not started" not in body

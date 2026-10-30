@@ -57,7 +57,7 @@ def action_reason(action):
 def skip_reason(*, event, action, attempt, is_draft, state, mode):
     """Why this run dispatches no `auto` apply, or None when every condition holds."""
     if event != "pull_request_target":
-        return f"a {event} run is not an autoplan"
+        return f"a {event or '(unset event)'} run is not an autoplan"
     if reason := action_reason(action):
         return reason
     if attempt != "1":
