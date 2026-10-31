@@ -1,5 +1,7 @@
 terramate=0.17.1
+terramate_min=0.17.1
 tofu=1.13.1
+tofu_min=1.13.1
 fe97e0a5e6416a4fc901bef547a44306bb3507e1c3cd0a1384f56b28a0845049  terramate_0.17.1_linux_x86_64.tar.gz
 f15eafa2cdc0f372f485cefe2a5002323497e56cbab7c5b68aef2be020ba8969  terramate_0.17.1_linux_arm64.tar.gz
 8ccbc6f8ee21d2827715f3c6e08a9b3e0209b1e62057c05067ef117e047c1a80  tofu_1.13.1_linux_amd64.zip

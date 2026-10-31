@@ -545,16 +545,16 @@ def test_a_misspelled_top_level_key_refuses():
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
         ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
-        "command_hints."
+        "command_hints, tools."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the five names are the whole allowed set, so a
-    table using all five must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the six names are the whole allowed set, so a
+    table using all six must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these five then refuses.
+    Mutation: remove a name from the allowed set -- one of these six then refuses.
     """
     table = {
         "layout": "folder",
@@ -562,6 +562,7 @@ def test_every_allowed_top_level_key_is_accepted():
         "environments": {},
         "max_parallel": "5",
         "command_hints": True,
+        "tools": {"tofu": "1.13.1"},
     }
     assert env_config.validate(table, ()) == table
 
@@ -1141,10 +1142,10 @@ def test_the_lines_come_in_check_order():
     assert _structural(table) == (
         "::error::colour is not a setting this engine implements. "
         ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
-        "command_hints.\n"
+        "command_hints, tools.\n"
         "::error::lyout is not a setting this engine implements. "
         ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
-        "command_hints.\n" + NO_LAYOUT + "\n"
+        "command_hints, tools.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
         "holds region, vars, identity, workloads, split, needs, apply_mode, review."
     )

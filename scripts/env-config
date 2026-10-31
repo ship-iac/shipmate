@@ -12,6 +12,7 @@ import contextlib
 import graphlib
 import importlib.util
 import os
+import pathlib
 import re
 import sys
 import types
@@ -102,6 +103,12 @@ def _normalise_settings(parsed):
         "max_parallel",
         "::error::max_parallel holds a variable reference, and it accepts none. Write the "
         "number into the file.",
+    )
+    _refuse_reference(
+        parsed,
+        "tools",
+        "::error::tools holds a variable reference, and it accepts none. Write the version "
+        "into the file.",
     )
     _normalise_bool(
         parsed,
@@ -348,7 +355,7 @@ _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("layout", "identities", "environments", "max_parallel", "command_hints")
+_TOP_KEYS = ("layout", "identities", "environments", "max_parallel", "command_hints", "tools")
 
 #: The cell jobs one plan or drift matrix runs at once when the table sets no
 #: `max_parallel`. Apply waves and unlock are not capped.
@@ -514,6 +521,83 @@ def _check_max_parallel(table, errors):
             f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the "
             "most cell jobs a plan or drift matrix runs at once)."
         )
+
+
+#: The engine's own pins: each tool's default version and the oldest one a table may name.
+VERSIONS_PATH = pathlib.Path(__file__).resolve().parent.parent / "VERSIONS"
+
+#: The tools a table's `tools` mapping may name.
+TOOLS = ("terramate", "tofu")
+
+#: Whole-value release grammar. `[0-9]`, not `\d`, refuses non-ASCII digits `int()` would accept.
+_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def engine_versions(path=VERSIONS_PATH):
+    """`{terramate, terramate_min, tofu, tofu_min}` from `VERSIONS`, or `SystemExit` naming
+    the file and the missing or malformed line. Lines without `=` are not read."""
+    pins = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            pins[key] = value
+    versions = {}
+    for key in (f"{tool}{suffix}" for tool in TOOLS for suffix in ("", "_min")):
+        if key not in pins:
+            raise SystemExit(f"::error::{path} holds no {key}= line; restore it.")
+        if not _VERSION.fullmatch(pins[key]):
+            raise SystemExit(
+                f"::error::{path} line {key}={pins[key]} is malformed; a version is written X.Y.Z."
+            )
+        versions[key] = pins[key]
+    return versions
+
+
+def _version_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def tool_version_errors(table, engine):
+    """One `::error::` line per refused `tools` entry of the unresolved `table`, judged
+    against `engine` (`engine_versions`); empty when valid or absent."""
+    if "tools" not in table:
+        return []
+    tools = table["tools"]
+    if not isinstance(tools, dict):
+        return [
+            (
+                f"::error::tools is {tools!r}; it must be a mapping of terramate and tofu to "
+                f"versions, got {type(tools).__name__}."
+            )
+        ]
+    errors = []
+    for tool, value in tools.items():
+        if tool not in TOOLS:
+            errors.append(
+                f"::error::tools.{tool} is {value!r}; {tool} is not a tool this engine "
+                f"installs. tools holds {', '.join(TOOLS)}."
+            )
+        elif not (isinstance(value, str) and _VERSION.fullmatch(value)):
+            errors.append(
+                f"::error::tools.{tool} is {value!r}; a version is written X.Y.Z in ASCII "
+                "digits, such as 1.13.2, with no v, pre-release or range."
+            )
+        elif _version_key(value) < _version_key(engine[f"{tool}_min"]):
+            errors.append(
+                f"::error::tools.{tool} is {value!r}, below {engine[f'{tool}_min']}, the oldest "
+                f"{tool} this engine supports."
+            )
+    return errors
+
+
+def tool_versions(table, engine):
+    """`{tool: (version, source)}`, source `"tools"` or `"VERSIONS"`. Call only on a table
+    `tool_version_errors` returned `[]` for."""
+    tools = table.get("tools", {})
+    return {
+        tool: (tools[tool], "tools") if tool in tools else (engine[tool], "VERSIONS")
+        for tool in TOOLS
+    }
 
 
 def command_hints(table):
@@ -1106,6 +1190,7 @@ def validate_structure(table):
         )
     _check_max_parallel(table, errors)
     _check_bool(table, "command_hints", "command_hints", errors)
+    errors.extend(tool_version_errors(table, engine_versions()))
     identities = table.get("identities", {})
     with _gather(errors) as shape:
         _mapping(identities, "identities")

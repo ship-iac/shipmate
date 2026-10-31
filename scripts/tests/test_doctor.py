@@ -6036,7 +6036,7 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
         "{} is not a setting this engine implements. .github/shipmate-config.yml holds "
-        "layout, identities, environments, max_parallel, command_hints."
+        "layout, identities, environments, max_parallel, command_hints, tools."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
