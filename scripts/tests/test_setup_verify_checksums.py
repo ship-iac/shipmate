@@ -74,10 +74,20 @@ _EXPECTED_STEPS = {
     },
 }
 
-needs_tools = pytest.mark.skipif(
-    not (shutil.which("gpg") and shutil.which("openssl")),
-    reason="gpg and openssl verify the signatures; ubuntu-latest ships both",
-)
+
+@pytest.fixture
+def _signature_tools():
+    """Skip without gpg or openssl locally; fail under `CI` (GitHub sets it), so a runner
+    without them reds the signature guards instead of skipping them."""
+    if shutil.which("gpg") and shutil.which("openssl"):
+        return
+    reason = "gpg and openssl verify the signatures; ubuntu-latest ships both"
+    if os.environ.get("CI"):
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
+needs_tools = pytest.mark.usefixtures("_signature_tools")
 
 
 def test_the_verify_steps_are_fail_closed():
