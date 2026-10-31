@@ -104,9 +104,9 @@ def _genuine():
     return {p.name: p.read_bytes() for p in _FIXTURES.iterdir() if p.name != "README"}
 
 
-def _run(tmp_path, sid, *, served=None, codes=None, body=None):
+def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0):
     """Run step `sid`'s body (or `body`) with curl serving `served` (basename -> bytes; the
-    genuine fixtures by default) at HTTP 200, or `codes[basename]`.
+    genuine fixtures by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`.
 
     Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP).
     """
@@ -128,7 +128,8 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None):
         'name="${!#}"; name="${name##*/}"\n'
         f"serve='{serve.as_posix()}'\n"
         'if [ -f "$serve/$name" ]; then cp "$serve/$name" "$out"; fi\n'
-        'if [ -f "$serve/$name.code" ]; then cat "$serve/$name.code"; else printf 200; fi',
+        'if [ -f "$serve/$name.code" ]; then cat "$serve/$name.code"; else printf 200; fi\n'
+        f"exit {curl_exit}",
     )
     gpg = shutil.which("gpg")
     _stub(
@@ -339,6 +340,66 @@ def test_a_404_fails_naming_the_url(tmp_path, sid, url):
     prefix = _TOFU_ERROR if sid == "tofu-sums" else _TM_ERROR
     assert r.stdout == f"{prefix}{url} answered HTTP 404 (curl exit 0).\n"
     assert out == ""
+
+
+@bash_only
+def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
+    """curl exits 2 on an option it does not know, which a re-run repeats. The Terramate verify
+    step makes the first download of the action, so the floor is reported there.
+
+    Mutation: delete the exit-2 branch (the generic HTTP message appears).
+    """
+    r, out, curl, *_ = _run(tmp_path, "terramate-sums", codes={"checksums.txt": ""}, curl_exit=2)
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == (
+        f"{_TM_ERROR}curl exited 2 on an option it does not know; shipmate needs curl 7.71 "
+        "or later (CONTRACT.md §Runner prerequisites).\n"
+    )
+    assert (len(curl), out) == (1, "")
+
+
+@pytest.mark.parametrize(
+    ("sid", "missing", "present"),
+    [
+        ("terramate-sums", "curl", ("openssl", "base64")),
+        ("terramate-sums", "openssl", ("curl", "base64")),
+        ("terramate-sums", "base64", ("curl", "openssl")),
+        ("tofu-sums", "gpg", ()),
+    ],
+)
+@bash_only
+def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
+    tmp_path, sid, missing, present
+):
+    """PATH holds only never-run stubs for `present`. The Terramate step runs first and checks
+    the tools it and the installers need; the OpenTofu step checks gpg alone.
+
+    Mutations: drop `curl`, `openssl` or `base64` from the Terramate step's `command -v` loop;
+    delete the OpenTofu step's `command -v gpg` line.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in present:
+        path = bin_dir / name
+        path.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8", newline="\n")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, id=sid)["run"],
+        {
+            "PATH": str(bin_dir),
+            "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
+            "GITHUB_OUTPUT": str(out),
+            "SHIPMATE_TOFU_VERSION": _TOFU,
+            "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
+        },
+    )
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    prefix = _TOFU_ERROR if sid == "tofu-sums" else _TM_ERROR
+    assert r.stdout == f"{prefix}{missing} is not installed on the runner.\n"
+    assert out.read_text(encoding="utf-8") == ""
 
 
 @pytest.fixture

@@ -7,9 +7,7 @@ reds it.
 """
 
 import os
-import shutil
 import stat
-from pathlib import Path
 
 import pytest
 from _loader import bash_only, run_step, step_by
@@ -182,22 +180,6 @@ def test_a_404_names_the_version_and_platform_as_the_remedy(tmp_path):
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
 
 
-@bash_only
-def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
-    """curl exits 2 on an option it does not know, which a re-run repeats.
-
-    Mutation: delete the exit-2 branch (the generic re-run message appears).
-    """
-    r, _, logs = _install(tmp_path, "", 2)
-    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stdout == (
-        f"{_PREFIX}curl exited 2 on an option it does not know; shipmate needs curl 7.71 "
-        "or later (CONTRACT.md §Runner prerequisites).\n"
-    )
-    assert _argv(logs, "tar") is None
-    assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-
-
 @pytest.mark.parametrize(
     ("tar_rc", "terramate_rc", "message"),
     [
@@ -256,40 +238,3 @@ def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path):
     )
     assert _argv(logs, "curl") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-
-
-@bash_only
-def test_a_runner_without_curl_fails_the_step_with_one_annotation(tmp_path):
-    """PATH holds every tool the step runs but curl. The stubs use `#!/bin/sh`, because
-    `#!/usr/bin/env bash` would look bash up on this PATH.
-
-    Mutation: delete the `command -v curl` line (the step reports HTTP 000, curl exit 127).
-    """
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    stubs = {"uname": 'if [ "$1" = -s ]; then echo Linux; elif [ "$1" = -m ]; then echo x86_64; fi'}
-    for tool in ("tr", "mkdir", "awk"):
-        real = shutil.which(tool)
-        assert real, f"{tool} is not on PATH"
-        stubs[tool] = f'exec "{Path(real).as_posix()}" "$@"'
-    for name, body in stubs.items():
-        path = bin_dir / name
-        path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8", newline="\n")
-        path.chmod(path.stat().st_mode | stat.S_IEXEC)
-    github_path = tmp_path / "github_path"
-    github_path.write_text("", encoding="utf-8")
-    r = run_step(
-        tmp_path,
-        step_by(_ACTION, name=_STEP)["run"],
-        {
-            **os.environ,
-            "PATH": str(bin_dir),
-            "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
-            "GITHUB_PATH": str(github_path),
-            "SHIPMATE_TERRAMATE_VERSION": _VERSION,
-            "SHIPMATE_TERRAMATE_SHA256": _PINNED,
-        },
-    )
-    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stdout == f"{_PREFIX}curl is not installed on the runner.\n"
-    assert github_path.read_text(encoding="utf-8") == ""

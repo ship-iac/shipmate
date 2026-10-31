@@ -28,12 +28,13 @@ _PYTHON_YAML = "$/actions/python-yaml"
 #: Every step, in order, by name or, for the unnamed install, by `uses:`. Hand-written: PyYAML
 #: must be present before the resolve step parses the table, the resolve step must precede the
 #: verify steps that read its versions, and both must precede the installers that read their
-#: outputs; one whole-list comparison pins that ordering.
+#: outputs. The ungated Terramate verify step runs first because it checks the runner
+#: prerequisites (curl and its floor) for every later step. One whole-list comparison pins this.
 _EXPECTED_STEPS = [
     _PYTHON_YAML,
     "Resolve versions",
-    "Verify OpenTofu checksums",
     "Verify Terramate checksums",
+    "Verify OpenTofu checksums",
     "Install OpenTofu",
     "Install Terramate",
     "Provider plugin cache",
@@ -98,7 +99,8 @@ def _outputs(text):
 
 
 def test_the_steps_run_in_this_order():
-    """Mutations: move the resolve step after the installers; delete the python-yaml step."""
+    """Mutations: move the resolve step after the installers; delete the python-yaml step; put
+    `Verify OpenTofu checksums` back before `Verify Terramate checksums`."""
     assert [s.get("name") or s.get("uses") for s in action_steps(_ACTION)] == _EXPECTED_STEPS
 
 
