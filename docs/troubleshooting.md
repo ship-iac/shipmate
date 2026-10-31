@@ -358,7 +358,7 @@ that causes it merges:
 
 | Item | `todo` when |
 | --- | --- |
-| `unmanaged stacks` | a stack carries no `env/*` tag. It names them; shipmate runs none of them, which needs nothing if deliberate. |
+| `unmanaged stacks` | a stack carries no `env/*` tag and no `shipmate/local` tag. It names them; shipmate runs none of them. Tag a stack kept out on purpose `shipmate/local`. |
 | `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list (checked only when that entry names an `identity`), or that list names a workload no stack in the environment tags. |
 | `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query, or one clause of it, matches no cell; or a sweep refuses: its query has an empty term, selects more than 256 cells, or keeps a cell whose `workload/*` tag its environment's `workloads` list does not name (checked only when that entry names an `identity`). A refused sweep runs no cell, so that file's cells count as unswept. |
 
@@ -1355,7 +1355,7 @@ detect failed: 2 generated file(s) stale; run terramate generate and commit the 
 
 The plan's `detect` job runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
-stacks included, and the pull request's head failed one or both. The message
+and local stacks included, and the pull request's head failed one or both. The message
 names the first ten files. Each file also carries its own annotation on the
 `detect` job. GitHub keeps ten error annotations per step and each failing
 command's summary takes one, so at most nine files are annotated, eight when
@@ -2073,7 +2073,7 @@ is no remedy for any of these refusals: it runs no overlap check.
 No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
 posted — unless there is already a plan comment to keep current, `doctor`
 raised a warning on that run outside the repository-settings probes, the
-pull request changes a stack with no `env/*` tag, it removes one `env/*` tag
+pull request changes a stack with no `env/*` tag that is not local, it removes one `env/*` tag
 from a stack that keeps another (the lost pairs line), or a `shipmate plan`
 command started the run, any of which still posts one, headlined `⚪ nothing planned` —
 and the gate goes green over no work.
@@ -2087,7 +2087,7 @@ no generated `.tf` — an engine-pin bump, a docs edit — plans nothing. This i
 
 A changed stack with no `env/*` tag is unmanaged and plans nothing either. The
 plan comment names it under the verdict, and the `detect` log carries a notice
-naming it. A pull request that removes one `env/*` tag from a stack that keeps
+naming it, unless it carries `shipmate/local`. A pull request that removes one `env/*` tag from a stack that keeps
 another drops that stack / environment pair the same way; the plan comment names
 the pair on its own line. Tag the stack `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
 grammar).

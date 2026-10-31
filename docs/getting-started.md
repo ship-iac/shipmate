@@ -18,7 +18,8 @@ does with that wiring.
   A repository may adopt with any number of stacks untagged. Each one is
   unmanaged until a pull request tags it: shipmate never plans or applies it
   ([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar, which also covers taking a
-  stack out of CI). `scripts/onboard` provisions every environment the table
+  stack out of CI). Tag a stack you keep out on purpose `shipmate/local`, and
+  no notice or checklist item names it. `scripts/onboard` provisions every environment the table
   declares and every one a stack tags. So declare an environment in the table
   and run `scripts/onboard` before the first pull request tagging a stack into
   it merges. Otherwise that merge's deploy refuses, because the `<env>-apply` it
@@ -187,7 +188,7 @@ approving review before apply, a `CODEOWNERS` entry, a git-tracked
 `.terraform.lock.hcl` in each stack, the repository's Actions settings
 ([`hardening.md`](hardening.md) §10–12 and 20 lists the rows it checks), and
 the pull request carrying the workflow file. Three items check the whole tree
-before a run does: `unmanaged stacks` names the stacks with no `env/*` tag,
+before a run does: `unmanaged stacks` names the stacks with no `env/*` tag and no `shipmate/local` tag,
 `stack tags` the tag refusals a plan would raise and the workload tags that
 disagree with the table, and `drift sweeps` the cells no drift file sweeps. It
 marks each item `ok`, `todo` or `cannot check` from what the run read, and only

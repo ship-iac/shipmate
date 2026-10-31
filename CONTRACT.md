@@ -1055,6 +1055,8 @@ in tag values:
   configuration, since Terramate forbids `:` in tags): `env/<name>` and
   `workload/<name>`. For example, the stack configuration carries the tag
   `env/staging`, not `env:staging`.
+- **Local** tag: `shipmate/local`, exact and case-sensitive, with no
+  conceptual form. It marks a stack kept out of CI on purpose.
 
 Everywhere this document or any other project document writes `env:<name>`
 or `workload:<name>`, it is describing the concept; the literal value that
@@ -1075,11 +1077,21 @@ uppercase name is refused rather than left to match nothing. An `env/<name>` tag
 takes an environment-table name (lowercase letters, digits, `-`, `_`, no
 `-plan`/`-apply` suffix, not `shipmate-engine`). A run whose scan includes
 a stack carrying any other `env/*` tag refuses: plan and deploy scan the changed
-stacks, drift and a bare `shipmate apply` the whole tree. A targeted
-`shipmate apply` and `shipmate unlock` check only the environment they act on.
+stacks; drift, a bare `shipmate apply`, an `auto` apply and `scripts/onboard`
+the whole tree. A run whose scan includes a stack carrying both `shipmate/local`
+and an `env/*` tag refuses too, naming every such stack:
+
+```text
+::error::stack 'stacks/lab' carries 'shipmate/local' and 'env/dev': a local stack carries no env/* tag. Remove 'shipmate/local' for shipmate to run the stack, or its env/* tags to keep it out of CI.
+```
+
+A targeted `shipmate apply` and `shipmate unlock` check only the environment
+they act on, and never refuse a local stack's `env/*` tag.
 
 A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
-it, and plan, deploy and drift print a notice counting the unmanaged stacks they
+it. An unmanaged stack carrying `shipmate/local` is local: no notice, count,
+plan comment line, lost-tag warning or `scripts/onboard` item below names or
+counts it. Every other unmanaged stack is reported: plan, deploy and drift print a notice counting the unmanaged stacks they
 scanned (the changed set on plan and deploy, the whole tree on drift) and naming
 the first ten, then `, and M more`. A bare
 `shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
@@ -1092,7 +1104,8 @@ under `layout: tf_vars`. The trade-off is accepted: a forgotten tag on a new
 stack is a notice and a line in the plan comment, not a refusal, and the gate
 goes green over a stack that plans nothing. When a pull request removes a
 stack's last `env/*` tag, plan detect also writes a `::warning::` naming it,
-because the same green gate then hides a live stack's unapplied change. A pull
+because the same green gate then hides a live stack's unapplied change; a stack
+the same pull request tags `shipmate/local` draws none. A pull
 request removing one `env/*` tag from a stack that keeps another gets a
 `::warning::` and a plan comment line naming each `<stack> / <env>` pair, for the
 same reason. A
@@ -1144,6 +1157,14 @@ whose `env_binding` names no GitHub Environment, and the refusal of a
 
 ### Taking a stack out of CI
 
+To keep a stack out for good, remove every `env/*` tag from it and add
+`shipmate/local` in the same pull request. No plan comment, run log or
+`scripts/onboard` item names it, and merging deploys nothing for it. A deploy
+of that pull request still refuses an apply check left open on the stack
+(§Tag grammar).
+
+To take a stack out for a while:
+
 1. Remove every `env/*` tag from the stack in a pull request. Its plan comment
    names the stack as unmanaged, its plan run warns that the stack lost its last
    `env/*` tag, and merging deploys nothing for it.
@@ -1156,7 +1177,7 @@ pair.
 
 Every plan's `detect` still runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
-stacks included, in its `hcl-check` step. Keep an unmanaged stack formatted and
+and local stacks included, in its `hcl-check` step. Keep an unmanaged stack formatted and
 its generated code current, or every plan's `detect` fails, naming the files.
 
 The stack's open drift Issues close on the next sweep that plans at least one
@@ -2713,7 +2734,7 @@ the repository-settings probes (the gate ruleset, the review rule and
 a comment on every quiet pull request. `shipmate doctor` and the run page still
 report them. A run whose comment carries the unmanaged line also posts: a pull
 request that changes only stacks with no `env/*` tag plans nothing, and the
-comment is where it says so. When the line is left out for size (below), this
+comment is where it says so; one changing only local stacks has no such line. When the line is left out for size (below), this
 exception does not apply. A run whose comment carries the lost pairs line also
 posts: a pull request that removes one `env/*` tag from a stack that keeps
 another drops that stack / environment pair, and the comment is where it says
@@ -2733,7 +2754,7 @@ line, the verdict line, a blank line, the auto apply line and a blank line when
 an autoplan not started by a push changed a cell of an `auto` environment
 (§`apply_mode: auto`), the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
-the pull request changes an unmanaged stack, the lost pairs line and a blank
+the pull request changes an unmanaged stack that is not local, the lost pairs line and a blank
 line when it untags a stack / environment pair, then per environment its
 heading and one line or fold-out per planned stack in it, then a blank line
 and the command section when it shows (below). The environments
@@ -2792,15 +2813,16 @@ and `lost` outputs, which the same rule reads.
   the cell lines leave it no room under the 65,536-character cap, it is left
   out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
-  managed by shipmate: <paths>`, naming at most ten paths within 1,000
+  managed by shipmate: <paths>`, for the changed unmanaged stacks that are not
+  local (§Tag grammar), naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends
   `; their paths are too long to list here.` When the cell lines leave it no
   room under the 65,536-character cap, it is left out with a warning.
 - **Lost pairs line.** `⚪ N stack / environment pair(s) lost their env/* tag
   in this pull request and are no longer planned or deployed: <pairs>`, each
   `<stack> / <env>`, for the stacks that keep another `env/*` tag; a stack that
-  lost its last tag is on the unmanaged line instead, so no stack is named on
-  both. Same caps and fallback as the unmanaged line, ending `; their pairs are
+  lost its last tag is on the unmanaged line instead, or on neither when it is
+  local, so no stack is named on both. Same caps and fallback as the unmanaged line, ending `; their pairs are
   too long to list here.` A drift sweep and a run with no pull-request base
   have no such line. On both lines each name is escaped like a cell line's
   stack, `@` included.

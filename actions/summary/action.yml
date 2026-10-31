@@ -67,7 +67,7 @@ inputs:
   unmanaged-stacks:
     description: >-
       build-matrix's `unmanaged` output: JSON {"count": N, "paths": [...]} for the changed
-      stacks that carry no env/* tag, at most ten paths named. The plan comment counts and names
+      stacks that carry no env/* tag and no shipmate/local tag, at most ten paths named. The plan comment counts and names
       them under its verdict. Empty (detect skipped) renders no line; a value not of that shape,
       or one naming other than min(N, 10) paths, renders none and warns.
     required: false
