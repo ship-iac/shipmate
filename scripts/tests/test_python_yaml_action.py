@@ -199,4 +199,5 @@ def test_exactly_the_actions_that_parse_yaml_install_it():
         "unlock-detect",
         "summary",
         "comment-ops",
+        "setup",
     }

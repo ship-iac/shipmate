@@ -1,5 +1,5 @@
 name: shipmate setup
-description: Install the pinned Terramate and, unless `tofu` is "false", the pinned OpenTofu; point OpenTofu at a provider plugin cache directory.
+description: Install Terramate and, unless `tofu` is "false", OpenTofu, each at the version `tools` in .github/shipmate-config.yml names, else at this release's pin; point OpenTofu at a provider plugin cache directory.
 inputs:
   tofu:
     description: Whether to install OpenTofu. "false" for jobs that never run it.
@@ -8,34 +8,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - uses: $/actions/python-yaml
     - name: Resolve versions
       id: versions
       shell: bash
-      run: |
-        set -euo pipefail
-        # `$/` fetches the whole engine repository at the pinned SHA, so this reads the
-        # versions this release was tested with. An unresolved version must fail the step:
-        # setup-opentofu reads an empty tofu_version as "latest", which is silent tool drift.
-        versions="$GITHUB_ACTION_PATH/../../VERSIONS"
-        need() { "${@:2}" || { echo "::error::$1"; exit 1; }; }
-        need "$versions does not exist: it carries the terramate= and tofu= versions this release pins." test -f "$versions"
-        TERRAMATE_VERSION="$(sed -n 's/^terramate=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
-        TOFU_VERSION="$(sed -n 's/^tofu=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
-        need "$versions carries no terramate= line; restore it." test -n "$TERRAMATE_VERSION"
-        need "$versions carries no tofu= line; restore it." test -n "$TOFU_VERSION"
-        # `sha256sum` lines whose asset name starts with the prefix. The name carries the
-        # version, so a version bump without its checksum lines finds none and refuses.
-        pinned() { tr -d '\r' < "$versions" | awk -v p="$1" 'NF == 2 && index($2, p) == 1'; }
-        TERRAMATE_SHA256="$(pinned "terramate_${TERRAMATE_VERSION}_")"
-        TOFU_SHA256="$(pinned "tofu_${TOFU_VERSION}_" | awk '{print $1}')"
-        need "$versions carries no sha256 line for terramate ${TERRAMATE_VERSION}; paste the release's checksum lines." test -n "$TERRAMATE_SHA256"
-        need "$versions carries no sha256 line for tofu ${TOFU_VERSION}; paste the release's checksum lines." test -n "$TOFU_SHA256"
-        {
-          echo "terramate=$TERRAMATE_VERSION"
-          echo "tofu=$TOFU_VERSION"
-          printf 'terramate_sha256<<SHIPMATE_EOF\n%s\nSHIPMATE_EOF\n' "$TERRAMATE_SHA256"
-          printf 'tofu_sha256<<SHIPMATE_EOF\n%s\nSHIPMATE_EOF\n' "$TOFU_SHA256"
-        } >> "$GITHUB_OUTPUT"
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/tool-versions"
     - name: Install OpenTofu
       if: ${{ inputs.tofu != 'false' }}
       uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2

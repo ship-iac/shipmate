@@ -1,6 +1,7 @@
 """Every workflow call site hands `actions/setup` exactly the `with:` it should.
 
-`actions/setup` resolves both versions from the release's own `VERSIONS` file. A composite
+`actions/setup` resolves both versions from the consumer table's `tools`, else the release's
+own `VERSIONS` file. A composite
 action only warns on an undeclared input, so a call site passing `${{ vars.TOFU_VERSION }}` would
 read as an override and silently do nothing.
 

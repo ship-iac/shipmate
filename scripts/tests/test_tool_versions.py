@@ -117,6 +117,17 @@ def test_engine_versions_names_a_missing_line(tmp_path):
     assert str(exc.value) == f"::error::{path} holds no tofu_min= line; restore it."
 
 
+def test_engine_versions_names_a_missing_file(tmp_path):
+    """Mutation: drop the `FileNotFoundError` handler -- a bare `FileNotFoundError` escapes."""
+    path = tmp_path / "VERSIONS"
+    with pytest.raises(SystemExit) as exc:
+        ec.engine_versions(path)
+    assert str(exc.value) == (
+        f"::error::{path} does not exist: it carries the terramate and tofu versions this "
+        "release pins."
+    )
+
+
 def test_engine_versions_names_a_malformed_line(tmp_path):
     """Mutation: drop the shape check in `engine_versions` -- `1.13` returns."""
     path = tmp_path / "VERSIONS"

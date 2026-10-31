@@ -535,9 +535,17 @@ _VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 def engine_versions(path=VERSIONS_PATH):
     """`{terramate, terramate_min, tofu, tofu_min}` from `VERSIONS`, or `SystemExit` naming
-    the file and the missing or malformed line. Lines without `=` are not read."""
+    the file and the missing or malformed line, or the missing file. Lines without `=` are not
+    read."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise SystemExit(
+            f"::error::{path} does not exist: it carries the terramate and tofu versions this "
+            "release pins."
+        ) from None
     pins = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         key, sep, value = line.partition("=")
         if sep:
             pins[key] = value

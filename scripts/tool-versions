@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Resolve the Terramate and OpenTofu versions `actions/setup` installs.
+
+Each version is the `tools` entry of `.github/shipmate-config.yml` on the default branch, else
+the release's `VERSIONS` pin. Only `tools` is judged here: references stay unresolved, because
+setup receives no GitHub variables, and the rest of the table is `detect`'s to refuse.
+
+Writes `terramate`, `tofu`, and the `VERSIONS` checksum lines for each resolved version:
+`terramate_sha256` whole `sha256sum` lines, `tofu_sha256` digests only. Every failure refuses
+and writes nothing: setup-opentofu installs "latest" for an empty version, and a failed table
+read must not install the default in place of the consumer's version.
+"""
+
+import os
+
+from _shipmate import _load, run_annotated
+
+ec = _load("env-config")
+
+
+def _pinned(lines, prefix):
+    """`[digest, asset]` for each two-field line whose asset starts with `prefix`. The asset
+    name carries the version, so a version with no checksum lines finds none."""
+    return [f for f in map(str.split, lines) if len(f) == 2 and f[1].startswith(prefix)]
+
+
+def main():
+    engine = ec.engine_versions(ec.VERSIONS_PATH)
+    # No `ref`: GitHub answers from the default branch, which branch content cannot rewrite.
+    path = f"repos/{os.environ['GITHUB_REPOSITORY']}/contents/{ec.CONFIG_PATH}"
+    text = ec.contents_text(path, fetch=ec._reporting_fetch)
+    if text is None:
+        raise SystemExit(ec._UNREADABLE)
+    table = ec.load_config(text)
+    errors = ec.tool_version_errors(table, engine)
+    if errors:
+        raise SystemExit("\n".join(errors))
+    resolved = ec.tool_versions(table, engine)
+    lines = ec.VERSIONS_PATH.read_text(encoding="utf-8").splitlines()
+    pinned = {}
+    for tool, (version, source) in resolved.items():
+        pinned[tool] = _pinned(lines, f"{tool}_{version}_")
+        if not pinned[tool]:
+            raise SystemExit(
+                f"::error::{ec.VERSIONS_PATH} carries no sha256 line for {tool} {version}; "
+                "paste the release's checksum lines."
+            )
+        print(f"{tool} {version} from {source}")
+    terramate = "\n".join(f"{digest}  {asset}" for digest, asset in pinned["terramate"])
+    tofu = "\n".join(digest for digest, _ in pinned["tofu"])
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(f"terramate={resolved['terramate'][0]}\ntofu={resolved['tofu'][0]}\n")
+        fh.write(f"terramate_sha256<<SHIPMATE_EOF\n{terramate}\nSHIPMATE_EOF\n")
+        fh.write(f"tofu_sha256<<SHIPMATE_EOF\n{tofu}\nSHIPMATE_EOF\n")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

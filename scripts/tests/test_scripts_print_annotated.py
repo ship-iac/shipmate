@@ -50,6 +50,7 @@ SCRIPTS_EXPECTED = [
     "state-path",
     "summary-comment",
     "tofu-error",
+    "tool-versions",
     "unlock-detect",
     "upsert-comment",
     "verify-environments",
