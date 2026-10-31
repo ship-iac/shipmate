@@ -190,7 +190,13 @@ runs:
         # nothing. After `init`: inside `terramate run` the render reads init's data directory
         # (`TF_DATA_DIR` from run.env) and, where the plan file lacks schemas, init's providers.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
-        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered"
+        # stderr goes to a file for `tofu-error`, so it is echoed back: otherwise a failed render's
+        # diagnostic never reaches the log.
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered" 2> "$RUNNER_TEMP/show.txt" || {
+          cat "$RUNNER_TEMP/show.txt" >&2
+          python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" < "$RUNNER_TEMP/show.txt" || true
+          exit 1
+        }
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
         # prefixes the whole line with one, which would never equal the recorded digest.
         actual=$(sha256sum < "$rendered" | cut -d' ' -f1)

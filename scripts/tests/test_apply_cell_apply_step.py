@@ -28,6 +28,8 @@ exits non-zero all the same and protects nothing.
 
 import hashlib
 import os
+import pathlib
+import sys
 
 import pytest
 from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, step_by
@@ -122,6 +124,8 @@ def _run_step(
         '  *) echo "unstubbed terramate call: $*" >&2 ; return 98 ;;\n'
         "esac ; }\n"
         f"tee() {{ {tee_body} ; }}\n"
+        # The test's own interpreter: on a Windows host `python3` on PATH can be the Store alias.
+        f'python3() {{ "{pathlib.Path(sys.executable).as_posix()}" "$@" ; }}\n'
     ) + run
     runner_temp = tmp_path / "rt"
     runner_temp.mkdir()
@@ -279,3 +283,25 @@ def test_the_render_lands_in_runner_temp_and_not_the_checkout(tmp_path):
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert (tmp_path / "rt" / "rendered-plan.txt").is_file()
     assert sorted(p.name for p in (tmp_path / "checkout").iterdir()) == []
+
+
+@bash_only
+def test_a_render_refused_for_another_tofu_version_names_the_replan_remedy(tmp_path):
+    """The render fails on a plan file from another OpenTofu version: nothing applies, the raw
+    diagnostic stays in the log, and `tofu-error` names the re-plan. Mutations: drop the
+    `tofu-error` line from `plan-digest`; drop its `cat` of the render's stderr."""
+    fixture = (pathlib.Path(__file__).parent / "fixtures/tofu-version-skew.txt").as_posix()
+    r = _run_step(
+        tmp_path,
+        terramate_body="echo applied ; exit 0",
+        tee_body='cat > "$1"',
+        tofu_body=f'cat "{fixture}" >&2 ; return 1',
+    )
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert not _ran(tmp_path, "apply-ran"), "applied after the render failed"
+    assert "Error: Couldn't show local plan" in r.stderr.splitlines()
+    assert (
+        "::error::The stored plan was made by another OpenTofu version: `tools.tofu` in"
+        " .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was"
+        " applied. Re-plan by pushing a commit to the pull request or commenting `shipmate plan`."
+    ) in r.stdout.splitlines()

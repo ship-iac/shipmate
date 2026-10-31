@@ -1,0 +1,6 @@
+
+Error: Couldn't show local plan
+
+Plan read error: plan file was created by OpenTofu or Terraform 1.13.1, but
+this is 1.13.2; plan files cannot be transferred between different versions
+of OpenTofu / Terraform
