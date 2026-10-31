@@ -167,7 +167,7 @@ def main():
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
     tag_map = bm.all_tags()
-    _, cells, tree, unmanaged = bm.compute_cells(
+    _, cells, tree, scanned, _ = bm.compute_cells(
         all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""), tag_map=tag_map
     )
     table = bm.env_config(cells)
@@ -179,9 +179,10 @@ def main():
     lines = ad._check_run_lines(repo, head)
     completed = ad.ag.app_done_names(lines, app_id)
     pending = ad.filter_pending(cells, completed)
-    refuse_stranded_checks(
-        tree, unmanaged, ad.apply_check_names(lines, app_id) - completed, pending
-    )
+    # `scanned` includes local stacks on purpose: a stack moved to `shipmate/local` with an
+    # open apply check must still refuse. Guard test:
+    # test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local.
+    refuse_stranded_checks(tree, scanned, ad.apply_check_names(lines, app_id) - completed, pending)
     # AFTER the pending filter, as on both pre-merge paths: an applied cell needs no record,
     # so a completed check that carries none never refuses the deploy.
     pending = ad.with_plan_runs(pending, lines, app_id, pr_number=None)

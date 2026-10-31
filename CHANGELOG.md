@@ -16,6 +16,7 @@ section below names the SHA the release tags.
 - **`actions/setup` verifies every Terramate and OpenTofu download against the release's signed checksum file**, with signer keys committed in the engine (`keys/`), and refuses on any failure. `setup` needs `gpg` and `base64` on the runner (`CONTRACT.md` §Runner prerequisites).
 - **An apply of a plan another OpenTofu version made fails with the re-plan remedy** beside OpenTofu's `plan files cannot be transferred between different versions`.
 - **`shipmate doctor` lists each tool's version and its source** (`tools` or `VERSIONS`) under `tool versions every run installs, from the default branch`.
+- **A stack tagged `shipmate/local` and no `env/*` tag is kept out of CI on purpose**: no unmanaged notice, plan comment line, lost-tag warning or `scripts/onboard` item names it, and a stack carrying it beside an `env/*` tag refuses the run (`CONTRACT.md` §Tag grammar).
 
 ## [0.53.1] — 2026-10-30
 

@@ -420,7 +420,7 @@ def test_each_page_holds_its_fences():
                 inside = not inside
     assert dict(found) == {
         ("CONTRACT.md", ""): 2,
-        ("CONTRACT.md", "text"): 1,
+        ("CONTRACT.md", "text"): 2,
         ("CONTRACT.md", "yaml"): 4,
         ("README.md", "bash"): 1,
         ("docs/aws.md", ""): 1,

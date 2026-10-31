@@ -1093,17 +1093,17 @@ def _lock_files_item(ctx):
 
 def _unmanaged_item(ctx):
     item = "unmanaged stacks"
-    unmanaged = bm.unmanaged_stacks(ctx["tags_by_stack"])
+    unmanaged = bm.reported_unmanaged(ctx["tags_by_stack"])
     if not unmanaged:
         return "ok", item, []
     return (
         "todo",
         item,
         [
-            f"{len(unmanaged)} stack(s) carry no `env/*` tag:",
+            f"{len(unmanaged)} stack(s) carry neither an `env/*` tag nor `shipmate/local`:",
             *_stack_list(unmanaged),
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
-            "needs nothing.",
+            "carries `shipmate/local`.",
         ],
     )
 

@@ -682,7 +682,10 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
         sc.build_comment(cells, {}, RUN_URL, SHA)[0]
 
 
-_LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
+_LEAD = (
+    "⚪ {} changed stack(s) carry neither an env/* tag nor shipmate/local and are not "
+    "managed by shipmate"
+)
 
 
 def _named(count, *paths):

@@ -192,9 +192,9 @@ def _run_main(
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: (head, pr_number))
-    # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks); a double
-    # returning fewer
-    # unpacks into the wrong names and fails somewhere unrelated.
+    # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks, reported
+    # unmanaged stacks); a double returning fewer unpacks into the wrong names and fails somewhere
+    # unrelated.
     if stacks is None:
         monkeypatch.setattr(
             dd.bm,
@@ -203,6 +203,7 @@ def _run_main(
                 {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
                 cells,
                 [{"environment": c["environment"], "stack": c["stack"]} for c in cells],
+                [],
                 [],
             ),
         )
@@ -704,6 +705,26 @@ _PARTIAL_UNTAG_MESSAGE = (
     "applies nothing, so these other cells of this merge are not applied either: "
     "stacks/app / dev-eu. " + _REMEDY
 )
+
+
+def test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local(tmp_path, monkeypatch):
+    """A stack retagged from `env/dev-eu` to `shipmate/local` after planning strands its check
+    like any untagged stack. Mutation: pass `compute_cells`' fifth element,
+    `reported_unmanaged`, to `refuse_stranded_checks` in `main` -- the deploy writes waves."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[],
+            checks=[_apply_check("stacks/gone", cells=1)],
+            stacks={"stacks/gone": ["shipmate/local"]},
+            deps={"stacks/gone": set()},
+        )
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "env/* tag after this pull request was planned, so its reviewed change was not "
+        "applied. " + _REMEDY
+    )
 
 
 def test_main_refuses_an_open_check_for_an_env_the_stack_no_longer_tags(tmp_path, monkeypatch):
