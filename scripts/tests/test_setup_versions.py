@@ -16,6 +16,7 @@ default in place of the consumer's version, so every refusal writes no output at
 
 import base64
 import re
+import sys
 
 import pytest
 from _loader import ENGINE, action_steps, action_yaml, load_script, step_by
@@ -238,6 +239,25 @@ def test_the_table_is_read_from_the_default_branch(monkeypatch, capsys, tmp_path
     code, _, err, calls, _ = _resolve(monkeypatch, capsys, tmp_path)
     assert code == 0, err
     assert calls == [_CONTENTS_PATH]
+
+
+def test_a_transient_read_failure_is_retried(monkeypatch, capsys, tmp_path):
+    """Every cell job runs setup, so a 502 must not fail it with a remedy naming the merge.
+
+    Mutation: drop the `retried` wrapper in `_reporting_fetch` (the unreadable refusal).
+    """
+    sleeps = []
+    monkeypatch.setattr(sys.modules["_shipmate"], "_sleep", sleeps.append)
+    failures = [SystemExit("::error::command failed (1): gh api x\ngh: HTTP 502")]
+
+    def fetch(path):
+        if failures:
+            raise failures.pop()
+        return _blob(_TABLE)
+
+    code, out, err, calls, _ = _resolve(monkeypatch, capsys, tmp_path, fetch=fetch)
+    assert code == 0, err
+    assert (out, calls, sleeps) == (_FIXTURE_OUTPUT, [_CONTENTS_PATH] * 2, [2])
 
 
 def test_an_invalid_tools_entry_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path):

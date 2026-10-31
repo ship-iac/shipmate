@@ -26,12 +26,7 @@ def _pinned(lines, prefix):
 
 def main():
     engine = ec.engine_versions(ec.VERSIONS_PATH)
-    # No `ref`: GitHub answers from the default branch, which branch content cannot rewrite.
-    path = f"repos/{os.environ['GITHUB_REPOSITORY']}/contents/{ec.CONFIG_PATH}"
-    text = ec.contents_text(path, fetch=ec._reporting_fetch)
-    if text is None:
-        raise SystemExit(ec._UNREADABLE)
-    table = ec.load_config(text)
+    table = ec.load_config(ec.default_branch_text())
     errors = ec.tool_version_errors(table, engine)
     if errors:
         raise SystemExit("\n".join(errors))

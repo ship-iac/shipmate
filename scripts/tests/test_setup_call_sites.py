@@ -1,9 +1,8 @@
 """Every workflow call site hands `actions/setup` exactly the `with:` it should.
 
 `actions/setup` resolves both versions from the consumer table's `tools`, else the release's
-own `VERSIONS` file. A composite
-action only warns on an undeclared input, so a call site passing `${{ vars.TOFU_VERSION }}` would
-read as an override and silently do nothing.
+own `VERSIONS` file. A composite action only warns on an undeclared input, so a call site
+passing `${{ vars.TOFU_VERSION }}` would read as an override and silently do nothing.
 
 Each step's whole `with:` block is asserted against a hand-written table: `tofu: "false"` at the
 five detect jobs, which never run OpenTofu, and an empty block everywhere else.
