@@ -1101,7 +1101,7 @@ def _unmanaged_item(ctx):
         "todo",
         item,
         [
-            f"{len(unmanaged)} stack(s) carry no `env/*` tag:",
+            f"{len(unmanaged)} stack(s) carry neither an `env/*` tag nor `shipmate/local`:",
             *_stack_list(unmanaged),
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
             "carries `shipmate/local`.",

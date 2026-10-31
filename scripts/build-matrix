@@ -631,8 +631,8 @@ def env_membership(all_stacks=False, base="", check_names=True, tag_map=None):
         print(
             "::notice::"
             + command_data(
-                f"{len(unmanaged)} {scope} carry no env/* tag and are not managed by "
-                f"shipmate: {named(unmanaged, UNMANAGED_NAMES)}"
+                f"{len(unmanaged)} {scope} carry neither an env/* tag nor shipmate/local and are "
+                f"not managed by shipmate: {named(unmanaged, UNMANAGED_NAMES)}"
             )
         )
     stacks_by_env = {}

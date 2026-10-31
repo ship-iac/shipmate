@@ -367,7 +367,8 @@ def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypat
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
     assert tags_by_stack == _UNMANAGED_TREE
     assert capsys.readouterr().out == (
-        "::notice::2 stack(s) carry no env/* tag and are not managed by shipmate: "
+        "::notice::2 stack(s) carry neither an env/* tag nor shipmate/local "
+        "and are not managed by shipmate: "
         "stacks/alpha, stacks/zeta\n"
     )
 
@@ -380,7 +381,8 @@ def test_the_unmanaged_notice_keeps_a_percent_in_a_stack_path(monkeypatch, capsy
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == (
-        "::notice::1 stack(s) carry no env/* tag and are not managed by shipmate: stacks/c100%25\n"
+        "::notice::1 stack(s) carry neither an env/* tag nor shipmate/local "
+        "and are not managed by shipmate: stacks/c100%25\n"
     )
 
 
@@ -390,7 +392,8 @@ def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys)
     monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     bm.env_membership(all_stacks=False, base="deadbeef")
     assert capsys.readouterr().out == (
-        "::notice::2 changed stack(s) carry no env/* tag and are not managed by shipmate: "
+        "::notice::2 changed stack(s) carry neither an env/* tag nor shipmate/local "
+        "and are not managed by shipmate: "
         "stacks/alpha, stacks/zeta\n"
     )
 
@@ -401,7 +404,8 @@ def test_the_notice_names_ten_paths_and_counts_the_rest(monkeypatch, capsys):
     monkeypatch.setattr(bm, "all_tags", lambda: _TWENTY_UNMANAGED)
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == (
-        "::notice::20 stack(s) carry no env/* tag and are not managed by shipmate: "
+        "::notice::20 stack(s) carry neither an env/* tag nor shipmate/local "
+        "and are not managed by shipmate: "
         + ", ".join(f"stacks/u{i:02}" for i in range(10))
         + ", and 10 more\n"
     )
@@ -467,7 +471,8 @@ def test_the_unmanaged_notice_never_names_a_local_stack(monkeypatch, capsys):
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == (
-        "::notice::2 stack(s) carry no env/* tag and are not managed by shipmate: b, d\n"
+        "::notice::2 stack(s) carry neither an env/* tag nor shipmate/local "
+        "and are not managed by shipmate: b, d\n"
     )
 
 

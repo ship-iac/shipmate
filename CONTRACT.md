@@ -1088,42 +1088,42 @@ and an `env/*` tag refuses too, naming every such stack:
 A targeted `shipmate apply` and `shipmate unlock` check only the environment
 they act on, and never refuse a local stack's `env/*` tag.
 
-A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
-it. An unmanaged stack carrying `shipmate/local` is local: no notice, count,
-plan comment line, lost-tag warning or `scripts/onboard` item below names or
-counts it. Every other unmanaged stack is reported: plan, deploy and drift print a notice counting the unmanaged stacks they
-scanned (the changed set on plan and deploy, the whole tree on drift) and naming
-the first ten, then `, and M more`. A bare
+A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip it.
+An unmanaged stack carrying `shipmate/local` is local: no notice, count, plan
+comment line, lost-tag warning or `scripts/onboard` item below names or counts
+it. Every other unmanaged stack is reported: plan, deploy and drift print a
+notice counting the ones they scanned (the changed set on plan and deploy, the
+whole tree on drift) and naming the first ten, then `, and M more`. A bare
 `shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
-whole tree, and `scripts/onboard` also lists the stacks on its `unmanaged stacks`
-checklist item. The plan
-comment names the unmanaged stacks a pull request changes, under its verdict. A
-`workload/*` tag on an unmanaged stack is never checked. An `env/<name>` tag
-whose environment has no entry in the environment table still refuses the run
-under `layout: tf_vars`. The trade-off is accepted: a forgotten tag on a new
-stack is a notice and a line in the plan comment, not a refusal, and the gate
-goes green over a stack that plans nothing. When a pull request removes a
-stack's last `env/*` tag, plan detect also writes a `::warning::` naming it,
-because the same green gate then hides a live stack's unapplied change; a stack
-the same pull request tags `shipmate/local` draws none. A pull
-request removing one `env/*` tag from a stack that keeps another gets a
-`::warning::` and a plan comment line naming each `<stack> / <env>` pair, for the
-same reason. A
-deploy refuses when its merged pull request holds an open apply check for a
-stack and environment the merge no longer pairs: the stack, changed by that
-pull request, lost that `env/*` tag (or every one) after the pull request was
-planned, so no cell would ever apply its reviewed change. The refusal applies
-nothing, so it also names every other cell of that merge still to apply, as `<stack> / <env>`.
-A new pull request that retags each stranded stack and changes every other
-named stack plans the current default branch; its cells are applied before
-merge under a required gate, or by its deploy otherwise. After a deliberate untag, the stranded change is applied by hand instead,
-and the pull request still changes every named stack, or is not needed when
-none is named. Re-running the refused deploy checks out the same commit and
-refuses again ([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy
-refused an apply check on a stack that lost its env tag). A check of a stack
-that is no longer a stack at the merge commit, deleted on the default branch
-after planning, is not refused: it strands with nothing said, because no remedy
-exists for a deleted stack.
+whole tree, and `scripts/onboard` also lists these stacks on its
+`unmanaged stacks` checklist item. The plan comment names these stacks when a
+pull request changes them, under its verdict. A `workload/*` tag on an unmanaged
+stack is never checked. An `env/<name>` tag whose environment has no entry in
+the environment table still refuses the run under `layout: tf_vars`. The
+trade-off is accepted: a forgotten tag on a new stack is a notice and a line in
+the plan comment, not a refusal, and the gate goes green over a stack that plans
+nothing. When a pull request removes a stack's last `env/*` tag, plan detect
+also writes a `::warning::` naming it, because the same green gate then hides a
+live stack's unapplied change; a stack the same pull request tags
+`shipmate/local` draws none. A pull request removing one `env/*` tag from a
+stack that keeps another gets a `::warning::` and a plan comment line naming
+each `<stack> / <env>` pair, for the same reason. A deploy refuses when its
+merged pull request holds an open apply check for a stack and environment the
+merge no longer pairs: the stack, changed by that pull request, lost that
+`env/*` tag (or every one) after the pull request was planned, so no cell would
+ever apply its reviewed change. The refusal applies nothing, so it also names
+every other cell of that merge still to apply, as `<stack> / <env>`. A new pull
+request that retags each stranded stack and changes every other named stack
+plans the current default branch; its cells are applied before merge under a
+required gate, or by its deploy otherwise. After a deliberate untag, the
+stranded change is applied by hand instead, and the pull request still changes
+every named stack, or is not needed when none is named. Re-running the refused
+deploy checks out the same commit and refuses again
+([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy refused an apply
+check on a stack that lost its env tag). A check of a stack that is no longer a
+stack at the merge commit, deleted on the default branch after planning, is not
+refused: it strands with nothing said, because no remedy exists for a deleted
+stack.
 
 **A drift sweep's `tags` query narrows what the sweep plans, never what it
 scans.** Engine `drift.yml` takes it as an input, one literal query per drift
@@ -1158,10 +1158,9 @@ whose `env_binding` names no GitHub Environment, and the refusal of a
 ### Taking a stack out of CI
 
 To keep a stack out for good, remove every `env/*` tag from it and add
-`shipmate/local` in the same pull request. No plan comment, run log or
-`scripts/onboard` item names it, and merging deploys nothing for it. A deploy
-of that pull request still refuses an apply check left open on the stack
-(§Tag grammar).
+`shipmate/local` in the same pull request. No plan comment, notice or warning
+names it, and merging deploys nothing for it. A deploy of that pull request
+still refuses an apply check left open on the stack (§Tag grammar).
 
 To take a stack out for a while:
 
@@ -1177,8 +1176,9 @@ pair.
 
 Every plan's `detect` still runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
-and local stacks included, in its `hcl-check` step. Keep an unmanaged stack formatted and
-its generated code current, or every plan's `detect` fails, naming the files.
+stacks included, local ones too, in its `hcl-check` step. Keep an unmanaged
+stack formatted and its generated code current, or every plan's `detect` fails,
+naming the files.
 
 The stack's open drift Issues close on the next sweep that plans at least one
 cell and planned the default branch's current head, as Issues of a cell no
@@ -2734,12 +2734,13 @@ the repository-settings probes (the gate ruleset, the review rule and
 a comment on every quiet pull request. `shipmate doctor` and the run page still
 report them. A run whose comment carries the unmanaged line also posts: a pull
 request that changes only stacks with no `env/*` tag plans nothing, and the
-comment is where it says so; one changing only local stacks has no such line. When the line is left out for size (below), this
-exception does not apply. A run whose comment carries the lost pairs line also
-posts: a pull request that removes one `env/*` tag from a stack that keeps
-another drops that stack / environment pair, and the comment is where it says
-so; the same size rule applies. A run a `shipmate plan` command started also
-posts: the comment is that command's answer on the pull request (§Comment-ops).
+comment is where it says so; one changing only local stacks has no such line.
+When the line is left out for size (below), this exception does not apply. A run
+whose comment carries the lost pairs line also posts: a pull request that
+removes one `env/*` tag from a stack that keeps another drops that stack /
+environment pair, and the comment is where it says so; the same size rule
+applies. A run a `shipmate plan` command started also posts: the comment is that
+command's answer on the pull request (§Comment-ops).
 
 An existing comment is edited in place on every plan run but a draft autoplan, a
 cancelled plan job and a run whose pull request moved to a newer head (comment
@@ -2754,10 +2755,10 @@ line, the verdict line, a blank line, the auto apply line and a blank line when
 an autoplan not started by a push changed a cell of an `auto` environment
 (§`apply_mode: auto`), the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
-the pull request changes an unmanaged stack that is not local, the lost pairs line and a blank
-line when it untags a stack / environment pair, then per environment its
-heading and one line or fold-out per planned stack in it, then a blank line
-and the command section when it shows (below). The environments
+the pull request changes an unmanaged stack that is not local, the lost pairs
+line and a blank line when it untags a stack / environment pair, then per
+environment its heading and one line or fold-out per planned stack in it, then
+a blank line and the command section when it shows (below). The environments
 follow `detect`'s `env_order` output, apply order: the env-levels of the
 table's `needs`, ties broken by name. An environment the output does not name
 follows them by name, and an empty or invalid output (the invalid one warns)
@@ -2812,20 +2813,21 @@ and `lost` outputs, which the same rule reads.
   leaves out the repository-settings warnings the linked run also shows. When
   the cell lines leave it no room under the 65,536-character cap, it is left
   out with a warning.
-- **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
-  managed by shipmate: <paths>`, for the changed unmanaged stacks that are not
-  local (§Tag grammar), naming at most ten paths within 1,000
-  characters, then `, and M more`. When not even the first path fits, it ends
-  `; their paths are too long to list here.` When the cell lines leave it no
-  room under the 65,536-character cap, it is left out with a warning.
+- **Unmanaged line.** `⚪ N changed stack(s) carry neither an env/* tag nor
+  shipmate/local and are not managed by shipmate: <paths>`, for the changed
+  unmanaged stacks that are not local (§Tag grammar), naming at most ten paths
+  within 1,000 characters, then `, and M more`. When not even the first path
+  fits, it ends `; their paths are too long to list here.` When the cell lines
+  leave it no room under the 65,536-character cap, it is left out with a
+  warning.
 - **Lost pairs line.** `⚪ N stack / environment pair(s) lost their env/* tag
   in this pull request and are no longer planned or deployed: <pairs>`, each
   `<stack> / <env>`, for the stacks that keep another `env/*` tag; a stack that
   lost its last tag is on the unmanaged line instead, or on neither when it is
-  local, so no stack is named on both. Same caps and fallback as the unmanaged line, ending `; their pairs are
-  too long to list here.` A drift sweep and a run with no pull-request base
-  have no such line. On both lines each name is escaped like a cell line's
-  stack, `@` included.
+  local, so no stack is named on both. Same caps and fallback as the unmanaged
+  line, ending `; their pairs are too long to list here.` A drift sweep and a
+  run with no pull-request base have no such line. On both lines each name is
+  escaped like a cell line's stack, `@` included.
 - **Environment heading.** `#### <env>: N cells, M changed` (`1 cell` for one),
   with a blank line on both sides, `<env>` escaped like a cell line's.
 - **Cell line.** `<circle> <stack>: <state> <a href="<url>">plan</a>`, under its

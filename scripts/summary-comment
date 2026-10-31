@@ -470,7 +470,10 @@ def held_comment(reason, missing, checks, run_url, head_sha, errors=None, attemp
     return "\n\n".join(parts)
 
 
-UNMANAGED_LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
+UNMANAGED_LEAD = (
+    "⚪ {} changed stack(s) carry neither an env/* tag nor shipmate/local and are not "
+    "managed by shipmate"
+)
 LOST_LEAD = (
     "⚪ {} stack / environment pair(s) lost their env/* tag in this pull request and are no "
     "longer planned or deployed"

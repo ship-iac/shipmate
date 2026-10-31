@@ -3330,8 +3330,8 @@ def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, t
     _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=None)
     assert exc.code == 0
     assert (
-        "::notice::1 stack(s) carry no env/* tag and are not managed by shipmate: b"
-        in capsys.readouterr().out.splitlines()
+        "::notice::1 stack(s) carry neither an env/* tag nor shipmate/local "
+        "and are not managed by shipmate: b" in capsys.readouterr().out.splitlines()
     )
 
 
@@ -3455,7 +3455,7 @@ def test_an_untagged_stack_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, 
     assert checklist_items(checklist_of(capsys.readouterr().out))[UNMANAGED_ITEM] == (
         "todo",
         [
-            "1 stack(s) carry no `env/*` tag:",
+            "1 stack(s) carry neither an `env/*` tag nor `shipmate/local`:",
             "  b",
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
             "carries `shipmate/local`.",
@@ -3470,7 +3470,7 @@ def test_a_local_stack_is_not_listed_as_unmanaged():
         "todo",
         UNMANAGED_ITEM,
         [
-            "1 stack(s) carry no `env/*` tag:",
+            "1 stack(s) carry neither an `env/*` tag nor `shipmate/local`:",
             "  b",
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
             "carries `shipmate/local`.",
@@ -3495,7 +3495,7 @@ def test_more_than_ten_unmanaged_stacks_name_ten_and_count_the_rest():
         "todo",
         UNMANAGED_ITEM,
         [
-            "12 stack(s) carry no `env/*` tag:",
+            "12 stack(s) carry neither an `env/*` tag nor `shipmate/local`:",
             *[f"  s{i:02}" for i in range(10)],
             "  and 2 more",
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
