@@ -1094,8 +1094,8 @@ comment line, lost-tag warning or `scripts/onboard` item below names or counts
 it. Every other unmanaged stack is reported: plan, deploy and drift print a
 notice counting the ones they scanned (the changed set on plan and deploy, the
 whole tree on drift) and naming the first ten, then `, and M more`. A bare
-`shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
-whole tree, and `scripts/onboard` also lists these stacks on its
+`shipmate apply`, an `auto` apply, `shipmate unlock` and `scripts/onboard` print
+it too, over the whole tree, and `scripts/onboard` also lists these stacks on its
 `unmanaged stacks` checklist item. The plan comment names these stacks when a
 pull request changes them, under its verdict. A `workload/*` tag on an unmanaged
 stack is never checked. An `env/<name>` tag whose environment has no entry in
@@ -1159,8 +1159,11 @@ whose `env_binding` names no GitHub Environment, and the refusal of a
 
 To keep a stack out for good, remove every `env/*` tag from it and add
 `shipmate/local` in the same pull request. No plan comment, notice or warning
-names it, and merging deploys nothing for it. A deploy of that pull request
-still refuses an apply check left open on the stack (§Tag grammar).
+names it, and merging deploys nothing for it. That pull request's head plans
+no cell for the stack, so its own deploy holds no apply check for it. Another
+pull request that planned the stack under its `env/*` tag before the move
+merged still holds an open apply check on it, and that pull request's deploy
+refuses (§Tag grammar).
 
 To take a stack out for a while:
 

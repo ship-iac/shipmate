@@ -188,9 +188,13 @@ approving review before apply, a `CODEOWNERS` entry, a git-tracked
 `.terraform.lock.hcl` in each stack, the repository's Actions settings
 ([`hardening.md`](hardening.md) §10–12 and 20 lists the rows it checks), and
 the pull request carrying the workflow file. Three items check the whole tree
-before a run does: `unmanaged stacks` names the stacks with no `env/*` tag and no `shipmate/local` tag,
-`stack tags` the tag refusals a plan would raise and the workload tags that
-disagree with the table, and `drift sweeps` the cells no drift file sweeps. It
+before a run does: `unmanaged stacks` names the stacks with no `env/*` tag and
+no `shipmate/local` tag, `stack tags` the workload and slug refusals a plan
+would raise and the workload tags that disagree with the table, and
+`drift sweeps` the cells no drift file sweeps. A stack carrying both
+`shipmate/local` and an `env/*` tag, or an `env/<name>` tag no environment can
+take, prints no item: the script stops with the plan's refusal before the
+checklist. It
 marks each item `ok`, `todo` or `cannot check` from what the run read, and only
 a `todo` prints what to do. The items that can be `cannot check` are: the App
 installation, which only an App JWT can read; the custom deployment protection

@@ -359,7 +359,7 @@ that causes it merges:
 | Item | `todo` when |
 | --- | --- |
 | `unmanaged stacks` | a stack carries no `env/*` tag and no `shipmate/local` tag. It names them; shipmate runs none of them. Tag a stack kept out on purpose `shipmate/local`. |
-| `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list (checked only when that entry names an `identity`), or that list names a workload no stack in the environment tags. |
+| `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list (checked only when that entry names an `identity`), or that list names a workload no stack in the environment tags. A stack carrying both `shipmate/local` and an `env/*` tag, or an `env/<name>` tag no environment can take, is never a `todo` here: `scripts/onboard` stops with the plan's refusal before printing the checklist. |
 | `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query, or one clause of it, matches no cell; or a sweep refuses: its query has an empty term, selects more than 256 cells, or keeps a cell whose `workload/*` tag its environment's `workloads` list does not name (checked only when that entry names an `identity`). A refused sweep runs no cell, so that file's cells count as unswept. |
 
 `drift sweeps` reads every `.yml` and `.yaml` file in `.github/workflows/` and
