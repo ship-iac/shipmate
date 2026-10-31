@@ -53,7 +53,7 @@ VERSION_SKEW = "plan files cannot be transferred between different versions"
 SKEW_REMEDY = (
     "The stored plan was made by another OpenTofu version: `tools.tofu` in"
     " .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was"
-    " applied. Re-plan by pushing a commit to the pull request or commenting `shipmate plan`."
+    " applied. Re-plan this stack on its pull request and review the fresh plan."
 )
 
 
