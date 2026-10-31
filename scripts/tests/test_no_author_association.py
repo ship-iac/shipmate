@@ -32,8 +32,8 @@ import subprocess
 import pytest
 from _loader import ENGINE
 
-#: Tracked files that are not UTF-8 text. None today.
-BINARY = set()
+#: Tracked files that are not UTF-8 text: a raw OpenPGP signature fixture.
+BINARY = {"scripts/tests/fixtures/release-sums/tofu_1.13.2_SHA256SUMS.gpgsig"}
 OWN = "scripts/tests/test_no_author_association.py"
 ASSOCIATION = re.compile(r"author_association|authorAssociation|\bCOLLABORATOR\b")
 
