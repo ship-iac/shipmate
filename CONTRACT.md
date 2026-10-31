@@ -1162,8 +1162,8 @@ To keep a stack out for good, remove every `env/*` tag from it and add
 names it, and merging deploys nothing for it. That pull request's head plans
 no cell for the stack, so its own deploy holds no apply check for it. Another
 pull request that planned the stack under its `env/*` tag before the move
-merged still holds an open apply check on it, and that pull request's deploy
-refuses (§Tag grammar).
+merged holds an apply check on it; when that check is still open, that pull
+request's deploy refuses (§Tag grammar).
 
 To take a stack out for a while:
 

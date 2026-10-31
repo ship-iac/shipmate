@@ -542,16 +542,18 @@ def test_compute_cells_keeps_local_stacks_in_the_scan_set(monkeypatch):
 
 
 def test_two_workload_tags_on_a_local_stack_draw_no_refusal(monkeypatch):
-    """Mutation: call `workload_of` over every stack in `tags_by_stack` in `full_tree`."""
+    """Mutations: call `workload_of` over every stack in `tags_by_stack` in `full_tree`;
+    break `LOCAL_TAG` matching in `reported_unmanaged` -- `stacks/lab` is reported."""
     tree = {
         "stacks/app": ["env/dev-eu"],
         "stacks/lab": ["shipmate/local", "workload/a", "workload/b"],
     }
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
-    _, cells, _, scanned, _ = bm.compute_cells(all_stacks=True)
+    _, cells, _, scanned, reported = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert scanned == ["stacks/lab"]
+    assert reported == []
 
 
 def test_a_stated_head_repository_equal_to_this_repository_is_planned():
@@ -2971,7 +2973,7 @@ def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_
 
 def test_main_counts_no_local_stack_as_unmanaged(monkeypatch, tmp_path):
     """Every changed stack is local: the plan comment's unmanaged line reads this output.
-    Mutation: build `named` from the unfiltered unmanaged list in `main` -- count 1."""
+    Mutation: take `compute_cells`' fourth element in `main` -- count 1."""
     outputs, _ = _run_main(
         monkeypatch,
         tmp_path,
@@ -2984,8 +2986,8 @@ def test_main_counts_no_local_stack_as_unmanaged(monkeypatch, tmp_path):
 
 def test_detect_draws_no_lost_tag_warning_for_a_stack_made_local(monkeypatch, tmp_path, capsys):
     """`stacks/lab` swaps its last `env/*` tag for `shipmate/local`; `stacks/gone` drops its
-    tag and stays unmanaged. Mutation: pass the unfiltered unmanaged list to
-    `warn_lost_env_tags` -- `stacks/lab` is named too."""
+    tag and stays unmanaged. Mutation: take `compute_cells`' fourth element in `main` --
+    `stacks/lab` is named too."""
     _run_main(
         monkeypatch,
         tmp_path,

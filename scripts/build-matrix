@@ -507,8 +507,7 @@ def reported_unmanaged(tags_by_stack):
     """Sorted `unmanaged_stacks` that are not `local_stacks`: the stacks the unmanaged notice in
     `env_membership`, the plan's `unmanaged` output and lost-tag warning in `main`, and
     onboard's unmanaged stacks item name."""
-    local = set(local_stacks(tags_by_stack))
-    return [s for s in unmanaged_stacks(tags_by_stack) if s not in local]
+    return [s for s in unmanaged_stacks(tags_by_stack) if LOCAL_TAG not in tags_by_stack[s]]
 
 
 def lost_env_tags(base, head_envs):
