@@ -158,7 +158,7 @@ live probes.
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
   on by itself run here — the top-level keys, `layout`, `max_parallel`,
-  `command_hints` and the environment entries; `tf_vars`-layout coverage and
+  `command_hints`, `tools` and the environment entries; `tf_vars`-layout coverage and
   unused entries need a plan matrix or a whole-tree environment scan, and the
   verdict names them as unchecked. A valid file also gets its `needs`, `apply_mode` and `max_parallel`
   values read back, absent ones included: `apply_mode: targeted` set on no entry is
@@ -183,6 +183,14 @@ live probes.
   may sit in a file the probe could not read; a file that does not parse
   silences the missing-file note for the same reason. So does an engine repository that
   could not be determined, since no call can then be recognised.
+
+Under `#### tool versions every run installs, from the default branch` the report
+lists one notice per tool, `<tool> <version> (from <source>)`, the source `tools` or
+`VERSIONS`. The lines count toward no verdict. They come from the default branch's
+table, not the commit under examination, so on a pull request that changes `tools`
+they show the versions in force until it merges. The section is absent when that
+table cannot be read or is invalid, or when `VERSIONS` cannot be read: every run
+then refuses before it installs anything.
 
 The report carries those findings together with the warning and failure
 annotations GitHub already recorded on this commit's workflow runs — shipmate's
@@ -602,16 +610,30 @@ cell re-renders the stored plan with the command that wrote it and compares.
   same remedy.
 - **The render disagrees with the digest.** The error names both digests. Either
   the plan text published for review does not describe the plan that would run,
-  or the tooling moved underneath the artifact. A pin bump that moves the tofu
-  version between plan and apply reaches `tofu` first and fails earlier with
-  `plan files cannot be transferred between different versions`; a provider that
-  moved fails at the apply with `Inconsistent dependency lock file`. Neither
-  produces this message. There is no force. Re-plan the stack on its pull request
+  or the tooling moved underneath the artifact. An OpenTofu version that moved
+  between plan and apply fails the render itself (§`plan files cannot be
+  transferred between different versions`); a provider that moved fails at the
+  apply with `Inconsistent dependency lock file`. Neither produces this message. There is no force. Re-plan the stack on its pull request
   and review the fresh plan.
 
 Nothing has been applied in either case: the comparison runs before
 `tofu apply`, and the pending check is what keeps the gate from greening over
 an unapplied stack.
+
+### `plan files cannot be transferred between different versions`
+
+An apply cell's `plan-digest` step fails rendering the stored plan, nothing
+applied, and its `apply / <stack> / <env>` check stays pending. OpenTofu's
+diagnostic is followed by a second error:
+
+> The stored plan was made by another OpenTofu version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was applied. Re-plan this stack on its pull request and review the fresh plan.
+
+Every job installs the OpenTofu version the default branch decides
+([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), so a merged
+`tools.tofu` change, or an engine re-pin that moves the `VERSIONS` default,
+invalidates every plan awaiting apply. Re-plan: on an open pull request, comment
+`shipmate plan` or push; after the merge, open a new pull request touching the
+stack.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
 
@@ -688,11 +710,16 @@ branch's** copy of the file — that is the only copy execution reads.
 | `the engine needs Python 3.12 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `the engine needs PyYAML for python3 and this runner has none` | the runner's `python3` cannot import PyYAML; see §`could not install python3-yaml`, or `the engine needs PyYAML` below |
 | `declares no layout` | either the key is genuinely absent, or it is indented under another key — see the indentation trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments`, `max_parallel` and `command_hints` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments`, `max_parallel`, `command_hints` and `tools` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
 | `max_parallel is …; it must be a whole number from 1 to 256` | `max_parallel` takes a bare whole number, quoted or not: no sign, space, decimal point or leading zero. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0 is refused; remove the key for the default of 10 |
 | `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan and drift matrices stays a merged commit. Write the number |
 | `command_hints must be true or false, got …` | `command_hints` holds `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise read as set and resolve as unset |
 | `command_hints holds a variable reference, and it accepts none` | `command_hints` is written into the file, like the flags. Write `true` or `false` |
+| `tools is …; it must be a mapping of terramate and tofu to versions, got …` | `tools` holds `tofu:` and `terramate:` lines indented under it. An empty `tools:` reads as a string, a list as a list. `setup`'s `Resolve versions` step refuses each `tools` row here in every job, before it installs anything |
+| `tools.<key> is …; <key> is not a tool this engine installs. tools holds terramate, tofu.` | a misspelled tool name. Only `terramate` and `tofu` are accepted |
+| `tools.<tool> is …; a version is written X.Y.Z in ASCII digits, such as 1.13.2, with no v, pre-release or range.` | write the release's whole version: `1.13` and `v1.13.2` both refuse |
+| `tools.<tool> is …, below <floor>, the oldest <tool> this engine supports.` | the version is older than the floor in the pinned engine's `VERSIONS`. Name the floor or a newer release, or remove the key for the engine's default |
+| `tools holds a variable reference, and it accepts none` | the versions are written into the file, like the flags. Write the version |
 | `environments.<env>.<key> must be true or false, got …` | `split` and `review` hold `true` or `false`, bare or quoted. `no`, `False` or a number would otherwise resolve to the default |
 | `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `split` and `review` are written into the file, so which environments are shared and which are review-exempt stays a merged commit. Write `true` or `false` |
 | `environments.<env>.apply_mode must be targeted, bare or auto, got …` | `apply_mode` holds `targeted`, `bare` or `auto`. Any other value, `true` and `Targeted` included, would otherwise resolve as `bare` and put the environment on a bare `shipmate apply` |
@@ -742,8 +769,8 @@ applies after a complete autoplan, with no approving review and no comment; read
 before merging.
 
 **Editing them on a branch does not change what that branch applies.**
-`needs`, `apply_mode`, `max_parallel` and `command_hints` are read from the default
-branch with the rest of the file. Validate the change with `shipmate doctor` on the pull
+`needs`, `apply_mode`, `max_parallel`, `command_hints` and `tools` are read from the
+default branch with the rest of the file. Validate the change with `shipmate doctor` on the pull
 request, then merge it — that is what makes it take effect.
 
 ### A cell fails with no AWS credential
@@ -1219,6 +1246,46 @@ The install needs a Debian or Ubuntu runner with passwordless `sudo`. Fix:
   `apt-get`'s own error. A package-mirror outage clears on a re-run of the
   failed job.
 
+### `VERSIONS` is refused
+
+The `Resolve versions` step in `actions/setup` fails with one of these, naming the
+engine's `VERSIONS` path:
+
+- "<path> does not exist: it carries the terramate and tofu versions this release pins."
+- "<path> holds no <key>= line; restore it."
+- "<path> line <key>=<value> is malformed; a version is written X.Y.Z."
+
+The file is the engine's, not the repository's, so this happens only on an engine
+commit that broke it. Pin a released engine commit. The step's `tools` refusals are
+the ones listed under §`.github/shipmate-config.yml` is rejected.
+
+### `Terramate checksum verification failed` or `OpenTofu checksum verification failed`
+
+The `Verify Terramate checksums` or `Verify OpenTofu checksums` step in
+`actions/setup` failed, before anything was installed. Each verifies the
+release's checksum file against a signer key committed in the engine
+([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites). Every annotation
+starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause.
+`<base>` is the release's download URL, `<sums>` OpenTofu's `tofu_<version>_SHA256SUMS`.
+
+| Annotation ends with | Cause and remedy |
+|---|---|
+| "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl` or `base64` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
+| "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
+| "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
+| "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
+| "gpg could not import the committed OpenTofu key." | `keys/opentofu.asc` in the pinned engine commit is not a key `gpg` reads. Pin a released engine commit. |
+| "the signature on <sums> did not verify against the committed OpenTofu key (gpg exit <rc>)." | The checksum file is not the one OpenTofu signed, the signature download is not a signature, or a key other than the committed one signed it. The step log carries `gpg`'s own reason. |
+| "<sums> is signed by <fingerprint>, not the OpenTofu signer E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80." | The signature verified, but its primary key fingerprint is not the pinned one (`no key` when `gpg` reported none). Only the committed key is imported, so `keys/opentofu.asc` in the pinned engine commit holds another key. Pin a released engine commit. |
+| "checksums.txt has no line for <asset>." or "<sums> has no line for <asset>." | The signed file lists no Linux `x86_64`/`amd64` or `arm64` asset for that release. Choose another version. |
+
+A signature that does not verify on a genuine release, every time, means upstream
+changed its signer. Every install of a release the new key signs fails until an
+engine release ships that key (`docs/releasing.md` §Rotate a signer key). Pin an
+older version in `tools` until then, one the committed key signed. Do not install
+the tool by hand.
+
 ### `Terramate install failed`
 
 The `Install Terramate` step in `actions/setup` failed. Every annotation starts
@@ -1226,28 +1293,20 @@ The `Install Terramate` step in `actions/setup` failed. Every annotation starts
 
 | Annotation ends with | Cause and remedy |
 |---|---|
-| "curl is not installed on the runner." | The runner has no `curl`. Install it on the runner image. |
-| "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<url> answered HTTP 404 (curl exit <rc>); check VERSIONS and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
+| "the signed checksums.txt yields no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no digest in the signed file, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
+| "<url> answered HTTP 404 (curl exit <rc>); check the signed checksums.txt and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
 | "<url> answered HTTP <code> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
+| "<url> has sha256 <got>, not the <want> the signed checksums.txt names; the release asset differs from the signed one." | The downloaded archive is not the one Terramate signed. A re-run downloads the same asset: report it, and do not install it by hand. |
 | "tar could not extract terramate from <url>." | The downloaded archive did not unpack. |
 | "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
-| "<url> delivered version <got>; check VERSIONS and the release asset." | The binary reports another version than the pinned one. |
-| "VERSIONS pins no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no pinned digest, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
-| "<url> has sha256 <got>, not the <pinned> VERSIONS pins; the release asset differs from the pinned one." | The downloaded archive is not the one the engine release pinned. A re-run downloads the same asset: report it, and do not install it by hand. |
+| "<url> delivered version <got>; check the signed checksums.txt and the release asset." | The binary reports another version than the one requested. |
 
-### `carries no sha256 line` or `Failed to validate OpenTofu CLI zip checksum`
+### `Failed to validate OpenTofu CLI zip checksum`
 
-The `Resolve versions` step in `actions/setup` fails with "<path>/VERSIONS carries
-no sha256 line for <tool> <version>; paste the release's checksum lines." when the
-engine's `VERSIONS` names a version without that release's checksum lines. It
-happens only on an engine commit whose tool-version bump left them out
-(`docs/releasing.md` §Bump Terramate or OpenTofu); pin a released engine commit.
-
-The `Install OpenTofu` step fails with "Failed to validate OpenTofu CLI zip
-checksum" when the downloaded zip's sha256 is not among the two `VERSIONS` pins
-for that version: the asset differs from the pinned one, or the runner is not
-Linux `amd64` or `arm64`. A re-run downloads the same asset.
+The `Install OpenTofu` step fails with this when the downloaded zip's sha256 is
+not among the Linux `amd64` and `arm64` digests of the signed `SHA256SUMS`: the
+asset differs from the signed one, or the runner is not Linux `amd64` or
+`arm64`. A re-run downloads the same asset.
 
 curl retries HTTP 408, 429, 500, 502, 503 and 504 responses, timeouts and stalls
 three times before the step fails. It also retries connection resets and TLS

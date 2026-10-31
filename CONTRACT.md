@@ -419,9 +419,9 @@ nothing for its cells to run as. The two absences refuse at the same site,
 `scripts/env-config` (§Refusals) — a file absent from the default branch, and a
 file that parses but declares no `layout`.
 
-The file holds five top-level settings and no others: `layout`,
-`identities`, `environments`, `max_parallel`, `command_hints`. Any other top-level
-key refuses, naming the offending key and the five that are allowed. An engine refuses a key
+The file holds six top-level settings and no others: `layout`,
+`identities`, `environments`, `max_parallel`, `command_hints`, `tools`. Any other top-level
+key refuses, naming the offending key and the six that are allowed. An engine refuses a key
 it does not implement, so a repository moves its pin before it adds a key a newer
 release introduces.
 
@@ -439,11 +439,12 @@ it plans; changing any of those takes a merge to the default branch. The read
 names `GITHUB_REPOSITORY`, which is the base repository under both pull-request
 events, and a fork pull request is still refused in `detect` before it plans.
 
-**`needs`, `apply_mode`, `review`, `max_parallel` and `command_hints` come from the
-default branch too.** They are read from the same parsed mapping as the environment
-table, and a branch therefore cannot reorder its own apply waves, drop its own
-production exclusion, exempt itself from the review requirement, raise its own
-fan-out or change what its own plan comment shows.
+**`needs`, `apply_mode`, `review`, `max_parallel`, `command_hints` and `tools` come
+from the default branch too.** They are read from the same parsed mapping as the
+environment table, and a branch therefore cannot reorder its own apply waves, drop its
+own production exclusion, exempt itself from the review requirement, raise its own
+fan-out, change what its own plan comment shows or choose the Terramate and OpenTofu
+versions its own plan runs.
 
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
@@ -468,6 +469,9 @@ keeps a leading `0`. Indentation is the one structure rule.
 layout: tf_vars                    # tf_vars | workspace | folder
 max_parallel: 10                   # cell jobs one plan or drift matrix runs at once
 # command_hints: true              # end a plan comment with a changed cell with its commands
+# tools:                           # versions every job installs; VERSIONS defaults when absent
+#   tofu: 1.13.2
+#   terramate: 0.17.3
 
 identities:
   dev:
@@ -514,6 +518,23 @@ a plan comment with a changed cell on a pull request that is not a draft ends
 with a folded `shipmate commands` section naming `shipmate apply`, `shipmate
 unlock <env> --evict` for each environment holding a changed cell another pull
 request holds, and `shipmate help` (§Plan comment). It changes no plan or apply.
+
+**`tools` chooses the Terramate and OpenTofu versions every job installs.** It
+maps `terramate`, `tofu` or both to a release version written `X.Y.Z` in ASCII
+digits, such as `1.13.2`: no `v`, pre-release or range. A tool it leaves out, and
+every tool when it is absent, installs the default the engine's `VERSIONS` file
+names at the commit the consumer pins. A version below that tool's floor in
+`VERSIONS` (`terramate_min`, `tofu_min`) refuses; versions compare numerically per
+component, so `1.13.10` is above `1.13.9`. A floor rises only in an engine release
+that starts relying on a newer feature of the tool, never with a routine default
+bump. An engine release is tested at its `VERSIONS` defaults only, so any other
+value is untested by that release. `tools` accepts no variable reference. `setup`
+reads it from the default branch in every job that installs a tool (§Runner
+prerequisites), so a pull request that changes it plans with the default branch's
+versions until it merges. A merged `tools.tofu` change invalidates every plan
+awaiting apply (§Apply-match fingerprint). `shipmate doctor` lists each tool's
+version and its source as the default branch decides them
+(`docs/troubleshooting.md` §shipmate doctor).
 
 **`max_parallel` caps the plan and drift matrices.** It is a whole number from
 1 to 256, and 10 when absent: each plan matrix and drift sweep runs at most that
@@ -641,7 +662,7 @@ would stop describing environment identity.
 ### Variable references
 
 Any string value in the file except `split`, `apply_mode`, `review`,
-`max_parallel` and `command_hints` may instead name a GitHub variable:
+`max_parallel`, `command_hints` and `tools` may instead name a GitHub variable:
 
 ```yaml
 # .github/shipmate-config.yml
@@ -664,7 +685,7 @@ environments:
 - **Shape.** Exactly `{vars: NAME}`, in flow or block form: a mapping with one
   key, `vars`, holding a string, named after GitHub's `vars` context. It is valid at every
   string position, list items and an identity map's values included, except
-  `split`, `apply_mode`, `review`, `max_parallel` and `command_hints` (see Values),
+  `split`, `apply_mode`, `review`, `max_parallel`, `command_hints` and `tools` (see Values),
   and it replaces the whole string before `{workload}` is filled. Any other
   mapping is ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
@@ -680,7 +701,7 @@ environments:
   variable of the same name on that Environment shadows the repository value in
   those two jobs, and nowhere else.
 - **Values.** A resolved value is always a string. `split`, `apply_mode`,
-  `review`, `max_parallel` and `command_hints` accept no reference: one refuses before it
+  `review`, `max_parallel`, `command_hints` and `tools` accept no reference: one refuses before it
   resolves, so the refusal never quotes the variable's value. A referenced
   `layout` whose value is not a layout refuses naming the variable, not the
   value. The name is
@@ -751,7 +772,8 @@ variable rows depend on the run as well as the file, so they are not structural.
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
 | `max_parallel` that is not a whole number from 1 to 256, or holds a variable reference | GitHub runs a matrix with `max-parallel: 0` unbounded and fails the run on an empty or non-numeric value; the cap is written into the file, like the flags |
 | `command_hints` that is not `true` or `false`, or holds a variable reference | anything else reads as set to a person and would resolve as unset; the setting is written into the file, like the flags |
-| A top-level key other than `layout`, `identities`, `environments`, `max_parallel`, `command_hints` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| `tools` that is not a mapping, names a key other than `terramate` or `tofu`, holds a value not written `X.Y.Z` or a version below that tool's floor in `VERSIONS`, or holds a variable reference | a version becomes a download URL, so only a release version is accepted; a version below the floor lacks a feature the engine relies on; the versions are written into the file, like the flags. `setup` refuses the same `tools` in every job before it installs anything |
+| A top-level key other than `layout`, `identities`, `environments`, `max_parallel`, `command_hints`, `tools` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
@@ -2417,6 +2439,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and several `ubuntu-slim` jobs on the plan, apply and deploy paths
   call `gh api`. Self-hosted runners must preinstall these tools.
+- A runner that runs `setup` must also provide `gpg` and a coreutils `base64`,
+  which only `setup` calls, and only in the jobs that take `runs_on`: no
+  `ubuntu-slim` job runs it. The `ubuntu-24.04` image's included-software list
+  names `gnupg2`; whether the `ubuntu-26.04` images ship `gpg` is unmeasured.
+  Self-hosted runners must preinstall both.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
@@ -2445,16 +2472,30 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - Engine steps use GitHub's `$/` self-repository syntax, which needs runner 2.336.0 or newer,
   and shipmate supports it on github.com only. A self-hosted runner below that version, and
   GitHub Enterprise Server, cannot run the engine. The error such a runner shows is unmeasured.
-- Terramate and OpenTofu are not assumed to be on the image: the
-  `setup` action installs the versions the engine release declares in its own
-  root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
-  other versions is a pin bump; the action takes no version input. A missing
-  file or line fails the step rather than falling back to the installer's
-  latest. `VERSIONS` also pins the sha256 of each tool's Linux `x86_64`/`amd64`
-  and `arm64` release asset, as `sha256sum` lines copied from the release's own
-  checksum file. Each download is checked against its pin: a mismatch, or a
-  version or platform with no pin, fails the step rather than installing
-  unverified.
+- Terramate and OpenTofu are not assumed to be on the image: the `setup`
+  action installs them in every job that runs them, at the versions `tools` in
+  the default branch's `.github/shipmate-config.yml` names, else at the defaults
+  in the engine's root-level `VERSIONS` file, read at the commit the consumer
+  pins (§Environment table). To read the table, `setup` makes one contents-API
+  read with the job's `GITHUB_TOKEN`, retried on a transient failure, and parses
+  it with `python3` and PyYAML, so it needs both as above. A failed read, an
+  invalid `tools` and a missing or malformed `VERSIONS` line each fail the step
+  rather than installing a default.
+- `setup` verifies each download against its release's signed checksum file
+  before it installs anything. For OpenTofu it fetches `tofu_<v>_SHA256SUMS` and
+  its `.gpgsig`, verifies the signature with `gpg` against `keys/opentofu.asc`,
+  and requires the primary key fingerprint
+  `E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80`. For Terramate it fetches
+  `checksums.txt` and its `.sig`, decodes the signature with `base64` and
+  verifies it with `openssl` against `keys/terramate-cosign.pub`. Both keys are
+  committed in the engine and never fetched at run time. The verified file's
+  Linux `x86_64`/`amd64` and `arm64` digests then bind the download. Any
+  failure fails the step with one `::error::`: a missing tool, a failed fetch, a
+  signature that does not verify, a file with no line for the asset, a download
+  whose digest differs. Nothing installs unverified and nothing falls back.
+  Neither key carries an expiry, so the keys change only when upstream changes
+  its signer: from then on, every install of a release the new signer signs
+  fails until an engine release ships the new key.
 
 ## Fan-out
 
@@ -3263,6 +3304,14 @@ detect; the remedy is a re-plan. `tofu show` of a stored plan renders the
 same bytes on any runner at one tofu version and one `run.env` (§Engine-owned
 tofu invocation says what the wrapper adds); both `show` and `apply` refuse a
 plan file from another version, so the record carries no version field.
+`setup` resolves the OpenTofu version in every job (§Runner prerequisites), so a
+merged `tools.tofu` change, like an engine re-pin that moves the `VERSIONS`
+default, invalidates every plan awaiting apply. Its render fails before `tofu
+apply` with OpenTofu's `plan files cannot be transferred between different
+versions` and a second error: "The stored plan was made by another OpenTofu
+version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS
+changed since the plan. Nothing was applied. Re-plan this stack on its pull
+request and review the fresh plan."
 
 The record's `cells` field binds each apply check to the rest of its plan run:
 the number of cells that run planned. The summary job publishes its apply checks

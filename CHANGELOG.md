@@ -8,6 +8,15 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Added
+
+- **`tools` in `.github/shipmate-config.yml` chooses the Terramate and OpenTofu versions every job installs**, each `X.Y.Z` at or above the floor in the engine's `VERSIONS`, read from the default branch; an absent tool installs the engine's default. A merged `tools.tofu` change invalidates every plan awaiting apply, as a re-pin that moves the default does.
+- **`actions/setup` verifies every Terramate and OpenTofu download against the release's signed checksum file**, with signer keys committed in the engine (`keys/`), and refuses on any failure. `setup` needs `gpg` and `base64` on the runner (`CONTRACT.md` §Runner prerequisites).
+- **An apply of a plan another OpenTofu version made fails with the re-plan remedy** beside OpenTofu's `plan files cannot be transferred between different versions`.
+- **`shipmate doctor` lists each tool's version and its source** (`tools` or `VERSIONS`) under `tool versions every run installs, from the default branch`.
+
 ## [0.53.1] — 2026-10-30
 
 Tags `639755d`.

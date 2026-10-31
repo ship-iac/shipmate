@@ -2763,7 +2763,8 @@ def _verdict(findings, sections, ctx):
     annotations), `N notices` (notice findings), zero counts omitted, then `harvest incomplete`
     when the harvest failed or is still pending. Errors are 🔴, warnings 🟠, notices and
     `harvest incomplete` ⚪, and the line takes the worst; `🟢 no problems found` when there is
-    no token. Then `provenance`. `config_status` lines are status and count toward nothing.
+    no token. Then `provenance`. `config_status` and `tool_status` lines are status and count
+    toward nothing.
 
     Harvested rows are counted from `harvest_sections`, after its filter, so a plan-path doctor
     annotation the live probes re-state is counted once, and a row the budget drops still counts.

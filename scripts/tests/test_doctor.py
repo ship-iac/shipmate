@@ -283,7 +283,7 @@ def test_one_run_reads_the_default_branch_table_once(monkeypatch):
     `tool_status`.
 
     Mutation: have `_default_branch_table` read the file without the `ctx` memo -- the file
-    is read four times.
+    is read more than once.
     """
     rules = [_gate_rule()[0], _pull_request_rule(count=0)]
     responses = {
