@@ -203,7 +203,7 @@ runs:
         # prefixes the whole line with one, which would never equal the recorded digest.
         actual=$(sha256sum < "$rendered" | cut -d' ' -f1)
         if [ "$actual" != "$PLAN_SHA256" ]; then
-          echo "::error::apply aborted for $ENV/$STACK: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan this stack on its pull request and review the fresh plan."
+          echo "::error::apply aborted for $ENV/$STACK: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack."
           exit 1
         fi
 

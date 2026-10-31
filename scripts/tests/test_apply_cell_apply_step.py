@@ -272,7 +272,8 @@ def test_a_mismatched_render_refuses_and_never_applies(tmp_path):
     assert (
         "::error::apply aborted for dev-eu/stacks/app: the stored plan does not render to the plan"
         f" text that was reviewed (expected {_PLAN_SHA256}, got {actual}). Nothing has been"
-        " applied. Re-plan this stack on its pull request and review the fresh plan."
+        " applied. Re-plan the stack by pushing a commit to its open pull request, or, after"
+        " merge, by a new pull request that changes the stack."
     ) in r.stdout.splitlines()
 
 
@@ -305,7 +306,8 @@ def test_a_render_refused_for_another_tofu_version_names_the_replan_remedy(tmp_p
     assert (
         "::error::The stored plan was made by another OpenTofu version: `tools.tofu` in"
         " .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was"
-        " applied. Re-plan this stack on its pull request and review the fresh plan."
+        " applied. Re-plan the stack by pushing a commit to its open pull request, or, after"
+        " merge, by a new pull request that changes the stack."
     ) in r.stdout.splitlines()
 
 

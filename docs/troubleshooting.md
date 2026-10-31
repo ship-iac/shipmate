@@ -613,8 +613,8 @@ cell re-renders the stored plan with the command that wrote it and compares.
   or the tooling moved underneath the artifact. An OpenTofu version that moved
   between plan and apply fails the render itself (§`plan files cannot be
   transferred between different versions`); a provider that moved fails at the
-  apply with `Inconsistent dependency lock file`. Neither produces this message. There is no force. Re-plan the stack on its pull request
-  and review the fresh plan.
+  apply with `Inconsistent dependency lock file`. Neither produces this message. There is no force. Re-plan the stack by pushing a
+  commit to its open pull request, or, after merge, by a new pull request that changes the stack.
 
 Nothing has been applied in either case: the comparison runs before
 `tofu apply`, and the pending check is what keeps the gate from greening over
@@ -624,9 +624,10 @@ an unapplied stack.
 
 An apply cell's `plan-digest` step fails rendering the stored plan, nothing
 applied, and its `apply / <stack> / <env>` check stays pending. OpenTofu's
-diagnostic is followed by a second error:
+`plan files cannot be transferred between different versions` text is in the
+step log, and the one error annotation is:
 
-> The stored plan was made by another OpenTofu version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was applied. Re-plan this stack on its pull request and review the fresh plan.
+> The stored plan was made by another OpenTofu version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack.
 
 Every job installs the OpenTofu version the default branch decides
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), so a merged
@@ -705,7 +706,10 @@ branch's** copy of the file — that is the only copy execution reads. `setup`'s
 `Resolve versions` step reads the same file in every job before it installs
 anything, so the read and parse refusals also fail it there with the same text:
 among them an unreadable file, invalid YAML, a missing Python 3.12 or PyYAML, a
-variable reference in a key that accepts none, and every `tools` row.
+variable reference in a key that accepts none, and every `tools` row. A merged
+`tools` refusal fails the plan of the pull request that fixes it too, so that pull
+request cannot pass the gate either: disable the gate rule until it merges, or
+merge it through a bypass actor.
 
 | What `detect` says | What it means |
 | --- | --- |
@@ -1276,7 +1280,7 @@ starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause
 |---|---|
 | "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl` or `base64` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. The pull request that fixes `tools` cannot pass the gate either, since its plan installs the default branch's version: disable the gate rule until that pull request merges, or merge it through a bypass actor. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
 | "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
 | "gpg could not import the committed OpenTofu key." | `keys/opentofu.asc` in the pinned engine commit is not a key `gpg` reads. Pin a released engine commit. |

@@ -532,7 +532,9 @@ value is untested by that release. `tools` accepts no variable reference. `setup
 reads it from the default branch in every job that installs a tool (§Runner
 prerequisites), so a pull request that changes it plans with the default branch's
 versions until it merges. A merged `tools.tofu` change invalidates every plan
-awaiting apply (§Apply-match fingerprint). `shipmate doctor` lists each tool's
+awaiting apply (§Apply-match fingerprint). Change `tools.tofu` in a pull request
+that changes no stack, since that pull request's plans ran on the old version.
+`shipmate doctor` lists each tool's
 version and its source as the default branch decides them
 (`docs/troubleshooting.md` §shipmate doctor).
 
@@ -3311,11 +3313,12 @@ plan file from another version, so the record carries no version field.
 `setup` resolves the OpenTofu version in every job (§Runner prerequisites), so a
 merged `tools.tofu` change, like an engine re-pin that moves the `VERSIONS`
 default, invalidates every plan awaiting apply. Its render fails before `tofu
-apply` with OpenTofu's `plan files cannot be transferred between different
-versions` and a second error: "The stored plan was made by another OpenTofu
-version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS
-changed since the plan. Nothing was applied. Re-plan this stack on its pull
-request and review the fresh plan."
+apply`. OpenTofu's `plan files cannot be transferred between different
+versions` text is in the step log, and the one error annotation is "The stored
+plan was made by another OpenTofu version: `tools.tofu` in
+.github/shipmate-config.yml or the engine's VERSIONS changed since the plan.
+Nothing was applied. Re-plan the stack by pushing a commit to its open pull
+request, or, after merge, by a new pull request that changes the stack."
 
 The record's `cells` field binds each apply check to the rest of its plan run:
 the number of cells that run planned. The summary job publishes its apply checks
