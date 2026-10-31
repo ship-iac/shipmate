@@ -279,7 +279,8 @@ def test_healthy_repo_emits_nothing(monkeypatch):
 
 def test_one_run_reads_the_default_branch_table_once(monkeypatch):
     """Every probe that needs the default branch's table judges one read of it: the review
-    count-0 path and the three environment probes behind `_bound_names`.
+    count-0 path, the three environment probes behind `_bound_names` and
+    `tool_status`.
 
     Mutation: have `_default_branch_table` read the file without the `ctx` memo -- the file
     is read four times.
@@ -302,6 +303,7 @@ def test_one_run_reads_the_default_branch_table_once(monkeypatch):
     ctx = _ctx()
     doctor.warnings(ctx)
     doctor.config_status(ctx)
+    doctor.tool_status(ctx)
     assert asked.count(_CONFIG_ON_DEFAULT) == 1
 
 
@@ -6991,6 +6993,122 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
     assert doctor.config_status(ctx) == []
     body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
     assert doctor.CONFIG_HEADING not in body
+
+
+#: Hand-written, and unlike the real `VERSIONS`, so no expected line can come from that file.
+_ENGINE = {"terramate": "8.8.8", "terramate_min": "0.1.0", "tofu": "9.9.9", "tofu_min": "0.1.0"}
+_DEFAULT_TOOLS = CANONICAL + "tools:\n  tofu: 9.9.10\n"
+_BRANCH_TOOLS = CANONICAL + "tools:\n  terramate: 7.7.7\n  tofu: 7.7.7\n"
+
+
+@pytest.mark.parametrize(
+    ("at_head", "on_default", "expected"),
+    [
+        (
+            _BRANCH_TOOLS,
+            _DEFAULT_TOOLS,
+            [
+                (doctor.NOTICE, "terramate 8.8.8 (from VERSIONS)"),
+                (doctor.NOTICE, "tofu 9.9.10 (from tools)"),
+            ],
+        ),
+        (
+            _BRANCH_TOOLS,
+            CANONICAL,
+            [
+                (doctor.NOTICE, "terramate 8.8.8 (from VERSIONS)"),
+                (doctor.NOTICE, "tofu 9.9.9 (from VERSIONS)"),
+            ],
+        ),
+    ],
+    ids=["default-tools", "default-without-tools"],
+)
+def test_tool_status_names_the_default_branch_versions(monkeypatch, at_head, on_default, expected):
+    """One line per tool from the default branch's table, never from the examined commit's,
+    whose `tools` differs in both rows.
+
+    Mutations: read the text from `_config_table`'s ref (`7.7.7` appears); swap the two
+    source labels in `tool_status`; return `[]` from it."""
+    monkeypatch.setattr(doctor.ec, "engine_versions", lambda: _ENGINE)
+    responses = _config_responses(at_head, on_default=on_default)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.tool_status(_ctx()) == expected
+
+
+@pytest.mark.parametrize(
+    "on_default",
+    [MISINDENTED_CONTROL, CANONICAL + "tools:\n  tofu: v9.9.10\n"],
+    ids=["misindented", "v-prefixed-tools"],
+)
+def test_no_tool_status_over_a_refused_default_table(monkeypatch, on_default):
+    """Every run refuses an invalid default-branch table before it installs anything, so no
+    version is named. Mutation: drop the `is None` return in `tool_status` -- both rows
+    name versions."""
+    monkeypatch.setattr(doctor.ec, "engine_versions", lambda: _ENGINE)
+    responses = _config_responses(CANONICAL, on_default=on_default)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.tool_status(_ctx()) == []
+
+
+def test_tool_status_never_raises_over_a_broken_versions_file(monkeypatch):
+    """The table is read first with a sound `VERSIONS`: `validate_structure` reads that file
+    too, and a refusal there leaves no table, so `tool_status` would return before its own read.
+
+    Mutation: drop the `try` in `tool_status` -- the refusal escapes report mode."""
+
+    def broken():
+        raise SystemExit("::error::VERSIONS is missing")
+
+    responses = _config_responses(CANONICAL)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    assert doctor._default_branch_table(ctx) is not None
+    monkeypatch.setattr(doctor.ec, "engine_versions", broken)
+    assert doctor.tool_status(ctx) == []
+
+
+def test_an_invalid_tools_entry_is_the_config_probes_finding(monkeypatch):
+    """`validate_structure` carries the `tools` refusal, so the examined commit's copy reports
+    it whole. Mutation: drop `tool_version_errors` from `validate_structure` -- no finding."""
+    monkeypatch.setattr(doctor.ec, "engine_versions", lambda: _ENGINE)
+    responses = _config_responses(CANONICAL + "tools:\n  tofu: v1.13.2\n")
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._config_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            (
+                "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+                "tools.tofu is 'v1.13.2'; a version is written X.Y.Z in ASCII digits, such as "
+                "1.13.2, with no v, pre-release or range. Merging it refuses every operation "
+                "that reads the table. Execution still reads the default branch's copy, which "
+                "this says nothing about."
+            ),
+        )
+    ]
+
+
+def test_report_mode_renders_the_tool_versions_section(monkeypatch, capsys):
+    """`main` passes `tool_status` to `render_report`, which renders it under its own heading
+    after the environment-table section.
+
+    Mutations: drop `tool_status(ctx)` from `main`'s `render_report` call; render the rows
+    under `CONFIG_HEADING`."""
+    monkeypatch.setattr(doctor.ec, "engine_versions", lambda: _ENGINE)
+    responses = _config_responses(CANONICAL, on_default=_DEFAULT_TOOLS)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "report")
+    monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
+    monkeypatch.setattr(doctor, "warnings_and_count", lambda ctx: ([], 0))
+    monkeypatch.setattr(doctor, "load_annotations", lambda ctx: [])
+    doctor.main()
+    lines = capsys.readouterr().out.splitlines()
+    at = lines.index(doctor.TOOLS_HEADING)
+    assert lines.index(doctor.CONFIG_HEADING) < at
+    assert lines[at + 1 : at + 4] == [
+        "",
+        "- ⚪ terramate 8.8.8 (from VERSIONS)",
+        "- ⚪ tofu 9.9.10 (from tools)",
+    ]
 
 
 #: A cycle is decidable from the file alone, so `doctor` must report it rather than certify
