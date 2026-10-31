@@ -492,21 +492,11 @@ def unmanaged_stacks(tags_by_stack):
     )
 
 
-def local_stacks(tags_by_stack):
-    """Sorted stack paths carrying `LOCAL_TAG` and no `env/*` tag. They stay in
-    `unmanaged_stacks`, the scan set `deploy-detect` refuses stranded apply checks over;
-    `reported_unmanaged` leaves them out."""
-    return sorted(
-        s
-        for s, tags in tags_by_stack.items()
-        if LOCAL_TAG in tags and not any(t.startswith("env/") for t in tags)
-    )
-
-
 def reported_unmanaged(tags_by_stack):
-    """Sorted `unmanaged_stacks` that are not `local_stacks`: the stacks the unmanaged notice in
+    """Sorted `unmanaged_stacks` not carrying `LOCAL_TAG`: the stacks the unmanaged notice in
     `env_membership`, the plan's `unmanaged` output and lost-tag warning in `main`, and
-    onboard's unmanaged stacks item name."""
+    onboard's unmanaged stacks item name. Local stacks stay in `unmanaged_stacks`, the scan
+    set `deploy-detect` refuses stranded apply checks over."""
     return [s for s in unmanaged_stacks(tags_by_stack) if LOCAL_TAG not in tags_by_stack[s]]
 
 

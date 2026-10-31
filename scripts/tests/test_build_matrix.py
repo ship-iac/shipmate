@@ -457,11 +457,13 @@ _LOCAL_TREE = {
 }
 
 
-def test_local_stacks_are_the_exact_tag_without_an_env_tag():
-    """Mutations: compare the tag case-insensitively -- `d` appears; drop the `env/*` exclusion
-    -- `c` appears; change `LOCAL_TAG`'s value -- red."""
+def test_reported_unmanaged_leaves_out_only_the_exact_local_tag():
+    """`a` is local, `c` carries an `env/*` tag beside it, and `d` and `e` miss the exact tag by
+    case and a trailing space. Mutations: compare the tag case-insensitively -- `d` leaves;
+    strip the tag -- `e` leaves; change `LOCAL_TAG`'s value -- `a` appears."""
     assert bm.LOCAL_TAG == "shipmate/local"
-    assert bm.local_stacks({**_LOCAL_TREE, "e": ["shipmate/local "]}) == ["a"]
+    tree = {**_LOCAL_TREE, "e": ["shipmate/local "]}
+    assert bm.reported_unmanaged(tree) == ["b", "d", "e"]
 
 
 def test_the_unmanaged_notice_never_names_a_local_stack(monkeypatch, capsys):
@@ -532,7 +534,7 @@ def test_the_local_and_env_refusal_follows_check_names(monkeypatch):
 def test_compute_cells_keeps_local_stacks_in_the_scan_set(monkeypatch):
     """The fourth element is the scan set `deploy-detect` refuses stranded checks over; the
     fifth is `reported_unmanaged`. Mutations: drop local stacks from `unmanaged_stacks` itself
-    -- `a` leaves the fourth element; return `local_stacks` as the fifth -- red."""
+    -- `a` leaves the fourth element; return `unmanaged_stacks` as the fifth -- `a` appears."""
     tree = {k: v for k, v in _LOCAL_TREE.items() if k != "c"}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
