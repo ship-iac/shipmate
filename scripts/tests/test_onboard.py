@@ -3458,8 +3458,33 @@ def test_an_untagged_stack_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, 
             "1 stack(s) carry no `env/*` tag:",
             "  b",
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
-            "needs nothing.",
+            "carries `shipmate/local`.",
         ],
+    )
+
+
+def test_a_local_stack_is_not_listed_as_unmanaged():
+    """Mutation: list `bm.unmanaged_stacks` unfiltered -- `a` is named and counted."""
+    tags_by_stack = {"a": ["shipmate/local"], "b": []}
+    assert onboard._unmanaged_item(ctx(tags_by_stack=tags_by_stack)) == (
+        "todo",
+        UNMANAGED_ITEM,
+        [
+            "1 stack(s) carry no `env/*` tag:",
+            "  b",
+            "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
+            "carries `shipmate/local`.",
+        ],
+    )
+
+
+def test_only_local_stacks_report_no_unmanaged_stack():
+    """Mutation: list `bm.unmanaged_stacks` unfiltered -- the item is `todo`."""
+    tags_by_stack = {"a": ["shipmate/local"], "c": ["env/dev-eu"]}
+    assert onboard._unmanaged_item(ctx(tags_by_stack=tags_by_stack)) == (
+        "ok",
+        UNMANAGED_ITEM,
+        [],
     )
 
 
@@ -3474,7 +3499,7 @@ def test_more_than_ten_unmanaged_stacks_name_ten_and_count_the_rest():
             *[f"  s{i:02}" for i in range(10)],
             "  and 2 more",
             "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
-            "needs nothing.",
+            "carries `shipmate/local`.",
         ],
     )
 
