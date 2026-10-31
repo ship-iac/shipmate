@@ -440,7 +440,7 @@ def test_each_page_holds_its_fences():
         ("docs/hardening.md", "console"): 1,
         ("docs/hardening.md", "json"): 1,
         ("docs/hardening.md", "yaml"): 2,
-        ("docs/releasing.md", "bash"): 9,
+        ("docs/releasing.md", "bash"): 8,
         ("docs/troubleshooting.md", "bash"): 1,
         ("docs/troubleshooting.md", "hcl"): 2,
         ("docs/troubleshooting.md", "text"): 6,

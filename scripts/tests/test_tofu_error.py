@@ -13,6 +13,12 @@ the local scratch directory prefix, in both its `/` and `\\` forms, became
 `/home/runner/work/_temp`, so terramate's Windows tofu path is now the mixed-separator
 `/home/runner/work/_temp\\tofu113\\tofu.exe` and the cache path keeps `windows_amd64`; and the
 AWS `RequestID` became `00000000-0000-0000-0000-000000000000`.
+
+`tofu-version-skew.txt` is the combined stdout and stderr of OpenTofu v1.13.2's
+`tofu show -no-color stack.otplan` over a plan file OpenTofu v1.13.1 wrote with
+`tofu plan -input=false -out=stack.otplan` (one `terraform_data` resource, local state), both
+`windows_amd64`, run directly (not under `terramate run`) and redirected to a file (no TTY);
+exit 1. Unmodified. `-no-color` drops the diagnostic box, so it holds no boxed `Error:`.
 """
 
 import io
@@ -338,3 +344,39 @@ def test_plan_cell_writes_and_uploads_its_error_after_any_failure():
     workspace -- red."""
     assert step_by("plan-cell", name="Write cell error") == WRITE_CELL_ERROR
     assert step_by("plan-cell", name="Upload cell error") == UPLOAD_CELL_ERROR
+
+
+#: Hand-written: the whole remedy for a plan file from another OpenTofu version.
+SKEW_REMEDY = (
+    "::error::The stored plan was made by another OpenTofu version: `tools.tofu` in"
+    " .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was"
+    " applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge,"
+    " by a new pull request that changes the stack.\n"
+)
+
+
+def test_names_the_replan_remedy_for_a_plan_from_another_version(monkeypatch, capsys):
+    """The captured output has no boxed diagnostic (`-no-color`), so the remedy is the one
+    annotation. Mutation: match a different phrase in `VERSION_SKEW`."""
+    assert _run(monkeypatch, capsys, _fixture("tofu-version-skew.txt")) == SKEW_REMEDY
+
+
+def test_names_the_remedy_wherever_the_phrase_wraps(monkeypatch, capsys):
+    """tofu wraps at a width, so the version strings' lengths move the break. Mutation: match the
+    phrase per line instead of over whitespace-joined text."""
+    text = (
+        "Error: Couldn't show local plan\n\nPlan read error: plan file was created by OpenTofu"
+        " or Terraform 1.13.10, but this is 1.13.9; plan files cannot be\ntransferred between"
+        " different versions of OpenTofu / Terraform\n"
+    )
+    assert _run(monkeypatch, capsys, text) == SKEW_REMEDY
+
+
+@pytest.mark.parametrize(
+    "name", ["plan_error_two_ansi.txt", "init_error_backend_ansi.txt"], ids=["plan", "init"]
+)
+def test_any_other_diagnostic_names_no_replan_remedy(monkeypatch, capsys, name):
+    """Mutation: print the remedy unconditionally after `first_error`."""
+    out = _run(monkeypatch, capsys, _fixture(name))
+    assert out.count("::error::") == 1
+    assert SKEW_REMEDY not in out

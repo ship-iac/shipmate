@@ -1,0 +1,14 @@
+Raw upstream release files, captured 2026-10-31 13:12 UTC in Git Bash with curl writing
+straight to a file (no TTY, no filter). Do not edit: the signatures cover these exact bytes.
+
+  curl -sSLo tofu_1.13.2_SHA256SUMS https://github.com/opentofu/opentofu/releases/download/v1.13.2/tofu_1.13.2_SHA256SUMS
+  curl -sSLo tofu_1.13.2_SHA256SUMS.gpgsig https://github.com/opentofu/opentofu/releases/download/v1.13.2/tofu_1.13.2_SHA256SUMS.gpgsig
+  curl -sSLo checksums.txt https://github.com/terramate-io/terramate/releases/download/v0.17.3/checksums.txt
+  curl -sSLo checksums.txt.sig https://github.com/terramate-io/terramate/releases/download/v0.17.3/checksums.txt.sig
+
+sha256 at capture:
+
+  b360c787954a5f181bdc6757b96aed478f6a974df35ca08894bb53af4012f936  tofu_1.13.2_SHA256SUMS
+  08d647ad400a70812e9a36ee48393bcf729d9c5ff97f284ef834dd97c97f607e  tofu_1.13.2_SHA256SUMS.gpgsig
+  01b0556bdc145cdba5200fb3b6a7cc6544164349a471265106c3cf6b3a29e3a7  checksums.txt
+  b3d45b6bb2d757d2b7a14a9a469b996c01c2c47272aa5563867546d727a7c0af  checksums.txt.sig

@@ -109,7 +109,7 @@ _APPLY_DETECT_OUTPUTS = {
     "pusher": "${{ steps.d.outputs.pusher }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
     "bare_envs": "${{ steps.d.outputs.bare_envs }}",
-    "refusal": "${{ steps.d.outputs.refusal }}",
+    "refusal": "${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
@@ -222,7 +222,9 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
     `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
     orders environments by name; delete `held_cells`; delete `provenance_run`; delete
-    `base_sha`; delete `skipped_after`; delete `bare_envs`; delete `pusher`."""
+    `base_sha`; delete `skipped_after`; delete `bare_envs`; delete `pusher`; drop
+    `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal reaches the comment
+    and the gate as the generic text."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 

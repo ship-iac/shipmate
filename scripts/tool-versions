@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Resolve the Terramate and OpenTofu versions `actions/setup` installs.
+
+Each version is the `tools` entry of `.github/shipmate-config.yml` on the default branch, else
+the release's `VERSIONS` pin. References stay unresolved, because setup receives no GitHub
+variables. Besides every `tools` refusal, the table read and `env-config.load_config` refuse
+here, in every job: an unreadable file, invalid YAML, a top level that is not a mapping, a
+`layout` that is not a string, a reference in `split`, `review`, `apply_mode`, `max_parallel` or
+`command_hints`, and a runner without Python 3.12 or PyYAML. The rest of the table is `detect`'s
+to refuse.
+
+Writes `terramate` and `tofu`. Every failure refuses and writes neither, only the `refusal`
+output: setup-opentofu installs "latest" for an empty version, and a failed table read must not
+install the default in place of the consumer's version.
+"""
+
+import os
+
+from _shipmate import _load, run_annotated
+
+ec = _load("env-config")
+
+
+def main():
+    engine = ec.engine_versions(ec.VERSIONS_PATH)
+    table = ec.load_config(ec.default_branch_text())
+    errors = ec.tool_version_errors(table, engine)
+    if errors:
+        raise SystemExit("\n".join(errors))
+    resolved = ec.tool_versions(table, engine)
+    for tool, (version, source) in resolved.items():
+        print(f"{tool} {version} from {source}")
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(f"terramate={resolved['terramate'][0]}\ntofu={resolved['tofu'][0]}\n")
+
+
+if __name__ == "__main__":
+    run_annotated(main, refusal_output=True)

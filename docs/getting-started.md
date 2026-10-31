@@ -28,10 +28,12 @@ does with that wiring.
   it on its `.github/shipmate-config.yml` checklist item, and every whole-tree run (the
   drift sweep, `shipmate unlock`, a bare `shipmate apply`) warns that the table
   declares an environment no stack tags; that warning is expected.
-- **Nothing to set for the Terramate and OpenTofu versions.** They are in
-  [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
-  engine commit your workflow file pins. Moving to other versions is a pin bump
-  ([`../CONTRACT.md`](../CONTRACT.md) §Consumption), not a repository variable.
+- **Nothing to set for the Terramate and OpenTofu versions.** Every job installs
+  the defaults in [`../VERSIONS`](../VERSIONS) at the engine commit your workflow
+  file pins. To run other versions, such as the ones you run locally, name them
+  under `tools` in `.github/shipmate-config.yml` and merge it
+  ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). A version other than
+  the default is untested by that engine release.
 - **`gh` authenticated with admin on the repository.** Every tier creates
   environments, variables or rulesets.
 - **A GitHub plan that carries the controls you intend to use.** On a private
@@ -329,7 +331,7 @@ Choose how finely to split environments before writing those trust policies
 
 **A value can come from a GitHub variable.** Write `{vars: NAME}` in
 place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
-except `split`, `apply_mode`, `review`, `max_parallel` and `command_hints`
+except `split`, `apply_mode`, `review`, `max_parallel`, `command_hints` and `tools`
 ([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
 name as a repository or organization variable. A resolved value is printed in job
 outputs and logs, so reference variables only, never secrets. Never define it
@@ -357,7 +359,9 @@ up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 `command_hints: true` ends each plan comment with a changed cell, on a pull
 request that is not a draft, with a folded section naming `shipmate apply`,
 `shipmate unlock <env> --evict` for an environment holding a locked changed cell,
-and `shipmate help`; it is off when absent.
+and `shipmate help`; it is off when absent. `tools` names the Terramate and
+OpenTofu versions every job installs, each the pinned engine's default when
+absent.
 
 **What each environment and ordering key does.** Four are keys of an `environments` entry;
 `after` is a Terramate stack attribute (`after = [...]` in the stack block). In the

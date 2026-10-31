@@ -28,6 +28,8 @@ exits non-zero all the same and protects nothing.
 
 import hashlib
 import os
+import pathlib
+import sys
 
 import pytest
 from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, step_by
@@ -122,6 +124,8 @@ def _run_step(
         '  *) echo "unstubbed terramate call: $*" >&2 ; return 98 ;;\n'
         "esac ; }\n"
         f"tee() {{ {tee_body} ; }}\n"
+        # The test's own interpreter: on a Windows host `python3` on PATH can be the Store alias.
+        f'python3() {{ "{pathlib.Path(sys.executable).as_posix()}" "$@" ; }}\n'
     ) + run
     runner_temp = tmp_path / "rt"
     runner_temp.mkdir()
@@ -268,7 +272,8 @@ def test_a_mismatched_render_refuses_and_never_applies(tmp_path):
     assert (
         "::error::apply aborted for dev-eu/stacks/app: the stored plan does not render to the plan"
         f" text that was reviewed (expected {_PLAN_SHA256}, got {actual}). Nothing has been"
-        " applied. Re-plan this stack on its pull request and review the fresh plan."
+        " applied. Re-plan the stack by pushing a commit to its open pull request, or, after"
+        " merge, by a new pull request that changes the stack."
     ) in r.stdout.splitlines()
 
 
@@ -279,3 +284,42 @@ def test_the_render_lands_in_runner_temp_and_not_the_checkout(tmp_path):
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert (tmp_path / "rt" / "rendered-plan.txt").is_file()
     assert sorted(p.name for p in (tmp_path / "checkout").iterdir()) == []
+
+
+@bash_only
+def test_a_render_refused_for_another_tofu_version_names_the_replan_remedy(tmp_path):
+    """The render fails on a plan file from another OpenTofu version: nothing applies, the raw
+    diagnostic stays in the log, and `tofu-error` names the re-plan. Mutations: drop the
+    `tofu-error` line from `plan-digest`; drop its `cat` of the render's stderr; drop the
+    failure branch's `exit 1` (the empty render then reaches the digest mismatch)."""
+    fixture = (pathlib.Path(__file__).parent / "fixtures/tofu-version-skew.txt").as_posix()
+    r = _run_step(
+        tmp_path,
+        terramate_body="echo applied ; exit 0",
+        tee_body='cat > "$1"',
+        tofu_body=f'cat "{fixture}" >&2 ; return 1',
+    )
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert not _ran(tmp_path, "apply-ran"), "applied after the render failed"
+    assert "Error: Couldn't show local plan" in r.stderr.splitlines()
+    assert "does not render to the plan text" not in r.stdout, "reached the digest"
+    assert (
+        "::error::The stored plan was made by another OpenTofu version: `tools.tofu` in"
+        " .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was"
+        " applied. Re-plan the stack by pushing a commit to its open pull request, or, after"
+        " merge, by a new pull request that changes the stack."
+    ) in r.stdout.splitlines()
+
+
+@bash_only
+def test_a_successful_render_keeps_its_stderr_in_the_log(tmp_path):
+    """A warning from a render that succeeds still reaches the log. Mutation: move `plan-digest`'s
+    `cat` of show.txt inside the failure branch."""
+    r = _run_step(
+        tmp_path,
+        terramate_body="echo applied ; exit 0",
+        tee_body='cat > "$1"',
+        tofu_body="printf 'plan text\\n' ; echo 'Warning: render warning' >&2",
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert "Warning: render warning" in r.stderr.splitlines()

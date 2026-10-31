@@ -110,7 +110,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
-          echo "::error::apply aborted for $ENV/$STACK: this reviewed plan records no planned commit, so there is nothing to compare against this checkout and the apply is refused. Re-plan this stack on its pull request and apply the fresh plan; if that pull request has already merged, a new pull request touching the stack plans and applies it afresh."
+          echo "::error::apply aborted for $ENV/$STACK: this reviewed plan records no planned commit, so there is nothing to compare against this checkout and the apply is refused. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack."
           exit 1
         fi
         record="$RUNNER_TEMP/planned-head.txt"
@@ -190,12 +190,20 @@ runs:
         # nothing. After `init`: inside `terramate run` the render reads init's data directory
         # (`TF_DATA_DIR` from run.env) and, where the plan file lacks schemas, init's providers.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
-        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered"
+        # stderr goes to a file for `tofu-error`, so it is echoed back on success and failure alike:
+        # otherwise a render's warnings and diagnostics never reach the log.
+        status=0
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered" 2> "$RUNNER_TEMP/show.txt" || status=$?
+        cat "$RUNNER_TEMP/show.txt" >&2
+        if [ "$status" -ne 0 ]; then
+          python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" < "$RUNNER_TEMP/show.txt" || true
+          exit 1
+        fi
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
         # prefixes the whole line with one, which would never equal the recorded digest.
         actual=$(sha256sum < "$rendered" | cut -d' ' -f1)
         if [ "$actual" != "$PLAN_SHA256" ]; then
-          echo "::error::apply aborted for $ENV/$STACK: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan this stack on its pull request and review the fresh plan."
+          echo "::error::apply aborted for $ENV/$STACK: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack."
           exit 1
         fi
 

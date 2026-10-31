@@ -122,7 +122,10 @@ _EXPECTED = {
         [*_SHOW_JSON, ">", "plan.json", "2>", "show-json.err", "&"],
     ],
     "drift-cell": [_PLAN, [*_SHOW_JSON, ">", "plan.json"]],
-    "apply-cell": [[*_SHOW_TEXT, ">", "$rendered"], _APPLY],
+    "apply-cell": [
+        [*_SHOW_TEXT, ">", "$rendered", "2>", "$RUNNER_TEMP/show.txt", "||", "status=$?"],
+        _APPLY,
+    ],
     "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
 }
 

@@ -474,11 +474,11 @@ enforcement.
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
 `split`, `review` and `command_hints` hold `true` or `false`, `apply_mode`
-holds `targeted`, `bare` or `auto`, `max_parallel` holds a number, and all five refuse a
-reference, so which
+holds `targeted`, `bare` or `auto`, `max_parallel` holds a number, `tools` holds
+versions, and all six refuse a reference, so which
 environments share one binding, which a bare apply skips, which apply on a
-push, which apply unreviewed, how many plan and drift cell jobs run at once and whether the plan
-comment shows its commands stay merged commits. Where this page says editing
+push, which apply unreviewed, how many plan and drift cell jobs run at once, whether the plan
+comment shows its commands and which tool versions every job installs stay merged commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
 out ([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
 
@@ -1298,11 +1298,11 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `needs`, `apply_mode`, `review`, `max_parallel` and `command_hints` are not on this list:
+  allowed to do. `needs`, `apply_mode`, `review`, `max_parallel`, `command_hints` and `tools` are not on this list:
   they live in `.github/shipmate-config.yml`, read from the default branch with the
   rest of it, so a branch can neither reorder its own apply waves,
-  drop its own exclusion, exempt itself from review, raise its own fan-out nor
-  change what its own plan comment shows.
+  drop its own exclusion, exempt itself from review, raise its own fan-out,
+  change what its own plan comment shows nor choose the tool versions its own plan runs.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
   keeps the App private key on the `shipmate-engine` environment, unreadable

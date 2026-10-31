@@ -62,7 +62,10 @@ EXPECTED_DETECT_OUTPUTS = {
     "auto_envs": "${{ steps.matrix.outputs.auto_envs }}",
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "lost": "${{ steps.matrix.outputs.lost }}",
-    "refusal": "${{ steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}",
+    "refusal": (
+        "${{ steps.setup.outputs.refusal || steps.matrix.outputs.refusal"
+        " || steps.checks.outputs.refusal }}"
+    ),
     "cells": "${{ steps.matrix.outputs.cells }}",
     "env_order": "${{ steps.matrix.outputs.env_order }}",
 }
@@ -119,6 +122,8 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the action's `lost-env-tags` input -> its input names differ.
     Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error.
     Mutation: swap the operands of `detect`'s `refusal` output -> its expression differs.
+    Mutation: drop `steps.setup.outputs.refusal ||` from `detect`'s `refusal` output -> a
+    setup refusal reaches the gate as the generic text.
     Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named.
     Mutation: drop the `env-order:` line -> the comment orders environments by name.
     Mutation: drop the `command-hints:` line, `detect`'s `command_hints` output or the action's

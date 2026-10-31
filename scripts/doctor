@@ -1858,7 +1858,7 @@ CONFIG_NO_COMMIT = (
 CONFIG_VALID = _Rendered(
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `layout`, `max_parallel`, "
-    "`command_hints`, the "
+    "`command_hints`, `tools`, the "
     "identities and the environment entries. Not checked here, for want of a plan matrix "
     "and a whole-tree environment scan: `tf_vars`-layout coverage of the planned "
     "environments, entries that no stack tags, workload tags outside an environment's "
@@ -2117,7 +2117,8 @@ def _default_branch_table(ctx):
     The read names no ref, which GitHub answers from the default branch: the same request
     `env-config`'s `read_table` makes, so doctor judges exactly the copy execution reads.
 
-    Read once per run and kept on `ctx`, so every probe judges the same copy.
+    Read once per run and kept on `ctx`, so every probe judges the same copy. The text is kept
+    beside the table for `tool_status`, which reads the unresolved table.
     """
     if "default_branch_table" not in ctx:
         text = ec.contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}", fetch=_gh_json)
@@ -2125,8 +2126,30 @@ def _default_branch_table(ctx):
         if text is not None:
             with contextlib.suppress(SystemExit):
                 table = ec.validate_structure(ec.parse_table(text))
+        ctx["default_branch_text"] = text
         ctx["default_branch_table"] = table
     return ctx["default_branch_table"]
+
+
+def tool_status(ctx):
+    """The report's tool-versions section: one notice per tool, `<tool> <version> (from
+    <source>)`, as the default branch's table and `VERSIONS` decide it for every run. Nothing
+    when that table is unreadable or invalid, since every run then refuses before installing.
+
+    Never raises, like `config_status`: a missing or malformed `VERSIONS` omits the section,
+    and the setup step refuses that file on every run anyway.
+    """
+    try:
+        if _default_branch_table(ctx) is None:
+            return []
+        raw = ec.load_config(ctx["default_branch_text"])
+        versions = ec.tool_versions(raw, ec.engine_versions())
+    except (Exception, SystemExit):  # noqa: BLE001 - display only; setup refuses the cause
+        return []
+    return [
+        (NOTICE, f"{tool} {version} (from {source})")
+        for tool, (version, source) in versions.items()
+    ]
 
 
 def _app_permission_warnings(ctx):
@@ -2740,7 +2763,8 @@ def _verdict(findings, sections, ctx):
     annotations), `N notices` (notice findings), zero counts omitted, then `harvest incomplete`
     when the harvest failed or is still pending. Errors are 🔴, warnings 🟠, notices and
     `harvest incomplete` ⚪, and the line takes the worst; `🟢 no problems found` when there is
-    no token. Then `provenance`. `config_status` lines are status and count toward nothing.
+    no token. Then `provenance`. `config_status` and `tool_status` lines are status and count
+    toward nothing.
 
     Harvested rows are counted from `harvest_sections`, after its filter, so a plan-path doctor
     annotation the live probes re-state is counted once, and a row the budget drops still counts.
@@ -2850,9 +2874,12 @@ def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending
 #: lines are status rather than findings: mixed into `warnings()` they would suppress the
 #: settings-probe all-clear on every repository and annotate every plan run.
 CONFIG_HEADING = "#### the environment table at this commit"
+#: Heading of the fixed section `tool_status` renders under: the default branch's versions,
+#: not the commit's, so it cannot share `CONFIG_HEADING`.
+TOOLS_HEADING = "#### tool versions every run installs, from the default branch"
 
 
-def render_report(findings, annotations, ctx, status=()):
+def render_report(findings, annotations, ctx, status=(), tools=()):
     sections = harvest_sections(annotations)
     circle, verdict = _verdict(findings, sections, ctx)
     out = _report_head(ctx, verdict)
@@ -2862,6 +2889,8 @@ def render_report(findings, annotations, ctx, status=()):
         out.append(_all_clear_line(ctx))
     if status:
         out += ["", CONFIG_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in status]
+    if tools:
+        out += ["", TOOLS_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in tools]
     heading = ["", "#### warnings from this commit's workflow runs", ""]
     hint = sc.footer_hint(circle)
     tail = ["", hint] if hint else []
@@ -2902,7 +2931,7 @@ def main():
         # Last, so a doctor that dies earlier leaves both unset and the action writes its own.
         write_outputs(warned=n > 0, warnings=n)
         return
-    print(render_report(found, load_annotations(ctx), ctx, config_status(ctx)))
+    print(render_report(found, load_annotations(ctx), ctx, config_status(ctx), tool_status(ctx)))
 
 
 if __name__ == "__main__":

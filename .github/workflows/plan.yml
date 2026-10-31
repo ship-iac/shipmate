@@ -52,7 +52,7 @@ jobs:
       auto_envs: ${{ steps.matrix.outputs.auto_envs }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
       lost: ${{ steps.matrix.outputs.lost }}
-      refusal: ${{ steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}
+      refusal: ${{ steps.setup.outputs.refusal || steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}
       cells: ${{ steps.matrix.outputs.cells }}
       env_order: ${{ steps.matrix.outputs.env_order }}
     steps:
@@ -66,7 +66,8 @@ jobs:
           # when a diff or read needs them, so the history costs commits and trees, not blobs.
           fetch-depth: 0
           filter: blob:none
-      - uses: $/actions/setup
+      - id: setup
+        uses: $/actions/setup
         with: { tofu: "false" }
       # Before the `hcl-check` step, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.

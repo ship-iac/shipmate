@@ -1144,8 +1144,9 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
 
 def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(monkeypatch):
     """A repository with no variables gets exactly the one the workflows still read. The
-    tool versions are not among them: `actions/setup` takes both from the release's own
-    VERSIONS file, so a repository copy would only be a second source of truth.
+    tool versions are not among them: `actions/setup` takes each from `tools` in the
+    default branch's config file, else from the release's own VERSIONS file, so a repository
+    variable would be a third source of truth.
 
     The whole recorded call list is compared against a hand-written constant: an assertion
     that TERRAMATE_VERSION is absent is satisfied by a run that wrote nothing at all.

@@ -12,11 +12,19 @@ import contextlib
 import graphlib
 import importlib.util
 import os
+import pathlib
 import re
 import sys
 import types
 
-from _shipmate import ENGINE_ENV, command_data, gh_json, load_config_text, yaml_error_text
+from _shipmate import (
+    ENGINE_ENV,
+    command_data,
+    gh_json,
+    load_config_text,
+    retried,
+    yaml_error_text,
+)
 
 #: The file the engine reads its settings from, and the interpreter floor that reading it
 #: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
@@ -66,8 +74,8 @@ def load_config(text):
     `false` becomes a bool here, before any reference resolves; one of those or `apply_mode`
     holding a variable reference anywhere in it refuses here, and so does a `layout` that is
     neither a string nor a reference, so the refusals that quote those values never quote a
-    resolved one. `max_parallel` and `command_hints` holding a reference anywhere in them
-    refuse here for the same reason, and `command_hints` holding exactly `true` or `false`
+    resolved one. `max_parallel`, `command_hints` and `tools` holding a reference anywhere in
+    them refuse here for the same reason, and `command_hints` holding exactly `true` or `false`
     becomes a bool. Any other value stays as written for `validate_structure` to refuse.
     """
     refusal = runner_refusal()
@@ -102,6 +110,12 @@ def _normalise_settings(parsed):
         "max_parallel",
         "::error::max_parallel holds a variable reference, and it accepts none. Write the "
         "number into the file.",
+    )
+    _refuse_reference(
+        parsed,
+        "tools",
+        "::error::tools holds a variable reference, and it accepts none. Write the version "
+        "into the file.",
     )
     _normalise_bool(
         parsed,
@@ -278,29 +292,36 @@ def log_failure(e, label=""):
 
 
 def _reporting_fetch(path):
-    """`gh_json`, writing a failed call's reason to stderr before re-raising it.
+    """`gh_json`, retried on a transient failure (`retried`), writing the final failure's
+    reason to stderr before re-raising it.
 
     `contents_text` swallows every exception, so this is the only place a 404, a 403, a
     missing `gh` or a non-JSON answer is seen.
     """
     try:
-        return gh_json(path)
+        return retried(lambda: gh_json(path))
     except (Exception, SystemExit) as e:
         log_failure(e)
         raise
 
 
-def read_table():
-    """The table from the default branch. Every failure here refuses.
+def default_branch_text():
+    """The config file's text from the default branch, or `SystemExit(_UNREADABLE)`.
 
-    The contents API read names no ref, which GitHub answers from the default branch;
-    a parameter or a `?ref=` here would let a caller point it at branch content.
+    The one read of the default branch's copy: `read_table` and `tool-versions` both call it.
+    The contents API read names no ref, which GitHub answers from the default branch; a
+    parameter or a `?ref=` here would let a caller point it at branch content.
     """
     path = f"repos/{os.environ['GITHUB_REPOSITORY']}/contents/{CONFIG_PATH}"
     text = contents_text(path, fetch=_reporting_fetch)
     if text is None:
         raise SystemExit(_UNREADABLE)
-    return parse_table(text)
+    return text
+
+
+def read_table():
+    """The table from the default branch (`default_branch_text`). Every failure here refuses."""
+    return parse_table(default_branch_text())
 
 
 def contents_text(path, fetch=None):
@@ -348,7 +369,7 @@ _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("layout", "identities", "environments", "max_parallel", "command_hints")
+_TOP_KEYS = ("layout", "identities", "environments", "max_parallel", "command_hints", "tools")
 
 #: The cell jobs one plan or drift matrix runs at once when the table sets no
 #: `max_parallel`. Apply waves and unlock are not capped.
@@ -514,6 +535,91 @@ def _check_max_parallel(table, errors):
             f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the "
             "most cell jobs a plan or drift matrix runs at once)."
         )
+
+
+#: The engine's own pins: each tool's default version and the oldest one a table may name.
+VERSIONS_PATH = pathlib.Path(__file__).resolve().parent.parent / "VERSIONS"
+
+#: The tools a table's `tools` mapping may name.
+TOOLS = ("terramate", "tofu")
+
+#: Whole-value release grammar. `[0-9]`, not `\d`, refuses non-ASCII digits `int()` would accept.
+_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def engine_versions(path=VERSIONS_PATH):
+    """`{terramate, terramate_min, tofu, tofu_min}` from `VERSIONS`, or `SystemExit` naming
+    the file and the missing or malformed line, or the missing file. Lines without `=` are not
+    read."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise SystemExit(
+            f"::error::{path} does not exist: it carries the terramate and tofu versions this "
+            "release pins."
+        ) from None
+    pins = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            pins[key] = value
+    versions = {}
+    for key in (f"{tool}{suffix}" for tool in TOOLS for suffix in ("", "_min")):
+        if key not in pins:
+            raise SystemExit(f"::error::{path} holds no {key}= line; restore it.")
+        if not _VERSION.fullmatch(pins[key]):
+            raise SystemExit(
+                f"::error::{path} line {key}={pins[key]} is malformed; a version is written X.Y.Z."
+            )
+        versions[key] = pins[key]
+    return versions
+
+
+def _version_key(version):
+    return tuple(int(part) for part in version.split("."))
+
+
+def tool_version_errors(table, engine):
+    """One `::error::` line per refused `tools` entry of the unresolved `table`, judged
+    against `engine` (`engine_versions`); empty when valid or absent."""
+    if "tools" not in table:
+        return []
+    tools = table["tools"]
+    if not isinstance(tools, dict):
+        return [
+            (
+                f"::error::tools is {tools!r}; it must be a mapping of terramate and tofu to "
+                f"versions, got {type(tools).__name__}."
+            )
+        ]
+    errors = []
+    for tool, value in tools.items():
+        if tool not in TOOLS:
+            errors.append(
+                f"::error::tools.{tool} is {value!r}; {tool} is not a tool this engine "
+                f"installs. tools holds {', '.join(TOOLS)}."
+            )
+        elif not (isinstance(value, str) and _VERSION.fullmatch(value)):
+            errors.append(
+                f"::error::tools.{tool} is {value!r}; a version is written X.Y.Z in ASCII "
+                "digits, such as 1.13.2, with no v, pre-release or range."
+            )
+        elif _version_key(value) < _version_key(engine[f"{tool}_min"]):
+            errors.append(
+                f"::error::tools.{tool} is {value!r}, below {engine[f'{tool}_min']}, the oldest "
+                f"{tool} this engine supports."
+            )
+    return errors
+
+
+def tool_versions(table, engine):
+    """`{tool: (version, source)}`, source `"tools"` or `"VERSIONS"`. Call only on a table
+    `tool_version_errors` returned `[]` for."""
+    tools = table.get("tools", {})
+    return {
+        tool: (tools[tool], "tools") if tool in tools else (engine[tool], "VERSIONS")
+        for tool in TOOLS
+    }
 
 
 def command_hints(table):
@@ -1106,6 +1212,7 @@ def validate_structure(table):
         )
     _check_max_parallel(table, errors)
     _check_bool(table, "command_hints", "command_hints", errors)
+    errors.extend(tool_version_errors(table, engine_versions()))
     identities = table.get("identities", {})
     with _gather(errors) as shape:
         _mapping(identities, "identities")

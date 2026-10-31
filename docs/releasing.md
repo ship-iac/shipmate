@@ -128,17 +128,47 @@ Three limits, all deliberate:
 
 ## Bump Terramate or OpenTofu
 
-`VERSIONS` holds each tool's version and the sha256 of its Linux release assets.
-`actions/setup` refuses a version with no checksum lines, so change both in one commit:
+`VERSIONS` holds each tool's default (`terramate=`, `tofu=`), which a consumer's `tools`
+overrides, and its floor (`terramate_min=`, `tofu_min=`), the oldest version a `tools` value
+may name. Edit `VERSIONS` only: `actions/setup` verifies every release against its signed
+checksum file at run time.
 
-1. Set `terramate=` or `tofu=` to the new version.
-2. Replace that tool's two checksum lines with the new release's, copied verbatim from its
-   checksum file, and check that each printed line names the new version:
+- Set `terramate=` or `tofu=` to the new default.
+- Raise `terramate_min=` or `tofu_min=` only when the engine starts relying on a feature of a
+  newer release, or on a signer key rotation (§Rotate a signer key). A default bump leaves the floor alone, so a consumer whose `tools` names an
+  older version keeps installing it after the re-pin.
 
-   ```bash
-   gh release download v<terramate-version> -R terramate-io/terramate -p checksums.txt -O - | grep -E '_linux_(x86_64|arm64)\.tar\.gz$'
-   gh release download v<tofu-version> -R opentofu/opentofu -p 'tofu_<tofu-version>_SHA256SUMS' -O - | grep -E '_linux_(amd64|arm64)\.zip$'
-   ```
+A default bump moves the OpenTofu version of every consumer without `tools.tofu`, so its
+re-pin invalidates every plan awaiting apply (`CONTRACT.md` §Apply-match fingerprint).
+
+### Rotate a signer key
+
+Neither key carries an expiry: the OpenTofu primary key
+`E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80` was created 2023-11-15, and Terramate's
+`cosign.pub` is byte-identical in its releases from v0.10.0 on. A rotation starts only when
+upstream changes its signer. From that release on, `setup` refuses every install the new key
+signs (`docs/troubleshooting.md` §`Terramate checksum verification failed` or `OpenTofu checksum
+verification failed`), and only an
+engine release carrying the new key clears it. Each verify step accepts one signer, so a
+release the old key signed stops verifying once its key is replaced.
+
+- OpenTofu: replace `keys/opentofu.asc` with `https://get.opentofu.org/opentofu.asc`, check
+  its primary key fingerprint against one OpenTofu publishes from another host, and write
+  that fingerprint into the `signer` constant of `Verify OpenTofu checksums` in
+  `actions/setup/action.yml` and `_SIGNER` in `scripts/tests/test_setup_verify_checksums.py`.
+- Terramate: replace `keys/terramate-cosign.pub` with the `cosign.pub` asset of a release the
+  new key signs. It has no source outside Terramate's GitHub releases: Terramate's repository
+  writes it from a secret at release time, and its documentation does not publish it. The
+  committed key is trusted as committed on 2026-10-31, byte-identical in the v0.10.0,
+  v0.14.0, v0.17.1 and v0.17.3 releases.
+- Set the tool's default (`terramate=` or `tofu=`) and its floor (`terramate_min=` or
+  `tofu_min=`) in `VERSIONS` to the first release the new key signs, or later. A default
+  the old key signed would fail every install without `tools`, and a floor below the new
+  key would accept versions that pass `tools` validation and then always fail verification.
+- Re-capture the genuine fixtures in `scripts/tests/fixtures/release-sums/` from a release
+  the new key signs, as their `README` records, and update the digests
+  `test_setup_verify_checksums.py` expects: the old fixtures do not verify against the new
+  key.
 
 ## Publishing the release
 

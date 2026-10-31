@@ -153,7 +153,7 @@ jobs:
       pusher: ${{ steps.d.outputs.pusher }}
       base_sha: ${{ steps.d.outputs.base_sha }}
       bare_envs: ${{ steps.d.outputs.bare_envs }}
-      refusal: ${{ steps.d.outputs.refusal }}
+      refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
     steps:
       - if: ${{ !inputs.auto }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -165,7 +165,8 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
-      - uses: $/actions/setup
+      - id: setup
+        uses: $/actions/setup
         with: { tofu: "false" }
       - id: d
         uses: $/actions/apply-detect
