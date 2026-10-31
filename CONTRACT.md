@@ -526,8 +526,8 @@ every tool when it is absent, installs the default the engine's `VERSIONS` file
 names at the commit the consumer pins. A version below that tool's floor in
 `VERSIONS` (`terramate_min`, `tofu_min`) refuses; versions compare numerically per
 component, so `1.13.10` is above `1.13.9`. A floor rises only in an engine release
-that starts relying on a newer feature of the tool, never with a routine default
-bump. An engine release is tested at its `VERSIONS` defaults only, so any other
+that starts relying on a newer feature of the tool or ships a new upstream signer
+key, never with a routine default bump. An engine release is tested at its `VERSIONS` defaults only, so any other
 value is untested by that release. `tools` accepts no variable reference. `setup`
 reads it from the default branch in every job that installs a tool (§Runner
 prerequisites), so a pull request that changes it plans with the default branch's
@@ -2440,9 +2440,12 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   step, and several `ubuntu-slim` jobs on the plan, apply and deploy paths
   call `gh api`. Self-hosted runners must preinstall these tools.
 - A runner that runs `setup` must also provide `gpg` and a coreutils `base64`,
-  which only `setup` calls, and only in the jobs that take `runs_on`: no
-  `ubuntu-slim` job runs it. The `ubuntu-24.04` image's included-software list
-  names `gnupg2`; whether the `ubuntu-26.04` images ship `gpg` is unmeasured.
+  GNU or uutils, which only `setup` calls, and only in the jobs that take
+  `runs_on`: no `ubuntu-slim` job runs it. The included-software lists of the
+  [`ubuntu-24.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2404-Readme.md),
+  [`ubuntu-26.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Readme.md) and
+  [`ubuntu-26.04-arm`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Arm64-Readme.md) images name `gnupg2`
+  (read 2026-10-31); `gpg` and `base64` on those runners are unmeasured.
   Self-hosted runners must preinstall both.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
@@ -2478,9 +2481,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   in the engine's root-level `VERSIONS` file, read at the commit the consumer
   pins (§Environment table). To read the table, `setup` makes one contents-API
   read with the job's `GITHUB_TOKEN`, retried on a transient failure, and parses
-  it with `python3` and PyYAML, so it needs both as above. A failed read, an
-  invalid `tools` and a missing or malformed `VERSIONS` line each fail the step
-  rather than installing a default.
+  it with `python3` and PyYAML, so it needs both as above. Every refusal of that
+  read and parse (§Environment table) fails the step in every job, as do an
+  invalid `tools` and a missing or malformed `VERSIONS` line, rather than
+  installing a default.
 - `setup` verifies each download against its release's signed checksum file
   before it installs anything. For OpenTofu it fetches `tofu_<v>_SHA256SUMS` and
   its `.gpgsig`, verifies the signature with `gpg` against `keys/opentofu.asc`,

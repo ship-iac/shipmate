@@ -135,7 +135,7 @@ checksum file at run time.
 
 - Set `terramate=` or `tofu=` to the new default.
 - Raise `terramate_min=` or `tofu_min=` only when the engine starts relying on a feature of a
-  newer release. A default bump leaves the floor alone, so a consumer whose `tools` names an
+  newer release, or on a signer key rotation (§Rotate a signer key). A default bump leaves the floor alone, so a consumer whose `tools` names an
   older version keeps installing it after the re-pin.
 
 A default bump moves the OpenTofu version of every consumer without `tools.tofu`, so its
@@ -161,6 +161,10 @@ release the old key signed stops verifying once its key is replaced.
   writes it from a secret at release time, and its documentation does not publish it. The
   committed key is trusted as committed on 2026-10-31, byte-identical in the v0.10.0,
   v0.14.0, v0.17.1 and v0.17.3 releases.
+- Set the tool's default (`terramate=` or `tofu=`) and its floor (`terramate_min=` or
+  `tofu_min=`) in `VERSIONS` to the first release the new key signs, or later. A default
+  the old key signed would fail every install without `tools`, and a floor below the new
+  key would accept versions that pass `tools` validation and then always fail verification.
 - Re-capture the genuine fixtures in `scripts/tests/fixtures/release-sums/` from a release
   the new key signs, as their `README` records, and update the digests
   `test_setup_verify_checksums.py` expects: the old fixtures do not verify against the new

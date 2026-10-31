@@ -74,8 +74,8 @@ def load_config(text):
     `false` becomes a bool here, before any reference resolves; one of those or `apply_mode`
     holding a variable reference anywhere in it refuses here, and so does a `layout` that is
     neither a string nor a reference, so the refusals that quote those values never quote a
-    resolved one. `max_parallel` and `command_hints` holding a reference anywhere in them
-    refuse here for the same reason, and `command_hints` holding exactly `true` or `false`
+    resolved one. `max_parallel`, `command_hints` and `tools` holding a reference anywhere in
+    them refuse here for the same reason, and `command_hints` holding exactly `true` or `false`
     becomes a bool. Any other value stays as written for `validate_structure` to refuse.
     """
     refusal = runner_refusal()

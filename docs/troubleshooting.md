@@ -701,7 +701,11 @@ it.
 
 Every row below but the `workloads lists` warning refuses at `detect`, before
 any cell starts, and every one of them is reported against the **default
-branch's** copy of the file — that is the only copy execution reads.
+branch's** copy of the file — that is the only copy execution reads. `setup`'s
+`Resolve versions` step reads the same file in every job before it installs
+anything, so the read and parse refusals also fail it there with the same text:
+among them an unreadable file, invalid YAML, a missing Python 3.12 or PyYAML, a
+variable reference in a key that accepts none, and every `tools` row.
 
 | What `detect` says | What it means |
 | --- | --- |
@@ -715,7 +719,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan and drift matrices stays a merged commit. Write the number |
 | `command_hints must be true or false, got …` | `command_hints` holds `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise read as set and resolve as unset |
 | `command_hints holds a variable reference, and it accepts none` | `command_hints` is written into the file, like the flags. Write `true` or `false` |
-| `tools is …; it must be a mapping of terramate and tofu to versions, got …` | `tools` holds `tofu:` and `terramate:` lines indented under it. An empty `tools:` reads as a string, a list as a list. `setup`'s `Resolve versions` step refuses each `tools` row here in every job, before it installs anything |
+| `tools is …; it must be a mapping of terramate and tofu to versions, got …` | `tools` holds `tofu:` and `terramate:` lines indented under it. An empty `tools:` reads as a string, a list as a list |
 | `tools.<key> is …; <key> is not a tool this engine installs. tools holds terramate, tofu.` | a misspelled tool name. Only `terramate` and `tofu` are accepted |
 | `tools.<tool> is …; a version is written X.Y.Z in ASCII digits, such as 1.13.2, with no v, pre-release or range.` | write the release's whole version: `1.13` and `v1.13.2` both refuse |
 | `tools.<tool> is …, below <floor>, the oldest <tool> this engine supports.` | the version is older than the floor in the pinned engine's `VERSIONS`. Name the floor or a newer release, or remove the key for the engine's default |
