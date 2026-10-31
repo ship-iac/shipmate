@@ -534,9 +534,8 @@ remedy differs:
   applied or silently re-planned — as with a stale plan, there is no force. The
   fix is a re-plan and an apply of the fresh plan.
 - **There is no record at all.** There is nothing to compare against the
-  checkout, so the apply is refused. Re-plan the stack on its pull request and
-  apply the fresh plan; post-merge, a new pull request touching the stack plans and
-  applies it.
+  checkout, so the apply is refused. Re-plan the stack by pushing a commit to its
+  open pull request, or, after merge, by a new pull request that changes the stack.
 
 This check is per cell and additive: the apply path's plan-run binding — each
 cell's plan run read from an App-authored apply check on that same head — still
@@ -604,8 +603,8 @@ job records the digest of the `plan.txt` it publishes in the comment
 cell re-renders the stored plan with the command that wrote it and compares.
 
 - **No digest is recorded.** Nothing is compared, so the apply is refused
-  rather than run unverified. Re-plan the stacks on their pull request and apply
-  again; post-merge, a new pull request touching those stacks plans and applies them.
+  rather than run unverified. Re-plan the stack by pushing a commit to its open
+  pull request, or, after merge, by a new pull request that changes the stack.
   This is the same shape as the absent planned-commit record above, and the
   same remedy.
 - **The render disagrees with the digest.** The error names both digests. Either
@@ -613,8 +612,9 @@ cell re-renders the stored plan with the command that wrote it and compares.
   or the tooling moved underneath the artifact. An OpenTofu version that moved
   between plan and apply fails the render itself (§`plan files cannot be
   transferred between different versions`); a provider that moved fails at the
-  apply with `Inconsistent dependency lock file`. Neither produces this message. There is no force. Re-plan the stack by pushing a
-  commit to its open pull request, or, after merge, by a new pull request that changes the stack.
+  apply with `Inconsistent dependency lock file`. Neither produces this message.
+  There is no force. Re-plan the stack by pushing a commit to its open pull
+  request, or, after merge, by a new pull request that changes the stack.
 
 Nothing has been applied in either case: the comparison runs before
 `tofu apply`, and the pending check is what keeps the gate from greening over
@@ -1280,7 +1280,7 @@ starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause
 |---|---|
 | "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl` or `base64` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. The pull request that fixes `tools` cannot pass the gate either, since its plan installs the default branch's version: disable the gate rule until that pull request merges, or merge it through a bypass actor. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
 | "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
 | "gpg could not import the committed OpenTofu key." | `keys/opentofu.asc` in the pinned engine commit is not a key `gpg` reads. Pin a released engine commit. |

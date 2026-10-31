@@ -110,7 +110,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
-          echo "::error::apply aborted for $ENV/$STACK: this reviewed plan records no planned commit, so there is nothing to compare against this checkout and the apply is refused. Re-plan this stack on its pull request and apply the fresh plan; if that pull request has already merged, a new pull request touching the stack plans and applies it afresh."
+          echo "::error::apply aborted for $ENV/$STACK: this reviewed plan records no planned commit, so there is nothing to compare against this checkout and the apply is refused. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack."
           exit 1
         fi
         record="$RUNNER_TEMP/planned-head.txt"

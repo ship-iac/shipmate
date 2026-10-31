@@ -105,9 +105,8 @@ def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
     assert out.strip() == (
         "::error::apply aborted for dev-eu/stacks/app: this reviewed plan records no planned "
         "commit, so there is nothing to compare against this checkout and the apply is "
-        "refused. Re-plan this stack "
-        "on its pull request and apply the fresh plan; if that pull request has already "
-        "merged, a new pull request touching the stack plans and applies it afresh."
+        "refused. Re-plan the stack by pushing a commit to its open pull request, or, after "
+        "merge, by a new pull request that changes the stack."
     )
 
 

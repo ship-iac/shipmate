@@ -527,15 +527,15 @@ names at the commit the consumer pins. A version below that tool's floor in
 `VERSIONS` (`terramate_min`, `tofu_min`) refuses; versions compare numerically per
 component, so `1.13.10` is above `1.13.9`. A floor rises only in an engine release
 that starts relying on a newer feature of the tool or ships a new upstream signer
-key, never with a routine default bump. An engine release is tested at its `VERSIONS` defaults only, so any other
-value is untested by that release. `tools` accepts no variable reference. `setup`
-reads it from the default branch in every job that installs a tool (§Runner
-prerequisites), so a pull request that changes it plans with the default branch's
-versions until it merges. A merged `tools.tofu` change invalidates every plan
-awaiting apply (§Apply-match fingerprint). Change `tools.tofu` in a pull request
-that changes no stack, since that pull request's plans ran on the old version.
-`shipmate doctor` lists each tool's
-version and its source as the default branch decides them
+key, never with a routine default bump. An engine release is tested at its
+`VERSIONS` defaults only, so any other value is untested by that release. `tools`
+accepts no variable reference. `setup` reads it from the default branch in every
+job that installs a tool (§Runner prerequisites), so a pull request that changes
+it plans with the default branch's versions until it merges. A merged
+`tools.tofu` change invalidates every plan awaiting apply (§Apply-match
+fingerprint). Change `tools.tofu` in a pull request that changes no stack, since
+that pull request's plans ran on the old version. `shipmate doctor` lists each
+tool's version and its source as the default branch decides them
 (`docs/troubleshooting.md` §shipmate doctor).
 
 **`max_parallel` caps the plan and drift matrices.** It is a whole number from
