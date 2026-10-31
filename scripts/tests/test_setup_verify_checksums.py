@@ -38,6 +38,13 @@ _SIGNER = "E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80"
 _TOFU_ERROR = f"::error title=OpenTofu checksum verification failed::OpenTofu {_TOFU}: "
 _TM_ERROR = f"::error title=Terramate checksum verification failed::Terramate {_TERRAMATE}: "
 
+
+def _refusal(stdout):
+    """The `refusal=` line a failed step writes: its one annotation without the
+    `::error title=...::` prefix. Every caller pins `stdout` whole."""
+    return "refusal=" + stdout.split("::", 2)[2]
+
+
 #: Each step's whole $GITHUB_OUTPUT on the genuine fixtures, digests copied by hand from them.
 _TOFU_OUTPUT = (
     "tofu_sha256<<SHIPMATE_EOF\n"
@@ -82,7 +89,7 @@ def _signature_tools():
     if shutil.which("gpg") and shutil.which("openssl"):
         return
     reason = "gpg and openssl verify the signatures; ubuntu-latest ships both"
-    if os.environ.get("CI"):
+    if os.environ.get("CI") == "true":
         pytest.fail(reason)
     pytest.skip(reason)
 
@@ -260,7 +267,7 @@ def test_a_flipped_byte_in_the_opentofu_sums_fails(tmp_path):
         f"{_TOFU_ERROR}the signature on {_TOFU_SUMS} did not verify against the committed "
         "OpenTofu key (gpg exit 1).\n"
     )
-    assert out == ""
+    assert out == _refusal(r.stdout)
 
 
 @bash_only
@@ -275,7 +282,7 @@ def test_a_flipped_byte_in_the_terramate_sums_fails(tmp_path):
         f"{_TM_ERROR}the signature on checksums.txt did not verify against the committed "
         "Terramate key (openssl exit 1).\n"
     )
-    assert out == ""
+    assert out == _refusal(r.stdout)
 
 
 @bash_only
@@ -292,7 +299,7 @@ def test_a_signature_by_another_key_fails_the_whole_fingerprint_compare(tmp_path
     assert r.stdout == (
         f"{_TOFU_ERROR}{_TOFU_SUMS} is signed by {_SIGNER}, not the OpenTofu signer {other}.\n"
     )
-    assert out == ""
+    assert out == _refusal(r.stdout)
 
 
 @pytest.mark.parametrize(
@@ -326,7 +333,7 @@ def test_an_html_signature_at_200_fails_with_one_annotation(tmp_path, sid, name,
     r, out, *_ = _run(tmp_path, sid, served=served)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == message
-    assert out == ""
+    assert out == _refusal(r.stdout)
 
 
 @pytest.mark.parametrize(
@@ -341,7 +348,8 @@ def test_an_html_signature_at_200_fails_with_one_annotation(tmp_path, sid, name,
 @bash_only
 @needs_tools
 def test_a_404_fails_naming_the_url(tmp_path, sid, url):
-    """Mutation: drop the `!= 200` status check."""
+    """Mutations: drop the `!= 200` status check; drop the `refusal=` write from either
+    step's `fail()`."""
     name = url.rsplit("/", 1)[1]
     served = _genuine()
     served[name] = b"Not Found"
@@ -349,7 +357,8 @@ def test_a_404_fails_naming_the_url(tmp_path, sid, url):
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     prefix = _TOFU_ERROR if sid == "tofu-sums" else _TM_ERROR
     assert r.stdout == f"{prefix}{url} answered HTTP 404 (curl exit 0).\n"
-    assert out == ""
+    tool = f"OpenTofu {_TOFU}" if sid == "tofu-sums" else f"Terramate {_TERRAMATE}"
+    assert out == f"refusal={tool}: {url} answered HTTP 404 (curl exit 0).\n"
 
 
 @bash_only
@@ -365,7 +374,7 @@ def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
         f"{_TM_ERROR}curl exited 2 on an option it does not know; shipmate needs curl 7.71 "
         "or later (CONTRACT.md §Runner prerequisites).\n"
     )
-    assert (len(curl), out) == (1, "")
+    assert (len(curl), out) == (1, _refusal(r.stdout))
 
 
 @pytest.mark.parametrize(
@@ -409,7 +418,7 @@ def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     prefix = _TOFU_ERROR if sid == "tofu-sums" else _TM_ERROR
     assert r.stdout == f"{prefix}{missing} is not installed on the runner.\n"
-    assert out.read_text(encoding="utf-8") == ""
+    assert out.read_text(encoding="utf-8") == _refusal(r.stdout)
 
 
 @pytest.fixture
@@ -493,7 +502,7 @@ def test_signed_opentofu_sums_without_an_asset_line_fail_naming_it(
     r, out, *_ = _run(tmp_path / "run", "tofu-sums", served=served, body=body)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TOFU_ERROR}{_TOFU_SUMS} has no line for {missing}.\n"
-    assert out == ""
+    assert out == _refusal(r.stdout)
 
 
 @pytest.mark.parametrize(
@@ -526,4 +535,4 @@ def test_signed_terramate_sums_without_an_asset_line_fail_naming_it(
     r, out, *_ = _run(tmp_path / "run", "terramate-sums", served=served, body=body)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TM_ERROR}checksums.txt has no line for {missing}.\n"
-    assert out == ""
+    assert out == _refusal(r.stdout)

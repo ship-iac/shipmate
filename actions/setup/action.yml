@@ -7,8 +7,8 @@ inputs:
     default: "true"
 outputs:
   refusal:
-    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table or of `tools`, or a failed read), without the prefix, its lines joined into one; empty when it raised none. Set although the step fails, and read through each detect job's `refusal` output into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
-    value: ${{ steps.versions.outputs.refusal }}
+    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table or of `tools`, or a failed read) or a verify step (a download or signature failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
+    value: ${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal || steps.tofu-sums.outputs.refusal }}
 runs:
   using: composite
   steps:
@@ -29,7 +29,13 @@ runs:
       run: |
         set -euo pipefail
         v="$SHIPMATE_TERRAMATE_VERSION"
-        fail() { echo "::error title=Terramate checksum verification failed::Terramate ${v}: $1"; exit 1; }
+        # The refusal output is cut at `REASON_CAP` (scripts/_shipmate.py), like run_annotated's.
+        fail() {
+          local msg="Terramate ${v}: $1"
+          echo "::error title=Terramate checksum verification failed::${msg}"
+          printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
+          exit 1
+        }
         # This step always runs first, so it checks the runner prerequisites for every later one.
         for tool in curl openssl base64; do
           command -v "$tool" >/dev/null || fail "${tool} is not installed on the runner."
@@ -77,7 +83,12 @@ runs:
         v="$SHIPMATE_TOFU_VERSION"
         # The primary key fingerprint of OpenTofu's release signer, compared whole.
         signer=E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
-        fail() { echo "::error title=OpenTofu checksum verification failed::OpenTofu ${v}: $1"; exit 1; }
+        fail() {
+          local msg="OpenTofu ${v}: $1"
+          echo "::error title=OpenTofu checksum verification failed::${msg}"
+          printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
+          exit 1
+        }
         command -v gpg >/dev/null || fail "gpg is not installed on the runner."
         sums="tofu_${v}_SHA256SUMS"
         base="https://github.com/opentofu/opentofu/releases/download/v${v}"
