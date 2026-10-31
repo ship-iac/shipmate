@@ -15,6 +15,86 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/tool-versions"
+    # Each verify step checks the release's checksum file against a signer key committed in this
+    # repository, never fetched, and outputs the Linux digests only once the signature holds.
+    - name: Verify OpenTofu checksums
+      id: tofu-sums
+      if: ${{ inputs.tofu != 'false' }}
+      shell: bash
+      env:
+        SHIPMATE_TOFU_VERSION: ${{ steps.versions.outputs.tofu }}
+      run: |
+        set -euo pipefail
+        v="$SHIPMATE_TOFU_VERSION"
+        # The primary key fingerprint of OpenTofu's release signer, compared whole.
+        signer=E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
+        fail() { echo "::error title=OpenTofu checksum verification failed::OpenTofu ${v}: $1"; exit 1; }
+        sums="tofu_${v}_SHA256SUMS"
+        base="https://github.com/opentofu/opentofu/releases/download/v${v}"
+        dir="$RUNNER_TEMP/tofu-sums"
+        mkdir -p "$dir"
+        for f in "$sums" "$sums.gpgsig"; do
+          rc=0
+          code="$(curl --retry-all-errors -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+            -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
+          if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
+            fail "${base}/${f} answered HTTP ${code:-000} (curl exit ${rc})."
+          fi
+        done
+        GNUPGHOME="$(mktemp -d)"
+        export GNUPGHOME
+        gpg --batch --import "$GITHUB_ACTION_PATH/../../keys/opentofu.asc" || fail "gpg could not import the committed OpenTofu key."
+        rc=0
+        status="$(gpg --batch --status-fd 1 --verify "$dir/$sums.gpgsig" "$dir/$sums")" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          fail "the signature on ${sums} did not verify against the committed OpenTofu key (gpg exit ${rc})."
+        fi
+        got="$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print $NF}' <<<"$status")"
+        [ "$got" = "$signer" ] || fail "${sums} is signed by ${got:-no key}, not the OpenTofu signer ${signer}."
+        digests=""
+        for arch in amd64 arm64; do
+          asset="tofu_${v}_linux_${arch}.zip"
+          d="$(awk -v a="$asset" '$2 == a {print $1}' "$dir/$sums")"
+          [ -n "$d" ] || fail "${sums} has no line for ${asset}."
+          digests+="${d}"$'\n'
+        done
+        printf 'tofu_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$digests" >> "$GITHUB_OUTPUT"
+    - name: Verify Terramate checksums
+      id: terramate-sums
+      shell: bash
+      env:
+        SHIPMATE_TERRAMATE_VERSION: ${{ steps.versions.outputs.terramate }}
+      run: |
+        set -euo pipefail
+        v="$SHIPMATE_TERRAMATE_VERSION"
+        fail() { echo "::error title=Terramate checksum verification failed::Terramate ${v}: $1"; exit 1; }
+        base="https://github.com/terramate-io/terramate/releases/download/v${v}"
+        dir="$RUNNER_TEMP/terramate-sums"
+        mkdir -p "$dir"
+        for f in checksums.txt checksums.txt.sig; do
+          rc=0
+          code="$(curl --retry-all-errors -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+            -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
+          if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
+            fail "${base}/${f} answered HTTP ${code:-000} (curl exit ${rc})."
+          fi
+        done
+        # cosign writes the signature base64-encoded; openssl reads it as DER.
+        base64 -d "$dir/checksums.txt.sig" > "$dir/checksums.txt.der" || fail "${base}/checksums.txt.sig is not base64."
+        rc=0
+        openssl dgst -sha256 -verify "$GITHUB_ACTION_PATH/../../keys/terramate-cosign.pub" \
+          -signature "$dir/checksums.txt.der" "$dir/checksums.txt" >/dev/null || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          fail "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit ${rc})."
+        fi
+        lines=""
+        for arch in x86_64 arm64; do
+          asset="terramate_${v}_linux_${arch}.tar.gz"
+          line="$(awk -v a="$asset" '$2 == a {print $1 "  " $2}' "$dir/checksums.txt")"
+          [ -n "$line" ] || fail "checksums.txt has no line for ${asset}."
+          lines+="${line}"$'\n'
+        done
+        printf 'terramate_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
     - name: Install OpenTofu
       if: ${{ inputs.tofu != 'false' }}
       uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
@@ -23,12 +103,12 @@ runs:
         tofu_wrapper: false
         # A non-empty list makes setup-opentofu refuse a zip outside it; without one it
         # installs unverified when the release's SHA256SUMS cannot be fetched.
-        checksums: ${{ steps.versions.outputs.tofu_sha256 }}
+        checksums: ${{ steps.tofu-sums.outputs.tofu_sha256 }}
     - name: Install Terramate
       shell: bash
       env:
         SHIPMATE_TERRAMATE_VERSION: ${{ steps.versions.outputs.terramate }}
-        SHIPMATE_TERRAMATE_SHA256: ${{ steps.versions.outputs.terramate_sha256 }}
+        SHIPMATE_TERRAMATE_SHA256: ${{ steps.terramate-sums.outputs.terramate_sha256 }}
       run: |
         set -euo pipefail
         v="$SHIPMATE_TERRAMATE_VERSION"
@@ -43,7 +123,7 @@ runs:
         esac
         asset="terramate_${v}_${system}_${arch}.tar.gz"
         want="$(awk -v a="$asset" '$2 == a {print $1}' <<<"$SHIPMATE_TERRAMATE_SHA256")"
-        [ -n "$want" ] || fail "VERSIONS pins no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
+        [ -n "$want" ] || fail "the signed checksums.txt yields no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
         url="https://github.com/terramate-io/terramate/releases/download/v${v}/${asset}"
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$dir"
@@ -57,19 +137,19 @@ runs:
             fail "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)."
           fi
           if [ "${code:-000}" = 404 ]; then
-            fail "${url} answered HTTP 404 (curl exit ${rc}); check VERSIONS and the runner's OS and architecture."
+            fail "${url} answered HTTP 404 (curl exit ${rc}); check the signed checksums.txt and the runner's OS and architecture."
           fi
           fail "${url} answered HTTP ${code:-000} (curl exit ${rc}); re-run the failed job."
         fi
         sum="$(sha256sum "$dir/terramate.tar.gz" | awk '{print $1}')"
         if [ "$sum" != "$want" ]; then
-          fail "${url} has sha256 ${sum}, not the ${want} VERSIONS pins; the release asset differs from the pinned one."
+          fail "${url} has sha256 ${sum}, not the ${want} the signed checksums.txt names; the release asset differs from the signed one."
         fi
         echo "Verified ${asset} sha256 ${sum}."
         tar -xzf "$dir/terramate.tar.gz" -C "$dir" terramate || fail "tar could not extract terramate from ${url}."
         got="$("$dir/terramate" --version)" || fail "the binary from ${url} failed to run terramate --version."
         if [ "$got" != "$v" ]; then
-          fail "${url} delivered version ${got}; check VERSIONS and the release asset."
+          fail "${url} delivered version ${got}; check the signed checksums.txt and the release asset."
         fi
         echo "$dir" >> "$GITHUB_PATH"
     - name: Provider plugin cache

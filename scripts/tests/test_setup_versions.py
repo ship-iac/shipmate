@@ -4,10 +4,10 @@ Each version is the consumer table's `tools` entry, read from the default branch
 release's own `VERSIONS` pin. No action input selects a version: its one input, `tofu`, only
 decides whether OpenTofu is installed at all.
 
-The structural guards pin the shape that makes the script the source -- it runs before both
-installers, and both installers read its outputs -- and the behavioural ones run the script
-in-process against a hand-written VERSIONS fixture and a mocked contents read. One case runs the
-repository's own file, because that is the file every consumer of this release reads.
+The structural guards pin the shape that makes the script the source -- it runs before the
+verify steps and both installers, which read its versions -- and the behavioural ones run the
+script in-process against a hand-written VERSIONS fixture and a mocked contents read. One case
+runs the repository's own file, because that is the file every consumer of this release reads.
 
 The fail-closed property is what the behavioural cases exist for: `opentofu/setup-opentofu`
 resolves an empty `tofu_version` as "latest", and a table read that fails must not install the
@@ -26,11 +26,14 @@ _ACTION = "setup"
 _PYTHON_YAML = "$/actions/python-yaml"
 
 #: Every step, in order, by name or, for the unnamed install, by `uses:`. Hand-written: PyYAML
-#: must be present before the resolve step parses the table, and the resolve step must precede
-#: both installers; one whole-list comparison pins that ordering.
+#: must be present before the resolve step parses the table, the resolve step must precede the
+#: verify steps that read its versions, and both must precede the installers that read their
+#: outputs; one whole-list comparison pins that ordering.
 _EXPECTED_STEPS = [
     _PYTHON_YAML,
     "Resolve versions",
+    "Verify OpenTofu checksums",
+    "Verify Terramate checksums",
     "Install OpenTofu",
     "Install Terramate",
     "Provider plugin cache",
@@ -51,45 +54,25 @@ _EXPECTED_RESOLVE = {
 _EXPECTED_TOFU_WITH = {
     "tofu_version": "${{ steps.versions.outputs.tofu }}",
     "tofu_wrapper": False,
-    "checksums": "${{ steps.versions.outputs.tofu_sha256 }}",
+    "checksums": "${{ steps.tofu-sums.outputs.tofu_sha256 }}",
 }
 
 #: The Terramate installer is a `run:` step; its whole `env:` block carries the version and the
-#: pinned `sha256sum` lines.
+#: signed `sha256sum` lines.
 _EXPECTED_TERRAMATE_ENV = {
     "SHIPMATE_TERRAMATE_VERSION": "${{ steps.versions.outputs.terramate }}",
-    "SHIPMATE_TERRAMATE_SHA256": "${{ steps.versions.outputs.terramate_sha256 }}",
+    "SHIPMATE_TERRAMATE_SHA256": "${{ steps.terramate-sums.outputs.terramate_sha256 }}",
 }
 
-_A, _B, _C, _D, _E, _F = (c * 64 for c in "abcdef")
-
-#: Two versions with their floors, the four default assets, and the two assets of the older tofu
-#: the table may choose, plus one older terramate line that no lookup may return.
-_FIXTURE_VERSIONS = (
-    "terramate=9.9.9\nterramate_min=9.9.0\ntofu=8.8.8\ntofu_min=8.0.0\n"
-    f"{_A}  terramate_9.9.9_linux_x86_64.tar.gz\n"
-    f"{_B}  terramate_9.9.9_linux_arm64.tar.gz\n"
-    f"{_E}  terramate_9.9.8_linux_x86_64.tar.gz\n"
-    f"{_C}  tofu_8.8.8_linux_amd64.zip\n"
-    f"{_D}  tofu_8.8.8_linux_arm64.zip\n"
-    f"{_E}  tofu_8.8.7_linux_amd64.zip\n"
-    f"{_F}  tofu_8.8.7_linux_arm64.zip\n"
-)
+#: Two versions with their floors.
+_FIXTURE_VERSIONS = "terramate=9.9.9\nterramate_min=9.9.0\ntofu=8.8.8\ntofu_min=8.0.0\n"
 
 #: A table naming no tools. Its `{vars: NAME}` reference is outside `tools`: setup receives no
 #: variables, so resolving it would refuse in every job.
 _TABLE = "layout: tf_vars\nenvironments:\n  dev:\n    region: {vars: DEV_REGION}\n"
 
-#: The whole $GITHUB_OUTPUT `_TABLE` resolves to, hand-written: the Terramate lines whole for
-#: the install step's lookup, the tofu digests hash-only for setup-opentofu's `checksums`.
-_FIXTURE_OUTPUT = (
-    "terramate=9.9.9\ntofu=8.8.8\n"
-    "terramate_sha256<<SHIPMATE_EOF\n"
-    f"{_A}  terramate_9.9.9_linux_x86_64.tar.gz\n"
-    f"{_B}  terramate_9.9.9_linux_arm64.tar.gz\n"
-    "SHIPMATE_EOF\n"
-    f"tofu_sha256<<SHIPMATE_EOF\n{_C}\n{_D}\nSHIPMATE_EOF\n"
-)
+#: The whole $GITHUB_OUTPUT `_TABLE` resolves to, hand-written.
+_FIXTURE_OUTPUT = "terramate=9.9.9\ntofu=8.8.8\n"
 
 #: The contents read, whole: no `ref`, so GitHub answers from the default branch.
 _CONTENTS_PATH = "repos/o/r/contents/.github/shipmate-config.yml"
@@ -125,8 +108,8 @@ def test_the_resolve_step_runs_the_script_with_the_token():
     assert action_steps(_ACTION)[0] == {"uses": _PYTHON_YAML}
 
 
-def test_both_installers_read_the_resolve_steps_outputs():
-    """Reds when an installer is pointed at anything but the resolve step's outputs."""
+def test_both_installers_read_the_resolved_version_and_the_verified_digests():
+    """Mutation: point the OpenTofu installer's `checksums` at `steps.versions`."""
     got = (
         step_by(_ACTION, name="Install OpenTofu").get("with"),
         step_by(_ACTION, name="Install Terramate").get("env"),
@@ -150,17 +133,21 @@ def test_the_only_input_is_the_tofu_switch():
     assert action_yaml(_ACTION).get("inputs") == _EXPECTED_INPUTS
 
 
-def test_only_the_opentofu_install_is_gated_on_the_tofu_input():
+def test_only_the_opentofu_steps_are_gated_on_the_tofu_input():
     """Composite inputs are strings, and expression string comparison ignores case, so
-    anything but "false" in any case installs OpenTofu.
+    anything but "false" in any case installs OpenTofu. A job that never runs tofu skips its
+    verify step too, so an OpenTofu signer change or outage cannot fail it.
 
-    Mutations: `!=` -> `==` in the `Install OpenTofu` step's `if:`; add
-    `if: ${{ inputs.tofu != 'false' }}` to `Install Terramate`; add one to the python-yaml step.
+    Mutations: `!=` -> `==` in the `Install OpenTofu` step's `if:`; remove the `if:` on
+    `Verify OpenTofu checksums`; add `if: ${{ inputs.tofu != 'false' }}` to `Install Terramate`;
+    add one to the python-yaml step.
     """
     got = {s.get("name") or s.get("uses"): s.get("if") for s in action_steps(_ACTION)}
     assert got == {
         _PYTHON_YAML: None,
         "Resolve versions": None,
+        "Verify OpenTofu checksums": "${{ inputs.tofu != 'false' }}",
+        "Verify Terramate checksums": None,
         "Install OpenTofu": "${{ inputs.tofu != 'false' }}",
         "Install Terramate": None,
         "Provider plugin cache": None,
@@ -206,12 +193,11 @@ def _resolve(
     return code, out.read_bytes().decode("utf-8"), capsys.readouterr().err, calls, path
 
 
-def test_both_versions_and_their_digests_come_from_versions(monkeypatch, capsys, tmp_path):
+def test_both_versions_come_from_versions(monkeypatch, capsys, tmp_path):
     """A table naming no tools, holding a reference elsewhere, installs the release's pins.
 
-    Mutations: read the table with `read_table` (the reference refuses without
-    `SHIPMATE_GITHUB_VARS`); emit the Terramate digests into `tofu_sha256`; drop the version
-    from the lookup prefix (the other-version lines reach the outputs).
+    Mutation: read the table with `read_table` (the reference refuses without
+    `SHIPMATE_GITHUB_VARS`).
     """
     code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path)
     assert code == 0, err
@@ -219,19 +205,11 @@ def test_both_versions_and_their_digests_come_from_versions(monkeypatch, capsys,
 
 
 def test_the_tables_tools_entry_wins_over_versions(monkeypatch, capsys, tmp_path):
-    """Mutations: ignore `tools` (tofu resolves 8.8.8); look the digests up by the `VERSIONS`
-    version instead of the resolved one."""
+    """Mutation: ignore `tools` (tofu resolves 8.8.8)."""
     table = _TABLE + "tools:\n  tofu: 8.8.7\n"
     code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path, table=table)
     assert code == 0, err
-    assert out == (
-        "terramate=9.9.9\ntofu=8.8.7\n"
-        "terramate_sha256<<SHIPMATE_EOF\n"
-        f"{_A}  terramate_9.9.9_linux_x86_64.tar.gz\n"
-        f"{_B}  terramate_9.9.9_linux_arm64.tar.gz\n"
-        "SHIPMATE_EOF\n"
-        f"tofu_sha256<<SHIPMATE_EOF\n{_E}\n{_F}\nSHIPMATE_EOF\n"
-    )
+    assert out == "terramate=9.9.9\ntofu=8.8.7\n"
 
 
 def test_the_table_is_read_from_the_default_branch(monkeypatch, capsys, tmp_path):
@@ -317,11 +295,10 @@ def test_unparseable_yaml_refuses_and_writes_nothing(monkeypatch, capsys, tmp_pa
 def test_a_crlf_versions_file_yields_outputs_without_carriage_returns(
     monkeypatch, capsys, tmp_path
 ):
-    """setup-opentofu compares each `checksums` line to a bare hex digest, and the install step
-    compares asset names exactly, so a carriage return would fail every install.
+    """A carriage return in a version would reach every download URL.
 
-    Two defences each keep the CR out, so the mutation breaks both: read the lines with
-    `read_bytes().decode("utf-8").split("\\n")` and split each line's fields on `"  "`.
+    Mutation: read the lines in `engine_versions` with `read_bytes().decode("utf-8").split("\\n")`
+    (each version then refuses as malformed).
     """
     crlf = _FIXTURE_VERSIONS.replace("\n", "\r\n")
     code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path, versions=crlf)
@@ -329,53 +306,22 @@ def test_a_crlf_versions_file_yields_outputs_without_carriage_returns(
     assert out == _FIXTURE_OUTPUT
 
 
-@pytest.mark.parametrize(("tool", "version"), [("terramate", "9.9.9"), ("tofu", "8.8.8")])
-def test_a_version_without_digest_lines_refuses_and_writes_nothing(
-    monkeypatch, capsys, tmp_path, tool, version
-):
-    """A version bump that left only the previous release's checksum lines.
-
-    Mutation: drop the emptiness check on the digests.
-    """
-    fixture = _FIXTURE_VERSIONS.replace(f"{tool}_{version}_", f"{tool}_0.0.1_")
-    code, out, err, _, path = _resolve(monkeypatch, capsys, tmp_path, versions=fixture)
-    assert (code, out) == (1, "")
-    assert err == (
-        f"::error::{path} carries no sha256 line for {tool} {version}; "
-        "paste the release's checksum lines.\n"
-    )
-
-
 def test_the_repositorys_own_versions_file_resolves(monkeypatch, capsys, tmp_path):
     """The cases above prove the logic; this one proves the file it runs against.
 
-    The shape is asserted, never the numbers, or a tool-version bump reds this. Both Linux
-    architectures of both tools must be pinned: a missing one resolves here and refuses only on
-    that architecture's runners.
+    The shape is asserted, never the numbers, or a tool-version bump reds this. The file holds
+    the four version lines and nothing else: digests come from the signed release files.
 
-    Mutations: write `tofu = 1.12.4` into VERSIONS; delete the two tofu digest lines from it.
+    Mutations: write `tofu = 1.12.4` into VERSIONS; append a sha256 line to it.
     """
     real = (ENGINE / "VERSIONS").read_bytes().decode("utf-8")
+    keys = [line.partition("=")[0] for line in real.splitlines()]
+    assert keys == ["terramate", "terramate_min", "tofu", "tofu_min"], real
     code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path, versions=real)
     assert code == 0, err
     got = _outputs(out)
-    assert set(got) == {"terramate", "tofu", "terramate_sha256", "tofu_sha256"}, out
-    v = got["terramate"]
-    assert re.fullmatch(r"\d+\.\d+\.\d+", v), out
-    assert re.fullmatch(r"\d+\.\d+\.\d+", got["tofu"]), out
-    terramate = {}
-    for line in got["terramate_sha256"].split("\n"):
-        digest, _, asset = line.partition("  ")
-        terramate[asset] = digest
-    assert set(terramate) == {
-        f"terramate_{v}_linux_x86_64.tar.gz",
-        f"terramate_{v}_linux_arm64.tar.gz",
-    }, out
-    tofu = got["tofu_sha256"].split("\n")
-    digests = [*terramate.values(), *tofu]
-    assert len(digests) == 4, out
-    assert all(re.fullmatch(r"[0-9a-f]{64}", d) for d in digests), out
-    assert len(set(digests)) == 4, out
+    assert set(got) == {"terramate", "tofu"}, out
+    assert all(re.fullmatch(r"\d+\.\d+\.\d+", v) for v in got.values()), out
 
 
 def test_a_missing_versions_file_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path):

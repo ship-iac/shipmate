@@ -140,6 +140,11 @@ Three limits, all deliberate:
    gh release download v<tofu-version> -R opentofu/opentofu -p 'tofu_<tofu-version>_SHA256SUMS' -O - | grep -E '_linux_(amd64|arm64)\.zip$'
    ```
 
+`keys/terramate-cosign.pub` has no source outside Terramate's GitHub releases: Terramate's
+repository writes it from a secret at release time, and its documentation does not publish it.
+The trust is in the key as committed on 2026-10-31, byte-identical in the v0.10.0, v0.14.0,
+v0.17.1 and v0.17.3 releases.
+
 ## Publishing the release
 
 After `manifest-load` is green on `main`,

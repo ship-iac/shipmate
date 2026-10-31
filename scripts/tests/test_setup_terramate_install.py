@@ -25,7 +25,7 @@ _PREFIX = f"::error title=Terramate install failed::Terramate {_VERSION} did not
 _ASSET = "terramate_0.17.1_linux_x86_64.tar.gz"
 _DIGEST = "a" * 64
 
-#: The `terramate_sha256` resolve output: the `sha256sum` lines pinned for this version.
+#: The `terramate_sha256` verify output: the signed `sha256sum` lines for this version.
 _PINNED = f"{_DIGEST}  {_ASSET}\n{'b' * 64}  terramate_0.17.1_linux_arm64.tar.gz"
 _VERIFIED = f"Verified {_ASSET} sha256 {_DIGEST}.\n"
 
@@ -176,7 +176,7 @@ def test_a_404_names_the_version_and_platform_as_the_remedy(tmp_path):
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
         f"{_PREFIX}{_URL} answered HTTP 404 (curl exit 0); "
-        "check VERSIONS and the runner's OS and architecture.\n"
+        "check the signed checksums.txt and the runner's OS and architecture.\n"
     )
     assert _argv(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
@@ -224,22 +224,22 @@ def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
         f"{_VERIFIED}{_PREFIX}{_URL} delivered version 0.17.0; "
-        "check VERSIONS and the release asset.\n"
+        "check the signed checksums.txt and the release asset.\n"
     )
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
 
 
 @bash_only
 def test_a_digest_mismatch_fails_the_step_before_tar_runs(tmp_path):
-    """The asset differs from the pinned one, so the annotation names no re-run.
+    """The asset differs from the signed one, so the annotation names no re-run.
 
     Mutation: drop the sha256 comparison.
     """
     r, _, logs = _install(tmp_path, "200", 0, digest="c" * 64)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
-        f"{_PREFIX}{_URL} has sha256 {'c' * 64}, not the {_DIGEST} VERSIONS pins; "
-        "the release asset differs from the pinned one.\n"
+        f"{_PREFIX}{_URL} has sha256 {'c' * 64}, not the {_DIGEST} the signed checksums.txt "
+        "names; the release asset differs from the signed one.\n"
     )
     assert _argv(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
@@ -251,8 +251,8 @@ def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path):
     r, _, logs = _install(tmp_path, "200", 0, machine="riscv64")
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
-        f"{_PREFIX}VERSIONS pins no sha256 for terramate_0.17.1_linux_riscv64.tar.gz; "
-        "shipmate installs on Linux x86_64 and arm64.\n"
+        f"{_PREFIX}the signed checksums.txt yields no sha256 for "
+        "terramate_0.17.1_linux_riscv64.tar.gz; shipmate installs on Linux x86_64 and arm64.\n"
     )
     assert _argv(logs, "curl") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
