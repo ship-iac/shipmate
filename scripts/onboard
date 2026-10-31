@@ -1093,8 +1093,7 @@ def _lock_files_item(ctx):
 
 def _unmanaged_item(ctx):
     item = "unmanaged stacks"
-    local = set(bm.local_stacks(ctx["tags_by_stack"]))
-    unmanaged = [s for s in bm.unmanaged_stacks(ctx["tags_by_stack"]) if s not in local]
+    unmanaged = bm.reported_unmanaged(ctx["tags_by_stack"])
     if not unmanaged:
         return "ok", item, []
     return (

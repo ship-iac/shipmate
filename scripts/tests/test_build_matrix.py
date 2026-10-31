@@ -531,14 +531,14 @@ def test_the_local_and_env_refusal_follows_check_names(monkeypatch):
 
 def test_compute_cells_keeps_local_stacks_in_the_scan_set(monkeypatch):
     """The fourth element is the scan set `deploy-detect` refuses stranded checks over; the
-    fifth is the local stacks. Mutation: drop local stacks from `unmanaged_stacks` itself --
-    `a` leaves the fourth element."""
+    fifth is `reported_unmanaged`. Mutations: drop local stacks from `unmanaged_stacks` itself
+    -- `a` leaves the fourth element; return `local_stacks` as the fifth -- red."""
     tree = {k: v for k, v in _LOCAL_TREE.items() if k != "c"}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
-    _, _, _, unmanaged, local = bm.compute_cells(all_stacks=True)
-    assert unmanaged == ["a", "b", "d"]
-    assert local == ["a"]
+    _, _, _, scanned, reported = bm.compute_cells(all_stacks=True)
+    assert scanned == ["a", "b", "d"]
+    assert reported == ["b", "d"]
 
 
 def test_two_workload_tags_on_a_local_stack_draw_no_refusal(monkeypatch):
@@ -549,9 +549,9 @@ def test_two_workload_tags_on_a_local_stack_draw_no_refusal(monkeypatch):
     }
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
-    _, cells, _, _, local = bm.compute_cells(all_stacks=True)
+    _, cells, _, scanned, _ = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    assert local == ["stacks/lab"]
+    assert scanned == ["stacks/lab"]
 
 
 def test_a_stated_head_repository_equal_to_this_repository_is_planned():
@@ -663,7 +663,6 @@ def _run_main(
     tree=None,
     read_table=None,
     unmanaged=(),
-    local=(),
     diffs=None,
     diff_calls=None,
     tag_map=None,
@@ -682,8 +681,8 @@ def _run_main(
     tree instead of the double, and leaves `called`, `cells` and `tree` unused. `read_table`
     replaces the default-branch read, which otherwise answers `table`.
 
-    The double returns `unmanaged` as the scan's unmanaged stacks and `local` as its local
-    stacks. `diffs`, `{stack: diff
+    The double returns `unmanaged` as both the scan's unmanaged stacks and its
+    `reported_unmanaged`. `diffs`, `{stack: diff
     text}`, answers the `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
     to `diff_calls`; it needs `head_sha`.
 
@@ -741,7 +740,7 @@ def _run_main(
         names = [{"environment": e, "stack": s} for s, e in cells] if tree is None else tree
         # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
         # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
-        return {e: frozenset() for _, e in cells}, rows, names, list(unmanaged), list(local)
+        return {e: frozenset() for _, e in cells}, rows, names, list(unmanaged), list(unmanaged)
 
     answer = dict(tag_map or {}) if stacks is None else stacks
     reads = [] if tag_reads is None else tag_reads

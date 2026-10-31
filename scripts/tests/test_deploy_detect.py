@@ -192,8 +192,8 @@ def _run_main(
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: (head, pr_number))
-    # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks, local
-    # stacks); a double returning fewer unpacks into the wrong names and fails somewhere
+    # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks, reported
+    # unmanaged stacks); a double returning fewer unpacks into the wrong names and fails somewhere
     # unrelated.
     if stacks is None:
         monkeypatch.setattr(
@@ -709,8 +709,8 @@ _PARTIAL_UNTAG_MESSAGE = (
 
 def test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local(tmp_path, monkeypatch):
     """A stack retagged from `env/dev-eu` to `shipmate/local` after planning strands its check
-    like any untagged stack. Mutation: filter `bm.local_stacks` out of `scanned` in
-    `refuse_stranded_checks` -- the deploy writes waves."""
+    like any untagged stack. Mutation: pass `compute_cells`' fifth element,
+    `reported_unmanaged`, to `refuse_stranded_checks` in `main` -- the deploy writes waves."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
