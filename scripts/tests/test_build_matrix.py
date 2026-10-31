@@ -96,7 +96,7 @@ def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
             for s in stacks
         },
     )
-    _, cells, tree, _ = bm.compute_cells(all_stacks=True, tags="workload/keep")
+    _, cells, tree, _, _ = bm.compute_cells(all_stacks=True, tags="workload/keep")
     assert [c["stack"] for c in cells] == [f"stacks/s{i:03}" for i in range(10)]
     assert tree == [{"environment": "dev-eu", "stack": f"stacks/s{i:03}"} for i in range(257)]
 
@@ -290,7 +290,7 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(
         bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"]}
     )
-    _, cells, _, _ = bm.compute_cells(all_stacks=True)
+    _, cells, _, _, _ = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
         {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
@@ -429,7 +429,7 @@ def test_compute_cells_leaves_an_unmanaged_stack_out_of_cells_and_tree(monkeypat
     Issues. Mutation: add unmanaged stacks to `tree`."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
     monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
-    _, cells, tree, unmanaged = bm.compute_cells(all_stacks=True)
+    _, cells, tree, unmanaged, _ = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert tree == [{"environment": "dev-eu", "stack": "stacks/app"}]
     assert unmanaged == ["stacks/alpha", "stacks/zeta"]
@@ -440,9 +440,113 @@ def test_two_workload_tags_on_an_unmanaged_stack_draw_no_refusal(monkeypatch):
     tree = {"stacks/app": ["env/dev-eu"], "stacks/odd": ["workload/a", "workload/b"]}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
     monkeypatch.setattr(bm, "all_tags", lambda: tree)
-    _, cells, _, unmanaged = bm.compute_cells(all_stacks=True)
+    _, cells, _, unmanaged, _ = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert unmanaged == ["stacks/odd"]
+
+
+_LOCAL_TREE = {
+    "a": ["shipmate/local"],
+    "b": [],
+    "c": ["shipmate/local", "env/dev"],
+    "d": ["Shipmate/Local"],
+}
+
+
+def test_local_stacks_are_the_exact_tag_without_an_env_tag():
+    """Mutations: compare the tag case-insensitively -- `d` appears; drop the `env/*` exclusion
+    -- `c` appears; change `LOCAL_TAG`'s value -- red."""
+    assert bm.LOCAL_TAG == "shipmate/local"
+    assert bm.local_stacks({**_LOCAL_TREE, "e": ["shipmate/local "]}) == ["a"]
+
+
+def test_the_unmanaged_notice_never_names_a_local_stack(monkeypatch, capsys):
+    """Mutation: count and name `unmanaged_stacks` unfiltered in the notice -- `a` appears."""
+    tree = {k: v for k, v in _LOCAL_TREE.items() if k != "c"}
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
+    bm.env_membership(all_stacks=True)
+    assert capsys.readouterr().out == (
+        "::notice::2 stack(s) carry no env/* tag and are not managed by shipmate: b, d\n"
+    )
+
+
+def test_a_changed_set_of_only_local_stacks_prints_no_notice(monkeypatch, capsys):
+    """Mutation: count and name `unmanaged_stacks` unfiltered in the notice -- `a` is
+    named."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["a"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"a": ["shipmate/local"]})
+    bm.env_membership(all_stacks=False, base="deadbeef")
+    assert capsys.readouterr().out == ""
+
+
+_LOCAL_AND_ENV = (
+    "::error::stack {!r} carries 'shipmate/local' and {}: a local stack carries no env/* tag. "
+    "Remove 'shipmate/local' for shipmate to run the stack, or its env/* tags to keep it out "
+    "of CI."
+)
+
+
+def test_a_local_stack_with_an_env_tag_refuses(monkeypatch):
+    """Mutation: let `env/*` win over `shipmate/local` silently (drop the raise) -- no
+    refusal."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_LOCAL_TREE))
+    monkeypatch.setattr(bm, "all_tags", lambda: _LOCAL_TREE)
+    with pytest.raises(SystemExit) as e:
+        bm.env_membership(all_stacks=False, base="deadbeef")
+    assert str(e.value) == _LOCAL_AND_ENV.format("c", "'env/dev'")
+
+
+def test_every_local_stack_with_an_env_tag_is_named_in_one_refusal(monkeypatch):
+    """Mutation: raise on the first offender -- `stacks/y` is missing."""
+    tree = {
+        "stacks/x": ["shipmate/local", "env/dev"],
+        "stacks/ok": ["env/dev"],
+        "stacks/y": ["env/dev", "workload/w", "env/prod", "shipmate/local"],
+    }
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
+    with pytest.raises(SystemExit) as e:
+        bm.env_membership(all_stacks=True)
+    assert str(e.value) == "\n".join(
+        [
+            _LOCAL_AND_ENV.format("stacks/x", "'env/dev'"),
+            _LOCAL_AND_ENV.format("stacks/y", "'env/dev', 'env/prod'"),
+        ]
+    )
+
+
+def test_the_local_and_env_refusal_follows_check_names(monkeypatch):
+    """Mutation: refuse a local stack's `env/*` tag regardless of `check_names` -- red."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_LOCAL_TREE))
+    monkeypatch.setattr(bm, "all_tags", lambda: _LOCAL_TREE)
+    stacks_by_env, _ = bm.env_membership(all_stacks=True, check_names=False)
+    assert stacks_by_env == {"dev": ["c"]}
+
+
+def test_compute_cells_keeps_local_stacks_in_the_scan_set(monkeypatch):
+    """The fourth element is the scan set `deploy-detect` refuses stranded checks over; the
+    fifth is the local stacks. Mutation: drop local stacks from `unmanaged_stacks` itself --
+    `a` leaves the fourth element."""
+    tree = {k: v for k, v in _LOCAL_TREE.items() if k != "c"}
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
+    _, _, _, unmanaged, local = bm.compute_cells(all_stacks=True)
+    assert unmanaged == ["a", "b", "d"]
+    assert local == ["a"]
+
+
+def test_two_workload_tags_on_a_local_stack_draw_no_refusal(monkeypatch):
+    """Mutation: call `workload_of` over every stack in `tags_by_stack` in `full_tree`."""
+    tree = {
+        "stacks/app": ["env/dev-eu"],
+        "stacks/lab": ["shipmate/local", "workload/a", "workload/b"],
+    }
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
+    _, cells, _, _, local = bm.compute_cells(all_stacks=True)
+    assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+    assert local == ["stacks/lab"]
 
 
 def test_a_stated_head_repository_equal_to_this_repository_is_planned():
@@ -554,6 +658,7 @@ def _run_main(
     tree=None,
     read_table=None,
     unmanaged=(),
+    local=(),
     diffs=None,
     diff_calls=None,
     tag_map=None,
@@ -572,7 +677,8 @@ def _run_main(
     tree instead of the double, and leaves `called`, `cells` and `tree` unused. `read_table`
     replaces the default-branch read, which otherwise answers `table`.
 
-    The double returns `unmanaged` as the scan's unmanaged stacks. `diffs`, `{stack: diff
+    The double returns `unmanaged` as the scan's unmanaged stacks and `local` as its local
+    stacks. `diffs`, `{stack: diff
     text}`, answers the `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
     to `diff_calls`; it needs `head_sha`.
 
@@ -630,7 +736,7 @@ def _run_main(
         names = [{"environment": e, "stack": s} for s, e in cells] if tree is None else tree
         # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
         # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
-        return {e: frozenset() for _, e in cells}, rows, names, list(unmanaged)
+        return {e: frozenset() for _, e in cells}, rows, names, list(unmanaged), list(local)
 
     answer = dict(tag_map or {}) if stacks is None else stacks
     reads = [] if tag_reads is None else tag_reads
@@ -2855,6 +2961,37 @@ def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_
         head_sha="cafe1234",
         unmanaged=["stacks/gone"],
         diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": ""},
+    )
+    assert _warnings(capsys) == [_LOST_ENV_WARNING]
+
+
+def test_main_counts_no_local_stack_as_unmanaged(monkeypatch, tmp_path):
+    """Every changed stack is local: the plan comment's unmanaged line reads this output.
+    Mutation: build `named` from the unfiltered unmanaged list in `main` -- count 1."""
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        stacks={"a": ["shipmate/local"]},
+    )
+    assert json.loads(outputs["unmanaged"]) == {"count": 0, "paths": []}
+
+
+def test_detect_draws_no_lost_tag_warning_for_a_stack_made_local(monkeypatch, tmp_path, capsys):
+    """`stacks/lab` swaps its last `env/*` tag for `shipmate/local`; `stacks/gone` drops its
+    tag and stays unmanaged. Mutation: pass the unfiltered unmanaged list to
+    `warn_lost_env_tags` -- `stacks/lab` is named too."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        stacks={"stacks/lab": ["shipmate/local"], "stacks/gone": []},
+        diffs={
+            "stacks/lab": '@@ -3 +3 @@\n-  tags = ["env/dev"]\n+  tags = ["shipmate/local"]\n',
+            "stacks/gone": _REMOVED_ENV_LINE,
+        },
     )
     assert _warnings(capsys) == [_LOST_ENV_WARNING]
 

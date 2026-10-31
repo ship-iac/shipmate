@@ -388,6 +388,30 @@ def test_unlock_tolerates_an_unusable_env_tag_elsewhere_in_the_tree(monkeypatch,
     ]
 
 
+def test_unlock_tolerates_a_local_stack_with_an_env_tag_elsewhere_in_the_tree(
+    monkeypatch, tmp_path
+):
+    """Through the real env_membership: `stacks/lab` carries `shipmate/local` and `env/dev-eu`,
+    which refuses every other run, and must not make `dev-eu` unable to unlock.
+
+    Mutation: refuse a local stack's `env/*` tag regardless of `check_names` -- red."""
+    out = _unlock_env(monkeypatch, tmp_path)
+    _stub_one_pending_check(monkeypatch)
+    monkeypatch.setattr(
+        ud.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/lab"]
+    )
+    monkeypatch.setattr(
+        ud.bm,
+        "all_tags",
+        lambda: {
+            "stacks/app": ["env/dev-eu", "workload/app"],
+            "stacks/lab": ["shipmate/local", "env/dev-eu"],
+        },
+    )
+    ud.main()
+    assert [c["stack"] for c in json.loads(github_outputs(out)["cells"])] == ["stacks/app"]
+
+
 def test_unlock_ignores_two_workload_tags_on_a_stack_outside_the_queue(monkeypatch, tmp_path):
     """stacks/other is in dev-eu with two `workload/*` tags and no apply check, so it is not
     released and must not refuse the unlock of stacks/app.

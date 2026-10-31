@@ -167,7 +167,7 @@ def main():
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
     tag_map = bm.all_tags()
-    _, cells, tree, unmanaged = bm.compute_cells(
+    _, cells, tree, unmanaged, _ = bm.compute_cells(
         all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""), tag_map=tag_map
     )
     table = bm.env_config(cells)

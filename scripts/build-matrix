@@ -37,6 +37,9 @@ PLAN_WORKFLOW = ag.PLAN_WORKFLOW
 #: pairs.
 UNMANAGED_NAMES = 10
 
+#: Marks a stack kept out of CI on purpose (CONTRACT §Tag grammar). Exact and case-sensitive.
+LOCAL_TAG = "shipmate/local"
+
 
 def workload_of(tags, stack, errors=None):
     """The `workload/<name>` tag name of `stack`, or "" when it carries none.
@@ -489,6 +492,17 @@ def unmanaged_stacks(tags_by_stack):
     )
 
 
+def local_stacks(tags_by_stack):
+    """Sorted stack paths carrying `LOCAL_TAG` and no `env/*` tag. They stay in
+    `unmanaged_stacks`, the scan set `deploy-detect` refuses stranded apply checks over; only
+    the unmanaged notice, count and lost-tag warning leave them out."""
+    return sorted(
+        s
+        for s, tags in tags_by_stack.items()
+        if LOCAL_TAG in tags and not any(t.startswith("env/") for t in tags)
+    )
+
+
 def lost_env_tags(base, head_envs):
     """`{stack: sorted env names}` for each stack of `head_envs` whose diff from the merge base
     of `base` to `HEAD` removes a line holding a complete tag literal `"env/<name>"`, `<name>`
@@ -588,15 +602,30 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
 def env_membership(all_stacks=False, base="", check_names=True, tag_map=None):
     """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT tag
     grammar: env/<name>). A stack with no `env/*` tag is unmanaged: it is in the tag map,
-    in no environment, and named in one notice scoped to what this call scanned.
+    in no environment, and named in one notice scoped to what this call scanned, unless it is
+    one of `local_stacks`.
 
-    `check_names` refuses an `env/<name>` tag whose name `ec.check_env_name` refuses.
+    `check_names` refuses a stack carrying both `LOCAL_TAG` and an `env/*` tag, every such
+    stack named in one raise, and an `env/<name>` tag whose name `ec.check_env_name` refuses.
     Terramate accepts `.` and `/` in a tag, and under `layout: folder` or `workspace` no
     table entry need check the name: a stack `c` tagged `env/a.b` and a stack `b.c` tagged
     `env/a` would both render the artifact `plan.a.b.c`. `tag_map` goes to `tags_of`."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = tags_of(stacks, tag_map)
-    unmanaged = unmanaged_stacks(tags_by_stack)
+    if check_names:
+        envs = {s: [t for t in tags_by_stack[s] if t.startswith("env/")] for s in stacks}
+        errors = [
+            f"::error::stack {s!r} carries {LOCAL_TAG!r} and "
+            + ", ".join(repr(t) for t in envs[s])
+            + f": a local stack carries no env/* tag. Remove {LOCAL_TAG!r} for shipmate to run "
+            "the stack, or its env/* tags to keep it out of CI."
+            for s in stacks
+            if LOCAL_TAG in tags_by_stack[s] and envs[s]
+        ]
+        if errors:
+            raise SystemExit("\n".join(errors))
+    local = set(local_stacks(tags_by_stack))
+    unmanaged = [s for s in unmanaged_stacks(tags_by_stack) if s not in local]
     if unmanaged:
         scope = "stack(s)" if all_stacks else "changed stack(s)"
         print(
@@ -637,7 +666,7 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
 
 def compute_cells(all_stacks=False, base="", tags="", errors=None, tag_map=None):
     """(`tagged_workloads` of the scan, the cells to plan, the scanned tree's cell names, the
-    scan's `unmanaged_stacks`).
+    scan's `unmanaged_stacks`, local stacks included, the scan's `local_stacks`).
 
     The map is returned beside the cells because a caller that scanned the whole tree feeds it
     to `env_config` as `tagged`, and re-scanning would be a second source that can disagree
@@ -656,6 +685,7 @@ def compute_cells(all_stacks=False, base="", tags="", errors=None, tag_map=None)
         cells,
         tree,
         unmanaged_stacks(tags_by_stack),
+        local_stacks(tags_by_stack),
     )
 
 
@@ -908,7 +938,8 @@ def main():
         base = merge_base(base)
     errors = []
     tag_map = all_tags()
-    tagged, cells, tree, unmanaged = compute_cells(sweep, base, tags, errors, tag_map)
+    tagged, cells, tree, scanned, local = compute_cells(sweep, base, tags, errors, tag_map)
+    unmanaged = [s for s in scanned if s not in local]
     with ec._gather(errors):
         # Outside a sweep `tagged` covers the changed stacks alone, so passing it would warn
         # every unchanged environment unused on every plan. The table is checked against
