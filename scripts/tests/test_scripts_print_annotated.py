@@ -73,6 +73,7 @@ BLOCKS = {
     "plan-crypt": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
     "plan-cell-summary": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "tofu-error": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
+    "tool-versions": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
 }
 #: Run by an operator in a terminal, never by a workflow: `onboard` strips `::error::` for human
 #: output itself, and neither `register-app` nor `repin` raises one.

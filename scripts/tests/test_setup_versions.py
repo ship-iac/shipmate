@@ -11,11 +11,13 @@ runs the repository's own file, because that is the file every consumer of this 
 
 The fail-closed property is what the behavioural cases exist for: `opentofu/setup-opentofu`
 resolves an empty `tofu_version` as "latest", and a table read that fails must not install the
-default in place of the consumer's version, so every refusal writes no output at all.
+default in place of the consumer's version, so a refusal writes no version: its one output is
+`refusal`, which each detect job reads into the gate description.
 """
 
 import base64
 import re
+import runpy
 import sys
 
 import pytest
@@ -161,9 +163,19 @@ def _blob(text):
 
 
 def _resolve(
-    monkeypatch, capsys, tmp_path, *, versions=_FIXTURE_VERSIONS, table=_TABLE, fetch=None
+    monkeypatch,
+    capsys,
+    tmp_path,
+    *,
+    versions=_FIXTURE_VERSIONS,
+    table=_TABLE,
+    fetch=None,
+    entry=False,
 ):
     """Run `tool-versions` in-process against a fixture VERSIONS and a mocked contents read.
+
+    `main` alone by default; `entry=True` runs the script as `__main__`, its own
+    `run_annotated` call included.
 
     Returns (exit code, the raw $GITHUB_OUTPUT text, stderr, the paths read, the VERSIONS path).
     `versions=None` writes no file; `versions` is written as bytes, so a CRLF reaches the script
@@ -186,8 +198,13 @@ def _resolve(
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
+    if entry:
+        monkeypatch.setattr(sys.modules["_shipmate"], "_load", lambda name: tv.ec)
     try:
-        run_annotated(tv.main)
+        if entry:
+            runpy.run_path(str(ENGINE / "scripts" / "tool-versions"), run_name="__main__")
+        else:
+            run_annotated(tv.main)
         code = 0
     except SystemExit as exc:
         code = exc.code
@@ -344,3 +361,30 @@ def test_a_missing_key_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path)
     code, out, err, _, path = _resolve(monkeypatch, capsys, tmp_path, versions="terramate=9.9.9\n")
     assert (code, out) == (1, "")
     assert err == f"::error::{path} holds no terramate_min= line; restore it.\n"
+
+
+def test_the_action_outputs_the_resolve_steps_refusal():
+    """Mutations: delete the `outputs:` block; point `refusal` at `steps.terramate-sums`."""
+    outputs = action_yaml(_ACTION)["outputs"]
+    assert {name: spec["value"] for name, spec in outputs.items()} == {
+        "refusal": "${{ steps.versions.outputs.refusal }}"
+    }
+
+
+def test_the_script_writes_its_first_refusal_as_the_refusal_output(monkeypatch, capsys, tmp_path):
+    """The script's own entry point, the one `Resolve versions` runs; the other cases call
+    `main` directly.
+
+    Mutation: drop `refusal_output=True` from the script's `run_annotated` call (nothing is
+    written).
+    """
+    table = _TABLE + "tools:\n  tofu: v8.8.8\n  terramate: 1.0.0\n"
+    code, out, _, _, _ = _resolve(monkeypatch, capsys, tmp_path, table=table, entry=True)
+    # Parsed, because `write_outputs` writes in text mode: CRLF on Windows.
+    assert (code, _outputs(out)) == (
+        1,
+        {
+            "refusal": "tools.tofu is 'v8.8.8'; a version is written X.Y.Z in ASCII digits, "
+            "such as 1.13.2, with no v, pre-release or range."
+        },
+    )

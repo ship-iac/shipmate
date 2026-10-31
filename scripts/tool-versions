@@ -2,12 +2,16 @@
 """Resolve the Terramate and OpenTofu versions `actions/setup` installs.
 
 Each version is the `tools` entry of `.github/shipmate-config.yml` on the default branch, else
-the release's `VERSIONS` pin. Only `tools` is judged here: references stay unresolved, because
-setup receives no GitHub variables, and the rest of the table is `detect`'s to refuse.
+the release's `VERSIONS` pin. References stay unresolved, because setup receives no GitHub
+variables. Besides every `tools` refusal, the table read and `env-config.load_config` refuse
+here, in every job: an unreadable file, invalid YAML, a top level that is not a mapping, a
+`layout` that is not a string, a reference in `split`, `review`, `apply_mode`, `max_parallel` or
+`command_hints`, and a runner without Python 3.12 or PyYAML. The rest of the table is `detect`'s
+to refuse.
 
-Writes `terramate` and `tofu`. Every failure refuses and writes nothing: setup-opentofu installs
-"latest" for an empty version, and a failed table read must not install the default in place of
-the consumer's version.
+Writes `terramate` and `tofu`. Every failure refuses and writes neither, only the `refusal`
+output: setup-opentofu installs "latest" for an empty version, and a failed table read must not
+install the default in place of the consumer's version.
 """
 
 import os
@@ -31,4 +35,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, refusal_output=True)

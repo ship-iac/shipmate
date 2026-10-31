@@ -5,6 +5,10 @@ inputs:
     description: Whether to install OpenTofu. "false" for jobs that never run it.
     required: false
     default: "true"
+outputs:
+  refusal:
+    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table or of `tools`, or a failed read), without the prefix, its lines joined into one; empty when it raised none. Set although the step fails, and read through each detect job's `refusal` output into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
+    value: ${{ steps.versions.outputs.refusal }}
 runs:
   using: composite
   steps:
