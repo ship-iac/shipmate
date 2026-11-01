@@ -59,8 +59,8 @@ HOLD_DESCRIPTION = (
     "its plan run ended before writing a final gate"
 )
 PUBLISH_HOLD = (
-    "Held while plan run 42 publishes (seconds). "
-    "If this stays after that run ends, re-plan (comment shipmate plan or push)"
+    "Plan run 42 holds this while it publishes; "
+    "if that run has ended, re-plan (comment shipmate plan or push)"
 )
 STATUSES_JQ = ".[] | {context, state, target_url}"
 APPLY_CHECKS_JQ = (
@@ -225,8 +225,10 @@ def _run(
     run_id=RUN_ID,
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
-    `run_id` reaches only `GITHUB_RUN_ID` while the fakes keep run 42, so pass it to HOLD-only
-    runs."""
+
+    `run_id` is for HOLD-only runs: the CREATE fakes and `FAKE_REFRESH_CHECKS` stay keyed to run
+    42, and a `run_id` below 42 beside a run-42 gate in `statuses` makes `refuse-newer` supersede
+    the run."""
     if planned_cells is None:
         planned_cells = str(len(list((tmp_path / "cells").rglob("cell.json"))))
     bin_dir = tmp_path / "bin"
@@ -319,8 +321,8 @@ def test_publish_hold_fits_the_status_description_limit(tmp_path):
     `description` -> the post cuts it and the whole-argv comparison fails."""
     run_id = "1" * 19
     description = (
-        f"Held while plan run {run_id} publishes (seconds). "
-        "If this stays after that run ends, re-plan (comment shipmate plan or push)"
+        f"Plan run {run_id} holds this while it publishes; "
+        "if that run has ended, re-plan (comment shipmate plan or push)"
     )
     _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(tmp_path, steps=(HOLD,), run_id=run_id)

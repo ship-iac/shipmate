@@ -1419,14 +1419,14 @@ all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. The summary job also holds the gate while it publishes the apply
-checks, reading "Held while plan run <id> publishes (seconds). If this stays
-after that run ends, re-plan (comment shipmate plan or push)". That hold stays
-when the run ends before its final gate write (a failed or cancelled summary
-job, or a cancelled plan job after the summary downloaded a cell summary). A sticky plan
+checks, reading "Plan run <id> holds this while it publishes; if that run has
+ended, re-plan (comment shipmate plan or push)". That hold stays when the run
+ends before its final gate write (a failed or cancelled summary job, or a
+cancelled plan job after the summary downloaded a cell summary). A sticky plan
 comment that could not be listed or written, or whose pull request head could
 not be read ("could not read the head of pull request #<n>"), fails the summary
-job before that write too, and before any apply check is published; the error
-is in the job's annotation for a failed write and in the step log for a failed
+job before that write too, and before any apply check is published; the error is
+in the job's annotation for a failed write and in the step log for a failed
 listing or head read. A held run's comment write, which only explains the red
 gate, warns on those failures instead, and the gate is still written. What a
 summary job that fails part way leaves on the comment is in
