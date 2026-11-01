@@ -178,6 +178,12 @@ first, each through `scripts/gate-status` and one at a time per head
 When `apply-env-level.yml`'s `complete` job completes an `apply / <stack> / <env>`
 check, it completes only the check-run ids `actions/apply-snapshot` recorded for
 that name in the `snapshot` job, before the first wave.
+`snapshot` also sets every recorded check to `in_progress`, so a level's checks
+read in progress while its waves run; a failed write only warns. After
+completing, `complete` sets every recorded check it did not complete back to
+`queued`, even when the completion failed; a failed revert only warns. Every
+reader treats `queued` and `in_progress` alike as pending. "Re-run failed jobs"
+skips `snapshot`, so a re-run cell applies while its check reads `queued`.
 A plan re-run can create a fresh duplicate apply check; a duplicate created
 *after the snapshot* is therefore left pending (its plan was not applied by this run),
 while duplicates that predate the apply are all completed so the gate never
@@ -1724,9 +1730,10 @@ reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <stack> / <env>`) — created pending by
-  `actions/summary`, completed by `actions/apply-complete` in
-  `apply-env-level.yml`'s `complete` job (bound to `shipmate-engine`) — both
-  mint an App installation token, so completion works across the create/complete
+  `actions/summary`, set in progress by `actions/apply-snapshot` in
+  `apply-env-level.yml`'s `snapshot` job, completed (or set back to queued) by
+  `actions/apply-complete` in its `complete` job (both bound to
+  `shipmate-engine`) — all three mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
   consistent). Completion sends no `output`, so the plan a changed cell's check
@@ -2322,7 +2329,7 @@ The five jobs:
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (reading the review decision, acquiring cell
-  locks, completing apply checks, refreshing the gate, posting the apply result
+  locks, marking apply checks in progress, completing apply checks, refreshing the gate, posting the apply result
   comment, releasing a merged pull request's cell locks) are likewise bound to
   `shipmate-engine`.
 - **`release.yml`**'s `release` job (engine, reached through the consumer's
