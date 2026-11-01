@@ -607,8 +607,9 @@ cell re-renders the stored plan with the command that wrote it and compares.
   the merge open a new pull request touching the stack.
   This is the same shape as the absent planned-commit record above, and the
   same remedy. When the cell's `digest-input` step refuses with `no usable
-  plan-text digest reached this action`, the matrix wiring dropped the digest:
-  re-pin every engine reference to one commit first, then re-plan.
+  plan-text digest reached this action`, the matrix wiring dropped the digest.
+  Re-pin every engine reference to one commit. Then re-plan (comment `shipmate
+  plan` or push), or after the merge open a new pull request touching the stack.
 - **The render disagrees with the digest.** The error names both digests. Either
   the plan text published for review does not describe the plan that would run,
   or the tooling moved underneath the artifact. An OpenTofu version that moved

@@ -164,7 +164,7 @@ runs:
         # any work. Its own step, above the init: a wiring slip and a tampered plan need different
         # remedies, so they must not share a blocked reason.
         [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
-          echo "::error::apply aborted for $ENV/$STACK: no usable plan-text digest reached this action. Re-pin every engine reference to one commit; then re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
+          echo "::error::apply aborted for $ENV/$STACK: no usable plan-text digest reached this action. Re-pin every engine reference to one commit. Then re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
           exit 1
         }
 

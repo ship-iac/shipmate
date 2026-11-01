@@ -135,9 +135,9 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "digest_input",
-            "no plan-text digest reached this action; re-pin every engine reference to one "
-            "commit, then re-plan: comment shipmate plan or push, or after the merge open a new "
-            "pull request touching the stack",
+            "no plan-text digest reached this action. Re-pin every engine reference to one "
+            "commit. Then re-plan (comment shipmate plan or push), or after the merge open a new "
+            "pull request touching the stack.",
             id="digest_input",
         ),
         # A failed init once reported result="failed" with no reason, the bucket for a real apply

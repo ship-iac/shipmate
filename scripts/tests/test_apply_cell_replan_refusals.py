@@ -53,6 +53,6 @@ def test_a_missing_digest_refuses_with_re_pin_then_the_two_branch_remedy(tmp_pat
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
         "::error::apply aborted for dev-eu/stacks/app: no usable plan-text digest reached this"
-        " action. Re-pin every engine reference to one commit; then re-plan (comment shipmate"
+        " action. Re-pin every engine reference to one commit. Then re-plan (comment shipmate"
         " plan or push), or after the merge open a new pull request touching the stack.\n"
     )

@@ -64,9 +64,9 @@ FAILSAFES = [
     (
         "DIGEST_INPUT_OUTCOME",
         (
-            "no plan-text digest reached this action; re-pin every engine reference to one "
-            "commit, then re-plan: comment shipmate plan or push, or after the merge open a new "
-            "pull request touching the stack"
+            "no plan-text digest reached this action. Re-pin every engine reference to one "
+            "commit. Then re-plan (comment shipmate plan or push), or after the merge open a new "
+            "pull request touching the stack."
         ),
     ),
     ("INIT_OUTCOME", "tofu init failed; see the job log"),
