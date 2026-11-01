@@ -110,7 +110,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
-          echo "::error::apply aborted for $ENV/$STACK: this reviewed plan records no planned commit, so there is nothing to compare against this checkout and the apply is refused. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack."
+          echo "::error::apply aborted for $ENV/$STACK: this reviewed plan records no planned commit, so there is nothing to compare against this checkout and the apply is refused. Re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
           exit 1
         fi
         record="$RUNNER_TEMP/planned-head.txt"
@@ -118,7 +118,7 @@ runs:
         planned=$(cat "$record")
         observed=$(git rev-parse HEAD)
         if [ "$planned" != "$observed" ]; then
-          echo "::error::apply aborted for $ENV/$STACK: the reviewed plan was produced from $planned but this job has $observed checked out. Re-plan."
+          echo "::error::apply aborted for $ENV/$STACK: the reviewed plan was produced from $planned but this job has $observed checked out. Re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
           exit 1
         fi
 
@@ -147,7 +147,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
         if ! diff -q fingerprint.txt "$expected" >/dev/null; then
           names=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --keys)
-          echo "::error::apply aborted for $ENV/$STACK: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed. Re-plan."
+          echo "::error::apply aborted for $ENV/$STACK: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed. Re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
           exit 1
         fi
 
@@ -164,7 +164,7 @@ runs:
         # any work. Its own step, above the init: a wiring slip and a tampered plan need different
         # remedies, so they must not share a blocked reason.
         [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
-          echo "::error::apply aborted for $ENV/$STACK: no usable plan-text digest reached this action. Re-pin every engine reference to one commit, then re-plan."
+          echo "::error::apply aborted for $ENV/$STACK: no usable plan-text digest reached this action. Re-pin every engine reference to one commit. Then re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
           exit 1
         }
 
@@ -203,7 +203,7 @@ runs:
         # prefixes the whole line with one, which would never equal the recorded digest.
         actual=$(sha256sum < "$rendered" | cut -d' ' -f1)
         if [ "$actual" != "$PLAN_SHA256" ]; then
-          echo "::error::apply aborted for $ENV/$STACK: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack."
+          echo "::error::apply aborted for $ENV/$STACK: the stored plan does not render to the plan text that was reviewed (expected $PLAN_SHA256, got $actual). Nothing has been applied. Re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack."
           exit 1
         fi
 

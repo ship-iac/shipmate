@@ -814,7 +814,10 @@ def test_build_comment_fails_loud_when_even_the_compact_form_overflows():
     assert exc.value.code == _OVER_CAP
 
 
-_PLANNED_HEAD = "reviewed plan records no commit or was produced from a different one; re-plan"
+_PLANNED_HEAD = (
+    "reviewed plan records no commit or was produced from a different one; re-plan: comment "
+    "shipmate plan or push, or after the merge open a new pull request touching the stack"
+)
 _JOB_URL = "https://github.com/ship-iac/repo-example-stacks/actions/runs/12345678901/job/{:011}"
 
 

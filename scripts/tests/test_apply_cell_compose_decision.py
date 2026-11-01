@@ -117,7 +117,9 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "planned_head",
-            "reviewed plan records no commit or was produced from a different one; re-plan",
+            "reviewed plan records no commit or was produced from a different one; re-plan: "
+            "comment shipmate plan or push, or after the merge open a new pull request touching "
+            "the stack",
             id="planned_head",
         ),
         pytest.param(
@@ -127,12 +129,15 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "fingerprint",
-            "environment does not match the reviewed plan's fingerprint; re-plan",
+            "environment does not match the reviewed plan's fingerprint; re-plan: comment "
+            "shipmate plan or push, or after the merge open a new pull request touching the stack",
             id="fingerprint",
         ),
         pytest.param(
             "digest_input",
-            "no plan-text digest reached this action; re-pin every engine reference to one commit",
+            "no plan-text digest reached this action. Re-pin every engine reference to one "
+            "commit. Then re-plan (comment shipmate plan or push), or after the merge open a new "
+            "pull request touching the stack.",
             id="digest_input",
         ),
         # A failed init once reported result="failed" with no reason, the bucket for a real apply
@@ -147,7 +152,8 @@ _ALL_SUCCESS = {
         pytest.param(
             "plan_digest",
             "the stored plan cannot be rendered, or does not render to the plan text that was "
-            "reviewed; re-plan",
+            "reviewed; re-plan: comment shipmate plan or push, or after the merge open a new pull "
+            "request touching the stack",
             id="plan_digest",
         ),
     ],

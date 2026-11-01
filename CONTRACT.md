@@ -718,11 +718,12 @@ environments:
 - **Scope.** A reference reads repository and organization variables;
   `scripts/onboard` gives a repository variable precedence over an organization
   variable of the same name, as GitHub does. The variables of a cell's
-  `<env>-plan`, `<env>-apply` or shared `<env>` Environment are never read: no
-  job that reads the file binds one. Of the jobs that read the file, comment-ops
-  and the plan `summary` job are the two that bind `shipmate-engine`, so a
-  variable of the same name on that Environment shadows the repository value in
-  those two jobs, and nowhere else.
+  `<env>-plan`, `<env>-apply` or shared `<env>` Environment are never read: the
+  jobs that bind one read the file only for `tools`, through `setup`, and `tools`
+  accepts no reference, so no reference resolves there. Of the jobs that resolve
+  references, comment-ops and the plan `summary` job are the two that bind
+  `shipmate-engine`, so a variable of the same name on that Environment shadows
+  the repository value in those two jobs, and nowhere else.
 - **Values.** A resolved value is always a string. `split`, `apply_mode`,
   `review`, `max_parallel`, `command_hints` and `tools` accept no reference: one refuses before it
   resolves, so the refusal never quotes the variable's value. A referenced
@@ -3368,8 +3369,8 @@ apply`. OpenTofu's `plan files cannot be transferred between different
 versions` text is in the step log, and the one error annotation is "The stored
 plan was made by another OpenTofu version: `tools.tofu` in
 .github/shipmate-config.yml or the engine's VERSIONS changed since the plan.
-Nothing was applied. Re-plan the stack by pushing a commit to its open pull
-request, or, after merge, by a new pull request that changes the stack."
+Nothing was applied. Re-plan (comment shipmate plan or push), or after the
+merge open a new pull request touching the stack."
 
 The record's `cells` field binds each apply check to the rest of its plan run:
 the number of cells that run planned. The summary job publishes its apply checks

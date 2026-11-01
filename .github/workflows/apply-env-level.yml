@@ -37,9 +37,9 @@ jobs:
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
-      # First in this workflow: binding an environment nobody created auto-creates it with no
-      # protection. Variables are keyed by matrix.environment, so the fingerprint pins nothing
-      # about the binding; existence and a branch policy are the only discriminators.
+      # Before any wave binds the environments it checks: binding one nobody created auto-creates
+      # it with no protection. Variables are keyed by matrix.environment, so the fingerprint pins
+      # nothing about the binding; existence and a branch policy are the only discriminators.
       - uses: $/actions/verify-environments
         with:
           waves-json: ${{ inputs.waves_json }}

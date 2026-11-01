@@ -16,7 +16,6 @@ An absent record is refused too, not tolerated: there is nothing to compare.
 
 import ast
 import os
-import re
 
 from _loader import SCRIPTS, action_steps, bash_only, run_step, step_by
 
@@ -105,8 +104,8 @@ def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
     assert out.strip() == (
         "::error::apply aborted for dev-eu/stacks/app: this reviewed plan records no planned "
         "commit, so there is nothing to compare against this checkout and the apply is "
-        "refused. Re-plan the stack by pushing a commit to its open pull request, or, after "
-        "merge, by a new pull request that changes the stack."
+        "refused. Re-plan (comment shipmate plan or push), or after the merge open a new pull "
+        "request touching the stack."
     )
 
 
@@ -115,11 +114,13 @@ def test_a_record_disagreeing_with_head_aborts_naming_both_commits(tmp_path):
     r, _ = _run_step(tmp_path, record=_PLANNED + "\n", observed=_OTHER)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     out = r.stdout + r.stderr
-    assert "::error::" in out
-    # Both commits, so the reader can tell which plan and which checkout. One of them alone is
-    # not actionable.
-    assert _PLANNED in out and _OTHER in out
-    assert re.search(r"re-plan", out, re.IGNORECASE)
+    # Both commits, so the reader can tell which plan and which checkout, and a remedy that
+    # holds after the merge too.
+    assert out.strip() == (
+        f"::error::apply aborted for dev-eu/stacks/app: the reviewed plan was produced from "
+        f"{_PLANNED} but this job has {_OTHER} checked out. Re-plan (comment shipmate plan or "
+        "push), or after the merge open a new pull request touching the stack."
+    )
 
 
 @bash_only
