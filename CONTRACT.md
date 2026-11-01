@@ -3514,8 +3514,8 @@ that differ.
 §Secrets in published output, below, is unchanged by them and must not be read
 as relaxed by them. A supported envelope entry such as `TF_VAR_password` is
 masked in the job log and still lands in the sticky plan comment, the step
-summary and the plan artifact whenever the consumer has not marked the variable
-`sensitive = true`. Redaction is the consumer's job, and OpenTofu's `sensitive`
+summary, each changed cell's apply check and the plan artifact whenever the
+consumer has not marked the variable `sensitive = true`. Redaction is the consumer's job, and OpenTofu's `sensitive`
 marking is the mechanism.
 
 ## Secrets in published output
