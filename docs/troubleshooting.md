@@ -534,8 +534,8 @@ remedy differs:
   applied or silently re-planned — as with a stale plan, there is no force. The
   fix is a re-plan and an apply of the fresh plan.
 - **There is no record at all.** There is nothing to compare against the
-  checkout, so the apply is refused. Re-plan the stack by pushing a commit to its
-  open pull request, or, after merge, by a new pull request that changes the stack.
+  checkout, so the apply is refused. Re-plan (comment `shipmate plan` or push),
+  or after the merge open a new pull request touching the stack.
 
 This check is per cell and additive: the apply path's plan-run binding — each
 cell's plan run read from an App-authored apply check on that same head — still
@@ -603,8 +603,8 @@ job records the digest of the `plan.txt` it publishes in the comment and the app
 cell re-renders the stored plan with the command that wrote it and compares.
 
 - **No digest is recorded.** Nothing is compared, so the apply is refused
-  rather than run unverified. Re-plan the stack by pushing a commit to its open
-  pull request, or, after merge, by a new pull request that changes the stack.
+  rather than run unverified. Re-plan (comment `shipmate plan` or push), or after
+  the merge open a new pull request touching the stack.
   This is the same shape as the absent planned-commit record above, and the
   same remedy.
 - **The render disagrees with the digest.** The error names both digests. Either
@@ -613,8 +613,8 @@ cell re-renders the stored plan with the command that wrote it and compares.
   between plan and apply fails the render itself (§`plan files cannot be
   transferred between different versions`); a provider that moved fails at the
   apply with `Inconsistent dependency lock file`. Neither produces this message.
-  There is no force. Re-plan the stack by pushing a commit to its open pull
-  request, or, after merge, by a new pull request that changes the stack.
+  There is no force. Re-plan (comment `shipmate plan` or push), or after the
+  merge open a new pull request touching the stack.
 
 Nothing has been applied in either case: the comparison runs before
 `tofu apply`, and the pending check is what keeps the gate from greening over
@@ -627,7 +627,7 @@ applied, and its `apply / <stack> / <env>` check stays pending. OpenTofu's
 `plan files cannot be transferred between different versions` text is in the
 step log, and the one error annotation is:
 
-> The stored plan was made by another OpenTofu version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge, by a new pull request that changes the stack.
+> The stored plan was made by another OpenTofu version: `tools.tofu` in .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was applied. Re-plan (comment shipmate plan or push), or after the merge open a new pull request touching the stack.
 
 Every job installs the OpenTofu version the default branch decides
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), so a merged

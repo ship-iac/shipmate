@@ -350,8 +350,8 @@ def test_plan_cell_writes_and_uploads_its_error_after_any_failure():
 SKEW_REMEDY = (
     "::error::The stored plan was made by another OpenTofu version: `tools.tofu` in"
     " .github/shipmate-config.yml or the engine's VERSIONS changed since the plan. Nothing was"
-    " applied. Re-plan the stack by pushing a commit to its open pull request, or, after merge,"
-    " by a new pull request that changes the stack.\n"
+    " applied. Re-plan (comment shipmate plan or push), or after the merge open a new pull"
+    " request touching the stack.\n"
 )
 
 
