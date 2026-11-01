@@ -4,16 +4,17 @@
 The summary job creates ALL pending apply checks with ONE App installation
 token, so the App private key never enters the plan matrix cells (they execute
 PR-head code) and a 256-cell run mints one token, not 256. Changed cells get a
-queued "apply pending" check, no-change cells a completed/neutral "no changes"
-check. Each check's external_id is a JSON record of the TF_VAR fingerprint, the
-id of the plan run that produced the cell, the number of the pull request it
+queued check titled with the plan's counts whose summary is the plan in a fence, cut to
+`CHECK_OUTPUT_CAP` UTF-8 bytes with a link to this run's page; no-change cells a
+completed/neutral "no changes" check. Each check's external_id is a JSON record of the
+TF_VAR fingerprint, the id of the plan run that produced the cell, the number of the pull request it
 planned, the sha256 of the plan text that run published, on either branch, and
 `cells`, the number of cells that run planned, against which apply judges whether
 the run published every check, and `action`, the plan run's event action (`""` when its
 payload names none, as a `shipmate plan` dispatch's does), which the auto apply requires
 to be a push's. That digest is computed here, over the whole
 plan.txt this job downloaded, never copied from the cell: it is what binds the
-reviewed text to the plan apply executes. The comment embeds a capped prefix of
+reviewed text to the plan apply executes. The comment and the check embed capped prefixes of
 the same file, so the digest covers at least what a reviewer saw and often more.
 The check name uses the stack PATH so deploy-detect (which only has the path)
 reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
@@ -37,11 +38,23 @@ import os
 import pathlib
 import sys
 
-from _shipmate import _load, cell_summaries, event_action, is_run_id, run_annotated
+from _shipmate import (
+    _load,
+    cell_summaries,
+    current_run_url,
+    event_action,
+    is_run_id,
+    run_annotated,
+)
 
 ag = _load("apply-gate")
 gs = _load("gate-state")
+sc = _load("summary-comment")
 NEWER_RUN = 3
+# GitHub refuses an output.summary over 65,535 characters and, separately, over 65,535 UTF-8
+# bytes; bytes bind first for any non-ASCII text.
+CHECK_OUTPUT_CAP = 65_535
+_COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 
 _KEYS = ("stack", "environment", "changed", "fingerprint")
@@ -62,10 +75,40 @@ def _plan_run():
     return plan_run
 
 
-def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action):
+def _utf8_len(text):
+    return len(text.encode("utf-8"))
+
+
+def check_output(cell, txt, url):
+    """The check `output` of the changed cell `cell` whose plan text is the file `txt`: its counts
+    as the title (`+? ~? -?` when underivable) and the plan in a `diff` fence as the summary,
+    at most `CHECK_OUTPUT_CAP` UTF-8 bytes. A cut plan keeps whole lines and ends with a link to
+    `url`, the plan run's page; a fence too long to leave room for any text gives that link
+    alone. Only a prefix of `txt` is read."""
+    tally = sc.counts(txt) or ("?",) * 5
+    title = sc.state({**cell, **dict(zip(_COUNT_KEYS, tally, strict=True))})
+    # No prefix longer than the cap can fit. The fence is sized over the whole prefix, a
+    # superset of any cut, so the cut text cannot close it.
+    with open(txt, encoding="utf-8") as fh:
+        prefix = fh.read(CHECK_OUTPUT_CAP + 1)
+    mapped = sc.diff_map(prefix)
+    f = sc._fence_of(mapped)
+    whole = sc.fence(mapped, f)
+    if len(prefix) <= CHECK_OUTPUT_CAP and _utf8_len(whole) <= CHECK_OUTPUT_CAP:
+        return {"title": title, "summary": whole}
+    link = f"[full plan in the plan run's step summaries]({url})"
+    trailer = f"\n\n_Truncated, {link}._"
+    room = CHECK_OUTPUT_CAP - _utf8_len(sc.fence("", f)) - _utf8_len(trailer)
+    if room <= 0:
+        return {"title": title, "summary": f"_Plan too large to show here; {link}._"}
+    kept = mapped.encode("utf-8")[:room].decode("utf-8", errors="ignore").rpartition("\n")[0]
+    return {"title": title, "summary": sc.fence(kept, f) + trailer}
+
+
+def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
     """The POST body for the cell summary `cell` at `cell_json`, whose apply check is `name`,
     hashing the plan.txt beside it. `cells` is the number of cells the run planned, `action`
-    its event action."""
+    its event action, `url` the run page a cut plan links."""
     txt = pathlib.Path(cell_json).with_name("plan.txt")
     if not txt.is_file():
         raise SystemExit(
@@ -89,13 +132,10 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action):
                 "action": action,
             }
         ),
-        "output": {
-            "title": "apply pending",
-            "summary": "Waiting to be applied. Merge after apply completes "
-            "for this stack x environment.",
-        },
     }
-    if not cell["changed"]:
+    if cell["changed"]:
+        out["output"] = check_output(cell, txt, url)
+    else:
         out["status"] = "completed"
         out["conclusion"] = "neutral"
         out["output"] = {
@@ -151,8 +191,9 @@ def main():
             print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
         return
     action = event_action()
+    url = current_run_url()
     for name, cj, cell in todo:
-        print(json.dumps(body(name, cj, cell, head, plan_run, pr, len(cells), action)))
+        print(json.dumps(body(name, cj, cell, head, plan_run, pr, len(cells), action, url)))
 
 
 if __name__ == "__main__":

@@ -38,6 +38,9 @@ SHA_B = "016cf8c84f06456af2ec0f1866e01c39d69ecd581daddf619528719a31e3dbc8"
 def _plan_run(monkeypatch):
     monkeypatch.setenv("GITHUB_RUN_ID", RUN_ID)
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", PR)
+    # A non-github.com server, so a URL built with a hardcoded host does not match.
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://ghe.example.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
 
 
 def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
@@ -95,14 +98,15 @@ def test_changed_cell_yields_queued_body(tmp_path):
         "head_sha": HEAD,
         "status": "queued",
         "output": {
-            "title": "apply pending",
-            "summary": "Waiting to be applied. Merge after apply completes "
-            "for this stack x environment.",
+            "title": "+? ~? -?",
+            "summary": "```diff\nTerraform will perform the following actions:\n\n"
+            "  # null_resource.a will be created\n```",
         },
     }
 
 
 def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
+    """No plan text in a no-change check. Mutation: emit `check_output` for every cell -> red."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -116,7 +120,10 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
     (body,) = _emit(tmp_path)
     assert body["status"] == "completed"
     assert body["conclusion"] == "neutral"
-    assert body["output"]["title"] == "no changes"
+    assert body["output"] == {
+        "title": "no changes",
+        "summary": "Plan produced no changes for this stack x environment.",
+    }
     assert json.loads(body["external_id"]) == {
         "fingerprint": "0" * 64,
         "plan_run": RUN_ID,
@@ -673,4 +680,121 @@ def test_a_run_with_an_evidence_gap_still_refuses_a_broken_pull_request_number(
         _main(tmp_path, monkeypatch, plan_result="failure")
     assert (
         str(exc_info.value) == "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '')"
+    )
+
+
+CAP = 65_535
+URL = "https://ghe.example.com/acme/demo/actions/runs/32668143791"
+TRAILER = (
+    "\n\n_Truncated, [full plan in the plan run's step summaries]"
+    "(https://ghe.example.com/acme/demo/actions/runs/32668143791)._"
+)
+CHANGED = {"stack": "stacks/app", "environment": "dev-eu", "changed": True, "fingerprint": "f" * 64}
+LINE = "a" * 99
+
+
+def _output(tmp_path, plan):
+    """`check_output` of a changed cell whose plan.txt holds the bytes `plan`."""
+    txt = tmp_path / "plan.txt"
+    txt.write_bytes(plan)
+    return pc.check_output(CHANGED, txt, URL)
+
+
+def _emit_changed(tmp_path, plan):
+    """The one body `main()` prints for a changed cell whose plan.txt holds the bytes `plan`."""
+    _write_cell(tmp_path, "dev-eu", "stacks-app", plan_text=plan, **CHANGED)
+    (body,) = _emit(tmp_path)
+    return body
+
+
+def test_the_title_is_the_plans_counts(tmp_path):
+    """Mutation: title the check with `state(cell)` over the cell without its counts -> red."""
+    tallied = b"  # null_resource.a will be created\n\nPlan: 2 to add, 1 to change, 0 to destroy.\n"
+    assert _output(tmp_path, tallied)["title"] == "+2 ~1 -0"
+    assert _output(tmp_path, PLAN_A)["title"] == "+? ~? -?"
+
+
+# 655 lines of 99 characters plus a last line: 65,500 + 23 = 65,523 characters, which a
+# 12-character "```diff\n...\n```" fence brings to exactly CAP.
+AT_CAP = (LINE + "\n") * 655 + "b" * 23
+
+
+def test_a_plan_whose_fenced_form_is_exactly_the_cap_is_emitted_whole(tmp_path):
+    """Mutation: cap at 65,534 -> red (the cut form)."""
+    summary = _output(tmp_path, (AT_CAP + "\n").encode())["summary"]
+    assert summary == "```diff\n" + AT_CAP + "\n```"
+    assert len(summary.encode()) == CAP
+
+
+def test_one_byte_over_the_cap_is_cut_at_a_line_and_links_this_run(tmp_path):
+    """The trailer is compared whole, `current_run_url()` from a non-github.com server. Mutations:
+    cap at 65,536 -> red (emitted whole); build the link from a hardcoded `https://github.com`
+    -> red; drop the trailer -> red."""
+    body = _emit_changed(tmp_path, (AT_CAP + "b\n").encode())
+    # 65,535 - 12 (fence) - 120 (trailer) = 65,403 bytes of room: 654 whole lines.
+    expected = "```diff\n" + "\n".join([LINE] * 654) + "\n```" + TRAILER
+    assert body["output"] == {"title": "+? ~? -?", "summary": expected}
+    assert len(expected.encode()) <= CAP
+
+
+def test_a_cut_plans_digest_covers_the_whole_file(tmp_path):
+    """The digest was computed once, off the tree, over the bytes written here. Mutation: hash
+    the cut summary in place of plan.txt -> red."""
+    body = _emit_changed(tmp_path, (AT_CAP + "b\n").encode())
+    assert body["output"]["summary"].endswith(TRAILER)
+    assert json.loads(body["external_id"])["plan_sha256"] == (
+        "42abbb4045b00081811c4505a4e142e681a1f18322ea0cb9651f65eebdf7f827"
+    )
+
+
+def test_a_plan_over_the_cap_in_bytes_but_not_characters_is_cut(tmp_path):
+    """3,200 lines of ten `é`: 35,200 characters, 67,200 UTF-8 bytes. Mutation: measure with
+    `len(str)` (`_utf8_len = len`) -> emitted whole, over the cap."""
+    summary = _output(tmp_path, (("é" * 10 + "\n") * 3200).encode())["summary"]
+    assert summary.endswith(TRAILER)
+    assert len(summary.encode()) <= CAP
+
+
+def test_the_fence_is_longer_than_a_backtick_run_in_the_plan_whole_and_cut(tmp_path):
+    """Mutation: a fixed three-backtick fence (`f = "```"`) -> both red."""
+    run = b'  + body = "`````"\n'
+    assert _output(tmp_path, run)["summary"] == '``````diff\n+   body = "`````"\n``````'
+    cut = _output(tmp_path, run + (AT_CAP + "b\n").encode())["summary"]
+    assert cut.startswith('``````diff\n+   body = "`````"\n')
+    assert cut.endswith("\n``````" + TRAILER)
+
+
+def test_a_fence_as_long_as_the_cap_leaves_only_the_link(tmp_path):
+    """A line of 40,000 backticks needs a 40,001-backtick fence, twice over the cap. Mutation:
+    drop the `room <= 0` branch -> red."""
+    summary = _output(tmp_path, b"`" * 40_000 + b"\n")["summary"]
+    assert summary == (
+        "_Plan too large to show here; [full plan in the plan run's step summaries]"
+        "(https://ghe.example.com/acme/demo/actions/runs/32668143791)._"
+    )
+    assert len(summary.encode()) <= CAP
+
+
+def test_a_first_line_longer_than_the_room_leaves_an_empty_fence(tmp_path):
+    """Mutation: cut back with `str.rfind` of the newline in place of `rpartition`, which keeps
+    all but one character of a line with no newline -> red."""
+    summary = _output(tmp_path, b"a" * 70_000 + b"\n")["summary"]
+    assert summary == "```diff\n\n```" + TRAILER
+
+
+def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
+    """1,000,000 bytes of ASCII lines, then the byte 0xFF: a whole strict UTF-8 text read raises
+    `UnicodeDecodeError`. `counts` reads the whole file for the tally, so a double stands in for
+    it. The digest was computed once, off the tree. Mutation: read the whole file
+    (`fh.read()`) -> red."""
+
+    def counts(path):
+        return (1, 0, 0, 0, 0)
+
+    monkeypatch.setattr(pc.sc, "counts", counts)
+    body = _emit_changed(tmp_path, ((LINE + "\n") * 10_000).encode() + b"\xff")
+    assert body["output"]["title"] == "+1 ~0 -0"
+    assert body["output"]["summary"].endswith(TRAILER)
+    assert json.loads(body["external_id"])["plan_sha256"] == (
+        "6bec3c7c34b6f1ed2f7833c8f8bcc17aa3bb6fd865587d11e0faec55362fc0ef"
     )
