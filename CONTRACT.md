@@ -68,8 +68,9 @@ queue by the `apply / ` prefix, from ever picking up a plan check.
 A changed cell's apply check carries its plan: the title is the plan's counts
 (`+a ~c -d`, `+? ~? -?` when no tally line can be read), and the summary is the
 rendered `plan.txt` in a `diff` fence, cut at a line boundary to 65,535 UTF-8
-bytes with a link to the plan run's step summaries. Completing the check leaves
-both in place. A no-change cell's check is created completed and `neutral`,
+bytes with a link to the plan run, whose plan job's raw log has the full plan;
+when no whole line fits, the summary is that link alone. Completing the check
+leaves both in place. A no-change cell's check is created completed and `neutral`,
 titled `no changes`, with no plan text.
 
 The apply-env-level wave job is named like the plan cell job, `<env> / <stack>`,
@@ -2871,8 +2872,8 @@ and `lost` outputs, which the same rule reads.
 GitHub caps issue-comment bodies at 65,536 characters. The comment is built
 to a smaller budget: each changed cell's fold-out degrades, in order, full
 plan → truncated plan (cut at a line boundary, with a link to the pull
-request's Checks tab, where the cell's apply check carries the plan, §Check
-names) → the cell's bare line. The space every remaining
+request's Checks tab, which shows more of the plan: each changed cell's apply
+check holds up to 65,535 bytes of it, §Check names) → the cell's bare line. The space every remaining
 cell's bare line and every environment heading need is reserved up front, so
 an early giant plan cannot starve a later cell, and every cell keeps its line
 and its link. The command section is left out before any of these steps: it is
@@ -3540,10 +3541,15 @@ the comment, the apply check and the artifact are the file bytes, and nothing
 redacts them on the way out. On a public repository the comments and checks are
 world-readable.
 
+An apply check's plan text stays on the check after the apply: GitHub has no
+endpoint that deletes a check run (HTTP 404, probed 2026-11-01). Only the
+shipmate App, which created the check, can replace that text: a PATCH with a new
+`output` is accepted even after the check completes (probed 2026-11-01).
+
 **Redaction is the consumer's job, and OpenTofu's `sensitive` marking is the
 mechanism.** A variable declared `sensitive = true`, or a provider attribute
 marked sensitive in its schema, is redacted in `tofu show` output, so it does
-not reach either comment through the rendered plan or a normal apply. Consumers
+not reach any published surface through the rendered plan or a normal apply. Consumers
 must mark every secret-bearing variable and output accordingly. Marking is
 best-effort, not a guarantee: it suppresses the value where OpenTofu knows to,
 and error paths can still surface one. GitHub masking is not a substitute even

@@ -337,7 +337,7 @@ def test_render_section_truncates_to_limit_with_a_checks_tab_link():
     assert len(s) <= 3_000
     assert s.startswith(f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource_0\n")
     assert s.endswith(
-        "\n```\n\n_Truncated, [full plan in the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
+        "\n```\n\n_Truncated, [more of the plan in the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
     )
 
 
@@ -438,7 +438,9 @@ def test_the_command_section_never_shrinks_a_cut_plan():
     shorter and the section shows, red."""
     cells = [(_cell(), "\n".join(f"  + r{i:04}{'x' * 20}" for i in range(3000)))]
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
-    assert "_Truncated, [full plan in the Checks tab](https://gh/o/r/pull/5/checks)._" in without
+    assert (
+        "_Truncated, [more of the plan in the Checks tab](https://gh/o/r/pull/5/checks)._"
+    ) in without
     assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True) == (without, False, False)
 
 
@@ -597,7 +599,7 @@ def _fold_out_rows(body, verdict, heading):
     opening = (
         HEAD + f"{verdict}\n\n{heading}\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
     )
-    trailer = "\n```\n\n_Truncated, [full plan in the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
+    trailer = "\n```\n\n_Truncated, [more of the plan in the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
     assert body.startswith(opening)
     rows, rest = body[len(opening) :].split(trailer, 1)
     return rows.split("\n"), rest

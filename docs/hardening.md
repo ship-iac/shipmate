@@ -892,6 +892,11 @@ comment, and a job summary cannot be edited or redacted. Shorten the Actions
 retention window if that inventory is sensitive
 (`docs/troubleshooting.md` §"Who can ask for the report").
 
+An apply check's plan text stays on the check after the apply: GitHub has no
+endpoint that deletes a check run (HTTP 404, probed 2026-11-01). Only the
+shipmate App, which created the check, can replace that text: a PATCH with a new
+`output` is accepted even after the check completes (probed 2026-11-01).
+
 ## 16. The `shipmate-engine` environment
 
 `SHIPMATE_APP_PRIVATE_KEY` lives as a secret on the `shipmate-engine` GitHub
