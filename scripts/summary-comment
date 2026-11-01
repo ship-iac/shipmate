@@ -15,7 +15,9 @@ read in `main`, so loading this module stays free of side effects.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's fold-out degrades
-full plan -> truncated plan -> its bare line, never dropping the check-run link.
+full plan -> truncated plan -> its bare line, never dropping the cell line's check link.
+A truncated plan links the pull request's Checks tab, where the cell's apply check holds up
+to 65,535 bytes of the plan.
 Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
@@ -394,13 +396,22 @@ def _head_lines(text, room):
     return sliced[: sliced.rfind("\n")] if "\n" in sliced else ""
 
 
-def render_section(line, plan_text, url, limit):
-    """`fold` of a cell's plan, truncated at the end with a link to its check run."""
-    # A limit under MIN_PLAN_CHARS means this cell's budget is spent, so link the check run
-    # rather than inline whatever small plan happens to fit.
+def checks_tab_url(pr):
+    """The pull request's Checks tab, where each changed cell's apply check shows up to 65,535
+    bytes of its plan.
+    Reads the runner's `GITHUB_SERVER_URL` and `GITHUB_REPOSITORY`."""
+    return f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/pull/{pr}/checks"
+
+
+def render_section(line, plan_text, limit):
+    """`fold` of a cell's plan, truncated at the end with a link to the pull request's Checks tab
+    (`checks_tab_url` of `SHIPMATE_PR_NUMBER`)."""
+    # A limit under MIN_PLAN_CHARS means this cell's budget is spent, so keep the bare line and
+    # its check link rather than inline whatever small plan happens to fit.
     if plan_text is None or limit < MIN_PLAN_CHARS:
         return line
-    trailer = f"\n\n_Truncated, [full plan in the check run]({url})._\n</details>"
+    url = checks_tab_url(ag.env_pr_number())
+    trailer = f"\n\n_Truncated; see the cell's apply check in [the Checks tab]({url})._\n</details>"
     return fold(line, diff_map(plan_text), limit, trailer, _head_lines)
 
 
@@ -528,15 +539,14 @@ def _join(sections):
 
 
 def _entries(cells, order, checks, run_url, locks):
-    """`(bare line, cell, plan text, url)` per heading and cell, in comment order; a heading has
-    no cell."""
+    """`(bare line, cell, plan text)` per heading and cell, in comment order; a heading has no
+    cell."""
     entries = []
     for env, group in by_env(cells, order, lambda c: c["changed"], cell=lambda ct: ct[0]):
         n = sum(1 for c, _ in group if c["changed"])
-        entries.append((env_heading(env, len(group), f"{n} changed"), None, None, None))
+        entries.append((env_heading(env, len(group), f"{n} changed"), None, None))
         for c, text in group:
-            url = check_url(c, checks, run_url)
-            entries.append((_plan_line(c, url, locks), c, text, url))
+            entries.append((_plan_line(c, check_url(c, checks, run_url), locks), c, text))
     return entries
 
 
@@ -593,11 +603,11 @@ def build_comment(
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
-    for bare, c, text, url in entries:
+    for bare, c, text in entries:
         reserve -= len(bare) + 2
         section = bare
         if c is not None and c["changed"]:
-            section = render_section(bare, text, url, SIZE_BUDGET - used - reserve - 2)
+            section = render_section(bare, text, SIZE_BUDGET - used - reserve - 2)
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, _join(sections)) if p)

@@ -199,11 +199,7 @@ def _check_post(slug, cells):
                 "action": "synchronize",
             }
         ),
-        "output": {
-            "title": "apply pending",
-            "summary": "Waiting to be applied. Merge after apply completes "
-            "for this stack x environment.",
-        },
+        "output": {"title": "+? ~? -?", "summary": "```diff\nplan\n```"},
     }
     return ["api", "repos/acme/demo/check-runs", "--input", "-", json.dumps(body)]
 

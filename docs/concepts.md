@@ -96,9 +96,9 @@ also holds the App key and writes the gate: a hold when the plan run's
 `summary` was cancelled before it published. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
-Plan text lives in each plan job's step summary, one click from its check,
-rather than in a separate check-run: the matrix job already emits the check of
-that name, so a second one would duplicate it. The aggregate `gate` is a commit
+Plan text lives in each plan job's step summary, one click from its check, and
+in each changed cell's `apply / <stack> / <env>` check, titled with the plan's
+counts and cut to the check's 65,535-byte cap. The aggregate `gate` is a commit
 status, not a check-run: a status is commit-scoped, so it cannot be
 misattributed to a stale check-suite when a commit carries two plan runs
 (draft→ready, or a rapid re-push) — a check-run can, silently blocking the

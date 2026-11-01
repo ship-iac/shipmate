@@ -22,7 +22,9 @@ sc = load_script("summary-comment")
 
 @pytest.fixture(autouse=True)
 def _run_context(monkeypatch):
-    """The runner defaults `provenance` reads for the verdict's commit and run links."""
+    """The runner defaults `provenance` reads for the verdict's commit and run links, and the
+    pull request number the truncation link's Checks tab URL reads."""
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "5")
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://gh")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
@@ -322,31 +324,32 @@ _BARE_APP = '🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="https://ck/app-eu">plan
 
 
 def test_render_section_full_plan_in_diff_fence():
-    s = sc.render_section(_BARE_APP, "  + resource added", "https://ck/app-eu", 10_000)
+    s = sc.render_section(_BARE_APP, "  + resource added", 10_000)
     assert s == (
         f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource added\n```\n</details>"
     )
 
 
-def test_render_section_truncates_to_limit_with_check_link():
+def test_render_section_truncates_to_limit_with_a_checks_tab_link():
+    """Mutation: link the cell's check URL (the bare line's `href`) in the trailer -- red."""
     plan = "\n".join(f"  + resource_{i}" for i in range(5_000))
-    s = sc.render_section(_BARE_APP, plan, "https://ck/app-eu", 3_000)
+    s = sc.render_section(_BARE_APP, plan, 3_000)
     assert len(s) <= 3_000
     assert s.startswith(f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource_0\n")
     assert s.endswith(
-        "\n```\n\n_Truncated, [full plan in the check run](https://ck/app-eu)._\n</details>"
+        "\n```\n\n_Truncated; see the cell's apply check in [the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
     )
 
 
 def test_render_section_degrades_to_the_bare_line_when_first_line_exceeds_room():
     # A single line longer than the truncated slice has no newline to cut at, so it degrades to
     # the bare line rather than emit a mid-line-truncated fence.
-    assert sc.render_section(_BARE_APP, "x" * 5_000, "https://ck/app-eu", 3_000) == _BARE_APP
+    assert sc.render_section(_BARE_APP, "x" * 5_000, 3_000) == _BARE_APP
 
 
 def test_render_section_bare_line_when_limit_tiny_or_plan_missing():
-    assert sc.render_section(_BARE_APP, "  + x", "https://ck/app-eu", 250) == _BARE_APP
-    assert sc.render_section(_BARE_APP, None, "https://ck/app-eu", 10_000) == _BARE_APP
+    assert sc.render_section(_BARE_APP, "  + x", 250) == _BARE_APP
+    assert sc.render_section(_BARE_APP, None, 10_000) == _BARE_APP
 
 
 def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
@@ -435,7 +438,9 @@ def test_the_command_section_never_shrinks_a_cut_plan():
     shorter and the section shows, red."""
     cells = [(_cell(), "\n".join(f"  + r{i:04}{'x' * 20}" for i in range(3000)))]
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
-    assert "_Truncated, [full plan in the check run]" in without
+    assert (
+        "_Truncated; see the cell's apply check in [the Checks tab](https://gh/o/r/pull/5/checks)._"
+    ) in without
     assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True) == (without, False, False)
 
 
@@ -594,7 +599,7 @@ def _fold_out_rows(body, verdict, heading):
     opening = (
         HEAD + f"{verdict}\n\n{heading}\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
     )
-    trailer = "\n```\n\n_Truncated, [full plan in the check run](https://gh/run/1)._\n</details>"
+    trailer = "\n```\n\n_Truncated; see the cell's apply check in [the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
     assert body.startswith(opening)
     rows, rest = body[len(opening) :].split(trailer, 1)
     return rows.split("\n"), rest
@@ -1263,7 +1268,8 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
     # empty. Mutation: dropping `SHIPMATE_COMMAND_HINTS` or `SHIPMATE_IS_DRAFT` -- the command
     # section never shows, or shows on a draft. Mutation: dropping `SHIPMATE_AUTO_ENVS_TABLE` --
-    # the comment never says why no auto apply follows.
+    # the comment never says why no auto apply follows. Mutation: dropping `SHIPMATE_PR_NUMBER`
+    # -- a truncated plan refuses the step.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -1277,6 +1283,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
         "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
         "SHIPMATE_LOCKS": "${{ steps.marks.outputs.locks }}",
+        "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
     }
     # Mutation: `required: true` on any of the six (GitHub does not enforce it, but it
     # misdocuments a draft run).

@@ -892,6 +892,9 @@ comment, and a job summary cannot be edited or redacted. Shorten the Actions
 retention window if that inventory is sensitive
 (`docs/troubleshooting.md` §"Who can ask for the report").
 
+Each changed cell's apply check holds plan text that Actions retention never
+expires (`CONTRACT.md` §Secrets in published output).
+
 ## 16. The `shipmate-engine` environment
 
 `SHIPMATE_APP_PRIVATE_KEY` lives as a secret on the `shipmate-engine` GitHub
@@ -1029,9 +1032,9 @@ and records the digest on each apply check, and the apply re-renders the stored
 plan with the command that wrote the file
 (`terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
 -- tofu show -no-color stack.otplan`) and refuses any difference.
-The digest covers the file, not the excerpt: the comment embeds a capped prefix
-(`CONTRACT.md` §Plan comment), so on a large plan a reviewer sees less than what
-is bound.
+The digest covers the file, not the excerpts: the comment and the apply check
+each embed a capped prefix (`CONTRACT.md` §Plan comment, §Check names), so on a
+large plan a reviewer sees less than what is bound.
 
 Four refusals hold that chain closed, each of them a refusal rather than a
 warning:

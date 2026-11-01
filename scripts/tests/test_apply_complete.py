@@ -463,10 +463,7 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
 
 #: The PATCH body gh receives, written by hand rather than read from the action. It ends in
 #: the one newline the here-string appends.
-COMPLETE_BODY = (
-    '{"status": "completed", "conclusion": "success", "output": {"title": "applied", '
-    '"summary": "Applied the reviewed plan for this stack x environment."}}\n'
-)
+COMPLETE_BODY = '{"status": "completed", "conclusion": "success"}\n'
 
 
 @bash_only
@@ -475,7 +472,8 @@ def test_the_completion_body_reaches_gh_without_a_file(tmp_path):
     workspace (its working directory) nor in `$RUNNER_TEMP`.
 
     Mutations: write the body to `body.json` and pass `--input body.json`; drop `--input -`
-    from the PATCH.
+    from the PATCH; restore an `output` object in the body, which replaces the plan the check
+    carries.
     """
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()

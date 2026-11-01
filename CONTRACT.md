@@ -65,6 +65,14 @@ The apply check keeps its `apply / ` verb prefix: it is created pending (by
 `actions/summary`) on the same head SHA that carries the plan job's check, and
 it is what keeps `apply-gate` / `scripts/gate-status`, which select the pending-apply
 queue by the `apply / ` prefix, from ever picking up a plan check.
+A changed cell's apply check carries its plan: the title is the plan's counts
+(`+a ~c -d`, `+? ~? -?` when no tally line can be read), and the summary is the
+rendered `plan.txt` in a `diff` fence, cut at a line boundary to 65,535 UTF-8
+bytes with a link to the plan run, whose plan job's raw log has the full plan
+until the repository's Actions log retention expires it; when no whole line
+fits, the summary is that link alone. Completing the check leaves both in
+place. A no-change cell's check is created completed and `neutral`, titled
+`no changes`, with no plan text.
 
 The apply-env-level wave job is named like the plan cell job, `<env> / <stack>`,
 and two scripts find a cell's wave job by that name: `apply-gate.is_cell_job`
@@ -1721,7 +1729,8 @@ check/status/comment/issue that crosses a workflow-run boundary:
   mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
-  consistent).
+  consistent). Completion sends no `output`, so the plan a changed cell's check
+  was created with stays on it after the apply (§Check names).
 - **The aggregate gate** (`shipmate / gate`) — read and written only by
   `scripts/gate-status`, under an App token, called by `actions/summary` in
   `plan.yml`'s `summary` job (the plan run's gate) and by `actions/gate-refresh`
@@ -2863,8 +2872,9 @@ and `lost` outputs, which the same rule reads.
 
 GitHub caps issue-comment bodies at 65,536 characters. The comment is built
 to a smaller budget: each changed cell's fold-out degrades, in order, full
-plan → truncated plan (cut at a line boundary, with a link to the check run
-carrying the full text) → the cell's bare line. The space every remaining
+plan → truncated plan (cut at a line boundary, with a link to the pull
+request's Checks tab, where the cell's apply check holds up to 65,535 bytes of
+the plan, §Check names) → the cell's bare line. The space every remaining
 cell's bare line and every environment heading need is reserved up front, so
 an early giant plan cannot starve a later cell, and every cell keeps its line
 and its link. The command section is left out before any of these steps: it is
@@ -3324,8 +3334,8 @@ A third record binds the plan *text* to the plan that executes. The trusted
 computed there, never copied from the cell — and writes it as the record's
 `plan_sha256` field, on the queued and the neutral check alike. The comment
 embeds at most the first 60 000 characters of that file and may truncate further or
-show only the cell's line, so on a large plan the digest covers more than the comment
-shows; it binds the file, not the excerpt.
+show only the cell's line, and the apply check at most 65,535 UTF-8 bytes of it, so on a
+large plan the digest covers more than either shows; it binds the file, not the excerpts.
 `apply-cell` re-renders the stored plan with `terramate run --quiet
 --disable-safeguards=git-out-of-sync --no-recursive -C <stack> -- tofu show
 -no-color stack.otplan`, the command that produced the file, and refuses unless
@@ -3506,39 +3516,48 @@ that differ.
 §Secrets in published output, below, is unchanged by them and must not be read
 as relaxed by them. A supported envelope entry such as `TF_VAR_password` is
 masked in the job log and still lands in the sticky plan comment, the step
-summary and the plan artifact whenever the consumer has not marked the variable
-`sensitive = true`. Redaction is the consumer's job, and OpenTofu's `sensitive`
+summary, each changed cell's apply check and the plan artifact whenever the
+consumer has not marked the variable `sensitive = true`. Redaction is the consumer's job, and OpenTofu's `sensitive`
 marking is the mechanism.
 
 ## Secrets in published output
 
-Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
-sticky plan comment and the job step summary, and `apply.txt` in the apply
-result comment — carry whatever the tool wrote (the cells run terramate with
-`--quiet`, so its routine lines never appear): shipmate never redacts either,
-and neither is covered by GitHub's log secret masking. (The published text is
-not byte-identical — escape sequences are stripped, undecodable bytes become
-replacement characters, and over-cap sections are truncated, per Plan comment
-and Apply result comment above — but none of that removes a secret.)
+Both text files shipmate publishes — the rendered plan `plan.txt` in the
+sticky plan comment, the job step summary and each changed cell's apply check,
+and `apply.txt` in the apply result comment — carry whatever the tool wrote
+(the cells run terramate with `--quiet`, so its routine lines never appear):
+shipmate never redacts either, and no surface is covered by GitHub's log secret
+masking. (The published text is not byte-identical — escape sequences are
+stripped, undecodable bytes become replacement characters, and over-cap
+sections are truncated, per Check names, Plan comment and Apply result comment
+above — but none of that removes a secret.)
 
 Masking applies to the log stream the runner consumes. Both files are written
 out of the tool's own stdout (`tofu show > plan.txt`,
 `… apply 2>&1 | tee apply.txt`), and the runner never sees the bytes on the
 file side of that write, so a value that appears as `***` in the job log is
-written unmasked into the artifact and into the comment. **Do not rely on
-masking for anything shipmate publishes**, including the step summary — the
-comment and the artifact are the file bytes, and nothing redacts them on the
-way out. On a public repository the comments are world-readable.
+written unmasked into the artifact, the comment and the apply check. **Do not
+rely on masking for anything shipmate publishes**, including the step summary —
+the comment, the apply check and the artifact are the file bytes, and nothing
+redacts them on the way out. On a public repository the comments and checks are
+world-readable.
+
+An apply check's plan text stays on the check after the apply: GitHub has no
+endpoint that deletes a check run (HTTP 404, probed 2026-11-01). Only the
+shipmate App, which created the check, can replace that text: a PATCH with a
+new `output` is accepted even after the check completes (probed 2026-11-01).
+The plan job's raw log that a cut check links expires with the repository's
+Actions log retention; the check's text does not.
 
 **Redaction is the consumer's job, and OpenTofu's `sensitive` marking is the
 mechanism.** A variable declared `sensitive = true`, or a provider attribute
 marked sensitive in its schema, is redacted in `tofu show` output, so it does
-not reach either comment through the rendered plan or a normal apply. Consumers
-must mark every secret-bearing variable and output accordingly. Marking is
-best-effort, not a guarantee: it suppresses the value where OpenTofu knows to,
-and error paths can still surface one. GitHub masking is not a substitute even
-where it does apply — it only covers values registered as GitHub secrets, not a
-credential a provider fetches at runtime.
+not reach any published surface through the rendered plan or a normal apply.
+Consumers must mark every secret-bearing variable and output accordingly.
+Marking is best-effort, not a guarantee: it suppresses the value where OpenTofu
+knows to, and error paths can still surface one. GitHub masking is not a
+substitute even where it does apply — it only covers values registered as GitHub
+secrets, not a credential a provider fetches at runtime.
 
 Two residual paths OpenTofu cannot redact, and shipmate does not attempt to:
 
@@ -3623,8 +3642,8 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   re-run. The apply check stays pending in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
-  plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
-  the job step summary — stays plaintext: it is the
+  plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, the
+  job step summary and each changed cell's apply check — stays plaintext: it is the
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan and the cached state at rest and nothing else; redaction in the
   published text comes from `sensitive` marking (see Secrets in published output, above).

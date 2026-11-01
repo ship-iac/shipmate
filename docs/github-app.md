@@ -399,8 +399,8 @@ actual work here:
   §Post-plan topology and `docs/hardening.md`.
 - **The plan-text digest is authored in that job, and does not widen the
   boundary.** The `summary` job hashes the whole `plan.txt` it already downloads
-  for the plan comment: reading author-produced data is not executing it, and no
-  new secret enters the job. Re-rendering the plan there instead of
+  for the plan comment and the apply checks: reading author-produced data is not
+  executing it, and no new secret enters the job. Re-rendering the plan there instead of
   hashing it was rejected for exactly this reason — the render needs the plan
   artifact decrypted, which would put `SHIPMATE_ENCRYPTION_KEY` in the job that
   holds the App key.
