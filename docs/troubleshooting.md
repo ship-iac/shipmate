@@ -1419,8 +1419,8 @@ all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. The summary job also holds the gate while it publishes the apply
-checks, reading "plan run <id> holds this gate while it publishes; re-plan
-(comment shipmate plan or push) if that run has ended". That hold stays when the
+checks, reading "plan run <id> is publishing; gate updates when done. Still red
+after that run ends: re-plan (comment shipmate plan or push)". That hold stays when the
 run ends before its final gate write (a failed or cancelled summary job, or a
 cancelled plan job after the summary downloaded a cell summary). A sticky plan
 comment that could not be listed or written, or whose pull request head could

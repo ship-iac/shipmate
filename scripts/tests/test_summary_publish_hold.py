@@ -60,8 +60,8 @@ HOLD_DESCRIPTION = (
     "its plan run ended before writing a final gate"
 )
 PUBLISH_HOLD = (
-    "plan run 42 holds this gate while it publishes; "
-    "re-plan (comment shipmate plan or push) if that run has ended"
+    "plan run 42 is publishing; gate updates when done. "
+    "Still red after that run ends: re-plan (comment shipmate plan or push)"
 )
 STATUSES_JQ = ".[] | {context, state, target_url}"
 APPLY_CHECKS_JQ = (
@@ -223,6 +223,7 @@ def _run(
     head=HEAD_SHA,
     plan_result="success",
     planned_cells=None,
+    run_id=RUN_ID,
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries."""
     if planned_cells is None:
@@ -257,7 +258,7 @@ def _run(
         "ON_DEMAND": "false",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://github.com",
-        "GITHUB_RUN_ID": RUN_ID,
+        "GITHUB_RUN_ID": run_id,
         "GITHUB_OUTPUT": str(tmp_path / "github_output"),
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "CALLS": str(calls),
@@ -308,6 +309,34 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
         _check_post("a", 2),
         _check_post("b", 2),
     ]
+
+
+@bash_only
+def test_publish_hold_fits_the_status_description_limit(tmp_path):
+    """A 19-digit run id still leaves the whole publish hold under `gate-status post`'s
+    140-character cut, so the remedy survives. Mutation: lengthen the hold text past 140 -> the
+    cut tail fails the whole-string assertion."""
+    run_id = "1" * 19
+    _write_cells(tmp_path, "a")
+    codes, calls, _, _ = _run(tmp_path, steps=(HOLD,), run_id=run_id)
+    description = (
+        f"plan run {run_id} is publishing; gate updates when done. "
+        "Still red after that run ends: re-plan (comment shipmate plan or push)"
+    )
+    assert codes == [0]
+    assert calls[-1] == [
+        "api",
+        f"repos/acme/demo/statuses/{HEAD_SHA}",
+        "-f",
+        "state=failure",
+        "-f",
+        "context=shipmate / gate",
+        "-f",
+        f"description={description}",
+        "-f",
+        f"target_url=https://github.com/acme/demo/actions/runs/{run_id}",
+    ]
+    assert len(description) <= 140
 
 
 @bash_only
