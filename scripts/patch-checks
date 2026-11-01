@@ -7,8 +7,8 @@ Reads check-run ids on stdin, one per line (blank lines skipped), and PATCHes ea
 line as each is acknowledged, because callers read it back as the done list; every diagnostic
 goes to stderr.
 
-The first id whose retries are exhausted stops the loop, so the slim runner's time cap is
-never spent once per id:
+The first id that still fails (a permanent failure at once, a transient one once its retries
+are exhausted) stops the loop, so the slim runner's time cap is never spent once per id:
 - `completed` fails closed: `::error::failed to complete apply check <id> after retries`,
   exit 1, as the gate's work queue is the pending checks.
 - `in_progress` and `queued` only change what a reviewer sees, so they degrade: one
@@ -48,7 +48,7 @@ def main(argv):
                 ) from None
             # Degrades: a flip or revert only changes what a reviewer sees.
             warning = (
-                f"failed to set {status} on apply check {cid} after retries; "
+                f"failed to set {status} on apply check {cid}; "
                 f"{len(ids) - n} left unpatched\n{exc.code}"
             )
             sys.stderr.write(f"::warning::{command_data(warning)}\n")

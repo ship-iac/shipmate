@@ -49,7 +49,8 @@ def snapshot(waves, check_runs, app_id):
 
 def print_ids(except_path=None):
     """Print every check id in `SHIPMATE_SNAPSHOT_JSON`, sorted and unique, one per line, minus
-    the ids listed in `except_path`. An absent `except_path` file excepts nothing."""
+    the ids listed in `except_path`. An absent `except_path` file excepts nothing; one that
+    cannot be read, or holds a line that is not an integer, refuses."""
     snap = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
     skip = set()
     if except_path:
@@ -58,6 +59,8 @@ def print_ids(except_path=None):
                 skip = {int(line) for line in f if line.strip()}
         except FileNotFoundError:
             pass
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"::error::cannot read the except file {except_path}: {exc}") from None
     for cid in sorted({cid for ids in snap.values() for cid in ids} - skip):
         print(cid)
 

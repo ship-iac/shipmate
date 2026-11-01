@@ -199,3 +199,29 @@ def test_ids_treats_an_absent_except_file_as_empty(monkeypatch, capsys, tmp_path
     monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps(_IDS_SNAPSHOT))
     apply_snapshot.main(["ids", str(tmp_path / "missing.txt")])
     assert capsys.readouterr() == ("1\n2\n3\n", "")
+
+
+def test_ids_refuses_an_except_file_it_cannot_read(monkeypatch, tmp_path):
+    """A non-integer line and a directory path each refuse with an annotation. Mutation: catch
+    only `FileNotFoundError` -> a raw `ValueError` (and `OSError`) escapes."""
+    monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps(_IDS_SNAPSHOT))
+    bad = tmp_path / "done.txt"
+    bad.write_text("x\n")
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.main(["ids", str(bad)])
+    assert str(exc.value) == (
+        f"::error::cannot read the except file {bad}: "
+        "invalid literal for int() with base 10: 'x\\n'"
+    )
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.main(["ids", str(tmp_path)])
+    assert str(exc.value).startswith(f"::error::cannot read the except file {tmp_path}: ")
+
+
+@pytest.mark.parametrize("argv", [["ids", "a", "b"], ["foo"]])
+def test_an_unknown_argument_list_refuses(argv):
+    """Mutation: drop the `len(argv) <= 2` check -> `ids a b` raises `TypeError`; second: drop the
+    `if argv:` refusal -> `foo` runs the bare snapshot and fails on its environment."""
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.main(argv)
+    assert str(exc.value) == "::error::usage: apply-snapshot [ids [EXCEPT_FILE]]"

@@ -69,25 +69,60 @@ def test_each_id_is_patched_with_its_body_on_stdin(monkeypatch, capsys, calls, s
     assert capsys.readouterr() == ("7\n9\n", "")
 
 
-@pytest.mark.parametrize("status", ["in_progress", "queued"])
+_RETRY = (
+    "::warning::command failed (1): gh api -X PATCH repos/acme/demo/check-runs/1 --input -"
+    "%0Agh: Bad Gateway (HTTP 502)\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("status", "warning"),
+    [
+        (
+            "in_progress",
+            (
+                "::warning::failed to set in_progress on apply check 1; 2 left unpatched"
+                "%0Acommand failed (1): gh api -X PATCH repos/acme/demo/check-runs/1 --input -"
+                "%0Agh: Bad Gateway (HTTP 502)\n"
+            ),
+        ),
+        (
+            "queued",
+            (
+                "::warning::failed to set queued on apply check 1; 2 left unpatched"
+                "%0Acommand failed (1): gh api -X PATCH repos/acme/demo/check-runs/1 --input -"
+                "%0Agh: Bad Gateway (HTTP 502)\n"
+            ),
+        ),
+    ],
+)
 def test_a_degrading_write_stops_at_the_first_exhausted_id_and_warns_once(
-    monkeypatch, capsys, calls, status
+    monkeypatch, capsys, calls, status, warning
 ):
     """Mutation: raise `SystemExit(1)` on the exhausted id -> the call exits nonzero; second:
-    `continue` to the next id -> the second id is PATCHed three times too."""
+    `continue` to the next id -> the second id is PATCHed three times too; third: count
+    `len(ids) - n + 10` left -> the warning says 12."""
     recorded, fail = calls
     fail.update({"1": _BAD_GATEWAY, "2": _BAD_GATEWAY})
     _main(monkeypatch, status, ["1", "2"])
     assert [a for a, _ in recorded] == [_argv("1")] * 3
-    out, err = capsys.readouterr()
-    assert out == ""
-    retry = f"::warning::command failed (1): {' '.join(_argv('1'))}%0A{_BAD_GATEWAY}"
-    lines = err.splitlines()
-    assert lines[:2] == [retry, retry]
-    assert len(lines) == 3
-    assert lines[2].startswith("::warning::")
-    assert f"{status} on apply check 1" in lines[2]
-    assert "2 left unpatched" in lines[2]
+    assert capsys.readouterr() == ("", _RETRY + _RETRY + warning)
+
+
+def test_a_degrading_write_does_not_retry_a_permanent_failure(monkeypatch, capsys, calls):
+    """Mutation: retry every failure -> three calls and two retry warnings."""
+    recorded, fail = calls
+    fail["1"] = "gh: Validation Failed (HTTP 422)"
+    _main(monkeypatch, "queued", ["1", "2"])
+    assert [a for a, _ in recorded] == [_argv("1")]
+    assert capsys.readouterr() == (
+        "",
+        (
+            "::warning::failed to set queued on apply check 1; 2 left unpatched"
+            "%0Acommand failed (1): gh api -X PATCH repos/acme/demo/check-runs/1 --input -"
+            "%0Agh: Validation Failed (HTTP 422)\n"
+        ),
+    )
 
 
 def test_an_exhausted_completion_fails(monkeypatch, capsys, calls):
