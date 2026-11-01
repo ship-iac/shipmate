@@ -227,8 +227,8 @@ def _run(
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
     `run_id` is for HOLD-only runs: the CREATE fakes and `FAKE_REFRESH_CHECKS` stay keyed to run
-    42, and a `run_id` below 42 beside a run-42 gate in `statuses` makes `refuse-newer` supersede
-    the run."""
+    42, and a `run_id` below 42 beside a run-42 hold (a `failure` gate) in `statuses` makes
+    `refuse-newer` supersede the run."""
     if planned_cells is None:
         planned_cells = str(len(list((tmp_path / "cells").rglob("cell.json"))))
     bin_dir = tmp_path / "bin"
