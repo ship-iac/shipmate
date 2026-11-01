@@ -526,16 +526,16 @@ blocked reason.
 
 The reviewed `.otplan` carries the commit it was produced from
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
-cell compares it against its own checkout. Two ways that ends here, and the
-remedy differs:
+cell compares it against its own checkout. Two ways that ends here:
 
 - **The record disagrees with the checkout.** The error names both commits. The
   plan describes a tree this job does not have, so it is refused rather than
-  applied or silently re-planned — as with a stale plan, there is no force. The
-  fix is a re-plan and an apply of the fresh plan.
+  applied or silently re-planned — as with a stale plan, there is no force.
 - **There is no record at all.** There is nothing to compare against the
-  checkout, so the apply is refused. Re-plan (comment `shipmate plan` or push),
-  or after the merge open a new pull request touching the stack.
+  checkout, so the apply is refused.
+
+Either way, re-plan (comment `shipmate plan` or push), or after the merge open a
+new pull request touching the stack.
 
 This check is per cell and additive: the apply path's plan-run binding — each
 cell's plan run read from an App-authored apply check on that same head — still
@@ -606,7 +606,9 @@ cell re-renders the stored plan with the command that wrote it and compares.
   rather than run unverified. Re-plan (comment `shipmate plan` or push), or after
   the merge open a new pull request touching the stack.
   This is the same shape as the absent planned-commit record above, and the
-  same remedy.
+  same remedy. When the cell's `digest-input` step refuses with `no usable
+  plan-text digest reached this action`, the matrix wiring dropped the digest:
+  re-pin every engine reference to one commit first, then re-plan.
 - **The render disagrees with the digest.** The error names both digests. Either
   the plan text published for review does not describe the plan that would run,
   or the tooling moved underneath the artifact. An OpenTofu version that moved
