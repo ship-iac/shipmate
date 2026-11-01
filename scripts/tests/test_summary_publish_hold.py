@@ -49,7 +49,6 @@ ag = load_script("apply-gate")
 
 HEAD_SHA = "a" * 40
 RUN_ID = "42"
-RUN_URL = f"https://github.com/acme/demo/actions/runs/{RUN_ID}"
 APP_ID = "4242"
 HOLD = "Hold the gate while apply checks publish"
 CREATE = "Create apply checks (pending / no-changes)"
@@ -60,8 +59,8 @@ HOLD_DESCRIPTION = (
     "its plan run ended before writing a final gate"
 )
 PUBLISH_HOLD = (
-    "plan run 42 holds this gate while it publishes; "
-    "re-plan (comment shipmate plan or push) if that run has ended"
+    "Plan run 42 holds this while it publishes; "
+    "if that run has ended, re-plan (comment shipmate plan or push)"
 )
 STATUSES_JQ = ".[] | {context, state, target_url}"
 APPLY_CHECKS_JQ = (
@@ -84,7 +83,7 @@ APPLY_LIST = [
 ]
 
 
-def _status_post(state, description):
+def _status_post(state, description, run_id=RUN_ID):
     return [
         "api",
         f"repos/acme/demo/statuses/{HEAD_SHA}",
@@ -95,7 +94,7 @@ def _status_post(state, description):
         "-f",
         f"description={description}",
         "-f",
-        f"target_url={RUN_URL}",
+        f"target_url=https://github.com/acme/demo/actions/runs/{run_id}",
     ]
 
 
@@ -223,8 +222,13 @@ def _run(
     head=HEAD_SHA,
     plan_result="success",
     planned_cells=None,
+    run_id=RUN_ID,
 ):
-    """`planned_cells=None` reports as many planned cells as the test wrote cell summaries."""
+    """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
+
+    `run_id` is for HOLD-only runs: the CREATE fakes and `FAKE_REFRESH_CHECKS` stay keyed to run
+    42, and a `run_id` below 42 beside a run-42 hold (a `failure` gate) in `statuses` makes
+    `refuse-newer` supersede the run."""
     if planned_cells is None:
         planned_cells = str(len(list((tmp_path / "cells").rglob("cell.json"))))
     bin_dir = tmp_path / "bin"
@@ -257,7 +261,7 @@ def _run(
         "ON_DEMAND": "false",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://github.com",
-        "GITHUB_RUN_ID": RUN_ID,
+        "GITHUB_RUN_ID": run_id,
         "GITHUB_OUTPUT": str(tmp_path / "github_output"),
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "CALLS": str(calls),
@@ -308,6 +312,22 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
         _check_post("a", 2),
         _check_post("b", 2),
     ]
+
+
+@bash_only
+def test_publish_hold_fits_the_status_description_limit(tmp_path):
+    """A 19-digit run id leaves the whole publish hold within `gate-status post`'s 140-character
+    cut, so the remedy survives. Mutation: lengthen the hold text past 140 in both the action and
+    `description` -> the post cuts it and the whole-argv comparison fails."""
+    run_id = "1" * 19
+    description = (
+        f"Plan run {run_id} holds this while it publishes; "
+        "if that run has ended, re-plan (comment shipmate plan or push)"
+    )
+    _write_cells(tmp_path, "a")
+    codes, calls, _, _ = _run(tmp_path, steps=(HOLD,), run_id=run_id)
+    assert codes == [0]
+    assert calls[-1] == _status_post("failure", description, run_id)
 
 
 @bash_only

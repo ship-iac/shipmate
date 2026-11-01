@@ -18,6 +18,10 @@ section below names the SHA the release tags.
 - **`shipmate doctor` lists each tool's version and its source** (`tools` or `VERSIONS`) under `tool versions every run installs, from the default branch`.
 - **A stack tagged `shipmate/local` and no `env/*` tag is kept out of CI on purpose**: no unmanaged notice, plan comment line, lost-tag warning or `scripts/onboard` item names it, and a stack carrying it beside an `env/*` tag refuses the run (`CONTRACT.md` §Tag grammar).
 
+### Changed
+
+- **The publish hold's description says it holds the gate only while its plan run publishes, and to re-plan if that run has ended**: `Plan run <id> holds this while it publishes; if that run has ended, re-plan (comment shipmate plan or push)`.
+
 ## [0.53.1] — 2026-10-30
 
 Tags `639755d`.
