@@ -99,12 +99,14 @@ def check_output(cell, txt, url):
     where = f"the plan job's raw log in [the plan run]({url}) has the full plan"
     trailer = f"\n\n_Truncated; {where}._"
     room = CHECK_OUTPUT_CAP - _utf8_len(sc.fence("", f)) - _utf8_len(trailer)
-    kept = ""
-    if room > 0:
-        kept = mapped.encode("utf-8")[:room].decode("utf-8", errors="ignore").rpartition("\n")[0]
-    if room <= 0 or not kept:
+    # `room + 1` keeps a line whose newline is byte `room + 1`; the newline itself is dropped.
+    # A negative room yields an empty or over-cap candidate, which the guard below refuses.
+    cut = mapped.encode("utf-8")[: room + 1].decode("utf-8", errors="ignore")
+    kept = cut.rpartition("\n")[0]
+    summary = sc.fence(kept, f) + trailer
+    if not kept or _utf8_len(summary) > CHECK_OUTPUT_CAP:
         return {"title": title, "summary": f"_Plan too large to show here; {where}._"}
-    return {"title": title, "summary": sc.fence(kept, f) + trailer}
+    return {"title": title, "summary": summary}
 
 
 def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):

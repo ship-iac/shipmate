@@ -770,17 +770,33 @@ def test_the_fence_is_longer_than_a_backtick_run_in_the_plan_whole_and_cut(tmp_p
 
 def test_a_fence_as_long_as_the_cap_leaves_only_the_link(tmp_path):
     """A line of 40,000 backticks needs a 40,001-backtick fence, twice over the cap. Mutation:
-    drop the `room <= 0` branch -> red."""
+    delete the final guard (both conditions) -> red."""
     summary = _output(tmp_path, b"`" * 40_000 + b"\n")["summary"]
     assert summary == NO_ROOM
     assert len(summary.encode()) <= CAP
 
 
 def test_a_first_line_longer_than_the_room_leaves_only_the_link(tmp_path):
-    """No whole line fits, so no empty fence shows. Mutation: drop `or not kept` -> an empty
-    fence and the trailer, red."""
+    """No whole line fits, so no empty fence shows. Mutation: drop `not kept or` from the final
+    guard -> an empty fence and the trailer, red."""
     summary = _output(tmp_path, b"a" * 70_000 + b"\n")["summary"]
     assert summary == NO_ROOM
+
+
+def test_a_long_fence_before_lines_that_fit_leaves_only_the_link(tmp_path):
+    """A 40,000-backtick first line makes the room negative, so the cut is an over-cap
+    candidate. Mutation: delete the final size guard -> the candidate is emitted, red."""
+    plan = b"`" * 40_000 + b"\n" + (LINE.encode() + b"\n") * 300
+    assert _output(tmp_path, plan)["summary"] == NO_ROOM
+
+
+def test_a_first_line_of_exactly_the_room_is_kept(tmp_path):
+    """The room is 65,535 - 12 (fence) - 134 (trailer) = 65,389 bytes, and the first line's
+    newline is byte 65,390. Mutation: slice to `[:room]` -> no newline, only the link, red."""
+    first = "a" * 65_389
+    summary = _output(tmp_path, (first + "\n" + (LINE + "\n") * 10).encode())["summary"]
+    assert summary == "```diff\n" + first + "\n```" + TRAILER
+    assert len(summary.encode()) == CAP
 
 
 def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
