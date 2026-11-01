@@ -105,7 +105,7 @@ runs:
       # a re-run cannot recover it: the applied state has already advanced past the reviewed plan.
       run: |
         set -euo pipefail
-        body='{"status": "completed", "conclusion": "success", "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}}'
+        body='{"status": "completed", "conclusion": "success"}'
         while read -r id; do
           [ -z "$id" ] && continue
           ok=""
