@@ -6,7 +6,16 @@ import subprocess
 import sys
 
 import pytest
-from _loader import ENGINE, SCRIPTS, action_steps, bash_only, jsonl, load_script, run_step
+from _loader import (
+    ENGINE,
+    SCRIPTS,
+    action_steps,
+    bash_only,
+    jsonl,
+    load_script,
+    run_step,
+    run_with_gh_recorder,
+)
 
 apply_complete = load_script("apply-complete")
 
@@ -242,10 +251,10 @@ def test_the_app_token_is_minted_after_the_listing_and_selection_step():
 
 
 def test_the_stranded_failure_is_reported_after_the_completion_patches():
-    # The point of deferring it: failing at selection time discards the completions this run
-    # did earn.
+    """The point of deferring it: failing at selection time discards the completions this run
+    did earn. Mutation: move the fail-over before `Complete the apply checks`."""
     steps = action_steps("apply-complete")
-    patch = next(i for i, s in enumerate(steps) if "check-runs/$id" in (s.get("run") or ""))
+    patch = next(i for i, s in enumerate(steps) if s.get("name") == "Complete the apply checks")
     fail = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Fail over"))
     assert fail > patch
 
@@ -461,46 +470,129 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
     assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0
 
 
-#: The PATCH body gh receives, written by hand rather than read from the action. It ends in
-#: the one newline the here-string appends.
-COMPLETE_BODY = '{"status": "completed", "conclusion": "success"}\n'
+_SNAP_IDS = {"apply / dns / dev-eu": [11], "apply / app / dev-eu": [22, 33]}
+
+
+def _step(name):
+    return next(s for s in action_steps("apply-complete") if s.get("name") == name)
+
+
+def test_the_revert_runs_between_the_completion_and_the_fail_over():
+    """Mutation: move the revert after the fail-over."""
+    names = [s.get("name") for s in action_steps("apply-complete")]
+    assert names[-3:] == [
+        "Complete the apply checks",
+        "Revert uncompleted apply checks to queued",
+        "Fail over any cell the jobs listing never resolved",
+    ]
+
+
+def test_the_mint_and_the_revert_run_always_and_the_completion_does_not():
+    """A cancelled level or a failed listing still reverts, which needs the token; the
+    completion and the fail-over keep the default `if:`. The mint also skips a missing key, so
+    verify-app-key's error is the only one.
+
+    Mutations: drop the revert's `if: always()`; set the mint's back to `always()`.
+    """
+    steps = {s.get("name"): s.get("if") for s in action_steps("apply-complete")}
+    assert [
+        steps["Mint App installation token"],
+        steps["Complete the apply checks"],
+        steps["Revert uncompleted apply checks to queued"],
+        steps["Fail over any cell the jobs listing never resolved"],
+    ] == ["${{ always() && inputs.private-key != '' }}", None, "always()", None]
+
+
+def _run_action_step(tmp_path, name, *, files=(), snapshot=_SNAP_IDS, empty_token=False, **gh):
+    """Run step `name` with a recording gh; `files` maps a RUNNER_TEMP file name to its ids."""
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    for fname, ids in dict(files).items():
+        (runner_temp / fname).write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
+    snap = snapshot if isinstance(snapshot, str) else json.dumps(snapshot)
+    env = {
+        **os.environ,
+        "GH_TOKEN": "" if empty_token else "x",
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_ACTION_PATH": (ENGINE / "actions" / "apply-complete").as_posix(),
+        "RUNNER_TEMP": runner_temp.as_posix(),
+        "SHIPMATE_SNAPSHOT_JSON": snap,
+    }
+    proc, calls = run_with_gh_recorder(tmp_path, _step(name)["run"], env, **gh)
+    return proc, [c[3] for c in calls], runner_temp
+
+
+def _patched(*ids):
+    return [f"repos/acme/demo/check-runs/{i}" for i in ids]
+
+
+REVERT = "Revert uncompleted apply checks to queued"
+_REVERT_WARNING = (
+    "::warning::the uncompleted apply checks were not reverted to queued "
+    "and may still show in progress"
+)
 
 
 @bash_only
-def test_the_completion_body_reaches_gh_without_a_file(tmp_path):
-    """The PATCH body reaches gh whole, and the step writes no file, neither in the job
-    workspace (its working directory) nor in `$RUNNER_TEMP`.
+def test_the_revert_patches_every_snapshot_id_when_nothing_completed(tmp_path):
+    """No completed-ids.txt (the listing failed hard, so completion was skipped) reverts all.
 
-    Mutations: write the body to `body.json` and pass `--input body.json`; drop `--input -`
-    from the PATCH; restore an `output` object in the body, which replaces the plan the check
-    carries.
+    Mutation: open the step with `[ -s "$RUNNER_TEMP/completed-ids.txt" ] || exit 0`.
     """
-    runner_temp = tmp_path / "runner"
-    runner_temp.mkdir()
-    (runner_temp / "complete-ids.txt").write_text("11\n", encoding="utf-8", newline="\n")
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    sent = (tmp_path / "sent").as_posix()
-    # `sleep` is a no-op so a failing PATCH reaches red without the retry loop's real waits.
-    stubs = (
-        'gh() { while [ $# -gt 0 ] && [ "$1" != --input ]; do shift; done; '
-        '[ $# -gt 0 ] || return 1; cat "$2" > "' + sent + '"; }\n'
-        "sleep() { :; }\n"
-    )
-    body = next(
-        s["run"]
-        for s in action_steps("apply-complete")
-        if s.get("name") == "Complete the apply checks"
-    )
-    env = {
-        **os.environ,
-        "GITHUB_REPOSITORY": "acme/demo",
-        "RUNNER_TEMP": runner_temp.as_posix(),
-    }
-    proc = run_step(tmp_path, stubs + body, env, cwd=workspace)
-    assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
-    assert sorted(p.name for p in runner_temp.iterdir()) == ["complete-ids.txt"], (
-        "the step left a file in RUNNER_TEMP"
+    proc, patched, _ = _run_action_step(tmp_path, REVERT)
+    assert proc.returncode == 0, proc.stderr
+    assert patched == _patched(11, 22, 33)
+
+
+@bash_only
+def test_the_revert_skips_only_the_acknowledged_ids(tmp_path):
+    """The completion failed after acknowledging 22: 11 and 33 go back to queued.
+
+    Mutation: except `complete-ids.txt` instead of `completed-ids.txt`.
+    """
+    files = {"complete-ids.txt": [11, 22, 33], "completed-ids.txt": [22]}
+    proc, patched, _ = _run_action_step(tmp_path, REVERT, files=files)
+    assert proc.returncode == 0, proc.stderr
+    assert patched == _patched(11, 33)
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "kwargs", [{"empty_token": True}, {"snapshot": "not json"}], ids=["empty-token", "bad-snapshot"]
+)
+def test_the_revert_warns_once_and_exits_zero_when_it_cannot_start(tmp_path, kwargs):
+    """An empty token (the mint failed) or a failing `apply-snapshot ids` sends nothing.
+
+    Mutations: drop the pipeline's `if ...; then` wrapper; drop the `-z "$GH_TOKEN"` test.
+    """
+    proc, patched, _ = _run_action_step(tmp_path, REVERT, **kwargs)
+    assert proc.returncode == 0, proc.stderr
+    assert [ln for ln in proc.stdout.splitlines() if ln.startswith("::warning::")] == [
+        _REVERT_WARNING
+    ]
+    assert patched == []
+
+
+@bash_only
+def test_the_revert_exits_zero_when_a_write_fails(tmp_path):
+    """patch-checks' own degrade and the step's wrapper each keep a failed PATCH at exit 0.
+
+    Mutation: unwrap the pipeline and make patch-checks' degrade branch exit 1.
+    """
+    proc, patched, _ = _run_action_step(tmp_path, REVERT, write_rc=1, write_stderr="HTTP 404")
+    assert proc.returncode == 0, proc.stderr
+    assert patched == _patched(11)
+
+
+@bash_only
+def test_the_completion_records_the_acknowledged_ids(tmp_path):
+    """The body and its no-file property are pinned in-process by
+    `test_patch_checks.py`; this pins the step's wiring to completed-ids.txt, which the revert
+    reads. Mutation: drop the `> completed-ids.txt` redirect.
+    """
+    proc, patched, runner_temp = _run_action_step(
+        tmp_path, "Complete the apply checks", files={"complete-ids.txt": [1, 2]}
     )
     assert proc.returncode == 0, proc.stderr
-    assert (tmp_path / "sent").read_text(encoding="utf-8") == COMPLETE_BODY
+    assert patched == _patched(1, 2)
+    assert (runner_temp / "completed-ids.txt").read_text(encoding="utf-8") == "1\n2\n"

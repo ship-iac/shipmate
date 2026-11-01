@@ -20,6 +20,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
+- **A level's apply checks read in progress while it applies, and queued again if it ends without completing them.** `apply-env-level.yml`'s `snapshot` job binds `shipmate-engine` and fails before any wave when the App key is missing.
 - **The publish hold's description says it holds the gate only while its plan run publishes, and to re-plan if that run has ended**: `Plan run <id> holds this while it publishes; if that run has ended, re-plan (comment shipmate plan or push)`.
 - **Each changed cell's `apply / <stack> / <env>` check shows its plan and counts**: the title is the plan's `+a ~c -d`, the summary the plan in a `diff` fence, cut at 65,535 UTF-8 bytes with a link to the plan run, whose plan job's raw log has the full plan. The plan stays on the check after it is applied.
 - **A plan cut in the plan comment links the pull request's Checks tab** (`see the cell's apply check in the Checks tab`) instead of the cell's plan check.

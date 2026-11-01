@@ -1,5 +1,5 @@
 name: shipmate apply-complete
-description: Complete the apply checks for every wave cell whose job succeeded in this run. The only step in the apply path that mints the App key. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs.
+description: Complete the apply checks for every wave cell whose job succeeded in this run, and revert the level's other snapshot checks to queued. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs.
 inputs:
   snapshot:
     description: JSON object from apply-snapshot mapping each cell to its pre-existing apply-check ids.
@@ -85,8 +85,10 @@ runs:
         fi
 
     - name: Mint App installation token
-      # Minted after the jobs listing, which can fail, so the token's lifetime never spans a
-      # step that may not need it -- only `Complete the apply checks` uses it.
+      # Minted after the jobs listing, so the token's lifetime never spans it. `always()`
+      # because the revert needs the token even when the listing failed. A missing key skips it,
+      # so verify-app-key's error is the only one.
+      if: ${{ always() && inputs.private-key != '' }}
       id: token
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
@@ -100,21 +102,29 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-      # The body is static (no author input), so a single-quoted literal is safe. Each
-      # completion is retried because a transient API blip would strand the check pending, and
-      # a re-run cannot recover it: the applied state has already advanced past the reviewed plan.
+      # Fails closed: a stranded check blocks the gate, and a re-run cannot recover it because
+      # the applied state has already advanced past the reviewed plan. completed-ids.txt holds
+      # only the acknowledged ids, so the revert resets the failed id and every one after it.
       run: |
         set -euo pipefail
-        body='{"status": "completed", "conclusion": "success"}'
-        while read -r id; do
-          [ -z "$id" ] && continue
-          ok=""
-          for _ in 1 2 3 4 5; do
-            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input - <<<"$body" >/dev/null; then ok=1; break; fi
-            sleep 3
-          done
-          [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }
-        done < "$RUNNER_TEMP/complete-ids.txt"
+        python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" completed \
+          < "$RUNNER_TEMP/complete-ids.txt" > "$RUNNER_TEMP/completed-ids.txt"
+
+    - name: Revert uncompleted apply checks to queued
+      # Degrades as a whole: this job runs after the applies, and its failure skips every
+      # successor level on deploy. An absent completed-ids.txt reverts every snapshot id.
+      if: always()
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
+      run: |
+        set -uo pipefail
+        if [ -z "$GH_TOKEN" ] ||
+          ! python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" ids "$RUNNER_TEMP/completed-ids.txt" |
+            python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" queued; then
+          echo "::warning::the uncompleted apply checks were not reverted to queued and may still show in progress"
+        fi
 
     - name: Fail over any cell the jobs listing never resolved
       shell: bash

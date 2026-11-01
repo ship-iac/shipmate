@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Map every cell in this run's wave matrices to its App-authored apply-check ids.
 
-Runs BEFORE wave0, in a job that holds no secret: the trailing completer marks
-only these ids done, so an apply check created mid-run by a fresh plan is left
-pending (its plan was never applied here) instead of being greened. Only checks
-authored by the shipmate App are eligible — a forged same-name check from any
-other identity is never completed.
+Runs BEFORE wave0: the trailing completer marks only these ids done, so an apply check
+created mid-run by a fresh plan is left pending (its plan was never applied here) instead of
+being greened. Only checks authored by the shipmate App are eligible — a forged same-name
+check from any other identity is never completed. The `snapshot` job holds the App key and
+checks out no repository content, so no branch content runs beside the key. `ids` prints a
+snapshot's ids, one per line, for `patch-checks`.
 """
 
 import json
@@ -47,7 +48,31 @@ def snapshot(waves, check_runs, app_id):
     return out
 
 
-def main():
+def print_ids(except_path=None):
+    """Print every check id in `SHIPMATE_SNAPSHOT_JSON`, sorted and unique, one per line, minus
+    the ids listed in `except_path`. An absent `except_path` file excepts nothing; one that
+    cannot be read, or holds a line that is not an integer, refuses."""
+    snap = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
+    skip = set()
+    if except_path:
+        try:
+            with open(except_path) as f:
+                skip = {int(line) for line in f if line.strip()}
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"::error::cannot read the except file {except_path}: {exc}") from None
+    for cid in sorted({cid for ids in snap.values() for cid in ids} - skip):
+        print(cid)
+
+
+def main(argv=()):
+    """Bare: the snapshot JSON on stdout. `ids [EXCEPT_FILE]`: `print_ids`."""
+    if argv[:1] == ["ids"] and len(argv) <= 2:
+        print_ids(*argv[1:])
+        return
+    if argv:
+        raise SystemExit("::error::usage: apply-snapshot [ids [EXCEPT_FILE]]")
     app_id = os.environ["SHIPMATE_APP_ID"]
     # Refuses an empty id before the waves or the listing are parsed, so a misconfiguration is
     # reported first.
@@ -58,4 +83,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, sys.argv[1:])

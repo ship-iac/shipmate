@@ -8,8 +8,8 @@ Invariants:
   environment does not exist, snapshot's pre-flight refuses the run: the fingerprint pins
   nothing about the binding, because plan and apply resolve a cell's variables from the same
   table (CONTRACT.md §Env model);
-- snapshot binds no environment at all and complete binds shipmate-engine: a job
-  that gains an env-derived binding is the regression;
+- snapshot and complete each bind shipmate-engine, the environment holding the App key both
+  mint from: a job that gains an env-derived binding is the regression;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
   and both before any wave: the pre-flight is only a control while it can still
   refuse the run;
@@ -80,18 +80,17 @@ def test_the_cell_jobs_are_exactly_the_hand_written_set():
     assert found == CELL_BOUND
 
 
-def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment():
+def test_snapshot_and_complete_bind_the_engine_environment():
+    """Mutation: drop `snapshot`'s `environment:` binding."""
     jobs = workflow_jobs("apply-env-level.yml")
-    # Absence asserted as absence: an explicit `environment:` with a null value is a binding the
-    # caller can be made to resolve, and `.get()` would read it as no key at all.
-    assert "environment" not in jobs["snapshot"], (
-        "snapshot must bind no environment -- it needs no secret, and an "
-        "env-derived binding would subject the check snapshot to protection rules"
-    )
-    assert jobs["complete"].get("environment") == ENGINE_ENVIRONMENT
+    assert {j: jobs[j].get("environment") for j in ("snapshot", "complete")} == {
+        "snapshot": ENGINE_ENVIRONMENT,
+        "complete": ENGINE_ENVIRONMENT,
+    }
 
 
 def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
+    """Mutation: swap snapshot's two steps."""
     steps = workflow_jobs("apply-env-level.yml")["snapshot"]["steps"]
     assert [s["uses"].split("@")[0] for s in steps] == SNAPSHOT_STEPS, (
         "snapshot's steps changed: the environment pre-flight must run first and "

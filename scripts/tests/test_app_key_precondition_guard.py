@@ -82,6 +82,7 @@ _SITES = {
     ACTIONS / "summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-complete" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "apply-snapshot" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "gate-refresh" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "dispatch" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "drift-issues" / "action.yml": (("runs", "steps"), _ACTION_WITH),
@@ -118,7 +119,8 @@ def test_the_mint_sites_are_the_ones_this_guard_knows_about():
 
 
 def test_every_mint_site_verifies_the_key_arrived():
-    """Mutation: delete the call from one site, or wire its `private-key` to the app id."""
+    """Mutations: delete the call from one site, or wire its `private-key` to the app id; move
+    `apply-snapshot`'s call after its `snap` step."""
     for path, site in _SITES.items():
         if site is None:
             continue
@@ -127,6 +129,63 @@ def test_every_mint_site_verifies_the_key_arrived():
         assert step == _call(with_), (
             f"{path.name} must open with the App-key precondition call verbatim; got {step!r}"
         )
+
+
+#: apply-snapshot's mint, whole.
+_SNAPSHOT_MINT = {
+    "name": "Mint App installation token",
+    "id": "token",
+    "uses": "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+    "with": {
+        "client-id": "${{ inputs.app-id }}",
+        "private-key": "${{ inputs.private-key }}",
+        "owner": "${{ github.repository_owner }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-checks": "write",
+    },
+}
+
+#: apply-snapshot's flip step, whole.
+_SNAPSHOT_FLIP = {
+    "name": "Mark the apply checks in progress",
+    "shell": "bash",
+    "env": {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "SHIPMATE_SNAPSHOT_JSON": "${{ steps.snap.outputs.snapshot }}",
+    },
+    "run": (
+        "set -euo pipefail\n"
+        'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" ids |\n'
+        '  python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" in_progress\n'
+    ),
+}
+
+
+def _snapshot_steps():
+    return _steps(ACTIONS / "apply-snapshot" / "action.yml", ("runs", "steps"))
+
+
+def test_snapshot_mints_before_it_flips():
+    """The key check, the snapshot and the mint are hard: a missing key fails snapshot before any
+    wave applies, instead of `complete` failing after infrastructure changed.
+
+    Mutations: `continue-on-error: true` on the mint; `if: always()` on `snap`; swap the mint
+    and the flip.
+    """
+    steps = _snapshot_steps()
+    assert [s.get("id") or s.get("name") for s in steps] == [
+        _NAME,
+        "snap",
+        "token",
+        "Mark the apply checks in progress",
+    ]
+    assert steps[2] == _SNAPSHOT_MINT
+    assert [(s.get("if"), s.get("continue-on-error")) for s in steps[:3]] == [(None, None)] * 3
+
+
+def test_flip_sends_in_progress_from_the_snapshot():
+    """Mutation: invoke `patch-checks` with `completed`."""
+    assert _snapshot_steps()[3] == _SNAPSHOT_FLIP
 
 
 def test_the_shared_check_says_why_the_key_did_not_arrive():
