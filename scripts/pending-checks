@@ -83,8 +83,8 @@ def check_output(cell, txt, url):
     """The check `output` of the changed cell `cell` whose plan text is the file `txt`: its counts
     as the title (`+? ~? -?` when underivable) and the plan in a `diff` fence as the summary,
     at most `CHECK_OUTPUT_CAP` UTF-8 bytes. A cut plan keeps whole lines and ends with a link to
-    `url`, the plan run's page; a fence too long to leave room for any text gives that link
-    alone. Only a prefix of `txt` is read."""
+    `url`, the plan run's page, whose plan job's raw log has the full plan; when no whole line
+    fits, the summary is that link alone. Only a prefix of `txt` is read."""
     tally = sc.counts(txt) or ("?",) * 5
     title = sc.state({**cell, **dict(zip(_COUNT_KEYS, tally, strict=True))})
     # No prefix longer than the cap can fit. The fence is sized over the whole prefix, a
@@ -96,12 +96,14 @@ def check_output(cell, txt, url):
     whole = sc.fence(mapped, f)
     if len(prefix) <= CHECK_OUTPUT_CAP and _utf8_len(whole) <= CHECK_OUTPUT_CAP:
         return {"title": title, "summary": whole}
-    link = f"[full plan in the plan run's step summaries]({url})"
-    trailer = f"\n\n_Truncated, {link}._"
+    where = f"the plan job's raw log in [the plan run]({url}) has the full plan"
+    trailer = f"\n\n_Truncated; {where}._"
     room = CHECK_OUTPUT_CAP - _utf8_len(sc.fence("", f)) - _utf8_len(trailer)
-    if room <= 0:
-        return {"title": title, "summary": f"_Plan too large to show here; {link}._"}
-    kept = mapped.encode("utf-8")[:room].decode("utf-8", errors="ignore").rpartition("\n")[0]
+    kept = ""
+    if room > 0:
+        kept = mapped.encode("utf-8")[:room].decode("utf-8", errors="ignore").rpartition("\n")[0]
+    if room <= 0 or not kept:
+        return {"title": title, "summary": f"_Plan too large to show here; {where}._"}
     return {"title": title, "summary": sc.fence(kept, f) + trailer}
 
 

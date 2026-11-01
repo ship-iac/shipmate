@@ -686,8 +686,12 @@ def test_a_run_with_an_evidence_gap_still_refuses_a_broken_pull_request_number(
 CAP = 65_535
 URL = "https://ghe.example.com/acme/demo/actions/runs/32668143791"
 TRAILER = (
-    "\n\n_Truncated, [full plan in the plan run's step summaries]"
-    "(https://ghe.example.com/acme/demo/actions/runs/32668143791)._"
+    "\n\n_Truncated; the plan job's raw log in [the plan run]"
+    "(https://ghe.example.com/acme/demo/actions/runs/32668143791) has the full plan._"
+)
+NO_ROOM = (
+    "_Plan too large to show here; the plan job's raw log in [the plan run]"
+    "(https://ghe.example.com/acme/demo/actions/runs/32668143791) has the full plan._"
 )
 CHANGED = {"stack": "stacks/app", "environment": "dev-eu", "changed": True, "fingerprint": "f" * 64}
 LINE = "a" * 99
@@ -731,8 +735,8 @@ def test_one_byte_over_the_cap_is_cut_at_a_line_and_links_this_run(tmp_path):
     cap at 65,536 -> red (emitted whole); build the link from a hardcoded `https://github.com`
     -> red; drop the trailer -> red."""
     body = _emit_changed(tmp_path, (AT_CAP + "b\n").encode())
-    # 65,535 - 12 (fence) - 120 (trailer) = 65,403 bytes of room: 654 whole lines.
-    expected = "```diff\n" + "\n".join([LINE] * 654) + "\n```" + TRAILER
+    # 65,535 - 12 (fence) - 134 (trailer) = 65,389 bytes of room: 653 whole lines.
+    expected = "```diff\n" + "\n".join([LINE] * 653) + "\n```" + TRAILER
     assert body["output"] == {"title": "+? ~? -?", "summary": expected}
     assert len(expected.encode()) <= CAP
 
@@ -748,11 +752,11 @@ def test_a_cut_plans_digest_covers_the_whole_file(tmp_path):
 
 
 def test_a_plan_over_the_cap_in_bytes_but_not_characters_is_cut(tmp_path):
-    """3,200 lines of ten `é`: 35,200 characters, 67,200 UTF-8 bytes. Mutation: measure with
-    `len(str)` (`_utf8_len = len`) -> emitted whole, over the cap."""
+    """3,200 lines of ten `é`: 35,200 characters, 67,200 UTF-8 bytes. The room is 65,535 less
+    the 12-byte empty fence and the 134-byte trailer, 65,389 bytes: 3,113 whole 21-byte lines.
+    Mutation: measure with `len(str)` (`_utf8_len = len`) -> emitted whole, red."""
     summary = _output(tmp_path, (("é" * 10 + "\n") * 3200).encode())["summary"]
-    assert summary.endswith(TRAILER)
-    assert len(summary.encode()) <= CAP
+    assert summary == "```diff\n" + "\n".join(["é" * 10] * 3113) + "\n```" + TRAILER
 
 
 def test_the_fence_is_longer_than_a_backtick_run_in_the_plan_whole_and_cut(tmp_path):
@@ -768,18 +772,15 @@ def test_a_fence_as_long_as_the_cap_leaves_only_the_link(tmp_path):
     """A line of 40,000 backticks needs a 40,001-backtick fence, twice over the cap. Mutation:
     drop the `room <= 0` branch -> red."""
     summary = _output(tmp_path, b"`" * 40_000 + b"\n")["summary"]
-    assert summary == (
-        "_Plan too large to show here; [full plan in the plan run's step summaries]"
-        "(https://ghe.example.com/acme/demo/actions/runs/32668143791)._"
-    )
+    assert summary == NO_ROOM
     assert len(summary.encode()) <= CAP
 
 
-def test_a_first_line_longer_than_the_room_leaves_an_empty_fence(tmp_path):
-    """Mutation: cut back with `str.rfind` of the newline in place of `rpartition`, which keeps
-    all but one character of a line with no newline -> red."""
+def test_a_first_line_longer_than_the_room_leaves_only_the_link(tmp_path):
+    """No whole line fits, so no empty fence shows. Mutation: drop `or not kept` -> an empty
+    fence and the trailer, red."""
     summary = _output(tmp_path, b"a" * 70_000 + b"\n")["summary"]
-    assert summary == "```diff\n\n```" + TRAILER
+    assert summary == NO_ROOM
 
 
 def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
