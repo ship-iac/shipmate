@@ -313,6 +313,7 @@ runs:
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DOCTOR_WARNINGS: ${{ steps.doctor.outputs.warnings }}
         SHIPMATE_LOCKS: ${{ steps.marks.outputs.locks }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links
