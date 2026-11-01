@@ -25,13 +25,15 @@ on:
 permissions: {}
 jobs:
   # Pre-flight, before any wave runs: verify that the environments the waves will bind exist and
-  # carry a branch policy, then capture the apply-check ids. It needs no secret and no environment.
+  # carry a branch policy, capture the apply-check ids and mark them in progress. It binds
+  # shipmate-engine for the App key: only the App that created a check can update it.
   snapshot:
     runs-on: ubuntu-slim
     # Permissions cap at each `uses:` boundary, so every calling job must grant checks:read too,
     # or this fails at workflow resolution. actions:read is not decorative: on a private repository,
     # listing environments 403s without it (measured; undocumented).
     permissions: { checks: read, actions: read }
+    environment: { name: shipmate-engine, deployment: false }
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
@@ -47,6 +49,7 @@ jobs:
           head-sha: ${{ inputs.head_sha }}
           waves-json: ${{ inputs.waves_json }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   wave0:
     needs: [snapshot]
@@ -197,8 +200,8 @@ jobs:
     name: *wave-name
     steps: *wave-steps
 
-  # Completes the snapshot's checks for every cell whose wave job succeeded; the only job here
-  # holding the App key. After every wave, so gate-refresh and apply-summary, which `needs:` this
+  # Completes the snapshot's checks for every cell whose wave job succeeded; holds the App key, as
+  # snapshot does. After every wave, so gate-refresh and apply-summary, which `needs:` this
   # workflow, never see a stale-pending check for a cell that just applied.
   complete:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7]

@@ -1,5 +1,5 @@
 name: shipmate apply-snapshot
-description: Map every cell in this run's wave matrices to its pre-existing App-authored apply-check ids, before any wave applies. Holds no App key; GITHUB_TOKEN's checks:read is enough to list check-runs.
+description: Map every cell in this run's wave matrices to its pre-existing App-authored apply-check ids, before any wave applies, then mark those checks in progress. Lists check-runs with GITHUB_TOKEN's checks:read; mints an App token with checks:write for the in-progress writes, because only the App that created a check can update it.
 inputs:
   head-sha:
     description: PR head SHA carrying the pending apply checks.
@@ -10,6 +10,9 @@ inputs:
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count.
     required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
 outputs:
   snapshot:
     description: JSON object mapping each cell's apply check name to its list of pre-existing App-authored apply-check ids.
@@ -17,6 +20,11 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
     - id: snap
       shell: bash
       env:
@@ -33,3 +41,26 @@ runs:
         fi
         snap=$(python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl")
         echo "snapshot=$snap" >> "$GITHUB_OUTPUT"
+
+    # Hard, like the key check: a missing or bad key fails snapshot before any wave applies.
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-checks: write
+
+    # Degrades: patch-checks warns and exits 0 on a failed PATCH, leaving those checks queued.
+    # A failed `apply-snapshot ids` is an engine bug and fails snapshot before any wave.
+    - name: Mark the apply checks in progress
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_SNAPSHOT_JSON: ${{ steps.snap.outputs.snapshot }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" ids |
+          python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" in_progress
