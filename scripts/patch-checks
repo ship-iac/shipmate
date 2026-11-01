@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Set the status of App-authored apply checks: `patch-checks in_progress|queued|completed`.
+
+Reads check-run ids on stdin, one per line (blank lines skipped), and PATCHes each with the
+`BODIES` entry for STATUS through `retried`, the body on gh's stdin. `GH_TOKEN` and
+`GITHUB_REPOSITORY` come from the environment. Stdout carries only the ids PATCHed, one per
+line as each is acknowledged, because callers read it back as the done list; every diagnostic
+goes to stderr.
+
+The first id whose retries are exhausted stops the loop, so the slim runner's time cap is
+never spent once per id:
+- `completed` fails closed: `::error::failed to complete apply check <id> after retries`,
+  exit 1, as the gate's work queue is the pending checks.
+- `in_progress` and `queued` only change what a reviewer sees, so they degrade: one
+  `::warning::` naming the status, the id and how many ids were left unpatched, exit 0.
+"""
+
+import functools
+import json
+import os
+import sys
+
+from _shipmate import command_data, retried, run, run_annotated
+
+# None sends `output`: a PATCH carrying it replaces the plan text on the check.
+BODIES = {
+    "in_progress": {"status": "in_progress"},
+    "queued": {"status": "queued"},
+    "completed": {"status": "completed", "conclusion": "success"},
+}
+
+
+def main(argv):
+    if len(argv) != 1 or argv[0] not in BODIES:
+        raise SystemExit(f"::error::usage: patch-checks {'|'.join(BODIES)}")
+    status = argv[0]
+    body = json.dumps(BODIES[status])
+    repo = os.environ["GITHUB_REPOSITORY"]
+    ids = [line.strip() for line in sys.stdin if line.strip()]
+    for n, cid in enumerate(ids):
+        args = ["gh", "api", "-X", "PATCH", f"repos/{repo}/check-runs/{cid}", "--input", "-"]
+        try:
+            retried(functools.partial(run, args, stdin=body))
+        except SystemExit as exc:
+            if status == "completed":
+                raise SystemExit(
+                    f"::error::failed to complete apply check {cid} after retries\n{exc.code}"
+                ) from None
+            # Degrades: a flip or revert only changes what a reviewer sees.
+            warning = (
+                f"failed to set {status} on apply check {cid} after retries; "
+                f"{len(ids) - n} left unpatched\n{exc.code}"
+            )
+            sys.stderr.write(f"::warning::{command_data(warning)}\n")
+            return
+        print(cid, flush=True)
+
+
+if __name__ == "__main__":
+    run_annotated(main, sys.argv[1:])
