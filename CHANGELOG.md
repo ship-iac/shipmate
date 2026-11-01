@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.54.0] — 2026-11-01
 
+Tags `5698f17`.
+
 ### Added
 
 - **`tools` in `.github/shipmate-config.yml` chooses the Terramate and OpenTofu versions every job installs**, each `X.Y.Z` at or above the floor in the engine's `VERSIONS`, read from the default branch; an absent tool installs the engine's default. A merged `tools.tofu` change invalidates every plan awaiting apply, as a re-pin that moves the default does.
