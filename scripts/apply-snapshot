@@ -4,8 +4,9 @@
 Runs BEFORE wave0: the trailing completer marks only these ids done, so an apply check
 created mid-run by a fresh plan is left pending (its plan was never applied here) instead of
 being greened. Only checks authored by the shipmate App are eligible — a forged same-name
-check from any other identity is never completed. `ids` prints a snapshot's ids, one per
-line, for `patch-checks`.
+check from any other identity is never completed. The `snapshot` job holds the App key and
+checks out no repository content, so no branch content runs beside the key. `ids` prints a
+snapshot's ids, one per line, for `patch-checks`.
 """
 
 import json

@@ -275,7 +275,8 @@ as above, and step 5 runs in every consumer repository.
   `.github/workflows` (the contents API and a git-data tree both answer 403) and
   cannot move the default branch under its ruleset (422); probed 2026-10-24.
 - The App mints a fresh installation token per job and authors every
-  `apply / <stack> / <env>` check (create pending, in progress while its level applies, queued again if its run did not apply it, completed on apply), the
+  `apply / <stack> / <env>` check (create pending, in progress while its level
+  applies, queued again if its run did not apply it, completed on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
   `shipmate doctor` sticky report, the apply result comments, and drift
   issues. With the same `pull_requests: write` token it minimizes (collapses
