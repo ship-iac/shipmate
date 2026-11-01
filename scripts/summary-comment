@@ -16,8 +16,8 @@ read in `main`, so loading this module stays free of side effects.
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's fold-out degrades
 full plan -> truncated plan -> its bare line, never dropping the cell line's check link.
-A truncated plan links the pull request's Checks tab, which shows more of it: the cell's apply
-check holds up to 65,535 bytes of the plan.
+A truncated plan links the pull request's Checks tab, where the cell's apply check holds up
+to 65,535 bytes of the plan.
 Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
@@ -411,7 +411,7 @@ def render_section(line, plan_text, limit):
     if plan_text is None or limit < MIN_PLAN_CHARS:
         return line
     url = checks_tab_url(ag.env_pr_number())
-    trailer = f"\n\n_Truncated, [more of the plan in the Checks tab]({url})._\n</details>"
+    trailer = f"\n\n_Truncated; see the cell's apply check in [the Checks tab]({url})._\n</details>"
     return fold(line, diff_map(plan_text), limit, trailer, _head_lines)
 
 
