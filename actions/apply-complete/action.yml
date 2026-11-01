@@ -86,8 +86,9 @@ runs:
 
     - name: Mint App installation token
       # Minted after the jobs listing, so the token's lifetime never spans it. `always()`
-      # because the revert needs the token even when the listing failed.
-      if: always()
+      # because the revert needs the token even when the listing failed. A missing key skips it,
+      # so verify-app-key's error is the only one.
+      if: ${{ always() && inputs.private-key != '' }}
       id: token
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:

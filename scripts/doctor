@@ -2410,8 +2410,11 @@ def latest_check_ids(lines, app_id=""):
     """[(id, name)] -- newest run per check name among shipmate-relevant
     authors, App-authored rows outside the `apply / ` namespace excluded.
     Ranks by `started_at`, not check-run `id` (unlike
-    apply-gate.latest_by_name): a queued run has no `started_at` and no
-    annotations to harvest, so ranking it BELOW a completed run is wanted.
+    apply-gate.latest_by_name): a job's queued run has no `started_at` and no
+    annotations to harvest, so ranking it BELOW a completed run is wanted. An
+    App apply check carries no annotations in any status (queued, in progress
+    while its level applies, queued again after a revert), so its rank changes
+    nothing.
 
     Carries the consumer file's skipped router jobs too — they are
     `github-actions`-authored, so four rows per report (comment, deploy, apply,
@@ -2441,8 +2444,9 @@ def latest_check_ids(lines, app_id=""):
 
 def harvest_pending(lines, app_id=""):
     """True when any shipmate-relevant check run on this commit has not
-    completed, the App's `apply / ` checks excluded: each stays queued by
-    design until its cell is applied, and records no warnings.
+    completed, the App's `apply / ` checks excluded: each stays incomplete by
+    design until its cell is applied (queued, or in progress while its level
+    applies), and records no warnings.
 
     Keyed on the WHOLE relevant set, not the subset `latest_check_ids` selects:
     that ranking pushes a queued run below a completed one of the same name,

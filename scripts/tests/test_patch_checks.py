@@ -126,12 +126,17 @@ def test_a_degrading_write_does_not_retry_a_permanent_failure(monkeypatch, capsy
 
 
 def test_an_exhausted_completion_fails(monkeypatch, capsys, calls):
-    """Mutation: degrade `completed` like the others -> `main` returns instead of raising."""
+    """Mutations: degrade `completed` like the others -> `main` returns instead of raising;
+    restore "after retries" to the message -> it differs."""
     _, fail = calls
     fail["1"] = _BAD_GATEWAY
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, "completed", ["1", "2"])
-    assert str(exc.value).startswith("::error::failed to complete apply check 1 after retries")
+    assert exc.value.code == (
+        "::error::failed to complete apply check 1\n"
+        "command failed (1): gh api -X PATCH repos/acme/demo/check-runs/1 --input -\n"
+        "gh: Bad Gateway (HTTP 502)"
+    )
 
 
 def test_a_permanent_failure_is_not_retried(monkeypatch, calls):

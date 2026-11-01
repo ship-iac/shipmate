@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Map every cell in this run's wave matrices to its App-authored apply-check ids.
 
-Runs BEFORE wave0, in a job that checks out no repository content: the trailing
-completer marks only these ids done, so an apply check created mid-run by a fresh
-plan is left pending (its plan was never applied here) instead of being greened. Only checks
-authored by the shipmate App are eligible — a forged same-name check from any
-other identity is never completed.
+Runs BEFORE wave0: the trailing completer marks only these ids done, so an apply check
+created mid-run by a fresh plan is left pending (its plan was never applied here) instead of
+being greened. Only checks authored by the shipmate App are eligible — a forged same-name
+check from any other identity is never completed. `ids` prints a snapshot's ids, one per
+line, for `patch-checks`.
 """
 
 import json

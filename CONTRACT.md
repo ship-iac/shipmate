@@ -178,12 +178,16 @@ first, each through `scripts/gate-status` and one at a time per head
 When `apply-env-level.yml`'s `complete` job completes an `apply / <stack> / <env>`
 check, it completes only the check-run ids `actions/apply-snapshot` recorded for
 that name in the `snapshot` job, before the first wave.
-`snapshot` also sets every recorded check to `in_progress`, so a level's checks
-read in progress while its waves run; a failed write only warns. After
-completing, `complete` sets every recorded check it did not complete back to
-`queued`, even when the completion failed; a failed revert only warns. Every
-reader treats `queued` and `in_progress` alike as pending. "Re-run failed jobs"
-skips `snapshot`, so a re-run cell applies while its check reads `queued`.
+`snapshot` also sets every recorded check to `in_progress` before wave0, one
+PATCH per check in sequence, so a level's checks read in progress while its
+waves run; a failed write only warns. After completing, `complete` sets every
+recorded check it did not complete back to `queued`, even when the completion
+failed; a failed revert only warns. Every reader treats `queued` and
+`in_progress` alike as pending, so two display-only ceilings are accepted:
+"Re-run failed jobs" skips `snapshot`, so a re-run cell applies while its check
+reads `queued`; and a run cancelled while `snapshot` is still setting checks
+skips `complete`, so the checks already set stay `in_progress` until the next
+plan re-creates them.
 A plan re-run can create a fresh duplicate apply check; a duplicate created
 *after the snapshot* is therefore left pending (its plan was not applied by this run),
 while duplicates that predate the apply are all completed so the gate never
@@ -341,8 +345,9 @@ never used.
     `GITHUB_TOKEN` gets a 403 with `checks: read` alone — and every apply route's
     call site already grants `actions: read` for its wave jobs and `complete`, so
     the `uses:` permission cap is already high enough. A hand-written wrapper
-    calling `apply-env-level.yml` must grant it. No App key or App permission is
-    involved.
+    calling `apply-env-level.yml` must grant it. The environment check uses no
+    App key or App permission; the same job mints an App token afterwards to
+    mark the apply checks in progress.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
     this pre-flight does not enumerate; an environment whose branch policy names
@@ -367,7 +372,7 @@ never used.
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` and `gate-hold` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `review`, `lock` and `summary`, `apply-env-level.yml`'s `complete`,
+  `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot` and `complete`,
   `deploy.yml`'s `summary`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those

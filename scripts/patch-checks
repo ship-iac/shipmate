@@ -9,8 +9,8 @@ goes to stderr.
 
 The first id that still fails (a permanent failure at once, a transient one once its retries
 are exhausted) stops the loop, so the slim runner's time cap is never spent once per id:
-- `completed` fails closed: `::error::failed to complete apply check <id> after retries`,
-  exit 1, as the gate's work queue is the pending checks.
+- `completed` fails closed: `::error::failed to complete apply check <id>` above gh's own
+  error line, exit 1, as the gate's work queue is the pending checks.
 - `in_progress` and `queued` only change what a reviewer sees, so they degrade: one
   `::warning::` naming the status, the id and how many ids were left unpatched, exit 0.
 """
@@ -44,7 +44,7 @@ def main(argv):
         except SystemExit as exc:
             if status == "completed":
                 raise SystemExit(
-                    f"::error::failed to complete apply check {cid} after retries\n{exc.code}"
+                    f"::error::failed to complete apply check {cid}\n{exc.code}"
                 ) from None
             # Degrades: a flip or revert only changes what a reviewer sees.
             warning = (

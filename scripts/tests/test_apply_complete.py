@@ -489,9 +489,10 @@ def test_the_revert_runs_between_the_completion_and_the_fail_over():
 
 def test_the_mint_and_the_revert_run_always_and_the_completion_does_not():
     """A cancelled level or a failed listing still reverts, which needs the token; the
-    completion and the fail-over keep the default `if:`.
+    completion and the fail-over keep the default `if:`. The mint also skips a missing key, so
+    verify-app-key's error is the only one.
 
-    Mutations: drop the revert's `if: always()`; drop the mint's.
+    Mutations: drop the revert's `if: always()`; set the mint's back to `always()`.
     """
     steps = {s.get("name"): s.get("if") for s in action_steps("apply-complete")}
     assert [
@@ -499,7 +500,7 @@ def test_the_mint_and_the_revert_run_always_and_the_completion_does_not():
         steps["Complete the apply checks"],
         steps["Revert uncompleted apply checks to queued"],
         steps["Fail over any cell the jobs listing never resolved"],
-    ] == ["always()", None, "always()", None]
+    ] == ["${{ always() && inputs.private-key != '' }}", None, "always()", None]
 
 
 def _run_action_step(tmp_path, name, *, files=(), snapshot=_SNAP_IDS, empty_token=False, **gh):

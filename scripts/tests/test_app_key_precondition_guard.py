@@ -131,7 +131,7 @@ def test_every_mint_site_verifies_the_key_arrived():
         )
 
 
-#: apply-snapshot's mint, whole: the same pinned reference and inputs as apply-complete's.
+#: apply-snapshot's mint, whole.
 _SNAPSHOT_MINT = {
     "name": "Mint App installation token",
     "id": "token",
