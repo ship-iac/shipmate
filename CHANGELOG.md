@@ -20,7 +20,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **The publish hold says it is transient and when to re-plan**: `plan run <id> is publishing; gate updates when done. Still red after that run ends: re-plan (comment shipmate plan or push)`.
+- **The publish hold's description says the hold is normally brief and when to re-plan**: `Held while plan run <id> publishes (seconds). If this stays after that run ends, re-plan (comment shipmate plan or push)`.
 
 ## [0.53.1] — 2026-10-30
 

@@ -202,7 +202,7 @@ runs:
         # mid-publish would merge the unpublished cells. A re-run that publishes nothing still
         # holds. It stands until `Create/refresh gate`; `Create apply checks` publishes after it.
         if [ -n "$cells" ]; then
-          hold "plan run $GITHUB_RUN_ID is publishing; gate updates when done. Still red after that run ends: re-plan (comment shipmate plan or push)"
+          hold "Held while plan run $GITHUB_RUN_ID publishes (seconds). If this stays after that run ends, re-plan (comment shipmate plan or push)"
         fi
 
     - name: Mirror this run's per-cell plan checks onto the head
