@@ -122,8 +122,9 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
     `pr_number` binds each record to the dispatching pull request, and only the
     pre-merge paths pass one: a cell whose check records another pull request,
     or none, refuses with a re-plan remedy. Deploy passes None, which skips the
-    check, because its pull request comes from `commits/{sha}/pulls` on the
-    merged head rather than from a dispatch input.
+    check, because its pull request comes from the merge's mapping to its pull
+    request (`commits/{sha}/pulls`, else the branch's closed pull requests)
+    rather than from a dispatch input.
 
     With at least one cell to apply, a run that published only part of its apply
     checks refuses last (`refuse_incomplete`): a cell recording it, or the head's
