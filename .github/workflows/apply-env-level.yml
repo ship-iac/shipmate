@@ -5,14 +5,16 @@ on:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
       runs_on: { required: true, type: string }
-      # Empty on the merge deploy, which ignores cell locks; set, each cell refuses unless that
-      # pull request holds its lock.
+      # On apply, each cell refuses unless this pull request holds its lock. With `deploy` (the
+      # merge deploy) it is the merged pull request, empty on a push, and each cell refuses only
+      # a lock another pull request holds.
       pr_number: { required: false, type: string, default: "" }
       # `auto` marks an auto apply; its pre-apply check then also compares `provenance_run`,
       # detect's plan run, and `base_sha`, the base tip detect read.
       auto: { required: false, type: boolean, default: false }
       provenance_run: { required: false, type: string, default: "" }
       base_sha: { required: false, type: string, default: "" }
+      deploy: { required: false, type: boolean, default: false }
     secrets:
       SHIPMATE_ENCRYPTION_KEY:
         required: false
@@ -73,7 +75,7 @@ jobs:
       # only to refuse.
       - name: Pre-apply check
         id: pre-apply
-        if: ${{ inputs.pr_number != '' }}
+        if: ${{ inputs.pr_number != '' || inputs.deploy }}
         uses: $/actions/pre-apply
         with:
           pr-number: ${{ inputs.pr_number }}
@@ -84,6 +86,7 @@ jobs:
           provenance-run: ${{ inputs.provenance_run }}
           base-sha: ${{ inputs.base_sha }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
+          deploy: ${{ inputs.deploy }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.head_sha }}" }
       - uses: $/actions/setup

@@ -1547,3 +1547,80 @@ def test_verify_refuses_a_malformed_head_or_mode_before_any_read(monkeypatch, tm
         f"::error::{WHERE} SHIPMATE_HEAD_SHA must be a commit sha and SHIPMATE_AUTO true or "
         f"false (got: {got['SHIPMATE_HEAD_SHA']!r}, {got['SHIPMATE_AUTO']!r})"
     )
+
+
+# --- verify, deploy mode -------------------------------------------------------------------------
+
+MERGED = 4
+DEPLOY = {"SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": str(MERGED)}
+HELD_BY_9 = (
+    "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
+    "this merge; applying this merge's plan would undo that pull request's applied change. "
+    "Merge or close the holding pull request first, then open a pull request that changes "
+    "this stack to plan and apply it against the result"
+)
+
+
+def _locked_by(msg):
+    """A double answering the lock read with a lock whose commit message is `msg`."""
+    gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    return gh.on(commit_read(OLD), commit(OLD, msg))
+
+
+def test_verify_deploy_refuses_a_cell_another_pull_request_locks(monkeypatch, tmp_path):
+    """Mutation: drop the holder compare (pass any lock): the lock by #9 passes."""
+    gh = _locked_by(message(9, "dev", "stacks/auth"))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == HELD_BY_9
+
+
+@pytest.mark.parametrize(
+    "locked", [pytest.param(True, id="merged-holds"), pytest.param(False, id="unlocked")]
+)
+def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch, tmp_path, locked):
+    """The strict double queues no `pulls/` read, so any one is an unexpected call. Mutation:
+    run `_verify_pull` after the deploy check (a `pulls/` read; the merged, closed pull request
+    refuses). Mutation: refuse the merged pull request's own lock (`held.pr == pr` for `!=`):
+    merged-holds refuses."""
+    if locked:
+        gh = _locked_by(message(MERGED, "dev", "stacks/auth"))
+    else:
+        gh = Gh().on(ref_read(AUTH_REF), "[]")
+    assert _verify(monkeypatch, tmp_path, gh, DEPLOY) == {}
+    assert gh.drained()
+
+
+def test_verify_deploy_checks_a_push_with_pull_request_zero(monkeypatch, tmp_path):
+    """A push that merged no pull request passes an empty number. Mutation: drop the empty to
+    `0` rule in `main` (`env_pr_number` refuses the empty number before any read)."""
+    gh = _locked_by(message(9, "dev", "stacks/auth"))
+    env = {**DEPLOY, "SHIPMATE_PR_NUMBER": ""}
+    assert _verify_refusal(monkeypatch, tmp_path, gh, env) == HELD_BY_9
+
+
+def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
+    """Mutation: pass an unknown holder (`held.pr in (pr, None)`)."""
+    gh = _locked_by("garbage")
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an "
+        "unreadable lock, not by this merge; applying this merge's plan would undo that pull "
+        "request's applied change. Merge or close the holding pull request first, then open a "
+        "pull request that changes this stack to plan and apply it against the result"
+    )
+
+
+def test_verify_deploy_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path):
+    """Mutation: treat a failed read as unlocked (return None from the read on `SystemExit`)."""
+    gh = Gh().on(ref_read(AUTH_REF), FAIL)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
+        f"::error::{WHERE} could not confirm which pull request holds its cell lock (command "
+        f"failed (1): gh api); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize("value", ["yes", "", "True"])
+def test_verify_refuses_a_malformed_deploy_mode_before_any_read(monkeypatch, tmp_path, value):
+    """Mutation: run the deploy check for any value but `false` (yes reaches the lock read).
+    Mutation: treat an empty value as unset (empty runs today's check)."""
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), {"SHIPMATE_DEPLOY": value}) == (
+        f"::error::SHIPMATE_DEPLOY must be true or false (got: {value!r})"
+    )

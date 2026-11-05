@@ -56,6 +56,8 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ needs.detect.outputs.pr_number }}
+      deploy: true
     # Named, never inherit: see the envlevel0 job in apply.yml.
     secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml first: see the envlevel0 job in apply.yml.
@@ -73,6 +75,8 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ needs.detect.outputs.pr_number }}
+      deploy: true
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -85,6 +89,8 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ needs.detect.outputs.pr_number }}
+      deploy: true
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -97,6 +103,8 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      pr_number: ${{ needs.detect.outputs.pr_number }}
+      deploy: true
     secrets: *envlevel-secrets
 
   summary:

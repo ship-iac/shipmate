@@ -18,6 +18,7 @@ EXPECTED_INPUTS = {
         "workflow_call": [
             "auto",
             "base_sha",
+            "deploy",
             "head_sha",
             "pr_number",
             "provenance_run",

@@ -62,7 +62,10 @@ EXPECTED_ENVLEVEL_WITH = {
                 "base_sha": "${{ needs.detect.outputs.base_sha }}",
             },
         ),
-        ("deploy.yml", {}),
+        (
+            "deploy.yml",
+            {"pr_number": "${{ needs.detect.outputs.pr_number }}", "deploy": True},
+        ),
     )
     for n in range(4)
 }
@@ -110,11 +113,14 @@ def test_apply_env_level_takes_no_cap():
         "auto": {"required": False, "type": "boolean", "default": False},
         "provenance_run": {"required": False, "type": "string", "default": ""},
         "base_sha": {"required": False, "type": "string", "default": ""},
+        "deploy": {"required": False, "type": "boolean", "default": False},
     }
 
 
 def test_no_env_level_call_passes_a_cap():
-    """Mutation: pass `max_parallel` in `deploy.yml`'s `envlevel2` call."""
+    """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
+    or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply.yml`'s
+    `envlevel0` call."""
     found = {
         (workflow, job_id): job["with"]
         for workflow in ("apply.yml", "deploy.yml")
