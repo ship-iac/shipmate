@@ -1071,9 +1071,11 @@ Properties that fall out of the existing gate semantics:
   the `deploy` job normally — which no-ops idempotently when everything was
   applied pre-merge.
 - **Any merge method works.** Squash merges are fine: `deploy-detect` maps the
-  merge commit back to the PR head SHA via the commit→PR association
-  (`commits/<sha>/pulls`), or, while that is empty, the closed pull request
-  whose `merge_commit_sha` is the merge commit, not the commit graph.
+  merge commit back to the PR head SHA through GitHub's API, not the commit
+  graph. It reads the commit→PR association (`commits/<sha>/pulls`); while that
+  stays empty, it takes the merged pull request (`merged_at` set) whose
+  `merge_commit_sha` is the merge commit, from one page of the 100 most
+  recently updated closed pull requests into the branch.
 
 ### Applying chosen environments without an approving review
 

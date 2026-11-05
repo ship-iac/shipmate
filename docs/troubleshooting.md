@@ -985,12 +985,19 @@ a merged pull request:
   three reads, or the merge is older than the 100 most recently updated closed
   pull requests into `<branch>`. A direct push that merged no pull request
   warns the same way.
-- Effect: the deploy runs as a push to `<branch>`. It reads no apply check of
-  the merged pull request, so a refusal that follows, such as `apply aborted:
-  no plan run recorded`, names the push path.
-- Remedy: re-run the deploy once the association appears.
-  `gh api repos/<repo>/commits/<sha>/pulls` lists the merged pull request when
-  it has.
+- Effect: the deploy runs as a push to `<branch>` with no pull request. It
+  reads no apply check of the merged pull request, so a refusal that follows,
+  such as `apply aborted: no plan run recorded`, names the push path. The merged
+  pull request's own cell locks count as another pull request's: the deploy
+  refuses with `deploy refused: <n> pending cell(s) are locked by another pull
+  request`, naming `(locked by #<merged>)`, and no lock release runs.
+- Remedy for a merge commit: re-run the deploy once
+  `gh api repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request.
+  The re-run maps the merge to it, so its own locks pass and its lock release
+  runs.
+- Remedy for a direct push that changed stacks: open a pull request that
+  changes those stacks (any edit `terramate list --changed` marks), and apply
+  and merge it.
 
 ### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`
 
@@ -1002,8 +1009,10 @@ unlock <env> --evict` on it for each environment above, then apply it. ``
 
 Another pull request, or an unknown holder, locks one of the merge's pending
 cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
-nothing. Its lock release still runs and releases every lock the merged pull
-request holds, pending cells' included. The merged head's `shipmate / gate`
+nothing. When the deploy mapped the merge to its pull request, its lock release
+still runs and releases every lock the merged pull request holds, pending cells'
+included; a merge it could not map runs no lock release (see §`could not map
+<sha> to a merged pull request ...`). The merged head's `shipmate / gate`
 turns to `failure`, and its apply checks stay pending.
 
 1. Open a pull request that changes every stack the message lists as not
