@@ -291,8 +291,9 @@ runs:
         SHIPMATE_HEAD_REF: ${{ inputs.head-ref }}
       run: |
         set -euo pipefail
-        # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and nothing
-        # on the gate path reads it. `Create/refresh gate` is later and must not inherit this.
+        # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and the gate
+        # reads `stacked` only for a pending gate's description, never its state.
+        # `Create/refresh gate` is later and must not inherit this.
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" marks 2>marks.err; then
           sed 's/^::error::/::warning::/' marks.err >&2
           echo "::warning::could not read the cell locks; the plan comment marks no locked cell"

@@ -8,6 +8,16 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Added
+
+- **The plan comment names a lock holder stacked on this pull request**: a changed cell whose holder's base branch is this pull request's head branch ends `🔒 locked by #<n>, which is stacked on this pull request; merging this pull request first undoes #<n>'s applied change. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`. `actions/pr-facts` emits the head branch as `head-ref`, and the plan run's `summary` reads each holder's pull request once.
+
+### Changed
+
+- **The merge deploy refuses to apply over another pull request's cell lock.** `deploy-detect` refuses the whole run with `deploy refused: <n> pending cell(s) are locked by another open pull request`, naming each holder and every pending cell, applies nothing, and the deploy's lock release then releases the merged pull request's locks on its pending cells too. A deploy wave cell whose lock another pull request took after `detect` refuses with `its cell lock is held by <who>, not by this merge`. Both name one recovery: merge or close the holding pull request, then open a pull request that changes the stacks.
+
 ## [0.54.0] — 2026-11-01
 
 Tags `5698f17`.

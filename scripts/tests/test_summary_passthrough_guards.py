@@ -1,6 +1,6 @@
 """The plan workflow -> summary action -> gate-state handshake.
 
-Three files have to agree on eight names. Nothing at runtime notices when they stop agreeing, and
+Three files have to agree on these names. Nothing at runtime notices when they stop agreeing, and
 the failure is a gate decided from defaults.
 """
 

@@ -1454,7 +1454,8 @@ comment, after its autoplan (§`apply_mode: auto`).
 
 `apply_mode` constrains the bare pre-merge `shipmate apply` only. The
 post-merge deploy applies every cell whose apply check is still pending,
-`targeted` environments included; the control on that path is the apply
+`targeted` environments included, unless another pull request locks one, which
+refuses the deploy (§Cell locks); the control on that path is the apply
 environment's required reviewers — which a shared environment cannot carry (see
 §Env model) — not this setting. The asymmetry is deliberate:
 after merge the pull request is closed, and the apply requirements above include
@@ -1844,9 +1845,10 @@ A cell (one stack in one environment) that an open pull request applies is
 locked to that pull request until it merges or closes. Another pull request's
 apply leaves that cell pending and names the holder, so a fresh plan of one
 pull request cannot roll back what another applied. The lock is per cell, never
-per environment. The merge deploy ignores cell locks: it applies a locked cell,
-and the lock stays with its holder, whose saved plan is then stale and refuses
-until re-planned.
+per environment. The merge deploy does not apply over another pull request's
+lock either: its `detect` refuses the whole run when another pull request locks
+a pending cell, and each of its wave cells refuses a lock another pull request
+took after that `detect` (below).
 
 **Store.** A locked cell is one git ref,
 `refs/shipmate/locks/<env>/<key>`, where `<key>` is the lowercase hex SHA-256
@@ -1881,7 +1883,9 @@ not this deleter's lock, and done; still on the same commit refuses.
 | `shipmate apply`, bare or targeted | `apply.yml` `detect` | Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
 | the same run | `apply.yml` `lock`, after `detect` and before the first env-level | Locks every cell the env-levels will apply. A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
 | merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff |
-| merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check |
+| merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below) |
+| merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
+| merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unreadable lock` for an unknown holder) |
@@ -1935,12 +1939,53 @@ or comment `shipmate apply` on the pull request ``, and every other mismatch nam
 itself with the same remedy; a closed pull request refuses with `nothing applies`. A refused cell assumes no cloud role, and the apply
 result comment gives it the refusal, less its `apply aborted for` prefix, as the
 blocked reason, or `could not confirm the pull request still allows this apply (see
-the job log)` when no refusal arrived. The merge deploy passes no pull request, so
-its cells skip the check.
+the job log)` when no refusal arrived. A merge deploy's cell runs the check in its
+deploy mode instead (below).
+
+**The merge deploy refuses another pull request's lock.** A pull request that
+holds a cell's lock applied its own plan there, so applying a merge's plan to
+that cell would undo that change. `deploy-detect` reads the locks of the
+pending cells' environments as the merged pull request; a push that merged no
+pull request reads them as pull request `0`, which holds no lock. When another
+pull request, or an unknown holder, locks a pending cell, it applies nothing and
+refuses the whole run with one line:
+
+`` deploy refused: <n> pending cell(s) are locked by another open pull request,
+which applied its own plan to them: <stack> / <env> (locked by <who>), ...
+Applying this merge's plan would undo that pull request's applied change, so
+none of this merge's <m> pending cell(s) were applied: <stack> / <env>, ...
+Merge or close the holding pull request first, then open a pull request that
+changes these stacks to plan and apply them against the result. ``
+
+`<who>` is `#<n>`, or `an unreadable lock` for an unknown holder; both lists are
+sorted. The refusal names one recovery and offers no re-run. Before it refuses,
+`detect` writes the output `refused_locked` `true`, and the deploy's release
+step passes it to `actions/lock-release` as `release-pending`, so the merged
+pull request's locks are released on its pending cells too: none of them
+applied. A failed lock read refuses the run as well. The refused deploy's apply
+checks stay pending on the merged head, and its `summary` turns that head's
+`shipmate / gate` to `failure`, as for any `detect` refusal.
+
+A cell locked after `detect` is caught by the cell itself. Each wave cell of
+the merge deploy runs the pre-apply check in deploy mode (`apply-env-level.yml`
+input `deploy: true`, with the merged pull request as `pr_number`, empty on a
+push), which runs none of the checks above and refuses only when a pull request
+other than the merged one, or an unknown holder, holds the cell's lock:
+`` apply aborted for `<env>` / `<stack>`: its cell lock is held by <who>, not by
+this merge; applying this merge's plan would undo that pull request's applied
+change. Merge or close the holding pull request first, then open a pull request
+that changes this stack to plan and apply it against the result ``. An unlocked
+cell, or one the merged pull request holds, passes. A failed read refuses with
+`` could not confirm which pull request holds its cell lock (<why>); re-run the
+failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
+wave cell assumes no cloud role and keeps its apply check pending, and the waves
+before it have applied.
 
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the
-merged pull request holds whose cell has no pending apply check. The deploy's
+merged pull request holds whose cell has no pending apply check; after a
+`detect` refused over another pull request's lock, the deploy's `summary`
+deletes those on pending cells too. The deploy's
 release step runs whenever `deploy-detect` found the merged pull request, before
 and apart from its work queue, so either job alone releases every such lock,
 even when the deploy applies no cell. The `release` job alone handles a close
@@ -1948,15 +1993,19 @@ without merge and a merge that starts no deploy. A deploy that completed a
 cell's check and then was cancelled, or failed its delete, leaves a lock its
 re-run still releases.
 
-**Failure.** A lock read or write that fails refuses, in `detect`, `lock`,
-each pre-merge apply cell, the `release` job, the deploy's release step (whose failure fails the deploy's
+**Failure.** A lock read or write that fails refuses, in `apply.yml`'s and
+`deploy.yml`'s `detect`, `lock`, each apply cell (a merge deploy's included),
+the `release` job, the deploy's release step (whose failure fails the deploy's
 `summary`) and `--evict`. A release and an eviction continue past a delete that
 refuses, then fail naming each lock left held. A failed release stays owed until
-a re-run of that job succeeds. The plan comment's marker alone degrades: a lock read that fails there
-warns, and the comment marks no cell.
+a re-run of that job succeeds. The plan comment's marker alone degrades: a lock
+read that fails there warns, and the comment marks no cell; a holder's pull
+request read that fails warns, and that holder's lines do not say it is stacked.
 
-**Permissions.** `detect` and each pre-merge apply cell read locks with their
-`GITHUB_TOKEN` at `contents: read`. Every lock write mints an App token with `contents: write`
+**Permissions.** `apply.yml`'s and `deploy.yml`'s `detect` and each apply cell
+read locks with their `GITHUB_TOKEN` at `contents: read`. `plan.yml`'s `summary`
+reads them, and each holder's pull request (`pulls/<holder>`, once per distinct
+holder), with the App token it already mints. Every lock write mints an App token with `contents: write`
 in a job bound to `shipmate-engine`: `apply.yml`'s `lock`, `release.yml`'s
 `release`, `deploy.yml`'s `summary` and `comment-ops.yml`'s `ops`. An
 installation that has not accepted `contents: write` fails each of those
@@ -2285,7 +2334,11 @@ The five jobs:
   only thing it can look one up by. Nothing else in the file reads the event
   payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
-  about its own head repository.
+  about its own head repository. Its outputs are the head SHA, head repository,
+  head branch (`head-ref`), base SHA, number and draft flag. `head-ref` alone is
+  optional: it only decides whether a lock holder is stacked on this pull
+  request (§Plan comment), so a pull request naming no head branch emits it
+  empty and nothing refuses.
 - **`detect` and `plan`** (engine, either trigger) — they upload plan artifacts
   and cell summaries; they author nothing and mint no App token. `detect` binds
   no environment; `plan` binds only the plan environment for the cell it is
@@ -2321,9 +2374,13 @@ The five jobs:
   collapse of the started reply that links the run (§Comment-ops).
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
-  policy. It reads every fact it decides on from `needs.facts.outputs`, and the
-  rest from the two other jobs' results; nothing is recovered from artifacts or
-  from a second API lookup.
+  policy. It reads every fact about this pull request it decides on from
+  `needs.facts.outputs`, and the rest from the two other jobs' results; nothing
+  is recovered from artifacts or from a second lookup of this pull request. Its
+  plan comment's lock marks also read the cell lock refs and, once per distinct
+  holder, that holder's pull request (`pulls/<holder>`), whose base branch they
+  compare against `head-ref` (§Plan comment); both reads only decide what a
+  reviewer sees, and degrade (§Cell locks).
 - **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
   runs only when `summary` was cancelled, which the gate-writer concurrency
   group does to a pending `summary` (§Comment-ops, "The aggregate gate"). It
@@ -2875,8 +2932,18 @@ and `lost` outputs, which the same rule reads.
   bold cell names and the doctor report's check headers do the same.
   A changed cell another pull request holds a cell lock on ends its line with
   ` 🔒 locked by #<n>`, or ` 🔒 locked by an unreadable lock` for an unknown
-  holder (§Cell locks). The marker is part of the bare line, so the size budget
-  never sheds it. A lock read that fails warns and marks no cell.
+  holder (§Cell locks). When #<n>'s base branch is this pull request's head
+  branch (`facts`' `head-ref`), #<n> is stacked on this pull request, and merging
+  this one first would make its deploy refuse over #<n>'s lock, so the marker
+  reads ` 🔒 locked by #<n>, which is stacked on this pull request; merging this
+  pull request first undoes #<n>'s applied change. Retarget #<n> to <default
+  branch> and merge it first.` A pending gate then reads `stacked #<n> holds <k>
+  cell(s); retarget it to <default branch> and merge it first` in place of its
+  generic description, naming the lowest stacked holder and counting its changed
+  locked cells. The marker is part of the bare line, so the size budget never
+  sheds it. It degrades: a lock read that fails warns and marks no cell, and a
+  failed read of #<n>, an empty `head-ref` or an empty default branch renders
+  the plain marker and the generic pending description.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
