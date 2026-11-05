@@ -536,9 +536,11 @@ on the same entry.
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
 a plan comment with a changed cell on a pull request that is not a draft ends
-with a folded `shipmate commands` section naming `shipmate apply`, `shipmate
-unlock <env> --evict` for each environment holding a changed cell another pull
-request holds, and `shipmate help` (§Plan comment). It changes no plan or apply.
+with a folded `shipmate commands` section naming `shipmate apply` when a changed
+cell sits outside every `apply_mode: targeted` environment, `shipmate apply <env>`
+for each targeted environment holding a changed cell, `shipmate unlock <env>
+--evict` for each environment holding a changed cell another pull request holds,
+and `shipmate help` (§Plan comment). It changes no plan or apply.
 
 **`tools` chooses the Terramate and OpenTofu versions every job installs.** It
 maps `terramate`, `tofu` or both to a release version written `X.Y.Z` in ASCII
@@ -2886,10 +2888,31 @@ Comment `shipmate help` for every command.
 </details>
 ```
 
-When the comment marks a changed cell `🔒 locked by`, the section adds, before
-the `shipmate help` paragraph, one paragraph per such environment, sorted:
-``Comment `shipmate unlock <env> --evict` to take a cell another pull request
-holds.``
+A bare `shipmate apply` skips an `apply_mode: targeted` environment, so for each
+targeted environment holding a changed cell the section adds, after the bare
+paragraph, ``Comment `shipmate apply <env>` to apply <env>.``, in `detect`'s
+`env_order` with any environment it does not name after them by name. The bare
+paragraph shows only when a changed cell sits outside every targeted
+environment; a plan whose changed cells all sit in a targeted `prod` reads:
+
+```
+<details><summary>shipmate commands</summary>
+
+Comment `shipmate apply prod` to apply prod.
+
+Comment `shipmate help` for every command.
+
+</details>
+```
+
+The targeted environments come from `detect`'s `targeted_envs` output, the
+default branch table's. An empty one (detect skipped) names none, and so does an
+invalid one, which warns.
+
+When the comment marks a changed cell `🔒 locked by`, the section adds, after
+the apply paragraphs and before the `shipmate help` paragraph, one paragraph per
+such environment, sorted: ``Comment `shipmate unlock <env> --evict` to take a
+cell another pull request holds.``
 
 The held body and a body with no changed cell never carry it. The held body
 above ends with the hint. `doctor` records its decision once, as its `warned`

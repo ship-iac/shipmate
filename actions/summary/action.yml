@@ -99,10 +99,11 @@ inputs:
   command-hints:
     description: >-
       build-matrix's `command_hints` output, read from the default branch's table. `true` ends
-      the plan comment with a folded section naming `shipmate apply`, `shipmate unlock <env>
-      --evict` for each environment holding a changed cell another pull request holds, and
-      `shipmate help`, when a cell changed and the pull request is not a draft. Anything else
-      (empty when detect is skipped) leaves it out.
+      the plan comment with a folded section naming `shipmate apply` when a changed cell sits
+      outside every `targeted-envs` environment, `shipmate apply <env>` for each of those holding
+      a changed cell, `shipmate unlock <env> --evict` for each environment holding a changed cell
+      another pull request holds, and `shipmate help`, when a cell changed and the pull request is
+      not a draft. Anything else (empty when detect is skipped) leaves it out.
     required: false
     default: ""
   auto-envs:
