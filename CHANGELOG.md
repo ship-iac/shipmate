@@ -21,6 +21,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
+- **A merge deploy whose `commits/<sha>/pulls` stays empty finds its pull request among the 100 most recently updated closed pull requests of the branch**, matched on `merge_commit_sha` with `merged_at` set. With no match it warns `could not map <sha> to a merged pull request (...); deploying it as a push to <branch>` before it deploys as a push.
 - **A plan run whose pull request has moved past its head no longer writes its plan comment, apply checks or final gate there, and dispatches a plan for the live head when no autoplan run of it is unfinished or succeeded.** A move seen before the publish hold writes nothing and ends green with `::notice::pull request #<n> has moved past <sha>; this run writes no comment, apply check or gate on it`; a move seen at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, writes no comment, apply check or final gate, and ends green with `::notice::pull request #<n> has moved past <sha>; its sticky plan comment was not written`. When the pull request is open, the live head is not a draft and has no autoplan run unfinished or succeeded (for example, a re-run of the stale run cancelled its autoplan), it dispatches `shipmate plan` with `::notice title=dispatch::pull request #<n> moved to <sha>, which has no plan run; dispatched shipmate plan (on demand, so no auto apply follows it)`. A failure on that path warns with the remedy `comment shipmate plan`.
 
 ## [0.54.0] — 2026-11-01

@@ -944,7 +944,7 @@ def test_a_record_with_no_plan_run_refuses_before_its_pull_request_is_compared()
 
 
 def test_no_pull_request_number_never_compares_a_record():
-    """Deploy's call: post-merge the head comes from `commits/{sha}/pulls`, so a record naming
+    """Deploy's call: post-merge the head comes from the merge's pull request, so a record naming
     PR 7 applies. Mutation: drop `pr_number is not None and` -- red."""
     lines = _lines(_apply_check("stacks/app", pr="7", cells=1))
     assert ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=None) == [

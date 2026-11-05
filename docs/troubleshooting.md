@@ -976,6 +976,22 @@ For the second and third causes, re-pin the fence
 differs. In every case, `shipmate unlock <env> --evict` from a pull request that
 changes the cell releases the lock now.
 
+### `could not map <sha> to a merged pull request (commits/<sha>/pulls stayed empty and no recently closed pull request records it as its merge commit); deploying it as a push to <branch>`
+
+The deploy's `detect` job warns this when neither read maps the merge commit to
+a merged pull request:
+
+- Cause: GitHub's commit→pull request association had not caught up after
+  three reads, or the merge is older than the 100 most recently updated closed
+  pull requests into `<branch>`. A direct push that merged no pull request
+  warns the same way.
+- Effect: the deploy runs as a push to `<branch>`. It reads no apply check of
+  the merged pull request, so a refusal that follows, such as `apply aborted:
+  no plan run recorded`, names the push path.
+- Remedy: re-run the deploy once the association appears.
+  `gh api repos/<repo>/commits/<sha>/pulls` lists the merged pull request when
+  it has.
+
 ### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`
 
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
