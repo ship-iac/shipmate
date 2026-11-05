@@ -44,6 +44,11 @@ outputs:
   pr_number:
     description: Number of the pull request the commit merged; empty for a push that merged none.
     value: "${{ steps.detect.outputs.pr_number }}"
+  refused_locked:
+    description: >-
+      `true` when detect refused because another pull request holds a lock on a pending cell;
+      empty otherwise.
+    value: "${{ steps.detect.outputs.refused_locked }}"
 runs:
   using: composite
   steps:

@@ -20,6 +20,7 @@ dd = load_script("deploy-detect")
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=100"
+LOCKS_URL = "repos/acme/iac/git/matching-refs/shipmate/locks/dev-eu/"
 
 
 def test_merged_head_exact_match_wins(monkeypatch):
@@ -136,6 +137,36 @@ def _cell(stack, env="dev-eu"):
     return {"stack": stack, "environment": env, "workload": ""}
 
 
+def _lock_answer(locks):
+    """`_run_main`'s answer to a lock-ref or lock-commit path under its `locks` keyword, None
+    for any other path."""
+    shas = {f"{i:040x}": key for i, key in enumerate(locks, 1)} if isinstance(locks, dict) else {}
+
+    def answer(path):
+        if not path.startswith(
+            ("repos/acme/iac/git/matching-refs/", "repos/acme/iac/git/commits/")
+        ):
+            return None
+        if isinstance(locks, BaseException):
+            raise locks
+        if path.startswith("repos/acme/iac/git/commits/"):
+            stack, env = shas[path.rsplit("/", 1)[1]]
+            holder = locks[(stack, env)]
+            record = {"pr": holder, "env": env, "stack": stack, "acquisition": "1.1"}
+            message = json.dumps(record) if holder is not None else "not a lock record"
+            return json.dumps({"committer": {"date": "2026-10-24T00:00:00Z"}, "message": message})
+        env = path.removeprefix("repos/acme/iac/git/matching-refs/shipmate/locks/").rstrip("/")
+        return json.dumps(
+            [
+                {"ref": dd.ad.cl.ref_name(e, s), "object": {"type": "commit", "sha": sha}}
+                for sha, (s, e) in shas.items()
+                if e == env
+            ]
+        )
+
+    return answer
+
+
 def _run_main(
     tmp_path,
     monkeypatch,
@@ -152,6 +183,7 @@ def _run_main(
     pr_number="7",
     tag_reads=None,
     dot=None,
+    locks=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
@@ -170,6 +202,10 @@ def _run_main(
     `dot`, run-graph text, keeps `run_graph_deps` real and answers its Terramate call; `deps`
     otherwise replaces the run-graph.
 
+    `locks`, a `{(stack, env): holder}` map, answers the lock refs the real `cell-lock` reads
+    (none by default); a `None` holder's commit carries no lock record, as an unreadable lock's
+    does. An exception for `locks` is raised by every lock-ref read instead.
+
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
     for k, v in {
@@ -182,14 +218,16 @@ def _run_main(
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
     stub_read_table(monkeypatch, (dd.bm.ec,), table, order, reads=reads)
     jsonl = "\n".join(json.dumps(c) for c in checks)
+    lock_answer = _lock_answer(locks)
 
     def _run(args):
         # Every terramate call must be stubbed, because CI installs uv alone: a real
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
+        path = next(a for a in args if a.startswith("repos/"))
         if urls is not None:
-            urls.append(next(a for a in args if a.startswith("repos/")))
-        return jsonl
+            urls.append(path)
+        return lock_answer(path) or jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: (head, pr_number))
     # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks, reported
@@ -252,7 +290,7 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
         urls=urls,
     )
     assert len(wave_cells(dd.wv, parsed)) == 1  # Not vacuous: a cell exists.
-    assert urls == [CHECK_RUNS_URL]
+    assert urls == [CHECK_RUNS_URL, LOCKS_URL]
 
 
 def test_main_writes_an_empty_pr_number_for_a_push_with_no_pull_request(tmp_path, monkeypatch):
@@ -942,3 +980,104 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
         ("dns", "dev-us"),
         ("workers", "dev-eu"),
     ]
+
+
+LOCK_REMEDY = (
+    "Merge or close the holding pull request first, then open a pull request that changes "
+    "these stacks to plan and apply them against the result."
+)
+
+
+def _locked_run(tmp_path, monkeypatch, locks, pr_number="12"):
+    """`_run_main` over two pending dev-eu cells, stacks/app and stacks/dns, under `locks`."""
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app"), _cell("stacks/dns")],
+        checks=[_apply_check("stacks/app", cells=2), _apply_check("stacks/dns", cells=2)],
+        pr_number=pr_number,
+        locks=locks,
+    )
+
+
+def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkeypatch):
+    """The whole refusal text, and `refused_locked` written beside the head facts and no wave.
+
+    Mutation: drop the `refuse_locked` call -- the run writes waves and raises nothing.
+    Mutation: write `refused_locked` after the raise -- absent from the outputs."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 7})
+    assert str(exc.value) == (
+        "::error::deploy refused: 1 pending cell(s) are locked by another open pull request, "
+        "which applied its own plan to them: stacks/dns / dev-eu (locked by #7). Applying this "
+        "merge's plan would undo that pull request's applied change, so none of this merge's 2 "
+        "pending cell(s) were applied: stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
+    )
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "12",
+        "refused_locked": "true",
+    }
+
+
+def test_main_deploys_a_cell_the_merged_pull_request_itself_locks(tmp_path, monkeypatch):
+    """Mutation: pass `0` instead of the merged pull request's number -- #12's own lock refuses."""
+    parsed = _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 12})
+    assert sorted(c["stack"] for c in wave_cells(dd.wv, parsed)) == ["stacks/app", "stacks/dns"]
+    assert "refused_locked" not in parsed
+
+
+def test_a_push_that_merged_no_pull_request_refuses_any_held_cell(tmp_path, monkeypatch):
+    """Mutation: drop `or 0` -- `int("")` raises `ValueError` instead of the refusal."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(tmp_path, monkeypatch, {("stacks/app", "dev-eu"): 7}, pr_number="")
+    assert str(exc.value) == (
+        "::error::deploy refused: 1 pending cell(s) are locked by another open pull request, "
+        "which applied its own plan to them: stacks/app / dev-eu (locked by #7). Applying this "
+        "merge's plan would undo that pull request's applied change, so none of this merge's 2 "
+        "pending cell(s) were applied: stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
+    )
+
+
+def test_an_unreadable_lock_on_a_pending_cell_refuses_and_names_it(tmp_path, monkeypatch):
+    """Both cells held, one by an unreadable lock: listed sorted, each with its holder.
+
+    Mutation: render `#None` for an unknown holder -- the text changes.
+    Mutation: change `lock_who`'s text in `_shipmate` -- the text changes."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(
+            tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 9, ("stacks/app", "dev-eu"): None}
+        )
+    assert str(exc.value) == (
+        "::error::deploy refused: 2 pending cell(s) are locked by another open pull request, "
+        "which applied its own plan to them: stacks/app / dev-eu (locked by an unreadable lock), "
+        "stacks/dns / dev-eu (locked by #9). Applying this merge's plan would undo that pull "
+        "request's applied change, so none of this merge's 2 pending cell(s) were applied: "
+        "stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
+    )
+
+
+def test_a_merge_with_no_pending_cell_reads_no_lock(tmp_path, monkeypatch):
+    """A lock on another dev-eu stack does not matter when nothing is pending.
+
+    Mutation: read the locks of every cell's env instead of the pending ones' -- the lock
+    listing is read."""
+    urls = []
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app")],
+        checks=[_check(name="apply / stacks/app / dev-eu")],
+        urls=urls,
+        locks={("stacks/dns", "dev-eu"): 9},
+    )
+    assert urls == [CHECK_RUNS_URL]
+    assert "refused_locked" not in parsed
+
+
+def test_a_failed_lock_read_refuses_and_writes_no_refused_locked(tmp_path, monkeypatch):
+    """Mutation: catch the read failure and continue -- the run writes waves."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(tmp_path, monkeypatch, SystemExit("::error::gh api exited 1: boom"))
+    assert str(exc.value) == "::error::gh api exited 1: boom"
+    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "12"}

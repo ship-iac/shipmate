@@ -23,8 +23,8 @@ any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
 The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_order`,
-`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `lock_who`, `_join`) lives
-here because apply-comment and doctor already load this module.
+`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here
+because apply-comment and doctor already load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface
 unless `command_hints` is on, and shows only where the reader has something to do: under a
@@ -59,6 +59,7 @@ from _shipmate import (
     current_run_url,
     event_action,
     is_head_sha,
+    lock_who,
     run_annotated,
     write_outputs,
 )
@@ -311,11 +312,6 @@ def state(cell):
     if cell["add"] == "?":
         return "+? ~? -?"
     return tally(*(cell[k] for k in ("add", "change", "destroy", "import", "forget")))
-
-
-def lock_who(holder):
-    """Who holds a cell lock: `#<holder>`, or `an unreadable lock` for None (unknown holder)."""
-    return f"#{holder}" if holder is not None else "an unreadable lock"
 
 
 def _lock_key(cell, locks):

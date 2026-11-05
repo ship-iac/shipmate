@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 
+import _shipmate
 import pytest
 from _loader import (
     ACTIONS,
@@ -1872,6 +1873,12 @@ def test_a_changed_cell_another_pull_request_holds_names_its_holder():
         "lock\n"
         '🟢 stacks/dns: no changes <a href="https://gh/run/1">plan</a>'
     )
+
+
+def test_lock_who_names_a_holder_and_an_unreadable_lock():
+    """The one spelling every lock surface renders. Mutation: change either text in
+    `_shipmate.lock_who` -- red here, and in the plan, apply, evict and deploy pins."""
+    assert (_shipmate.lock_who(7), _shipmate.lock_who(None)) == ("#7", "an unreadable lock")
 
 
 _UNMARKED_LOCK_BODY = (

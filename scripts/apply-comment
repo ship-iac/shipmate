@@ -29,7 +29,15 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, command_data, current_run_url, named, run_annotated
+from _shipmate import (
+    _load,
+    cell_summaries,
+    command_data,
+    current_run_url,
+    lock_who,
+    named,
+    run_annotated,
+)
 
 sc = _load("summary-comment")
 # COUPLING: "what counts as a done apply check" is written once in apply-gate and shared with
@@ -606,7 +614,7 @@ def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, ove
     targeted blocker needs the approval and then its command. The targeted form passes
     `held`, `skipped` and `excluded` empty, so its remedy is the lock's or
     `shipmate apply <env>`."""
-    lock = f"it is locked by {sc.lock_who(holder)}; {_lock_remedy(holder, env)}"
+    lock = f"it is locked by {lock_who(holder)}; {_lock_remedy(holder, env)}"
     base = f"the base also changed it; {_OVERLAP_REMEDY}"
     if locked and overlap:
         return f"{lock}; {base}"
@@ -648,8 +656,7 @@ def _locked_lines(locked):
     for (holder, env), cells in by_lock.items():
         remedy = _lock_remedy(holder, env)
         lines.append(
-            f"🔒 locked by {sc.lock_who(holder)}: {', '.join(cells)}. "
-            f"{remedy[0].upper()}{remedy[1:]}."
+            f"🔒 locked by {lock_who(holder)}: {', '.join(cells)}. {remedy[0].upper()}{remedy[1:]}."
         )
     return lines
 
