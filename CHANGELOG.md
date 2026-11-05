@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Added
 
-- **The plan comment names a lock holder stacked on this pull request**: a changed cell whose holder's base branch is this pull request's head branch ends `🔒 locked by #<n>, which is stacked on this pull request; merging this pull request first undoes #<n>'s applied change. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`. `actions/pr-facts` emits the head branch as `head-ref`, and the plan run's `summary` reads each holder's pull request once.
+- **The plan comment names a lock holder stacked on this pull request.** A changed cell whose holder's base branch is this pull request's head branch ends `🔒 locked by #<n>, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`. `actions/pr-facts` emits the head branch as `head-ref`, and the plan run's `summary` reads each holder's pull request once.
 
 ### Changed
 

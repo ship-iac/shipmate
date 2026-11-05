@@ -879,19 +879,20 @@ def test_marks_reads_each_holder_once(monkeypatch, tmp_path):
 
 def test_a_failed_holder_read_warns_and_still_writes_the_locks(monkeypatch, tmp_path, capsys):
     """The stacked list is reviewer-facing, so a failed read leaves that holder out with a
-    warning naming it, and the step still writes `locks`. Mutation: let the read failure
-    raise -- `SystemExit`."""
+    one-line warning naming it, and the step still writes `locks`. Mutations: let the read
+    failure raise -- `SystemExit`; print `why` unflattened -- the warning splits, red."""
     gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
-    gh.on(pull_read(12), FAIL).on(pull_read(9), pull("feat-a"))
+    gh.on(pull_read(12), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
+    gh.on(pull_read(9), pull("feat-a"))
     assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
         "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
         "stacked": "[9]",
     }
     assert gh.drained()
     assert capsys.readouterr().out == (
-        "::warning::could not read pull request #12 (command failed (1): gh api), so "
+        "::warning::could not read pull request #12 (command failed (1): gh api | HTTP 502), so "
         "the plan comment does not say whether it is stacked on this pull request\n"
     )
 
@@ -1072,8 +1073,8 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
 
 def test_release_cli_release_pending_deletes_a_pending_cells_lock(monkeypatch, tmp_path):
     """A refused deploy releases even the lock whose apply check is pending, without reading the
-    head's checks. Mutation: keep the merge rule's `pending` set under release-pending (the
-    check read is unexpected and the pending lock stays)."""
+    head's checks. Mutation: keep the merge rule's `pending` set under release-pending -- the
+    head's checks are read, an unexpected call to the double, red."""
     gh = _all_locks(
         (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
         (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), EARLY),

@@ -1936,8 +1936,8 @@ def test_main_warns_and_marks_nothing_for_malformed_locks(tmp_path, monkeypatch,
 
 _STACKED_7 = (
     '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7, which is '
-    "stacked on this pull request; merging this pull request first undoes #7's applied change. "
-    "Retarget #7 to main and merge it first."
+    "stacked on this pull request; merging this pull request first makes its deploy refuse the "
+    "cells #7 holds. Retarget #7 to main and merge it first."
 )
 _PLAIN_7 = '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7'
 
@@ -1983,7 +1983,8 @@ def _stacked_hold_output(text):
 _STACKED_LOCK_BODY = _UNMARKED_LOCK_BODY.replace(
     "plan</a></summary>",
     "plan</a> 🔒 locked by #12, which is stacked on this pull request; merging this pull request "
-    "first undoes #12's applied change. Retarget #12 to main and merge it first.</summary>",
+    "first makes its deploy refuse the cells #12 holds. Retarget #12 to main and merge it "
+    "first.</summary>",
 )
 
 

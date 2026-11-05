@@ -335,9 +335,9 @@ def _plan_line(cell, url, locks, stacked=frozenset(), default_branch=""):
         line += f" 🔒 locked by {who}"
         if locks[key] in stacked and default_branch:
             line += (
-                ", which is stacked on this pull request; merging this pull request first undoes "
-                f"{who}'s applied change. Retarget {who} to {_md_name(default_branch)} and merge "
-                "it first."
+                ", which is stacked on this pull request; merging this pull request first makes "
+                f"its deploy refuse the cells {who} holds. Retarget {who} to "
+                f"{_md_name(default_branch)} and merge it first."
             )
     return line
 

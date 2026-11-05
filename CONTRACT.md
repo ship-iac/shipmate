@@ -1888,7 +1888,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
-| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unreadable lock` for an unknown holder) |
+| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unreadable lock` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
 the ref is read rather than the status parsed: this run's commit is acquired,
@@ -2334,8 +2334,9 @@ The five jobs:
   only thing it can look one up by. Nothing else in the file reads the event
   payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
-  about its own head repository. Its outputs are the head SHA, head repository,
-  head branch (`head-ref`), base SHA, number and draft flag. `head-ref` alone is
+  about its own head repository. Its outputs are `head-sha`, `head-repo`,
+  `head-ref` (the head branch), `base-sha`, `pr-number`, `is-draft` and
+  `on-demand`. `head-ref` alone is
   optional: it only decides whether a lock holder is stacked on this pull
   request (§Plan comment), so a pull request naming no head branch emits it
   empty and nothing refuses.
@@ -2933,11 +2934,10 @@ and `lost` outputs, which the same rule reads.
   A changed cell another pull request holds a cell lock on ends its line with
   ` 🔒 locked by #<n>`, or ` 🔒 locked by an unreadable lock` for an unknown
   holder (§Cell locks). When #<n>'s base branch is this pull request's head
-  branch (`facts`' `head-ref`), #<n> is stacked on this pull request, and merging
-  this one first would make its deploy refuse over #<n>'s lock, so the marker
-  reads ` 🔒 locked by #<n>, which is stacked on this pull request; merging this
-  pull request first undoes #<n>'s applied change. Retarget #<n> to <default
-  branch> and merge it first.` A pending gate then reads `stacked #<n> holds <k>
+  branch (`facts`' `head-ref`), #<n> is stacked on this pull request, and the
+  marker reads ` 🔒 locked by #<n>, which is stacked on this pull request; merging
+  this pull request first makes its deploy refuse the cells #<n> holds. Retarget
+  #<n> to <default branch> and merge it first.` A pending gate then reads `stacked #<n> holds <k>
   cell(s); retarget it to <default branch> and merge it first` in place of its
   generic description, naming the lowest stacked holder and counting its changed
   locked cells. The marker is part of the bare line, so the size budget never

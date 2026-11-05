@@ -208,6 +208,11 @@ def test_more_cells_than_planned_holds():
         {"planned_cells": "256", "cell_count": 0},
         {"planned_cells": "256", "cell_count": 255},
         {"detect_result": "skipped", "is_draft": True},
+        {
+            "stacked_hold": (
+                "stacked #123456 holds 256 cell(s); retarget it to main and merge it first"
+            )
+        },
     ],
 )
 def test_every_description_fits_the_statuses_api(kw):

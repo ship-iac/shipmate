@@ -1002,9 +1002,11 @@ pending.
 For `an unreadable lock`, no merge or close releases it: the new pull request's
 plan comment marks the cell, and `shipmate unlock <env> --evict` there releases
 it (§A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not
-a commit`). A stacked pull request's plan comment warns before this happens
-(`which is stacked on this pull request`): retarget the stacked pull request to
-the default branch and merge it first.
+a commit`). When the holder is stacked on the merged pull request (its base
+branch was the merged pull request's head branch), the merged pull request's own
+plan comment marks the cell `which is stacked on this pull request` once a plan
+runs after the lock was taken. Retarget the stacked pull request to the default
+branch and merge it first.
 
 ### A deploy cell refused: `its cell lock is held by`
 

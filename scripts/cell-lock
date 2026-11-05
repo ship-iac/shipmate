@@ -57,6 +57,7 @@ from _shipmate import (
     _run,
     cell_names,
     check_runs,
+    command_data,
     gh_json,
     is_head_sha,
     is_run_id,
@@ -546,6 +547,7 @@ def _stacked(repo, holders, head_ref, run):
             if base == head_ref:
                 stacked.append(holder)
             continue
+        why = command_data(" | ".join(why.splitlines()))
         print(
             f"::warning::could not read pull request #{holder} ({why}), so the plan comment "
             "does not say whether it is stacked on this pull request"
