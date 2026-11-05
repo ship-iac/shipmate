@@ -36,8 +36,11 @@ def test_the_summary_collapse_runs_last_on_a_written_on_demand_plan_comment():
     `|| echo` fallback; `SHIPMATE_REPLY_VERB: apply`.
     """
     names = [s.get("name") for s in action_steps("summary")]
-    assert names[-5:] == [
+    assert names[-8:] == [
         "Create/refresh gate",
+        "Check whether the live head needs a plan",
+        "Mint the plan dispatch token",
+        "Dispatch a plan of the live head",
         "Decide whether to dispatch an auto apply",
         "Mint the auto apply dispatch token",
         "Dispatch an auto apply",

@@ -9,6 +9,8 @@
     gate-status refresh <sha>                    green the gate once every apply check is done
     gate-status deploy <sha> <detect> <results>  write the post-merge verdict over job results
     gate-status checks <sha> <jq>                print one `jq` projection per line of check runs
+    gate-status moved <sha> <pr>                 print `<pr>`'s live head when it is not `<sha>`
+    gate-status replan <sha> <pr>                print that live head when it needs a plan
 
 The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
@@ -24,6 +26,14 @@ serves `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends
 on any host, and a malformed `<sha>` or a failed listing exits 1 unannotated: a caller that
 degrades prints the only annotation as a warning, and a fail-closed caller prints its own
 `::error::`.
+
+`moved` and `replan` read the pull request once through `_shipmate.pr_head`. `replan` prints the
+live head when it is not `<sha>`, the pull request is open and not a draft, and no autoplan run of
+the live head is unfinished (any status but `completed`, a missing one included) or `completed` with
+conclusion `success`; otherwise it prints nothing, with a log line on stderr when the head moved.
+A `<pr>` that is not a pull-request number exits 1 with `::error::` before any API call. A
+malformed `<sha>`, a failed head read and a failed or malformed run listing exit 1 with one
+unannotated stderr line, as in `checks`.
 """
 
 import os
@@ -36,7 +46,10 @@ from _shipmate import (
     _run,
     check_runs,
     current_run_url,
+    is_pr_number,
     is_run_id,
+    one_line,
+    pr_head,
     retried,
     run,
     run_annotated,
@@ -211,11 +224,49 @@ def _checks(sha, jq):
     sys.stdout.buffer.write(check_runs(_repo(), sha, jq, run=run).encode("utf-8"))
 
 
+def _moved(sha, pr):
+    live, _, _ = pr_head(_repo(), pr, run=run)
+    if live != sha:
+        print(live)
+
+
+def _blocks_replan(listed):
+    return listed.get("status") != "completed" or listed.get("conclusion") == "success"
+
+
+def _replan(sha, pr):
+    live, draft, state = pr_head(_repo(), pr, run=run)
+    if live == sha:
+        return
+    if state != "open":
+        print(f"pull request #{pr} is {state}; nothing dispatched", file=sys.stderr)
+        return
+    if draft:
+        print(f"pull request #{pr} moved to {live}, a draft; nothing dispatched", file=sys.stderr)
+        return
+    try:
+        runs = ag.autoplan_runs(_repo(), live, run=run)
+    except SystemExit as exc:
+        raise SystemExit(one_line(exc.code)) from None
+    except ValueError as exc:
+        raise SystemExit(one_line(exc)) from None
+    if any(map(_blocks_replan, runs)):
+        print(
+            f"pull request #{pr} moved to {live}, whose autoplan run has not finished or "
+            "succeeded; nothing dispatched",
+            file=sys.stderr,
+        )
+        return
+    print(live)
+
+
 #: command -> (argument count after the sha, handler)
 _COMMANDS = {
     "newest": (0, _newest),
     "refuse-newer": (0, _refuse_newer),
     "checks": (1, _checks),
+    "moved": (1, _moved),
+    "replan": (1, _replan),
     # The summary writes after `refuse-newer`; a retried write re-runs it first.
     "post": (2, lambda sha, state, desc: post(sha, state, desc, lambda: _refuse_newer(sha))),
     "hold": (1, lambda sha, description: post(sha, "failure", description)),
@@ -233,8 +284,10 @@ def main(argv):
     sha = args[0]
     if cmd == "deploy" and not sha:
         raise SystemExit("::error::detect produced no head SHA; deploy cannot gate")
-    # Unannotated for `checks`: each caller annotates, as a warning where it degrades.
-    validate_head_sha(sha, "head SHA", annotate=cmd != "checks")
+    # Unannotated for these: each caller annotates, as a warning where it degrades.
+    validate_head_sha(sha, "head SHA", annotate=cmd not in ("checks", "moved", "replan"))
+    if cmd in ("moved", "replan") and not is_pr_number(args[1]):
+        raise SystemExit(f"::error::<pr> must be a pull request number (got: {args[1]!r})")
     _COMMANDS[cmd][1](*args)
 
 

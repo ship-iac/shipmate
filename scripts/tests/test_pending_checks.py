@@ -291,7 +291,7 @@ def test_an_unset_pull_request_number_refuses(tmp_path, monkeypatch):
 def test_the_publishing_step_hands_the_script_exactly_these_names():
     """The whole `env:` of the summary step running pending-checks. Mutations: drop
     `SHIPMATE_PR_NUMBER` from it -- red; drop `SHIPMATE_APP_ID` -- red; drop
-    `SHIPMATE_PLANNED_CELLS` -- red."""
+    `SHIPMATE_PLANNED_CELLS` -- red; rebind or drop `GH_TOKEN` -- red."""
     (step,) = [
         s
         for s in action_yaml("summary")["runs"]["steps"]

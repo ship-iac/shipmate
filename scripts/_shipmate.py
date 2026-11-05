@@ -395,6 +395,34 @@ def validate_head_sha(value, source="SHIPMATE_HEAD_SHA", *, annotate=True):
         raise SystemExit(f"::error::{message}" if annotate else message)
 
 
+def one_line(text):
+    """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
+    command in the log."""
+    return " | ".join(part for part in re.split(r"[\r\n]+", str(text)) if part)
+
+
+def pr_head(repo, pr, run=run):
+    """`(head SHA, draft, state)` of pull request `pr` from one `gh api repos/{repo}/pulls/{pr}`
+    read; `state` is GitHub's `open` or `closed`.
+
+    Raises `SystemExit` with one unannotated line when the read fails, its body is not a pull
+    request, the SHA is not 40 lowercase hex characters, `draft` is not a bool, or `state` is not
+    a string; each caller decides how to report it. `pr` is bound into the path: validate it
+    first."""
+    try:
+        pull = json.loads(run(["gh", "api", f"repos/{repo}/pulls/{pr}"]))
+        sha, draft, state = pull["head"]["sha"], pull["draft"], pull["state"]
+    except SystemExit as exc:
+        raise SystemExit(one_line(exc.code)) from None
+    except (ValueError, LookupError, TypeError) as exc:
+        raise SystemExit(one_line(f"unreadable pull request #{pr}: {exc!r}")) from None
+    if not is_head_sha(sha) or not isinstance(draft, bool):
+        raise SystemExit(one_line(f"pull request #{pr} has head SHA {sha!r} and draft {draft!r}"))
+    if not isinstance(state, str):
+        raise SystemExit(one_line(f"pull request #{pr} has state {state!r}"))
+    return sha, draft, state
+
+
 def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None, name=None):
     """Every check-run on `sha`, or only those named `name`, as `gh api --jq` output: one `jq`
     projection per line.

@@ -37,7 +37,7 @@ def _head(cid, head):
 
 #: A pull request head, and the `--head` read's whole argv.
 _HEAD = "c" * 40
-PULLS_ARGV = ["gh", "api", "repos/o/r/pulls/7", "--jq", ".head.sha"]
+PULLS_ARGV = ["gh", "api", "repos/o/r/pulls/7"]
 
 
 def _upsert(
@@ -63,7 +63,7 @@ def _upsert(
         if args[2].startswith("repos/o/r/pulls/"):
             if head_fails:
                 raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")
-            return f"{head}\n"
+            return json.dumps({"head": {"sha": head}, "draft": False, "state": "open"})
         if args[2] == "--paginate":
             if list_fails:
                 raise SystemExit("command failed (1): gh api\nHTTP 502")
@@ -191,6 +191,17 @@ def test_a_failed_head_read_prints_head_failed_on_one_stderr_line(monkeypatch, t
     assert capsys.readouterr() == (
         "head-failed\n",
         "command failed (1): gh api | HTTP 502 | ::add-mask::x\n",
+    )
+
+
+def test_a_null_head_prints_head_failed_not_moved(monkeypatch, tmp_path, capsys):
+    """A pull request read with no head SHA is a failed read, not a moved head. Mutation: skip
+    the SHA check in `_shipmate.pr_head` -- `moved`."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", _HEAD, head=None)
+    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
+    assert capsys.readouterr() == (
+        "head-failed\n",
+        "pull request #7 has head SHA None and draft False\n",
     )
 
 
@@ -383,7 +394,7 @@ _SUMMARY_SKIPPED = (
 )
 _SHA = "a" * 40
 #: The pull request head read every writing mode makes after the comment listing.
-_PULLS = ["api", "repos/o/r/pulls/7", "--jq", ".head.sha"]
+_PULLS = ["api", "repos/o/r/pulls/7"]
 _DEGRADED = (
     "::warning::the sticky plan comment was not updated with why the gate is held; the gate "
     "description says it\n"
@@ -536,21 +547,23 @@ def test_summary_held_render_failure_writes_no_comment(tmp_path):
 @pytest.mark.parametrize("mode", ["held", "post", "nothing-changed"])
 def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
     """A re-run of an old run never replaces the comment of the head the pull request has moved
-    to. Mutations: drop `--head` from either upsert-comment call -- a write follows; misspell
-    `moved` in the step -- no notice."""
+    to. `result=moved` is what skips `Create apply checks` and `Create/refresh gate`.
+    Mutations: drop `--head` from either upsert-comment call -- a write follows; misspell
+    `moved` in the step -- no notice; drop the held branch's `result=` line -- no output."""
     proc, calls = _run_summary(tmp_path, mode, head="b" * 40, warned="true")
     assert (proc.returncode, proc.stdout, calls) == (
         0,
         (
-            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment belongs "
-            "to the newer head's run and was not written\n"
+            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment was not "
+            "written\n"
         ),
         [_LIST, _PULLS],
     )
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=moved\n"
 
 
 #: upsert-comment's one-line stderr for a failed head read; the stub prints no gh stderr.
-_HEAD_FAILED = "command failed (1): gh api repos/o/r/pulls/7 --jq .head.sha\n"
+_HEAD_FAILED = "command failed (1): gh api repos/o/r/pulls/7\n"
 
 
 @bash_only

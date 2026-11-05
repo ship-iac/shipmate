@@ -614,6 +614,42 @@ def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
     assert argv == [autoplans_read("o/r", _HEAD)]
 
 
+def test_autoplan_runs_returns_every_listed_run_in_listing_order():
+    """The rows carry `status` and `conclusion`, which `replan` judges. Mutation: return only the
+    newest row; drop `status, conclusion` from the projection (the argv differs)."""
+    rows = [
+        listed_autoplan(5, _HEAD, status="completed", conclusion="success"),
+        listed_autoplan(12, _HEAD, status="queued", conclusion=None),
+    ]
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        return "".join(json.dumps(row) + "\n" for row in rows)
+
+    assert ag.autoplan_runs("o/r", _HEAD, run=run) == [
+        {
+            "id": 5,
+            "event": "pull_request_target",
+            "head_sha": _HEAD,
+            "actor": {"login": "k3np"},
+            "triggering_actor": {"login": "k3np"},
+            "status": "completed",
+            "conclusion": "success",
+        },
+        {
+            "id": 12,
+            "event": "pull_request_target",
+            "head_sha": _HEAD,
+            "actor": {"login": "k3np"},
+            "triggering_actor": {"login": "k3np"},
+            "status": "queued",
+            "conclusion": None,
+        },
+    ]
+    assert argv == [autoplans_read("o/r", _HEAD)]
+
+
 def test_newest_autoplan_of_an_empty_listing_is_none():
     """Mutation: `default=0` for `default=None` in the `max`."""
     assert _newest()[0] is None

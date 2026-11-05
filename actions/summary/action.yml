@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and that head has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
 inputs:
   pr-number:
     description: Pull request number.
@@ -166,14 +166,26 @@ runs:
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
         hold() { python3 "$gate_status" hold "$SHIPMATE_HEAD_SHA" "$1"; }
-        # A composite step's `exit 0` does not end the composite, so every later step's `if:` reads
-        # `superseded`. The run ends green, so a re-run of a cancelled autoplan clears its checks.
+        # A composite step's `exit 0` does not end the composite, so every write step skips on
+        # `superseded`; the live-head steps run on `moved` and must not read `superseded`. The run
+        # ends green, so a re-run of a cancelled autoplan clears its checks.
         superseded() {
           sed 's/^::error::/::notice::/' "$1" >&2
           echo "superseded=true" >> "$GITHUB_OUTPUT"
           exit 0
         }
         ended="re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate"
+        # A head the pull request has left is not the one it merges, so this run writes nothing on
+        # it. Degrades: a failed read publishes on this head as before, which holds and gates it.
+        if live=$(python3 "$gate_status" moved "$SHIPMATE_HEAD_SHA" "$SHIPMATE_PR_NUMBER" 2>moved.err); then
+          if [ -n "$live" ]; then
+            echo "::notice::pull request #$SHIPMATE_PR_NUMBER has moved past $SHIPMATE_HEAD_SHA; this run writes no comment, apply check or gate on it"
+            printf 'superseded=true\nmoved=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        else
+          echo "::warning::could not read the head of pull request #$SHIPMATE_PR_NUMBER ($(cat moved.err)); this run publishes on $SHIPMATE_HEAD_SHA"
+        fi
         # A failed read holds, which is always safe: a failed artifact download leaves `cells/`
         # empty over planned cells, so no cell summary is no proof of no work. A newer run's hold or
         # checks refuse without a write, so an older run never overwrites that run's gate or checks.
@@ -398,7 +410,7 @@ runs:
         degraded="::warning::the sticky plan comment was not updated with why the gate is held; the gate description says it"
         # `--head`: the comment is keyed per pull request, so a re-run of an old run would replace
         # a newer head's comment. upsert-comment then writes nothing and prints `moved`.
-        moved="::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment belongs to the newer head's run and was not written"
+        moved="::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment was not written"
         # Degrades: `Create/refresh gate` writes the `failure` gate and its description either way,
         # and a red gate over a stale comment greens nothing. A failed render writes no comment.
         if [ "$MODE" = "held" ]; then
@@ -442,7 +454,7 @@ runs:
         fi
 
     - name: Create apply checks (pending / no-changes)
-      if: ${{ steps.hold.outputs.superseded != 'true' }}
+      if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -462,7 +474,7 @@ runs:
         done < bodies.jsonl
 
     - name: Create/refresh gate
-      if: ${{ steps.hold.outputs.superseded != 'true' }}
+      if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -510,9 +522,66 @@ runs:
           fi
         fi
 
+    - name: Check whether the live head needs a plan
+      if: ${{ steps.hold.outputs.moved == 'true' || steps.upsert.outputs.result == 'moved' }}
+      id: livehead
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        # Degrades: this run's head is not the pull request's, so nothing here gates the merge.
+        if ! live=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" replan "$SHIPMATE_HEAD_SHA" "$SHIPMATE_PR_NUMBER" 2>replan.err); then
+          echo "::warning::could not decide whether pull request #$SHIPMATE_PR_NUMBER needs a plan ($(cat replan.err)); comment shipmate plan to plan it"
+          exit 0
+        fi
+        cat replan.err >&2
+        if [ -n "$live" ]; then echo "live=$live" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Mint the plan dispatch token
+      if: ${{ steps.livehead.outputs.live != '' }}
+      id: plantoken
+      # Degrades: a failed mint leaves the token empty, which the dispatch step reports.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+
+    - name: Dispatch a plan of the live head
+      if: ${{ steps.livehead.outputs.live != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.plantoken.outputs.token }}
+        # dispatch-body's inputs. A `workflow_dispatch` plan is on demand, so no auto apply follows.
+        VERB: plan
+        PR_NUMBER: ${{ inputs.pr-number }}
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+        SHIPMATE_LIVE: ${{ steps.livehead.outputs.live }}
+      run: |
+        set -euo pipefail
+        # Degrades: a failed mint or dispatch warns with the remedy and exits 0.
+        not_planned() {
+          echo "::warning::$1 failed, so $SHIPMATE_LIVE has no plan; comment shipmate plan to plan pull request #$PR_NUMBER"
+          exit 0
+        }
+        [ -n "${GH_TOKEN:-}" ] || not_planned "the plan dispatch token mint"
+        if ! body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") \
+          || ! gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/shipmate.yml/dispatches" \
+            --input - <<<"$body" >/dev/null; then
+          not_planned "the plan dispatch"
+        fi
+        echo "::notice title=dispatch::pull request #$PR_NUMBER moved to $SHIPMATE_LIVE, which has no plan run; dispatched shipmate plan (on demand, so no auto apply follows it)"
+
     - name: Decide whether to dispatch an auto apply
       # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
-      # job first. A `moved` upsert means a newer head exists, whose own run decides.
+      # job first. A `moved` upsert means the pull request left this head; the live-head step
+      # decides whether that head gets a plan.
       if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
       id: autodecide
       shell: bash

@@ -1474,12 +1474,16 @@ ended, re-plan (comment shipmate plan or push)". That hold stays when the run
 ends before its final gate write (a failed or cancelled summary job, or a
 cancelled plan job after the summary downloaded a cell summary). A sticky plan
 comment that could not be listed or written, or whose pull request head could
-not be read ("could not read the head of pull request #<n>"), fails the summary
-job before that write too, and before any apply check is published; the error is
+not be read just before the write ("could not read the head of pull request
+#<n>, so the sticky plan comment was not updated"), fails the summary job
+before that write too, and before any apply check is published; the error is
 in the job's annotation for a failed write and in the step log for a failed
 listing or head read. A held run's comment write, which only explains the red
-gate, warns on those failures instead, and the gate is still written. What a
-summary job that fails part way leaves on the comment is in
+gate, warns on those failures instead, and the gate is still written. The
+hold step's own head read, before the publish hold, only warns ("could not read
+the head of pull request #<n> (<why>); this run publishes on <sha>"), and the
+run publishes as if the head had not moved. What a summary job that fails part
+way leaves on the comment is in
 [`CONTRACT.md`](../CONTRACT.md) §Plan comment. The
 summary job also holds the gate when it cannot read the head's gate statuses or
 apply checks, or cannot build the checks to publish (a cell summary missing a key),
@@ -1509,10 +1513,13 @@ and a later arrival replaces a waiting run; whether a re-run of a
 `ready_for_review` run or of a dispatched run waits is not verified. A re-run
 summary publishes no apply check its own run already published, so it leaves
 alone a check an apply completed or is completing. It refuses before writing
-anything when a newer plan run holds the gate or published apply checks on the
-head, and ends green with that refusal as a notice. A re-run of a plan job
-whose artifact upload succeeded fails, because the uploads are not `overwrite:`
-and 409.
+anything when its hold step finds the pull request moved past its head, or
+when a newer plan run holds the gate or published apply checks on the head, and
+ends green with that refusal as a notice; a moved run then plans the live head
+when the pull request is open, the live head is not a draft, and it has no
+autoplan run unfinished or succeeded (§A cancelled autoplan left red checks on
+the pull request). A re-run of a plan job whose artifact upload succeeded fails,
+because the uploads are not `overwrite:` and 409.
 
 `gate-refresh` refuses to green a held gate from apply checks alone: the apply
 run fails with "shipmate / gate is held", pointing at this status description.
@@ -1809,10 +1816,17 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    another pull request, the plan comment says so under its verdict, on every
    attempt of that run:
    ``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.``
-   The step is skipped when a newer plan run of the head superseded this one, or
-   when the sticky comment upsert found the head moved: the new head's run
-   decides. The next step, `Dispatch an auto apply`, logs `dispatched an auto
-   apply of <envs> for PR #<n> (ref <sha>)`.
+   The next step, `Dispatch an auto apply`, logs `dispatched an auto apply of
+   <envs> for PR #<n> (ref <sha>)`. Both steps are skipped when a newer plan
+   run of the head refused this one, or when the pull request moved past this
+   run's head (the publish hold's or the sticky comment upsert's read). A moved
+   run's step `Check whether the live head needs a plan` then dispatches
+   `shipmate plan` for the live head, or logs why not (`pull request #<n> is
+   <state>; nothing dispatched`, `pull request #<n> moved to <sha>, a draft;
+   nothing dispatched`, or `pull request #<n> moved to <sha>, whose autoplan run
+   has not finished or succeeded; nothing dispatched`). A
+   dispatched plan is on demand, so no auto apply follows it: comment `shipmate
+   apply` once it finishes.
 2. The pull request's comments: the `auto apply not started` reply (below), or
    the `auto` run's apply result comment. A `detect` refusal sits in that
    comment's error fence; the entries below quote each one.
@@ -2172,10 +2186,30 @@ fence in [`getting-started.md`](getting-started.md) §The workflow file.
 A newer plan run of the same pull request (a push, open or reopen, or a re-run
 of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, `plan / gate-hold`, the `plan / <env> / <stack>` matrix
-check) stay red or cancelled on the head.
+check) stay red or cancelled on its head.
 
-After the newer plan run has finished, re-run the cancelled run:
-`gh run rerun <id>`. Not before: the re-run re-enters the `plan-<pr>`
+When a newer head's run cancelled it, those checks sit on a head the pull
+request has left, and the merge gates on the live head alone: nothing needs
+recovering. A re-run
+of it writes nothing on its head and ends green at its hold step, with the
+notice "pull request #<n> has moved past <sha>; this run writes no comment,
+apply check or gate on it". When that re-run cancelled the live head's autoplan
+in flight (below), it dispatches `shipmate plan` for the live head, whose
+autoplan run is then neither unfinished nor succeeded; that plan is on demand,
+so no auto apply follows it.
+
+A push, open or reopen run of an older head that arrives while the live head's
+autoplan runs cancels that autoplan. When that older run's summary finds the
+head moved, it dispatches `shipmate plan` for the live head if the pull request
+is open, is not a draft, and the live head has no autoplan run unfinished or
+succeeded; it logs why otherwise. In every case, once no plan run is in flight,
+comment `shipmate plan` if the plan comment does not show the live head, then
+`shipmate apply` for an environment that applies automatically: an on-demand
+plan starts no auto apply.
+
+When a run on the same head cancelled it (open, reopen, or a re-run), re-run
+the cancelled run after the newer plan run has finished: `gh run rerun <id>`.
+Not before: the re-run re-enters the `plan-<pr>`
 concurrency group, which cancels the run in progress only when the arriving
 run is a `pull_request_target` run other than `ready_for_review` (a push, open or
 reopen, or a re-run of one), so the re-run of such a run cancels a newer run

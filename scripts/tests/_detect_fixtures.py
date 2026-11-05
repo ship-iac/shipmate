@@ -42,7 +42,7 @@ def forbid_shared_runner(monkeypatch):
 
 
 def listed_autoplan(run_id, head, **keys):
-    """One run object of the autoplan listing as `apply-gate.newest_autoplan`'s `--jq`
+    """One run object of the autoplan listing as `apply-gate.autoplan_runs`' `--jq`
     projects it: a `pull_request_target` run of `head` pushed by `k3np`, `keys` over it."""
     login = {"login": "k3np"}
     run = {"id": run_id, "event": "pull_request_target", "head_sha": head}
@@ -50,7 +50,7 @@ def listed_autoplan(run_id, head, **keys):
 
 
 def autoplans_read(repo, head):
-    """The argv `apply-gate.newest_autoplan` lists `head`'s autoplans in `repo` with,
+    """The argv `apply-gate.autoplan_runs` lists `head`'s autoplans in `repo` with,
     hand-written."""
     return [
         "gh",
@@ -62,8 +62,9 @@ def autoplans_read(repo, head):
         ),
         "--jq",
         (
-            ".workflow_runs[] | {id, event, head_sha, actor: {login: .actor.login}, "
-            "triggering_actor: {login: .triggering_actor.login}} | tojson"
+            ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
+            "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
+            "| tojson"
         ),
     ]
 

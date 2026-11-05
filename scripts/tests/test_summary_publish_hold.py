@@ -7,10 +7,12 @@ apply-check POST and `Create/refresh gate` would therefore let an apply of the p
 green the gate and merge the unpublished ones. `Hold the gate while apply checks publish` writes a
 `failure` gate first, which `gate-refresh` refuses to green.
 
-Before that hold it refuses, writing nothing, when a newer plan run of the head holds the gate
+First it reads the pull request (`gate-status moved`): on a head the pull request has left it
+writes nothing and sets `superseded` and `moved`; a failed read warns and publishes as before.
+Before the hold it refuses, writing nothing, when a newer plan run of the head holds the gate
 anywhere in its status history or published an apply check, so an older run (a first attempt or a
 re-run) never replaces a newer run's gate or checks. That refusal ends the step green with a notice
-and sets `superseded`, which every later step's `if:` reads, so a re-run of a cancelled autoplan
+and sets `superseded`, which every write step's `if:` reads, so a re-run of a cancelled autoplan
 clears its checks. A failed read of either, or a failed
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
@@ -99,6 +101,8 @@ def _status_post(state, description, run_id=RUN_ID):
 
 
 HOLD_POST = _status_post("failure", HOLD_DESCRIPTION)
+#: `gate-status moved`'s one read, the first call of a hold step that reaches the API.
+PULL_READ = ["api", "repos/acme/demo/pulls/7"]
 LISTING_FAILED = (
     f"::error::could not list the check runs on {HEAD_SHA}; the step log names the cause"
 )
@@ -112,7 +116,8 @@ REFUSED = (
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
 # `--` line. FAKE_FAIL_CHECK fails that check-runs POST (1-based); pipeline members run in
-# subshells, so its counter lives in a file. The pull request's comment listing fails.
+# subshells, so its counter lives in a file. The pull request's comment listing fails. The pull
+# request read answers head FAKE_PULL_HEAD with exit FAKE_PULL_RC.
 GH_STUB = """\
 #!/bin/bash
 printf '%s\\n' "$@" >> "$CALLS"
@@ -128,6 +133,9 @@ elif [ "$*" = "api --paginate $head/check-runs?filter=all&per_page=100 --jq $FAK
 elif [ "$*" = "api --paginate $head/check-runs?filter=all&per_page=100 --jq $FAKE_REFRESH_JQ" ]
 then
   printf '%s' "$FAKE_REFRESH_CHECKS"
+elif [ "$*" = "api repos/acme/demo/pulls/7" ]; then
+  printf '{"head": {"sha": "%s"}, "draft": false, "state": "open"}\\n' "$FAKE_PULL_HEAD"
+  exit "$FAKE_PULL_RC"
 elif [ "$1 $2" = "api repos/acme/demo/statuses/$FAKE_SHA" ]; then
   echo '{}'
   exit "$FAKE_STATUS_POST_RC"
@@ -216,6 +224,8 @@ def _run(
     steps=(HOLD, CREATE),
     refresh_checks=None,
     head=HEAD_SHA,
+    pull_head=HEAD_SHA,
+    pull_rc=0,
     plan_result="success",
     planned_cells=None,
     run_id=RUN_ID,
@@ -263,6 +273,8 @@ def _run(
         "CALLS": str(calls),
         "COUNT": str(tmp_path / "count"),
         "FAKE_SHA": HEAD_SHA,
+        "FAKE_PULL_HEAD": pull_head,
+        "FAKE_PULL_RC": str(pull_rc),
         "FAKE_STATUSES_JQ": STATUSES_JQ,
         "FAKE_APPLY_JQ": APPLY_CHECKS_JQ,
         "FAKE_REFRESH_JQ": REFRESH_CHECKS_JQ,
@@ -301,6 +313,7 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
     assert codes == [0, 0]
     assert not (tmp_path / "github_output").exists()
     assert calls == [
+        PULL_READ,
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
@@ -334,7 +347,7 @@ def test_a_failed_plan_job_holds_and_publishes_no_check(tmp_path):
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path, plan_result="failure")
     assert codes == [0, 0]
-    assert calls == [STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -344,6 +357,7 @@ def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
     codes, calls, _, _ = _run(tmp_path, fail_check=2)
     assert codes == [0, 1]
     assert calls == [
+        PULL_READ,
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
@@ -381,7 +395,7 @@ def test_no_planned_cell_writes_no_hold(tmp_path):
     """Mutation: replace the cells test with `true` -> the hold is written."""
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
-    assert calls == [STATUSES_LIST, APPLY_LIST]
+    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST]
 
 
 @bash_only
@@ -393,7 +407,7 @@ def test_a_re_run_that_publishes_nothing_still_holds(tmp_path):
     checks = _lines(_record(1, "a", RUN_ID), _record(2, "b", RUN_ID, status="queued"))
     codes, calls, _, _ = _run(tmp_path, apply_checks=checks)
     assert codes == [0, 0]
-    assert calls == [STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -403,7 +417,7 @@ def test_a_failed_hold_write_publishes_no_check(tmp_path):
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path, status_post_rc=1)
     assert codes == [1]
-    assert calls == [STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -419,6 +433,7 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
     )
     assert codes == [0, 0, 0]
     assert calls == [
+        PULL_READ,
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
@@ -474,6 +489,7 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
     assert (codes, calls) == (
         [0, 1],
         [
+            PULL_READ,
             STATUSES_LIST,
             APPLY_LIST,
             PUBLISH_HOLD_POST,
@@ -517,7 +533,11 @@ def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
         apply_checks=_lines(_record(1, "a", "50")),
         steps=(HOLD,),
     )
-    assert (codes, calls, stderr) == ([0], [STATUSES_LIST, APPLY_LIST], _notice(NEWER_CHECK))
+    assert (codes, calls, stderr) == (
+        [0],
+        [PULL_READ, STATUSES_LIST, APPLY_LIST],
+        _notice(NEWER_CHECK),
+    )
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == "superseded=true\n"
 
 
@@ -538,7 +558,7 @@ def test_a_newer_runs_hold_refuses_before_any_write(tmp_path, statuses):
     `exit 1` -> `[1]`."""
     _write_cells(tmp_path, "a")
     codes, calls, stderr, _ = _run(tmp_path, statuses=statuses, steps=(HOLD,))
-    assert (codes, calls, stderr) == ([0], [STATUSES_LIST], _notice(REFUSED))
+    assert (codes, calls, stderr) == ([0], [PULL_READ, STATUSES_LIST], _notice(REFUSED))
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == "superseded=true\n"
 
 
@@ -548,6 +568,9 @@ def _notice(error):
 
 
 NOT_SUPERSEDED = "${{ steps.hold.outputs.superseded != 'true' }}"
+NOT_MOVED = (
+    "${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
+)
 #: Every step after the hold, by name (or `uses` for the unnamed one), to its whole `if:`.
 LATER_STEP_IFS = {
     "Mirror this run's per-cell plan checks onto the head": (
@@ -565,11 +588,14 @@ LATER_STEP_IFS = {
         " && steps.gate.outputs.comment_mode == 'held' }}"
     ),
     UPSERT: NOT_SUPERSEDED,
-    CREATE: NOT_SUPERSEDED,
-    GATE: NOT_SUPERSEDED,
-    "Decide whether to dispatch an auto apply": (
-        "${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
+    CREATE: NOT_MOVED,
+    GATE: NOT_MOVED,
+    "Check whether the live head needs a plan": (
+        "${{ steps.hold.outputs.moved == 'true' || steps.upsert.outputs.result == 'moved' }}"
     ),
+    "Mint the plan dispatch token": "${{ steps.livehead.outputs.live != '' }}",
+    "Dispatch a plan of the live head": "${{ steps.livehead.outputs.live != '' }}",
+    "Decide whether to dispatch an auto apply": NOT_MOVED,
     "Mint the auto apply dispatch token": "${{ steps.autodecide.outputs.envs != '' }}",
     "Dispatch an auto apply": "${{ steps.autodecide.outputs.envs != '' }}",
     "Collapse the started reply": (
@@ -622,7 +648,7 @@ def test_a_pending_checks_failure_with_cells_holds(tmp_path):
     cell = {"stack": "stacks/a", "environment": "dev", "changed": True}
     (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
     codes, calls, _, _ = _run(tmp_path)
-    assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
 
 
 @bash_only
@@ -631,7 +657,7 @@ def test_a_failed_statuses_read_holds(tmp_path):
     POST; pass that hold the publish text -> red."""
     _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(tmp_path, statuses_rc=1)
-    assert (codes, calls) == ([1], [STATUSES_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, HOLD_POST])
 
 
 @bash_only
@@ -646,7 +672,7 @@ def test_a_failed_check_listing_holds(tmp_path, slugs, status_post_rc):
     on stdout reddens, `hold-failed` for the move."""
     _write_cells(tmp_path, *slugs)
     codes, calls, _, stdout = _run(tmp_path, apply_rc=1, status_post_rc=status_post_rc)
-    assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
     assert stdout == f"{LISTING_FAILED}\n"
 
 
@@ -656,7 +682,7 @@ def test_a_pending_checks_failure_without_cells_holds(tmp_path):
     Mutations: guard that hold with `[ -n "$cells" ]` -> no POST; pass that hold the publish
     text -> red."""
     codes, calls, _, _ = _run(tmp_path, apply_checks="not json\n")
-    assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
 
 
 @bash_only
@@ -669,3 +695,59 @@ def test_a_malformed_head_fails_the_hold_step_before_any_call(tmp_path):
     codes, calls, stderr, _ = _run(tmp_path, head="A" * 40)
     refusal = f"::error::head SHA must be a 40-char lowercase hex SHA (got: {'A' * 40!r})\n"
     assert (codes, calls, stderr) == ([1], [], refusal * 2)
+
+
+NEWER_HEAD = "b" * 40
+MOVED_NOTICE = (
+    f"::notice::pull request #7 has moved past {HEAD_SHA}; this run writes no comment, apply "
+    "check or gate on it\n"
+)
+
+
+@bash_only
+def test_a_moved_head_writes_nothing(tmp_path):
+    """A newer run's hold is also on the head: the run still ends green and reads nothing past
+    the pull request. Mutation: drop the `moved` call -> the statuses read follows and `moved=true`
+    is missing."""
+    _write_cells(tmp_path, "a")
+    codes, calls, _, stdout = _run(
+        tmp_path, pull_head=NEWER_HEAD, statuses=_lines(_gate("failure", 50)), steps=(HOLD,)
+    )
+    assert (codes, calls, stdout) == ([0], [PULL_READ], MOVED_NOTICE)
+    output = (tmp_path / "github_output").read_text(encoding="utf-8")
+    assert output == "superseded=true\nmoved=true\n"
+
+
+#: Today's whole call sequence of a one-cell run, after the one pull request read.
+ONE_CELL_RUN = [
+    PULL_READ,
+    STATUSES_LIST,
+    APPLY_LIST,
+    PUBLISH_HOLD_POST,
+    STATUSES_LIST,
+    _check_post("a", 1),
+    STATUSES_LIST,
+    _status_post("pending", "waiting"),
+]
+
+
+@bash_only
+def test_an_unmoved_head_adds_one_read_and_no_write(tmp_path):
+    """Mutations: run `moved` twice -> two reads; drop the `moved` call -> no read."""
+    _write_cells(tmp_path, "a")
+    codes, calls, _, stdout = _run(tmp_path, steps=(HOLD, CREATE, GATE))
+    assert (codes, calls, stdout) == ([0, 0, 0], ONE_CELL_RUN, "")
+    assert not (tmp_path / "github_output").exists()
+
+
+@bash_only
+def test_a_failed_head_read_publishes_as_before(tmp_path):
+    """Mutations: treat a failed read as moved (the moved branch's outputs and `exit 0` in the
+    failure branch) -> no statuses read, no hold, no check; drop the warning -> no stdout."""
+    _write_cells(tmp_path, "a")
+    codes, calls, _, stdout = _run(tmp_path, pull_rc=1, steps=(HOLD, CREATE, GATE))
+    assert (codes, calls) == ([0, 0, 0], ONE_CELL_RUN)
+    assert stdout == (
+        "::warning::could not read the head of pull request #7 (command failed (1): gh api "
+        f"repos/acme/demo/pulls/7); this run publishes on {HEAD_SHA}\n"
+    )

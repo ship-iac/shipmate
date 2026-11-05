@@ -1291,12 +1291,13 @@ sticky plan comment; an apply run once it posts its result comment.
 line equal to the verdict that links that run; a failed collapse is a warning on
 that run. A run that posts no result leaves the reply: an apply refused at
 review, an `unlock`, a run that ends or is cancelled before its result, a
-superseded plan, a plan whose comment was not written, and a plan whose
-apply-check publish or gate write fails (for example a newer run's hold refuses
-it once the head moved). A reply with no run link is never collapsed. A result
-posted before the reply exists leaves the reply too: nothing matches yet, and
-the reply is posted one API round trip after the dispatch answers, while the
-result needs at least three sequential jobs.
+superseded plan (a newer plan run of its head refused it, or the pull request
+moved past its head), a plan whose comment was not written, and a plan whose
+apply-check publish or gate write fails (for example a newer run of the same
+head holds the gate by then). A reply with no run link is never collapsed. A
+result posted before the reply exists leaves the reply too: nothing matches
+yet, and the reply is posted one API round trip after the dispatch answers,
+while the result needs at least three sequential jobs.
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
@@ -2032,8 +2033,10 @@ bare and a targeted `shipmate apply` reach an `auto` environment as they reach a
 `.github/workflows/shipmate.yml` with exactly `{verb: "auto", ref: <head sha>,
 pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 
-- no newer plan run of the head superseded this one, and the sticky comment
-  upsert did not find the head moved;
+- the run was not superseded, and its head is still the pull request's: neither
+  the publish hold's head read nor the sticky comment upsert found the pull
+  request moved past it, and no newer plan run of the head refused it
+  (§Plan comment);
 - the run is a `pull_request_target` run, an autoplan, on its first attempt: a
   `shipmate plan` run and a re-run dispatch nothing;
 - the event payload's `action` is `opened` or `synchronize`, a push: an autoplan
@@ -2380,7 +2383,14 @@ The five jobs:
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
   mirror of this run's completed `plan / ` checks onto the pull request's
   head, the `⚪ nothing planned` comment when no cell was planned, and the
-  collapse of the started reply that links the run (§Comment-ops).
+  collapse of the started reply that links the run (§Comment-ops). A run that
+  sees its pull request moved past its head before the publish hold writes none
+  of these on it; one that sees the move at the comment write leaves any publish
+  hold it already wrote (whose text says to re-plan) and any mirrored checks,
+  and writes no comment, apply check or final gate. Either run dispatches
+  `shipmate plan` for the live head when the pull request is open and not a
+  draft and that head has no autoplan run unfinished or succeeded (§Plan
+  comment).
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact about this pull request it decides on from
@@ -2803,14 +2813,17 @@ A run whose plan job was cancelled writes no final gate (below) and keeps the
 comment as it is, with a warning; a draft autoplan keeps it too (§Post-plan
 topology).
 
-Every comment write, the held body included, reads the pull request's head
-once the comment listing shows a write follows, and writes nothing when the pull
-request has moved past the head this run planned, with a notice: the comment is
-per pull request, and a re-run of an older run would otherwise replace the newer
-head's comment. A run that writes nothing (no comment yet, nothing changed)
-reads no head. A failed read warns and writes nothing for the held body, and
-fails the job ("could not read the head of pull request #<n>") before any apply
-check or gate is written for the plan body.
+The comment is per pull request, so a run of a head the pull request has left
+must not replace the live head's comment. A run that finds the pull request
+moved past its head in the publish hold's read (below) writes no comment at
+all. Every comment write, the held body included, reads the head
+again once the comment listing shows a write follows, which catches a push
+during the run, and writes nothing when the pull request has moved past the
+head this run planned, with a notice. A run that writes nothing (no comment
+yet, nothing changed) makes no second read. A failed second read warns and
+writes nothing for the held body, and fails the job ("could not read the head
+of pull request #<n>, so the sticky plan comment was not updated") before any
+apply check or gate is written for the plan body.
 
 Where the zero *does* mean no stacks changed, the suppression is create-only: an
 existing comment is always updated to the no-changes body, because a pull
@@ -3005,6 +3018,38 @@ declares it as the `count` output of `actions/build-matrix`, and the `summary`
 job receives it as the `planned-cells` input. A cell count that disagrees with
 it holds the gate in either direction.
 
+The `summary` job's publish hold step first reads the pull request's head,
+before it reads a gate status or an apply check. When the pull request has
+moved past the head this run planned, the run writes nothing on that head (no
+comment, apply check or gate), with the notice
+"pull request #<n> has moved past <sha>; this run writes no comment, apply check
+or gate on it", and ends green: the merge gates on the live head, not on this
+one. A failed read warns ("could not read the head of pull request #<n> (<why>);
+this run publishes on <sha>") and the run publishes as below. A run that skips
+its publish this way, or whose sticky comment upsert later finds the head moved,
+then decides whether the live head needs a plan (`scripts/gate-status replan`).
+It dispatches `shipmate plan` for the pull request, with an App token minted for
+it alone with `actions: write`, when the pull request is open, the live head is
+not a draft, and that head has no autoplan run that is unfinished (any status
+but `completed`) or `completed` with conclusion `success`. A succeeded autoplan
+counts: a second plan would write newer plan records, and an auto apply waiting
+on that autoplan would then refuse. On a dispatch the run notices "pull request
+#<n> moved to <sha>, which has no plan run; dispatched shipmate plan (on demand,
+so no auto apply follows it)"; otherwise it logs "pull request #<n> is <state>;
+nothing dispatched", "pull request #<n> moved to <sha>, a draft; nothing
+dispatched" or "pull request #<n> moved to <sha>, whose autoplan run has not
+finished or succeeded; nothing dispatched". The dispatched plan is on demand, so
+no auto apply follows it (§`apply_mode: auto`). It joins the consumer's
+`plan-<pr>` concurrency group, which cancels nothing in progress for a
+`workflow_dispatch`, so it queues behind this run; a later arrival replaces a
+waiting run, and the plan that runs resolves the live head from the pull
+request. The listing holds only `pull_request_target` runs, so it does not see
+an earlier dispatched plan of the live head, and a second queued plan is
+possible. On this path a failed head read, run listing, token mint or dispatch
+warns with the remedy `comment shipmate plan` and fails nothing: this run's
+head is not the pull request's, so nothing it writes or fails to write gates
+the merge.
+
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
 only some checks published leaves a hold that `gate-refresh` will not green. The
@@ -3048,12 +3093,12 @@ were planned; a planned count that was not reported; or a parsed cell count that
 disagrees with it. The gate holds every such run except one whose plan job was
 cancelled, for which it writes nothing and leaves any earlier hold standing. A
 plan job skipped with no cell planned is the empty matrix and is not held.
-`gate-state` holds the one rule for both decisions. The newer-run refusal above
-runs first, before any cell summary is read. Apply checks an earlier plan run of
-the same head published stay, and a pre-merge `shipmate apply` applies those
-when that run published every one of its checks and the head's newest plan run
-did too (§Apply-match fingerprint); on a head with none it names no plan run and
-is refused (§Comment-ops, "undiverged").
+`gate-state` holds the one rule for both decisions. The head read and the
+newer-run refusal above run first, before any cell summary is read. Apply
+checks an earlier plan run of the same head published stay, and a pre-merge
+`shipmate apply` applies those when that run published every one of its checks
+and the head's newest plan run did too (§Apply-match fingerprint); on a head
+with none it names no plan run and is refused (§Comment-ops, "undiverged").
 
 ## Apply result comment
 

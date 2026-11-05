@@ -182,3 +182,16 @@ def test_the_summary_action_downloads_cell_errors_where_the_held_render_reads_th
     `continue-on-error`; change `path`; change `pattern` to `cell-summary.*`; drop the
     `comment_mode` clause."""
     assert step_by("summary", name="Download cell errors") == EXPECTED_CELL_ERROR_DOWNLOAD_STEP
+
+
+#: Hand-written: a superseded run or a moved upsert writes no apply check and no gate.
+NOT_MOVED = (
+    "${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
+)
+
+
+def test_a_moved_head_skips_the_apply_checks_and_the_gate():
+    """A `moved` upsert, `held` mode included, means the pull request left this head.
+    Mutations: `&&` -> `||` in either `if:`; drop the `moved` clause from either."""
+    names = ["Create apply checks (pending / no-changes)", "Create/refresh gate"]
+    assert {n: step_by("summary", name=n)["if"] for n in names} == dict.fromkeys(names, NOT_MOVED)
