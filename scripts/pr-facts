@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Resolve the pull-request facts the plan path decides on, for either trigger.
 
-One producer for six values -- head SHA, head repository, base SHA, pull-request
-number, draft flag, and whether a human named this run -- so the fork refusal,
+One producer for seven values -- head SHA, head repository, head branch, base SHA,
+pull-request number, draft flag, and whether a human named this run -- so the fork refusal,
 the draft skip, the checkout ref and the plan's recorded provenance cannot read
 two different answers to the same question.
 
@@ -34,7 +34,7 @@ _DELETED_FORK = (
 
 
 def _facts(pr, on_demand):
-    """The six facts from a pull-request object -- payload or API, same shape.
+    """The seven facts from a pull-request object -- payload or API, same shape.
 
     Refuses rather than emitting an empty value for anything nothing else can
     supply: an absent head SHA leaves the checkout on the base and the matrix
@@ -45,12 +45,17 @@ def _facts(pr, on_demand):
     author fresh pending apply checks on a head the deploy path has already been
     through, and `deploy-detect`'s work queue IS the pending apply checks -- a
     re-run of that deploy would apply them again.
+
+    `head_ref` alone is optional: it only decides whether a lock holder is stacked on this pull
+    request, which the plan comment reports, so an absent one is emitted empty.
     """
     head = pr.get("head") or {}
     repo = head.get("repo") or {}
+    ref = head.get("ref")
     facts = {
         "head_sha": head.get("sha") or "",
         "head_repo": repo.get("full_name") or "",
+        "head_ref": ref if isinstance(ref, str) else "",
         "base_sha": (pr.get("base") or {}).get("sha") or "",
         "pr_number": str(pr.get("number") or ""),
         "is_draft": "true" if pr.get("draft") is True else "false",

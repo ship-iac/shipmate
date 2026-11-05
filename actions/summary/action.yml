@@ -7,6 +7,13 @@ inputs:
   head-sha:
     description: PR head commit SHA.
     required: true
+  head-ref:
+    description: >-
+      The pull request's head branch name (pr-facts' `head-ref`). A lock holder whose base branch
+      is this one is stacked on this pull request; the plan comment and a pending gate say to
+      retarget it to the default branch. Empty finds no holder stacked.
+    required: false
+    default: ""
   detect-result:
     description: 'Result of the plan workflow''s detect job (needs.detect.result): success|failure|cancelled|skipped.'
     required: true
@@ -281,10 +288,12 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_CELLS: ${{ inputs.planned-cell-names }}
+        SHIPMATE_HEAD_REF: ${{ inputs.head-ref }}
       run: |
         set -euo pipefail
-        # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and nothing
-        # on the gate path reads it. `Create/refresh gate` is later and must not inherit this.
+        # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and the gate
+        # reads `stacked` only for a pending gate's description, never its state.
+        # `Create/refresh gate` is later and must not inherit this.
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" marks 2>marks.err; then
           sed 's/^::error::/::warning::/' marks.err >&2
           echo "::warning::could not read the cell locks; the plan comment marks no locked cell"
@@ -313,6 +322,8 @@ runs:
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DOCTOR_WARNINGS: ${{ steps.doctor.outputs.warnings }}
         SHIPMATE_LOCKS: ${{ steps.marks.outputs.locks }}
+        SHIPMATE_STACKED: ${{ steps.marks.outputs.stacked }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -339,6 +350,7 @@ runs:
         SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
+        SHIPMATE_STACKED_HOLD: ${{ steps.build.outputs.stacked_hold }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"

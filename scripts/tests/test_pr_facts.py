@@ -23,16 +23,16 @@ _PAYLOAD_PR = {
     "number": 7,
     "state": "open",
     "draft": False,
-    "head": {"sha": "a" * 40, "repo": {"full_name": "own/repo"}},
-    "base": {"sha": "b" * 40},
+    "head": {"sha": "a" * 40, "ref": "feat-a", "repo": {"full_name": "own/repo"}},
+    "base": {"sha": "b" * 40, "ref": "main"},
 }
 
 _API_PR = {
     "number": 42,
     "state": "open",
     "draft": True,
-    "head": {"sha": "c" * 40, "repo": {"full_name": "own/repo"}},
-    "base": {"sha": "d" * 40},
+    "head": {"sha": "c" * 40, "ref": "feat-b", "repo": {"full_name": "own/repo"}},
+    "base": {"sha": "d" * 40, "ref": "feat-a"},
 }
 
 
@@ -71,12 +71,14 @@ def _api(pr):
 
 
 def test_payload_leg_reads_the_payload_and_makes_no_api_call(monkeypatch, tmp_path):
-    """A `pull_request` payload supplies all six facts, with zero API calls."""
+    """A `pull_request` payload supplies all seven facts, with zero API calls. Mutation: emit
+    `base.ref` as `head_ref`."""
     text, calls = _main(monkeypatch, tmp_path, {"pull_request": _PAYLOAD_PR})
     assert calls == []
     assert text.splitlines() == [
         f"head_sha={'a' * 40}",
         "head_repo=own/repo",
+        "head_ref=feat-a",
         f"base_sha={'b' * 40}",
         "pr_number=7",
         "is_draft=false",
@@ -101,7 +103,7 @@ def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatc
     The inputs also state a head SHA and a head repository, as anyone holding `actions: write`
     could. Neither reaches an output: `build-matrix`'s fork refusal keys on the head repository
     this action emits, so a stated one would run fork-authored code on the consumer's
-    runners."""
+    runners. Mutation: emit `base.ref` as `head_ref`."""
     text, calls = _main(
         monkeypatch,
         tmp_path,
@@ -112,6 +114,7 @@ def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatc
     assert text.splitlines() == [
         f"head_sha={'c' * 40}",
         "head_repo=own/repo",
+        "head_ref=feat-b",
         f"base_sha={'d' * 40}",
         "pr_number=42",
         "is_draft=true",
@@ -201,6 +204,20 @@ def test_a_missing_fact_is_refused_and_named(patch, named, unnamed):
     assert [key for key in unnamed if key in message] == []
 
 
+@pytest.mark.parametrize("ref", [None, "", 7, ["feat-a"]], ids=["missing", "empty", "int", "list"])
+def test_a_missing_or_non_string_head_ref_is_emitted_empty_and_refuses_nothing(
+    monkeypatch, tmp_path, ref
+):
+    """The head branch only decides whether a lock holder is stacked on this pull request, which
+    is reviewer-facing, so its absence degrades instead of refusing. Mutation: add `head_ref` to
+    the required facts -- the run refuses."""
+    head = {"sha": "a" * 40, "repo": {"full_name": "own/repo"}}
+    if ref is not None:
+        head["ref"] = ref
+    text, _ = _main(monkeypatch, tmp_path, {"pull_request": dict(_PAYLOAD_PR, head=head)})
+    assert text.splitlines()[2] == "head_ref="
+
+
 @pytest.mark.parametrize(
     ("draft", "expected"),
     [(True, "true"), (False, "false"), (None, "false"), ("yes", "false")],
@@ -213,7 +230,7 @@ def test_is_draft_is_the_string_the_guards_compare_against(draft, expected):
     assert isinstance(value, str)
 
 
-def test_the_actions_outputs_are_exactly_the_six_step_outputs():
+def test_the_actions_outputs_are_exactly_the_seven_step_outputs():
     """Hand-written, whole-mapping: the action's kebab-case outputs and the script's snake_case
     GITHUB_OUTPUT keys are two spellings of one list, and a rename on either side leaves the
     other reading an empty string."""
@@ -221,6 +238,7 @@ def test_the_actions_outputs_are_exactly_the_six_step_outputs():
     assert {name: out["value"] for name, out in spec["outputs"].items()} == {
         "head-sha": "${{ steps.facts.outputs.head_sha }}",
         "head-repo": "${{ steps.facts.outputs.head_repo }}",
+        "head-ref": "${{ steps.facts.outputs.head_ref }}",
         "base-sha": "${{ steps.facts.outputs.base_sha }}",
         "pr-number": "${{ steps.facts.outputs.pr_number }}",
         "is-draft": "${{ steps.facts.outputs.is_draft }}",

@@ -315,6 +315,11 @@ def write_outputs(**pairs):
             fh.write(f"{name}={value}\n")
 
 
+def lock_who(holder: int | None) -> str:
+    """Who holds a cell lock: `#<holder>`, or `an unknown holder` for None."""
+    return f"#{holder}" if holder is not None else "an unknown holder"
+
+
 def event_payload(path):
     """The event payload at `path`, or {} when `path` is empty or the file cannot be read as a
     JSON object."""

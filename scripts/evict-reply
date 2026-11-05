@@ -21,7 +21,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, run_annotated
+from _shipmate import _load, current_run_url, is_pr_number, lock_who, run_annotated
 
 sc = _load("summary-comment")
 rc = _load("reply-comment")
@@ -52,9 +52,7 @@ def notice(locks, login, pr):
 
 def _named(locks):
     return ", ".join(
-        f"{cell(e['environment'], e['stack'])} (held by "
-        f"{'#' + str(e['holder']) if e['holder'] is not None else 'an unreadable lock'})"
-        for e in locks
+        f"{cell(e['environment'], e['stack'])} (held by {lock_who(e['holder'])})" for e in locks
     )
 
 

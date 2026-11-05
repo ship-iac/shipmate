@@ -4,9 +4,12 @@
 Reads the plan matrix jobs' auto check-runs (named `plan / <env> / <stack>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
 cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
-artifacts). Writes comment.md, plus pending, count, unmanaged, lost and missing to
-GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned cells with no
+artifacts). Writes comment.md, plus pending, count, unmanaged, lost, missing and stacked_hold
+to GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned cells with no
 cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
+`stacked_hold` is the pending gate text (`stacked_hold`) for a holder `SHIPMATE_STACKED` lists
+and `SHIPMATE_DEFAULT_BRANCH` to retarget it to; gate-state writes it, and empty keeps the
+generic text.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
 reads no cell summary, only the `cell-error.json` files under $CELL_ERRORS (default
@@ -23,8 +26,8 @@ any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
 The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_order`,
-`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `lock_who`, `_join`) lives
-here because apply-comment and doctor already load this module.
+`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here
+because apply-comment and doctor already load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface
 unless `command_hints` is on, and shows only where the reader has something to do: under a
@@ -59,6 +62,7 @@ from _shipmate import (
     current_run_url,
     event_action,
     is_head_sha,
+    lock_who,
     run_annotated,
     write_outputs,
 )
@@ -313,11 +317,6 @@ def state(cell):
     return tally(*(cell[k] for k in ("add", "change", "destroy", "import", "forget")))
 
 
-def lock_who(holder):
-    """Who holds a cell lock: `#<holder>`, or `an unreadable lock` for None (unknown holder)."""
-    return f"#{holder}" if holder is not None else "an unreadable lock"
-
-
 def _lock_key(cell, locks):
     """`cell`'s `<stack> / <env>` key in `locks` when it is changed and another pull request
     holds it, else None."""
@@ -325,13 +324,36 @@ def _lock_key(cell, locks):
     return key if cell["changed"] and key in locks else None
 
 
-def _plan_line(cell, url, locks):
+def _plan_line(cell, url, locks, stacked=frozenset(), default_branch=""):
     """A cell's bare line; a changed cell another pull request holds ends with `🔒 locked by`
-    and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys)."""
+    and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys). When
+    that holder is in `stacked` and `default_branch` is not empty, the line goes on to say the
+    holder is stacked on this pull request and to retarget it to `default_branch`."""
     line = cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
     if key := _lock_key(cell, locks):
-        line += f" 🔒 locked by {lock_who(locks[key])}"
+        who = lock_who(locks[key])
+        line += f" 🔒 locked by {who}"
+        if locks[key] in stacked and default_branch:
+            line += (
+                ", which is stacked on this pull request; merging this pull request first makes "
+                f"its deploy refuse the cells {who} holds. Retarget {who} to "
+                f"{_md_name(default_branch)} and merge it first."
+            )
     return line
+
+
+def stacked_hold(cells, locks, stacked, default_branch):
+    """The pending gate text for the lowest holder in `stacked` of a changed cell of `cells`,
+    with the count of its changed locked cells; empty when there is none or `default_branch` is
+    empty."""
+    held = [locks[k] for c in cells if (k := _lock_key(c, locks)) and locks[k] in stacked]
+    if not held or not default_branch:
+        return ""
+    holder = min(held)
+    return (
+        f"stacked #{holder} holds {held.count(holder)} cell(s); retarget it to {default_branch} "
+        "and merge it first"
+    )
 
 
 def commands(locked):
@@ -538,7 +560,7 @@ def _join(sections):
     return "".join(out)
 
 
-def _entries(cells, order, checks, run_url, locks):
+def _entries(cells, order, checks, run_url, locks, stacked, default_branch):
     """`(bare line, cell, plan text)` per heading and cell, in comment order; a heading has no
     cell."""
     entries = []
@@ -546,7 +568,8 @@ def _entries(cells, order, checks, run_url, locks):
         n = sum(1 for c, _ in group if c["changed"])
         entries.append((env_heading(env, len(group), f"{n} changed"), None, None))
         for c, text in group:
-            entries.append((_plan_line(c, check_url(c, checks, run_url), locks), c, text))
+            line = _plan_line(c, check_url(c, checks, run_url), locks, stacked, default_branch)
+            entries.append((line, c, text))
     return entries
 
 
@@ -562,6 +585,8 @@ def build_comment(
     hints=False,
     locks=None,
     auto="",
+    stacked=frozenset(),
+    default_branch="",
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `auto_line` `auto`,
     `doctor_line` of `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line
@@ -572,15 +597,15 @@ def build_comment(
     cell ends with `commands` when the whole body stays within SIZE_BUDGET, and leaves it out
     silently otherwise, after every cell is sized, so it never shrinks one. `locks`
     (`lock_marks`) marks the changed cells another pull request holds, and `commands` names their
-    environments. Every cell is guaranteed its bare line: the space all headings and remaining
-    cells' bare lines need is reserved up front, so an early giant plan cannot starve a later
-    cell. Each of the four lines yields, with a warning, when the headings and bare lines leave
-    it no room under HARD_CAP. Returns `(body, unmanaged_named, lost_named)`, each flag saying
-    whether that line is in `body`."""
+    environments; `stacked` and `default_branch` go to `_plan_line`. Every cell is guaranteed
+    its bare line: the space all headings and remaining cells' bare lines need is reserved up
+    front, so an early giant plan cannot starve a later cell. Each of the four lines yields, with
+    a warning, when the headings and bare lines leave it no room under HARD_CAP. Returns
+    `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     locks = locks or {}
-    entries = _entries(cells, order, checks, run_url, locks)
+    entries = _entries(cells, order, checks, run_url, locks, stacked, default_branch)
     bares = [e[0] for e in entries]
     named = []
     for line, what in (
@@ -770,6 +795,24 @@ def lock_marks(raw):
     return {}
 
 
+def stacked_marks(raw):
+    """`cell-lock marks`' `stacked` output `raw` as a frozenset of pull request numbers: empty
+    when `raw` is empty, and empty with one warning when it is not a JSON list of ints."""
+    if not raw:
+        return frozenset()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, list) and all(type(h) is int for h in value):
+        return frozenset(value)
+    print(
+        "::warning::the stacked lock holders are not a JSON list of pull request numbers; the "
+        "plan comment names none as stacked"
+    )
+    return frozenset()
+
+
 CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
 
 
@@ -850,6 +893,8 @@ def main():
         )
         auto = []
     locks = lock_marks(os.environ.get("SHIPMATE_LOCKS", ""))
+    stacked = stacked_marks(os.environ.get("SHIPMATE_STACKED", ""))
+    default_branch = os.environ.get("SHIPMATE_DEFAULT_BRANCH", "")
     body, named, lost_named = build_comment(
         cells,
         checks,
@@ -871,6 +916,8 @@ def main():
             action=event_action(),
             is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
         ),
+        stacked=stacked,
+        default_branch=default_branch,
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
@@ -883,6 +930,7 @@ def main():
         lost=bool(lost_named),
         # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
         missing=json.dumps(missing),
+        stacked_hold=stacked_hold([c for c, _ in cells], locks, stacked, default_branch),
     )
 
 

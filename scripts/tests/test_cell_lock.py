@@ -813,7 +813,114 @@ def test_marks_writes_each_foreign_holder_per_cell(monkeypatch, tmp_path):
     monkeypatch.setattr(cl, "_run", gh)
     monkeypatch.setattr(cl.sys, "argv", ["cell-lock", "marks"])
     cl.main()
-    assert github_outputs(out) == {"locks": json.dumps({"stacks/auth / dev": 12})}
+    assert github_outputs(out) == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "[]",
+    }
+    assert gh.drained()
+
+
+APP = {"stack": "stacks/app", "environment": "dev"}
+APP_REF = cl.ref_name("dev", "stacks/app")
+
+
+def pull_read(number):
+    return ["gh", "api", f"repos/{REPO}/pulls/{number}"]
+
+
+def pull(base_ref, state="open"):
+    return json.dumps({"state": state, "base": {"ref": base_ref, "sha": "feat-a"}})
+
+
+def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a"):
+    out = tmp_path / "out"
+    for key, value in {
+        "GITHUB_OUTPUT": str(out),
+        "GITHUB_REPOSITORY": REPO,
+        "SHIPMATE_PR_NUMBER": str(PR),
+        "SHIPMATE_CELLS": json.dumps(cells),
+        "SHIPMATE_HEAD_REF": head_ref,
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(cl, "_run", gh)
+    monkeypatch.setattr(cl.sys, "argv", ["cell-lock", "marks"])
+    cl.main()
+    return github_outputs(out)
+
+
+def test_marks_writes_the_holders_stacked_on_this_pull_requests_head(monkeypatch, tmp_path):
+    """#12's base is this pull request's head branch, #9's is `main`. The base `sha` holds the
+    head branch's name too, so comparing it in place of `ref` is observable. Mutation: compare
+    `base.sha` to the head ref -- `[]`."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
+    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("main"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
+        "stacked": "[12]",
+    }
+    assert gh.drained()
+
+
+@pytest.mark.parametrize("state", ["closed", None])
+def test_marks_leaves_out_a_holder_that_is_not_open(monkeypatch, tmp_path, state):
+    """A closed or merged holder will not merge after this pull request, so it is not stacked
+    even when its base branch is this head; a read naming no state is not open either.
+    Mutation: drop the `state == "open"` check -- `[12]`, red."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), pull("feat-a", state))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "[]",
+    }
+    assert gh.drained()
+
+
+def test_marks_reads_each_holder_once(monkeypatch, tmp_path):
+    """Two cells held by #12 queue one pull read; the double refuses a second. Mutation: read
+    the holder per cell -- unexpected call."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(12, "dev", "stacks/app")))
+    gh.on(pull_read(12), pull("feat-a"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, APP]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/app / dev": 12}),
+        "stacked": "[12]",
+    }
+    assert gh.drained()
+
+
+def test_a_failed_holder_read_warns_and_still_writes_the_locks(monkeypatch, tmp_path, capsys):
+    """The stacked list is reviewer-facing, so a failed read leaves that holder out with a
+    one-line warning naming it, and the step still writes `locks`. Mutations: let the read
+    failure raise -- `SystemExit`; print `why` unflattened -- the warning splits, red."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
+    gh.on(pull_read(12), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
+    gh.on(pull_read(9), pull("feat-a"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
+        "stacked": "[9]",
+    }
+    assert gh.drained()
+    assert capsys.readouterr().out == (
+        "::warning::could not read pull request #12 (command failed (1): gh api | HTTP 502), so "
+        "the plan comment does not say whether it is stacked on this pull request\n"
+    )
+
+
+def test_an_empty_head_ref_reads_no_holder(monkeypatch, tmp_path):
+    """No head branch, nothing can be stacked on it: no pull read (the double refuses one).
+    Mutation: drop the empty-head-ref early return -- unexpected call."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH], head_ref="") == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "[]",
+    }
     assert gh.drained()
 
 
@@ -939,7 +1046,14 @@ def test_acquire_refuses_bad_input_before_any_call(monkeypatch, tmp_path, env, r
 @pytest.mark.parametrize(
     ("env", "released"),
     [
-        pytest.param({"SHIPMATE_MERGED": "true"}, DNS_REF, id="merged"),
+        pytest.param(
+            {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": None}, DNS_REF, id="merged"
+        ),
+        pytest.param(
+            {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "false"},
+            DNS_REF,
+            id="merged-release-pending-false",
+        ),
         pytest.param(
             {"SHIPMATE_MERGED": "false", "SHIPMATE_CLOSED_AT": "2026-10-24T11:00:00Z"},
             AUTH_REF,
@@ -950,7 +1064,8 @@ def test_acquire_refuses_bad_input_before_any_call(monkeypatch, tmp_path, env, r
 def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
     """Mutations: release nothing in the unmerged branch (`gone = []`: no delete is sent); read
     `pending` without the App filter (`parse_jsonl` for `app_runs` in `pending_names`: the
-    foreign check on stacks/dns keeps its lock)."""
+    foreign check on stacks/dns keeps its lock); read release-pending `false` as `true` (`if
+    release_pending`: merged-release-pending-false deletes the pending stacks/auth lock)."""
     gh = _all_locks(
         (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
         (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), LATE),
@@ -968,6 +1083,33 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
     sha = OLD if released == AUTH_REF else NEW
     gh.on(REPO_ID_READ, REPO_ID).on(update(released, sha, ZERO, False), "{}")
     _main(monkeypatch, tmp_path, "release", gh, env)
+    assert gh.drained()
+
+
+def test_release_cli_release_pending_deletes_every_lock_without_reading_checks(
+    monkeypatch, tmp_path
+):
+    """A refused deploy deletes every lock its merged pull request holds, and reads no apply
+    check to do it. Mutation: keep the merge rule's `pending` set under release-pending -- the
+    head's checks are read, an unexpected call to the double, red."""
+    gh = _all_locks(
+        (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
+        (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), EARLY),
+    )
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    gh.on(update(DNS_REF, NEW, ZERO, False), "{}")
+    env = {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "true"}
+    _main(monkeypatch, tmp_path, "release", gh, env)
+    assert gh.drained()
+
+
+def test_release_cli_release_pending_with_no_lock_left_exits_clean(monkeypatch, tmp_path, capsys):
+    """A re-run after every lock is gone deletes nothing and succeeds. Mutation: refuse when
+    release-pending deletes no lock (`if not gone: raise SystemExit`)."""
+    gh = Gh().on(listing("shipmate/locks/"), "[]")
+    env = {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "true"}
+    _main(monkeypatch, tmp_path, "release", gh, env)
+    assert capsys.readouterr().out == "::notice::released 0 cell lock(s) of pull request #7\n"
     assert gh.drained()
 
 
@@ -1009,12 +1151,30 @@ def test_release_cli_names_each_refused_delete_after_releasing_the_rest(
             "SHIPMATE_CLOSED_AT must be an ISO-8601 time (got: '2026-10-24T11:00:00')",
             id="closed-at-no-offset",
         ),
+        pytest.param(
+            {
+                "SHIPMATE_MERGED": "false",
+                "SHIPMATE_CLOSED_AT": LATE,
+                "SHIPMATE_RELEASE_PENDING": "true",
+            },
+            "SHIPMATE_RELEASE_PENDING must be true or false, and true only with SHIPMATE_MERGED "
+            "true (got: SHIPMATE_RELEASE_PENDING='true', SHIPMATE_MERGED='false')",
+            id="release-pending-unmerged",
+        ),
+        pytest.param(
+            {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "yes"},
+            "SHIPMATE_RELEASE_PENDING must be true or false, and true only with SHIPMATE_MERGED "
+            "true (got: SHIPMATE_RELEASE_PENDING='yes', SHIPMATE_MERGED='true')",
+            id="release-pending-yes",
+        ),
     ],
 )
 def test_release_cli_refuses_a_bad_mode_before_any_call(monkeypatch, tmp_path, env, refusal):
     """Mutations: treat any `SHIPMATE_MERGED` but `true` as unmerged (merged-yes and
     merged-unset release by `SHIPMATE_CLOSED_AT`); drop the `_when` check (closed-at-no-offset
-    reaches the API)."""
+    reaches the API); accept release-pending `true` whatever `SHIPMATE_MERGED` says
+    (release-pending-unmerged releases by `SHIPMATE_CLOSED_AT`); accept any release-pending
+    value (release-pending-yes reads the head's checks)."""
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, tmp_path, "release", Gh(), env)
     assert exc.value.code == "::error::" + refusal
@@ -1174,7 +1334,8 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
 )
 def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, why):
     """Mutations: re-raise the read's `SystemExit` unchanged in `_confirm` (read-fails loses the
-    cell); `str(exc.code)` for the `why` (read-fails keeps `::error::`, read-exits-* print
+    cell); pass the deploy retry everywhere (`_confirm`'s default, every case ends without
+    `RETRY`); `str(exc.code)` for the `why` (read-fails keeps `::error::`, read-exits-* print
     `(None)` and `(1)`); drop `LookupError` from `_confirm`'s second `except` (malformed escapes
     as a `KeyError`)."""
     gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
@@ -1495,4 +1656,103 @@ def test_verify_refuses_a_malformed_head_or_mode_before_any_read(monkeypatch, tm
     assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
         f"::error::{WHERE} SHIPMATE_HEAD_SHA must be a commit sha and SHIPMATE_AUTO true or "
         f"false (got: {got['SHIPMATE_HEAD_SHA']!r}, {got['SHIPMATE_AUTO']!r})"
+    )
+
+
+# --- verify, deploy mode -------------------------------------------------------------------------
+
+MERGED = 4
+DEPLOY = {"SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": str(MERGED)}
+HELD_BY_9 = (
+    "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
+    "this merge. Open a pull request that changes this stack, comment `shipmate unlock dev "
+    "--evict` on it, then apply it"
+)
+
+
+def _locked_by(msg):
+    """A double answering the lock read with a lock whose commit message is `msg`."""
+    gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    return gh.on(commit_read(OLD), commit(OLD, msg))
+
+
+def test_verify_deploy_refuses_a_cell_another_pull_request_locks(monkeypatch, tmp_path):
+    """Mutation: drop the holder compare (pass any lock): the lock by #9 passes."""
+    gh = _locked_by(message(9, "dev", "stacks/auth"))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == HELD_BY_9
+
+
+@pytest.mark.parametrize(
+    "locked", [pytest.param(True, id="merged-holds"), pytest.param(False, id="unlocked")]
+)
+def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch, tmp_path, locked):
+    """The strict double queues no `pulls/` read, so any one is an unexpected call. Mutation:
+    run `_verify_pull` after the deploy check (a `pulls/` read; the merged, closed pull request
+    refuses). Mutation: refuse the merged pull request's own lock (`held.pr == pr` for `!=`):
+    merged-holds refuses."""
+    if locked:
+        gh = _locked_by(message(MERGED, "dev", "stacks/auth"))
+    else:
+        gh = Gh().on(ref_read(AUTH_REF), "[]")
+    assert _verify(monkeypatch, tmp_path, gh, DEPLOY) == {}
+    assert gh.drained()
+
+
+def test_verify_deploy_checks_a_push_with_pull_request_zero(monkeypatch, tmp_path):
+    """A push that merged no pull request passes an empty number. Mutation: drop the empty to
+    `0` rule in `main` (`env_pr_number` refuses the empty number before any read)."""
+    gh = _locked_by(message(9, "dev", "stacks/auth"))
+    env = {**DEPLOY, "SHIPMATE_PR_NUMBER": ""}
+    assert _verify_refusal(monkeypatch, tmp_path, gh, env) == HELD_BY_9
+
+
+def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
+    """Mutation: pass an unknown holder (`held.pr in (pr, None)`)."""
+    gh = _locked_by("garbage")
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an unknown "
+        "holder, not by this merge. Open a pull request that changes this stack, comment "
+        "`shipmate unlock dev --evict` on it, then apply it"
+    )
+
+
+def test_verify_deploy_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path):
+    """No merged pull request can push or take a comment, so the remedy is a re-run; the
+    pull-request path's `RETRY` is pinned by `test_verify_refuses_a_lock_it_cannot_read`.
+    Mutation: treat a failed read as unlocked (return None from the read on `SystemExit`).
+    Mutation: drop the deploy retry from `_verify_deploy` (ends with `RETRY`)."""
+    gh = Gh().on(ref_read(AUTH_REF), FAIL)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
+        "holds its cell lock (command failed (1): gh api); re-run the failed deploy jobs"
+    )
+
+
+def test_verify_deploy_names_a_failed_read_on_one_line(monkeypatch, tmp_path):
+    """A gh failure whose stderr runs to a second line stays one line in the refusal.
+    Mutation: return `why` unjoined from `_why` -- the refusal splits, red."""
+    gh = Gh().on(ref_read(AUTH_REF), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
+        "holds its cell lock (command failed (1): gh api | HTTP 502); re-run the failed deploy "
+        "jobs"
+    )
+
+
+def test_verify_names_a_malformed_deploy_mode_before_an_empty_pull_request(monkeypatch, tmp_path):
+    """The pull request number is resolved after the mode, so the mode's refusal names its own
+    variable. Mutation: resolve the number in `main` again (`SHIPMATE_DEPLOY == "true"` reads
+    `True` as false and `env_pr_number` refuses the empty number first), red."""
+    env = {"SHIPMATE_DEPLOY": "True", "SHIPMATE_PR_NUMBER": ""}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        "::error::SHIPMATE_DEPLOY must be true or false (got: 'True')"
+    )
+
+
+@pytest.mark.parametrize("value", ["yes", "", "True"])
+def test_verify_refuses_a_malformed_deploy_mode_before_any_read(monkeypatch, tmp_path, value):
+    """Mutation: run the deploy check for any value but `false` (yes reaches the lock read).
+    Mutation: treat an empty value as unset (empty runs today's check)."""
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), {"SHIPMATE_DEPLOY": value}) == (
+        f"::error::SHIPMATE_DEPLOY must be true or false (got: {value!r})"
     )

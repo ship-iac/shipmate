@@ -3,8 +3,9 @@ request still holds the cell's lock and is open at the applied head, and, under 
 the plan run detect bound is still the head's newest autoplan and the cell's newest plan record,
 and the base tip is the one detect read. A wave can wait hours on an environment approval, and
 "Re-run failed jobs" re-runs a failed wave without its `detect` and `lock` jobs. The check is the
-wave job's first step, before the cloud credentials; the merge deploy passes no pull request and
-skips it. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
+wave job's first step, before the cloud credentials. The merge deploy passes the merged pull
+request (empty on a push) with `deploy` true, and the check then refuses only a lock another pull
+request holds. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
 reports a blocked reason: the check's own refusal. The reads use the wave job's GITHUB_TOKEN.
 
 Whole parsed values against hand-written constants: the check's step, the wave steps that read
@@ -31,6 +32,7 @@ VERIFY_STEP = {
         "SHIPMATE_PROVENANCE_RUN": "${{ inputs.provenance-run }}",
         "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "SHIPMATE_DEPLOY": "${{ inputs.deploy }}",
     },
     "run": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify',
 }
@@ -38,7 +40,7 @@ VERIFY_STEP = {
 WAVE_VERIFY = {
     "name": "Pre-apply check",
     "id": "pre-apply",
-    "if": "${{ inputs.pr_number != '' }}",
+    "if": "${{ inputs.pr_number != '' || inputs.deploy }}",
     "uses": "$/actions/pre-apply",
     "with": {
         "pr-number": "${{ inputs.pr_number }}",
@@ -49,6 +51,7 @@ WAVE_VERIFY = {
         "provenance-run": "${{ inputs.provenance_run }}",
         "base-sha": "${{ inputs.base_sha }}",
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+        "deploy": "${{ inputs.deploy }}",
     },
 }
 
@@ -56,14 +59,16 @@ WAVE_VERIFY = {
 def test_pre_apply_runs_the_check_with_the_job_token():
     """Mutations: read the token from `secrets.GITHUB_TOKEN`; run `cell-lock marks`; drop
     `SHIPMATE_AUTO` (every auto cell refuses as a malformed mode); drop the step `id` (the
-    action's `refusal` output reads empty)."""
+    action's `refusal` output reads empty); drop `SHIPMATE_DEPLOY` (every deploy cell runs the
+    pull request check, and the merged, closed pull request refuses)."""
     assert step_by("pre-apply", name="Pre-apply check") == VERIFY_STEP
 
 
 def test_every_wave_checks_first_and_refuses_through_apply_cell():
-    """Mutations: drop the `if:` (the deploy's cells refuse on an empty pull request); add
+    """Mutations: drop `|| inputs.deploy` from the `if:` (deploy waves run no check); add
     `&& github.run_attempt > 1` (first attempts skip the check); invert to
-    `inputs.pr_number == ''`; move the step after the credentials step; pass
+    `inputs.pr_number == ''`; drop `deploy:` from `with:` (deploy cells run the pull request
+    check); move the step after the credentials step; pass
     `inputs.provenance_run` as `base-sha`; drop apply-cell's `if:` (a failed check skips
     apply-cell and the cell reports no blocked reason); drop its `!cancelled() &&`; pass
     `steps.pre-apply.conclusion`; drop the refusal input (the blocked reason names no cause);
@@ -138,9 +143,10 @@ def test_apply_cell_hands_the_refusal_to_the_cell_summary():
 
 def test_every_level_call_grants_what_the_wave_requests():
     """A reusable workflow cannot exceed its caller's permissions, so a level missing one the
-    wave requests fails at load. The levels' `with:` blocks, the deploy's passing no pull
-    request among them, are pinned whole by `test_no_env_level_call_passes_a_cap`. Mutation:
-    drop `pull-requests: read` from `apply.yml`'s, then `deploy.yml`'s, level permissions."""
+    wave requests fails at load. The levels' `with:` blocks, the deploy's passing the merged
+    pull request with `deploy` true among them, are pinned whole by
+    `test_no_env_level_call_passes_a_cap`. Mutation: drop `pull-requests: read` from
+    `apply.yml`'s, then `deploy.yml`'s, level permissions."""
     found = {
         (workflow, lvl): workflow_jobs(workflow)[lvl]["permissions"]
         for workflow in ("apply.yml", "deploy.yml")

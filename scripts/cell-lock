@@ -19,14 +19,18 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
 - `acquire`: locks every cell of `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES` for
   pull request `SHIPMATE_PR_NUMBER`, then fences the acquisition against a close.
 - `release`: `SHIPMATE_MERGED` `true` deletes the pull request's locks except those whose apply
-  check is pending on `SHIPMATE_HEAD_SHA`; `false` deletes them all while the pull request is
-  closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again. Refuses,
-  after releasing the rest, naming each lock whose delete refused.
+  check is pending on `SHIPMATE_HEAD_SHA`, and every one of them with `SHIPMATE_RELEASE_PENDING`
+  `true` (a deploy refused before applying any cell); `false` deletes them all while the pull
+  request is closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again.
+  Refuses, after releasing the rest, naming each lock whose delete refused.
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
   on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes outputs `evicted` and
   `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
-  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds.
+  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds, and `stacked`, the
+  sorted JSON list of those holders that are open with `SHIPMATE_HEAD_REF` as their base branch
+  (empty reads none).
+  A holder whose pull request read fails is left out with a `::warning::`.
 - `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
   `STACK` in `SHIPMATE_ENV` and is open at `SHIPMATE_HEAD_SHA`. With `SHIPMATE_AUTO` `true` it
   also refuses unless `GITHUB_RUN_ATTEMPT` is `1`, the pull request is not a draft,
@@ -35,6 +39,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   `authorize.pusher_reason`, and the base tip is still `SHIPMATE_BASE_SHA`. A "Re-run
   failed jobs" of an apply re-runs its waves without `detect` or `acquire`, and a wave can wait
   hours on an environment approval, so each apply cell checks here before its credentials.
+  With `SHIPMATE_DEPLOY` `true` (a merge deploy's wave) it runs no other check and refuses only
+  when a pull request other than `SHIPMATE_PR_NUMBER`, the merged one (empty on a push, read as
+  `0`), holds the cell's lock: one taken after the deploy's detect.
 """
 
 import dataclasses
@@ -51,9 +58,11 @@ from _shipmate import (
     _run,
     cell_names,
     check_runs,
+    command_data,
     gh_json,
     is_head_sha,
     is_run_id,
+    lock_who,
     run_annotated,
     write_outputs,
 )
@@ -263,12 +272,13 @@ def _install(repo, cell, pr, acquisition, tree, run):
     held = _lock(repo, ref, sha, run)
     if held.pr is None:
         raise SystemExit(
-            f"::error::{where} is locked by an unknown holder ({ref}); comment "
+            f"::error::{where} is locked by {lock_who(None)} ({ref}); comment "
             f"`shipmate unlock {env} --evict` to release it"
         )
     if held.pr != pr:
+        who = lock_who(held.pr)
         raise SystemExit(
-            f"::error::{where} is locked by #{held.pr}; wait for #{held.pr} to merge or close, "
+            f"::error::{where} is locked by {who}; wait for {who} to merge or close, "
             f"then re-plan, or comment `shipmate unlock {env} --evict`"
         )
     if _update(repo, ref, sha, mine.sha, True, run) or _ref_sha(repo, ref, run) == mine.sha:
@@ -464,8 +474,16 @@ def _acquire_cmd(repo, pr, run):
 
 def _release_cmd(repo, pr, run):
     merged = os.environ.get("SHIPMATE_MERGED", "")
+    release_pending = os.environ.get("SHIPMATE_RELEASE_PENDING", "")
+    if release_pending not in ("", "false") and (release_pending, merged) != ("true", "true"):
+        raise SystemExit(
+            "::error::SHIPMATE_RELEASE_PENDING must be true or false, and true only with "
+            f"SHIPMATE_MERGED true (got: SHIPMATE_RELEASE_PENDING={release_pending!r}, "
+            f"SHIPMATE_MERGED={merged!r})"
+        )
     if merged == "true":
-        gone, refused = release(repo, pr, pending=pending_names(*_head_names(repo, run)), run=run)
+        pending = set() if release_pending == "true" else pending_names(*_head_names(repo, run))
+        gone, refused = release(repo, pr, pending=pending, run=run)
     elif merged == "false":
         closed_at = os.environ.get("SHIPMATE_CLOSED_AT", "")
         try:
@@ -507,45 +525,92 @@ def _marks_cmd(repo, pr, run):
             "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
         )
     held = foreign(read_locks(repo, {c["environment"] for c in cells}, run=run), cells, pr)
+    holders = {h["holder"] for h in held} - {None}
     write_outputs(
-        locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held})
+        locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held}),
+        stacked=json.dumps(_stacked(repo, holders, os.environ.get("SHIPMATE_HEAD_REF", ""), run)),
     )
 
 
+def _stacked(repo, holders, head_ref, run):
+    """The `holders` whose pull request is open with `head_ref` as its base branch, sorted.
+    Reviewer-facing, so a failed read warns and leaves that holder out."""
+    if not head_ref:
+        return []
+    stacked = []
+    for holder in sorted(holders):
+        try:
+            pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
+            base = pull["base"]["ref"]
+        except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
+            print(
+                f"::warning::could not read pull request #{holder} ({command_data(_why(exc))}), "
+                "so the plan comment does not say whether it is stacked on this pull request"
+            )
+            continue
+        # A closed or merged holder is no longer stacked: it will not merge after this one.
+        if base == head_ref and pull.get("state") == "open":
+            stacked.append(holder)
+    return stacked
+
+
+def _why(exc):
+    """A failed read's reason on one line: a multi-line reason would split its annotation."""
+    if isinstance(exc, SystemExit):
+        why = exc.code.removeprefix("::error::") if isinstance(exc.code, str) else "read failed"
+    else:
+        why = repr(exc)
+    return " | ".join(why.splitlines())
+
+
 _RETRY = "push, or comment `shipmate apply` on the pull request"
+_DEPLOY_RETRY = "re-run the failed deploy jobs"
 
 
-def _confirm(where, what, read):
-    """`read()`, refused as an unconfirmed `what` when it fails or its answer is malformed."""
+def _confirm(where, what, read, retry=_RETRY):
+    """`read()`, refused as an unconfirmed `what` when it fails or its answer is malformed,
+    naming `retry` as the remedy."""
     try:
         return read()
-    except SystemExit as exc:
-        why = exc.code.removeprefix("::error::") if isinstance(exc.code, str) else "read failed"
-    except (LookupError, TypeError, ValueError, AttributeError) as exc:
-        why = repr(exc)
+    except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
+        why = _why(exc)
     raise SystemExit(
-        f"::error::apply aborted for {where}: could not confirm {what} ({why}); {_RETRY}"
+        f"::error::apply aborted for {where}: could not confirm {what} ({why}); {retry}"
     ) from None
 
 
-def _verify_lock(repo, pr, env, stack, where, run):
+def _cell_lock(repo, env, stack, where, what, run, retry=_RETRY):
+    """The cell's lock, None when it is unlocked; a failed read refuses as an unconfirmed
+    `what`, naming `retry`."""
     ref = ref_name(env, stack)
 
     def read():
         sha = _ref_sha(repo, ref, run)
         return None if sha is None else _lock(repo, ref, sha, run)
 
-    held = _confirm(where, f"pull request #{pr} holds its cell lock", read)
+    return _confirm(where, what, read, retry)
+
+
+def _verify_lock(repo, pr, env, stack, where, run):
+    held = _cell_lock(repo, env, stack, where, f"pull request #{pr} holds its cell lock", run)
     if held is not None and held.pr == pr:
         return
-    holder = (
-        "the cell is not locked"
-        if held is None
-        else f"it is locked by {'an unknown holder' if held.pr is None else f'#{held.pr}'}"
-    )
+    holder = "the cell is not locked" if held is None else f"it is locked by {lock_who(held.pr)}"
     raise SystemExit(
         f"::error::apply aborted for {where}: pull request #{pr} no longer holds its cell lock "
         f"({holder}); comment `shipmate apply` again to lock it or name its holder"
+    )
+
+
+def _verify_deploy(repo, pr, env, stack, where, run):
+    what = "which pull request holds its cell lock"
+    held = _cell_lock(repo, env, stack, where, what, run, _DEPLOY_RETRY)
+    if held is None or held.pr == pr:
+        return
+    raise SystemExit(
+        f"::error::apply aborted for {where}: its cell lock is held by {lock_who(held.pr)}, not "
+        "by this merge. Open a pull request that changes this stack, comment `shipmate unlock "
+        f"{env} --evict` on it, then apply it"
     )
 
 
@@ -638,9 +703,24 @@ def _draft(pull):
     return draft
 
 
-def _verify_cmd(repo, pr, run):
+def _deploy_mode():
+    """`SHIPMATE_DEPLOY` is `true`; unset reads as `false`, and any other value refuses."""
+    deploy = os.environ.get("SHIPMATE_DEPLOY", "false")
+    if deploy not in ("true", "false"):
+        raise SystemExit(f"::error::SHIPMATE_DEPLOY must be true or false (got: {deploy!r})")
+    return deploy == "true"
+
+
+def _verify_cmd(repo, _, run):
+    """`main` passes no pull request here: deploy mode decides how an empty one reads."""
     env, stack = _env(os.environ.get("SHIPMATE_ENV", "")), os.environ.get("STACK", "")
     where = f"`{env}` / `{stack}`"
+    deploy = _deploy_mode()
+    # A push that merged no pull request deploys with pull request 0, which holds no lock.
+    pr = 0 if deploy and not os.environ.get("SHIPMATE_PR_NUMBER") else int(ag.env_pr_number())
+    if deploy:
+        _verify_deploy(repo, pr, env, stack, where, run)
+        return
     head, auto, provenance, base = (
         os.environ.get(k, "")
         for k in (
@@ -701,7 +781,7 @@ COMMANDS = {
 def main():
     if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
         raise SystemExit(f"::error::usage: cell-lock {{{'|'.join(COMMANDS)}}}")
-    pr = int(ag.env_pr_number())
+    pr = None if sys.argv[1] == "verify" else int(ag.env_pr_number())
     # `_run` is looked up per call, so a test that replaces the module's `_run` reaches it.
     COMMANDS[sys.argv[1]](os.environ["GITHUB_REPOSITORY"], pr, _run)
 

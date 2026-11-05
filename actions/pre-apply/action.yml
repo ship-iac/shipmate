@@ -5,11 +5,13 @@ description: >-
   attempt is 1, the pull request is not a draft, the provenance run is still the head's newest
   autoplan and the run the cell's newest plan record names, that record names a push event
   action (opened or synchronize), its pusher still has write access, and the base tip is still
-  the one detect read. A read that fails refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read and pull-requests:read, and, with auto true,
+  the one detect read. With deploy true (a merge deploy's wave) it runs none of those and refuses
+  only when a pull request other than pr-number, the merged one (empty on a push), holds the
+  cell's lock. A read that fails refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read and pull-requests:read, and, with auto true,
   actions:read and checks:read.
 inputs:
   pr-number:
-    description: The pull request that must hold the lock.
+    description: The pull request that must hold the lock; with deploy true, the merged pull request, empty on a push.
     required: true
   env:
     description: Environment name, e.g. dev-eu.
@@ -35,6 +37,10 @@ inputs:
     description: The shipmate App id, whose apply checks carry the plan records.
     required: false
     default: ""
+  deploy:
+    description: true for a merge deploy's wave, false otherwise; any other value refuses.
+    required: false
+    default: "false"
 outputs:
   refusal:
     description: The refusal on one line; empty when the check passed or failed before naming one.
@@ -55,4 +61,5 @@ runs:
         SHIPMATE_PROVENANCE_RUN: ${{ inputs.provenance-run }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_DEPLOY: ${{ inputs.deploy }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify

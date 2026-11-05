@@ -1,7 +1,8 @@
 name: shipmate lock-release
 description: >-
   Release the cell locks a closed pull request holds through scripts/cell-lock. A merge releases
-  every lock but those whose apply check is still pending on the head; a close without merge
+  every lock but those whose apply check is still pending on the head, and every lock with
+  release-pending 'true' (its deploy refused before applying any cell); a close without merge
   releases every lock while the pull request stays closed, applies the merge rule once it has
   merged since, and releases only those taken at or before the close once it is reopened.
   Mints its own App token with contents:write, checks:read and pull-requests:read.
@@ -19,6 +20,12 @@ inputs:
     description: ISO-8601 time the pull request closed; read only when merged is 'false'.
     required: false
     default: ""
+  release-pending:
+    description: >-
+      'true' releases a merge's locks on pending cells too, for a deploy that refused before
+      applying any; 'true' only with merged 'true', any other value but 'false' refuses.
+    required: false
+    default: "false"
   app-id:
     description: shipmate App id (repo/org variable).
     required: true
@@ -52,5 +59,6 @@ runs:
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_MERGED: ${{ inputs.merged }}
         SHIPMATE_CLOSED_AT: ${{ inputs.closed-at }}
+        SHIPMATE_RELEASE_PENDING: ${{ inputs.release-pending }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" release
