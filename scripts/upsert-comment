@@ -27,7 +27,7 @@ Prints exactly one word and exits 0:
 - `created`: no match, so the body was POSTed.
 - `skipped`: no match under `--update-only`; nothing written, and the head is not read.
 - `moved`: the pull request's head is not `--head`; nothing written.
-- `head-failed`: the head read failed; nothing written.
+- `head-failed`: the head read failed or gave no head SHA; nothing written.
 - `list-failed`: the listing failed on any page, or printed a line that is not an `{id, head}`
   object, so nothing was written. A POST here would create a second sticky that later runs
   could PATCH instead of this one.
@@ -45,7 +45,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_head_sha, is_pr_number, run, run_annotated
+from _shipmate import is_head_sha, is_pr_number, one_line, pr_head, run, run_annotated
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
 JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
@@ -73,12 +73,6 @@ def find_existing(repo, pr, marker):
     return None
 
 
-def one_line(text):
-    """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
-    command in the log."""
-    return " | ".join(part for part in re.split(r"[\r\n]+", str(text)) if part)
-
-
 def _args(argv):
     """(PR, BODYFILE, update_only, head or None) from `argv`, or `::error::` usage."""
     usage = "::error::usage: upsert-comment PR BODYFILE [--update-only] [--head SHA]"
@@ -100,13 +94,13 @@ def _args(argv):
 
 def _head_stop(repo, pr, head):
     """None when `head` is None or still the pull request's head; else `moved`, or `head-failed`
-    with gh's error on one stderr line."""
+    with `pr_head`'s one-line error on stderr."""
     if head is None:
         return None
     try:
-        current = run(["gh", "api", f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha"]).strip()
+        current, _ = pr_head(repo, pr, run=run)
     except SystemExit as exc:
-        print(one_line(exc.code), file=sys.stderr)
+        print(exc.code, file=sys.stderr)
         return "head-failed"
     return None if current == head else "moved"
 

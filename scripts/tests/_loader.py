@@ -330,8 +330,8 @@ if [ "$2" = "--paginate" ]; then
   printf '%s' "${FAKE_LIST_STDERR:-}" >&2
   exit "${FAKE_LIST_RC:-0}"
 fi
-if [ "$3 $4" = "--jq .head.sha" ]; then
-  printf '%s\\n' "${FAKE_HEAD:-}"
+if [ "$#" = 2 ] && [[ "$2" == repos/*/pulls/* ]]; then
+  printf '{"head": {"sha": "%s"}, "draft": false}\\n' "${FAKE_HEAD:-}"
   exit "${FAKE_HEAD_RC:-0}"
 fi
 echo '{"id": 99}'
@@ -370,8 +370,8 @@ def run_with_gh_recorder(
     on PATH; return (process, the argv after ``gh`` of each call, in order).
 
     ``listing`` is what a ``--paginate`` call prints, with ``list_stderr`` on stderr, before
-    exiting ``list_rc``; ``head`` is what a
-    ``--jq .head.sha`` read prints before exiting ``head_rc``; every other call prints
+    exiting ``list_rc``; ``head`` is the head SHA of the not-draft pull a
+    ``repos/<repo>/pulls/<n>`` read prints before exiting ``head_rc``; every other call prints
     ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced, with PATH
     and the stub's variables.
     """

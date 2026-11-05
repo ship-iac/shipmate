@@ -15,6 +15,7 @@ import os
 
 import _shipmate
 import pytest
+from _detect_fixtures import autoplans_read, listed_autoplan
 from _loader import SCRIPTS, bash_only, load_script, run_with_gate_gh
 
 gs = load_script("gate-status")
@@ -592,3 +593,226 @@ def test_the_post_command_writes_again_when_no_newer_run_holds(in_process, monke
     calls = _flaky_run(monkeypatch, [("failure", "1")])
     gs.main(["post", SHA, "pending", "the reason"])
     assert calls == [_POST, _READ, _READ, _POST]
+
+
+#: The pull request's live head, and the whole argv of its one read.
+_LIVE = "b" * 40
+_PULL_READ = ["gh", "api", "repos/acme/demo/pulls/7"]
+_RUNS_READ = autoplans_read("acme/demo", _LIVE)
+_PULL_FAILED = "command failed (1): gh api repos/acme/demo/pulls/7 | HTTP 502 | ::add-mask::x"
+_DRAFT_LOG = f"pull request #7 moved to {_LIVE}, a draft; nothing dispatched\n"
+_PLANNED_LOG = (
+    f"pull request #7 moved to {_LIVE}, which has an autoplan run queued, in progress or "
+    "succeeded; nothing dispatched\n"
+)
+
+
+def _pull(sha=_LIVE, draft=False):
+    return json.dumps({"head": {"sha": sha}, "draft": draft})
+
+
+def _live_head(monkeypatch, pull=None, runs="", pull_fails=False, runs_fail=False):
+    """`gs.run` answering the pulls read with the text `pull` (default: `_LIVE`, not a draft) and
+    the live head's autoplan listing with `runs`; each read fails with a multi-line gh error on
+    request. Returns the calls."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _PULL_READ:
+            if pull_fails:
+                raise SystemExit(
+                    "command failed (1): gh api repos/acme/demo/pulls/7\nHTTP 502\r::add-mask::x"
+                )
+            return _pull() if pull is None else pull
+        if args == _RUNS_READ:
+            if runs_fail:
+                raise SystemExit("command failed (1): gh api --paginate x\nHTTP 502")
+            return runs
+        raise AssertionError(f"unexpected gh call: {args}")
+
+    monkeypatch.setattr(gs, "run", run)
+    return calls
+
+
+def _cli(*argv):
+    """`gate-status argv` as its `__main__` block runs it: 0, or the `SystemExit` code, which for
+    a non-refusal is the message the interpreter prints as the one stderr line before exit 1."""
+    try:
+        _shipmate.run_annotated(gs.main, list(argv))
+    except SystemExit as exc:
+        return exc.code
+    return 0
+
+
+def _rows(*runs):
+    return "".join(
+        json.dumps(listed_autoplan(9, _LIVE, status=status, conclusion=conclusion)) + "\n"
+        for status, conclusion in runs
+    )
+
+
+@pytest.mark.parametrize(
+    ("sha", "stdout"), [(SHA, f"{_LIVE}\n"), (_LIVE, "")], ids=["moved", "same"]
+)
+def test_moved_prints_the_live_head_only_when_it_is_not_the_sha(
+    in_process, monkeypatch, capsys, sha, stdout
+):
+    """Mutation: compare `==` for `!=` in `_moved` -- both cases red."""
+    calls = _live_head(monkeypatch)
+    assert _cli("moved", sha, "7") == 0
+    assert (capsys.readouterr(), calls) == ((stdout, ""), [_PULL_READ])
+
+
+@pytest.mark.parametrize("cmd", ["moved", "replan"])
+def test_a_failed_head_read_exits_1_on_one_unannotated_line(in_process, monkeypatch, capsys, cmd):
+    """gh's CR-led `::add-mask::` stays inside the one line. Mutation: re-raise `run`'s
+    `SystemExit` raw in `pr_head` -- two lines."""
+    calls = _live_head(monkeypatch, pull_fails=True)
+    assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls) == (
+        _PULL_FAILED,
+        ("", ""),
+        [_PULL_READ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("pull", "message"),
+    [
+        pytest.param(
+            _pull(None), "pull request #7 has head SHA None and draft False", id="null-sha"
+        ),
+        pytest.param(
+            _pull(draft="false"),
+            f"pull request #7 has head SHA '{_LIVE}' and draft 'false'",
+            id="str-draft",
+        ),
+        pytest.param(
+            '{"draft": false}', "unreadable pull request #7: KeyError('head')", id="no-head"
+        ),
+        pytest.param(
+            "null",
+            "unreadable pull request #7: TypeError(\"'NoneType' object is not subscriptable\")",
+            id="null-pull",
+        ),
+        pytest.param(
+            "<html>",
+            "unreadable pull request #7: JSONDecodeError('Expecting value: line 1 column 1 "
+            "(char 0)')",
+            id="not-json",
+        ),
+    ],
+)
+@pytest.mark.parametrize("cmd", ["moved", "replan"])
+def test_a_head_read_without_a_sha_and_draft_flag_exits_1(
+    in_process, monkeypatch, capsys, cmd, pull, message
+):
+    """Mutations: return `pr_head`'s answer unchecked (drop the `is_head_sha` or the `isinstance`
+    clause) -- null-sha or str-draft prints or lists; drop `TypeError` from the caught classes --
+    null-pull is a traceback."""
+    calls = _live_head(monkeypatch, pull=pull)
+    assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls) == (message, ("", ""), [_PULL_READ])
+
+
+@pytest.mark.parametrize("cmd", ["moved", "replan"])
+def test_a_pr_that_is_not_a_number_is_refused_annotated_before_any_call(
+    in_process, monkeypatch, capsys, cmd
+):
+    """It is bound into the pulls path. Mutation: drop the `is_pr_number` check -- a pulls call."""
+    calls = _live_head(monkeypatch)
+    assert (_cli(cmd, SHA, "1/../x"), capsys.readouterr(), calls) == (
+        1,
+        ("", "::error::<pr> must be a pull request number (got: '1/../x')\n"),
+        [],
+    )
+
+
+@pytest.mark.parametrize("cmd", ["moved", "replan"])
+def test_a_malformed_sha_is_refused_unannotated_before_any_call(
+    in_process, monkeypatch, capsys, cmd
+):
+    """The step that runs it degrades with its own warning. Mutation: leave
+    `annotate=cmd != "checks"` -- an `::error::` line."""
+    calls = _live_head(monkeypatch)
+    assert (_cli(cmd, "A" * 40, "7"), capsys.readouterr(), calls) == (
+        f"head SHA must be a 40-char lowercase hex SHA (got: {'A' * 40!r})",
+        ("", ""),
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        pytest.param((), id="no-run"),
+        pytest.param((("completed", "cancelled"),), id="cancelled"),
+        pytest.param((("completed", "failure"),), id="failure"),
+    ],
+)
+def test_replan_prints_a_moved_head_with_no_live_autoplan(in_process, monkeypatch, capsys, runs):
+    """Mutation: treat any listed run as blocking -- cancelled and failure print nothing."""
+    calls = _live_head(monkeypatch, runs=_rows(*runs))
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls) == ((f"{_LIVE}\n", ""), [_PULL_READ, _RUNS_READ])
+
+
+@pytest.mark.parametrize(
+    "runs",
+    [
+        pytest.param((("queued", None),), id="queued"),
+        pytest.param((("in_progress", None),), id="in-progress"),
+        pytest.param((("completed", "success"),), id="success"),
+        pytest.param(
+            (("completed", "cancelled"), ("completed", "success")), id="success-after-cancel"
+        ),
+    ],
+)
+def test_replan_prints_nothing_when_the_live_head_has_its_autoplan(
+    in_process, monkeypatch, capsys, runs
+):
+    """A succeeded autoplan counts: a duplicate plan would write newer plan records, and an auto
+    apply waiting on that autoplan would then refuse. Mutations: drop the success clause --
+    success red; judge only the first row -- success-after-cancel red."""
+    calls = _live_head(monkeypatch, runs=_rows(*runs))
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls) == (("", _PLANNED_LOG), [_PULL_READ, _RUNS_READ])
+
+
+def test_replan_prints_nothing_for_a_draft_and_lists_no_run(in_process, monkeypatch, capsys):
+    """Mutation: skip the draft check -- the listing is read and the head printed."""
+    calls = _live_head(monkeypatch, pull=_pull(draft=True))
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls) == (("", _DRAFT_LOG), [_PULL_READ])
+
+
+def test_replan_prints_nothing_when_the_head_did_not_move(in_process, monkeypatch, capsys):
+    """Mutation: drop the unmoved return -- the listing is read and the head printed."""
+    calls = _live_head(monkeypatch)
+    assert _cli("replan", _LIVE, "7") == 0
+    assert (capsys.readouterr(), calls) == (("", ""), [_PULL_READ])
+
+
+@pytest.mark.parametrize(
+    ("fakes", "message"),
+    [
+        pytest.param(
+            {"runs": json.dumps(listed_autoplan("9", _LIVE, status="queued")) + "\n"},
+            "run id is '9'",
+            id="str-id",
+        ),
+        pytest.param(
+            {"runs_fail": True}, "command failed (1): gh api --paginate x | HTTP 502", id="failed"
+        ),
+    ],
+)
+def test_replan_exits_1_on_one_unannotated_line_when_the_listing_fails(
+    in_process, monkeypatch, capsys, fakes, message
+):
+    """Mutations: catch only `SystemExit` -- str-id escapes as a `ValueError` traceback; re-raise
+    the listing's `SystemExit` raw -- failed prints two lines."""
+    calls = _live_head(monkeypatch, **fakes)
+    assert (_cli("replan", SHA, "7"), capsys.readouterr(), calls) == (
+        message,
+        ("", ""),
+        [_PULL_READ, _RUNS_READ],
+    )
