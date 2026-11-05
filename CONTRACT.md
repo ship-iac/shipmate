@@ -1956,12 +1956,13 @@ refuses the whole run with one line:
 `` deploy refused: <n> pending cell(s) are locked by another pull request:
 <stack> / <env> (locked by <who>), .... None of this merge's <m> pending
 cell(s) were applied: <stack> / <env>, .... Open a pull request that changes
-these stacks; its plan comment names each lock and how to release it. ``
+these stacks, comment `shipmate unlock <env> --evict` on it for each
+environment above, then apply it. ``
 
-`<who>` is `#<n>`, or `an unknown holder`; both lists are sorted. The refusal
-names one recovery and offers no re-run: the recovery pull request's plan
-comment marks each changed cell another pull request locks and offers
-`shipmate unlock <env> --evict` for it, whatever the holder's state. Before it refuses,
+`<who>` is `#<n>`, or `an unknown holder`; both lists are sorted, and `<env>`
+is the command's placeholder. The refusal names one recovery and offers no
+re-run: `--evict` from a pull request that changes the cells releases the locks
+other pull requests, or an unknown holder, hold on them. Before it refuses,
 `detect` writes the output `refused_locked` `true`, and the deploy's release
 step passes it to `actions/lock-release` as `release-pending`, so the merged
 pull request's locks are released on its pending cells too: none of them
@@ -1975,15 +1976,15 @@ input `deploy: true`, with the merged pull request as `pr_number`, empty on a
 push), which runs none of the checks above and refuses only when a pull request
 other than the merged one, or an unknown holder, holds the cell's lock:
 `` apply aborted for `<env>` / `<stack>`: its cell lock is held by <who>, not by
-this merge. Open a pull request that changes this stack; its plan comment names
-the lock and how to release it ``. An unlocked
-cell, or one the merged pull request holds, passes. A failed read refuses with
+this merge. Open a pull request that changes this stack, comment `shipmate
+unlock <env> --evict` on it, then apply it ``. An unlocked cell, or one the
+merged pull request holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
 wave cell assumes no cloud role and keeps its apply check pending, and the waves
 before it have applied. The merged pull request keeps its locks on the cells
-that did not apply, which the recovery pull request's plan comment marks and
-`--evict` releases.
+that did not apply, other than the refused one, and the recovery pull request's
+`--evict` releases those too.
 
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the

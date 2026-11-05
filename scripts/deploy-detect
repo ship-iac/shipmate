@@ -12,8 +12,8 @@ would apply it from nowhere and a skip would leave its check pending with nothin
 said. Every pending cell here is also runnable: this path holds nothing back, unlike
 the bare-apply path's targeted and held envs. It refuses the whole run instead in two more
 cases. A pending cell that `after` runs behind a pending cell `needs` puts on a later env-level
-has no order that meets both. A pending cell another pull request locks may carry that pull
-request's applied change, which this merge's plan would undo.
+has no order that meets both. A pending cell another pull request locks refuses too;
+CONTRACT.md §Cell locks gives the reason.
 """
 
 import os
@@ -134,8 +134,8 @@ def refuse_locked(repo, pending, pr_number):
         f"::error::deploy refused: {len(held)} pending cell(s) are locked by another pull "
         f"request: {', '.join(f'{k} (locked by {who})' for k, who in held)}. None of this "
         f"merge's {len(cells)} pending cell(s) were applied: {', '.join(cells)}. Open a pull "
-        "request that changes these stacks; its plan comment names each lock and how to "
-        "release it."
+        "request that changes these stacks, comment `shipmate unlock <env> --evict` on it for "
+        "each environment above, then apply it."
     )
 
 

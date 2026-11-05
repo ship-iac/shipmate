@@ -981,8 +981,8 @@ changes the cell releases the lock now.
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
 pending cell(s) are locked by another pull request: <stack> / <env> (locked by
 <who>), .... None of this merge's <m> pending cell(s) were applied: <stack> /
-<env>, .... Open a pull request that changes these stacks; its plan comment
-names each lock and how to release it. ``
+<env>, .... Open a pull request that changes these stacks, comment `shipmate
+unlock <env> --evict` on it for each environment above, then apply it. ``
 
 Another pull request, or an unknown holder, locks one of the merge's pending
 cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
@@ -992,9 +992,10 @@ turns to `failure`, and its apply checks stay pending.
 
 1. Open a pull request that changes every stack the message lists as not
    applied (any edit `terramate list --changed` marks, such as a comment line).
-2. Its plan comment marks each changed cell another pull request locks and
-   names `shipmate unlock <env> --evict` for it. Comment that, with write
-   access, to release the lock.
+2. Once it has planned, comment `shipmate unlock <env> --evict` on it, with
+   write access, for each environment the message names. It releases the
+   locks other pull requests, or an unknown holder, hold on its cells there.
+   Its plan comment can mark a locked cell `🔒 locked by`.
 3. Its cells are applied before merge under a required gate (`shipmate apply`,
    and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.
@@ -1003,17 +1004,18 @@ turns to `failure`, and its apply checks stay pending.
 
 A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
 `<env>` / `<stack>`: its cell lock is held by <who>, not by this merge. Open a
-pull request that changes this stack; its plan comment names the lock and how to
-release it ``.
+pull request that changes this stack, comment `shipmate unlock <env> --evict` on
+it, then apply it ``.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
 check stays pending; the waves before it have applied, and the later waves and
-env-levels are skipped, as after any failed cell. Follow the steps in §A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`,
-with this stack and every other stack whose cell did not apply. The merged pull
-request keeps its locks on the cells that did not apply, so the recovery pull
-request's plan comment may mark cells locked by the merged pull request too;
-`shipmate unlock <env> --evict` releases those as well.
+env-levels are skipped, as after any failed cell. Follow the steps in §A
+merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another
+pull request`, with this stack and every other stack whose cell did not apply.
+The merged pull request keeps its locks on the cells that did not apply, other
+than the refused one, and `shipmate unlock <env> --evict` from the recovery pull
+request releases those as well.
 
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs `` is a failed lock read: re-run the deploy's failed jobs.

@@ -983,8 +983,8 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
 
 
 LOCK_REMEDY = (
-    "Open a pull request that changes these stacks; its plan comment names each lock and how to "
-    "release it."
+    "Open a pull request that changes these stacks, comment `shipmate unlock <env> --evict` on it "
+    "for each environment above, then apply it."
 )
 
 
