@@ -1665,7 +1665,7 @@ MERGED = 4
 DEPLOY = {"SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": str(MERGED)}
 HELD_BY_9 = (
     "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
-    "this merge. Open a pull request that changes this stack, comment `shipmate unlock <env> "
+    "this merge. Open a pull request that changes this stack, comment `shipmate unlock dev "
     "--evict` on it, then apply it"
 )
 
@@ -1712,7 +1712,7 @@ def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
         "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an unknown "
         "holder, not by this merge. Open a pull request that changes this stack, comment "
-        "`shipmate unlock <env> --evict` on it, then apply it"
+        "`shipmate unlock dev --evict` on it, then apply it"
     )
 
 
