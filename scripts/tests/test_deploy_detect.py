@@ -1,6 +1,7 @@
 import functools
 import json
 
+import _shipmate
 import pytest
 from _detect_fixtures import (
     APP_ID,
@@ -80,7 +81,7 @@ def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch, capsys):
     monkeypatch.setattr(dd, "_gh_json", _answering({PULLS_PATH: pulls}, paths))
     assert dd._merged_head("o/r", "merge123", "main") == ("merge123", "")
     assert paths == [PULLS_PATH]
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().err == ""
 
 
 def test_merged_head_mix_of_merged_and_open_picks_merged(monkeypatch):
@@ -102,11 +103,6 @@ def test_merged_head_mix_of_merged_and_open_picks_merged(monkeypatch):
     ]
     monkeypatch.setattr(dd, "_gh_json", lambda path: pulls)
     assert dd._merged_head("o/r", "merge123", "main") == ("merged-pr-head", "8")
-
-
-def test_merged_head_no_pulls_returns_merge_sha(monkeypatch):
-    monkeypatch.setattr(dd, "_gh_json", lambda path: [])
-    assert dd._merged_head("o/r", "merge123", "main", _attempts=1, _sleep=0) == ("merge123", "")
 
 
 def test_merged_head_falls_back_to_the_closed_pull_that_merged_it(monkeypatch):
@@ -162,7 +158,7 @@ def test_merged_head_never_takes_a_closed_unmerged_pull_by_its_test_merge(monkey
     ]
     monkeypatch.setattr(dd, "_gh_json", _answering({PULLS_PATH: [], CLOSED_PATH: closed}))
     assert dd._merged_head("o/r", "merge123", "main", _sleep=0) == ("merge123", "")
-    assert capsys.readouterr().out == WARNING + "\n"
+    assert capsys.readouterr().err == WARNING + "\n"
 
 
 def test_merged_head_warns_once_when_no_pull_request_records_the_merge(monkeypatch, capsys):
@@ -170,25 +166,55 @@ def test_merged_head_warns_once_when_no_pull_request_records_the_merge(monkeypat
     compared whole. Mutation: print the warning without its closed-listing clause -- red."""
     monkeypatch.setattr(dd, "_gh_json", _answering({PULLS_PATH: [], CLOSED_PATH: []}))
     assert dd._merged_head("o/r", "merge123", "main", _sleep=0) == ("merge123", "")
-    assert capsys.readouterr().out == WARNING + "\n"
+    assert capsys.readouterr().err == WARNING + "\n"
 
 
 def test_merged_head_lists_the_closed_pulls_of_a_quoted_branch(monkeypatch, capsys):
     """The `base=` value is the branch URL-quoted with no safe characters; the warning names
-    it unquoted. Mutations: drop the `quote` -- `base=release/2026`; drop `state=closed` --
-    the URL differs, red either way."""
+    it as workflow-command data, so its `%` reads `%25`. Mutations: drop the `quote` --
+    `base=release/50%`; drop `state=closed` -- the URL differs; drop `command_data` from the
+    warning -- `release/50%`. Red each way."""
     paths = []
     closed = (
-        "repos/o/r/pulls?state=closed&base=release%2F2026&sort=updated&direction=desc&per_page=100"
+        "repos/o/r/pulls?state=closed&base=release%2F50%25&sort=updated&direction=desc&per_page=100"
     )
     monkeypatch.setattr(dd, "_gh_json", _answering({PULLS_PATH: [], closed: []}, paths))
-    assert dd._merged_head("o/r", "merge123", "release/2026", _attempts=1) == ("merge123", "")
+    assert dd._merged_head("o/r", "merge123", "release/50%", _attempts=1) == ("merge123", "")
     assert paths == [PULLS_PATH, closed]
-    assert capsys.readouterr().out == (
+    assert capsys.readouterr().err == (
         "::warning::could not map merge123 to a merged pull request (commits/merge123/pulls "
         "stayed empty and no recently closed pull request records it as its merge commit); "
-        "deploying it as a push to release/2026\n"
+        "deploying it as a push to release/50%25\n"
     )
+
+
+def test_merged_head_retries_a_transient_failure_of_the_closed_listing(monkeypatch):
+    """One 502 on the closed listing is retried, not raised: a deploy with nothing pending
+    must not fail on it. Mutation: read the listing without `retried` -- the 502 raises."""
+    closed = [
+        {
+            "number": 7,
+            "merge_commit_sha": "merge123",
+            "merged_at": "2024-01-02T00:00:00Z",
+            "head": {"sha": "right"},
+        }
+    ]
+    answers = iter([SystemExit(f"::error::gh api {CLOSED_PATH}\nHTTP 502: Bad Gateway"), closed])
+    paths = []
+
+    def gh_json(path):
+        paths.append(path)
+        if path == PULLS_PATH:
+            return []
+        answer = next(answers)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(dd, "_gh_json", gh_json)
+    monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
+    assert dd._merged_head("o/r", "merge123", "main", _attempts=1) == ("right", "7")
+    assert paths == [PULLS_PATH, CLOSED_PATH, CLOSED_PATH]
 
 
 def test_merged_head_retries_until_pulls_populated(monkeypatch):
@@ -271,7 +297,7 @@ def _lock_answer(locks):
 
 def _stub_merged_head(monkeypatch, pull_reads, answer, run):
     """`_run_main`'s `_merged_head`: a double returning `answer`, or with `pull_reads` the real
-    one reading through `run` without sleeping."""
+    one reading through `run` without sleeping. Apart from `_run_main` to keep it under C901."""
     if pull_reads is None:
         monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha, branch: answer)
     else:
@@ -299,9 +325,9 @@ def _run_main(
     pull_reads=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
-    stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
-    into `urls` are the ones the work set itself asks for; `head` and `pr_number` are what the stub
-    returns.
+    stubbed. Without `pull_reads`, `_merged_head` is stubbed rather than fed, so the only `gh api`
+    paths collected into `urls` are the ones the work set itself asks for; `head` and `pr_number`
+    are what the stub returns.
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
     the double, and leaves `cells` unused. Without it, `all_tags` tags each stack of `cells`
@@ -320,7 +346,8 @@ def _run_main(
     does. An exception for `locks` is raised by every lock-ref read instead.
 
     `pull_reads`, a `{path: JSON text}` map, leaves `_merged_head` real on `GITHUB_SHA` =
-    `head` and branch `main`, and answers its reads by path; `pr_number` is then unused.
+    `head` and branch `main`, and answers its reads by path; those reads land in `urls` too, and
+    `pr_number` is unused.
 
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
@@ -545,11 +572,15 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
 def test_main_warns_of_an_unmapped_merge_before_refusing_its_record_less_cell(
     tmp_path, monkeypatch, capsys
 ):
-    """No pull request maps the merge, so it deploys as a push: the warning prints first, then
-    the push path's pending cell, whose check records no plan run, refuses, compared whole.
-    Mutation: print the warning from `main` after `with_plan_runs` -- stdout is empty.
+    """No pull request maps the merge, so it deploys as a push: through `run_annotated`, the
+    one stream the runner's log interleaves, stderr holds the warning and then the push path's
+    refusal of its pending cell, whose check records no plan run, compared whole.
+    Mutation: write the warning to stdout -- stderr holds the refusal alone.
+    Mutation: print the warning from `main` after `with_plan_runs` -- the same.
     Mutation: make the lock read fail -- its failure is raised instead of the refusal."""
     closed = "repos/acme/iac/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100"
+    main = dd.main
+    monkeypatch.setattr(dd, "main", lambda: dd.run_annotated(main))
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -565,17 +596,16 @@ def test_main_warns_of_an_unmapped_merge_before_refusing_its_record_less_cell(
             ],
             pull_reads={f"repos/acme/iac/commits/{HEAD}/pulls": "[]", closed: "[]"},
         )
-    assert capsys.readouterr().out == (
+    assert exc_info.value.code == 1
+    assert capsys.readouterr().err == (
         f"::warning::could not map {HEAD} to a merged pull request (commits/{HEAD}/pulls stayed "
         "empty and no recently closed pull request records it as its merge commit); deploying "
         "it as a push to main\n"
-    )
-    assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-eu: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "
         "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
         "then apply again; if that pull request has already merged, a new pull request "
-        "touching them plans and applies them afresh."
+        "touching them plans and applies them afresh.\n"
     )
 
 
