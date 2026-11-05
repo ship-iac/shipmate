@@ -83,7 +83,7 @@ def test_each_holder_is_told_once_and_the_command_names_every_evicted_cell(monke
                 "notice",
                 "released `dev-eu` / `stacks/auth` (held by #3), `dev-eu` / **stacks/a`b** "
                 "(held by #4), `dev-eu` / `stacks/dns` (held by #3), `dev-eu` / `stacks/app` "
-                "(held by an unreadable lock).",
+                "(held by an unknown holder).",
             ),
         ),
     ]

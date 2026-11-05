@@ -1865,7 +1865,7 @@ _LOCK_CELLS = [
 
 
 def test_a_changed_cell_another_pull_request_holds_names_its_holder():
-    """A known holder renders its number, an unknown one `an unreadable lock`. An unchanged cell
+    """A known holder renders its number, an unknown one `an unknown holder`. An unchanged cell
     is never marked: it has nothing to apply. Mutations: drop `cell["changed"] and` -- the dns
     line gains a marker, red; key the lookup by the bare stack -- no marker, red."""
     locks = {"stacks/app / dev-eu": 12, "stacks/db / dev-eu": None, "stacks/dns / dev-eu": 9}
@@ -1874,16 +1874,16 @@ def test_a_changed_cell_another_pull_request_holds_names_its_holder():
         "#### dev-eu: 3 cells, 2 changed\n\n"
         f"<details><summary>{_bare_app('https://ck/app-eu')} 🔒 locked by #12</summary>\n\n"
         "```diff\n+   one\n```\n</details>\n\n"
-        '🟡 stacks/db: +1 ~0 -0 <a href="https://gh/run/1">plan</a> 🔒 locked by an unreadable '
-        "lock\n"
+        '🟡 stacks/db: +1 ~0 -0 <a href="https://gh/run/1">plan</a> 🔒 locked by an unknown '
+        "holder\n"
         '🟢 stacks/dns: no changes <a href="https://gh/run/1">plan</a>'
     )
 
 
-def test_lock_who_names_a_holder_and_an_unreadable_lock():
+def test_lock_who_names_a_holder_and_an_unknown_holder():
     """The one spelling every lock surface renders. Mutation: change either text in
     `_shipmate.lock_who` -- red here, and in the plan, apply, evict and deploy pins."""
-    assert (_shipmate.lock_who(7), _shipmate.lock_who(None)) == ("#7", "an unreadable lock")
+    assert (_shipmate.lock_who(7), _shipmate.lock_who(None)) == ("#7", "an unknown holder")
 
 
 _UNMARKED_LOCK_BODY = (

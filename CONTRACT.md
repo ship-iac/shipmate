@@ -1859,7 +1859,7 @@ file, `lock`, and whose message is one line of JSON,
 The commit carries no committer of its own, so its committer date is the
 server's time of the acquisition. The ref name is the lock's identity. A
 message that is not exactly that record, or whose `env` and `stack` name
-another ref, is a lock of unknown holder, which renders as `an unreadable lock`;
+another ref, is a lock of unknown holder, which renders as `an unknown holder`;
 closing or merging never releases it, and only `shipmate unlock <env> --evict`
 does. A lock ref that targets anything but a commit refuses every read of its
 environment's locks (a `release`, every environment's) with
@@ -1888,7 +1888,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
-| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unreadable lock` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
+| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
 the ref is read rather than the status parsed: this run's commit is acquired,
@@ -1942,23 +1942,26 @@ blocked reason, or `could not confirm the pull request still allows this apply (
 the job log)` when no refusal arrived. A merge deploy's cell runs the check in its
 deploy mode instead (below).
 
-**The merge deploy refuses another pull request's lock.** A pull request that
-holds a cell's lock applied its own plan there, so applying a merge's plan to
-that cell would undo that change. `deploy-detect` reads the locks of the
+**The merge deploy refuses another pull request's lock.** A pull request
+locks a cell before it applies, so a cell another pull request locks may carry
+that pull request's applied change, and applying a merge's plan there would
+undo it. A lock ref proves neither that its holder is open nor that it applied
+anything (`lock` takes the cells of every env-level up front), so the refusals
+state only the lock and one remedy. `deploy-detect` reads the locks of the
 pending cells' environments as the merged pull request; a push that merged no
 pull request reads them as pull request `0`, which holds no lock. When another
 pull request, or an unknown holder, locks a pending cell, it applies nothing and
 refuses the whole run with one line:
 
-`` deploy refused: <n> pending cell(s) are locked by another open pull request,
-which applied its own plan to them: <stack> / <env> (locked by <who>), ...
-Applying this merge's plan would undo that pull request's applied change, so
-none of this merge's <m> pending cell(s) were applied: <stack> / <env>, ...
-Merge or close the holding pull request first, then open a pull request that
-changes these stacks to plan and apply them against the result. ``
+`` deploy refused: <n> pending cell(s) are locked by another pull request:
+<stack> / <env> (locked by <who>), .... None of this merge's <m> pending
+cell(s) were applied: <stack> / <env>, .... Open a pull request that changes
+these stacks; its plan comment names each lock and how to release it. ``
 
-`<who>` is `#<n>`, or `an unreadable lock` for an unknown holder; both lists are
-sorted. The refusal names one recovery and offers no re-run. Before it refuses,
+`<who>` is `#<n>`, or `an unknown holder`; both lists are sorted. The refusal
+names one recovery and offers no re-run: the recovery pull request's plan
+comment marks each changed cell another pull request locks and offers
+`shipmate unlock <env> --evict` for it, whatever the holder's state. Before it refuses,
 `detect` writes the output `refused_locked` `true`, and the deploy's release
 step passes it to `actions/lock-release` as `release-pending`, so the merged
 pull request's locks are released on its pending cells too: none of them
@@ -1972,14 +1975,15 @@ input `deploy: true`, with the merged pull request as `pr_number`, empty on a
 push), which runs none of the checks above and refuses only when a pull request
 other than the merged one, or an unknown holder, holds the cell's lock:
 `` apply aborted for `<env>` / `<stack>`: its cell lock is held by <who>, not by
-this merge; applying this merge's plan would undo that pull request's applied
-change. Merge or close the holding pull request first, then open a pull request
-that changes this stack to plan and apply it against the result ``. An unlocked
+this merge. Open a pull request that changes this stack; its plan comment names
+the lock and how to release it ``. An unlocked
 cell, or one the merged pull request holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
 wave cell assumes no cloud role and keeps its apply check pending, and the waves
-before it have applied.
+before it have applied. The merged pull request keeps its locks on the cells
+that did not apply, which the recovery pull request's plan comment marks and
+`--evict` releases.
 
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the
@@ -2932,18 +2936,19 @@ and `lost` outputs, which the same rule reads.
   mention a user or team; the apply comment's cell lines and its notes'
   bold cell names and the doctor report's check headers do the same.
   A changed cell another pull request holds a cell lock on ends its line with
-  ` 🔒 locked by #<n>`, or ` 🔒 locked by an unreadable lock` for an unknown
-  holder (§Cell locks). When #<n>'s base branch is this pull request's head
-  branch (`facts`' `head-ref`), #<n> is stacked on this pull request, and the
-  marker reads ` 🔒 locked by #<n>, which is stacked on this pull request; merging
-  this pull request first makes its deploy refuse the cells #<n> holds. Retarget
-  #<n> to <default branch> and merge it first.` A pending gate then reads `stacked #<n> holds <k>
-  cell(s); retarget it to <default branch> and merge it first` in place of its
-  generic description, naming the lowest stacked holder and counting its changed
-  locked cells. The marker is part of the bare line, so the size budget never
-  sheds it. It degrades: a lock read that fails warns and marks no cell, and a
-  failed read of #<n>, an empty `head-ref` or an empty default branch renders
-  the plain marker and the generic pending description.
+  ` 🔒 locked by #<n>`, or ` 🔒 locked by an unknown holder` for an unknown
+  holder (§Cell locks). When #<n> is open and its base branch is this pull
+  request's head branch (`facts`' `head-ref`), #<n> is stacked on this pull
+  request, and the marker reads ` 🔒 locked by #<n>, which is stacked on this
+  pull request; merging this pull request first makes its deploy refuse the
+  cells #<n> holds. Retarget #<n> to <default branch> and merge it first.` A
+  pending gate then reads `stacked #<n> holds <k> cell(s); retarget it to
+  <default branch> and merge it first` in place of its generic description,
+  naming the lowest stacked holder and counting its changed locked cells. The
+  marker is part of the bare line, so the size budget never sheds it. It
+  degrades: a lock read that fails warns and marks no cell, and a failed read of
+  #<n>, a closed or merged #<n>, an empty `head-ref` or an empty default branch
+  renders the plain marker and the generic pending description.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
@@ -3188,7 +3193,7 @@ actionable warning cannot be lost on either path. In the order they render:
   then re-plan, or comment `shipmate unlock <env> --evict`.``, one per pull
   request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
   with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
-  unknown renders ``🔒 locked by an unreadable lock: <cells>. Comment
+  unknown renders ``🔒 locked by an unknown holder: <cells>. Comment
   `shipmate unlock <env> --evict`.`` Every form renders these lines.
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
   it, so their plans would revert that change: <cells>. Update the branch from
@@ -3202,7 +3207,7 @@ actionable warning cannot be lost on either path. In the order they render:
   nothing itself when there is one, so it can apply now. `<remedy>` is
   `` it is locked by #<n>; wait for #<n> to merge or close, then re-plan, or
   comment `shipmate unlock <env> --evict` `` when another pull request locks
-  the blocker cell (`` it is locked by an unreadable lock; comment
+  the blocker cell (`` it is locked by an unknown holder; comment
   `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
   else holds its environment, followed by `; the base also changed it; update
   the branch from the base and push` when the blocker is also an overlap cell,

@@ -2275,7 +2275,7 @@ _LOCK_LINES = [
         "comment `shipmate unlock dev --evict`."
     ),
     (
-        "🔒 locked by an unreadable lock: stacks/net / dev, stacks/edge / dev. Comment "
+        "🔒 locked by an unknown holder: stacks/net / dev, stacks/edge / dev. Comment "
         "`shipmate unlock dev --evict`."
     ),
 ]
@@ -2356,12 +2356,12 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
         "The run log's apply-all-detect notice names the decision seen.\n"
         "🔒 locked by #12: stacks/dns / ops. Wait for #12 to merge or close, then re-plan, or "
         "comment `shipmate unlock ops --evict`.\n"
-        "🔒 locked by an unreadable lock: stacks/net / ops. Comment "
+        "🔒 locked by an unknown holder: stacks/net / ops. Comment "
         "`shipmate unlock ops --evict`.\n"
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #12; wait "
         "for #12 to merge or close, then re-plan, or comment `shipmate unlock ops --evict`\n"
         "⚪ stacks/b / qa: waits on stacks/net / ops, not applied yet; it is locked by an "
-        "unreadable lock; comment `shipmate unlock ops --evict`\n"
+        "unknown holder; comment `shipmate unlock ops --evict`\n"
         "⚪ stacks/c / qa: waits on stacks/vault / ops, not applied yet; it is held until the pull "
         "request is approved, then comment `shipmate apply ops`\n\n" + HINT
     )

@@ -203,7 +203,7 @@ def _run_main(
     otherwise replaces the run-graph.
 
     `locks`, a `{(stack, env): holder}` map, answers the lock refs the real `cell-lock` reads
-    (none by default); a `None` holder's commit carries no lock record, as an unreadable lock's
+    (none by default); a `None` holder's commit carries no lock record, as an unknown holder's
     does. An exception for `locks` is raised by every lock-ref read instead.
 
     Returns the parsed GITHUB_OUTPUT."""
@@ -983,8 +983,8 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
 
 
 LOCK_REMEDY = (
-    "Merge or close the holding pull request first, then open a pull request that changes "
-    "these stacks to plan and apply them against the result."
+    "Open a pull request that changes these stacks; its plan comment names each lock and how to "
+    "release it."
 )
 
 
@@ -1008,9 +1008,8 @@ def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkey
     with pytest.raises(SystemExit) as exc:
         _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 7})
     assert str(exc.value) == (
-        "::error::deploy refused: 1 pending cell(s) are locked by another open pull request, "
-        "which applied its own plan to them: stacks/dns / dev-eu (locked by #7). Applying this "
-        "merge's plan would undo that pull request's applied change, so none of this merge's 2 "
+        "::error::deploy refused: 1 pending cell(s) are locked by another pull request: "
+        "stacks/dns / dev-eu (locked by #7). None of this merge's 2 "
         "pending cell(s) were applied: stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
     )
     assert github_outputs(tmp_path / "out.txt") == {
@@ -1032,15 +1031,14 @@ def test_a_push_that_merged_no_pull_request_refuses_any_held_cell(tmp_path, monk
     with pytest.raises(SystemExit) as exc:
         _locked_run(tmp_path, monkeypatch, {("stacks/app", "dev-eu"): 7}, pr_number="")
     assert str(exc.value) == (
-        "::error::deploy refused: 1 pending cell(s) are locked by another open pull request, "
-        "which applied its own plan to them: stacks/app / dev-eu (locked by #7). Applying this "
-        "merge's plan would undo that pull request's applied change, so none of this merge's 2 "
+        "::error::deploy refused: 1 pending cell(s) are locked by another pull request: "
+        "stacks/app / dev-eu (locked by #7). None of this merge's 2 "
         "pending cell(s) were applied: stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
     )
 
 
-def test_an_unreadable_lock_on_a_pending_cell_refuses_and_names_it(tmp_path, monkeypatch):
-    """Both cells held, one by an unreadable lock: listed sorted, each with its holder.
+def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monkeypatch):
+    """Both cells held, one by an unknown holder: listed sorted, each with its holder.
 
     Mutation: render `#None` for an unknown holder -- the text changes.
     Mutation: change `lock_who`'s text in `_shipmate` -- the text changes."""
@@ -1049,10 +1047,9 @@ def test_an_unreadable_lock_on_a_pending_cell_refuses_and_names_it(tmp_path, mon
             tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 9, ("stacks/app", "dev-eu"): None}
         )
     assert str(exc.value) == (
-        "::error::deploy refused: 2 pending cell(s) are locked by another open pull request, "
-        "which applied its own plan to them: stacks/app / dev-eu (locked by an unreadable lock), "
-        "stacks/dns / dev-eu (locked by #9). Applying this merge's plan would undo that pull "
-        "request's applied change, so none of this merge's 2 pending cell(s) were applied: "
+        "::error::deploy refused: 2 pending cell(s) are locked by another pull request: "
+        "stacks/app / dev-eu (locked by an unknown holder), stacks/dns / dev-eu (locked by #9). "
+        "None of this merge's 2 pending cell(s) were applied: "
         "stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
     )
 

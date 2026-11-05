@@ -316,8 +316,8 @@ def write_outputs(**pairs):
 
 
 def lock_who(holder: int | None) -> str:
-    """Who holds a cell lock: `#<holder>`, or `an unreadable lock` for None (unknown holder)."""
-    return f"#{holder}" if holder is not None else "an unreadable lock"
+    """Who holds a cell lock: `#<holder>`, or `an unknown holder` for None."""
+    return f"#{holder}" if holder is not None else "an unknown holder"
 
 
 def event_payload(path):

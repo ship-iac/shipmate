@@ -909,11 +909,11 @@ nothing.
   holds its cell lock (<why>) ``. §An apply cell refused: ``apply aborted for
   `<env>` / `<stack>`: ...`` has it and the check's other refusals.
 
-### A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not a commit`
+### A cell is locked by an unknown holder, or a lock ref `targets a <type>, not a commit`
 
 The apply result comment carries
-``🔒 locked by an unreadable lock: <cells>. Comment `shipmate unlock <env> --evict`.``,
-the plan comment marks a cell `🔒 locked by an unreadable lock`, or the `lock`
+``🔒 locked by an unknown holder: <cells>. Comment `shipmate unlock <env> --evict`.``,
+the plan comment marks a cell `🔒 locked by an unknown holder`, or the `lock`
 job fails with `` `<env>` / `<stack>` is locked by an unknown holder (<ref>) ``.
 
 The lock ref's commit message is not the record the engine writes, or names
@@ -964,7 +964,7 @@ merged or closed.
   (§The deploy's `summary` failed releasing cell locks). Re-run the deploy. A
   deploy refused over another pull request's lock releases it instead, with
   every other lock #<n> holds (§A merge deploy refused: `deploy refused: <n>
-  pending cell(s) are locked by another open pull request`). A merge into a
+  pending cell(s) are locked by another pull request`). A merge into a
   branch no deploy runs on leaves the check pending, and the lock with it.
 - **#<n> was closed without merging, then reopened, and the lock is newer than
   the close.** The release keeps a lock taken after the close while #<n> is
@@ -976,53 +976,44 @@ For the second and third causes, re-pin the fence
 differs. In every case, `shipmate unlock <env> --evict` from a pull request that
 changes the cell releases the lock now.
 
-### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another open pull request`
+### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`
 
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
-pending cell(s) are locked by another open pull request, which applied its own
-plan to them: <stack> / <env> (locked by <who>), ... ``, then names every
-pending cell of the merge, none of them applied.
+pending cell(s) are locked by another pull request: <stack> / <env> (locked by
+<who>), .... None of this merge's <m> pending cell(s) were applied: <stack> /
+<env>, .... Open a pull request that changes these stacks; its plan comment
+names each lock and how to release it. ``
 
-The merge's pending cells include one another open pull request, or an unknown
-holder (`an unreadable lock`), locks ([`../CONTRACT.md`](../CONTRACT.md) §Cell
-locks). That pull request applied its own plan to the cell, and this merge's
-plan would undo it, so the deploy applies nothing. Its lock release still runs
-and releases every lock the merged pull request holds, pending cells' included.
-The merged head's `shipmate / gate` turns to `failure`, and its apply checks stay
-pending.
+Another pull request, or an unknown holder, locks one of the merge's pending
+cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
+nothing. Its lock release still runs and releases every lock the merged pull
+request holds, pending cells' included. The merged head's `shipmate / gate`
+turns to `failure`, and its apply checks stay pending.
 
-1. Merge or close the holding pull request.
-2. Open a pull request that changes every stack the message lists as not
+1. Open a pull request that changes every stack the message lists as not
    applied (any edit `terramate list --changed` marks, such as a comment line).
-   It plans against the result, that pull request's change included.
+2. Its plan comment marks each changed cell another pull request locks and
+   names `shipmate unlock <env> --evict` for it. Comment that, with write
+   access, to release the lock.
 3. Its cells are applied before merge under a required gate (`shipmate apply`,
    and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.
 
-For `an unreadable lock`, no merge or close releases it: the new pull request's
-plan comment marks the cell, and `shipmate unlock <env> --evict` there releases
-it (§A cell is locked by an unreadable lock, or a lock ref `targets a <type>, not
-a commit`). When the holder is stacked on the merged pull request (its base
-branch was the merged pull request's head branch), the merged pull request's own
-plan comment marks the cell `which is stacked on this pull request` once a plan
-runs after the lock was taken. Retarget the stacked pull request to the default
-branch and merge it first.
-
 ### A deploy cell refused: `its cell lock is held by`
 
 A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
-`<env>` / `<stack>`: its cell lock is held by <who>, not by this merge; applying
-this merge's plan would undo that pull request's applied change. Merge or close
-the holding pull request first, then open a pull request that changes this stack
-to plan and apply it against the result ``.
+`<env>` / `<stack>`: its cell lock is held by <who>, not by this merge. Open a
+pull request that changes this stack; its plan comment names the lock and how to
+release it ``.
 
-Another pull request applied the cell and took its lock after this deploy's
-`detect` read the locks. The cell assumes no cloud role and its apply check stays
-pending; the waves before it have applied, and the later waves and env-levels
-are skipped, as after any failed cell. Merge or close the holding pull
-request, then open a pull request that changes this stack, as in §A merge
-deploy refused: `deploy refused: <n> pending cell(s) are locked by another open
-pull request`.
+Another pull request, or an unknown holder, took the cell's lock after this
+deploy's `detect` read the locks. The cell assumes no cloud role and its apply
+check stays pending; the waves before it have applied, and the later waves and
+env-levels are skipped, as after any failed cell. Follow the steps in §A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`,
+with this stack and every other stack whose cell did not apply. The merged pull
+request keeps its locks on the cells that did not apply, so the recovery pull
+request's plan comment may mark cells locked by the merged pull request too;
+`shipmate unlock <env> --evict` releases those as well.
 
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs `` is a failed lock read: re-run the deploy's failed jobs.
@@ -1693,7 +1684,7 @@ stays pending and the rest of the run applied. Follow the remedy:
   comment `shipmate unlock <env> --evict` ``: another pull request holds the
   blocker cell's lock. Wait for it to merge or close, then re-plan, or evict
   the lock with that comment.
-- ``it is locked by an unreadable lock; comment `shipmate unlock <env> --evict` ``:
+- ``it is locked by an unknown holder; comment `shipmate unlock <env> --evict` ``:
   the lock names no holder, so no merge or close releases it; evict it.
 - `the base also changed it; update the branch from the base and push`: an
   `auto` apply held the blocker (§`⚪ held, the base changed these stacks after

@@ -828,8 +828,8 @@ def pull_read(number):
     return ["gh", "api", f"repos/{REPO}/pulls/{number}"]
 
 
-def pull(base_ref):
-    return json.dumps({"base": {"ref": base_ref, "sha": "feat-a"}})
+def pull(base_ref, state="open"):
+    return json.dumps({"state": state, "base": {"ref": base_ref, "sha": "feat-a"}})
 
 
 def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a"):
@@ -859,6 +859,21 @@ def test_marks_writes_the_holders_stacked_on_this_pull_requests_head(monkeypatch
     assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
         "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
         "stacked": "[12]",
+    }
+    assert gh.drained()
+
+
+@pytest.mark.parametrize("state", ["closed", None])
+def test_marks_leaves_out_a_holder_that_is_not_open(monkeypatch, tmp_path, state):
+    """A closed or merged holder will not merge after this pull request, so it is not stacked
+    even when its base branch is this head; a read naming no state is not open either.
+    Mutation: drop the `state == "open"` check -- `[12]`, red."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), pull("feat-a", state))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "[]",
     }
     assert gh.drained()
 
@@ -1071,9 +1086,11 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
     assert gh.drained()
 
 
-def test_release_cli_release_pending_deletes_a_pending_cells_lock(monkeypatch, tmp_path):
-    """A refused deploy releases even the lock whose apply check is pending, without reading the
-    head's checks. Mutation: keep the merge rule's `pending` set under release-pending -- the
+def test_release_cli_release_pending_deletes_every_lock_without_reading_checks(
+    monkeypatch, tmp_path
+):
+    """A refused deploy deletes every lock its merged pull request holds, and reads no apply
+    check to do it. Mutation: keep the merge rule's `pending` set under release-pending -- the
     head's checks are read, an unexpected call to the double, red."""
     gh = _all_locks(
         (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
@@ -1648,9 +1665,8 @@ MERGED = 4
 DEPLOY = {"SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": str(MERGED)}
 HELD_BY_9 = (
     "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
-    "this merge; applying this merge's plan would undo that pull request's applied change. "
-    "Merge or close the holding pull request first, then open a pull request that changes "
-    "this stack to plan and apply it against the result"
+    "this merge. Open a pull request that changes this stack; its plan comment names the lock "
+    "and how to release it"
 )
 
 
@@ -1694,10 +1710,9 @@ def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
     """Mutation: pass an unknown holder (`held.pr in (pr, None)`)."""
     gh = _locked_by("garbage")
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
-        "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an "
-        "unreadable lock, not by this merge; applying this merge's plan would undo that pull "
-        "request's applied change. Merge or close the holding pull request first, then open a "
-        "pull request that changes this stack to plan and apply it against the result"
+        "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an unknown "
+        "holder, not by this merge. Open a pull request that changes this stack; its plan "
+        "comment names the lock and how to release it"
     )
 
 
@@ -1710,6 +1725,27 @@ def test_verify_deploy_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path):
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
         "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
         "holds its cell lock (command failed (1): gh api); re-run the failed deploy jobs"
+    )
+
+
+def test_verify_deploy_names_a_failed_read_on_one_line(monkeypatch, tmp_path):
+    """A gh failure whose stderr runs to a second line stays one line in the refusal.
+    Mutation: return `why` unjoined from `_why` -- the refusal splits, red."""
+    gh = Gh().on(ref_read(AUTH_REF), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
+        "holds its cell lock (command failed (1): gh api | HTTP 502); re-run the failed deploy "
+        "jobs"
+    )
+
+
+def test_verify_names_a_malformed_deploy_mode_before_an_empty_pull_request(monkeypatch, tmp_path):
+    """The pull request number is resolved after the mode, so the mode's refusal names its own
+    variable. Mutation: resolve the number in `main` again (`SHIPMATE_DEPLOY == "true"` reads
+    `True` as false and `env_pr_number` refuses the empty number first), red."""
+    env = {"SHIPMATE_DEPLOY": "True", "SHIPMATE_PR_NUMBER": ""}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        "::error::SHIPMATE_DEPLOY must be true or false (got: 'True')"
     )
 
 

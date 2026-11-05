@@ -12,11 +12,12 @@ section below names the SHA the release tags.
 
 ### Added
 
-- **The plan comment names a lock holder stacked on this pull request.** A changed cell whose holder's base branch is this pull request's head branch ends `🔒 locked by #<n>, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`. `actions/pr-facts` emits the head branch as `head-ref`, and the plan run's `summary` reads each holder's pull request once.
+- **The plan comment names a lock holder stacked on this pull request.** A changed cell whose holder is open and has this pull request's head branch as its base ends `🔒 locked by #<n>, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`. `actions/pr-facts` emits the head branch as `head-ref`, and the plan run's `summary` reads each holder's pull request once.
 
 ### Changed
 
-- **The merge deploy refuses to apply over another pull request's cell lock.** `deploy-detect` refuses the whole run with `deploy refused: <n> pending cell(s) are locked by another open pull request`, naming each holder and every pending cell, applies nothing, and the deploy's lock release then releases the merged pull request's locks on its pending cells too. A deploy wave cell whose lock another pull request took after `detect` refuses with `its cell lock is held by <who>, not by this merge`. Both name one recovery: merge or close the holding pull request, then open a pull request that changes the stacks.
+- **The merge deploy refuses to apply over another pull request's cell lock.** `deploy-detect` refuses the whole run with `deploy refused: <n> pending cell(s) are locked by another pull request`, naming each holder and every pending cell, applies nothing, and the deploy's lock release then releases the merged pull request's locks on its pending cells too. A deploy wave cell whose lock another pull request took after `detect` refuses with `its cell lock is held by <who>, not by this merge`. Both name one recovery: open a pull request that changes the stacks, whose plan comment names each lock and how to release it.
+- **A lock whose holder cannot be read reads `an unknown holder` on every surface**: the plan comment, the apply result comment, the waiting remedy, the eviction reply and both deploy refusals. It read `an unreadable lock`.
 
 ## [0.54.0] — 2026-11-01
 
