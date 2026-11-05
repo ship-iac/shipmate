@@ -547,8 +547,9 @@ def test_summary_held_render_failure_writes_no_comment(tmp_path):
 @pytest.mark.parametrize("mode", ["held", "post", "nothing-changed"])
 def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
     """A re-run of an old run never replaces the comment of the head the pull request has moved
-    to. Mutations: drop `--head` from either upsert-comment call -- a write follows; misspell
-    `moved` in the step -- no notice."""
+    to. `result=moved` is what skips `Create apply checks` and `Create/refresh gate`.
+    Mutations: drop `--head` from either upsert-comment call -- a write follows; misspell
+    `moved` in the step -- no notice; drop the held branch's `result=` line -- no output."""
     proc, calls = _run_summary(tmp_path, mode, head="b" * 40, warned="true")
     assert (proc.returncode, proc.stdout, calls) == (
         0,
@@ -558,6 +559,7 @@ def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
         ),
         [_LIST, _PULLS],
     )
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=moved\n"
 
 
 #: upsert-comment's one-line stderr for a failed head read; the stub prints no gh stderr.

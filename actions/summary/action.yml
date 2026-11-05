@@ -174,6 +174,17 @@ runs:
           exit 0
         }
         ended="re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate"
+        # A head the pull request has left is not the one it merges, so this run writes nothing on
+        # it. Degrades: a failed read publishes on this head as before, which holds and gates it.
+        if live=$(python3 "$gate_status" moved "$SHIPMATE_HEAD_SHA" "$SHIPMATE_PR_NUMBER" 2>moved.err); then
+          if [ -n "$live" ]; then
+            echo "::notice::pull request #$SHIPMATE_PR_NUMBER has moved past $SHIPMATE_HEAD_SHA; this run writes no comment, apply check or gate on it"
+            printf 'superseded=true\nmoved=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        else
+          echo "::warning::could not read the head of pull request #$SHIPMATE_PR_NUMBER ($(cat moved.err)); this run publishes on $SHIPMATE_HEAD_SHA"
+        fi
         # A failed read holds, which is always safe: a failed artifact download leaves `cells/`
         # empty over planned cells, so no cell summary is no proof of no work. A newer run's hold or
         # checks refuse without a write, so an older run never overwrites that run's gate or checks.
@@ -442,7 +453,7 @@ runs:
         fi
 
     - name: Create apply checks (pending / no-changes)
-      if: ${{ steps.hold.outputs.superseded != 'true' }}
+      if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -462,7 +473,7 @@ runs:
         done < bodies.jsonl
 
     - name: Create/refresh gate
-      if: ${{ steps.hold.outputs.superseded != 'true' }}
+      if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -512,7 +523,8 @@ runs:
 
     - name: Decide whether to dispatch an auto apply
       # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
-      # job first. A `moved` upsert means a newer head exists, whose own run decides.
+      # job first. A `moved` upsert means the pull request left this head; the live-head step
+      # decides whether that head gets a plan.
       if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
       id: autodecide
       shell: bash
