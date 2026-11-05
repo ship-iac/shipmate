@@ -18,6 +18,7 @@ CONTRACT.md §Cell locks gives the reason.
 
 import os
 import time
+from urllib.parse import quote
 
 from _shipmate import (
     StackCycle,
@@ -36,7 +37,7 @@ wv = _load("waves")
 ad = _load("apply-detect")
 
 
-def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
+def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
     """Map a merge commit -> (head SHA, number) of the PR it merged.
 
     Reviewed .otplan artifacts and apply checks live on the PR head, not on main.
@@ -49,6 +50,13 @@ def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
     commit must never be selected, since deploying its plans would apply more
     than main actually contains. If no pull qualifies, head = merge_sha and the
     number is empty, same as a genuine non-PR push to main.
+
+    When every attempt returns [], one page of the 100 most recently updated closed pull
+    requests into `branch` is read, and only a pull request with `merge_commit_sha ==
+    merge_sha` and `merged_at` set is taken: GitHub fills `merge_commit_sha` with the
+    test-merge commit on a closed unmerged pull request. A merge older than that page is not
+    found. With no match it prints a warning and returns `(merge_sha, "")`. A failed read
+    raises, as the first one does.
     """
     for attempt in range(_attempts):
         pulls = _gh_json(f"repos/{repo}/commits/{merge_sha}/pulls")
@@ -58,6 +66,18 @@ def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
             return (pull["head"]["sha"], str(pull["number"])) if pull else (merge_sha, "")
         if attempt < _attempts - 1:
             time.sleep(_sleep)
+    closed = _gh_json(
+        f"repos/{repo}/pulls?state=closed&base={quote(branch, safe='')}"
+        "&sort=updated&direction=desc&per_page=100"
+    )
+    for p in closed:
+        if p.get("merge_commit_sha") == merge_sha and p.get("merged_at"):
+            return p["head"]["sha"], str(p["number"])
+    print(
+        f"::warning::could not map {merge_sha} to a merged pull request (commits/{merge_sha}/pulls "
+        "stayed empty and no recently closed pull request records it as its merge commit); "
+        f"deploying it as a push to {branch}"
+    )
     return merge_sha, ""
 
 
@@ -183,11 +203,12 @@ def run_graph_deps(pending):
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
-    head, pr_number = _merged_head(repo, merge_sha)
+    branch = os.environ["GITHUB_REF_NAME"]
+    head, pr_number = _merged_head(repo, merge_sha, branch)
     validate_head_sha(
         head,
         "the deploy's head SHA (the merged pull request's head from "
-        f"commits/{merge_sha}/pulls, else GITHUB_SHA)",
+        f"commits/{merge_sha}/pulls or the closed pull requests of {branch}, else GITHUB_SHA)",
     )
     # Before any refusal past head validation, so a refused deploy's summary can write the gate's
     # failure on the head.
