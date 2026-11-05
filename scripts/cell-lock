@@ -19,9 +19,10 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
 - `acquire`: locks every cell of `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES` for
   pull request `SHIPMATE_PR_NUMBER`, then fences the acquisition against a close.
 - `release`: `SHIPMATE_MERGED` `true` deletes the pull request's locks except those whose apply
-  check is pending on `SHIPMATE_HEAD_SHA`; `false` deletes them all while the pull request is
-  closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again. Refuses,
-  after releasing the rest, naming each lock whose delete refused.
+  check is pending on `SHIPMATE_HEAD_SHA`, and every one of them with `SHIPMATE_RELEASE_PENDING`
+  `true` (a deploy refused before applying any cell); `false` deletes them all while the pull
+  request is closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again.
+  Refuses, after releasing the rest, naming each lock whose delete refused.
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
   on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes outputs `evicted` and
   `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
@@ -464,8 +465,16 @@ def _acquire_cmd(repo, pr, run):
 
 def _release_cmd(repo, pr, run):
     merged = os.environ.get("SHIPMATE_MERGED", "")
+    release_pending = os.environ.get("SHIPMATE_RELEASE_PENDING", "")
+    if release_pending not in ("", "false") and (release_pending, merged) != ("true", "true"):
+        raise SystemExit(
+            "::error::SHIPMATE_RELEASE_PENDING must be true or false, and true only with "
+            f"SHIPMATE_MERGED true (got: SHIPMATE_RELEASE_PENDING={release_pending!r}, "
+            f"SHIPMATE_MERGED={merged!r})"
+        )
     if merged == "true":
-        gone, refused = release(repo, pr, pending=pending_names(*_head_names(repo, run)), run=run)
+        pending = set() if release_pending == "true" else pending_names(*_head_names(repo, run))
+        gone, refused = release(repo, pr, pending=pending, run=run)
     elif merged == "false":
         closed_at = os.environ.get("SHIPMATE_CLOSED_AT", "")
         try:

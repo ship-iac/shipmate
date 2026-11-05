@@ -39,6 +39,7 @@ EXPECTED_SUMMARY = {
                 "pr-number": "${{ needs.detect.outputs.pr_number }}",
                 "head-sha": "${{ needs.detect.outputs.head_sha }}",
                 "merged": "true",
+                "release-pending": "${{ needs.detect.outputs.refused_locked == 'true' }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
             },

@@ -66,13 +66,15 @@ DEPLOY_RELEASE_STEP = {
         "pr-number": "${{ needs.detect.outputs.pr_number }}",
         "head-sha": "${{ needs.detect.outputs.head_sha }}",
         "merged": "true",
+        "release-pending": "${{ needs.detect.outputs.refused_locked == 'true' }}",
         **_APP,
     },
 }
 
 
 def test_deploy_summary_releases_last_after_any_level_result():
-    """Mutations: move the release step first; its `if:` to `success()`."""
+    """Mutations: move the release step first; its `if:` to `success()`; `!=` in the
+    `release-pending` expression."""
     steps = workflow_jobs("deploy.yml")["summary"]["steps"]
     assert [s["name"] for s in steps] == SUMMARY_STEP_NAMES
     assert steps[-1] == DEPLOY_RELEASE_STEP
@@ -85,6 +87,16 @@ def test_deploy_detect_hands_the_pull_request_number_to_the_summary():
     )
     assert action_yaml("deploy-detect")["outputs"]["pr_number"]["value"] == (
         "${{ steps.detect.outputs.pr_number }}"
+    )
+
+
+def test_deploy_detect_hands_the_lock_refusal_to_the_summary():
+    """Mutations: drop `refused_locked` from `detect`'s job outputs; from the action's outputs."""
+    assert workflow_jobs("deploy.yml")["detect"]["outputs"]["refused_locked"] == (
+        "${{ steps.d.outputs.refused_locked }}"
+    )
+    assert action_yaml("deploy-detect")["outputs"]["refused_locked"]["value"] == (
+        "${{ steps.detect.outputs.refused_locked }}"
     )
 
 
@@ -117,6 +129,7 @@ LOCK_RELEASE_STEPS = [
             "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
             "SHIPMATE_MERGED": "${{ inputs.merged }}",
             "SHIPMATE_CLOSED_AT": "${{ inputs.closed-at }}",
+            "SHIPMATE_RELEASE_PENDING": "${{ inputs.release-pending }}",
             "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         },
         "run": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" release',
@@ -125,5 +138,6 @@ LOCK_RELEASE_STEPS = [
 
 
 def test_lock_release_runs_the_release_command_with_its_inputs():
-    """Mutations: drop `SHIPMATE_CLOSED_AT`; drop `permission-checks`; run `acquire`."""
+    """Mutations: drop `SHIPMATE_CLOSED_AT`; drop `permission-checks`; run `acquire`; bind
+    `SHIPMATE_RELEASE_PENDING` to `inputs.merged`."""
     assert action_steps("lock-release") == LOCK_RELEASE_STEPS

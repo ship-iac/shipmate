@@ -939,7 +939,14 @@ def test_acquire_refuses_bad_input_before_any_call(monkeypatch, tmp_path, env, r
 @pytest.mark.parametrize(
     ("env", "released"),
     [
-        pytest.param({"SHIPMATE_MERGED": "true"}, DNS_REF, id="merged"),
+        pytest.param(
+            {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": None}, DNS_REF, id="merged"
+        ),
+        pytest.param(
+            {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "false"},
+            DNS_REF,
+            id="merged-release-pending-false",
+        ),
         pytest.param(
             {"SHIPMATE_MERGED": "false", "SHIPMATE_CLOSED_AT": "2026-10-24T11:00:00Z"},
             AUTH_REF,
@@ -950,7 +957,8 @@ def test_acquire_refuses_bad_input_before_any_call(monkeypatch, tmp_path, env, r
 def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
     """Mutations: release nothing in the unmerged branch (`gone = []`: no delete is sent); read
     `pending` without the App filter (`parse_jsonl` for `app_runs` in `pending_names`: the
-    foreign check on stacks/dns keeps its lock)."""
+    foreign check on stacks/dns keeps its lock); read release-pending `false` as `true` (`if
+    release_pending`: merged-release-pending-false deletes the pending stacks/auth lock)."""
     gh = _all_locks(
         (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
         (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), LATE),
@@ -968,6 +976,31 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
     sha = OLD if released == AUTH_REF else NEW
     gh.on(REPO_ID_READ, REPO_ID).on(update(released, sha, ZERO, False), "{}")
     _main(monkeypatch, tmp_path, "release", gh, env)
+    assert gh.drained()
+
+
+def test_release_cli_release_pending_deletes_a_pending_cells_lock(monkeypatch, tmp_path):
+    """A refused deploy releases even the lock whose apply check is pending, without reading the
+    head's checks. Mutation: keep the merge rule's `pending` set under release-pending (the
+    check read is unexpected and the pending lock stays)."""
+    gh = _all_locks(
+        (AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY),
+        (DNS_REF, NEW, message(PR, "dev", "stacks/dns"), EARLY),
+    )
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    gh.on(update(DNS_REF, NEW, ZERO, False), "{}")
+    env = {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "true"}
+    _main(monkeypatch, tmp_path, "release", gh, env)
+    assert gh.drained()
+
+
+def test_release_cli_release_pending_with_no_lock_left_exits_clean(monkeypatch, tmp_path, capsys):
+    """A re-run after every lock is gone deletes nothing and succeeds. Mutation: refuse when
+    release-pending deletes no lock (`if not gone: raise SystemExit`)."""
+    gh = Gh().on(listing("shipmate/locks/"), "[]")
+    env = {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "true"}
+    _main(monkeypatch, tmp_path, "release", gh, env)
+    assert capsys.readouterr().out == "::notice::released 0 cell lock(s) of pull request #7\n"
     assert gh.drained()
 
 
@@ -1009,12 +1042,30 @@ def test_release_cli_names_each_refused_delete_after_releasing_the_rest(
             "SHIPMATE_CLOSED_AT must be an ISO-8601 time (got: '2026-10-24T11:00:00')",
             id="closed-at-no-offset",
         ),
+        pytest.param(
+            {
+                "SHIPMATE_MERGED": "false",
+                "SHIPMATE_CLOSED_AT": LATE,
+                "SHIPMATE_RELEASE_PENDING": "true",
+            },
+            "SHIPMATE_RELEASE_PENDING must be true or false, and true only with SHIPMATE_MERGED "
+            "true (got: SHIPMATE_RELEASE_PENDING='true', SHIPMATE_MERGED='false')",
+            id="release-pending-unmerged",
+        ),
+        pytest.param(
+            {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "yes"},
+            "SHIPMATE_RELEASE_PENDING must be true or false, and true only with SHIPMATE_MERGED "
+            "true (got: SHIPMATE_RELEASE_PENDING='yes', SHIPMATE_MERGED='true')",
+            id="release-pending-yes",
+        ),
     ],
 )
 def test_release_cli_refuses_a_bad_mode_before_any_call(monkeypatch, tmp_path, env, refusal):
     """Mutations: treat any `SHIPMATE_MERGED` but `true` as unmerged (merged-yes and
     merged-unset release by `SHIPMATE_CLOSED_AT`); drop the `_when` check (closed-at-no-offset
-    reaches the API)."""
+    reaches the API); accept release-pending `true` whatever `SHIPMATE_MERGED` says
+    (release-pending-unmerged releases by `SHIPMATE_CLOSED_AT`); accept any release-pending
+    value (release-pending-yes reads the head's checks)."""
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, tmp_path, "release", Gh(), env)
     assert exc.value.code == "::error::" + refusal
