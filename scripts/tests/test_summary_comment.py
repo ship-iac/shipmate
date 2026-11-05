@@ -1,3 +1,4 @@
+import functools
 import io
 import json
 import os
@@ -1270,7 +1271,9 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # empty. Mutation: dropping `SHIPMATE_COMMAND_HINTS` or `SHIPMATE_IS_DRAFT` -- the command
     # section never shows, or shows on a draft. Mutation: dropping `SHIPMATE_AUTO_ENVS_TABLE` --
     # the comment never says why no auto apply follows. Mutation: dropping `SHIPMATE_PR_NUMBER`
-    # -- a truncated plan refuses the step.
+    # -- a truncated plan refuses the step. Mutation: bind `SHIPMATE_STACKED` to
+    # `steps.marks.outputs.locks`, or drop `SHIPMATE_DEFAULT_BRANCH` -- no holder is ever
+    # named stacked.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -1284,6 +1287,8 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
         "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
         "SHIPMATE_LOCKS": "${{ steps.marks.outputs.locks }}",
+        "SHIPMATE_STACKED": "${{ steps.marks.outputs.stacked }}",
+        "SHIPMATE_DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
     }
     # Mutation: `required: true` on any of the six (GitHub does not enforce it, but it
@@ -1339,7 +1344,7 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     one path, the count of 3 over none and the count of -1."""
     monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
     assert _run_main(tmp_path, monkeypatch, []) == (
-        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\nmissing=[]\n"
+        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\nmissing=[]\nstacked_hold=\n"
     )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
@@ -1373,7 +1378,7 @@ def test_main_names_the_lost_pairs_without_touching_the_gate_outputs(
     Mutation: read the lost value under `paths` -- the first bad case renders a line."""
     monkeypatch.setenv("SHIPMATE_LOST_ENV_TAGS", raw)
     assert _run_main(tmp_path, monkeypatch, []) == (
-        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\nmissing=[]\n"
+        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\nmissing=[]\nstacked_hold=\n"
     )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LOST_LEAD.format(1) + ": stacks/x / dev" if flag == "true" else ""
@@ -1396,7 +1401,7 @@ def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monke
     (tmp_path / "out.txt").unlink()
     capsys.readouterr()
     assert _run_main(tmp_path, monkeypatch, []) == (
-        "pending=true\ncount=130\nunmanaged=false\nlost=false\nmissing=[]\n"
+        "pending=true\ncount=130\nunmanaged=false\nlost=false\nmissing=[]\nstacked_hold=\n"
     )
     assert capsys.readouterr().out == _NO_ROOM
     assert len((tmp_path / "comment.md").read_text(encoding="utf-8")) == sc.HARD_CAP - 10
@@ -1454,7 +1459,7 @@ def test_main_names_the_planned_cells_with_no_cell_summary(
     monkeypatch.setenv("SHIPMATE_PLANNED_CELLS_NAMES", raw)
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", detect)
     text = _run_main(tmp_path, monkeypatch, [_cell()])
-    assert text.splitlines()[-1] == f"missing={missing}"
+    assert text.splitlines()[-2:] == [f"missing={missing}", "stacked_hold="]
     assert capsys.readouterr().out == out
 
 
@@ -1926,6 +1931,117 @@ def test_main_warns_and_marks_nothing_for_malformed_locks(tmp_path, monkeypatch,
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _UNMARKED_LOCK_BODY
     assert capsys.readouterr().out == (
         "::warning::the cell locks are not a JSON map of holders; the plan comment marks none\n"
+    )
+
+
+_STACKED_7 = (
+    '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7, which is '
+    "stacked on this pull request; merging this pull request first undoes #7's applied change. "
+    "Retarget #7 to main and merge it first."
+)
+_PLAIN_7 = '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7'
+
+
+def test_a_changed_cell_locked_by_a_stacked_holder_says_to_retarget_it():
+    """Mutation: drop the `holder in stacked` check -- a holder not in `stacked` renders the
+    stacked text, red; drop the `default_branch` check -- red."""
+    locks = {"stacks/app / dev-eu": 7}
+    line = functools.partial(sc._plan_line, _cell(), "https://ck/app-eu", locks)
+    assert line(frozenset({7}), "main") == _STACKED_7
+    assert line(frozenset({5}), "main") == _PLAIN_7
+    assert line(frozenset({7}), "") == _PLAIN_7
+    assert line() == _PLAIN_7
+
+
+def test_an_unchanged_cell_locked_by_a_stacked_holder_renders_no_stacked_text():
+    """Only a changed cell has a plan to apply. Mutation: key `stacked_hold`'s count by the bare
+    `<stack> / <env>` in place of `_lock_key` -- the gate text names #7, red."""
+    locks = {"stacks/dns / dev-eu": 7}
+    cell = _cell(changed=False, stack="stacks/dns")
+    assert sc._plan_line(cell, "u", locks, frozenset({7}), "main") == (
+        '🟢 stacks/dns: no changes <a href="u">plan</a>'
+    )
+    assert sc.stacked_hold([cell], locks, frozenset({7}), "main") == ""
+
+
+def test_the_stacked_gate_text_names_the_lowest_stacked_holder_and_its_cells():
+    """Two changed cells held by #7, one by #5, an unchanged one by #3, all stacked. Mutation:
+    `max` in place of `min` -- `stacked #7 holds 2 cell(s)`, red."""
+    cells = [_cell(stack=s) for s in ("a", "b", "c")] + [_cell(stack="d", changed=False)]
+    locks = {"a / dev-eu": 7, "b / dev-eu": 7, "c / dev-eu": 5, "d / dev-eu": 3}
+    assert sc.stacked_hold(cells, locks, frozenset({3, 5, 7}), "main") == (
+        "stacked #5 holds 1 cell(s); retarget it to main and merge it first"
+    )
+    assert sc.stacked_hold(cells, locks, frozenset({3, 5, 7}), "") == ""
+    assert sc.stacked_hold(cells, locks, frozenset(), "main") == ""
+
+
+def _stacked_hold_output(text):
+    return [line for line in text.splitlines() if line.startswith("stacked_hold=")]
+
+
+_STACKED_LOCK_BODY = _UNMARKED_LOCK_BODY.replace(
+    "plan</a></summary>",
+    "plan</a> 🔒 locked by #12, which is stacked on this pull request; merging this pull request "
+    "first undoes #12's applied change. Retarget #12 to main and merge it first.</summary>",
+)
+
+
+def test_main_renders_the_stacked_line_and_writes_the_gate_text(tmp_path, monkeypatch, capsys):
+    """Mutation: drop the `SHIPMATE_STACKED` read from `main` -- plain marker and an empty
+    `stacked_hold`, red; read the default branch from another variable -- red."""
+    monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
+    monkeypatch.setenv("SHIPMATE_STACKED", "[12]")
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
+    out = _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _STACKED_LOCK_BODY
+    assert _stacked_hold_output(out) == [
+        "stacked_hold=stacked #12 holds 1 cell(s); retarget it to main and merge it first"
+    ]
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("stacked", "branch"),
+    [(None, "main"), ("", "main"), ("[]", "main"), ("[12]", ""), ("[12]", None)],
+    ids=["stacked-absent", "stacked-empty", "none-stacked", "branch-empty", "branch-absent"],
+)
+def test_main_degrades_to_the_plain_marker(tmp_path, monkeypatch, capsys, stacked, branch):
+    """A failed holder read leaves the holder out of `stacked` (`none-stacked`), as does an empty
+    head ref. Mutation: drop `_plan_line`'s `default_branch` check -- the branch cases render the
+    stacked text, red; drop `stacked_hold`'s -- they write a gate text, red; drop
+    `stacked_marks`' empty-value return -- the empty case warns, red."""
+    monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
+    for name, value in (("SHIPMATE_STACKED", stacked), ("SHIPMATE_DEFAULT_BRANCH", branch)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    out = _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        _UNMARKED_LOCK_BODY.replace("plan</a></summary>", "plan</a> 🔒 locked by #12</summary>")
+    )
+    assert _stacked_hold_output(out) == ["stacked_hold="]
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("raw", ["not json", '["12"]', '{"12": 12}', "[true]", "12"])
+def test_main_warns_and_renders_the_plain_marker_for_malformed_stacked(
+    tmp_path, monkeypatch, capsys, raw
+):
+    """Degrades as `lock_marks` does. Mutation: drop the holder type check -- `["12"]` and
+    `[true]` reach the set and the warning is gone, red."""
+    monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
+    monkeypatch.setenv("SHIPMATE_STACKED", raw)
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
+    out = _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        _UNMARKED_LOCK_BODY.replace("plan</a></summary>", "plan</a> 🔒 locked by #12</summary>")
+    )
+    assert _stacked_hold_output(out) == ["stacked_hold="]
+    assert capsys.readouterr().out == (
+        "::warning::the stacked lock holders are not a JSON list of pull request numbers; the "
+        "plan comment names none as stacked\n"
     )
 
 

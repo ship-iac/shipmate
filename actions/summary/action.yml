@@ -10,7 +10,8 @@ inputs:
   head-ref:
     description: >-
       The pull request's head branch name (pr-facts' `head-ref`). A lock holder whose base branch
-      is this one is stacked on this pull request. Empty finds no holder stacked.
+      is this one is stacked on this pull request; the plan comment and a pending gate say to
+      retarget it to the default branch. Empty finds no holder stacked.
     required: false
     default: ""
   detect-result:
@@ -320,6 +321,8 @@ runs:
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DOCTOR_WARNINGS: ${{ steps.doctor.outputs.warnings }}
         SHIPMATE_LOCKS: ${{ steps.marks.outputs.locks }}
+        SHIPMATE_STACKED: ${{ steps.marks.outputs.stacked }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
@@ -346,6 +349,7 @@ runs:
         SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
+        SHIPMATE_STACKED_HOLD: ${{ steps.build.outputs.stacked_hold }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"

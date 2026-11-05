@@ -31,6 +31,9 @@ _POST = "post"
 _NOTHING = "nothing-changed"
 _DRAFT = "draft"
 
+PENDING_DESCRIPTION = (
+    "one or more stacks are waiting to be applied; merge is blocked until applies complete"
+)
 DRAFT_DESCRIPTION = (
     "the pull request was a draft when this run started, so nothing was planned; "
     "comment `shipmate plan`, or mark it ready"
@@ -155,6 +158,7 @@ def decide(
     on_demand=False,
     refusal="",
     missing=(),
+    stacked_hold="",
 ):
     """Return (state, description, comment_mode).
 
@@ -174,7 +178,8 @@ def decide(
     no count.
 
     `refusal` is the first error of the `::error::` message `build-matrix` or `hcl-check` failed
-    with, on one line (`_detect_gap`). `missing` goes to `evidence_gap`.
+    with, on one line (`_detect_gap`). `missing` goes to `evidence_gap`. `stacked_hold`, when not
+    empty, is the `pending` description in place of the generic one.
     """
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT
@@ -188,11 +193,7 @@ def decide(
     if gap:
         return "failure", gap, _HELD
     if pending:
-        return (
-            "pending",
-            "one or more stacks are waiting to be applied; merge is blocked until applies complete",
-            _POST,
-        )
+        return "pending", stacked_hold or PENDING_DESCRIPTION, _POST
     # Safe only below the gap check: a None gap means `cell_count` equals the planned count,
     # so moving this branch above it would green a run nobody reported a count for.
     if cell_count == 0:
@@ -214,6 +215,7 @@ def main():
         on_demand=os.environ.get("SHIPMATE_ON_DEMAND", "false") == "true",
         refusal=os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
         missing=cell_names(os.environ.get("SHIPMATE_MISSING", "")),
+        stacked_hold=os.environ.get("SHIPMATE_STACKED_HOLD", ""),
     )
     # A stack path holding CR or LF would end the `GITHUB_OUTPUT` line. `reason` is the whole
     # text, for the held comment.

@@ -21,6 +21,7 @@ EXPECTED_GATE_ENV = {
     "SHIPMATE_MISSING": "${{ steps.build.outputs.missing }}",
     "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
     "SHIPMATE_ON_DEMAND": "${{ inputs.on-demand }}",
+    "SHIPMATE_STACKED_HOLD": "${{ steps.build.outputs.stacked_hold }}",
 }
 
 

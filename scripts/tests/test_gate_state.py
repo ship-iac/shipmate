@@ -420,3 +420,39 @@ def test_main_reads_the_missing_cells_and_flattens_a_line_break(tmp_path, monkey
         "reason": text,
         "comment_mode": "held",
     }
+
+
+_STACKED_HOLD = "stacked #5 holds 1 cell(s); retarget it to main and merge it first"
+
+
+def test_a_pending_gate_with_a_stacked_holder_says_to_retarget_it():
+    """Only the pending branch reads it. Mutation: return `stacked_hold` as the description of
+    every state -- the failure and success cases name the holder, red; drop it from the pending
+    branch -- red."""
+    assert d(stacked_hold=_STACKED_HOLD) == ("pending", _STACKED_HOLD, "post")
+    assert d(stacked_hold="") == (
+        "pending",
+        "one or more stacks are waiting to be applied; merge is blocked until applies complete",
+        "post",
+    )
+    assert d(stacked_hold=_STACKED_HOLD, pending=False) == (
+        "success",
+        "no pending applies for this PR",
+        "post",
+    )
+    assert d(stacked_hold=_STACKED_HOLD, plan_result="failure") == (
+        "failure",
+        "plan incomplete (plan job: failure); fix the failing plan checks before merging",
+        "held",
+    )
+
+
+def test_main_reads_the_stacked_hold(tmp_path, monkeypatch, capsys):
+    """Mutation: drop the `SHIPMATE_STACKED_HOLD` read from `main` -- the generic text, red."""
+    body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_STACKED_HOLD=_STACKED_HOLD)
+    assert body == {
+        "state": "pending",
+        "description": _STACKED_HOLD,
+        "reason": _STACKED_HOLD,
+        "comment_mode": "post",
+    }
