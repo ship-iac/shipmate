@@ -1945,7 +1945,8 @@ MARKS_RUN = [
 
 def test_the_marks_step_reads_the_planned_cells_with_the_plan_token():
     """`SHIPMATE_LOCKS` on the build step is pinned with that step's whole env. Mutations: bind
-    `SHIPMATE_CELLS` to another input -- red; `exit 0` -> `exit 1` in the handler -- red."""
+    `SHIPMATE_CELLS` to another input -- red; `exit 0` -> `exit 1` in the handler -- red; drop
+    `SHIPMATE_HEAD_REF` -- red."""
     step = step_by("summary", name=_MARKS)
     assert (step["id"], step["env"], run_lines(step)) == (
         "marks",
@@ -1953,6 +1954,7 @@ def test_the_marks_step_reads_the_planned_cells_with_the_plan_token():
             "GH_TOKEN": "${{ steps.token.outputs.token }}",
             "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
             "SHIPMATE_CELLS": "${{ inputs.planned-cell-names }}",
+            "SHIPMATE_HEAD_REF": "${{ inputs.head-ref }}",
         },
         MARKS_RUN,
     )

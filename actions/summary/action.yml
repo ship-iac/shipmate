@@ -7,6 +7,12 @@ inputs:
   head-sha:
     description: PR head commit SHA.
     required: true
+  head-ref:
+    description: >-
+      The pull request's head branch name (pr-facts' `head-ref`). A lock holder whose base branch
+      is this one is stacked on this pull request. Empty finds no holder stacked.
+    required: false
+    default: ""
   detect-result:
     description: 'Result of the plan workflow''s detect job (needs.detect.result): success|failure|cancelled|skipped.'
     required: true
@@ -281,6 +287,7 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_CELLS: ${{ inputs.planned-cell-names }}
+        SHIPMATE_HEAD_REF: ${{ inputs.head-ref }}
       run: |
         set -euo pipefail
         # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and nothing

@@ -47,7 +47,8 @@ def test_every_job_declares_its_own_permissions():
 
 def test_facts_is_the_single_producer_of_every_pull_request_fact():
     """One producer, or two producers of one fact disagree eventually. Mutation: add a second
-    `actions/pr-facts` step to `detect`."""
+    `actions/pr-facts` step to `detect`. Mutation: drop the `head-ref` line from `facts`'s
+    outputs."""
     producers = [
         job_id
         for job_id, job in workflow_jobs(WF).items()
@@ -58,6 +59,7 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
     assert workflow_jobs(WF)["facts"]["outputs"] == {
         "head-sha": "${{ steps.facts.outputs.head-sha }}",
         "head-repo": "${{ steps.facts.outputs.head-repo }}",
+        "head-ref": "${{ steps.facts.outputs.head-ref }}",
         "base-sha": "${{ steps.facts.outputs.base-sha }}",
         "pr-number": "${{ steps.facts.outputs.pr-number }}",
         "is-draft": "${{ steps.facts.outputs.is-draft }}",

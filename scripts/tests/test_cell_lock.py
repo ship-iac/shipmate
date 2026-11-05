@@ -813,7 +813,98 @@ def test_marks_writes_each_foreign_holder_per_cell(monkeypatch, tmp_path):
     monkeypatch.setattr(cl, "_run", gh)
     monkeypatch.setattr(cl.sys, "argv", ["cell-lock", "marks"])
     cl.main()
-    assert github_outputs(out) == {"locks": json.dumps({"stacks/auth / dev": 12})}
+    assert github_outputs(out) == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "[]",
+    }
+    assert gh.drained()
+
+
+APP = {"stack": "stacks/app", "environment": "dev"}
+APP_REF = cl.ref_name("dev", "stacks/app")
+
+
+def pull_read(number):
+    return ["gh", "api", f"repos/{REPO}/pulls/{number}"]
+
+
+def pull(base_ref):
+    return json.dumps({"base": {"ref": base_ref, "sha": "feat-a"}})
+
+
+def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a"):
+    out = tmp_path / "out"
+    for key, value in {
+        "GITHUB_OUTPUT": str(out),
+        "GITHUB_REPOSITORY": REPO,
+        "SHIPMATE_PR_NUMBER": str(PR),
+        "SHIPMATE_CELLS": json.dumps(cells),
+        "SHIPMATE_HEAD_REF": head_ref,
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(cl, "_run", gh)
+    monkeypatch.setattr(cl.sys, "argv", ["cell-lock", "marks"])
+    cl.main()
+    return github_outputs(out)
+
+
+def test_marks_writes_the_holders_stacked_on_this_pull_requests_head(monkeypatch, tmp_path):
+    """#12's base is this pull request's head branch, #9's is `main`. The base `sha` holds the
+    head branch's name too, so comparing it in place of `ref` is observable. Mutation: compare
+    `base.sha` to the head ref -- `[]`."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
+    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("main"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
+        "stacked": "[12]",
+    }
+    assert gh.drained()
+
+
+def test_marks_reads_each_holder_once(monkeypatch, tmp_path):
+    """Two cells held by #12 queue one pull read; the double refuses a second. Mutation: read
+    the holder per cell -- unexpected call."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(12, "dev", "stacks/app")))
+    gh.on(pull_read(12), pull("feat-a"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, APP]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/app / dev": 12}),
+        "stacked": "[12]",
+    }
+    assert gh.drained()
+
+
+def test_a_failed_holder_read_warns_and_still_writes_the_locks(monkeypatch, tmp_path, capsys):
+    """The stacked list is reviewer-facing, so a failed read leaves that holder out with a
+    warning naming it, and the step still writes `locks`. Mutation: let the read failure
+    raise -- `SystemExit`."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
+    gh.on(pull_read(12), FAIL).on(pull_read(9), pull("feat-a"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
+        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
+        "stacked": "[9]",
+    }
+    assert gh.drained()
+    assert capsys.readouterr().out == (
+        "::warning::could not read pull request #12 (command failed (1): gh api), so "
+        "the plan comment does not say whether it is stacked on this pull request\n"
+    )
+
+
+def test_an_empty_head_ref_reads_no_holder(monkeypatch, tmp_path):
+    """No head branch, nothing can be stacked on it: no pull read (the double refuses one).
+    Mutation: drop the empty-head-ref early return -- unexpected call."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH], head_ref="") == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "[]",
+    }
     assert gh.drained()
 
 

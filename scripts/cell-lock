@@ -27,7 +27,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   on the cells whose apply check is on `SHIPMATE_HEAD_SHA`; writes outputs `evicted` and
   `refused` (the locks whose delete refused, each also an `::error::`) before refusing.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
-  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds.
+  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds, and `stacked`, the
+  sorted JSON list of those holders whose base branch is `SHIPMATE_HEAD_REF` (empty reads none).
+  A holder whose pull request read fails is left out with a `::warning::`.
 - `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
   `STACK` in `SHIPMATE_ENV` and is open at `SHIPMATE_HEAD_SHA`. With `SHIPMATE_AUTO` `true` it
   also refuses unless `GITHUB_RUN_ATTEMPT` is `1`, the pull request is not a draft,
@@ -520,9 +522,35 @@ def _marks_cmd(repo, pr, run):
             "::error::SHIPMATE_CELLS must be a JSON list of {stack, environment} objects"
         )
     held = foreign(read_locks(repo, {c["environment"] for c in cells}, run=run), cells, pr)
+    holders = {h["holder"] for h in held} - {None}
     write_outputs(
-        locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held})
+        locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held}),
+        stacked=json.dumps(_stacked(repo, holders, os.environ.get("SHIPMATE_HEAD_REF", ""), run)),
     )
+
+
+def _stacked(repo, holders, head_ref, run):
+    """The `holders` whose pull request's base branch is `head_ref`, sorted. Reviewer-facing,
+    so a failed read warns and leaves that holder out."""
+    if not head_ref:
+        return []
+    stacked = []
+    for holder in sorted(holders):
+        try:
+            base = gh_json(f"repos/{repo}/pulls/{holder}", run)["base"]["ref"]
+        except SystemExit as exc:
+            why = exc.code.removeprefix("::error::") if isinstance(exc.code, str) else "read failed"
+        except (LookupError, TypeError, ValueError, AttributeError) as exc:
+            why = repr(exc)
+        else:
+            if base == head_ref:
+                stacked.append(holder)
+            continue
+        print(
+            f"::warning::could not read pull request #{holder} ({why}), so the plan comment "
+            "does not say whether it is stacked on this pull request"
+        )
+    return stacked
 
 
 _RETRY = "push, or comment `shipmate apply` on the pull request"

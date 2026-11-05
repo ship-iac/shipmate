@@ -28,6 +28,7 @@ jobs:
     outputs:
       head-sha: ${{ steps.facts.outputs.head-sha }}
       head-repo: ${{ steps.facts.outputs.head-repo }}
+      head-ref: ${{ steps.facts.outputs.head-ref }}
       base-sha: ${{ steps.facts.outputs.base-sha }}
       pr-number: ${{ steps.facts.outputs.pr-number }}
       is-draft: ${{ steps.facts.outputs.is-draft }}
@@ -149,6 +150,7 @@ jobs:
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
+          head-ref: ${{ needs.facts.outputs.head-ref }}
           detect-result: ${{ needs.detect.result }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           plan-result: ${{ needs.plan.result }}

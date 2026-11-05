@@ -35,6 +35,7 @@ EXPECTED_STEP_USES = [local_action("summary")]
 EXPECTED_SUMMARY_WITH = {
     "pr-number": "${{ needs.facts.outputs.pr-number }}",
     "head-sha": "${{ needs.facts.outputs.head-sha }}",
+    "head-ref": "${{ needs.facts.outputs.head-ref }}",
     "detect-result": "${{ needs.detect.result }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "plan-result": "${{ needs.plan.result }}",
@@ -129,7 +130,9 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `command-hints:` line, `detect`'s `command_hints` output or the action's
     `command-hints` input -> the comment never shows its command section.
     Mutation: drop the `auto-envs:` line, `detect`'s `auto_envs` output or the action's
-    `auto-envs` input -> no auto apply is ever dispatched."""
+    `auto-envs` input -> no auto apply is ever dispatched.
+    Mutation: drop the `head-ref:` line or the action's `head-ref` input -> no lock holder is
+    ever found stacked on the pull request."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1
