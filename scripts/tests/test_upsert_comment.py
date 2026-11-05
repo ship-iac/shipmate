@@ -63,7 +63,7 @@ def _upsert(
         if args[2].startswith("repos/o/r/pulls/"):
             if head_fails:
                 raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")
-            return json.dumps({"head": {"sha": head}, "draft": False})
+            return json.dumps({"head": {"sha": head}, "draft": False, "state": "open"})
         if args[2] == "--paginate":
             if list_fails:
                 raise SystemExit("command failed (1): gh api\nHTTP 502")
@@ -554,8 +554,8 @@ def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
     assert (proc.returncode, proc.stdout, calls) == (
         0,
         (
-            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment belongs "
-            "to the newer head's run and was not written\n"
+            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment was not "
+            "written\n"
         ),
         [_LIST, _PULLS],
     )

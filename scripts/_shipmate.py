@@ -402,21 +402,25 @@ def one_line(text):
 
 
 def pr_head(repo, pr, run=run):
-    """`(head SHA, draft)` of pull request `pr` from one `gh api repos/{repo}/pulls/{pr}` read.
+    """`(head SHA, draft, state)` of pull request `pr` from one `gh api repos/{repo}/pulls/{pr}`
+    read; `state` is GitHub's `open` or `closed`.
 
     Raises `SystemExit` with one unannotated line when the read fails, its body is not a pull
-    request, the SHA is not 40 lowercase hex characters, or `draft` is not a bool; each caller
-    decides how to report it. `pr` is bound into the path: validate it first."""
+    request, the SHA is not 40 lowercase hex characters, `draft` is not a bool, or `state` is not
+    a string; each caller decides how to report it. `pr` is bound into the path: validate it
+    first."""
     try:
         pull = json.loads(run(["gh", "api", f"repos/{repo}/pulls/{pr}"]))
-        sha, draft = pull["head"]["sha"], pull["draft"]
+        sha, draft, state = pull["head"]["sha"], pull["draft"], pull["state"]
     except SystemExit as exc:
         raise SystemExit(one_line(exc.code)) from None
     except (ValueError, LookupError, TypeError) as exc:
         raise SystemExit(one_line(f"unreadable pull request #{pr}: {exc!r}")) from None
     if not is_head_sha(sha) or not isinstance(draft, bool):
         raise SystemExit(one_line(f"pull request #{pr} has head SHA {sha!r} and draft {draft!r}"))
-    return sha, draft
+    if not isinstance(state, str):
+        raise SystemExit(one_line(f"pull request #{pr} has state {state!r}"))
+    return sha, draft, state
 
 
 def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None, name=None):

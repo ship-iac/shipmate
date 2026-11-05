@@ -320,8 +320,8 @@ def write_python3_shim(bin_dir):
 #: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
 #: per argument and ``--`` after each call, answers a ``--paginate`` listing with
 #: ``$FAKE_LISTING``, ``$FAKE_LIST_STDERR`` on stderr and exit ``$FAKE_LIST_RC``, a bare
-#: ``repos/<o>/<r>/pulls/<n>`` read with pull JSON of head ``$FAKE_HEAD``, not a draft, and exit
-#: ``$FAKE_HEAD_RC``, and any other call with JSON and ``$FAKE_WRITE_RC``, after printing
+#: ``repos/<o>/<r>/pulls/<n>`` read with pull JSON of head ``$FAKE_HEAD``, open and not a draft,
+#: and exit ``$FAKE_HEAD_RC``, and any other call with JSON and ``$FAKE_WRITE_RC``, after printing
 #: ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
 _GH_RECORDER = """\
 #!/bin/bash
@@ -332,7 +332,7 @@ if [ "$2" = "--paginate" ]; then
   exit "${FAKE_LIST_RC:-0}"
 fi
 if [ "$#" = 2 ] && [[ "$2" =~ ^repos/[^/]+/[^/]+/pulls/[0-9]+$ ]]; then
-  printf '{"head": {"sha": "%s"}, "draft": false}\\n' "${FAKE_HEAD:-}"
+  printf '{"head": {"sha": "%s"}, "draft": false, "state": "open"}\\n' "${FAKE_HEAD:-}"
   exit "${FAKE_HEAD_RC:-0}"
 fi
 echo '{"id": 99}'

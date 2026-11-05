@@ -105,7 +105,8 @@ elif [ "$2" = "--paginate" ]; then
   printf '%s' "$FAKE_RUNS"
   exit "$FAKE_RUNS_RC"
 elif [[ "$2" =~ ^repos/[^/]+/[^/]+/pulls/[0-9]+$ ]]; then
-  printf '{"head": {"sha": "%s"}, "draft": %s}\\n' "$FAKE_HEAD" "$FAKE_DRAFT"
+  printf '{"head": {"sha": "%s"}, "draft": %s, "state": "%s"}\\n' \
+    "$FAKE_HEAD" "$FAKE_DRAFT" "$FAKE_STATE"
 elif [[ "$*" == *status* ]]; then
   echo '{"state": "failure", "statuses": [{"state": "failure", "context": "shipmate / gate"}]}'
 else
@@ -141,6 +142,7 @@ def _run(
     *,
     live=LIVE,
     draft="false",
+    state="open",
     runs=(),
     runs_rc=0,
     plan_token="plan-token",  # noqa: S107 - a stub token, never sent
@@ -163,6 +165,7 @@ def _run(
         "FAKE_DISPATCH_RC": str(dispatch_rc),
         "FAKE_HEAD": live,
         "FAKE_DRAFT": draft,
+        "FAKE_STATE": state,
         "FAKE_RUNS": "".join(f"{_listed(*r)}\n" for r in runs),
         "FAKE_RUNS_RC": str(runs_rc),
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
@@ -253,6 +256,15 @@ def test_a_draft_live_head_is_not_planned(tmp_path):
     stdout, stderr, calls, outputs = _run(tmp_path, draft="true")
     assert (calls, outputs, stdout) == ([PULL_READ], {}, "")
     assert stderr.splitlines() == [f"pull request #42 moved to {LIVE}, a draft; nothing dispatched"]
+
+
+@bash_only
+def test_a_closed_pull_request_is_not_planned(tmp_path):
+    """A stale run that ends after its pull request merged or closed dispatches nothing.
+    Mutation: drop `_replan`'s state check -- the runs are listed and a plan is dispatched."""
+    stdout, stderr, calls, outputs = _run(tmp_path, state="closed")
+    assert (calls, outputs, stdout) == ([PULL_READ], {}, "")
+    assert stderr.splitlines() == ["pull request #42 is closed; nothing dispatched"]
 
 
 @bash_only

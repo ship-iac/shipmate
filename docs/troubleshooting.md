@@ -1513,9 +1513,10 @@ and a later arrival replaces a waiting run; whether a re-run of a
 `ready_for_review` run or of a dispatched run waits is not verified. A re-run
 summary publishes no apply check its own run already published, so it leaves
 alone a check an apply completed or is completing. It refuses before writing
-anything when the pull request has moved past its head, or when a newer plan
-run holds the gate or published apply checks on the head, and ends green with
-that refusal as a notice; a moved run then plans the live head when it has no
+anything when its hold step finds the pull request moved past its head, or
+when a newer plan run holds the gate or published apply checks on the head, and
+ends green with that refusal as a notice; a moved run then plans the live head
+when the pull request is open, the live head is not a draft, and it has no
 autoplan run unfinished or succeeded (§A cancelled autoplan left red checks on
 the pull request). A re-run of a plan job whose artifact upload succeeded fails,
 because the uploads are not `overwrite:` and 409.
@@ -1820,9 +1821,10 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    run of the head refused this one, or when the pull request moved past this
    run's head (the publish hold's or the sticky comment upsert's read). A moved
    run's step `Check whether the live head needs a plan` then dispatches
-   `shipmate plan` for the live head, or logs why not (`pull request #<n> moved
-   to <sha>, a draft; nothing dispatched`, or `pull request #<n> moved to <sha>,
-   whose autoplan run has not finished or succeeded; nothing dispatched`). A
+   `shipmate plan` for the live head, or logs why not (`pull request #<n> is
+   <state>; nothing dispatched`, `pull request #<n> moved to <sha>, a draft;
+   nothing dispatched`, or `pull request #<n> moved to <sha>, whose autoplan run
+   has not finished or succeeded; nothing dispatched`). A
    dispatched plan is on demand, so no auto apply follows it: comment `shipmate
    apply` once it finishes.
 2. The pull request's comments: the `auto apply not started` reply (below), or
@@ -2186,14 +2188,24 @@ of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, `plan / gate-hold`, the `plan / <env> / <stack>` matrix
 check) stay red or cancelled on its head.
 
-When a push cancelled it, those checks sit on a head the pull request has left,
-and the merge gates on the live head alone: nothing needs recovering. A re-run
+When a newer head's run cancelled it, those checks sit on a head the pull
+request has left, and the merge gates on the live head alone: nothing needs
+recovering. A re-run
 of it writes nothing on its head and ends green at its hold step, with the
 notice "pull request #<n> has moved past <sha>; this run writes no comment,
 apply check or gate on it". When that re-run cancelled the live head's autoplan
 in flight (below), it dispatches `shipmate plan` for the live head, whose
 autoplan run is then neither unfinished nor succeeded; that plan is on demand,
 so no auto apply follows it.
+
+Runs join the `plan-<pr>` concurrency group in arrival order, not push order.
+When an older head's run arrives after the live head's autoplan, it cancels
+that autoplan, and the cancelled or red checks sit on the live head. The older
+run's `summary` finds the pull request moved, writes no comment, apply check or
+gate on its own head, and dispatches `shipmate plan` for the live head. That
+plan is on demand, so no auto apply follows it: comment `shipmate apply` once it
+finishes. The cancelled autoplan's checks stay on the live head until the next
+push.
 
 When a run on the same head cancelled it (open, reopen, or a re-run), re-run
 the cancelled run after the newer plan run has finished: `gh run rerun <id>`.

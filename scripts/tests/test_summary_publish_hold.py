@@ -12,7 +12,7 @@ writes nothing and sets `superseded` and `moved`; a failed read warns and publis
 Before the hold it refuses, writing nothing, when a newer plan run of the head holds the gate
 anywhere in its status history or published an apply check, so an older run (a first attempt or a
 re-run) never replaces a newer run's gate or checks. That refusal ends the step green with a notice
-and sets `superseded`, which every later step's `if:` reads, so a re-run of a cancelled autoplan
+and sets `superseded`, which every write step's `if:` reads, so a re-run of a cancelled autoplan
 clears its checks. A failed read of either, or a failed
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
@@ -134,7 +134,7 @@ elif [ "$*" = "api --paginate $head/check-runs?filter=all&per_page=100 --jq $FAK
 then
   printf '%s' "$FAKE_REFRESH_CHECKS"
 elif [ "$*" = "api repos/acme/demo/pulls/7" ]; then
-  printf '{"head": {"sha": "%s"}, "draft": false}\\n' "$FAKE_PULL_HEAD"
+  printf '{"head": {"sha": "%s"}, "draft": false, "state": "open"}\\n' "$FAKE_PULL_HEAD"
   exit "$FAKE_PULL_RC"
 elif [ "$1 $2" = "api repos/acme/demo/statuses/$FAKE_SHA" ]; then
   echo '{}'

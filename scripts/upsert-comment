@@ -98,7 +98,7 @@ def _head_stop(repo, pr, head):
     if head is None:
         return None
     try:
-        current, _ = pr_head(repo, pr, run=run)
+        current, _, _ = pr_head(repo, pr, run=run)
     except SystemExit as exc:
         print(exc.code, file=sys.stderr)
         return "head-failed"

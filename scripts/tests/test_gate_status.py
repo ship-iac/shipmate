@@ -607,8 +607,8 @@ _PLANNED_LOG = (
 )
 
 
-def _pull(sha=_LIVE, draft=False):
-    return json.dumps({"head": {"sha": sha}, "draft": draft})
+def _pull(sha=_LIVE, draft=False, state="open"):
+    return json.dumps({"head": {"sha": sha}, "draft": draft, "state": state})
 
 
 def _live_head(monkeypatch, pull=None, runs="", pull_fails=False, runs_fail=False):
@@ -696,6 +696,12 @@ def test_a_failed_head_read_exits_1_on_one_unannotated_line(in_process, monkeypa
             '{"draft": false}', "unreadable pull request #7: KeyError('head')", id="no-head"
         ),
         pytest.param(
+            json.dumps({"head": {"sha": _LIVE}, "draft": False}),
+            "unreadable pull request #7: KeyError('state')",
+            id="no-state",
+        ),
+        pytest.param(_pull(state=None), "pull request #7 has state None", id="null-state"),
+        pytest.param(
             "null",
             "unreadable pull request #7: TypeError(\"'NoneType' object is not subscriptable\")",
             id="null-pull",
@@ -713,8 +719,9 @@ def test_a_head_read_without_a_sha_and_draft_flag_exits_1(
     in_process, monkeypatch, capsys, cmd, pull, message
 ):
     """Mutations: return `pr_head`'s answer unchecked (drop the `is_head_sha` or the `isinstance`
-    clause) -- null-sha or str-draft prints or lists; drop `TypeError` from the caught classes --
-    null-pull is a traceback."""
+    clause) -- null-sha or str-draft prints or lists; drop the state `isinstance` check --
+    null-state prints or lists; read `pull.get("state")` -- no-state prints or lists; drop
+    `TypeError` from the caught classes -- null-pull is a traceback."""
     calls = _live_head(monkeypatch, pull=pull)
     assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls) == (message, ("", ""), [_PULL_READ])
 
@@ -793,6 +800,19 @@ def test_replan_prints_nothing_for_a_draft_and_lists_no_run(in_process, monkeypa
     calls = _live_head(monkeypatch, pull=_pull(draft=True))
     assert _cli("replan", SHA, "7") == 0
     assert (capsys.readouterr(), calls) == (("", _DRAFT_LOG), [_PULL_READ])
+
+
+def test_replan_prints_nothing_for_a_closed_pull_request_and_lists_no_run(
+    in_process, monkeypatch, capsys
+):
+    """A merged or closed pull request needs no plan. Mutation: drop the state check -- the
+    listing is read and the head printed."""
+    calls = _live_head(monkeypatch, pull=_pull(state="closed"))
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls) == (
+        ("", "pull request #7 is closed; nothing dispatched\n"),
+        [_PULL_READ],
+    )
 
 
 def test_replan_prints_nothing_when_the_head_did_not_move(in_process, monkeypatch, capsys):
