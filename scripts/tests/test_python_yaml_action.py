@@ -155,7 +155,7 @@ def test_the_detect_actions_install_first(action):
     assert action_steps(action)[0] == {"uses": _USES}
 
 
-def test_summary_installs_directly_before_doctor_and_its_gate_step_skips_only_when_moved():
+def test_summary_installs_directly_before_doctor_and_its_gate_step_skips_when_superseded_or_moved():
     """A failing step before `Create/refresh gate` would skip it, and the install never fails.
     The install skips only on a superseded run, the gate also on a moved upsert; both write
     nothing. Mutations: move the step after `Doctor`; add `&& inputs.on-demand == 'true'` to the

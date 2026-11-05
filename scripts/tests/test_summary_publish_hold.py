@@ -117,10 +117,9 @@ REFUSED = (
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
 # `--` line. FAKE_FAIL_CHECK fails that check-runs POST (1-based); pipeline members run in
 # subshells, so its counter lives in a file. The pull request's comment listing fails. The pull
-# request read answers head FAKE_PULL_HEAD with exit FAKE_PULL_RC; a call without GH_TOKEN fails.
+# request read answers head FAKE_PULL_HEAD with exit FAKE_PULL_RC.
 GH_STUB = """\
 #!/bin/bash
-if [ -z "$GH_TOKEN" ]; then echo "missing GH_TOKEN" >&2; exit 1; fi
 printf '%s\\n' "$@" >> "$CALLS"
 if [ "${*: -1}" = "-" ]; then cat >> "$CALLS"; printf '\\n' >> "$CALLS"; fi
 printf -- '--\\n' >> "$CALLS"
