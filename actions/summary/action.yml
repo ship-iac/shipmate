@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run whose pull request has moved past its head writes none of these on it and, when the live head is not a draft and has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
 inputs:
   pr-number:
     description: Pull request number.
@@ -520,6 +520,62 @@ runs:
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi
+
+    - name: Check whether the live head needs a plan
+      if: ${{ steps.hold.outputs.moved == 'true' || steps.upsert.outputs.result == 'moved' }}
+      id: livehead
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        # Degrades: this run's head is not the pull request's, so nothing here gates the merge.
+        if ! live=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" replan "$SHIPMATE_HEAD_SHA" "$SHIPMATE_PR_NUMBER" 2>replan.err); then
+          echo "::warning::could not decide whether pull request #$SHIPMATE_PR_NUMBER needs a plan ($(cat replan.err)); comment shipmate plan to plan it"
+          exit 0
+        fi
+        cat replan.err >&2
+        if [ -n "$live" ]; then echo "live=$live" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Mint the plan dispatch token
+      if: ${{ steps.livehead.outputs.live != '' }}
+      id: plantoken
+      # Degrades: a failed mint leaves the token empty, which the dispatch step reports.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+
+    - name: Dispatch a plan of the live head
+      if: ${{ steps.livehead.outputs.live != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.plantoken.outputs.token }}
+        # dispatch-body's inputs. A `workflow_dispatch` plan is on demand, so no auto apply follows.
+        VERB: plan
+        PR_NUMBER: ${{ inputs.pr-number }}
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+        SHIPMATE_LIVE: ${{ steps.livehead.outputs.live }}
+      run: |
+        set -euo pipefail
+        # Degrades: a failed mint or dispatch warns with the remedy and exits 0.
+        not_planned() {
+          echo "::warning::$1 failed, so $SHIPMATE_LIVE has no plan; comment shipmate plan to plan pull request #$PR_NUMBER"
+          exit 0
+        }
+        [ -n "${GH_TOKEN:-}" ] || not_planned "the plan dispatch token mint"
+        if ! body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") \
+          || ! gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/shipmate.yml/dispatches" \
+            --input - <<<"$body" >/dev/null; then
+          not_planned "the plan dispatch"
+        fi
+        echo "::notice title=dispatch::pull request #$PR_NUMBER moved to $SHIPMATE_LIVE, which has no plan run; dispatched shipmate plan (on demand, so no auto apply follows it)"
 
     - name: Decide whether to dispatch an auto apply
       # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the

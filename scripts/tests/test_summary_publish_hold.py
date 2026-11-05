@@ -591,6 +591,11 @@ LATER_STEP_IFS = {
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_MOVED,
     GATE: NOT_MOVED,
+    "Check whether the live head needs a plan": (
+        "${{ steps.hold.outputs.moved == 'true' || steps.upsert.outputs.result == 'moved' }}"
+    ),
+    "Mint the plan dispatch token": "${{ steps.livehead.outputs.live != '' }}",
+    "Dispatch a plan of the live head": "${{ steps.livehead.outputs.live != '' }}",
     "Decide whether to dispatch an auto apply": NOT_MOVED,
     "Mint the auto apply dispatch token": "${{ steps.autodecide.outputs.envs != '' }}",
     "Dispatch an auto apply": "${{ steps.autodecide.outputs.envs != '' }}",
