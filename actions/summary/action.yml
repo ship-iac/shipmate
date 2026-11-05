@@ -115,6 +115,14 @@ inputs:
       names renders none and warns.
     required: false
     default: ""
+  targeted-envs:
+    description: >-
+      build-matrix's `targeted_envs` output: JSON [env, ...], the default branch table's
+      `apply_mode: targeted` environments. The command section names `shipmate apply <env>` for
+      each one holding a changed cell. Empty (detect skipped) or invalid renders the bare
+      `shipmate apply` paragraph alone; invalid warns.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -327,6 +335,7 @@ runs:
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_COMMAND_HINTS: ${{ inputs.command-hints }}
         SHIPMATE_AUTO_ENVS_TABLE: ${{ inputs.auto-envs }}
+        SHIPMATE_TARGETED_ENVS: ${{ inputs.targeted-envs }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
         # failure still carries a full list.

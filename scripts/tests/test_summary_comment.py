@@ -1270,7 +1270,9 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
     # empty. Mutation: dropping `SHIPMATE_COMMAND_HINTS` or `SHIPMATE_IS_DRAFT` -- the command
     # section never shows, or shows on a draft. Mutation: dropping `SHIPMATE_AUTO_ENVS_TABLE` --
-    # the comment never says why no auto apply follows. Mutation: dropping `SHIPMATE_PR_NUMBER`
+    # the comment never says why no auto apply follows. Mutation: dropping
+    # `SHIPMATE_TARGETED_ENVS` -- the commands section never names a targeted environment.
+    # Mutation: dropping `SHIPMATE_PR_NUMBER`
     # -- a truncated plan refuses the step. Mutation: bind `SHIPMATE_STACKED` to
     # `steps.marks.outputs.locks`, or drop `SHIPMATE_DEFAULT_BRANCH` -- no holder is ever
     # named stacked.
@@ -1282,6 +1284,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
         "SHIPMATE_COMMAND_HINTS": "${{ inputs.command-hints }}",
         "SHIPMATE_AUTO_ENVS_TABLE": "${{ inputs.auto-envs }}",
+        "SHIPMATE_TARGETED_ENVS": "${{ inputs.targeted-envs }}",
         "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
@@ -1291,7 +1294,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
     }
-    # Mutation: `required: true` on any of the six (GitHub does not enforce it, but it
+    # Mutation: `required: true` on any of the seven (GitHub does not enforce it, but it
     # misdocuments a draft run).
     for name in (
         "unmanaged-stacks",
@@ -1300,6 +1303,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "env-order",
         "command-hints",
         "auto-envs",
+        "targeted-envs",
     ):
         decl = load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {

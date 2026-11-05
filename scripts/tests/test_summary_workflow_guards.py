@@ -51,6 +51,7 @@ EXPECTED_SUMMARY_WITH = {
     "env-order": "${{ needs.detect.outputs.env_order }}",
     "command-hints": "${{ needs.detect.outputs.command_hints }}",
     "auto-envs": "${{ needs.detect.outputs.auto_envs }}",
+    "targeted-envs": "${{ needs.detect.outputs.targeted_envs }}",
 }
 #: `detect`'s whole outputs map: `unmanaged`, `refusal` and `cells` are what the `with:` above
 #: passes on.
@@ -61,6 +62,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "max_parallel": "${{ steps.matrix.outputs.max_parallel }}",
     "command_hints": "${{ steps.matrix.outputs.command_hints }}",
     "auto_envs": "${{ steps.matrix.outputs.auto_envs }}",
+    "targeted_envs": "${{ steps.matrix.outputs.targeted_envs }}",
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "lost": "${{ steps.matrix.outputs.lost }}",
     "refusal": (
@@ -132,7 +134,9 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `auto-envs:` line, `detect`'s `auto_envs` output or the action's
     `auto-envs` input -> no auto apply is ever dispatched.
     Mutation: drop the `head-ref:` line or the action's `head-ref` input -> no lock holder is
-    ever found stacked on the pull request."""
+    ever found stacked on the pull request.
+    Mutation: drop the `targeted-envs:` line, `detect`'s `targeted_envs` output or the action's
+    `targeted-envs` input -> the commands section offers only the bare `shipmate apply`."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

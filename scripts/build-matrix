@@ -964,6 +964,7 @@ def main():
         max_parallel=cap,
         command_hints=hints,
         auto_envs=json.dumps(ec.auto_envs(table)),
+        targeted_envs=json.dumps(ec.targeted_envs(table)),
         cells=json.dumps(tree),
         unmanaged=json.dumps(named),
         lost=lost,
