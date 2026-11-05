@@ -2198,14 +2198,14 @@ in flight (below), it dispatches `shipmate plan` for the live head, whose
 autoplan run is then neither unfinished nor succeeded; that plan is on demand,
 so no auto apply follows it.
 
-When an older head's run arrives while the live head's autoplan is still
-running, the `plan-<pr>` group cancels that autoplan, so its cancelled or red
-checks sit on the live head. The older run's summary finds the head moved and,
-when the pull request is open and not a draft, dispatches `shipmate plan` for
-the live head; that plan is on demand, so no auto apply follows it. On a draft
-or a closed pull request it dispatches nothing and logs why. Once the dispatched
-plan has finished, clear the cancelled autoplan's checks as the next paragraph
-describes.
+A push, open or reopen run of an older head that arrives while the live head's
+autoplan runs cancels that autoplan. When that older run's summary finds the
+head moved, it dispatches `shipmate plan` for the live head if the pull request
+is open, is not a draft, and the live head has no autoplan run unfinished or
+succeeded; it logs why otherwise. In every case, once no plan run is in flight,
+comment `shipmate plan` if the plan comment does not show the live head, then
+`shipmate apply` for an environment that applies automatically: an on-demand
+plan starts no auto apply.
 
 When a run on the same head cancelled it (open, reopen, or a re-run), re-run
 the cancelled run after the newer plan run has finished: `gh run rerun <id>`.

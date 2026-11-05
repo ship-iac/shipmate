@@ -2383,13 +2383,14 @@ The five jobs:
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
   mirror of this run's completed `plan / ` checks onto the pull request's
   head, the `⚪ nothing planned` comment when no cell was planned, and the
-  collapse of the started reply that links the run (§Comment-ops). A run
-  that sees its pull request moved past its head before the publish hold writes
-  none of these on it; one that sees the move at the comment write leaves any
-  publish hold it already wrote (whose text says to re-plan) and any mirrored
-  checks, and writes no comment, apply check or final gate. Either run
-  dispatches `shipmate plan` for the live head when the pull request is open and not a draft and that head has
-  no autoplan run unfinished or succeeded (§Plan comment).
+  collapse of the started reply that links the run (§Comment-ops). A run that
+  sees its pull request moved past its head before the publish hold writes none
+  of these on it; one that sees the move at the comment write leaves any publish
+  hold it already wrote (whose text says to re-plan) and any mirrored checks,
+  and writes no comment, apply check or final gate. Either run dispatches
+  `shipmate plan` for the live head when the pull request is open and not a
+  draft and that head has no autoplan run unfinished or succeeded (§Plan
+  comment).
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact about this pull request it decides on from
