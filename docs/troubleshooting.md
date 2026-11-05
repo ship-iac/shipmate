@@ -2198,14 +2198,14 @@ in flight (below), it dispatches `shipmate plan` for the live head, whose
 autoplan run is then neither unfinished nor succeeded; that plan is on demand,
 so no auto apply follows it.
 
-Runs join the `plan-<pr>` concurrency group in arrival order, not push order.
-When an older head's run arrives after the live head's autoplan, it cancels
-that autoplan, and the cancelled or red checks sit on the live head. The older
-run's `summary` finds the pull request moved, writes no comment, apply check or
-gate on its own head, and dispatches `shipmate plan` for the live head. That
-plan is on demand, so no auto apply follows it: comment `shipmate apply` once it
-finishes. The cancelled autoplan's checks stay on the live head until the next
-push.
+When an older head's run arrives while the live head's autoplan is still
+running, the `plan-<pr>` group cancels that autoplan, so its cancelled or red
+checks sit on the live head. The older run's summary finds the head moved and,
+when the pull request is open and not a draft, dispatches `shipmate plan` for
+the live head; that plan is on demand, so no auto apply follows it. On a draft
+or a closed pull request it dispatches nothing and logs why. Once the dispatched
+plan has finished, clear the cancelled autoplan's checks as the next paragraph
+describes.
 
 When a run on the same head cancelled it (open, reopen, or a re-run), re-run
 the cancelled run after the newer plan run has finished: `gh run rerun <id>`.
