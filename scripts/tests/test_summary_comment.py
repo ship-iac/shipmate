@@ -495,6 +495,84 @@ def test_a_lock_on_an_unchanged_cell_names_no_evict_command():
     assert body.endswith("\n\n" + COMMANDS)
 
 
+#: Hand-written sections for `targeted` environments: every changed environment targeted, then
+#: one untargeted and one targeted environment changed.
+_ALL_TARGETED = (
+    "<details><summary>shipmate commands</summary>\n\n"
+    "Comment `shipmate apply dev-eu` to apply dev-eu.\n\n"
+    "Comment `shipmate apply prod` to apply prod.\n\n"
+    "Comment `shipmate help` for every command.\n\n"
+    "</details>"
+)
+_MIXED_TARGETED = (
+    "<details><summary>shipmate commands</summary>\n\n"
+    "Comment `shipmate apply` to apply this plan.\n\n"
+    "Comment `shipmate apply prod` to apply prod.\n\n"
+    "Comment `shipmate help` for every command.\n\n"
+    "</details>"
+)
+
+
+def _section(cells, **kw):
+    """The section `build_comment` appends with `hints`, checked against the body without it."""
+    without = sc.build_comment(cells, CHECKS, RUN_URL, SHA, **kw)[0]
+    body = sc.build_comment(cells, CHECKS, RUN_URL, SHA, hints=True, **kw)[0]
+    assert body.startswith(without + "\n\n")
+    return body[len(without) + 2 :]
+
+
+def test_every_changed_environment_targeted_names_each_and_no_bare_apply():
+    """Mutation: always emit the bare paragraph -- red."""
+    cells = [(_cell(), None), (_cell(environment="prod"), None)]
+    assert _section(cells, targeted=["dev-eu", "prod"]) == _ALL_TARGETED
+
+
+def test_a_mixed_plan_names_the_bare_apply_first_then_the_targeted_environment():
+    """Mutation: emit the bare paragraph only when `targeted` is empty -- red."""
+    cells = [(_cell(), None), (_cell(environment="prod"), None)]
+    assert _section(cells, targeted=["prod"]) == _MIXED_TARGETED
+
+
+def test_a_targeted_environment_with_no_changed_cell_gets_no_paragraph():
+    """Mutation: iterate the `targeted` list instead of the changed environments -- the `prod`
+    paragraph renders, red."""
+    cells = [(_cell(), None), (_cell(environment="prod", changed=False), None)]
+    assert _section(cells, targeted=["prod"]) == COMMANDS
+
+
+def test_an_empty_targeted_set_renders_todays_section():
+    """Detect skipped: `targeted` empty. Mutation: emit the bare paragraph only when an environment
+    is targeted -- red."""
+    cells = [(_cell(), None), (_cell(environment="prod"), None)]
+    assert _section(cells, targeted=[]) == COMMANDS
+
+
+def test_targeted_paragraphs_follow_the_apply_order_not_the_names():
+    """`live` needs `staging`, so `staging` comes first. Mutation: sort the targeted paragraphs by
+    name -- `live` first, red."""
+    cells = [(_cell(environment="live"), None), (_cell(environment="staging"), None)]
+    assert _section(cells, targeted=["live", "staging"], order=["staging", "live"]) == (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply staging` to apply staging.\n\n"
+        "Comment `shipmate apply live` to apply live.\n\n"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
+
+
+def test_a_locked_cell_in_a_targeted_environment_gets_both_paragraphs():
+    """The targeted paragraph, then the evict paragraph. Mutation: compute the changed
+    environments from the unlocked cells alone -- the targeted paragraph is missing, red."""
+    locks = {"stacks/app / dev-eu": 12, "stacks/db / dev-eu": 3}
+    assert _section(_LOCK_CELLS, targeted=["dev-eu"], locks=locks) == (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply dev-eu` to apply dev-eu.\n\n"
+        f"{_evict('dev-eu')}"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
+
+
 def test_without_an_env_order_environments_sort_by_name(tmp_path):
     """Mutation: dropping `sorted` from the environments `order` does not name -- `prod`, the
     first read, comes first."""
@@ -1766,6 +1844,34 @@ def test_main_shows_no_command_section_on_a_draft(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIPMATE_IS_DRAFT", "true")
     _run_main(tmp_path, monkeypatch, [_cell()])
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _MAIN_BODY
+
+
+def test_main_names_the_targeted_environments_it_reads(tmp_path, monkeypatch):
+    """Mutation: drop the `SHIPMATE_TARGETED_ENVS` read from `main` -- the bare paragraph, red."""
+    monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
+    monkeypatch.setenv("SHIPMATE_TARGETED_ENVS", '["dev-eu"]')
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        _MAIN_BODY + "\n\n<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply dev-eu` to apply dev-eu.\n\n"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
+
+
+def test_main_warns_once_and_offers_the_bare_apply_for_a_malformed_targeted_set(
+    tmp_path, monkeypatch, capsys
+):
+    """Mutation: drop the warning -- red; return `names` (None) for `[]` in `_env_names` -- the
+    section build raises, red."""
+    monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
+    monkeypatch.setenv("SHIPMATE_TARGETED_ENVS", '{"a":1}')
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _MAIN_BODY + "\n\n" + COMMANDS
+    assert capsys.readouterr().out == (
+        "::warning::targeted-envs is not a JSON list of environment names; the commands section "
+        "offers the bare shipmate apply\n"
+    )
 
 
 def test_main_orders_environments_by_the_env_order_input(tmp_path, monkeypatch):

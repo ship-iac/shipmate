@@ -35,8 +35,10 @@ refusal or a failure, under an apply or doctor verdict that is not 🟢. A plan 
 only when the gate is held.
 With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
 that is not a draft ends with the `commands` section, when the body has room for it under
-SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply` and `shipmate help`, and
-`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked.
+SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply` when a changed cell sits
+outside every `apply_mode: targeted` environment, `shipmate apply <env>` for each targeted
+environment holding a changed cell, in apply order, `shipmate unlock <env> --evict` for each
+environment holding a changed cell it marks locked, and `shipmate help`.
 
 An autoplan of a pull request that is not a draft, not started by a push, that changed a cell of
 an `apply_mode: auto` environment no other pull request locks says so in a line under the verdict
@@ -356,18 +358,25 @@ def stacked_hold(cells, locks, stacked, default_branch):
     )
 
 
-def commands(locked):
-    """The folded command section: `shipmate apply`, then per environment of `locked`, sorted,
+def commands(locked, targeted=(), changed=()):
+    """The folded command section: `shipmate apply` unless `changed` (the changed cells'
+    environments in apply order) is not empty and all in `targeted`, then per environment of
+    `changed` in `targeted` its `shipmate apply <env>`, then per environment of `locked`, sorted,
     its `shipmate unlock <env> --evict`, then `shipmate help`. No line starts with `shipmate`, so
     the section is not itself a command."""
+    bare = "Comment `shipmate apply` to apply this plan.\n\n"
+    if changed and set(changed) <= set(targeted):
+        bare = ""
+    named = "".join(
+        f"Comment `shipmate apply {e}` to apply {e}.\n\n" for e in changed if e in targeted
+    )
     evict = "".join(
         f"Comment `shipmate unlock {e} --evict` to take a cell another pull request holds.\n\n"
         for e in sorted(locked)
     )
     return (
         "<details><summary>shipmate commands</summary>\n\n"
-        "Comment `shipmate apply` to apply this plan.\n\n"
-        f"{evict}"
+        f"{bare}{named}{evict}"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
     )
@@ -587,6 +596,7 @@ def build_comment(
     auto="",
     stacked=frozenset(),
     default_branch="",
+    targeted=(),
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `auto_line` `auto`,
     `doctor_line` of `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line
@@ -597,10 +607,11 @@ def build_comment(
     cell ends with `commands` when the whole body stays within SIZE_BUDGET, and leaves it out
     silently otherwise, after every cell is sized, so it never shrinks one. `locks`
     (`lock_marks`) marks the changed cells another pull request holds, and `commands` names their
-    environments; `stacked` and `default_branch` go to `_plan_line`. Every cell is guaranteed
-    its bare line: the space all headings and remaining cells' bare lines need is reserved up
-    front, so an early giant plan cannot starve a later cell. Each of the four lines yields, with
-    a warning, when the headings and bare lines leave it no room under HARD_CAP. Returns
+    environments, and the changed environments of `targeted` in `order`; `stacked` and
+    `default_branch` go to `_plan_line`. Every cell is guaranteed its bare line: the space all
+    headings and remaining cells' bare lines need is reserved up front, so an early giant plan
+    cannot starve a later cell. Each of the four lines yields, with a warning, when the headings
+    and bare lines leave it no room under HARD_CAP. Returns
     `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
@@ -636,7 +647,8 @@ def build_comment(
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
-    section = commands({c["environment"] for c in meta if _lock_key(c, locks)})
+    changed = [e for e, _ in by_env([c for c in meta if c["changed"]], order, bool)]
+    section = commands({c["environment"] for c in meta if _lock_key(c, locks)}, targeted, changed)
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
@@ -858,6 +870,17 @@ def _held_main(checks, url):
         fh.write(body)
 
 
+def _env_names(var, label, unread):
+    """The JSON list of environment names in env var `var` (`ad.auto_set`); `[]` when it is
+    empty, and `[]` with one warning naming `label` and `unread` when it is not that shape."""
+    raw = os.environ.get(var, "")
+    names = ad.auto_set(raw) if raw else []
+    if names is None:
+        print(f"::warning::{label} is not a JSON list of environment names; {unread}")
+        return []
+    return names
+
+
 def main():
     mode = os.environ.get("SHIPMATE_COMMENT_MODE", "")
     if mode not in ("", "held"):
@@ -884,14 +907,14 @@ def main():
     )
     # Reviewer-facing only: anything but doctor's count renders no line.
     warnings = os.environ.get("SHIPMATE_DOCTOR_WARNINGS", "")
-    raw = os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", "")
-    auto = ad.auto_set(raw) if raw else []
-    if auto is None:
-        print(
-            "::warning::auto-envs is not a JSON list of environment names; the plan comment "
-            "says nothing about an auto apply"
-        )
-        auto = []
+    auto = _env_names(
+        "SHIPMATE_AUTO_ENVS_TABLE", "auto-envs", "the plan comment says nothing about an auto apply"
+    )
+    targeted = _env_names(
+        "SHIPMATE_TARGETED_ENVS",
+        "targeted-envs",
+        "the commands section offers the bare shipmate apply",
+    )
     locks = lock_marks(os.environ.get("SHIPMATE_LOCKS", ""))
     stacked = stacked_marks(os.environ.get("SHIPMATE_STACKED", ""))
     default_branch = os.environ.get("SHIPMATE_DEFAULT_BRANCH", "")
@@ -918,6 +941,7 @@ def main():
         ),
         stacked=stacked,
         default_branch=default_branch,
+        targeted=targeted,
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
