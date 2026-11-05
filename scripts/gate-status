@@ -29,7 +29,8 @@ degrades prints the only annotation as a warning, and a fail-closed caller print
 
 `moved` and `replan` read the pull request once through `_shipmate.pr_head`. `replan` prints the
 live head when it is not `<sha>`, the pull request is not a draft, and no autoplan run of the live
-head is `queued`, `in_progress`, or `completed` with conclusion `success`; otherwise it prints
+head is unfinished (any status but `completed`, a missing one included) or `completed` with
+conclusion `success`; otherwise it prints
 nothing, with a log line on stderr when the head moved. A `<pr>` that is not a pull-request number
 exits 1 with `::error::` before any API call. A malformed `<sha>`, a failed head read and a failed
 or malformed run listing exit 1 with one unannotated stderr line, as in `checks`.
@@ -230,10 +231,7 @@ def _moved(sha, pr):
 
 
 def _blocks_replan(listed):
-    status = listed.get("status")
-    return status in ("queued", "in_progress") or (
-        status == "completed" and listed.get("conclusion") == "success"
-    )
+    return listed.get("status") != "completed" or listed.get("conclusion") == "success"
 
 
 def _replan(sha, pr):
@@ -251,8 +249,8 @@ def _replan(sha, pr):
         raise SystemExit(one_line(exc)) from None
     if any(map(_blocks_replan, runs)):
         print(
-            f"pull request #{pr} moved to {live}, which has an autoplan run queued, in progress "
-            "or succeeded; nothing dispatched",
+            f"pull request #{pr} moved to {live}, whose autoplan run has not finished or "
+            "succeeded; nothing dispatched",
             file=sys.stderr,
         )
         return

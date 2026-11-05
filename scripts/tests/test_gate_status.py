@@ -602,8 +602,8 @@ _RUNS_READ = autoplans_read("acme/demo", _LIVE)
 _PULL_FAILED = "command failed (1): gh api repos/acme/demo/pulls/7 | HTTP 502 | ::add-mask::x"
 _DRAFT_LOG = f"pull request #7 moved to {_LIVE}, a draft; nothing dispatched\n"
 _PLANNED_LOG = (
-    f"pull request #7 moved to {_LIVE}, which has an autoplan run queued, in progress or "
-    "succeeded; nothing dispatched\n"
+    f"pull request #7 moved to {_LIVE}, whose autoplan run has not finished or succeeded; "
+    "nothing dispatched\n"
 )
 
 
@@ -646,8 +646,13 @@ def _cli(*argv):
 
 
 def _rows(*runs):
+    """Listing lines for `(status, conclusion)` pairs; a None status omits both keys."""
     return "".join(
-        json.dumps(listed_autoplan(9, _LIVE, status=status, conclusion=conclusion)) + "\n"
+        json.dumps(
+            listed_autoplan(9, _LIVE)
+            | ({} if status is None else {"status": status, "conclusion": conclusion})
+        )
+        + "\n"
         for status, conclusion in runs
     )
 
@@ -761,6 +766,10 @@ def test_replan_prints_a_moved_head_with_no_live_autoplan(in_process, monkeypatc
     [
         pytest.param((("queued", None),), id="queued"),
         pytest.param((("in_progress", None),), id="in-progress"),
+        pytest.param((("requested", None),), id="requested"),
+        pytest.param((("waiting", None),), id="waiting"),
+        pytest.param((("pending", None),), id="pending"),
+        pytest.param(((None, None),), id="no-status"),
         pytest.param((("completed", "success"),), id="success"),
         pytest.param(
             (("completed", "cancelled"), ("completed", "success")), id="success-after-cancel"
@@ -771,8 +780,9 @@ def test_replan_prints_nothing_when_the_live_head_has_its_autoplan(
     in_process, monkeypatch, capsys, runs
 ):
     """A succeeded autoplan counts: a duplicate plan would write newer plan records, and an auto
-    apply waiting on that autoplan would then refuse. Mutations: drop the success clause --
-    success red; judge only the first row -- success-after-cancel red."""
+    apply waiting on that autoplan would then refuse. Any status but `completed` is unfinished.
+    Mutations: drop the success clause -- success red; judge only the first row --
+    success-after-cancel red; block only `queued` and `in_progress` -- waiting red."""
     calls = _live_head(monkeypatch, runs=_rows(*runs))
     assert _cli("replan", SHA, "7") == 0
     assert (capsys.readouterr(), calls) == (("", _PLANNED_LOG), [_PULL_READ, _RUNS_READ])

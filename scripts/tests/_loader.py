@@ -330,7 +330,7 @@ if [ "$2" = "--paginate" ]; then
   printf '%s' "${FAKE_LIST_STDERR:-}" >&2
   exit "${FAKE_LIST_RC:-0}"
 fi
-if [ "$#" = 2 ] && [[ "$2" == repos/*/pulls/* ]]; then
+if [ "$#" = 2 ] && [[ "$2" =~ ^repos/[^/]+/[^/]+/pulls/[0-9]+$ ]]; then
   printf '{"head": {"sha": "%s"}, "draft": false}\\n' "${FAKE_HEAD:-}"
   exit "${FAKE_HEAD_RC:-0}"
 fi
