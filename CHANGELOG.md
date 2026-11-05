@@ -16,7 +16,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **The merge deploy refuses to apply over another pull request's cell lock.** `deploy-detect` refuses the whole run with `deploy refused: <n> pending cell(s) are locked by another pull request`, naming each holder and every pending cell, applies nothing, and the deploy's lock release then releases the merged pull request's locks on its pending cells too. A deploy wave cell whose lock another pull request took after `detect` refuses with `its cell lock is held by <who>, not by this merge`. Both name one recovery: open a pull request that changes the stacks, comment `shipmate unlock <env> --evict` on it, then apply it.
+- **The merge deploy refuses to apply over another pull request's cell lock.** `deploy-detect` refuses the whole run with `deploy refused: <n> pending cell(s) are locked by another pull request`, naming each holder and every pending cell, applies nothing, and, when the deploy mapped the merge to its pull request, the deploy's lock release then releases the merged pull request's locks on its pending cells too. A deploy wave cell whose lock another pull request took after `detect` refuses with `its cell lock is held by <who>, not by this merge`. Both name one recovery: open a pull request that changes the stacks, comment `shipmate unlock <env> --evict` on it, then apply it.
 - **A lock whose holder cannot be read reads `an unknown holder` on every surface**: the plan comment, the apply result comment, the waiting remedy, the eviction reply and both deploy refusals. It read `an unreadable lock`.
 
 ### Fixed

@@ -954,16 +954,16 @@ merged or closed.
   (`shipmate · release`) and re-run it.
 - **#<n>'s close started no run.** The file's `pull_request_target` types lack
   `closed`; `shipmate doctor`'s `shipmate.yml` probe reports the types. A merge
-  is still released by the merge deploy's `summary`; a close without merge is
-  not.
+  is still released by the merge deploy's `summary` when the deploy mapped the
+  merge to its pull request; a close without merge is not.
 - **The closing run skipped every job.** The file has no `release` job;
   `shipmate doctor`'s `shipmate.yml` probe reports no `release` job calling
   `release.yml`.
 - **#<n> merged and the cell's apply check is still pending on its head.** The
   lock stays until the merge deploy applies the cell; a failed deploy keeps it
   (§The deploy's `summary` failed releasing cell locks). Re-run the deploy. A
-  deploy refused over another pull request's lock releases it instead, with
-  every other lock #<n> holds (§A merge deploy refused: `deploy refused: <n>
+  deploy refused over another pull request's lock releases it instead, when the
+  deploy mapped the merge to its pull request, with every other lock #<n> holds (§A merge deploy refused: `deploy refused: <n>
   pending cell(s) are locked by another pull request`). A merge into a
   branch no deploy runs on leaves the check pending, and the lock with it.
 - **#<n> was closed without merging, then reopened, and the lock is newer than
@@ -985,19 +985,16 @@ a merged pull request:
   three reads, or the merge is older than the 100 most recently updated closed
   pull requests into `<branch>`. A direct push that merged no pull request
   warns the same way.
-- Effect: the deploy runs as a push to `<branch>` with no pull request. It
-  reads no apply check of the merged pull request, so a refusal that follows,
-  such as `apply aborted: no plan run recorded`, names the push path. The merged
-  pull request's own cell locks count as another pull request's: the deploy
-  refuses with `deploy refused: <n> pending cell(s) are locked by another pull
-  request`, naming `(locked by #<merged>)`, and no lock release runs.
-- Remedy for a merge commit: re-run the deploy once
-  `gh api repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request.
-  The re-run maps the merge to it, so its own locks pass and its lock release
-  runs.
-- Remedy for a direct push that changed stacks: open a pull request that
-  changes those stacks (any edit `terramate list --changed` marks), and apply
-  and merge it.
+- Effect: The deploy runs as a push to `<branch>`: it maps no pull request, so
+  it releases no cell lock and writes its gate on the merge commit. A pending
+  cell the merged pull request locked refuses with `deploy refused: ... locked
+  by another pull request` naming `#<merged>`; without such a lock, a pending
+  cell refuses with `apply aborted: no plan run recorded`.
+- Remedy: For a merge commit, re-run the deploy once `gh api
+  repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request. If it never
+  does, or the commit was a direct push, open a pull request that changes the
+  unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
+  environment the refusal names, then apply it.
 
 ### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`
 
@@ -1012,8 +1009,9 @@ cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
 nothing. When the deploy mapped the merge to its pull request, its lock release
 still runs and releases every lock the merged pull request holds, pending cells'
 included; a merge it could not map runs no lock release (see §`could not map
-<sha> to a merged pull request ...`). The merged head's `shipmate / gate`
-turns to `failure`, and its apply checks stay pending.
+<sha> to a merged pull request ...`). When the deploy mapped the merge to its pull
+request, the merged head's `shipmate / gate` turns to `failure`; otherwise the
+gate is written on the merge commit. The apply checks stay pending.
 
 1. Open a pull request that changes every stack the message lists as not
    applied (any edit `terramate list --changed` marks, such as a comment line).
