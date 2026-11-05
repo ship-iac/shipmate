@@ -1225,7 +1225,8 @@ def test_verify_refuses_a_cell_our_pull_request_does_not_hold(
 )
 def test_verify_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path, commit_answer, why):
     """Mutations: re-raise the read's `SystemExit` unchanged in `_confirm` (read-fails loses the
-    cell); `str(exc.code)` for the `why` (read-fails keeps `::error::`, read-exits-* print
+    cell); pass the deploy retry everywhere (`_confirm`'s default, every case ends without
+    `RETRY`); `str(exc.code)` for the `why` (read-fails keeps `::error::`, read-exits-* print
     `(None)` and `(1)`); drop `LookupError` from `_confirm`'s second `except` (malformed escapes
     as a `KeyError`)."""
     gh = Gh().on(ref_read(AUTH_REF), refs((AUTH_REF, OLD))).on(commit_read(OLD), commit_answer)
@@ -1609,11 +1610,14 @@ def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
 
 
 def test_verify_deploy_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path):
-    """Mutation: treat a failed read as unlocked (return None from the read on `SystemExit`)."""
+    """No merged pull request can push or take a comment, so the remedy is a re-run; the
+    pull-request path's `RETRY` is pinned by `test_verify_refuses_a_lock_it_cannot_read`.
+    Mutation: treat a failed read as unlocked (return None from the read on `SystemExit`).
+    Mutation: drop the deploy retry from `_verify_deploy` (ends with `RETRY`)."""
     gh = Gh().on(ref_read(AUTH_REF), FAIL)
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
-        f"::error::{WHERE} could not confirm which pull request holds its cell lock (command "
-        f"failed (1): gh api); {RETRY}"
+        "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
+        "holds its cell lock (command failed (1): gh api); re-run the failed deploy jobs"
     )
 
 

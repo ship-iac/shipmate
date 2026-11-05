@@ -44,7 +44,8 @@ EXPECTED_STRATEGIES = {
 
 #: Each env-level call's whole `with:` in the two callers.
 #: The pre-merge apply passes its pull request, whose cell locks each cell verifies; the merge
-#: deploy passes none, because it ignores cell locks.
+#: deploy passes the merged pull request with `deploy: true`, and each cell refuses only a lock
+#: another pull request holds.
 EXPECTED_ENVLEVEL_WITH = {
     (workflow, f"envlevel{n}"): {
         "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",

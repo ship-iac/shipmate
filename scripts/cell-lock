@@ -526,10 +526,12 @@ def _marks_cmd(repo, pr, run):
 
 
 _RETRY = "push, or comment `shipmate apply` on the pull request"
+_DEPLOY_RETRY = "re-run the failed deploy jobs"
 
 
-def _confirm(where, what, read):
-    """`read()`, refused as an unconfirmed `what` when it fails or its answer is malformed."""
+def _confirm(where, what, read, retry=_RETRY):
+    """`read()`, refused as an unconfirmed `what` when it fails or its answer is malformed,
+    naming `retry` as the remedy."""
     try:
         return read()
     except SystemExit as exc:
@@ -537,20 +539,20 @@ def _confirm(where, what, read):
     except (LookupError, TypeError, ValueError, AttributeError) as exc:
         why = repr(exc)
     raise SystemExit(
-        f"::error::apply aborted for {where}: could not confirm {what} ({why}); {_RETRY}"
+        f"::error::apply aborted for {where}: could not confirm {what} ({why}); {retry}"
     ) from None
 
 
-def _cell_lock(repo, env, stack, where, what, run):
+def _cell_lock(repo, env, stack, where, what, run, retry=_RETRY):
     """The cell's lock, None when it is unlocked; a failed read refuses as an unconfirmed
-    `what`."""
+    `what`, naming `retry`."""
     ref = ref_name(env, stack)
 
     def read():
         sha = _ref_sha(repo, ref, run)
         return None if sha is None else _lock(repo, ref, sha, run)
 
-    return _confirm(where, what, read)
+    return _confirm(where, what, read, retry)
 
 
 def _verify_lock(repo, pr, env, stack, where, run):
@@ -569,7 +571,8 @@ def _verify_lock(repo, pr, env, stack, where, run):
 
 
 def _verify_deploy(repo, pr, env, stack, where, run):
-    held = _cell_lock(repo, env, stack, where, "which pull request holds its cell lock", run)
+    what = "which pull request holds its cell lock"
+    held = _cell_lock(repo, env, stack, where, what, run, _DEPLOY_RETRY)
     if held is None or held.pr == pr:
         return
     raise SystemExit(
