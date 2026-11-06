@@ -51,6 +51,7 @@ jobs:
       max_parallel: ${{ steps.matrix.outputs.max_parallel }}
       command_hints: ${{ steps.matrix.outputs.command_hints }}
       auto_envs: ${{ steps.matrix.outputs.auto_envs }}
+      targeted_envs: ${{ steps.matrix.outputs.targeted_envs }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
       lost: ${{ steps.matrix.outputs.lost }}
       refusal: ${{ steps.setup.outputs.refusal || steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}
@@ -166,6 +167,7 @@ jobs:
           env-order: ${{ needs.detect.outputs.env_order }}
           command-hints: ${{ needs.detect.outputs.command_hints }}
           auto-envs: ${{ needs.detect.outputs.auto_envs }}
+          targeted-envs: ${{ needs.detect.outputs.targeted_envs }}
 
   # Holds the gate when the per-head group evicts a pending `summary`; it writes outside the group,
   # since a hold only closes the gate. A `summary` whose fork `if:` refused the head is `skipped`,

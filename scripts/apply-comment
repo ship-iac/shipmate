@@ -1007,7 +1007,7 @@ def main():
         # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
         os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
         or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
-        sc.env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
+        sc.env_names(os.environ.get("SHIPMATE_ENV_ORDER", ""), "env-order", sc.ENV_ORDER_UNREAD),
         json.loads(os.environ.get("SHIPMATE_HELD_CELLS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_SKIPPED_AFTER") or "{}"),
         json.loads(os.environ.get("SHIPMATE_BARE_ENVS") or "[]"),

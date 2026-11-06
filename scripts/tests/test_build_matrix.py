@@ -1493,7 +1493,9 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     """Mutation: delete the `refusal` output -- the gate never names a detect error.
     Mutation: delete the `env_order` output -- the plan comment orders environments by name.
     Mutation: delete the `command_hints` output -- the plan comment never shows its commands.
-    Mutation: delete or rename the `auto_envs` output -- no auto apply is ever dispatched."""
+    Mutation: delete or rename the `auto_envs` output -- no auto apply is ever dispatched.
+    Mutation: delete the `targeted_envs` output -- the commands section offers only the bare
+    `shipmate apply`."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
@@ -1505,6 +1507,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "max_parallel": "${{ steps.build.outputs.max_parallel }}",
         "command_hints": "${{ steps.build.outputs.command_hints }}",
         "auto_envs": "${{ steps.build.outputs.auto_envs }}",
+        "targeted_envs": "${{ steps.build.outputs.targeted_envs }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
         "lost": "${{ steps.build.outputs.lost }}",
@@ -2576,6 +2579,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "max_parallel": "10",
         "command_hints": "false",
         "auto_envs": "[]",
+        "targeted_envs": "[]",
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
         "lost": "",
@@ -2638,6 +2642,30 @@ def test_detect_writes_the_tables_auto_envs(monkeypatch, tmp_path, modes, expect
     )
     assert outputs["count"] == "1"  # Not vacuous: a cell exists.
     assert outputs["auto_envs"] == expected
+
+
+def test_detect_writes_the_tables_targeted_envs(monkeypatch, tmp_path):
+    """The plan summary reads this output to name `shipmate apply <env>` per targeted environment.
+
+    Mutation: write `ec.auto_envs(table)` into it -- `["b"]`."""
+    table = {
+        "layout": "folder",
+        "environments": {
+            "a": {"apply_mode": "targeted", "review": False},
+            "b": {"apply_mode": "auto", "review": False},
+            "c": {"review": False},
+        },
+    }
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        cells=(("stacks/app", "a"),),
+        head_sha="cafe1234",
+        table=table,
+    )
+    assert outputs["count"] == "1"  # Not vacuous: a cell exists.
+    assert outputs["targeted_envs"] == '["a"]'
 
 
 def _git(*args):

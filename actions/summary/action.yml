@@ -99,10 +99,11 @@ inputs:
   command-hints:
     description: >-
       build-matrix's `command_hints` output, read from the default branch's table. `true` ends
-      the plan comment with a folded section naming `shipmate apply`, `shipmate unlock <env>
-      --evict` for each environment holding a changed cell another pull request holds, and
-      `shipmate help`, when a cell changed and the pull request is not a draft. Anything else
-      (empty when detect is skipped) leaves it out.
+      the plan comment with a folded section naming `shipmate apply <env>` for each
+      `targeted-envs` environment holding a changed cell, `shipmate apply` when a changed cell
+      sits outside all of them, `shipmate unlock <env> --evict` for each environment holding a
+      changed cell another pull request holds, and `shipmate help`, when a cell changed and the
+      pull request is not a draft. Anything else (empty when detect is skipped) leaves it out.
     required: false
     default: ""
   auto-envs:
@@ -113,6 +114,15 @@ inputs:
       skipped or refused) renders no line; the dispatch decision then stops at an earlier
       condition, and warns only when it reaches the value. A value that is not a list of
       names renders none and warns.
+    required: false
+    default: ""
+  targeted-envs:
+    description: >-
+      build-matrix's `targeted_envs` output: JSON [env, ...], the default branch table's
+      `apply_mode: targeted` environments. The command section names `shipmate apply <env>` for
+      each one holding a changed cell. An empty (detect skipped) or unreadable value names no
+      targeted environment, so the section offers the bare `shipmate apply` as before; an
+      unreadable one warns once.
     required: false
     default: ""
 runs:
@@ -327,6 +337,7 @@ runs:
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_COMMAND_HINTS: ${{ inputs.command-hints }}
         SHIPMATE_AUTO_ENVS_TABLE: ${{ inputs.auto-envs }}
+        SHIPMATE_TARGETED_ENVS: ${{ inputs.targeted-envs }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
         # failure still carries a full list.
