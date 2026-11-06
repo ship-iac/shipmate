@@ -713,13 +713,18 @@ _DRIFT_LINE = (
 )
 
 
+#: Bytes of the apply check's summary that its fence and truncation trailer take from the plan.
+_CHECK_FRAME = 1024
+
+
 def fold_drift(text):
     """`text` with OpenTofu's outside-changes note, from the note line to the first following
     line made only of `─`, replaced by one line counting the note's `has changed` and
     `has been deleted` headers. Unchanged unless the note line is the first non-empty line,
-    where tofu prints it (author text cannot reach it there), the rule line is complete (a cut
-    read can stop inside it), and the text through the rule fits `CHECK_OUTPUT_CAP` UTF-8
-    bytes, so the apply check the counted line names holds the whole note."""
+    where tofu prints it (author text, even split at a CR by the text-mode read, cannot reach
+    it there), the rule line is complete (a cut read can stop inside it), and the text through
+    the rule fits `CHECK_OUTPUT_CAP - _CHECK_FRAME` UTF-8 bytes, so the apply check the counted
+    line names holds the whole note."""
     body = text.lstrip("\n")
     if not body.startswith(_DRIFT_NOTE + "\n"):
         return text
@@ -731,7 +736,7 @@ def fold_drift(text):
         line = lines[end]
         if line and not line.strip("─"):
             note = "\n".join(lines[: end + 1]) + "\n"
-            if lead + len(note.encode("utf-8")) > CHECK_OUTPUT_CAP:
+            if lead + len(note.encode("utf-8")) > CHECK_OUTPUT_CAP - _CHECK_FRAME:
                 return text
             return "\n".join([text[:lead] + _DRIFT_LINE.format(n), *lines[end + 1 :]])
         n += bool(_DRIFT_HEADER.match(line))
@@ -777,9 +782,8 @@ def load_cells(cells_dir):
         text = None
         if txt.exists():
             # A SIZE_BUDGET text exceeds every section limit, so a cut one renders truncated; the
-            # top-up refills what `fold_drift` shrank (`max`: a negative size reads the whole file),
-            # and newline="\n" keeps an author-text CR from starting a column-0 line, as `counts`.
-            with open(txt, encoding="utf-8", newline="\n") as fh:
+            # top-up refills what `fold_drift` shrank (`max`: a negative size reads the whole file).
+            with open(txt, encoding="utf-8") as fh:
                 text = fold_drift(fh.read(SIZE_BUDGET))
                 text += fh.read(max(0, SIZE_BUDGET - len(text)))
         out.append((cell, text))

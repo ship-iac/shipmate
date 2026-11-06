@@ -1041,8 +1041,7 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell()))
     line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars.
-    # Over 70_000 chars, past SIZE_BUDGET; bytes, so Windows writes no CR.
-    (d / "plan.txt").write_bytes((line * 1_112 + _MIXED).encode("utf-8"))
+    (d / "plan.txt").write_text(line * 1_112 + _MIXED)  # Over 70_000 chars, past SIZE_BUDGET.
     cells = sc.load_cells(str(tmp_path))
     assert sc.state(cells[0][0]) == "+1 ~2 -2"
     assert len(cells[0][1]) == sc.SIZE_BUDGET
@@ -1988,9 +1987,9 @@ def test_fold_drift_folds_only_a_note_on_the_first_non_empty_line():
 
 
 def test_a_cr_in_author_text_cannot_forge_a_drift_note(tmp_path):
-    """Read in text mode, each CR in a heredoc body ends a line, so the body forges a column-0
-    note line and rule that fold away the planned change between them. Mutation: opening
-    plan.txt with default newline handling turns each CR into a line break."""
+    """The text-mode read ends a line at each CR in a heredoc body, so the body forges a column-0
+    note line and rule around a planned line; neither is the plan's first line, which tofu
+    prints. Mutation: folding the note line wherever it sits hides `hidden`."""
     plan = (
         "\n"
         "OpenTofu will perform the following actions:\n"
@@ -2008,7 +2007,7 @@ def test_a_cr_in_author_text_cannot_forge_a_drift_note(tmp_path):
     )
     _write_cell(tmp_path, _cell(), plan)
     [(_, text)] = sc.load_cells(str(tmp_path))
-    assert text == plan
+    assert text == plan.replace("\r", "\n")
 
 
 def _note_of_bytes(size):
@@ -2021,11 +2020,12 @@ def _note_of_bytes(size):
     return head + wide * k + "  " + "a" * (rest - 3) + "\n" + rule
 
 
-@pytest.mark.parametrize(("size", "folded"), [(65_535, True), (65_536, False)])
+@pytest.mark.parametrize(("size", "folded"), [(64_511, True), (64_512, False)])
 def test_fold_drift_folds_only_a_note_the_apply_check_holds_whole(size, folded):
-    """The counted line says the apply check holds the full note, which that check's 65,535-byte
-    cap only keeps true for a note within it. Mutations: dropping the byte check folds the
-    65,536-byte note; `>=` leaves the 65,535-byte note unfolded."""
+    """The counted line says the apply check holds the full note, which only a note within that
+    check's 65,535-byte cap less 1,024 bytes for its fence and trailer keeps true. Mutations:
+    dropping the byte check or its margin folds the 64,512-byte note; `>=` leaves the
+    64,511-byte note unfolded."""
     tail = "\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
     note = _note_of_bytes(size)
     assert len(note.encode("utf-8")) == size and len(note) < sc.SIZE_BUDGET

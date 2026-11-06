@@ -3003,8 +3003,8 @@ and `lost` outputs, which the same rule reads.
   `ℹ️ <n> object(s) changed outside OpenTofu; the full note is in this cell's apply check.`,
   where `<n>` counts its `has changed` and `has been deleted` headers. The block
   renders unchanged when it is not the plan's first non-empty line, when the
-  read budget cut it before its rule, or when the plan through its rule passes
-  the apply check's 65,535-byte cap. `plan.txt`, the apply
+  read budget cut it before its rule, or when the plan through its rule does not
+  fit within the apply check's size cap. `plan.txt`, the apply
   check and the step summary keep the full note. An unchanged cell is its bare
   line only. Consecutive bare lines are
   separated by one newline, and every fold-out has a blank line on both sides,
