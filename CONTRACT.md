@@ -3097,10 +3097,10 @@ not a draft, and that head has no autoplan run that is unfinished (any status
 but `completed`) or `completed` with conclusion `success`. A succeeded autoplan
 counts: a second plan would write newer plan records, and an auto apply waiting
 on that autoplan would then refuse. On a dispatch the run notices "pull request
-#<n> moved to <sha>, which has no plan run; dispatched shipmate plan (on demand,
-so no auto apply follows it)"; otherwise it logs "pull request #<n> is <state>;
-nothing dispatched", "pull request #<n> moved to <sha>, a draft; nothing
-dispatched" or "pull request #<n> moved to <sha>, whose autoplan run has not
+#<n> moved to <sha>, which has no unfinished or succeeded autoplan run;
+dispatched shipmate plan (on demand, so no auto apply follows it)"; otherwise it
+logs "pull request #<n> is <state>; nothing dispatched", "pull request #<n>
+moved to <sha>, a draft; nothing dispatched" or "pull request #<n> moved to <sha>, whose autoplan run has not
 finished or succeeded; nothing dispatched". The dispatched plan is on demand, so
 no auto apply follows it (§`apply_mode: auto`). It joins the consumer's
 `plan-<pr>` concurrency group, which cancels nothing in progress for a

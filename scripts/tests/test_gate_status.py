@@ -613,8 +613,9 @@ def _pull(sha=_LIVE, draft=False, state="open"):
 
 def _live_head(monkeypatch, pull=None, runs="", pull_fails=False, runs_fail=False):
     """`gs.run` answering the pulls read with the text `pull` (default: `_LIVE`, not a draft) and
-    the live head's autoplan listing with `runs`; each read fails with a multi-line gh error on
-    request. Returns the calls."""
+    the live head's autoplan listing with `runs`, or with each item of a `runs` list in turn,
+    raising one that is a `SystemExit`; each read fails with a multi-line gh error on request
+    (`runs_fail` is the HTTP status). Returns the calls."""
     calls = []
 
     def run(args):
@@ -627,7 +628,12 @@ def _live_head(monkeypatch, pull=None, runs="", pull_fails=False, runs_fail=Fals
             return _pull() if pull is None else pull
         if args == _RUNS_READ:
             if runs_fail:
-                raise SystemExit("command failed (1): gh api --paginate x\nHTTP 502")
+                raise SystemExit(f"command failed (1): gh api --paginate x\nHTTP {runs_fail}")
+            if isinstance(runs, list):
+                item = runs.pop(0)
+                if isinstance(item, SystemExit):
+                    raise item
+                return item
             return runs
         raise AssertionError(f"unexpected gh call: {args}")
 
@@ -795,6 +801,18 @@ def test_replan_prints_nothing_when_the_live_head_has_its_autoplan(
     assert (capsys.readouterr(), calls) == (("", _PLANNED_LOG), [_PULL_READ, _RUNS_READ])
 
 
+def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, capsys):
+    """Mutation: call `autoplan_runs` outside `retried` -- the 502 exits 1, red."""
+    transient = SystemExit("command failed (1): gh api --paginate x\nHTTP 502")
+    calls = _live_head(monkeypatch, runs=[transient, _rows()])
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls, in_process) == (
+        (f"{_LIVE}\n", "::warning::command failed (1): gh api --paginate x%0AHTTP 502\n"),
+        [_PULL_READ, _RUNS_READ, _RUNS_READ],
+        [2],
+    )
+
+
 def test_replan_prints_nothing_for_a_draft_and_lists_no_run(in_process, monkeypatch, capsys):
     """Mutation: skip the draft check -- the listing is read and the head printed."""
     calls = _live_head(monkeypatch, pull=_pull(draft=True))
@@ -831,7 +849,7 @@ def test_replan_prints_nothing_when_the_head_did_not_move(in_process, monkeypatc
             id="str-id",
         ),
         pytest.param(
-            {"runs_fail": True}, "command failed (1): gh api --paginate x | HTTP 502", id="failed"
+            {"runs_fail": 404}, "command failed (1): gh api --paginate x | HTTP 404", id="failed"
         ),
     ],
 )
