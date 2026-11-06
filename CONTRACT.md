@@ -536,9 +536,10 @@ on the same entry.
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
 a plan comment with a changed cell on a pull request that is not a draft ends
-with a folded `shipmate commands` section naming `shipmate apply <env>` for each
-`apply_mode: targeted` environment holding a changed cell, `shipmate apply` when a
-changed cell sits outside every targeted environment, `shipmate unlock <env>
+with a folded `shipmate commands` section naming, in apply order,
+`shipmate apply <env>` for each `apply_mode: targeted` environment holding a
+changed cell and `shipmate apply` once, at the first changed environment that is
+not targeted, then `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
 and `shipmate help` (§Plan comment). It changes no plan or apply.
 
@@ -1891,7 +1892,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
-| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
+| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
 the ref is read rather than the status parsed: this run's commit is acquired,
@@ -1952,21 +1953,24 @@ undo it. A lock ref proves neither that its holder is open nor that it applied
 anything (`lock` takes the cells of every env-level up front), so the refusals
 state only the lock and one remedy. `deploy-detect` reads the locks of the
 pending cells' environments as the merged pull request; a push that merged no
-pull request reads them as pull request `0`, which holds no lock. When another
+pull request reads them as pull request `0`, which holds no lock. A merge the
+deploy cannot map to its pull request deploys as such a push, so the merged pull
+request's own locks refuse it too and no lock release runs; re-running the deploy
+once `commits/<sha>/pulls` lists the pull request is its recovery. When another
 pull request, or an unknown holder, locks a pending cell, it applies nothing and
 refuses the whole run with one line:
 
 `` deploy refused: <n> pending cell(s) are locked by another pull request:
-<stack> / <env> (locked by <who>), .... None of this merge's <m> pending
+<stack> / <env> (locked by <who>), .... None of this deploy's <m> pending
 cell(s) were applied: <stack> / <env>, .... Open a pull request that changes
 these stacks, comment `shipmate unlock <env> --evict` on it for each
 environment above, then apply it. ``
 
 `<who>` is `#<n>`, or `an unknown holder`; both lists are sorted, and `<env>`
-is the command's placeholder. The refusal names one recovery and offers no
-re-run: `--evict` from a pull request that changes the cells releases the locks
-other pull requests, or an unknown holder, hold on them. It releases a cell only
-once that pull request's plan has published the cell's apply check
+is the command's placeholder. For a mapped merge, the refusal names one
+recovery and offers no re-run: `--evict` from a pull request that changes the
+cells releases the locks other pull requests, or an unknown holder, hold on
+them. It releases a cell only once that pull request's plan has published the cell's apply check
 (§Comment-ops), so the comment comes after the plan. Before it refuses,
 `detect` writes the output `refused_locked` `true`, and the deploy's release
 step passes it to `actions/lock-release` as `release-pending`, so the merged
@@ -1981,9 +1985,9 @@ input `deploy: true`, with the merged pull request as `pr_number`, empty on a
 push), which runs none of the checks above and refuses only when a pull request
 other than the merged one, or an unknown holder, holds the cell's lock:
 `` apply aborted for `<env>` / `<stack>`: its cell lock is held by <who>, not by
-this merge. Open a pull request that changes this stack, comment `shipmate
-unlock <env> --evict` on it, then apply it ``, where `<env>` in the command is
-the cell's own environment. An unlocked cell, or one the merged pull request
+this deploy's pull request. Open a pull request that changes this stack, comment
+`shipmate unlock <env> --evict` on it, then apply it ``, where `<env>` in the
+command is the cell's own environment. An unlocked cell, or one the merged pull request
 holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
@@ -2890,22 +2894,22 @@ Comment `shipmate help` for every command.
 </details>
 ```
 
-A bare `shipmate apply` skips an `apply_mode: targeted` environment, so for each
-targeted environment holding a changed cell the section starts with
-``Comment `shipmate apply <env>` to apply <env>.``, in `detect`'s `env_order` with
-any environment it does not name after them by name. The bare paragraph follows
-them, because a bare apply waits on the targeted environments it needs, and
-shows only when a changed cell sits outside every targeted environment. After a
-targeted paragraph it reads ``Comment `shipmate apply` to apply the other
-environments.``; a plan that changed a targeted `prod` and an untargeted
-`dev-eu` reads:
+A bare `shipmate apply` skips an `apply_mode: targeted` environment, so the
+section walks the environments holding a changed cell in apply order
+(`detect`'s `env_order`, with any environment it does not name after them by
+name). Each targeted one contributes ``Comment `shipmate apply <env>` to apply
+<env>.`` at its position. The bare paragraph shows once, at the position of the
+first environment that is not targeted, and only when there is one; when any
+targeted paragraph renders it reads ``Comment `shipmate apply` to apply the
+other environments.``. A plan that changed a targeted `prod` whose `needs` names
+an untargeted `dev-eu` reads:
 
 ```
 <details><summary>shipmate commands</summary>
 
-Comment `shipmate apply prod` to apply prod.
-
 Comment `shipmate apply` to apply the other environments.
+
+Comment `shipmate apply prod` to apply prod.
 
 Comment `shipmate help` for every command.
 
@@ -2948,7 +2952,8 @@ and `lost` outputs, which the same rule reads.
 - **Superseded autoplan lines.** On a `shipmate plan` run only, one line per
   earlier autoplan run, ascending run id: `⚪ <n> check(s) from autoplan run
   [#<run>](<run url>) still read red on this head; this run's plan supersedes
-  them, and GitHub keeps them until the next push plans a new head.` A check
+  them, and they stay until a push plans a new head or a re-run of that run
+  replaces them.` A check
   counts when its job belongs to one of the head's `pull_request_target` runs
   of `.github/workflows/shipmate.yml`, its name starts with `plan / `, it is the
   newest check of that name among those runs' checks, and it completed with a
@@ -2957,6 +2962,12 @@ and `lost` outputs, which the same rule reads.
   carries such a red `plan / ` job check. A consumer job named `plan / …` in any other workflow
   run never counts. When the autoplan runs cannot be listed, the lines are left
   out with a warning; when the cell lines leave them no room under the
+  65,536-character cap, they are left out with a warning.
+- **Stacked holder lines.** One line per lock holder stacked on this pull
+  request (§Cell line) that holds a changed cell, lowest first: `🔒 #<n> is
+  stacked on this pull request and holds <k> of its changed cell(s); merging
+  this pull request first makes its deploy refuse. Retarget #<n> to <default
+  branch> and merge it first.` When the cell lines leave them no room under the
   65,536-character cap, they are left out with a warning.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings in this run: see [the run](<run url>)`, under any verdict. `N`
@@ -3000,16 +3011,16 @@ and `lost` outputs, which the same rule reads.
   ` 🔒 locked by #<n>`, or ` 🔒 locked by an unknown holder` for an unknown
   holder (§Cell locks). When #<n> is open and its base branch is this pull
   request's head branch (`facts`' `head-ref`), #<n> is stacked on this pull
-  request, and the marker reads ` 🔒 locked by #<n>, which is stacked on this
-  pull request; merging this pull request first makes its deploy refuse the
-  cells #<n> holds. Retarget #<n> to <default branch> and merge it first.` A
+  request, the marker reads ` 🔒 locked by #<n>, stacked on this pull request`,
+  and a stacked holder line under the verdict explains it. A
   pending gate then reads `stacked #<n> holds <k> cell(s); retarget it to
   <default branch> and merge it first` in place of its generic description,
   naming the lowest stacked holder and counting its changed locked cells. The
   marker is part of the bare line, so the size budget never sheds it. It
   degrades: a lock read that fails warns and marks no cell, and a failed read of
   #<n>, a closed or merged #<n>, an empty `head-ref` or an empty default branch
-  renders the plain marker and the generic pending description.
+  renders the plain marker, no stacked holder line and the generic pending
+  description.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
@@ -3086,10 +3097,10 @@ not a draft, and that head has no autoplan run that is unfinished (any status
 but `completed`) or `completed` with conclusion `success`. A succeeded autoplan
 counts: a second plan would write newer plan records, and an auto apply waiting
 on that autoplan would then refuse. On a dispatch the run notices "pull request
-#<n> moved to <sha>, which has no plan run; dispatched shipmate plan (on demand,
-so no auto apply follows it)"; otherwise it logs "pull request #<n> is <state>;
-nothing dispatched", "pull request #<n> moved to <sha>, a draft; nothing
-dispatched" or "pull request #<n> moved to <sha>, whose autoplan run has not
+#<n> moved to <sha>, which has no unfinished or succeeded autoplan run;
+dispatched shipmate plan (on demand, so no auto apply follows it)"; otherwise it
+logs "pull request #<n> is <state>; nothing dispatched", "pull request #<n>
+moved to <sha>, a draft; nothing dispatched" or "pull request #<n> moved to <sha>, whose autoplan run has not
 finished or succeeded; nothing dispatched". The dispatched plan is on demand, so
 no auto apply follows it (§`apply_mode: auto`). It joins the consumer's
 `plan-<pr>` concurrency group, which cancels nothing in progress for a

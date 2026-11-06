@@ -52,8 +52,8 @@ DISPATCH_POST = [
     "-",
 ]
 NOTICE = (
-    f"::notice title=dispatch::pull request #42 moved to {LIVE}, which has no plan run; "
-    "dispatched shipmate plan (on demand, so no auto apply follows it)"
+    f"::notice title=dispatch::pull request #42 moved to {LIVE}, which has no unfinished or "
+    "succeeded autoplan run; dispatched shipmate plan (on demand, so no auto apply follows it)"
 )
 
 

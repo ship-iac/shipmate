@@ -37,10 +37,9 @@ refusal or a failure, under an apply or doctor verdict that is not 🟢. A plan 
 only when the gate is held.
 With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
 that is not a draft ends with the `commands` section, when the body has room for it under
-SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply <env>` for each
-`apply_mode: targeted` environment holding a changed cell, in apply order, then `shipmate apply`
-when a changed cell sits outside every targeted environment (`to apply the other environments`
-after a targeted line, since a bare apply waits on the targeted environments it needs), then
+SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments in apply order:
+each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
+`shipmate apply` once (`to apply the other environments` when a targeted line renders), then
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked, and
 `shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
 section degrades to the bare `shipmate apply` even when every changed environment is targeted;
@@ -342,28 +341,44 @@ def _lock_key(cell, locks):
 
 def _plan_line(cell, url, locks, stacked=frozenset(), default_branch=""):
     """A cell's bare line; a changed cell another pull request holds ends with `🔒 locked by`
-    and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys). When
-    that holder is in `stacked` and `default_branch` is not empty, the line goes on to say the
-    holder is stacked on this pull request and to retarget it to `default_branch`."""
+    and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys), then
+    `, stacked on this pull request` when that holder is in `stacked` and `default_branch` is
+    not empty. `stacked_lines` carries the explanation once per holder."""
     line = cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
     if key := _lock_key(cell, locks):
-        who = lock_who(locks[key])
-        line += f" 🔒 locked by {who}"
+        line += f" 🔒 locked by {lock_who(locks[key])}"
         if locks[key] in stacked and default_branch:
-            line += (
-                ", which is stacked on this pull request; merging this pull request first makes "
-                f"its deploy refuse the cells {who} holds. Retarget {who} to "
-                f"{_md_name(default_branch)} and merge it first."
-            )
+            line += ", stacked on this pull request"
     return line
+
+
+def _stacked_held(cells, locks, stacked, default_branch):
+    """The holder in `stacked` of each changed locked cell of `cells`; empty when
+    `default_branch` is empty."""
+    if not default_branch:
+        return []
+    return [locks[k] for c in cells if (k := _lock_key(c, locks)) and locks[k] in stacked]
+
+
+def stacked_lines(cells, locks, stacked, default_branch):
+    """One line per holder in `stacked` of a changed cell of `cells`, lowest first, counting its
+    changed locked cells and saying to retarget it to `default_branch`; none when
+    `default_branch` is empty."""
+    held = _stacked_held(cells, locks, stacked, default_branch)
+    return [
+        f"🔒 #{h} is stacked on this pull request and holds {held.count(h)} of its changed "
+        "cell(s); merging this pull request first makes its deploy refuse. Retarget "
+        f"#{h} to {_md_name(default_branch)} and merge it first."
+        for h in sorted(set(held))
+    ]
 
 
 def stacked_hold(cells, locks, stacked, default_branch):
     """The pending gate text for the lowest holder in `stacked` of a changed cell of `cells`,
     with the count of its changed locked cells; empty when there is none or `default_branch` is
     empty."""
-    held = [locks[k] for c in cells if (k := _lock_key(c, locks)) and locks[k] in stacked]
-    if not held or not default_branch:
+    held = _stacked_held(cells, locks, stacked, default_branch)
+    if not held:
         return ""
     holder = min(held)
     return (
@@ -374,28 +389,26 @@ def stacked_hold(cells, locks, stacked, default_branch):
 
 def commands(locked, targeted=(), changed=()):
     """The folded command section: per environment of `changed` (the changed cells'
-    environments in apply order) in `targeted`, its `shipmate apply <env>`; then `shipmate apply`
-    unless `changed` is not empty and all in `targeted`, worded `to apply the other
-    environments` after a targeted paragraph, since a bare apply waits on the targeted
-    environments it needs; then per environment of `locked`, sorted, its `shipmate unlock <env>
-    --evict`, then `shipmate help`. No line starts with `shipmate`, so the section is not itself
-    a command."""
-    named = "".join(
-        f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n"
-        for e in changed
-        if e in targeted
-    )
-    bare = ""
-    if not changed or not set(changed) <= set(targeted):
-        what = "the other environments" if named else "this plan"
-        bare = f"Comment `shipmate apply` to apply {what}.\n\n"
+    environments in apply order), its `shipmate apply <env>` when it is in `targeted`, and at the
+    first one that is not, `shipmate apply` once, worded `to apply the other environments` when
+    a targeted line renders, else `to apply this plan`; with `changed` empty, only the bare
+    line. Then per environment of `locked`, sorted, its `shipmate unlock <env> --evict`, then
+    `shipmate help`. No line starts with `shipmate`, so the section is not itself a command."""
+    what = "the other environments" if set(changed) & set(targeted) else "this plan"
+    bare = f"Comment `shipmate apply` to apply {what}.\n\n"
+    lines = [] if changed else [bare]
+    for e in changed:
+        if e in targeted:
+            lines.append(f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n")
+        elif bare not in lines:
+            lines.append(bare)
     evict = "".join(
         f"Comment `shipmate unlock {e} --evict` to take a cell another pull request holds.\n\n"
         for e in sorted(locked)
     )
     return (
         "<details><summary>shipmate commands</summary>\n\n"
-        f"{named}{bare}{evict}"
+        f"{''.join(lines)}{evict}"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
     )
@@ -423,7 +436,8 @@ def auto_line(cells, auto, locks, *, event, action, is_draft):
 _JOB_RUN = re.compile(r"/actions/runs/(\d+)/job/\d+$")
 SUPERSEDED_LINE = (
     "⚪ {} check(s) from autoplan run [#{}]({}) still read red on this head; this run's plan "
-    "supersedes them, and GitHub keeps them until the next push plans a new head."
+    "supersedes them, and they stay until a push plans a new head or a re-run of that run "
+    "replaces them."
 )
 _NOT_RED = (None, "success", "neutral", "skipped")
 
@@ -656,7 +670,8 @@ def build_comment(
     superseded=(),
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
-    `superseded` as one block, the `auto_line` `auto`, `doctor_line` of `warnings`, the
+    `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block,
+    `doctor_line` of `warnings`, the
     unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when each count is not
     zero, then per environment in `by_env` order of `order` its
     `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed
@@ -666,10 +681,10 @@ def build_comment(
     silently otherwise, after every cell is sized, so it never shrinks one. `locks`
     (`lock_marks`) marks the changed cells another pull request holds, and `commands` names their
     environments, and the changed environments of `targeted` in `order`; `stacked` and
-    `default_branch` go to `_plan_line`. Every cell is guaranteed its bare line: the space all
-    headings and remaining cells' bare lines need is reserved up front, so an early giant plan
-    cannot starve a later cell. Each of the five blocks yields, with a warning, when the headings
-    and bare lines leave it no room under HARD_CAP. Returns
+    `default_branch` go to `_plan_line` and `stacked_lines`. Every cell is guaranteed its bare
+    line: the space all headings and remaining cells' bare lines need is reserved up front, so an
+    early giant plan cannot starve a later cell. Each of the six blocks yields, with a warning,
+    when the headings and bare lines leave it no room under HARD_CAP. Returns
     `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
@@ -680,6 +695,7 @@ def build_comment(
     for line, what in (
         ("\n".join(superseded), "superseded autoplan checks"),
         (auto, "auto apply not started"),
+        ("\n".join(stacked_lines(meta, locks, stacked, default_branch)), "stacked lock holders"),
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
         (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
         (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),

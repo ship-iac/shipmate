@@ -506,8 +506,8 @@ _ALL_TARGETED = (
 )
 _MIXED_TARGETED = (
     "<details><summary>shipmate commands</summary>\n\n"
-    "Comment `shipmate apply prod` to apply prod.\n\n"
     "Comment `shipmate apply` to apply the other environments.\n\n"
+    "Comment `shipmate apply prod` to apply prod.\n\n"
     "Comment `shipmate help` for every command.\n\n"
     "</details>"
 )
@@ -527,13 +527,41 @@ def test_every_changed_environment_targeted_names_each_and_no_bare_apply():
     assert _section(cells, targeted=["dev-eu", "prod"]) == _ALL_TARGETED
 
 
-def test_a_mixed_plan_names_the_targeted_environment_then_the_other_environments():
-    """A bare apply waits on the targeted environments it needs, so they come first.
+def test_a_targeted_environment_after_a_bare_one_follows_the_bare_line():
+    """`prod` (targeted) needs `dev-eu` (bare), so the bare line comes first.
 
-    Mutations: emit the bare paragraph only when `targeted` is empty -- red; put the bare
-    paragraph first -- red; keep `to apply this plan.` beside a targeted paragraph -- red."""
+    Mutations: emit the bare paragraph only when `targeted` is empty -- red; put every targeted
+    paragraph before the bare one -- red; keep `to apply this plan.` beside a targeted paragraph
+    -- red."""
     cells = [(_cell(), None), (_cell(environment="prod"), None)]
-    assert _section(cells, targeted=["prod"]) == _MIXED_TARGETED
+    assert _section(cells, targeted=["prod"], order=["dev-eu", "prod"]) == _MIXED_TARGETED
+
+
+def test_a_targeted_environment_before_a_bare_one_precedes_the_bare_line():
+    """`prod` (bare) needs `canary` (targeted), so the canary line comes first.
+
+    Mutation: put the bare paragraph before every targeted one -- red."""
+    cells = [(_cell(environment="prod"), None), (_cell(environment="canary"), None)]
+    assert _section(cells, targeted=["canary"], order=["canary", "prod"]) == (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply canary` to apply canary.\n\n"
+        "Comment `shipmate apply` to apply the other environments.\n\n"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
+
+
+def test_the_bare_line_appears_once_among_several_bare_environments():
+    """`a` and `c` bare around targeted `b`. Mutation: drop the `bare not in lines` check --
+    the bare line renders twice, red."""
+    cells = [(_cell(environment=e), None) for e in ("a", "b", "c")]
+    assert _section(cells, targeted=["b"], order=["a", "b", "c"]) == (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply` to apply the other environments.\n\n"
+        "Comment `shipmate apply b` to apply b.\n\n"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
 
 
 def test_a_targeted_environment_name_renders_through_md_name_outside_the_code_span():
@@ -2230,9 +2258,8 @@ def test_main_warns_and_marks_nothing_for_malformed_locks(tmp_path, monkeypatch,
 
 
 _STACKED_7 = (
-    '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7, which is '
-    "stacked on this pull request; merging this pull request first makes its deploy refuse the "
-    "cells #7 holds. Retarget #7 to main and merge it first."
+    '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7, stacked on '
+    "this pull request"
 )
 _PLAIN_7 = '🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-eu">plan</a> 🔒 locked by #7'
 
@@ -2271,15 +2298,54 @@ def test_the_stacked_gate_text_names_the_lowest_stacked_holder_and_its_cells():
     assert sc.stacked_hold(cells, locks, frozenset(), "main") == ""
 
 
+def test_the_stacked_lines_name_each_stacked_holder_once_lowest_first():
+    """Two changed cells held by #7, one by #5, an unchanged one by #3, one by unstacked #9.
+    Mutations: `sorted(set(held), reverse=True)` -- #7 first, red; `len(held)` in place of
+    `held.count(h)` -- red."""
+    cells = [_cell(stack=s) for s in ("a", "b", "c", "e")] + [_cell(stack="d", changed=False)]
+    locks = {"a / dev-eu": 7, "b / dev-eu": 7, "c / dev-eu": 5, "d / dev-eu": 3, "e / dev-eu": 9}
+    assert sc.stacked_lines(cells, locks, frozenset({3, 5, 7}), "main") == [
+        (
+            "🔒 #5 is stacked on this pull request and holds 1 of its changed cell(s); merging "
+            "this pull request first makes its deploy refuse. Retarget #5 to main and merge it "
+            "first."
+        ),
+        (
+            "🔒 #7 is stacked on this pull request and holds 2 of its changed cell(s); merging "
+            "this pull request first makes its deploy refuse. Retarget #7 to main and merge it "
+            "first."
+        ),
+    ]
+    assert sc.stacked_lines(cells, locks, frozenset({3, 5, 7}), "") == []
+
+
+def test_three_hundred_cells_locked_by_a_stacked_holder_stay_under_the_hard_cap():
+    """The explanation renders once, not per cell. Mutation: put `, which is stacked on this pull
+    request; merging this pull request first makes its deploy refuse the cells #7 holds.
+    Retarget #7 to main and merge it first.` back on each cell line -- the cell lines alone pass
+    HARD_CAP and the build refuses, red."""
+    cells = [(_cell(stack=f"stacks/{'s' * 40}{i:03}"), None) for i in range(300)]
+    locks = {f"stacks/{'s' * 40}{i:03} / dev-eu": 7 for i in range(300)}
+    body = sc.build_comment(
+        cells, {}, RUN_URL, SHA, locks=locks, stacked=frozenset({7}), default_branch="main"
+    )[0]
+    assert len(body) <= sc.HARD_CAP
+    assert body.count(", stacked on this pull request") == 300
+    assert body.count("🔒 #7 is stacked on this pull request and holds 300 of its changed") == 1
+
+
 def _stacked_hold_output(text):
     return [line for line in text.splitlines() if line.startswith("stacked_hold=")]
 
 
-_STACKED_LOCK_BODY = _UNMARKED_LOCK_BODY.replace(
-    "plan</a></summary>",
-    "plan</a> 🔒 locked by #12, which is stacked on this pull request; merging this pull request "
-    "first makes its deploy refuse the cells #12 holds. Retarget #12 to main and merge it "
-    "first.</summary>",
+_STACKED_LOCK_BODY = (
+    HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n"
+    "🔒 #12 is stacked on this pull request and holds 1 of its changed cell(s); merging this "
+    "pull request first makes its deploy refuse. Retarget #12 to main and merge it first.\n\n"
+    "#### dev-eu: 1 cell, 1 changed\n\n"
+    f"<details><summary>{_bare_app('https://gh/o/r/actions/runs/1')} 🔒 locked by #12, stacked "
+    "on this pull request</summary>\n\n```diff\n"
+    "+   resource added\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
 )
 
 
@@ -2305,7 +2371,8 @@ def test_main_renders_the_stacked_line_and_writes_the_gate_text(tmp_path, monkey
 def test_main_degrades_to_the_plain_marker(tmp_path, monkeypatch, capsys, stacked, branch):
     """A failed holder read leaves the holder out of `stacked` (`none-stacked`), as does an empty
     head ref. Mutation: drop `_plan_line`'s `default_branch` check -- the branch cases render the
-    stacked text, red; drop `stacked_hold`'s -- they write a gate text, red; drop
+    stacked marker, red; drop `_stacked_held`'s -- they write a gate text and a stacked line,
+    red; drop
     `stacked_marks`' empty-value return -- the empty case warns, red."""
     monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
     for name, value in (("SHIPMATE_STACKED", stacked), ("SHIPMATE_DEFAULT_BRANCH", branch)):
@@ -2606,8 +2673,8 @@ def _job(run, name, conclusion, check_id):
 def _superseded(n, run):
     return (
         f"⚪ {n} check(s) from autoplan run [#{run}](https://gh/o/r/actions/runs/{run}) still "
-        "read red on this head; this run's plan supersedes them, and GitHub keeps them until the "
-        "next push plans a new head."
+        "read red on this head; this run's plan supersedes them, and they stay until a push plans "
+        "a new head or a re-run of that run replaces them."
     )
 
 

@@ -1001,7 +1001,7 @@ a merged pull request:
 
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
 pending cell(s) are locked by another pull request: <stack> / <env> (locked by
-<who>), .... None of this merge's <m> pending cell(s) were applied: <stack> /
+<who>), .... None of this deploy's <m> pending cell(s) were applied: <stack> /
 <env>, .... Open a pull request that changes these stacks, comment `shipmate
 unlock <env> --evict` on it for each environment above, then apply it. ``
 
@@ -1027,9 +1027,9 @@ gate is written on the merge commit. The apply checks stay pending.
 ### A deploy cell refused: `its cell lock is held by`
 
 A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
-`<env>` / `<stack>`: its cell lock is held by <who>, not by this merge. Open a
-pull request that changes this stack, comment `shipmate unlock <env> --evict` on
-it, then apply it ``.
+`<env>` / `<stack>`: its cell lock is held by <who>, not by this deploy's pull
+request. Open a pull request that changes this stack, comment `shipmate unlock
+<env> --evict` on it, then apply it ``.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
@@ -2223,11 +2223,10 @@ While that head is still the pull request's, a `shipmate plan` comment plans it
 again. Its plan comment names an autoplan run under the verdict only when the
 newest `plan / ` check of a name across the head's autoplan runs is that run's
 and reads red: `⚪ <n> check(s) from autoplan run [#<run>](<url>) still read red
-on this head; this run's plan supersedes them, and GitHub keeps them until the
-next push plans a new head.` A run on the same head that cancelled the autoplan
-and succeeded is itself an autoplan run with newer checks of the same names, so
-the cancelled run stays unnamed. Either way the red checks stay until a push
-plans a new head: GitHub keeps every check run of a head, and none of them is a
+on this head; this run's plan supersedes them, and they stay until a push plans
+a new head or a re-run of that run replaces them.` A run on the same head that
+cancelled the autoplan and succeeded is itself an autoplan run with newer checks
+of the same names, so the cancelled run stays unnamed. None of these checks is a
 required check, so the merge gates on `shipmate / gate` alone.
 
 When a newer head's run cancelled it, those checks sit on a head the pull
