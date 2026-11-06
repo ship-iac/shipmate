@@ -1193,7 +1193,7 @@ def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkey
         _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 7})
     assert str(exc.value) == (
         "::error::deploy refused: 1 pending cell(s) are locked by another pull request: "
-        "stacks/dns / dev-eu (locked by #7). None of this merge's 2 "
+        "stacks/dns / dev-eu (locked by #7). None of this deploy's 2 "
         "pending cell(s) were applied: stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
     )
     assert github_outputs(tmp_path / "out.txt") == {
@@ -1216,7 +1216,7 @@ def test_a_push_that_merged_no_pull_request_refuses_any_held_cell(tmp_path, monk
         _locked_run(tmp_path, monkeypatch, {("stacks/app", "dev-eu"): 7}, pr_number="")
     assert str(exc.value) == (
         "::error::deploy refused: 1 pending cell(s) are locked by another pull request: "
-        "stacks/app / dev-eu (locked by #7). None of this merge's 2 "
+        "stacks/app / dev-eu (locked by #7). None of this deploy's 2 "
         "pending cell(s) were applied: stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
     )
 
@@ -1233,7 +1233,7 @@ def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monk
     assert str(exc.value) == (
         "::error::deploy refused: 2 pending cell(s) are locked by another pull request: "
         "stacks/app / dev-eu (locked by an unknown holder), stacks/dns / dev-eu (locked by #9). "
-        "None of this merge's 2 pending cell(s) were applied: "
+        "None of this deploy's 2 pending cell(s) were applied: "
         "stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
     )
 

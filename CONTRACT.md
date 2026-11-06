@@ -1953,21 +1953,24 @@ undo it. A lock ref proves neither that its holder is open nor that it applied
 anything (`lock` takes the cells of every env-level up front), so the refusals
 state only the lock and one remedy. `deploy-detect` reads the locks of the
 pending cells' environments as the merged pull request; a push that merged no
-pull request reads them as pull request `0`, which holds no lock. When another
+pull request reads them as pull request `0`, which holds no lock. A merge the
+deploy cannot map to its pull request deploys as such a push, so the merged pull
+request's own locks refuse it too and no lock release runs; re-running the deploy
+once `commits/<sha>/pulls` lists the pull request is its recovery. When another
 pull request, or an unknown holder, locks a pending cell, it applies nothing and
 refuses the whole run with one line:
 
 `` deploy refused: <n> pending cell(s) are locked by another pull request:
-<stack> / <env> (locked by <who>), .... None of this merge's <m> pending
+<stack> / <env> (locked by <who>), .... None of this deploy's <m> pending
 cell(s) were applied: <stack> / <env>, .... Open a pull request that changes
 these stacks, comment `shipmate unlock <env> --evict` on it for each
 environment above, then apply it. ``
 
 `<who>` is `#<n>`, or `an unknown holder`; both lists are sorted, and `<env>`
-is the command's placeholder. The refusal names one recovery and offers no
-re-run: `--evict` from a pull request that changes the cells releases the locks
-other pull requests, or an unknown holder, hold on them. It releases a cell only
-once that pull request's plan has published the cell's apply check
+is the command's placeholder. For a mapped merge, the refusal names one
+recovery and offers no re-run: `--evict` from a pull request that changes the
+cells releases the locks other pull requests, or an unknown holder, hold on
+them. It releases a cell only once that pull request's plan has published the cell's apply check
 (§Comment-ops), so the comment comes after the plan. Before it refuses,
 `detect` writes the output `refused_locked` `true`, and the deploy's release
 step passes it to `actions/lock-release` as `release-pending`, so the merged
@@ -1982,9 +1985,9 @@ input `deploy: true`, with the merged pull request as `pr_number`, empty on a
 push), which runs none of the checks above and refuses only when a pull request
 other than the merged one, or an unknown holder, holds the cell's lock:
 `` apply aborted for `<env>` / `<stack>`: its cell lock is held by <who>, not by
-this merge. Open a pull request that changes this stack, comment `shipmate
-unlock <env> --evict` on it, then apply it ``, where `<env>` in the command is
-the cell's own environment. An unlocked cell, or one the merged pull request
+this deploy's pull request. Open a pull request that changes this stack, comment
+`shipmate unlock <env> --evict` on it, then apply it ``, where `<env>` in the
+command is the cell's own environment. An unlocked cell, or one the merged pull request
 holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused

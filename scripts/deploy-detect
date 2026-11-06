@@ -160,7 +160,7 @@ def refuse_locked(repo, pending, pr_number):
     raise SystemExit(
         f"::error::deploy refused: {len(held)} pending cell(s) are locked by another pull "
         f"request: {', '.join(f'{k} (locked by {who})' for k, who in held)}. None of this "
-        f"merge's {len(cells)} pending cell(s) were applied: {', '.join(cells)}. Open a pull "
+        f"deploy's {len(cells)} pending cell(s) were applied: {', '.join(cells)}. Open a pull "
         "request that changes these stacks, comment `shipmate unlock <env> --evict` on it for "
         "each environment above, then apply it."
     )

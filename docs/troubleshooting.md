@@ -1001,7 +1001,7 @@ a merged pull request:
 
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
 pending cell(s) are locked by another pull request: <stack> / <env> (locked by
-<who>), .... None of this merge's <m> pending cell(s) were applied: <stack> /
+<who>), .... None of this deploy's <m> pending cell(s) were applied: <stack> /
 <env>, .... Open a pull request that changes these stacks, comment `shipmate
 unlock <env> --evict` on it for each environment above, then apply it. ``
 
@@ -1027,9 +1027,9 @@ gate is written on the merge commit. The apply checks stay pending.
 ### A deploy cell refused: `its cell lock is held by`
 
 A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
-`<env>` / `<stack>`: its cell lock is held by <who>, not by this merge. Open a
-pull request that changes this stack, comment `shipmate unlock <env> --evict` on
-it, then apply it ``.
+`<env>` / `<stack>`: its cell lock is held by <who>, not by this deploy's pull
+request. Open a pull request that changes this stack, comment `shipmate unlock
+<env> --evict` on it, then apply it ``.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
