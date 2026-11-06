@@ -50,8 +50,13 @@ An autoplan of a pull request that is not a draft, not started by a push, that c
 an `apply_mode: auto` environment no other pull request locks says so in a line under the verdict
 (`auto_line`), whatever `command_hints` is:
 auto-dispatch's `action_reason` and its remedy.
+
+Only a commanded plan (`SHIPMATE_ON_DEMAND` is `true`) names, directly under the verdict, the
+earlier autoplan runs whose checks still read red on the head; `superseded_lines` says which
+checks count. A failed listing of the autoplan runs renders no line, with one warning.
 """
 
+import collections
 import glob
 import html
 import itertools
@@ -65,6 +70,7 @@ from _shipmate import (
     CHECK_OUTPUT_CAP,
     REASON_CAP,
     _load,
+    _run,
     cell_names,
     cell_summaries,
     command_data,
@@ -72,6 +78,8 @@ from _shipmate import (
     event_action,
     is_head_sha,
     lock_who,
+    one_line,
+    retried,
     run_annotated,
     write_outputs,
 )
@@ -412,6 +420,43 @@ def auto_line(cells, auto, locks, *, event, action, is_draft):
     return f"⚪ auto apply not started: {reason}; {AUTO_REMEDY}"
 
 
+_JOB_RUN = re.compile(r"/actions/runs/(\d+)/job/\d+$")
+SUPERSEDED_LINE = (
+    "⚪ {} check(s) from autoplan run [#{}]({}) still read red on this head; this run's plan "
+    "supersedes them, and GitHub keeps them until the next push plans a new head."
+)
+_NOT_RED = (None, "success", "neutral", "skipped")
+
+
+def plan_jobs(rows):
+    """`(run id, row)` per check-run of `rows` whose name starts with `CALLER_PREFIX` and whose
+    `html_url` is an Actions job's, in order. An App mirror carries no job URL, so it is left
+    out here, before any newest-per-name collapse, and cannot hide the check it mirrors."""
+    jobs = []
+    for row in rows:
+        m = _JOB_RUN.search(row.get("html_url") or "")
+        if m and row["name"].startswith(ag.CALLER_PREFIX):
+            jobs.append((int(m[1]), row))
+    return jobs
+
+
+def _red(row):
+    return row.get("conclusion") not in _NOT_RED
+
+
+def superseded_lines(jobs, autoplan_ids):
+    """One `SUPERSEDED_LINE` per run of `autoplan_ids` (ints), ascending run id, counting the
+    `plan_jobs` `jobs` of that run that are the newest of their name among all those runs' jobs
+    and read red: a completed conclusion other than `success`, `neutral` or `skipped`. So an
+    autoplan run is named only when the newest check of a name across them reads red."""
+    autoplan = [dict(row, run=run) for run, row in jobs if run in autoplan_ids]
+    latest = ag.latest_by_name(autoplan, prefix="").values()
+    counts = collections.Counter(row["run"] for row in latest if _red(row))
+    return [
+        SUPERSEDED_LINE.format(n, r, current_run_url(str(r))) for r, n in sorted(counts.items())
+    ]
+
+
 def fold(line, body, limit, trailer, cut, lang="diff"):
     """Largest form of a section that fits in `limit` characters: fold-out of its bare `line`
     with the whole `body` -> fold-out with `cut(body, room)` and `trailer` -> `line`, which the
@@ -608,10 +653,12 @@ def build_comment(
     stacked=frozenset(),
     default_branch="",
     targeted=(),
+    superseded=(),
 ):
-    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `auto_line` `auto`,
-    `doctor_line` of `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line
-    of `lost` when each count is not zero, then per environment in `by_env` order of `order` its
+    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
+    `superseded` as one block, the `auto_line` `auto`, `doctor_line` of `warnings`, the
+    unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when each count is not
+    zero, then per environment in `by_env` order of `order` its
     `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed
     cell with plan text, else its bare line, which names no environment). No footer: the verdict
     links the run, and neither plan verdict asks anything. With `hints`, a body with a changed
@@ -621,7 +668,7 @@ def build_comment(
     environments, and the changed environments of `targeted` in `order`; `stacked` and
     `default_branch` go to `_plan_line`. Every cell is guaranteed its bare line: the space all
     headings and remaining cells' bare lines need is reserved up front, so an early giant plan
-    cannot starve a later cell. Each of the four lines yields, with a warning, when the headings
+    cannot starve a later cell. Each of the five blocks yields, with a warning, when the headings
     and bare lines leave it no room under HARD_CAP. Returns
     `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
@@ -629,8 +676,9 @@ def build_comment(
     locks = locks or {}
     entries = _entries(cells, order, checks, run_url, locks, stacked, default_branch)
     bares = [e[0] for e in entries]
-    named = []
+    named = {}
     for line, what in (
+        ("\n".join(superseded), "superseded autoplan checks"),
         (auto, "auto apply not started"),
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
         (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
@@ -646,7 +694,7 @@ def build_comment(
             line = ""
         if line:
             head = f"{head}\n\n{line}"
-        named.append(bool(line))
+        named[what] = bool(line)
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
@@ -671,7 +719,7 @@ def build_comment(
             "::error::the plan comment's cell lines alone exceed the 65,536-char comment "
             "cap, shorten stack/env display names"
         )
-    return body, *named[2:]
+    return body, named["unmanaged stacks"], named["lost stack / environment pairs"]
 
 
 _STR_KEYS = ("stack", "environment")
@@ -907,6 +955,33 @@ def cell_errors(errors_dir):
     return out
 
 
+def _superseded(rows):
+    """`superseded_lines` of `rows` on a commanded plan (`SHIPMATE_ON_DEMAND` is `true`), else
+    none. The autoplan runs are listed, with transient failures retried, only when a `plan_jobs`
+    row reads red. This run is never among them: a commanded plan is a `workflow_dispatch` run.
+    Reviewer-facing only: a failed or malformed listing renders none, with one warning naming
+    the cause."""
+    if os.environ.get("SHIPMATE_ON_DEMAND") != "true":
+        return []
+    jobs = plan_jobs(rows)
+    if not any(_red(row) for _, row in jobs):
+        return []
+    head = os.environ.get("HEAD_SHA", "")
+    try:
+        runs = retried(lambda: ag.autoplan_runs(os.environ["GITHUB_REPOSITORY"], head, run=_run))
+    except SystemExit as exc:
+        cause = command_data(one_line(str(exc.code).removeprefix("::error::")))
+    except ValueError as exc:
+        cause = command_data(one_line(exc))
+    else:
+        return superseded_lines(jobs, {r["id"] for r in runs})
+    print(
+        f"::warning::could not list the autoplan runs of {head} ({cause}); the plan comment "
+        "names no superseded checks"
+    )
+    return []
+
+
 def _held_main(checks, url):
     body = held_comment(
         os.environ.get("SHIPMATE_HOLD_REASON", ""),
@@ -928,7 +1003,8 @@ def main():
     # prefix="" gathers every check-run on the head SHA: plan checks, detect/summary, and earlier
     # runs' apply checks, since this run publishes its own after the comment. Plan check names
     # carry the calling job's `plan / ` prefix, so check_url's lookup is exact.
-    checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
+    rows = ag.parse_jsonl(sys.stdin)
+    checks = ag.latest_by_name(rows, prefix="")
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
@@ -984,6 +1060,7 @@ def main():
         stacked=stacked,
         default_branch=default_branch,
         targeted=targeted,
+        superseded=_superseded(rows),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

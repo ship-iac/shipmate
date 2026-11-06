@@ -12,8 +12,8 @@ writes nothing and sets `superseded` and `moved`; a failed read warns and publis
 Before the hold it refuses, writing nothing, when a newer plan run of the head holds the gate
 anywhere in its status history or published an apply check, so an older run (a first attempt or a
 re-run) never replaces a newer run's gate or checks. That refusal ends the step green with a notice
-and sets `superseded`, which every write step's `if:` reads, so a re-run of a cancelled autoplan
-clears its checks. A failed read of either, or a failed
+and sets `superseded`, which every write step's `if:` reads, so a refused re-run's `summary` ends
+green. A failed read of either, or a failed
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
 
