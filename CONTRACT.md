@@ -2859,7 +2859,9 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
-line, the verdict line, a blank line, the auto apply line and a blank line when
+line, the verdict line, a blank line, the superseded autoplan lines and a blank
+line on a `shipmate plan` run whose head carries failed or cancelled checks of
+an earlier autoplan run (below), the auto apply line and a blank line when
 an autoplan not started by a push changed a cell of an `auto` environment
 (§`apply_mode: auto`), the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
@@ -2943,6 +2945,19 @@ and `lost` outputs, which the same rule reads.
   job's check shows its name expression literally
   (`plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped), a
   platform behaviour no `if:` or `name:` change removes.
+- **Superseded autoplan lines.** On a `shipmate plan` run only, one line per
+  earlier autoplan run, ascending run id: `⚪ <n> check(s) from autoplan run
+  [#<run>](<run url>) still read failed or cancelled on this head; this run's
+  plan supersedes them, and GitHub keeps them until the next push plans a new
+  head.` A check counts when its job belongs to one of the head's
+  `pull_request_target` runs of `.github/workflows/shipmate.yml` other than
+  this run, its name starts
+  with `plan / `, it is the newest check of that name among those runs' checks,
+  and it concluded `failure` or `cancelled`; an App-mirrored check of the same
+  name does not hide it. A consumer job named `plan / …` in any other workflow
+  run never counts. When the autoplan runs cannot be listed, the lines are left
+  out with a warning; when the cell lines leave them no room under the
+  65,536-character cap, they are left out with a warning.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings in this run: see [the run](<run url>)`, under any verdict. `N`
   leaves out the repository-settings warnings the linked run also shows. When
@@ -3111,8 +3126,11 @@ head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
 this run") or published apply checks there ("plan run <id>, newer than this run
 (<id>), published apply checks on this head"), so an older run never overwrites
 a newer run's gate or checks. That refusal is a notice, and the `summary` job
-ends green and runs none of its later steps, so a re-run of a cancelled autoplan
-clears its checks. Its apply-check publish and its final gate write
+ends green and runs none of its later steps. A full re-run of a cancelled
+autoplan still fails each plan cell that already uploaded its plan, since the
+`plan.*` and `cell-summary.*` artifact names carry no attempt and those uploads
+do not overwrite; "Re-run failed jobs" clears the checks when every failed cell
+failed before its upload. The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` was
 evicted, and `gate-hold` writes outside the job's concurrency group); a failed

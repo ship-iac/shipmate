@@ -2219,6 +2219,14 @@ of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, `plan / gate-hold`, the `plan / <env> / <stack>` matrix
 check) stay red or cancelled on its head.
 
+While that head is still the pull request's, a `shipmate plan` comment plans it
+again, and its plan comment names each such autoplan run under the verdict: `⚪ <n> check(s) from autoplan run
+[#<run>](<url>) still read failed or cancelled on this head; this run's plan
+supersedes them, and GitHub keeps them until the next push plans a new head.`
+The checks stay red until a push plans a new head: GitHub keeps every check run
+of a head, and none of them is a required check, so the merge gates on
+`shipmate / gate` alone.
+
 When a newer head's run cancelled it, those checks sit on a head the pull
 request has left, and the merge gates on the live head alone: nothing needs
 recovering. A re-run
@@ -2238,9 +2246,14 @@ comment `shipmate plan` if the plan comment does not show the live head, then
 `shipmate apply` for an environment that applies automatically: an on-demand
 plan starts no auto apply.
 
-When a run on the same head cancelled it (open, reopen, or a re-run), re-run
-the cancelled run after the newer plan run has finished: `gh run rerun <id>`.
-Not before: the re-run re-enters the `plan-<pr>`
+When a run on the same head cancelled it (open, reopen, or a re-run), a re-run
+of the cancelled run clears its checks only in one form. A full re-run
+(`gh run rerun <id>`, or "Re-run all jobs") fails each plan cell that already
+uploaded its plan: the `plan.*` and `cell-summary.*` artifact names carry no
+attempt, and those uploads do not overwrite. "Re-run failed jobs"
+(`gh run rerun <id> --failed`) works when every failed or cancelled cell failed
+before its upload. Re-run only after the newer plan run has finished. Not
+before: the re-run re-enters the `plan-<pr>`
 concurrency group, which cancels the run in progress only when the arriving
 run is a `pull_request_target` run other than `ready_for_review` (a push, open or
 reopen, or a re-run of one), so the re-run of such a run cancels a newer run
