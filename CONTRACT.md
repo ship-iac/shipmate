@@ -3129,8 +3129,9 @@ a newer run's gate or checks. That refusal is a notice, and the `summary` job
 ends green and runs none of its later steps. For a cancelled autoplan,
 "Re-run failed jobs" re-runs every failed or cancelled job, so it clears the
 checks only when none of them had already uploaded its plan; a full re-run
-fails each cell that had (the `plan.*` and `cell-summary.*` artifact names
-carry no attempt, and the upload does not overwrite). The `summary` job's apply-check publish and its final gate write
+(`gh run rerun <id>`) fails every cell that already uploaded its plan,
+successful ones included, because the artifact names carry no attempt and the
+upload does not overwrite. The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` was
 evicted, and `gate-hold` writes outside the job's concurrency group); a failed

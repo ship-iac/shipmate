@@ -970,9 +970,9 @@ def _superseded(rows):
     try:
         runs = retried(lambda: ag.autoplan_runs(os.environ["GITHUB_REPOSITORY"], head, run=_run))
     except SystemExit as exc:
-        cause = one_line(str(exc.code).removeprefix("::error::"))
+        cause = command_data(one_line(str(exc.code).removeprefix("::error::")))
     except ValueError as exc:
-        cause = one_line(exc)
+        cause = command_data(one_line(exc))
     else:
         return superseded_lines(jobs, {r["id"] for r in runs})
     print(

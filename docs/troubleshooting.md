@@ -2253,9 +2253,9 @@ When a run on the same head cancelled it (open, reopen, or a re-run), a re-run
 of the cancelled run can clear its checks. "Re-run failed jobs"
 (`gh run rerun <id> --failed`) re-runs every failed or cancelled job, so it
 clears the checks only when none of them had already uploaded its plan; a full
-re-run (`gh run rerun <id>`) fails each cell that had (the `plan.*` and
-`cell-summary.*` artifact names carry no attempt, and the upload does not
-overwrite). Re-run only after the newer plan run has finished. Not
+re-run (`gh run rerun <id>`) fails every cell that already uploaded its plan,
+successful ones included, because the artifact names carry no attempt and the
+upload does not overwrite. Re-run only after the newer plan run has finished. Not
 before: the re-run re-enters the `plan-<pr>`
 concurrency group, which cancels the run in progress only when the arriving
 run is a `pull_request_target` run other than `ready_for_review` (a push, open or
