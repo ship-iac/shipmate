@@ -1,0 +1,74 @@
+
+Note: Objects have changed outside of OpenTofu
+
+OpenTofu detected the following changes made outside of OpenTofu since the
+last "tofu apply" which may have affected this plan:
+
+  # local_file.a has been deleted
+  - resource "local_file" "a" {
+      - id                   = "fe05bcdcdc4928012781a5f1a2a77cbb5398e106" -> null
+        # (10 unchanged attributes hidden)
+    }
+
+  # local_file.b has been deleted
+  - resource "local_file" "b" {
+      - content_md5          = "b8a9f715dbb64fd5c56e7783c6820a61" -> null
+        id                   = "ad782ecdac770fc6eb9a62e44f90873fb97fb26b"
+        # (9 unchanged attributes hidden)
+    }
+
+
+Unless you have made equivalent changes to your configuration, or ignored the
+relevant attributes using ignore_changes, the following plan may include
+actions to undo or respond to these changes.
+
+─────────────────────────────────────────────────────────────────────────────
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  ~ update in-place (current -> planned)
+
+OpenTofu will perform the following actions:
+
+  # local_file.a will be created
+  + resource "local_file" "a" {
+      + content              = "one"
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "./a.txt"
+      + id                   = (known after apply)
+    }
+
+  # local_file.b will be created
+  + resource "local_file" "b" {
+      + content              = "two"
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "./b.txt"
+      + id                   = (known after apply)
+    }
+
+  # terraform_data.d will be updated in-place
+  ~ resource "terraform_data" "d" {
+        id     = "dee8a95f-ceca-3f4c-2992-df14d6ec20e6"
+      ~ input  = "b8a9f715dbb64fd5c56e7783c6820a61" -> (known after apply)
+      ~ output = "b8a9f715dbb64fd5c56e7783c6820a61" -> (known after apply)
+    }
+
+Plan: 2 to add, 1 to change, 0 to destroy.
+
+Changes to Outputs:
+  ~ a = "fe05bcdcdc4928012781a5f1a2a77cbb5398e106" -> (known after apply)

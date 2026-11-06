@@ -21,6 +21,8 @@ leaves headroom below that cap; each changed cell's fold-out degrades
 full plan -> truncated plan -> its bare line, never dropping the cell line's check link.
 A truncated plan links the pull request's Checks tab, where the cell's apply check holds up
 to 65,535 bytes of the plan.
+A fold-out shows OpenTofu's `Objects have changed outside of OpenTofu` note as one counted line
+(`fold_drift`); plan.txt and every other reader of it keep the full note.
 Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
@@ -703,6 +705,31 @@ def counts(path):
     return (0, 0, 0, 0, 0) if not hits and zero else None
 
 
+_DRIFT_NOTE = "Note: Objects have changed outside of OpenTofu"
+_DRIFT_HEADER = re.compile(r"^  # .* has (changed|been deleted)$")
+_DRIFT_LINE = (
+    "ℹ️ {} object(s) changed outside OpenTofu; the full note is in this cell's apply check."
+)
+
+
+def fold_drift(text):
+    """`text` with its first OpenTofu outside-changes note, from the column-0 note line to the
+    first following line made only of `─`, replaced by one line counting the note's
+    `has changed` and `has been deleted` headers. A note with no complete rule line, as a cut
+    read leaves it, stays unchanged."""
+    lines = text.split("\n")
+    if _DRIFT_NOTE not in lines:
+        return text
+    start = lines.index(_DRIFT_NOTE)
+    # The last element is unterminated: a rule there may be cut mid-line.
+    for end in range(start + 1, len(lines) - 1):
+        if lines[end] and not lines[end].strip("─"):
+            n = sum(1 for line in lines[start:end] if _DRIFT_HEADER.match(line))
+            lines[start : end + 1] = [_DRIFT_LINE.format(n)]
+            return "\n".join(lines)
+    return text
+
+
 def _validate_cell(cell, path):
     """Type-check cell.json values past the missing-keys check. A
     pin-skewed/crafted cell.json can carry the right keys with the wrong
@@ -739,11 +766,12 @@ def load_cells(cells_dir):
         cell["add"], cell["change"], cell["destroy"], cell["import"], cell["forget"] = tally
         text = None
         if txt.exists():
-            # Cap the read at SIZE_BUDGET: a body that long exceeds every section's limit
-            # (all strictly below SIZE_BUDGET), so later characters could never be emitted,
-            # and diff_map and _fence_of never regex-scan a multi-MB plan.txt in full.
+            # A SIZE_BUDGET text exceeds every section limit, so a cut one renders truncated;
+            # the top-up refills what `fold_drift` shrank. `max`: a negative size reads the
+            # whole rest of the file, which diff_map and _fence_of must never scan.
             with open(txt, encoding="utf-8") as fh:
-                text = fh.read(SIZE_BUDGET)
+                text = fold_drift(fh.read(SIZE_BUDGET))
+                text += fh.read(max(0, SIZE_BUDGET - len(text)))
         out.append((cell, text))
     out.sort(key=lambda ct: (ct[0]["environment"], ct[0]["stack"]))
     return out
