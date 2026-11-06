@@ -1368,7 +1368,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # Mutation: dropping `SHIPMATE_PR_NUMBER`
     # -- a truncated plan refuses the step. Mutation: bind `SHIPMATE_STACKED` to
     # `steps.marks.outputs.locks`, or drop `SHIPMATE_DEFAULT_BRANCH` -- no holder is ever
-    # named stacked.
+    # named stacked. Mutation: dropping `SHIPMATE_ON_DEMAND` -- no superseded autoplan line.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -1386,6 +1386,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_STACKED": "${{ steps.marks.outputs.stacked }}",
         "SHIPMATE_DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
+        "SHIPMATE_ON_DEMAND": "${{ inputs.on-demand }}",
     }
     # Mutation: `required: true` on any of the seven (GitHub does not enforce it, but it
     # misdocuments a draft run).
@@ -2089,8 +2090,10 @@ def test_a_fold_that_lengthens_the_read_gets_no_top_up(tmp_path):
 
 
 #: The Build step's check-runs projection, hand-written.
-_BUILD_JQ = ".check_runs[] | {name, html_url, id}"
-_BUILD_LISTING = '{"name": "plan / dev / a", "html_url": "https://gh/c/1", "id": 1}\n'
+_BUILD_JQ = ".check_runs[] | {name, html_url, id, conclusion}"
+_BUILD_LISTING = (
+    '{"name": "plan / dev / a", "html_url": "https://gh/c/1", "id": 1, "conclusion": "failure"}\n'
+)
 
 
 def _run_build(tmp_path, checks_rc=0):

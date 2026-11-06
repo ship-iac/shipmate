@@ -348,13 +348,14 @@ runs:
         SHIPMATE_STACKED: ${{ steps.marks.outputs.stacked }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links
         # fall back to the workflow-run URL, rather than failing the step and blocking the gate
         # status.
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \
-          '.check_runs[] | {name, html_url, id}' > check-runs.jsonl; then
+          '.check_runs[] | {name, html_url, id, conclusion}' > check-runs.jsonl; then
           echo "::warning::check-runs listing failed; comment links degrade to the workflow-run URL"
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" < check-runs.jsonl
