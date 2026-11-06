@@ -51,11 +51,9 @@ an `apply_mode: auto` environment no other pull request locks says so in a line 
 (`auto_line`), whatever `command_hints` is:
 auto-dispatch's `action_reason` and its remedy.
 
-A commanded plan (`SHIPMATE_ON_DEMAND` is `true`) names, directly under the verdict, each earlier
-autoplan run of the head whose `plan / ` checks still read failed or cancelled
-(`superseded_lines`): only checks of the head's `pull_request_target` runs of `PLAN_WORKFLOW`
-(`autoplan_runs`) count, read before the newest-per-name collapse, so an App mirror of the same
-name cannot hide one. A failed listing renders no line, with one warning.
+Only a commanded plan (`SHIPMATE_ON_DEMAND` is `true`) names, directly under the verdict, the
+earlier autoplan runs whose checks still read red on the head; `superseded_lines` says which
+checks count. A failed listing of the autoplan runs renders no line, with one warning.
 """
 
 import collections
@@ -80,6 +78,8 @@ from _shipmate import (
     event_action,
     is_head_sha,
     lock_who,
+    one_line,
+    retried,
     run_annotated,
     write_outputs,
 )
@@ -422,29 +422,36 @@ def auto_line(cells, auto, locks, *, event, action, is_draft):
 
 _JOB_RUN = re.compile(r"/actions/runs/(\d+)/job/\d+$")
 SUPERSEDED_LINE = (
-    "⚪ {} check(s) from autoplan run [#{}]({}) still read failed or cancelled on this head; "
-    "this run's plan supersedes them, and GitHub keeps them until the next push plans a new head."
+    "⚪ {} check(s) from autoplan run [#{}]({}) still read red on this head; this run's plan "
+    "supersedes them, and GitHub keeps them until the next push plans a new head."
 )
+_NOT_RED = (None, "success", "neutral", "skipped")
 
 
-def superseded_lines(rows, autoplan_ids, run_id):
-    """One `SUPERSEDED_LINE` per earlier autoplan run, ascending run id, counting its checks in
-    the head's check-run `rows` that still read `failure` or `cancelled`. A row counts when the
-    run id in its Actions job `html_url` is in `autoplan_ids` and is not `run_id` (a string), its
-    name starts with `CALLER_PREFIX`, and it is the newest of its name among those rows. The
-    selection runs before any newest-per-name collapse across identities: an App mirror of the
-    same name carries no job URL and must not hide the failure it mirrors."""
-
-    def run_of(row):
+def plan_jobs(rows):
+    """`(run id, row)` per check-run of `rows` whose name starts with `CALLER_PREFIX` and whose
+    `html_url` is an Actions job's, in order. An App mirror carries no job URL, so it is left
+    out here, before any newest-per-name collapse, and cannot hide the check it mirrors."""
+    jobs = []
+    for row in rows:
         m = _JOB_RUN.search(row.get("html_url") or "")
-        return int(m[1]) if m else None
+        if m and row["name"].startswith(ag.CALLER_PREFIX):
+            jobs.append((int(m[1]), row))
+    return jobs
 
-    autoplan = [r for r in rows if run_of(r) in autoplan_ids and str(run_of(r)) != run_id]
-    counts = collections.Counter(
-        run_of(r)
-        for r in ag.latest_by_name(autoplan, prefix=ag.CALLER_PREFIX).values()
-        if r.get("conclusion") in ("failure", "cancelled")
-    )
+
+def _red(row):
+    return row.get("conclusion") not in _NOT_RED
+
+
+def superseded_lines(jobs, autoplan_ids):
+    """One `SUPERSEDED_LINE` per run of `autoplan_ids` (ints), ascending run id, counting the
+    `plan_jobs` `jobs` of that run that are the newest of their name among all those runs' jobs
+    and read red: a completed conclusion other than `success`, `neutral` or `skipped`. So an
+    autoplan run is named only when the newest check of a name across them reads red."""
+    autoplan = [dict(row, run=run) for run, row in jobs if run in autoplan_ids]
+    latest = ag.latest_by_name(autoplan, prefix="").values()
+    counts = collections.Counter(row["run"] for row in latest if _red(row))
     return [
         SUPERSEDED_LINE.format(n, r, current_run_url(str(r))) for r, n in sorted(counts.items())
     ]
@@ -950,20 +957,29 @@ def cell_errors(errors_dir):
 
 def _superseded(rows):
     """`superseded_lines` of `rows` on a commanded plan (`SHIPMATE_ON_DEMAND` is `true`), else
-    none. Reviewer-facing only: a failed or malformed `autoplan_runs` listing renders none, with
-    one warning."""
+    none. The autoplan runs are listed, with transient failures retried, only when a `plan_jobs`
+    row reads red. This run is never among them: a commanded plan is a `workflow_dispatch` run.
+    Reviewer-facing only: a failed or malformed listing renders none, with one warning naming
+    the cause."""
     if os.environ.get("SHIPMATE_ON_DEMAND") != "true":
+        return []
+    jobs = plan_jobs(rows)
+    if not any(_red(row) for _, row in jobs):
         return []
     head = os.environ.get("HEAD_SHA", "")
     try:
-        runs = ag.autoplan_runs(os.environ["GITHUB_REPOSITORY"], head, run=_run)
-    except (ValueError, SystemExit):
-        print(
-            f"::warning::could not list the autoplan runs of {head}; the plan comment names no "
-            "superseded checks"
-        )
-        return []
-    return superseded_lines(rows, {r["id"] for r in runs}, os.environ["GITHUB_RUN_ID"])
+        runs = retried(lambda: ag.autoplan_runs(os.environ["GITHUB_REPOSITORY"], head, run=_run))
+    except SystemExit as exc:
+        cause = one_line(str(exc.code).removeprefix("::error::"))
+    except ValueError as exc:
+        cause = one_line(exc)
+    else:
+        return superseded_lines(jobs, {r["id"] for r in runs})
+    print(
+        f"::warning::could not list the autoplan runs of {head} ({cause}); the plan comment "
+        "names no superseded checks"
+    )
+    return []
 
 
 def _held_main(checks, url):

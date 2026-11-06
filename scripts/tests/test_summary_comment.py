@@ -2606,19 +2606,25 @@ def _job(run, name, conclusion, check_id):
 def _superseded(n, run):
     return (
         f"⚪ {n} check(s) from autoplan run [#{run}](https://gh/o/r/actions/runs/{run}) still "
-        "read failed or cancelled on this head; this run's plan supersedes them, and GitHub keeps "
-        "them until the next push plans a new head."
+        "read red on this head; this run's plan supersedes them, and GitHub keeps them until the "
+        "next push plans a new head."
     )
 
 
-def test_a_failed_and_a_cancelled_autoplan_check_render_one_counted_line():
-    """Mutation: keep only `failure` -- the line counts 1."""
+def _lines(rows, ids):
+    return sc.superseded_lines(sc.plan_jobs(rows), ids)
+
+
+def test_every_red_conclusion_of_an_autoplan_run_counts_and_no_other():
+    """Mutations: count only `failure` and `cancelled` -- `timed_out` is left out (2); drop
+    `neutral` or `skipped` from the not-red conclusions -- that check counts (4)."""
     rows = [
-        _job(42, "plan / dev-eu / stacks/app", "failure", 1),
-        _job(42, "plan / dev-eu / stacks/db", "cancelled", 2),
-        _job(42, "plan / dev-eu / stacks/dns", "success", 3),
+        _job(42, f"plan / dev-eu / s{i}", conclusion, i)
+        for i, conclusion in enumerate(
+            ["failure", "cancelled", "timed_out", "success", "neutral", "skipped"]
+        )
     ]
-    assert sc.superseded_lines(rows, {42}, "99") == [_superseded(2, 42)]
+    assert _lines(rows, {42}) == [_superseded(3, 42)]
 
 
 def test_two_autoplan_runs_render_one_line_each_in_run_order():
@@ -2627,12 +2633,13 @@ def test_two_autoplan_runs_render_one_line_each_in_run_order():
         _job(42, "plan / dev-eu / stacks/app", "failure", 5),
         _job(7, "plan / dev-eu / stacks/db", "cancelled", 2),
     ]
-    assert sc.superseded_lines(rows, {7, 42}, "99") == [_superseded(1, 7), _superseded(1, 42)]
+    assert _lines(rows, {7, 42}) == [_superseded(1, 7), _superseded(1, 42)]
 
 
 def test_an_app_mirror_of_a_failed_cell_does_not_hide_its_failure():
     """The mirror shares the name, carries a newer id and no Actions job URL. Mutation: collapse
-    the rows with `latest_by_name(prefix="")` before selecting -- the mirror wins and no line."""
+    the rows with `latest_by_name(prefix="")` before `plan_jobs` selects -- the mirror wins and no
+    line."""
     mirror = {
         "name": "plan / dev-eu / stacks/app",
         "html_url": "https://github.com/o/r/runs/50",
@@ -2640,7 +2647,7 @@ def test_an_app_mirror_of_a_failed_cell_does_not_hide_its_failure():
         "conclusion": "success",
     }
     rows = [_job(42, "plan / dev-eu / stacks/app", "failure", 1), mirror]
-    assert sc.superseded_lines(rows, {42}, "99") == [_superseded(1, 42)]
+    assert _lines(rows, {42}) == [_superseded(1, 42)]
 
 
 def test_a_rerun_attempt_that_succeeded_a_failed_name_is_not_counted():
@@ -2649,31 +2656,23 @@ def test_a_rerun_attempt_that_succeeded_a_failed_name_is_not_counted():
         _job(42, "plan / dev-eu / stacks/app", "failure", 1),
         _job(42, "plan / dev-eu / stacks/app", "success", 2),
     ]
-    assert sc.superseded_lines(rows, {42}, "99") == []
+    assert _lines(rows, {42}) == []
 
 
 def test_a_running_autoplan_check_is_not_counted():
-    """Mutation: keep every conclusion but `success` -- the null conclusion counts."""
-    rows = [_job(42, "plan / dev-eu / stacks/app", None, 1)]
-    assert sc.superseded_lines(rows, {42}, "99") == []
+    """Mutation: drop `None` from the not-red conclusions -- the null conclusion counts."""
+    assert _lines([_job(42, "plan / dev-eu / stacks/app", None, 1)], {42}) == []
 
 
 def test_a_consumer_job_named_like_a_plan_cell_outside_the_autoplan_runs_is_not_counted():
-    """Mutation: select by the `plan / ` name prefix alone -- run 50 renders a line."""
+    """Mutation: drop the `autoplan_ids` membership -- run 50 renders a line."""
     rows = [_job(50, "plan / lint", "failure", 1), _job(42, "plan / dev-eu / x", "failure", 2)]
-    assert sc.superseded_lines(rows, {42}, "99") == [_superseded(1, 42)]
+    assert _lines(rows, {42}) == [_superseded(1, 42)]
 
 
 def test_the_router_jobs_of_an_autoplan_run_are_not_counted():
-    """Mutation: select with `prefix=""` -- the run's `facts` job counts."""
-    rows = [_job(42, "facts", "failure", 1)]
-    assert sc.superseded_lines(rows, {42}, "99") == []
-
-
-def test_this_runs_own_checks_are_never_superseded():
-    """Mutation: drop the run-id comparison -- run 42's own failed check renders."""
-    rows = [_job(42, "plan / dev-eu / stacks/app", "failure", 1)]
-    assert sc.superseded_lines(rows, {42}, "42") == []
+    """Mutation: drop the `CALLER_PREFIX` check from `plan_jobs` -- the run's `facts` job counts."""
+    assert _lines([_job(42, "facts", "failure", 1)], {42}) == []
 
 
 def test_a_check_whose_url_is_no_actions_job_is_skipped():
@@ -2686,7 +2685,7 @@ def test_a_check_whose_url_is_no_actions_job_is_skipped():
             "conclusion": "failure",
         }
     ]
-    assert sc.superseded_lines(rows, {42}, "99") == []
+    assert _lines(rows, {42}) == []
 
 
 def test_the_superseded_lines_sit_between_the_verdict_and_the_doctor_line():
@@ -2700,6 +2699,21 @@ def test_the_superseded_lines_sit_between_the_verdict_and_the_doctor_line():
         + _superseded(2, 42)
         + "\n\n⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: "
         "see [the run](https://gh/run/1)"
+    )
+
+
+def test_the_superseded_lines_yield_to_cell_lines_near_the_hard_cap(capsys):
+    """Mutation: append the entry to `head` outside the yield loop -- the refusal raises."""
+    cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    capsys.readouterr()
+    result = sc.build_comment(cells, {}, RUN_URL, SHA, superseded=[_superseded(1, 7)])
+    assert result == (without, False, False)
+    assert capsys.readouterr().out == (
+        "::warning::the plan comment's cell lines leave no room under the 65,536-char comment "
+        "cap for the superseded autoplan checks line; it was left out\n"
     )
 
 
@@ -2746,18 +2760,20 @@ def _listed(run_id):
 _FAILED_42 = json.dumps(_job(42, "plan / dev-eu / stacks/app", "failure", 1)) + "\n"
 
 
-def _stub_runner(monkeypatch, result):
-    """Stub `summary-comment`'s runner: return `result`, or raise it when it is an exception.
-    Returns the argv list of every call."""
+def _stub_runner(monkeypatch, *results):
+    """Stub `summary-comment`'s runner: the nth call returns `results[n]`, or raises it when it
+    is an exception. Returns the argv list of every call."""
     calls = []
 
     def fake(args):
         calls.append(args)
+        result = results[len(calls) - 1]
         if isinstance(result, BaseException):
             raise result
         return result
 
     monkeypatch.setattr(sc, "_run", fake)
+    monkeypatch.setattr(_shipmate, "_sleep", lambda _: None)
     return calls
 
 
@@ -2773,6 +2789,28 @@ def test_main_names_the_superseded_autoplan_checks_of_a_commanded_plan(tmp_path,
     )
 
 
+def test_a_transient_listing_failure_is_retried(tmp_path, monkeypatch):
+    """Mutation: call `autoplan_runs` outside `retried` -- the first failure warns, no line."""
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
+    transient = SystemExit("::error::command failed (1): gh api\nHTTP 502: Bad Gateway")
+    calls = _stub_runner(monkeypatch, transient, _listed(42) + "\n")
+    _run_main(tmp_path, monkeypatch, [], stdin=_FAILED_42)
+    assert calls == [_AUTOPLAN_ARGV, _AUTOPLAN_ARGV]
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        HEAD + f"⚪ nothing planned {MAIN_AT}\n\n" + _superseded(1, 42)
+    )
+
+
+def test_a_head_with_no_red_plan_check_lists_no_autoplan_runs(tmp_path, monkeypatch, capsys):
+    """Mutation: drop the red pre-filter -- the runner is called."""
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
+    calls = _stub_runner(monkeypatch)
+    green = json.dumps(_job(42, "plan / dev-eu / stacks/app", "success", 1)) + "\n"
+    _run_main(tmp_path, monkeypatch, [], stdin=green)
+    assert calls == []
+    assert capsys.readouterr().out == ""
+
+
 def test_an_autoplan_lists_no_autoplan_runs_and_renders_no_superseded_line(tmp_path, monkeypatch):
     """Mutation: drop the on-demand condition -- the runner is called and the line renders."""
     monkeypatch.setenv("SHIPMATE_ON_DEMAND", "false")
@@ -2785,19 +2823,23 @@ def test_an_autoplan_lists_no_autoplan_runs_and_renders_no_superseded_line(tmp_p
 
 
 @pytest.mark.parametrize(
-    "result",
+    ("result", "cause"),
     [
-        SystemExit("::error::command failed (1): gh api"),
-        json.dumps({**json.loads(_listed(42)), "id": "42"}) + "\n",
+        (
+            SystemExit("::error::command failed (1): gh api\nHTTP 404: Not Found"),
+            "command failed (1): gh api | HTTP 404: Not Found",
+        ),
+        (json.dumps({**json.loads(_listed(42)), "id": "42"}) + "\n", "run id is '42'"),
     ],
     ids=["failed-call", "malformed-row"],
 )
 def test_an_unreadable_autoplan_listing_warns_once_and_changes_nothing_else(
-    tmp_path, monkeypatch, capsys, result
+    tmp_path, monkeypatch, capsys, result, cause
 ):
     """The comment and every output equal those of a run without on-demand. Mutations: catch
     only `SystemExit` -- the malformed row's `ValueError` ends `main`; catch only `ValueError`
-    -- the failed call ends `main`; drop `run=_run` -- `autoplan_runs` raises `TypeError`."""
+    -- the failed call ends `main`; drop `run=_run` -- `autoplan_runs` raises `TypeError`; drop
+    the cause from the warning -- the whole line differs."""
     _stub_runner(monkeypatch, result)
     cells = [_cell()]
     (tmp_path / "plain").mkdir()
@@ -2808,8 +2850,8 @@ def test_an_unreadable_autoplan_listing_warns_once_and_changes_nothing_else(
     monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
     text = _run_main(tmp_path / "on", monkeypatch, cells, stdin=_FAILED_42)
     assert capsys.readouterr().out == (
-        f"::warning::could not list the autoplan runs of {SHA}; the plan comment names no "
-        "superseded checks\n"
+        f"::warning::could not list the autoplan runs of {SHA} ({cause}); the plan comment "
+        "names no superseded checks\n"
     )
     assert text == plain
     assert (tmp_path / "on" / "comment.md").read_text(encoding="utf-8") == plain_body

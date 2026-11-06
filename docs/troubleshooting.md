@@ -2220,12 +2220,15 @@ of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 check) stay red or cancelled on its head.
 
 While that head is still the pull request's, a `shipmate plan` comment plans it
-again, and its plan comment names each such autoplan run under the verdict: `⚪ <n> check(s) from autoplan run
-[#<run>](<url>) still read failed or cancelled on this head; this run's plan
-supersedes them, and GitHub keeps them until the next push plans a new head.`
-The checks stay red until a push plans a new head: GitHub keeps every check run
-of a head, and none of them is a required check, so the merge gates on
-`shipmate / gate` alone.
+again. Its plan comment names an autoplan run under the verdict only when the
+newest `plan / ` check of a name across the head's autoplan runs is that run's
+and reads red: `⚪ <n> check(s) from autoplan run [#<run>](<url>) still read red
+on this head; this run's plan supersedes them, and GitHub keeps them until the
+next push plans a new head.` A run on the same head that cancelled the autoplan
+and succeeded is itself an autoplan run with newer checks of the same names, so
+the cancelled run stays unnamed. Either way the red checks stay until a push
+plans a new head: GitHub keeps every check run of a head, and none of them is a
+required check, so the merge gates on `shipmate / gate` alone.
 
 When a newer head's run cancelled it, those checks sit on a head the pull
 request has left, and the merge gates on the live head alone: nothing needs
@@ -2247,12 +2250,12 @@ comment `shipmate plan` if the plan comment does not show the live head, then
 plan starts no auto apply.
 
 When a run on the same head cancelled it (open, reopen, or a re-run), a re-run
-of the cancelled run clears its checks only in one form. A full re-run
-(`gh run rerun <id>`, or "Re-run all jobs") fails each plan cell that already
-uploaded its plan: the `plan.*` and `cell-summary.*` artifact names carry no
-attempt, and those uploads do not overwrite. "Re-run failed jobs"
-(`gh run rerun <id> --failed`) works when every failed or cancelled cell failed
-before its upload. Re-run only after the newer plan run has finished. Not
+of the cancelled run can clear its checks. "Re-run failed jobs"
+(`gh run rerun <id> --failed`) re-runs every failed or cancelled job, so it
+clears the checks only when none of them had already uploaded its plan; a full
+re-run (`gh run rerun <id>`) fails each cell that had (the `plan.*` and
+`cell-summary.*` artifact names carry no attempt, and the upload does not
+overwrite). Re-run only after the newer plan run has finished. Not
 before: the re-run re-enters the `plan-<pr>`
 concurrency group, which cancels the run in progress only when the arriving
 run is a `pull_request_target` run other than `ready_for_review` (a push, open or

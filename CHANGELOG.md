@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Added
 
-- **A `shipmate plan` comment names each earlier autoplan run whose checks still read failed or cancelled on the head**, one line per run under the verdict: `⚪ <n> check(s) from autoplan run [#<run>](<url>) still read failed or cancelled on this head; this run's plan supersedes them, and GitHub keeps them until the next push plans a new head.`
+- **A `shipmate plan` comment names each earlier autoplan run whose checks still read red on the head**, one line per run under the verdict: `⚪ <n> check(s) from autoplan run [#<run>](<url>) still read red on this head; this run's plan supersedes them, and GitHub keeps them until the next push plans a new head.`
 - **The plan comment names a lock holder stacked on this pull request.** A changed cell whose holder is open and has this pull request's head branch as its base ends `🔒 locked by #<n>, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`. `actions/pr-facts` emits the head branch as `head-ref`, and the plan run's `summary` reads each holder's pull request once.
 
 ### Changed

@@ -155,8 +155,9 @@ runs:
         permission-statuses: write
         permission-pull-requests: write
         permission-contents: read
-        # Some configurations need Actions read for doctor's environment probes' `/environments`
-        # reads; without it they degrade to "could not verify". A subset of the manifest's
+        # Actions read covers doctor's environment probes' `/environments` reads (without it they
+        # degrade to "could not verify") and the workflow-runs listing of the head's autoplan runs
+        # (the superseded autoplan line, the live-head replan). A subset of the manifest's
         # `actions: write`, so no re-approval.
         permission-actions: read
         # doctor's plan-environment secret probe lists `/environments/{name}/secrets`.
@@ -177,8 +178,7 @@ runs:
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
         hold() { python3 "$gate_status" hold "$SHIPMATE_HEAD_SHA" "$1"; }
         # A composite step's `exit 0` does not end the composite, so every write step skips on
-        # `superseded`; the live-head steps run on `moved` and must not read `superseded`. The run
-        # ends green, so a refused re-run's `summary` check does too.
+        # `superseded`; the live-head steps run on `moved` and must not read `superseded`.
         superseded() {
           sed 's/^::error::/::notice::/' "$1" >&2
           echo "superseded=true" >> "$GITHUB_OUTPUT"
