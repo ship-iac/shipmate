@@ -59,9 +59,9 @@ and an apply or `doctor` comment whose verdict is not 🟢, end by pointing at
 `shipmate help`, so the commands are discoverable from the pull request itself.
 With `command_hints: true` in `.github/shipmate-config.yml`, a plan comment with
 a changed cell on a pull request that is not a draft shows them too, in a folded
-`shipmate commands` section: `shipmate apply <env>` for each changed
-`apply_mode: targeted` environment, then the bare `shipmate apply` only when a
-changed cell sits outside every targeted one.
+`shipmate commands` section: in apply order, `shipmate apply <env>` for each
+changed `apply_mode: targeted` environment, and the bare `shipmate apply` once,
+at the first changed environment that is not targeted.
 
 ## Dynamic environments
 

@@ -2223,11 +2223,10 @@ While that head is still the pull request's, a `shipmate plan` comment plans it
 again. Its plan comment names an autoplan run under the verdict only when the
 newest `plan / ` check of a name across the head's autoplan runs is that run's
 and reads red: `⚪ <n> check(s) from autoplan run [#<run>](<url>) still read red
-on this head; this run's plan supersedes them, and GitHub keeps them until the
-next push plans a new head.` A run on the same head that cancelled the autoplan
-and succeeded is itself an autoplan run with newer checks of the same names, so
-the cancelled run stays unnamed. Either way the red checks stay until a push
-plans a new head: GitHub keeps every check run of a head, and none of them is a
+on this head; this run's plan supersedes them, and they stay until a push plans
+a new head or a re-run of that run replaces them.` A run on the same head that
+cancelled the autoplan and succeeded is itself an autoplan run with newer checks
+of the same names, so the cancelled run stays unnamed. None of these checks is a
 required check, so the merge gates on `shipmate / gate` alone.
 
 When a newer head's run cancelled it, those checks sit on a head the pull

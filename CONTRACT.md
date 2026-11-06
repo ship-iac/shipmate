@@ -536,9 +536,10 @@ on the same entry.
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
 a plan comment with a changed cell on a pull request that is not a draft ends
-with a folded `shipmate commands` section naming `shipmate apply <env>` for each
-`apply_mode: targeted` environment holding a changed cell, `shipmate apply` when a
-changed cell sits outside every targeted environment, `shipmate unlock <env>
+with a folded `shipmate commands` section naming, in apply order,
+`shipmate apply <env>` for each `apply_mode: targeted` environment holding a
+changed cell and `shipmate apply` once, at the first changed environment that is
+not targeted, then `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
 and `shipmate help` (§Plan comment). It changes no plan or apply.
 
@@ -1891,7 +1892,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
-| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, which is stacked on this pull request; merging this pull request first makes its deploy refuse the cells #<n> holds. Retarget #<n> to <default branch> and merge it first.`, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
+| plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
 the ref is read rather than the status parsed: this run's commit is acquired,
@@ -2890,22 +2891,22 @@ Comment `shipmate help` for every command.
 </details>
 ```
 
-A bare `shipmate apply` skips an `apply_mode: targeted` environment, so for each
-targeted environment holding a changed cell the section starts with
-``Comment `shipmate apply <env>` to apply <env>.``, in `detect`'s `env_order` with
-any environment it does not name after them by name. The bare paragraph follows
-them, because a bare apply waits on the targeted environments it needs, and
-shows only when a changed cell sits outside every targeted environment. After a
-targeted paragraph it reads ``Comment `shipmate apply` to apply the other
-environments.``; a plan that changed a targeted `prod` and an untargeted
-`dev-eu` reads:
+A bare `shipmate apply` skips an `apply_mode: targeted` environment, so the
+section walks the environments holding a changed cell in apply order
+(`detect`'s `env_order`, with any environment it does not name after them by
+name). Each targeted one contributes ``Comment `shipmate apply <env>` to apply
+<env>.`` at its position. The bare paragraph shows once, at the position of the
+first environment that is not targeted, and only when there is one; when any
+targeted paragraph renders it reads ``Comment `shipmate apply` to apply the
+other environments.``. A plan that changed a targeted `prod` whose `needs` names
+an untargeted `dev-eu` reads:
 
 ```
 <details><summary>shipmate commands</summary>
 
-Comment `shipmate apply prod` to apply prod.
-
 Comment `shipmate apply` to apply the other environments.
+
+Comment `shipmate apply prod` to apply prod.
 
 Comment `shipmate help` for every command.
 
@@ -2948,7 +2949,8 @@ and `lost` outputs, which the same rule reads.
 - **Superseded autoplan lines.** On a `shipmate plan` run only, one line per
   earlier autoplan run, ascending run id: `⚪ <n> check(s) from autoplan run
   [#<run>](<run url>) still read red on this head; this run's plan supersedes
-  them, and GitHub keeps them until the next push plans a new head.` A check
+  them, and they stay until a push plans a new head or a re-run of that run
+  replaces them.` A check
   counts when its job belongs to one of the head's `pull_request_target` runs
   of `.github/workflows/shipmate.yml`, its name starts with `plan / `, it is the
   newest check of that name among those runs' checks, and it completed with a
@@ -2957,6 +2959,12 @@ and `lost` outputs, which the same rule reads.
   carries such a red `plan / ` job check. A consumer job named `plan / …` in any other workflow
   run never counts. When the autoplan runs cannot be listed, the lines are left
   out with a warning; when the cell lines leave them no room under the
+  65,536-character cap, they are left out with a warning.
+- **Stacked holder lines.** One line per lock holder stacked on this pull
+  request (§Cell line) that holds a changed cell, lowest first: `🔒 #<n> is
+  stacked on this pull request and holds <k> of its changed cell(s); merging
+  this pull request first makes its deploy refuse. Retarget #<n> to <default
+  branch> and merge it first.` When the cell lines leave them no room under the
   65,536-character cap, they are left out with a warning.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings in this run: see [the run](<run url>)`, under any verdict. `N`
@@ -3000,16 +3008,16 @@ and `lost` outputs, which the same rule reads.
   ` 🔒 locked by #<n>`, or ` 🔒 locked by an unknown holder` for an unknown
   holder (§Cell locks). When #<n> is open and its base branch is this pull
   request's head branch (`facts`' `head-ref`), #<n> is stacked on this pull
-  request, and the marker reads ` 🔒 locked by #<n>, which is stacked on this
-  pull request; merging this pull request first makes its deploy refuse the
-  cells #<n> holds. Retarget #<n> to <default branch> and merge it first.` A
+  request, the marker reads ` 🔒 locked by #<n>, stacked on this pull request`,
+  and a stacked holder line under the verdict explains it. A
   pending gate then reads `stacked #<n> holds <k> cell(s); retarget it to
   <default branch> and merge it first` in place of its generic description,
   naming the lowest stacked holder and counting its changed locked cells. The
   marker is part of the bare line, so the size budget never sheds it. It
   degrades: a lock read that fails warns and marks no cell, and a failed read of
   #<n>, a closed or merged #<n>, an empty `head-ref` or an empty default branch
-  renders the plain marker and the generic pending description.
+  renders the plain marker, no stacked holder line and the generic pending
+  description.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
