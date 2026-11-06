@@ -2591,3 +2591,225 @@ def test_main_gives_no_auto_line_for_a_cell_another_pull_request_locks(tmp_path,
     body = (tmp_path / "run" / "comment.md").read_text(encoding="utf-8")
     assert "🔒 locked by #12" in body
     assert "auto apply not started" not in body
+
+
+def _job(run, name, conclusion, check_id):
+    """A `github-actions` job check-run row of the Build step's listing, of Actions run `run`."""
+    return {
+        "name": name,
+        "html_url": f"https://github.com/o/r/actions/runs/{run}/job/{check_id + 1000}",
+        "id": check_id,
+        "conclusion": conclusion,
+    }
+
+
+def _superseded(n, run):
+    return (
+        f"⚪ {n} check(s) from autoplan run [#{run}](https://gh/o/r/actions/runs/{run}) still "
+        "read failed or cancelled on this head; this run's plan supersedes them, and GitHub keeps "
+        "them until the next push plans a new head."
+    )
+
+
+def test_a_failed_and_a_cancelled_autoplan_check_render_one_counted_line():
+    """Mutation: keep only `failure` -- the line counts 1."""
+    rows = [
+        _job(42, "plan / dev-eu / stacks/app", "failure", 1),
+        _job(42, "plan / dev-eu / stacks/db", "cancelled", 2),
+        _job(42, "plan / dev-eu / stacks/dns", "success", 3),
+    ]
+    assert sc.superseded_lines(rows, {42}, "99") == [_superseded(2, 42)]
+
+
+def test_two_autoplan_runs_render_one_line_each_in_run_order():
+    """Mutation: drop the sort -- the run listed first, 42, renders first."""
+    rows = [
+        _job(42, "plan / dev-eu / stacks/app", "failure", 5),
+        _job(7, "plan / dev-eu / stacks/db", "cancelled", 2),
+    ]
+    assert sc.superseded_lines(rows, {7, 42}, "99") == [_superseded(1, 7), _superseded(1, 42)]
+
+
+def test_an_app_mirror_of_a_failed_cell_does_not_hide_its_failure():
+    """The mirror shares the name, carries a newer id and no Actions job URL. Mutation: collapse
+    the rows with `latest_by_name(prefix="")` before selecting -- the mirror wins and no line."""
+    mirror = {
+        "name": "plan / dev-eu / stacks/app",
+        "html_url": "https://github.com/o/r/runs/50",
+        "id": 50,
+        "conclusion": "success",
+    }
+    rows = [_job(42, "plan / dev-eu / stacks/app", "failure", 1), mirror]
+    assert sc.superseded_lines(rows, {42}, "99") == [_superseded(1, 42)]
+
+
+def test_a_rerun_attempt_that_succeeded_a_failed_name_is_not_counted():
+    """Mutation: drop the newest-per-name step -- attempt 1's failure counts."""
+    rows = [
+        _job(42, "plan / dev-eu / stacks/app", "failure", 1),
+        _job(42, "plan / dev-eu / stacks/app", "success", 2),
+    ]
+    assert sc.superseded_lines(rows, {42}, "99") == []
+
+
+def test_a_running_autoplan_check_is_not_counted():
+    """Mutation: keep every conclusion but `success` -- the null conclusion counts."""
+    rows = [_job(42, "plan / dev-eu / stacks/app", None, 1)]
+    assert sc.superseded_lines(rows, {42}, "99") == []
+
+
+def test_a_consumer_job_named_like_a_plan_cell_outside_the_autoplan_runs_is_not_counted():
+    """Mutation: select by the `plan / ` name prefix alone -- run 50 renders a line."""
+    rows = [_job(50, "plan / lint", "failure", 1), _job(42, "plan / dev-eu / x", "failure", 2)]
+    assert sc.superseded_lines(rows, {42}, "99") == [_superseded(1, 42)]
+
+
+def test_the_router_jobs_of_an_autoplan_run_are_not_counted():
+    """Mutation: select with `prefix=""` -- the run's `facts` job counts."""
+    rows = [_job(42, "facts", "failure", 1)]
+    assert sc.superseded_lines(rows, {42}, "99") == []
+
+
+def test_this_runs_own_checks_are_never_superseded():
+    """Mutation: drop the run-id comparison -- run 42's own failed check renders."""
+    rows = [_job(42, "plan / dev-eu / stacks/app", "failure", 1)]
+    assert sc.superseded_lines(rows, {42}, "42") == []
+
+
+def test_a_check_whose_url_is_no_actions_job_is_skipped():
+    """Mutation: drop the `/job/<id>` tail from the pattern -- the run page row counts."""
+    rows = [
+        {
+            "name": "plan / dev-eu / stacks/app",
+            "html_url": "https://github.com/o/r/actions/runs/42",
+            "id": 1,
+            "conclusion": "failure",
+        }
+    ]
+    assert sc.superseded_lines(rows, {42}, "99") == []
+
+
+def test_the_superseded_lines_sit_between_the_verdict_and_the_doctor_line():
+    """Mutation: put the entry after the doctor line -- red."""
+    lines = [_superseded(1, 7), _superseded(2, 42)]
+    assert sc.build_comment([], {}, RUN_URL, SHA, warnings=2, superseded=lines)[0] == (
+        HEAD
+        + f"⚪ nothing planned {AT}\n\n"
+        + _superseded(1, 7)
+        + "\n"
+        + _superseded(2, 42)
+        + "\n\n⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: "
+        "see [the run](https://gh/run/1)"
+    )
+
+
+def test_build_comment_returns_the_unmanaged_and_lost_flags_by_name():
+    """Mutation: `return body, *named[2:]` over a list with the superseded entry first -- a
+    four-tuple whose flags are shifted."""
+    result = sc.build_comment(
+        [], {}, RUN_URL, SHA, _named(1, "stacks/x"), superseded=[_superseded(1, 7)]
+    )
+    assert result[1:] == (True, False)
+
+
+#: `ag.autoplan_runs`' listing call for `SHA` in `o/r`, hand-written.
+_AUTOPLAN_ARGV = [
+    "gh",
+    "api",
+    "--paginate",
+    (
+        "repos/o/r/actions/workflows/shipmate.yml/runs?"
+        f"event=pull_request_target&head_sha={SHA}&per_page=100"
+    ),
+    "--jq",
+    (
+        ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
+        "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} | tojson"
+    ),
+]
+
+
+def _listed(run_id):
+    return json.dumps(
+        {
+            "id": run_id,
+            "event": "pull_request_target",
+            "head_sha": SHA,
+            "status": "completed",
+            "conclusion": "failure",
+            "actor": {"login": "a"},
+            "triggering_actor": {"login": "a"},
+        }
+    )
+
+
+_FAILED_42 = json.dumps(_job(42, "plan / dev-eu / stacks/app", "failure", 1)) + "\n"
+
+
+def _stub_runner(monkeypatch, result):
+    """Stub `summary-comment`'s runner: return `result`, or raise it when it is an exception.
+    Returns the argv list of every call."""
+    calls = []
+
+    def fake(args):
+        calls.append(args)
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    monkeypatch.setattr(sc, "_run", fake)
+    return calls
+
+
+def test_main_names_the_superseded_autoplan_checks_of_a_commanded_plan(tmp_path, monkeypatch):
+    """Mutations: list the autoplan runs of an empty head -- the argv differs; drop
+    `superseded=` from `main`'s `build_comment` call -- no line."""
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
+    calls = _stub_runner(monkeypatch, _listed(42) + "\n")
+    _run_main(tmp_path, monkeypatch, [], stdin=_FAILED_42)
+    assert calls == [_AUTOPLAN_ARGV]
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        HEAD + f"⚪ nothing planned {MAIN_AT}\n\n" + _superseded(1, 42)
+    )
+
+
+def test_an_autoplan_lists_no_autoplan_runs_and_renders_no_superseded_line(tmp_path, monkeypatch):
+    """Mutation: drop the on-demand condition -- the runner is called and the line renders."""
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "false")
+    calls = _stub_runner(monkeypatch, _listed(42) + "\n")
+    _run_main(tmp_path, monkeypatch, [], stdin=_FAILED_42)
+    assert calls == []
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        HEAD + f"⚪ nothing planned {MAIN_AT}"
+    )
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        SystemExit("::error::command failed (1): gh api"),
+        json.dumps({**json.loads(_listed(42)), "id": "42"}) + "\n",
+    ],
+    ids=["failed-call", "malformed-row"],
+)
+def test_an_unreadable_autoplan_listing_warns_once_and_changes_nothing_else(
+    tmp_path, monkeypatch, capsys, result
+):
+    """The comment and every output equal those of a run without on-demand. Mutations: catch
+    only `SystemExit` -- the malformed row's `ValueError` ends `main`; catch only `ValueError`
+    -- the failed call ends `main`; drop `run=_run` -- `autoplan_runs` raises `TypeError`."""
+    _stub_runner(monkeypatch, result)
+    cells = [_cell()]
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "on").mkdir()
+    plain = _run_main(tmp_path / "plain", monkeypatch, cells, stdin=_FAILED_42)
+    plain_body = (tmp_path / "plain" / "comment.md").read_text(encoding="utf-8")
+    capsys.readouterr()
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
+    text = _run_main(tmp_path / "on", monkeypatch, cells, stdin=_FAILED_42)
+    assert capsys.readouterr().out == (
+        f"::warning::could not list the autoplan runs of {SHA}; the plan comment names no "
+        "superseded checks\n"
+    )
+    assert text == plain
+    assert (tmp_path / "on" / "comment.md").read_text(encoding="utf-8") == plain_body
