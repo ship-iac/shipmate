@@ -1382,14 +1382,14 @@ The `Install Terramate` step in `actions/setup` failed. Every annotation starts
 | "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
 | "<url> delivered version <got>; check the signed checksums.txt and the release asset." | The binary reports another version than the one requested. |
 
-`actions/setup` downloads three files with curl: the Terramate checksums, the
-OpenTofu checksums and the Terramate archive. Each of these downloads retries a
-failed attempt (an HTTP or network error, or a transfer below 1 KiB/s for 30
-seconds) with waits that double from 1 second, or the wait a 429 or 503 names in
-`Retry-After`. curl starts no new attempt after 120 seconds, so a fast failure
-gets about eight attempts and a stalled download about four, and the last one can
-end a minute or more later. A step that still fails met a longer outage: re-run
-the job.
+Setup downloads five files with curl: the Terramate checksums and their signature,
+the OpenTofu checksums and their signature, and the Terramate archive. curl retries
+each after a network error, a 408, 429 or 5xx response, or a transfer below 1 KiB/s
+for 30 seconds, with waits that double from 1 second or follow the server's
+`Retry-After`, and gives up at once when a `Retry-After` wait would pass the limit.
+It decides on no new retry once 120 seconds have passed, so one file can take about
+3 minutes before the step fails. A 403 or 404 is not retried. A step that still
+fails after retries met a longer outage: re-run the job.
 
 ### `Failed to validate OpenTofu CLI zip checksum`
 

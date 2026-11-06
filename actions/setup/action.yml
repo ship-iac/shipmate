@@ -44,9 +44,8 @@ runs:
         dir="$RUNNER_TEMP/terramate-sums"
         mkdir -p "$dir"
         for f in checksums.txt checksums.txt.sig; do
-          # curl retries a failed attempt (an error, or under 1 KiB/s for 30 s) after a wait that doubles from
-          # 1 s, or the server's Retry-After; it starts none after 120 s, so the last can end later: about 8
-          # fast failures or 4 stalls. --retry-all-errors needs curl 7.71+; an older curl exits 2.
+          # Each download retries network errors, 408/429/5xx and stalls (<1 KiB/s for 30 s), waiting 1 s doubling or the server's Retry-After;
+          # curl decides on no new retry after 120 s, so one file can take about 3 minutes. --retry-all-errors needs curl 7.71+; older exits 2.
           rc=0
           code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
             -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
