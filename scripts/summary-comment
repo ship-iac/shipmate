@@ -62,6 +62,7 @@ import re
 import sys
 
 from _shipmate import (
+    CHECK_OUTPUT_CAP,
     REASON_CAP,
     _load,
     cell_names,
@@ -713,20 +714,27 @@ _DRIFT_LINE = (
 
 
 def fold_drift(text):
-    """`text` with its first OpenTofu outside-changes note, from the column-0 note line to the
-    first following line made only of `─`, replaced by one line counting the note's
-    `has changed` and `has been deleted` headers. A note with no complete rule line, as a cut
-    read leaves it, stays unchanged."""
-    lines = text.split("\n")
-    if _DRIFT_NOTE not in lines:
+    """`text` with OpenTofu's outside-changes note, from the note line to the first following
+    line made only of `─`, replaced by one line counting the note's `has changed` and
+    `has been deleted` headers. Unchanged unless the note line is the first non-empty line,
+    where tofu prints it (author text cannot reach it there), the rule line is complete (a cut
+    read can stop inside it), and the text through the rule fits `CHECK_OUTPUT_CAP` UTF-8
+    bytes, so the apply check the counted line names holds the whole note."""
+    body = text.lstrip("\n")
+    if not body.startswith(_DRIFT_NOTE + "\n"):
         return text
-    start = lines.index(_DRIFT_NOTE)
+    lead = len(text) - len(body)
+    lines = body.split("\n")
+    n = 0
     # The last element is unterminated: a rule there may be cut mid-line.
-    for end in range(start + 1, len(lines) - 1):
-        if lines[end] and not lines[end].strip("─"):
-            n = sum(1 for line in lines[start:end] if _DRIFT_HEADER.match(line))
-            lines[start : end + 1] = [_DRIFT_LINE.format(n)]
-            return "\n".join(lines)
+    for end in range(1, len(lines) - 1):
+        line = lines[end]
+        if line and not line.strip("─"):
+            note = "\n".join(lines[: end + 1]) + "\n"
+            if lead + len(note.encode("utf-8")) > CHECK_OUTPUT_CAP:
+                return text
+            return "\n".join([text[:lead] + _DRIFT_LINE.format(n), *lines[end + 1 :]])
+        n += bool(_DRIFT_HEADER.match(line))
     return text
 
 
@@ -749,7 +757,9 @@ def load_cells(cells_dir):
     pin skew, not a state to render around. Each cell's `add`, `change`,
     `destroy`, `import` and `forget` are set here from `counts` over its
     `plan.txt`, whatever cell.json holds; underivable counts become "?" each,
-    with one warning."""
+    with one warning. `plan_text` is `fold_drift` of the file's first SIZE_BUDGET characters,
+    topped up to SIZE_BUDGET when the fold shrank it; a fold that lengthens it leaves it over
+    SIZE_BUDGET by that much."""
     out = []
     skew = "(plan-cell and summary must be pinned at the same engine SHA)"
     for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
@@ -766,10 +776,10 @@ def load_cells(cells_dir):
         cell["add"], cell["change"], cell["destroy"], cell["import"], cell["forget"] = tally
         text = None
         if txt.exists():
-            # A SIZE_BUDGET text exceeds every section limit, so a cut one renders truncated;
-            # the top-up refills what `fold_drift` shrank. `max`: a negative size reads the
-            # whole rest of the file, which diff_map and _fence_of must never scan.
-            with open(txt, encoding="utf-8") as fh:
+            # A SIZE_BUDGET text exceeds every section limit, so a cut one renders truncated; the
+            # top-up refills what `fold_drift` shrank (`max`: a negative size reads the whole file),
+            # and newline="\n" keeps an author-text CR from starting a column-0 line, as `counts`.
+            with open(txt, encoding="utf-8", newline="\n") as fh:
                 text = fold_drift(fh.read(SIZE_BUDGET))
                 text += fh.read(max(0, SIZE_BUDGET - len(text)))
         out.append((cell, text))

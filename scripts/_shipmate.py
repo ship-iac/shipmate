@@ -249,6 +249,10 @@ def command_property(s):
 #: 65,536-character cap, and an env var holding one far under Linux's 128 KiB per-string limit.
 REASON_CAP = 4000
 
+# GitHub refuses a check output.summary over 65,535 characters and, separately, over 65,535 UTF-8
+# bytes; bytes bind first for any non-ASCII text.
+CHECK_OUTPUT_CAP = 65_535
+
 
 def is_refusal(code) -> TypeGuard[str]:
     """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`."""

@@ -39,6 +39,7 @@ import pathlib
 import sys
 
 from _shipmate import (
+    CHECK_OUTPUT_CAP,
     _load,
     cell_summaries,
     current_run_url,
@@ -51,9 +52,6 @@ ag = _load("apply-gate")
 gs = _load("gate-state")
 sc = _load("summary-comment")
 NEWER_RUN = 3
-# GitHub refuses an output.summary over 65,535 characters and, separately, over 65,535 UTF-8
-# bytes; bytes bind first for any non-ASCII text.
-CHECK_OUTPUT_CAP = 65_535
 _COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 

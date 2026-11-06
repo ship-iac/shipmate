@@ -1033,7 +1033,8 @@ plan with the command that wrote the file
 (`terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
 -- tofu show -no-color stack.otplan`) and refuses any difference.
 The digest covers the file, not the excerpts: the comment and the apply check
-each embed a capped prefix (`CONTRACT.md` §Plan comment, §Check names), so on a
+each embed a capped excerpt, the comment's with OpenTofu's outside-changes note folded into one
+line (`CONTRACT.md` §Plan comment, §Check names), so on a
 large plan a reviewer sees less than what is bound.
 
 Four refusals hold that chain closed, each of them a refusal rather than a

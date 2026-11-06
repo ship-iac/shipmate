@@ -598,8 +598,9 @@ cell summary.
 
 The plan text and the stored plan are produced by the same job, which runs the
 pull request's own code, so the two can be made to disagree. The trusted summary
-job records the digest of the `plan.txt` it publishes in the comment and the apply check
-([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
+job records the digest of the whole `plan.txt`, of which the comment and the apply check
+publish capped excerpts, the comment's with OpenTofu's outside-changes note folded into one
+line ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
 cell re-renders the stored plan with the command that wrote it and compares.
 
 - **No digest is recorded.** Nothing is compared, so the apply is refused

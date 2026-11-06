@@ -3001,8 +3001,10 @@ and `lost` outputs, which the same rule reads.
   to `!`). OpenTofu's `Note: Objects have changed outside of OpenTofu` block,
   through its `─` rule, renders as one line,
   `ℹ️ <n> object(s) changed outside OpenTofu; the full note is in this cell's apply check.`,
-  where `<n>` counts its `has changed` and `has been deleted` headers; a block
-  the read budget cut before its rule renders unchanged. `plan.txt`, the apply
+  where `<n>` counts its `has changed` and `has been deleted` headers. The block
+  renders unchanged when it is not the plan's first non-empty line, when the
+  read budget cut it before its rule, or when the plan through its rule passes
+  the apply check's 65,535-byte cap. `plan.txt`, the apply
   check and the step summary keep the full note. An unchanged cell is its bare
   line only. Consecutive bare lines are
   separated by one newline, and every fold-out has a blank line on both sides,
@@ -3504,7 +3506,8 @@ A third record binds the plan *text* to the plan that executes. The trusted
 `summary` job takes `sha256` over the **whole** `plan.txt` it downloaded —
 computed there, never copied from the cell — and writes it as the record's
 `plan_sha256` field, on the queued and the neutral check alike. The comment
-embeds at most the first 60 000 characters of that file and may truncate further or
+embeds a capped excerpt of that file, about its first 60 000 characters with OpenTofu's
+outside-changes note folded into one line (§Plan comment), and may truncate further or
 show only the cell's line, and the apply check at most 65,535 UTF-8 bytes of it, so on a
 large plan the digest covers more than either shows; it binds the file, not the excerpts.
 `apply-cell` re-renders the stored plan with `terramate run --quiet
@@ -3699,7 +3702,8 @@ and `apply.txt` in the apply result comment — carry whatever the tool wrote
 (the cells run terramate with `--quiet`, so its routine lines never appear):
 shipmate never redacts either, and no surface is covered by GitHub's log secret
 masking. (The published text is not byte-identical — escape sequences are
-stripped, undecodable bytes become replacement characters, and over-cap
+stripped, undecodable bytes become replacement characters, the plan comment
+folds OpenTofu's outside-changes note into one line, and over-cap
 sections are truncated, per Check names, Plan comment and Apply result comment
 above — but none of that removes a secret.)
 

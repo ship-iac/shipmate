@@ -1041,7 +1041,8 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     d.mkdir()
     (d / "cell.json").write_text(json.dumps(_cell()))
     line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars.
-    (d / "plan.txt").write_text(line * 1_112 + _MIXED)  # Over 70_000 chars, past SIZE_BUDGET.
+    # Over 70_000 chars, past SIZE_BUDGET; bytes, so Windows writes no CR.
+    (d / "plan.txt").write_bytes((line * 1_112 + _MIXED).encode("utf-8"))
     cells = sc.load_cells(str(tmp_path))
     assert sc.state(cells[0][0]) == "+1 ~2 -2"
     assert len(cells[0][1]) == sc.SIZE_BUDGET
@@ -1922,10 +1923,6 @@ def test_import_and_forget_counts_from_raw_tofu_captures(name, tally, state):
     assert sc.state({"changed": True, **dict(zip(_COUNT_KEYS, got, strict=True))}) == state
 
 
-# OpenTofu v1.13.1 windows_amd64, `tofu show -no-color stack.otplan > plan.txt` (not a TTY),
-# provider hashicorp/local, captured raw after deleting a.txt and rewriting b.txt past an apply;
-# sha256 10b3cef844e26213bdec27da635e882c5b6b98da545fb14e23a94560b8e3af63. Line 2 opens the
-# outside-changes note, line 25 is its 77 x U+2500 rule.
 _DRIFT_BYTES = (_FIXTURES / "drift-deleted.plan.txt").read_bytes()
 _DRIFT = _DRIFT_BYTES.decode("utf-8")
 _DRIFT_LINES = _DRIFT.splitlines(keepends=True)
@@ -1940,8 +1937,12 @@ _TRAILER = (
 
 
 def test_fold_drift_replaces_the_outside_changes_note_with_one_counted_line():
-    """Mutations: leaving the rule out of the replaced span keeps the rule line; counting
-    `has changed` alone renders 0."""
+    """Fixture `drift-deleted.plan.txt`: OpenTofu 1.13.1 on windows_amd64 with provider
+    hashicorp/local, `tofu show -no-color stack.otplan > plan.txt` (non-TTY), captured raw after
+    deleting a.txt and rewriting b.txt past an apply; sha256
+    10b3cef844e26213bdec27da635e882c5b6b98da545fb14e23a94560b8e3af63. Line 2 opens the
+    outside-changes note, line 25 is its 77 x U+2500 rule. Mutations: leaving the rule out of the
+    replaced span keeps the rule line; counting `has changed` alone renders 0."""
     assert _DRIFT_LINES[1] == _DRIFT_NOTE and _DRIFT_LINES[24:27] == [
         "─" * 77 + "\n",
         "\n",
@@ -1973,15 +1974,68 @@ def test_fold_drift_leaves_a_note_cut_before_its_rule_unchanged(cut):
 
 
 def test_fold_drift_leaves_a_plan_without_the_note_unchanged():
-    """Fixture: `import-forget.plan.txt`, raw. Mutation: dropping the no-note early return
-    raises ValueError from `index`."""
+    """Fixture: `import-forget.plan.txt`, raw. Mutation: returning the text without its leading
+    newlines on the no-note path drops its first line."""
     text = (_FIXTURES / "import-forget.plan.txt").read_text(encoding="utf-8")
     assert sc.fold_drift(text) == text
 
 
+def test_fold_drift_folds_only_a_note_on_the_first_non_empty_line():
+    """Derived from the capture: one line of tofu's own text before the note. Mutation: folding
+    the note line wherever it sits folds it."""
+    derived = "\nOpenTofu used the selected providers.\n" + "".join(_DRIFT_LINES[1:])
+    assert sc.fold_drift(derived) == derived
+
+
+def test_a_cr_in_author_text_cannot_forge_a_drift_note(tmp_path):
+    """Read in text mode, each CR in a heredoc body ends a line, so the body forges a column-0
+    note line and rule that fold away the planned change between them. Mutation: opening
+    plan.txt with default newline handling turns each CR into a line break."""
+    plan = (
+        "\n"
+        "OpenTofu will perform the following actions:\n"
+        "\n"
+        "  # terraform_data.x will be created\n"
+        '  + resource "terraform_data" "x" {\n'
+        "      + input = <<-EOT\n"
+        "            x\rNote: Objects have changed outside of OpenTofu\n"
+        "            hidden\n"
+        "            y\r" + "─" * 77 + "\n"
+        "        EOT\n"
+        "    }\n"
+        "\n"
+        "Plan: 1 to add, 0 to change, 0 to destroy.\n"
+    )
+    _write_cell(tmp_path, _cell(), plan)
+    [(_, text)] = sc.load_cells(str(tmp_path))
+    assert text == plan
+
+
+def _note_of_bytes(size):
+    """A note of `size` UTF-8 bytes from the text's start through its rule's newline, mostly
+    two-byte `é`, so its characters stay far under its bytes."""
+    head = "\n" + _DRIFT_NOTE + "  # x.y has been deleted\n"
+    rule = "─" * 77 + "\n"
+    wide = "  " + "é" * 98 + "\n"
+    k, rest = divmod(size - len((head + rule).encode("utf-8")), len(wide.encode("utf-8")))
+    return head + wide * k + "  " + "a" * (rest - 3) + "\n" + rule
+
+
+@pytest.mark.parametrize(("size", "folded"), [(65_535, True), (65_536, False)])
+def test_fold_drift_folds_only_a_note_the_apply_check_holds_whole(size, folded):
+    """The counted line says the apply check holds the full note, which that check's 65,535-byte
+    cap only keeps true for a note within it. Mutations: dropping the byte check folds the
+    65,536-byte note; `>=` leaves the 65,535-byte note unfolded."""
+    tail = "\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
+    note = _note_of_bytes(size)
+    assert len(note.encode("utf-8")) == size and len(note) < sc.SIZE_BUDGET
+    expected = "\n" + _COUNTED_1 + "\n" + tail if folded else note + tail
+    assert sc.fold_drift(note + tail) == expected
+
+
 def test_fold_drift_ignores_an_indented_note_header():
     """Derived from the capture: the header indented, as author text renders. Mutation:
-    matching the header on the stripped line folds it."""
+    stripping all leading whitespace, not only newlines, folds it."""
     derived = _DRIFT.replace(_DRIFT_NOTE, "  " + _DRIFT_NOTE, 1)
     assert derived != _DRIFT
     assert sc.fold_drift(derived) == derived
@@ -2026,13 +2080,11 @@ def test_a_fold_that_lengthens_the_read_gets_no_top_up(tmp_path):
     """Derived from the capture: a one-character rule and a single drift header, a block shorter
     than the counted line (tofu's own 77-character rule never is). Mutation: dropping the `max`
     passes `fh.read` a negative size, which reads the whole rest of the file."""
-    head = "  + a\n" * 1_000
-    block = _DRIFT_NOTE + "  # x.y has been deleted\n─\n"
+    block = "\n" + _DRIFT_NOTE + "  # x.y has been deleted\n─\n"
     tail = "  + b\n" * 12_000
-    _write_cell(tmp_path, _cell(), head + block + tail)
+    _write_cell(tmp_path, _cell(), block + tail)
     [(_, text)] = sc.load_cells(str(tmp_path))
-    kept = tail[: sc.SIZE_BUDGET - len(head) - len(block)]
-    assert text == head + _COUNTED_1 + "\n" + kept
+    assert text == "\n" + _COUNTED_1 + "\n" + tail[: sc.SIZE_BUDGET - len(block)]
     assert len(text) > sc.SIZE_BUDGET
 
 
