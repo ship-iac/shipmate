@@ -2998,7 +2998,13 @@ and `lost` outputs, which the same rule reads.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
-  to `!`). An unchanged cell is its bare line only. Consecutive bare lines are
+  to `!`). OpenTofu's `Note: Objects have changed outside of OpenTofu` block,
+  through its `─` rule, renders as one line,
+  `ℹ️ <n> object(s) changed outside OpenTofu; the full note is in this cell's apply check.`,
+  where `<n>` counts its `has changed` and `has been deleted` headers; a block
+  the read budget cut before its rule renders unchanged. `plan.txt`, the apply
+  check and the step summary keep the full note. An unchanged cell is its bare
+  line only. Consecutive bare lines are
   separated by one newline, and every fold-out has a blank line on both sides,
   without which the next line stays inside the HTML block and its link renders
   literally.
