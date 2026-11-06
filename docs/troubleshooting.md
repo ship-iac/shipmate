@@ -1390,8 +1390,9 @@ asset differs from the signed one, or the runner is not Linux `amd64` or
 `arm64`. A re-run downloads the same asset.
 
 curl retries HTTP 408, 429, 500, 502, 503 and 504 responses, timeouts and stalls
-three times before the step fails. It also retries connection resets and TLS
-errors (`--retry-all-errors`), which is why setup needs curl 7.71 or later.
+with waits that double from 1 second, for about 2 minutes, before the step fails.
+It also retries connection resets and TLS errors (`--retry-all-errors`), which is
+why setup needs curl 7.71 or later.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 
