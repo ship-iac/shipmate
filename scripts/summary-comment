@@ -25,7 +25,7 @@ Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
-The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_order`,
+The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_names`,
 `by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here
 because apply-comment and doctor already load this module.
 
@@ -35,10 +35,14 @@ refusal or a failure, under an apply or doctor verdict that is not 🟢. A plan 
 only when the gate is held.
 With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
 that is not a draft ends with the `commands` section, when the body has room for it under
-SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply` when a changed cell sits
-outside every `apply_mode: targeted` environment, `shipmate apply <env>` for each targeted
-environment holding a changed cell, in apply order, `shipmate unlock <env> --evict` for each
-environment holding a changed cell it marks locked, and `shipmate help`.
+SIZE_BUDGET; it never shrinks a cell. The section names `shipmate apply <env>` for each
+`apply_mode: targeted` environment holding a changed cell, in apply order, then `shipmate apply`
+when a changed cell sits outside every targeted environment (`to apply the other environments`
+after a targeted line, since a bare apply waits on the targeted environments it needs), then
+`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked, and
+`shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
+section degrades to the bare `shipmate apply` even when every changed environment is targeted;
+the unreadable one warns.
 
 An autoplan of a pull request that is not a draft, not started by a push, that changed a cell of
 an `apply_mode: auto` environment no other pull request locks says so in a line under the verdict
@@ -220,22 +224,21 @@ def env_heading(env, n, tally):
     return f"#### {_md_name(env)}: {n} cell{'' if n == 1 else 's'}, {tally}"
 
 
-def env_order(raw):
-    """The environments of detect's `env_order` output `raw`, a JSON list of strings in apply
-    order; `[]` when empty, and `[]` with one warning when it is not that shape."""
+#: `env_names`' consequence for an unreadable `env-order`, in every comment that reads it.
+ENV_ORDER_UNREAD = "the comment orders its environments by name"
+
+
+def env_names(raw, label, unread):
+    """The environments of `raw`, a JSON list of strings (detect's `env_order`, `auto_envs` or
+    `targeted_envs` output); `[]` when empty, and `[]` with one warning naming the input `label`
+    and the consequence `unread` when it is not that shape."""
     if not raw:
         return []
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        value = None
-    if isinstance(value, list) and all(isinstance(e, str) for e in value):
-        return value
-    print(
-        "::warning::env-order is not a JSON list of environment names; the comment orders its "
-        "environments by name"
-    )
-    return []
+    names = ad.auto_set(raw)
+    if names is None:
+        print(f"::warning::{label} is not a JSON list of environment names; {unread}")
+        return []
+    return names
 
 
 def by_env(items, order, first, cell=lambda item: item):
@@ -359,24 +362,29 @@ def stacked_hold(cells, locks, stacked, default_branch):
 
 
 def commands(locked, targeted=(), changed=()):
-    """The folded command section: `shipmate apply` unless `changed` (the changed cells'
-    environments in apply order) is not empty and all in `targeted`, then per environment of
-    `changed` in `targeted` its `shipmate apply <env>`, then per environment of `locked`, sorted,
-    its `shipmate unlock <env> --evict`, then `shipmate help`. No line starts with `shipmate`, so
-    the section is not itself a command."""
-    bare = "Comment `shipmate apply` to apply this plan.\n\n"
-    if changed and set(changed) <= set(targeted):
-        bare = ""
+    """The folded command section: per environment of `changed` (the changed cells'
+    environments in apply order) in `targeted`, its `shipmate apply <env>`; then `shipmate apply`
+    unless `changed` is not empty and all in `targeted`, worded `to apply the other
+    environments` after a targeted paragraph, since a bare apply waits on the targeted
+    environments it needs; then per environment of `locked`, sorted, its `shipmate unlock <env>
+    --evict`, then `shipmate help`. No line starts with `shipmate`, so the section is not itself
+    a command."""
     named = "".join(
-        f"Comment `shipmate apply {e}` to apply {e}.\n\n" for e in changed if e in targeted
+        f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n"
+        for e in changed
+        if e in targeted
     )
+    bare = ""
+    if not changed or not set(changed) <= set(targeted):
+        what = "the other environments" if named else "this plan"
+        bare = f"Comment `shipmate apply` to apply {what}.\n\n"
     evict = "".join(
         f"Comment `shipmate unlock {e} --evict` to take a cell another pull request holds.\n\n"
         for e in sorted(locked)
     )
     return (
         "<details><summary>shipmate commands</summary>\n\n"
-        f"{bare}{named}{evict}"
+        f"{named}{bare}{evict}"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
     )
@@ -647,7 +655,8 @@ def build_comment(
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
-    changed = [e for e, _ in by_env([c for c in meta if c["changed"]], order, bool)]
+    envs = {c["environment"] for c in meta if c["changed"]}
+    changed = [e for e in dict.fromkeys(order) if e in envs] + sorted(envs - set(order))
     section = commands({c["environment"] for c in meta if _lock_key(c, locks)}, targeted, changed)
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
@@ -870,17 +879,6 @@ def _held_main(checks, url):
         fh.write(body)
 
 
-def _env_names(var, label, unread):
-    """The JSON list of environment names in env var `var` (`ad.auto_set`); `[]` when it is
-    empty, and `[]` with one warning naming `label` and `unread` when it is not that shape."""
-    raw = os.environ.get(var, "")
-    names = ad.auto_set(raw) if raw else []
-    if names is None:
-        print(f"::warning::{label} is not a JSON list of environment names; {unread}")
-        return []
-    return names
-
-
 def main():
     mode = os.environ.get("SHIPMATE_COMMENT_MODE", "")
     if mode not in ("", "held"):
@@ -907,11 +905,13 @@ def main():
     )
     # Reviewer-facing only: anything but doctor's count renders no line.
     warnings = os.environ.get("SHIPMATE_DOCTOR_WARNINGS", "")
-    auto = _env_names(
-        "SHIPMATE_AUTO_ENVS_TABLE", "auto-envs", "the plan comment says nothing about an auto apply"
+    auto = env_names(
+        os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", ""),
+        "auto-envs",
+        "the plan comment says nothing about an auto apply",
     )
-    targeted = _env_names(
-        "SHIPMATE_TARGETED_ENVS",
+    targeted = env_names(
+        os.environ.get("SHIPMATE_TARGETED_ENVS", ""),
         "targeted-envs",
         "the commands section offers the bare shipmate apply",
     )
@@ -926,7 +926,7 @@ def main():
         unmanaged,
         lost,
         int(warnings) if warnings.isdecimal() else 0,
-        env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
+        env_names(os.environ.get("SHIPMATE_ENV_ORDER", ""), "env-order", ENV_ORDER_UNREAD),
         # `shipmate apply` refuses a draft, so an on-demand plan of one must not invite it.
         hints=os.environ.get("SHIPMATE_COMMAND_HINTS") == "true"
         and os.environ.get("SHIPMATE_IS_DRAFT") != "true",

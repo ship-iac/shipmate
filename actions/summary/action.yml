@@ -99,11 +99,11 @@ inputs:
   command-hints:
     description: >-
       build-matrix's `command_hints` output, read from the default branch's table. `true` ends
-      the plan comment with a folded section naming `shipmate apply` when a changed cell sits
-      outside every `targeted-envs` environment, `shipmate apply <env>` for each of those holding
-      a changed cell, `shipmate unlock <env> --evict` for each environment holding a changed cell
-      another pull request holds, and `shipmate help`, when a cell changed and the pull request is
-      not a draft. Anything else (empty when detect is skipped) leaves it out.
+      the plan comment with a folded section naming `shipmate apply <env>` for each
+      `targeted-envs` environment holding a changed cell, `shipmate apply` when a changed cell
+      sits outside all of them, `shipmate unlock <env> --evict` for each environment holding a
+      changed cell another pull request holds, and `shipmate help`, when a cell changed and the
+      pull request is not a draft. Anything else (empty when detect is skipped) leaves it out.
     required: false
     default: ""
   auto-envs:
@@ -120,8 +120,9 @@ inputs:
     description: >-
       build-matrix's `targeted_envs` output: JSON [env, ...], the default branch table's
       `apply_mode: targeted` environments. The command section names `shipmate apply <env>` for
-      each one holding a changed cell. Empty (detect skipped) or invalid renders the bare
-      `shipmate apply` paragraph alone; invalid warns.
+      each one holding a changed cell. An empty (detect skipped) or unreadable value names no
+      targeted environment, so the section offers the bare `shipmate apply` as before; an
+      unreadable one warns once.
     required: false
     default: ""
 runs:

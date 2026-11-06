@@ -506,8 +506,8 @@ _ALL_TARGETED = (
 )
 _MIXED_TARGETED = (
     "<details><summary>shipmate commands</summary>\n\n"
-    "Comment `shipmate apply` to apply this plan.\n\n"
     "Comment `shipmate apply prod` to apply prod.\n\n"
+    "Comment `shipmate apply` to apply the other environments.\n\n"
     "Comment `shipmate help` for every command.\n\n"
     "</details>"
 )
@@ -527,10 +527,24 @@ def test_every_changed_environment_targeted_names_each_and_no_bare_apply():
     assert _section(cells, targeted=["dev-eu", "prod"]) == _ALL_TARGETED
 
 
-def test_a_mixed_plan_names_the_bare_apply_first_then_the_targeted_environment():
-    """Mutation: emit the bare paragraph only when `targeted` is empty -- red."""
+def test_a_mixed_plan_names_the_targeted_environment_then_the_other_environments():
+    """A bare apply waits on the targeted environments it needs, so they come first.
+
+    Mutations: emit the bare paragraph only when `targeted` is empty -- red; put the bare
+    paragraph first -- red; keep `to apply this plan.` beside a targeted paragraph -- red."""
     cells = [(_cell(), None), (_cell(environment="prod"), None)]
     assert _section(cells, targeted=["prod"]) == _MIXED_TARGETED
+
+
+def test_a_targeted_environment_name_renders_through_md_name_outside_the_code_span():
+    """Mutation: render `{e}` instead of `{_md_name(e)}` after `to apply` -- the `@` mentions,
+    red."""
+    assert sc.commands(set(), ["dev@eu"], ["dev@eu"]) == (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply dev@eu` to apply dev@<!-- -->eu.\n\n"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
 
 
 def test_a_targeted_environment_with_no_changed_cell_gets_no_paragraph():
@@ -658,10 +672,11 @@ _BAD_ENV_ORDER = (
         ('["b", 1]', [], _BAD_ENV_ORDER),
     ],
 )
-def test_env_order_reads_a_list_of_names_and_warns_on_anything_else(raw, expected, out, capsys):
+def test_env_names_reads_a_list_of_names_and_warns_on_anything_else(raw, expected, out, capsys):
     """Mutations: dropping the element check -- `["b", 1]` passes; warning on an empty value --
     the first case prints."""
-    assert sc.env_order(raw) == expected
+    order_unread = "the comment orders its environments by name"
+    assert sc.env_names(raw, "env-order", order_unread) == expected
     assert capsys.readouterr().out == out
 
 
@@ -1862,8 +1877,9 @@ def test_main_names_the_targeted_environments_it_reads(tmp_path, monkeypatch):
 def test_main_warns_once_and_offers_the_bare_apply_for_a_malformed_targeted_set(
     tmp_path, monkeypatch, capsys
 ):
-    """Mutation: drop the warning -- red; return `names` (None) for `[]` in `_env_names` -- the
-    section build raises, red."""
+    """Mutation: drop the warning -- red; return `names` (None) for `[]` in `env_names` -- the
+    section build raises, red; pass `SHIPMATE_ENV_ORDER`'s label -- the warning names
+    `env-order`, red."""
     monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
     monkeypatch.setenv("SHIPMATE_TARGETED_ENVS", '{"a":1}')
     _run_main(tmp_path, monkeypatch, [_cell()])

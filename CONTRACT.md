@@ -536,9 +536,9 @@ on the same entry.
 **`command_hints: true` ends the plan comment with its commands.** It holds
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
 a plan comment with a changed cell on a pull request that is not a draft ends
-with a folded `shipmate commands` section naming `shipmate apply` when a changed
-cell sits outside every `apply_mode: targeted` environment, `shipmate apply <env>`
-for each targeted environment holding a changed cell, `shipmate unlock <env>
+with a folded `shipmate commands` section naming `shipmate apply <env>` for each
+`apply_mode: targeted` environment holding a changed cell, `shipmate apply` when a
+changed cell sits outside every targeted environment, `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
 and `shipmate help` (§Plan comment). It changes no plan or apply.
 
@@ -2889,16 +2889,21 @@ Comment `shipmate help` for every command.
 ```
 
 A bare `shipmate apply` skips an `apply_mode: targeted` environment, so for each
-targeted environment holding a changed cell the section adds, after the bare
-paragraph, ``Comment `shipmate apply <env>` to apply <env>.``, in `detect`'s
-`env_order` with any environment it does not name after them by name. The bare
-paragraph shows only when a changed cell sits outside every targeted
-environment; a plan whose changed cells all sit in a targeted `prod` reads:
+targeted environment holding a changed cell the section starts with
+``Comment `shipmate apply <env>` to apply <env>.``, in `detect`'s `env_order` with
+any environment it does not name after them by name. The bare paragraph follows
+them, because a bare apply waits on the targeted environments it needs, and
+shows only when a changed cell sits outside every targeted environment. After a
+targeted paragraph it reads ``Comment `shipmate apply` to apply the other
+environments.``; a plan that changed a targeted `prod` and an untargeted
+`dev-eu` reads:
 
 ```
 <details><summary>shipmate commands</summary>
 
 Comment `shipmate apply prod` to apply prod.
+
+Comment `shipmate apply` to apply the other environments.
 
 Comment `shipmate help` for every command.
 
@@ -2906,8 +2911,9 @@ Comment `shipmate help` for every command.
 ```
 
 The targeted environments come from `detect`'s `targeted_envs` output, the
-default branch table's. An empty one (detect skipped) names none, and so does an
-invalid one, which warns.
+default branch table's. An empty (detect skipped) or unreadable one names no
+targeted environment, so the section degrades to the bare paragraph as above
+even when every changed environment is targeted; the unreadable one warns.
 
 When the comment marks a changed cell `🔒 locked by`, the section adds, after
 the apply paragraphs and before the `shipmate help` paragraph, one paragraph per

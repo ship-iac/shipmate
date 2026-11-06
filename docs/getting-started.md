@@ -362,9 +362,9 @@ and `environments`, caps how many cells one plan or drift sweep runs at once ([`
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
 `command_hints: true` ends each plan comment with a changed cell, on a pull
-request that is not a draft, with a folded section naming `shipmate apply` when a
-changed cell sits outside every `apply_mode: targeted` environment,
-`shipmate apply <env>` for each targeted environment holding a changed cell,
+request that is not a draft, with a folded section naming `shipmate apply <env>`
+for each `apply_mode: targeted` environment holding a changed cell, then
+`shipmate apply` when a changed cell sits outside every targeted environment,
 `shipmate unlock <env> --evict` for an environment holding a locked changed cell,
 and `shipmate help`; it is off when absent. `tools` names the Terramate and
 OpenTofu versions every job installs, each the pinned engine's default when
