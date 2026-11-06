@@ -120,7 +120,8 @@ def test_the_install_step_is_fail_closed():
 
 
 #: curl's whole argv, hand-written; `{tarball}` stands for the download path.
-_CURL_ARGV = ["--retry-all-errors", "-sSL", "--retry", "3", "--connect-timeout", "10"]
+_CURL_ARGV = ["--retry-all-errors", "-sSL", "--retry", "10", "--retry-max-time", "120"]
+_CURL_ARGV += ["--connect-timeout", "10"]
 _CURL_ARGV += ["--speed-limit", "1024", "--speed-time", "30", "-o", "{tarball}"]
 _CURL_ARGV += ["-w", "%{http_code}", _URL]
 

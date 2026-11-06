@@ -1382,16 +1382,23 @@ The `Install Terramate` step in `actions/setup` failed. Every annotation starts
 | "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
 | "<url> delivered version <got>; check the signed checksums.txt and the release asset." | The binary reports another version than the one requested. |
 
+Setup downloads five files with curl: the Terramate checksums and their signature,
+the OpenTofu checksums and their signature, and the Terramate archive. curl retries
+each after a network error, a 408, 429 or 5xx response, or a transfer below 1 KiB/s
+for 30 seconds, with waits that double from 1 second or follow the server's
+`Retry-After`, and gives up at once when a `Retry-After` wait would pass the limit.
+It decides on no new retry once 120 seconds have passed, so one file can take about
+3 minutes before the step fails. A 403 or 404 is not retried. A step that still
+fails after retries met a longer outage: re-run the job.
+
 ### `Failed to validate OpenTofu CLI zip checksum`
 
 The `Install OpenTofu` step fails with this when the downloaded zip's sha256 is
 not among the Linux `amd64` and `arm64` digests of the signed `SHA256SUMS`: the
 asset differs from the signed one, or the runner is not Linux `amd64` or
-`arm64`. A re-run downloads the same asset.
-
-curl retries HTTP 408, 429, 500, 502, 503 and 504 responses, timeouts and stalls
-three times before the step fails. It also retries connection resets and TLS
-errors (`--retry-all-errors`), which is why setup needs curl 7.71 or later.
+`arm64`. A re-run downloads the same asset. `opentofu/setup-opentofu` downloads
+the zip with its own retry: 3 attempts, 10 to 20 seconds apart, on a 5xx, 408 or
+429 response or a network error.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 
