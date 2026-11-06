@@ -44,10 +44,11 @@ runs:
         dir="$RUNNER_TEMP/terramate-sums"
         mkdir -p "$dir"
         for f in checksums.txt checksums.txt.sig; do
-          # --retry covers 408/429/500/502/503/504 and timeouts, stalls included. --retry-all-errors
-          # adds connection resets and TLS errors; it needs curl 7.71+, and an older curl exits 2.
+          # --retry covers 408/429/500/502/503/504 and timeouts, stalls included, with doubling waits
+          # for about 2 minutes. --retry-all-errors adds connection resets and TLS errors; it needs
+          # curl 7.71+, and an older curl exits 2.
           rc=0
-          code="$(curl --retry-all-errors -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+          code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
             -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
           if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
             if [ "$rc" -eq 2 ]; then
@@ -96,7 +97,7 @@ runs:
         mkdir -p "$dir"
         for f in "$sums" "$sums.gpgsig"; do
           rc=0
-          code="$(curl --retry-all-errors -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+          code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
             -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
           if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
             fail "${base}/${f} answered HTTP ${code:-000} (curl exit ${rc})."
@@ -152,7 +153,7 @@ runs:
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$dir"
         rc=0
-        code="$(curl --retry-all-errors -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+        code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
           -o "$dir/terramate.tar.gz" -w '%{http_code}' "$url")" || rc=$?
         if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
           if [ "${code:-000}" = 404 ]; then
