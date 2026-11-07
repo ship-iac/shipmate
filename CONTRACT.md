@@ -3115,13 +3115,19 @@ request's Checks tab, where the cell's apply check holds up to 65,535 bytes of
 the plan, §Check names) → the cell's bare line. The space every remaining
 cell's bare line and every environment heading need is reserved up front, so
 an early giant plan cannot starve a later cell, and every cell keeps its line
-and its link. The command section is left out before any of these steps: it is
-added after every cell is sized, only when the whole body with it stays within
-the budget, and never shrinks a cell; leaving it out warns nothing. If even the
-bare lines alone cannot fit the cap, the summary fails loud rather than posting
-a truncated comment. Plan text is emitted only inside a backtick
-fence computed to be longer than any backtick run in the text —
-author-controlled plan output cannot escape the fence.
+and its link. The room left after the head, every heading and every bare line
+is spent in two passes. First, each environment with a changed cell gets an
+equal share for its first changed cell's fold-out. Then every changed cell
+still on its bare line gets what is left, in comment order, including what a
+first cell did not use. So every changed environment shows a fold-out before
+any shows a second, unless a share is too small to hold a truncated plan; then
+the cells fill in comment order. The command section is left out before any of
+these steps: it is added after every cell is sized, only when the whole body
+with it stays within the budget, and never shrinks a cell; leaving it out
+warns nothing. If even the bare lines alone cannot fit the cap, the summary
+fails loud rather than posting a truncated comment. Plan text is emitted only
+inside a backtick fence computed to be longer than any backtick run in the
+text — author-controlled plan output cannot escape the fence.
 
 The data feeding the comment ships in the per-cell artifact
 `cell-summary.<env>.<slug>` (same dot-delimited, env-first grammar as
@@ -3507,10 +3513,12 @@ or carrying another type. Its `result` grammar is `applied | failed | blocked`. 
 is a display status derived at render time, never a value `apply-cell` writes,
 so the validator still rejects an out-of-enum `result`.
 
-The 65,536-character comment cap and the up-front reserve of every row's bare
-line work the same way as the plan comment's, above, but the truncation
-direction is the opposite. A plan diff is read top-down, so the plan comment's
-fold-out keeps the head. Apply output is read for its END: a failing apply's
+The 65,536-character comment cap, the up-front reserve of every row's bare
+line and the degrade ladder work the same way as the plan comment's, above,
+but the apply comment sizes its fold-outs in comment order, with no
+per-environment share, and the truncation direction is the opposite. A plan
+diff is read top-down, so the plan comment's fold-out keeps the head. Apply
+output is read for its END: a failing apply's
 fatal `Error:` line and a successful apply's closing `Apply complete!
 Resources: ...` line are both the last thing tofu prints, so each attempted
 cell's fold-out instead keeps the TAIL — full output → truncated (front cut at
