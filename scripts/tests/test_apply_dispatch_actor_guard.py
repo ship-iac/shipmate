@@ -130,6 +130,17 @@ DOWNSTREAM_NEEDS = {
             "envlevel2",
             "envlevel3",
         ],
+        "outcome": [
+            "guard",
+            "review",
+            "detect",
+            "lock",
+            "envlevel0",
+            "envlevel1",
+            "envlevel2",
+            "envlevel3",
+            "summary",
+        ],
     },
     # No `summary` job at all: an unlock posts no comment and refreshes no gate, which is why
     # nothing here mints the App key.

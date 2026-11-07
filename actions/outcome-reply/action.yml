@@ -1,0 +1,98 @@
+name: shipmate outcome-reply
+description: Post one 🔴 reply on the pull request when a dispatched plan or apply run ended without posting its result. The calling job decides that no result was posted; this action picks the reason from its inputs. Mints a shipmate App installation token with pull-requests write. A reply that cannot be posted only warns.
+inputs:
+  verb:
+    description: The command the run answers, `plan` or `apply` (an auto apply passes `apply`). Names the reply header and the run in its text.
+    required: true
+  environment:
+    description: The targeted apply's environment, shown in the reply header. Empty for a plan or a bare apply.
+    required: false
+    default: ""
+  pr-number:
+    description: Pull request number to reply on.
+    required: true
+  review-result:
+    description: The apply run's `needs.review.result`; `failure` selects the refused reply. Empty for a plan.
+    required: false
+    default: ""
+  summary-result:
+    description: The run's `needs.summary.result`; `cancelled` without a run cancel means a newer gate writer of the head evicted the summary.
+    required: true
+  run-cancelled:
+    description: "`true` when the run itself was cancelled. Computed by the caller from its `needs.*.result`: in a job that starts after a run cancel, a step-level `cancelled()` is false."
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-pull-requests: write
+    # Exactly one of the four `if:`s holds for any inputs (test_outcome_reply.py). They read
+    # inputs only, never a status function: see `run-cancelled`.
+    - name: Reply that the review refused the apply
+      if: ${{ inputs.review-result == 'failure' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+      run: |
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        SHIPMATE_REPLY_OUTCOME=refused SHIPMATE_REPLY_TEXT="its review check stopped [the apply run]($url) before any cell applied; the reason is in that run's log." \
+          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
+    - name: Reply that the apply run was cancelled
+      if: ${{ inputs.review-result != 'failure' && inputs.run-cancelled == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+      run: |
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="[the apply run]($url) was cancelled before it posted a result." \
+          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
+    - name: Reply that a newer run replaced the summary
+      if: ${{ inputs.review-result != 'failure' && inputs.run-cancelled != 'true' && inputs.summary-result == 'cancelled' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+      run: |
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        text="[the $SHIPMATE_REPLY_VERB run]($url) posted no result: a newer run for this head replaced its summary."
+        if [ "$SHIPMATE_REPLY_VERB" = apply ]; then text+=" Its cells' results are on their apply checks."; fi
+        SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
+          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
+    - name: Reply that the run ended without a result
+      if: ${{ inputs.review-result != 'failure' && inputs.run-cancelled != 'true' && inputs.summary-result != 'cancelled' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+      run: |
+        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+        SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="[the $SHIPMATE_REPLY_VERB run]($url) ended before it posted a result; the error is in that run's log." \
+          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"

@@ -79,6 +79,7 @@ APPLY_JOBS = {
     "envlevel2",
     "envlevel3",
     "summary",
+    "outcome",
 }
 UNLOCK_JOBS = {"guard", "detect", "unlock"}
 
