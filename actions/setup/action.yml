@@ -57,7 +57,7 @@ runs:
           exit 1
         }
         # The first verify step, so it checks the runner prerequisites for every later step.
-        for tool in curl openssl base64; do
+        for tool in curl openssl base64 sha256sum; do
           command -v "$tool" >/dev/null || fail "${tool} is not installed on the runner."
         done
         key="${SHIPMATE_CACHE_KEY:-}"
@@ -66,14 +66,10 @@ runs:
         # Outside $dir, which the cache saves whole.
         der="$RUNNER_TEMP/terramate-checksums.der"
         files=(checksums.txt checksums.txt.sig)
-        drop() { for f in "${files[@]}"; do rm -f "${dir:?}/${f:?}"; done; }
+        drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
         mkdir -p "$dir"
-        # Without a restored entry, nothing explains a file already here.
-        [ -n "$key" ] || drop
-        restored=""
         download() {
           for f in "${files[@]}"; do
-            if [ -f "$dir/$f" ]; then restored=1; continue; fi
             # Each download retries network errors, 408/429/5xx and stalls (<1 KiB/s for 30 s), waiting 1 s doubling or the server's Retry-After;
             # curl decides on no new retry after 120 s, so one file can take about 3 minutes. --retry-all-errors needs curl 7.71+; older exits 2.
             rc=0
@@ -89,6 +85,7 @@ runs:
         }
         # Runs as a condition, where set -e is off, so each check returns its own reason.
         check() {
+          for f in "${files[@]}"; do [ -f "$dir/$f" ] || { reason="$dir/$f is not a regular file."; return 1; }; done
           # cosign writes the signature base64-encoded; openssl reads it as DER.
           base64 -d "$dir/checksums.txt.sig" > "$der" || { reason="${base}/checksums.txt.sig is not base64."; return 1; }
           rc=0
@@ -106,11 +103,9 @@ runs:
             lines+="${line}"$'\n'
           done
         }
-        download
-        # A restored file that fails is downloaded once more; a fresh copy that fails fails the step.
-        if ! check; then
-          [ -n "$restored" ] || fail "$reason"
-          echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloaded the release files again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+        # Without a restored entry, nothing explains a file already here.
+        if [ -z "$key" ] || ! check; then
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloaded checksums.txt and checksums.txt.sig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           drop
           download
           check || fail "$reason"
@@ -140,14 +135,10 @@ runs:
         base="https://github.com/opentofu/opentofu/releases/download/v${v}"
         dir="$RUNNER_TEMP/tofu-release"
         files=("$sums" "$sums.gpgsig")
-        drop() { for f in "${files[@]}"; do rm -f "${dir:?}/${f:?}"; done; }
+        drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
         mkdir -p "$dir"
-        # Without a restored entry, nothing explains a file already here.
-        [ -n "$key" ] || drop
-        restored=""
         download() {
           for f in "${files[@]}"; do
-            if [ -f "$dir/$f" ]; then restored=1; continue; fi
             rc=0
             code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
               -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
@@ -158,6 +149,7 @@ runs:
         }
         # Runs as a condition, where set -e is off, so each check returns its own reason.
         check() {
+          for f in "${files[@]}"; do [ -f "$dir/$f" ] || { reason="$dir/$f is not a regular file."; return 1; }; done
           rc=0
           status="$(gpg --batch --status-fd 1 --verify "$dir/$sums.gpgsig" "$dir/$sums")" || rc=$?
           if [ "$rc" -ne 0 ]; then
@@ -174,14 +166,12 @@ runs:
             lines+="${line}"$'\n'
           done
         }
-        download
         GNUPGHOME="$(mktemp -d)"
         export GNUPGHOME
         gpg --batch --import "$GITHUB_ACTION_PATH/../../keys/opentofu.asc" || fail "gpg could not import the committed OpenTofu key."
-        # A restored file that fails is downloaded once more; a fresh copy that fails fails the step.
-        if ! check; then
-          [ -n "$restored" ] || fail "$reason"
-          echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloaded the release files again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+        # Without a restored entry, nothing explains a file already here.
+        if [ -z "$key" ] || ! check; then
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloaded ${sums} and ${sums}.gpgsig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           drop
           download
           check || fail "$reason"
@@ -215,11 +205,7 @@ runs:
         archive="$release/$asset"
         bin="$RUNNER_TEMP/tofu"
         mkdir -p "$release" "$bin"
-        # Without a restored entry, nothing explains an archive already here.
-        [ -n "$key" ] || rm -f "$archive"
-        restored=""
         download() {
-          if [ -f "$archive" ]; then restored=1; return 0; fi
           rc=0
           code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
             -o "$archive" -w '%{http_code}' "$url")" || rc=$?
@@ -231,15 +217,15 @@ runs:
           fi
         }
         check() {
+          [ -f "$archive" ] || { reason="${archive} is not a regular file."; return 1; }
           sum="$(sha256sum "$archive" | awk '{print $1}')"
+          [ -n "$sum" ] || fail "sha256sum printed no digest for ${archive}."
           [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed ${sums} names; the release asset differs from the signed one."; return 1; }
         }
-        download
-        # A restored archive that fails is downloaded once more; a fresh copy that fails fails the step.
-        if ! check; then
-          [ -n "$restored" ] || fail "$reason"
-          echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloaded the release files again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
-          rm -f "$archive"
+        # Without a restored entry, nothing explains an archive already here.
+        if [ -z "$key" ] || ! check; then
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloaded ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          rm -rf "${archive:?}"
           download
           check || fail "$reason"
         fi
@@ -279,11 +265,7 @@ runs:
         archive="$release/$asset"
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$release" "$dir"
-        # Without a restored entry, nothing explains an archive already here.
-        [ -n "$key" ] || rm -f "$archive"
-        restored=""
         download() {
-          if [ -f "$archive" ]; then restored=1; return 0; fi
           rc=0
           code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
             -o "$archive" -w '%{http_code}' "$url")" || rc=$?
@@ -295,15 +277,15 @@ runs:
           fi
         }
         check() {
+          [ -f "$archive" ] || { reason="${archive} is not a regular file."; return 1; }
           sum="$(sha256sum "$archive" | awk '{print $1}')"
+          [ -n "$sum" ] || fail "sha256sum printed no digest for ${archive}."
           [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed checksums.txt names; the release asset differs from the signed one."; return 1; }
         }
-        download
-        # A restored archive that fails is downloaded once more; a fresh copy that fails fails the step.
-        if ! check; then
-          [ -n "$restored" ] || fail "$reason"
-          echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloaded the release files again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
-          rm -f "$archive"
+        # Without a restored entry, nothing explains an archive already here.
+        if [ -z "$key" ] || ! check; then
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloaded ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          rm -rf "${archive:?}"
           download
           check || fail "$reason"
         fi

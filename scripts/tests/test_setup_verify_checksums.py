@@ -46,11 +46,23 @@ _TOFU_CACHE_KEY = f"shipmate-tools-Linux-X64-tofu-{_TOFU}"
 _TM_CACHE_KEY = f"shipmate-tools-Linux-X64-terramate-{_TERRAMATE}"
 
 
-def _warning(tool, key, reason):
-    """The one warning a step prints before it downloads a failed cache entry's files again."""
+def _warning(sid, reason):
+    """The one warning step `sid` prints before it downloads a failed cache entry's files again."""
+    tool, key, names = {
+        "tofu-sums": (
+            f"OpenTofu {_TOFU}",
+            _TOFU_CACHE_KEY,
+            f"{_TOFU_SUMS} and {_TOFU_SUMS}.gpgsig",
+        ),
+        "terramate-sums": (
+            f"Terramate {_TERRAMATE}",
+            _TM_CACHE_KEY,
+            "checksums.txt and checksums.txt.sig",
+        ),
+    }[sid]
     return (
-        f"::warning title=Tool cache entry failed verification::{tool}: {reason} Downloaded the "
-        "release files again. Every job repeats this download until the entry is deleted: "
+        f"::warning title=Tool cache entry failed verification::{tool}: {reason} Downloaded "
+        f"{names} again. Every job repeats this download until the entry is deleted: "
         f"gh cache delete {key} --repo {_REPO}\n"
     )
 
@@ -149,8 +161,8 @@ def _genuine():
 def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cached=None, key=None):
     """Run step `sid`'s body (or `body`) with curl serving `served` (basename -> bytes; the
     genuine fixtures by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`.
-    `cached` (basename -> bytes) is placed in the step's release directory first, and `key`,
-    when given, is the `SHIPMATE_CACHE_KEY`.
+    `cached` (basename -> bytes, or None for a directory) is placed in the step's release
+    directory first, and `key`, when given, is the `SHIPMATE_CACHE_KEY`.
 
     Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP);
     openssl's argv per call is in `tmp_path/logs/openssl`.
@@ -164,7 +176,10 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
     release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
     for name, data in (cached or {}).items():
         release.mkdir(exist_ok=True)
-        (release / name).write_bytes(data)
+        if data is None:
+            (release / name).mkdir()
+        else:
+            (release / name).write_bytes(data)
     for name, code in (codes or {}).items():
         (serve / f"{name}.code").write_text(code, encoding="utf-8")
     log = logs.as_posix()
@@ -462,9 +477,10 @@ def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
 @pytest.mark.parametrize(
     ("sid", "missing", "present"),
     [
-        ("terramate-sums", "curl", ("openssl", "base64")),
-        ("terramate-sums", "openssl", ("curl", "base64")),
-        ("terramate-sums", "base64", ("curl", "openssl")),
+        ("terramate-sums", "curl", ("openssl", "base64", "sha256sum")),
+        ("terramate-sums", "openssl", ("curl", "base64", "sha256sum")),
+        ("terramate-sums", "base64", ("curl", "openssl", "sha256sum")),
+        ("terramate-sums", "sha256sum", ("curl", "openssl", "base64")),
         ("tofu-sums", "gpg", ()),
     ],
 )
@@ -475,7 +491,8 @@ def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
     """PATH holds only never-run stubs for `present`. The Terramate step runs first and checks
     the tools it and the installers need; the OpenTofu step checks gpg alone.
 
-    Mutations: drop `curl`, `openssl` or `base64` from the Terramate step's `command -v` loop;
+    Mutations: drop `curl`, `openssl`, `base64` or `sha256sum` from the Terramate step's
+    `command -v` loop;
     delete the OpenTofu step's `command -v gpg` line.
     """
     bin_dir = tmp_path / "bin"
@@ -637,7 +654,7 @@ def _signature_log(sid, tmp_path, gpg):
 @bash_only
 @needs_tools
 def test_a_genuine_cache_hit_downloads_nothing_and_verifies_the_same_way(tmp_path, sid):
-    """Mutation: download each file unconditionally (curl is called twice)."""
+    """Mutation: run `download` before the restored-entry `if` (curl is called twice)."""
     r, out, curl, gpg, rt = _run(
         tmp_path, sid, cached={n: _genuine()[n] for n in _SUMS_NAMES[sid]}, key=_CACHE_KEYS[sid]
     )
@@ -699,14 +716,31 @@ def test_a_cached_file_that_fails_is_downloaded_again_with_one_warning(
     """A poisoned entry costs a download, never a wrong digest, and names its key for deletion.
 
     Mutations: fail instead of downloading again (trust the hit: exit 1); download again without
-    the warning; delete only the checksum file and keep the cached signature (one curl call, not
-    two).
+    the warning.
     """
     cached = {n: _genuine()[n] for n in _SUMS_NAMES[sid]}
     cached[name] = _poison(name, needle)
     r, out, curl, _, rt = _run(tmp_path, sid, cached=cached, key=_CACHE_KEYS[sid])
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stdout == _warning(_TOOLS[sid], _CACHE_KEYS[sid], reason)
+    assert r.stdout == _warning(sid, reason)
+    assert (out, curl) == (_OUTPUTS[sid], _downloads(sid, rt))
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_a_restored_checksum_path_that_is_a_directory_is_downloaded_again(tmp_path, sid):
+    """A restored path that is not a regular file costs a download, not the job.
+
+    Mutation: `rm -f` in place of `rm -rf` in `drop` (the step exits 1 on the directory).
+    """
+    name, sig = _SUMS_NAMES[sid]
+    cached = {name: None, sig: _genuine()[sig]}
+    r, out, curl, _, rt = _run(tmp_path, sid, cached=cached, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    d = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    reason = f"{d.as_posix()}/{name} is not a regular file."
+    assert r.stdout == _warning(sid, reason)
     assert (out, curl) == (_OUTPUTS[sid], _downloads(sid, rt))
 
 
@@ -725,7 +759,7 @@ def test_a_failed_entry_whose_fresh_copy_fails_too_fails_after_one_download(
     r, out, curl, _, rt = _run(tmp_path, sid, served=served, cached=cached, key=_CACHE_KEYS[sid])
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     error = f"{_TOFU_ERROR if sid == 'tofu-sums' else _TM_ERROR}{reason}\n"
-    assert r.stdout == _warning(_TOOLS[sid], _CACHE_KEYS[sid], reason) + error
+    assert r.stdout == _warning(sid, reason) + error
     assert (out, curl) == (f"refusal={_TOOLS[sid]}: {reason}\n", _downloads(sid, rt))
 
 

@@ -2700,10 +2700,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner architecture, keyed `shipmate-tools-<os>-<arch>-<tool>-<version>`,
   exact match. Every job restores the entry and verifies every restored file as
   it would a download: the checksum file against its signature and the
-  committed key, the archive against the verified digest. A restored file that
-  fails is deleted and downloaded once more, and the step warns
-  `Tool cache entry failed verification`, naming the entry's key and its
-  `gh cache delete` command; the entry stays, so every later job downloads
+  committed key, the archive against the verified digest. When a restored file
+  fails, is missing or is not a regular file, the step deletes its files (the
+  checksum file and signature, or the archive), downloads them once more and
+  warns `Tool cache entry failed verification`, naming those files, the
+  entry's key and its `gh cache delete` command; the entry stays, so every later job downloads
   again until it is deleted. A job with `tofu: "false"` restores and saves no
   OpenTofu entry. A job saves an entry after a restore that missed and only
   after the tool installed; a failed save does not fail the job.

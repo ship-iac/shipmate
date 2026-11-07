@@ -1399,13 +1399,15 @@ fails after retries met a longer outage: re-run the job.
 ### `Tool cache entry failed verification`
 
 A release file `setup` restored from the tool cache failed the check a download
-gets: the checksum file or its signature in a `Verify Terramate checksums` or
-`Verify OpenTofu checksums` step, the archive in an `Install Terramate` or
-`Install OpenTofu` step. The step deleted it, downloaded the release files again
-and verified them, so the job went on. The warning ends with the reason the
-restored file failed, then `Every job repeats this download until the entry is
-deleted: gh cache delete <key> --repo <owner>/<repo>`. The entry is corrupt or
-was altered ([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites).
+gets, or is missing or not a regular file: the checksum file or its signature in
+a `Verify Terramate checksums` or `Verify OpenTofu checksums` step, the archive
+in an `Install Terramate` or `Install OpenTofu` step. The step deleted its
+files, downloaded them again and verified them, so the job went on. The warning
+gives the reason the restored files failed, then `Downloaded <files> again.
+Every job repeats this download until the entry is deleted: gh cache delete
+<key> --repo <owner>/<repo>`, where `<files>` names the checksum file and its
+signature, or the archive. The entry is corrupt or was altered
+([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites).
 
 1. Run the `gh cache delete` command the warning prints. The key starts
    `shipmate-tools-`.

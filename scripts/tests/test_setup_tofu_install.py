@@ -72,6 +72,7 @@ def _install(
         bin_dir,
         "curl",
         f"printf '%s\\n' \"$@\" >> '{log}/curl'\ntouch '{log}/downloaded'\n"
+        'prev=""; for a in "$@"; do if [ "$prev" = -o ]; then : > "$a"; fi; prev="$a"; done\n'
         f"printf '{curl_output}'\nexit {curl_rc}",
     )
     _stub(
@@ -97,7 +98,7 @@ def _install(
         "sha256sum",
         f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" >> '{log}/sha256sum'\n"
         f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={cached_digest or digest}; fi\n"
-        'echo "$d  $1"',
+        'if [ -n "$d" ]; then echo "$d  $1"; fi',
     )
     _stub(
         bin_dir,
@@ -295,7 +296,7 @@ def _mismatch(got):
 def _warning(reason):
     return (
         f"::warning title=Tool cache entry failed verification::OpenTofu {_VERSION}: {reason} "
-        "Downloaded the release files again. Every job repeats this download until the entry is "
+        f"Downloaded {_ASSET} again. Every job repeats this download until the entry is "
         f"deleted: gh cache delete {_CACHE_KEY} --repo o/r\n"
     )
 
@@ -313,7 +314,7 @@ def _install_cached(tmp_path, **kwargs):
 
 @bash_only
 def test_a_restored_archive_whose_digest_matches_is_not_downloaded(tmp_path):
-    """Mutation: download the archive unconditionally (curl is called)."""
+    """Mutation: run `download` before the restored-entry `if` (curl is called)."""
     r, runner_temp, logs = _install_cached(tmp_path)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/tofu-release/{_ASSET}"
@@ -357,3 +358,29 @@ def test_an_archive_present_without_a_restored_key_is_downloaded_again(tmp_path)
     r, runner_temp, logs = _install(tmp_path, "200", 0, key="")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert _argv(logs, "curl") == _curl(f"{runner_temp}/tofu-release/{_ASSET}")
+
+
+@bash_only
+def test_a_restored_archive_path_that_is_a_directory_is_downloaded_again(tmp_path):
+    """A restored path that is not a regular file costs a download, not the job.
+
+    Mutation: `rm -f` in place of `rm -rf` before the download (the step exits 1 on the
+    directory).
+    """
+    release = tmp_path / "runner-temp" / "tofu-release"
+    (release / _ASSET).mkdir(parents=True)
+    r, runner_temp, logs = _install(tmp_path, "200", 0, key=_CACHE_KEY)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    archive = f"{runner_temp}/tofu-release/{_ASSET}"
+    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive])
+    assert r.stdout == _warning(f"{archive} is not a regular file.") + _VERIFIED
+
+
+@bash_only
+def test_an_empty_sha256sum_output_fails_naming_the_tool_not_the_asset(tmp_path):
+    """Mutation: drop the empty-digest guard (the annotation reports a tampered asset)."""
+    r, runner_temp, logs = _install(tmp_path, "200", 0, digest="")
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    archive = f"{runner_temp}/tofu-release/{_ASSET}"
+    assert r.stdout == f"{_PREFIX}sha256sum printed no digest for {archive}.\n"
+    assert (_argv(logs, "python3"), _github_path(tmp_path)) == (None, "")
