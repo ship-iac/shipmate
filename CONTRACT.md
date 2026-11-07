@@ -3523,10 +3523,9 @@ carries a pull request number, and `summary` did not output `posted` as `true`.
 `actions/apply-summary` writes `posted` only after its result comment's POST
 succeeded. `review` outputs `unbound` as `true` just before its two refusals
 that read the pull request as missing (a null `pullRequest`) or not `OPEN`; a
-failed `review` with that output, or in an `auto` run, gets no reply. Every
-other failed `review` replies refused, including one that failed at its token
-mint or query before it read the pull request (GitHub answers an unknown number
-with a query error, so that number replies). The reply is:
+failed `review` with that output, or in an `auto` run, skips `outcome`. Any
+other failed `review` runs `outcome` with the refused text; whether a reply
+appears then depends only on `outcome` minting and posting, as above. The reply is:
 
 - refused when `review` failed;
 - otherwise cancelled when a job other than `summary` ended `cancelled`: the
