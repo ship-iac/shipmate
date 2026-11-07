@@ -20,17 +20,19 @@ reach this script, which the marker's length bound keeps inside.
 Without a flag, the first marker comment in listing order is PATCHed, or the body is POSTed
 when there is none.
 
-With `--update-only`, the newest visible marker comment is PATCHed, and nothing is POSTed.
-
 With `--new`, the body is always POSTed, then every earlier marker comment that is visible and
 by the POST's author (its response's `user.login`) is minimized as outdated. Posting first means
 the pull request never shows zero plan comments, and the new comment is never one minimized.
+
+With `--update-only`, the newest visible marker comment is PATCHed instead, nothing is POSTed,
+and the other visible ones by the PATCH's author are minimized the same way.
+
 Under either flag, visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids
 (`minimized_ids`). A read that fails or is incomplete, a non-boolean `isMinimized` included,
 prints one `::warning::` and every marker comment counts as visible: failing the step would drop
 the run's comment to save a no-op, since minimizing a minimized comment changes nothing, and the
 newest comment is the one to bring up to date either way. Each failed minimize prints one
-`::warning::`, as does a POST response with no author, and the run goes on. Every warning goes
+`::warning::`, as does a write response with no author, and the run goes on. Every warning goes
 to stderr on one line; one quoting an unexpected answer quotes its first 200 characters.
 
 With `--head`, the pull request's current head is read once a write is due, and nothing is
@@ -144,7 +146,9 @@ def _minimize_warning(pr, error):
 
 
 def _minimize_earlier(pr, visible, response):
-    """Minimize each comment of `visible` by the author of the POST `response`."""
+    """Minimize each comment of `visible` by the author of the write `response`."""
+    if not visible:
+        return
     try:
         author = json.loads(response)["user"]["login"]
     except (ValueError, LookupError, TypeError):
@@ -246,10 +250,12 @@ def main():
         print(stop)
         return
     if update_only:
-        found = visible[-1:]
-    response, word = _write(repo, pr, path, None if new or not found else found[0]["id"])
-    if new:
-        _minimize_earlier(pr, visible, response)
+        response, word = _write(repo, pr, path, visible[-1]["id"])
+        _minimize_earlier(pr, visible[:-1], response)
+    else:
+        response, word = _write(repo, pr, path, None if new or not found else found[0]["id"])
+        if new:
+            _minimize_earlier(pr, visible, response)
     print(word)
 
 

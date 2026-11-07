@@ -130,16 +130,13 @@ def _upsert(
     return 0, calls
 
 
+def _patch_of(cid, body):
+    """A PATCH of comment `cid` with `body`, as the argv after `gh`."""
+    return ["api", "-X", "PATCH", f"repos/o/r/issues/comments/{cid}", "-F", f"body=@{body}"]
+
+
 def _patch(cid, tmp_path):
-    return [
-        "gh",
-        "api",
-        "-X",
-        "PATCH",
-        f"repos/o/r/issues/comments/{cid}",
-        "-F",
-        f"body=@{tmp_path / 'comment.md'}",
-    ]
+    return ["gh", *_patch_of(cid, tmp_path / "comment.md")]
 
 
 def _post(tmp_path):
@@ -254,12 +251,27 @@ def test_a_null_head_prints_head_failed_not_moved(monkeypatch, tmp_path, capsys)
 
 
 def test_update_only_patches_the_newest_visible_comment(monkeypatch, tmp_path, capsys):
-    """A quiet run rewrites the plan comment people see, and posts and minimizes nothing.
-    Mutations: PATCH the first listed comment -- comment 5; PATCH the newest listed one, minimized
-    or not -- comment 7; skip the visibility read under `--update-only` -- comment 5."""
-    listing = [_head(5, SUMMARY), _head(6, SUMMARY), _head(7, SUMMARY)]
+    """A quiet run rewrites the plan comment people see, posts nothing, and minimizes the App's
+    other visible plan comments, which would keep showing stale applies; another App's stays.
+    Mutations: PATCH the first listed comment -- comment 4; PATCH the newest listed one, minimized
+    or not -- comment 7; skip the visibility read under `--update-only` -- comment 7; drop the
+    minimize -- no IC_5 call; drop the author compare -- IC_4 minimized."""
+    listing = [
+        _head(4, SUMMARY, login="other-app[bot]"),
+        _head(5, SUMMARY),
+        _head(6, SUMMARY),
+        _head(7, SUMMARY),
+    ]
     code, calls = _upsert(monkeypatch, tmp_path, listing, "--update-only", minimized={"IC_7"})
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5", "IC_6", "IC_7"), _patch(6, tmp_path)])
+    assert (code, calls) == (
+        0,
+        [
+            LIST_ARGV,
+            _read("IC_4", "IC_5", "IC_6", "IC_7"),
+            _patch(6, tmp_path),
+            _minimize("IC_5"),
+        ],
+    )
     assert capsys.readouterr() == ("updated\n", "")
 
 
@@ -687,10 +699,6 @@ _LIST = LIST_ARGV[1:]
 
 def _post_of(body):
     return ["api", "repos/o/r/issues/7/comments", "-F", f"body=@{body}"]
-
-
-def _patch_of(cid, body):
-    return ["api", "-X", "PATCH", f"repos/o/r/issues/comments/{cid}", "-F", f"body=@{body}"]
 
 
 #: The `--new` visibility read and minimize of `_head(5, ...)`'s comment, as the argv after `gh`.

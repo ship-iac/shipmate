@@ -1840,12 +1840,12 @@ check/status/comment/issue that crosses a workflow-run boundary:
   write, which GitHub commit statuses lack.
 - **The plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
-  `shipmate[bot]`), posted new by `actions/summary` on each plan run that
-  posts it (a quiet no-change run rewrites the newest visible one instead;
-  §Plan comment), through `scripts/upsert-comment --new`, which reads the marker
-  from the body's first line and matches it only at the start of a comment.
-  Under the same `pull_requests: write` token it then minimizes the App's
-  earlier visible plan comments as outdated (GraphQL `minimizeComment`;
+  `shipmate[bot]`), posted new by `actions/summary` through
+  `scripts/upsert-comment --new`, or, on a quiet no-change run, written over
+  the newest visible one through `--update-only` (§Plan comment). The script
+  reads the marker from the body's first line and matches it only at the start
+  of a comment. Under the same `pull_requests: write` token it then minimizes
+  the App's other visible plan comments as outdated (GraphQL `minimizeComment`;
   §Plan comment).
 - **The `shipmate doctor` report** — App-authored (its own marker +
   Bot-author lookup, same posture as the plan comment), upserted in place by
@@ -2942,12 +2942,13 @@ command's answer on the pull request (§Comment-ops).
 
 Each plan run that writes the comment posts a new one, so each plan sits after
 the push or command it answers in the pull request timeline, except the quiet
-no-change run above, which PATCHes the newest visible plan comment in place and
-minimizes nothing (`scripts/upsert-comment --update-only`). A draft autoplan,
+no-change run above, which PATCHes the newest visible plan comment in place
+(`scripts/upsert-comment --update-only`) and then minimizes the others as below.
+A draft autoplan,
 a cancelled plan job and a run whose pull request moved to a newer head write
-none. After the post, `scripts/upsert-comment --new` minimizes as outdated
-(GraphQL `minimizeComment`, classifier `OUTDATED`) every earlier visible plan
-comment by the new comment's author. A plan comment is a Bot-authored comment
+none. After the write, `scripts/upsert-comment` minimizes as outdated
+(GraphQL `minimizeComment`, classifier `OUTDATED`) every other visible plan
+comment by the written comment's author. A plan comment is a Bot-authored comment
 whose body starts with the marker: the shipmate App's bot login is derived from
 the registered App name, which a consumer org may have had to slug differently
 than `shipmate[bot]`. The author compare leaves another App's plan comment
@@ -2959,8 +2960,8 @@ comment of pull request #<n>; it stays visible: <error>" and leaves two visible,
 newest last. Visibility is GraphQL `isMinimized`, read for every plan comment
 the listing holds. A failed or incomplete read warns "could not read which plan
 comments of pull request #<n> are minimized, so all count as visible: <error>":
-the run posts, and minimizes the App's earlier plan comments anyway; a quiet
-no-change run rewrites the newest plan comment.
+the run writes, and minimizes the App's other plan comments anyway; a quiet
+no-change run rewrites the newest plan comment, minimized or not.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the superseded autoplan lines and a blank
