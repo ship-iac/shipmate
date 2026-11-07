@@ -19,6 +19,8 @@ read in `main`, so loading this module stays free of side effects.
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's fold-out degrades
 full plan -> truncated plan -> its bare line, never dropping the cell line's check link.
+Every changed environment with plan text gets a fold-out before any gets a second one, while its
+share of the room holds one.
 A truncated plan links the pull request's Checks tab, where the cell's apply check holds up
 to 65,535 bytes of the plan.
 A fold-out shows OpenTofu's `Objects have changed outside of OpenTofu` note as one counted line
@@ -652,6 +654,36 @@ def _entries(cells, order, checks, run_url, locks, stacked, default_branch):
     return entries
 
 
+def _fold_outs(entries, free):
+    """Each entry's section, in `entries` order, sized from `free`, the room fold-outs may add
+    over the bare lines. Pass 1 gives each changed environment's first changed cell with plan
+    text an equal share; pass 2 walks the changed cells in comment order and lets a bare line or
+    a truncated fold-out grow by what is left, until less than MIN_PLAN_CHARS is left."""
+    sections = [bare for bare, _, _ in entries]
+    changed = [i for i, (_, c, _) in enumerate(entries) if c is not None and c["changed"]]
+    with_text = [i for i in changed if entries[i][2] is not None]
+    # Walked backwards so each environment keeps its first cell with plan text.
+    firsts = sorted({entries[i][1]["environment"]: i for i in reversed(with_text)}.values())
+
+    def grow(i, room):
+        old = sections[i]
+        sections[i] = render_section(entries[i][0], entries[i][2], len(old) + room)
+        return len(sections[i]) - len(old)
+
+    if firsts:
+        share = free // len(firsts)
+        for i in firsts:
+            free -= grow(i, share)
+    for i in changed:
+        if free < MIN_PLAN_CHARS:
+            break
+        # A full fold-out's fence closes right before `</details>`; a truncated one's trailer
+        # sits between them.
+        if not sections[i].endswith("`\n</details>"):
+            free -= grow(i, free)
+    return sections
+
+
 def build_comment(
     cells,
     checks,
@@ -671,21 +703,23 @@ def build_comment(
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
     `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block,
-    `doctor_line` of `warnings`, the
-    unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when each count is not
-    zero, then per environment in `by_env` order of `order` its
-    `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed
-    cell with plan text, else its bare line, which names no environment). No footer: the verdict
-    links the run, and neither plan verdict asks anything. With `hints`, a body with a changed
-    cell ends with `commands` when the whole body stays within SIZE_BUDGET, and leaves it out
-    silently otherwise, after every cell is sized, so it never shrinks one. `locks`
-    (`lock_marks`) marks the changed cells another pull request holds, and `commands` names their
-    environments, and the changed environments of `targeted` in `order`; `stacked` and
-    `default_branch` go to `_plan_line` and `stacked_lines`. Every cell is guaranteed its bare
-    line: the space all headings and remaining cells' bare lines need is reserved up front, so an
-    early giant plan cannot starve a later cell. Each of the six blocks yields, with a warning,
-    when the headings and bare lines leave it no room under HARD_CAP. Returns
-    `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
+    `doctor_line` of `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of
+    `lost` when each count is not zero, then per environment in `by_env` order of `order` its
+    `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell
+    with plan text, else its bare line, which names no environment). No footer: the verdict links
+    the run, and neither plan verdict asks anything. With `hints`, a body with a changed cell ends
+    with `commands` when the whole body stays within SIZE_BUDGET, and leaves it out silently
+    otherwise, after every cell is sized, so it never shrinks one. `locks` (`lock_marks`) marks the
+    changed cells another pull request holds, and `commands` names their environments, and the
+    changed environments of `targeted` in `order`; `stacked` and `default_branch` go to `_plan_line`
+    and `stacked_lines`. Every cell is guaranteed its bare line: the space all headings and bare
+    lines need is reserved up front, so an early giant plan cannot starve a later cell. The free
+    room left after the head and every bare line is shared equally among the changed environments'
+    first changed cells with plan text, then what is left goes, in comment order, to every changed
+    cell on its bare line or a truncated fold-out, until less than MIN_PLAN_CHARS is left. Each of
+    the six blocks yields, with a warning, when the headings and bare lines leave it no room under
+    HARD_CAP. Returns `(body, unmanaged_named, lost_named)`, each flag saying whether that line is
+    in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     locks = locks or {}
@@ -713,14 +747,7 @@ def build_comment(
         named[what] = bool(line)
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
-    sections = []
-    for bare, c, text in entries:
-        reserve -= len(bare) + 2
-        section = bare
-        if c is not None and c["changed"]:
-            section = render_section(bare, text, SIZE_BUDGET - used - reserve - 2)
-        sections.append(section)
-        used += len(section) + 2
+    sections = _fold_outs(entries, SIZE_BUDGET - used - reserve)
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
     envs = {c["environment"] for c in meta if c["changed"]}
     changed = [e for e in dict.fromkeys(order) if e in envs] + sorted(envs - set(order))
