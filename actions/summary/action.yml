@@ -430,8 +430,8 @@ runs:
           exit 0
         fi
         degraded="::warning::the plan comment does not say why the gate is held; the gate description says it"
-        # `--head`: the comment is keyed per pull request, so a re-run of an old run would replace
-        # a newer head's comment. upsert-comment then writes nothing and prints `moved`.
+        # `--head`: a re-run of an old run would post over a newer head's comment and minimize
+        # it; upsert-comment then writes nothing and prints `moved`.
         moved="::notice::pull request #$PR has moved past $HEAD_SHA; its plan comment was not written"
         # Degrades: on a failed upsert `Create/refresh gate` still writes the gate, and a red gate
         # over a stale comment greens nothing; on `moved` that step is skipped. A failed render
@@ -473,7 +473,7 @@ runs:
         elif [ "$result" = "moved" ]; then
           echo "$moved"
         elif [ "$result" = "skipped" ]; then
-          echo "nothing changed, no existing plan comment, no doctor warning outside the settings probes, no unmanaged or lost pairs line, not a shipmate plan command; nothing to post"
+          echo "nothing changed, no visible plan comment, no doctor warning outside the settings probes, no unmanaged or lost pairs line, not a shipmate plan command; nothing to post"
         fi
 
     - name: Create apply checks (pending / no-changes)

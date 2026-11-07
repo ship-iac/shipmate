@@ -17,7 +17,7 @@ green. A failed read of either, or a failed
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
 
-`Create apply checks` runs after the sticky comment, so a failed `post` or `nothing-changed`
+`Create apply checks` runs after the plan comment write, so a failed `post` or `nothing-changed`
 comment write publishes no apply check. With nothing in `bodies.jsonl` it reads nothing;
 otherwise it runs `gate-status refuse-newer` first and refuses, writing nothing, over a newer
 run's hold: `gate-hold` writes outside the job's concurrency group, after the hold step's read.

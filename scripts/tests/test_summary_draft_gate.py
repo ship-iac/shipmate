@@ -13,7 +13,7 @@ queued apply check: an apply's refresh serialized before this write would otherw
 cells behind a `pending` nobody upgrades. The refresh only upgrades a fail-closed write, so its
 failure, a hold included, warns and the step passes.
 
-The upsert step leaves the sticky comment as it is on a draft run and makes no comment API call.
+The upsert step leaves the plan comment as it is on a draft run and makes no comment API call.
 
 Both steps run for real: `Create/refresh gate` through `_loader.run_with_gate_gh`, the upsert step
 through `run_with_gh_recorder`.
