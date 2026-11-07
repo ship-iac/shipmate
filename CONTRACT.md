@@ -3108,26 +3108,28 @@ and `lost` outputs, which the same rule reads.
   without which the next line stays inside the HTML block and its link renders
   literally.
 
-GitHub caps issue-comment bodies at 65,536 characters. The comment is built
-to a smaller budget: each changed cell's fold-out degrades, in order, full
-plan → truncated plan (cut at a line boundary, with a link to the pull
-request's Checks tab, where the cell's apply check holds up to 65,535 bytes of
-the plan, §Check names) → the cell's bare line. The space every remaining
-cell's bare line and every environment heading need is reserved up front, so
-an early giant plan cannot starve a later cell, and every cell keeps its line
-and its link. The room left after the head, every heading and every bare line
-is spent in two passes. First, each environment with a changed cell gets an
-equal share for its first changed cell's fold-out. Then every changed cell
-still on its bare line, and every first cell its share truncated, gets what is
-left, in comment order, including what a first cell did not use. So every changed environment shows a fold-out before
-any shows a second, unless a share is too small to hold a truncated plan; then
-the cells fill in comment order. The command section is left out before any of
-these steps: it is added after every cell is sized, only when the whole body
-with it stays within the budget, and never shrinks a cell; leaving it out
-warns nothing. If even the bare lines alone cannot fit the cap, the summary
-fails loud rather than posting a truncated comment. Plan text is emitted only
-inside a backtick fence computed to be longer than any backtick run in the
-text — author-controlled plan output cannot escape the fence.
+GitHub caps issue-comment bodies at 65,536 characters. The comment is built to
+a smaller budget: each changed cell's fold-out degrades, in order, full plan →
+truncated plan (cut at a line boundary, with a link to the pull request's
+Checks tab, where the cell's apply check holds up to 65,535 bytes of the plan,
+§Check names) → the cell's bare line. The space every remaining cell's bare
+line and every environment heading need is reserved up front, so an early
+giant plan cannot starve a later cell, and every cell keeps its line and its
+link. The room left after the head, every heading and every bare line is spent
+in two passes. First, each environment with a changed cell that has plan text
+gets an equal share for the fold-out of its first such cell. Then every
+changed cell on its bare line or a truncated fold-out gets what is left, in
+comment order, including what a first cell did not use, until less than 500
+characters are left. So every changed environment with plan text shows a
+fold-out before any shows a second, unless a share is too small to hold a
+truncated plan; then the cells fill in comment order. The command section is
+left out before any of these steps: it is added after every cell is sized,
+only when the whole body with it stays within the budget, and never shrinks a
+cell; leaving it out warns nothing. If even the bare lines alone cannot fit
+the cap, the summary fails loud rather than posting a truncated comment. Plan
+text is emitted only inside a backtick fence computed to be longer than any
+backtick run in the text — author-controlled plan output cannot escape the
+fence.
 
 The data feeding the comment ships in the per-cell artifact
 `cell-summary.<env>.<slug>` (same dot-delimited, env-first grammar as
