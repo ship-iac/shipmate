@@ -48,7 +48,7 @@ _REVIEW_JOB = {
     "permissions": {},
     "outputs": {
         "decision": "${{ steps.rd.outputs.decision }}",
-        "open": "${{ steps.rd.outputs.open }}",
+        "unbound": "${{ steps.rd.outputs.unbound }}",
     },
 }
 
@@ -79,6 +79,7 @@ _RD_STEP = {
                 '.isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv\')'
             ),
             'if [[ -z "$pr" ]]; then',
+            '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
                 '  echo "::error::Pull request #$PR_NUMBER does not exist in this repository; '
                 'nothing applies."'
@@ -87,13 +88,13 @@ _RD_STEP = {
             "fi",
             "IFS=$'\\t' read -r state draft cross head rd <<< \"$pr\"",
             'if [[ "$state" != OPEN ]]; then',
+            '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
                 '  echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. '
                 "A merged pull request's plans apply through the merge deploy.\""
             ),
             "  exit 1",
             "fi",
-            'echo "open=true" >> "$GITHUB_OUTPUT"',
             'if [[ "$draft" != false ]]; then',
             (
                 '  echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. '
@@ -280,11 +281,12 @@ def test_a_bare_null_pull_request_refuses(tmp_path):
     NOT_FOUND, above); select() still refuses it rather than reading empty fields.
 
     Mutation: replace the `-z "$pr"` branch's `echo ...; exit 1` with
-    `echo "decision=MISSING_PR" >> "$GITHUB_OUTPUT"; exit 0`."""
+    `echo "decision=MISSING_PR" >> "$GITHUB_OUTPUT"; exit 0`; drop its `unbound=true` write
+    (`outcome` would reply on a number naming no pull request)."""
     assert _run_rd(tmp_path, None) == (
         1,
         "::error::Pull request #7 does not exist in this repository; nothing applies.\n",
-        "",
+        "unbound=true\n",
     )
 
 
@@ -294,16 +296,16 @@ def test_a_bare_null_pull_request_refuses(tmp_path):
 def test_a_pull_request_that_is_not_open_refuses(tmp_path, state):
     """A pull request merged between the comment and the dispatch is the deploy's to apply.
 
-    Writes no `open`, so `outcome` posts no reply for it.
+    Writes `unbound`, so `outcome` posts no reply for it.
 
-    Mutations: delete the `"$state" != OPEN` check; move the `open=true` write above it."""
+    Mutations: delete the `"$state" != OPEN` check; drop its `unbound=true` write."""
     assert _run_rd(tmp_path, {**_OPEN, "state": state}) == (
         1,
         (
             f"::error::Pull request #7 is {state}, not OPEN; nothing applies. A merged pull "
             "request's plans apply through the merge deploy.\n"
         ),
-        "",
+        "unbound=true\n",
     )
 
 
@@ -316,7 +318,7 @@ def test_a_draft_pull_request_refuses(tmp_path):
     assert _run_rd(tmp_path, {**_OPEN, "isDraft": True}) == (
         1,
         "::error::Pull request #7 is a draft; nothing applies. Mark it ready for review first.\n",
-        "open=true\n",
+        "",
     )
 
 
@@ -327,7 +329,7 @@ def test_a_fork_pull_request_refuses(tmp_path):
     assert _run_rd(tmp_path, {**_OPEN, "isCrossRepository": True}) == (
         1,
         "::error::Pull request #7 comes from a fork; nothing applies.\n",
-        "open=true\n",
+        "",
     )
 
 
@@ -346,7 +348,7 @@ def test_a_head_differing_in_the_last_character_refuses(tmp_path):
             f"::error::Pull request #7 head is {other}, but this dispatch names {_HEAD}; "
             "nothing applies. Comment `shipmate apply` on the pull request.\n"
         ),
-        "open=true\n",
+        "",
     )
 
 
@@ -361,5 +363,5 @@ def test_the_open_pull_requests_own_head_writes_its_decision(tmp_path, review, d
     assert _run_rd(tmp_path, {**_OPEN, "reviewDecision": review}) == (
         0,
         "",
-        f"open=true\ndecision={decision}\n",
+        f"decision={decision}\n",
     )

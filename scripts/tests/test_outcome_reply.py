@@ -242,10 +242,11 @@ def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel. `run-cancelled` ORs every needed job but
     `guard`, whose success the `if:` requires, and `summary`, whose `cancelled` is an eviction.
 
-    A failed `review` replies only for an open pull request and never for an `auto` run.
+    A failed `review` replies unless it found no open pull request, and never in an `auto` run.
 
     Mutations: drop `&& needs.summary.outputs.posted != 'true'`; drop
-    `needs.review.outputs.open == 'true' &&`; drop `&& !inputs.auto`; drop `summary` from `needs`;
+    `needs.review.outputs.unbound != 'true' &&`; flip its `!=` to `==`; drop `&& !inputs.auto`;
+    drop `summary` from `needs`;
     `permissions: { pull-requests: write }`; pass `needs.review.result` as `summary-result`;
     replace `always()` with `!cancelled()`; drop `needs.lock.result == 'cancelled'` from
     `run-cancelled`."""
@@ -255,7 +256,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
             "${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && "
             "needs.summary.outputs.posted != 'true' && "
             "(needs.review.result != 'failure' || "
-            "(needs.review.outputs.open == 'true' && !inputs.auto)) }}"
+            "(needs.review.outputs.unbound != 'true' && !inputs.auto)) }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,

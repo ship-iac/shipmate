@@ -2217,20 +2217,20 @@ plan`) and no reply, since the job that would answer never ran; for `shipmate
 unlock` the started-run reply links the run when it carries a link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
 
-### 🚀 and no plan comment or reply within a few minutes
+### Rocket reaction and no plan comment or reply
 
 A `shipmate plan` or `shipmate apply` comment got the 🚀 reaction, and neither
-a result nor a 🔴 reply followed. The run ended before its `outcome` job could
-answer: an apply run's `guard` job refused it, a plan run's `facts` job
-failed, or the run failed at startup. An apply whose `review` found the pull
-request closed or merged gets no reply either. A push to a draft pull request
-or a manual cancel ends a `shipmate plan` run with no answer.
+a result nor a 🔴 reply followed within a few minutes. The run ended before its
+`outcome` job could answer: an apply run's `guard` job refused it, a plan run's
+`facts` job failed, or the run failed at startup. An apply whose `review` read
+the pull request as closed or merged gets no reply either; every other `review`
+failure replies refused. A push to a draft pull request or a manual cancel ends
+a `shipmate plan` run with no answer.
 
 Open the Actions tab and filter the runs titled `shipmate · <verb>`. A failed
 `guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
-`review` names it in its job log. A startup failure
-shows on the run page with no jobs started, with GitHub's error for the
-workflow file.
+`review` names it in its job log. A startup failure shows on the run page with
+no jobs started, with GitHub's error for the workflow file.
 
 ### A cancelled autoplan left red checks on the pull request
 

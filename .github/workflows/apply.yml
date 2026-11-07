@@ -67,7 +67,7 @@ jobs:
     permissions: {}
     outputs:
       decision: ${{ steps.rd.outputs.decision }}
-      open: ${{ steps.rd.outputs.open }}
+      unbound: ${{ steps.rd.outputs.unbound }}
     steps:
       - name: Verify the App key arrived
         uses: $/actions/verify-app-key
@@ -99,15 +99,16 @@ jobs:
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
             --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv')
           if [[ -z "$pr" ]]; then
+            echo "unbound=true" >> "$GITHUB_OUTPUT"
             echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
             exit 1
           fi
           IFS=$'\t' read -r state draft cross head rd <<< "$pr"
           if [[ "$state" != OPEN ]]; then
+            echo "unbound=true" >> "$GITHUB_OUTPUT"
             echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. A merged pull request's plans apply through the merge deploy."
             exit 1
           fi
-          echo "open=true" >> "$GITHUB_OUTPUT"
           if [[ "$draft" != false ]]; then
             echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. Mark it ready for review first."
             exit 1
@@ -287,8 +288,8 @@ jobs:
 
   summary:
     needs: [guard, review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3]
-    # A rejected dispatch or a `pr_number` naming no open pull request gets a red run and no App
-    # comment or gate write; an `auto` run refused at review gets none either. Keyed on `review`:
+    # A rejected dispatch, a `pr_number` review reads as missing or not open, or an `auto` run
+    # refused at review gets a red run, no App comment and no gate write. Keyed on `review`:
     # a `detect` failure after a bound review still gets both, as a failed or cancelled apply does.
     if: ${{ always() && needs.review.result == 'success' }}
     runs-on: ubuntu-slim
@@ -348,7 +349,7 @@ jobs:
   # status functions see that cancel. Holds the App key but checks nothing out.
   outcome:
     needs: [guard, review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3, summary]
-    if: ${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && needs.summary.outputs.posted != 'true' && (needs.review.result != 'failure' || (needs.review.outputs.open == 'true' && !inputs.auto)) }}
+    if: ${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && needs.summary.outputs.posted != 'true' && (needs.review.result != 'failure' || (needs.review.outputs.unbound != 'true' && !inputs.auto)) }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
