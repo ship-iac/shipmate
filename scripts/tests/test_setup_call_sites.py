@@ -5,9 +5,10 @@ own `VERSIONS` file. A composite action only warns on an undeclared input, so a 
 passing `${{ vars.TOFU_VERSION }}` would read as an override and silently do nothing.
 
 Each step, `uses:` aside, is asserted whole against a hand-written table: `tofu: "false"` at the
-five detect jobs, which never run OpenTofu; the `id: setup` that plan.yml's and apply.yml's
-detect `refusal` output reads, which an id rename would empty; and `if: false` on the
-manifest-load parse probe.
+five detect jobs, which never run OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml
+site, whose workflow-level `cache-mode: read` denies the save with a warning; the `id: setup` that
+plan.yml's and apply.yml's detect `refusal` output reads, which an id rename would empty; and
+`if: false` on the manifest-load parse probe.
 """
 
 from _loader import WORKFLOWS, local_action, workflow_yaml
@@ -43,15 +44,22 @@ EXPECTED_STEPS = {
     "drift.yml": [_SKIP_TOFU, {}],
     # The remote parse probe never runs a step.
     "manifest-load.yml": [{"if": False}],
-    "plan.yml": [_GATE_READ, {}],
-    "unlock.yml": [_SKIP_TOFU, {}],
+    "plan.yml": [
+        {"id": "setup", "with": {"tofu": "false", "cache-save": "false"}},
+        {"with": {"cache-save": "false"}},
+    ],
+    "unlock.yml": [
+        {"with": {"tofu": "false", "cache-save": "false"}},
+        {"with": {"cache-save": "false"}},
+    ],
 }
 
 
-def test_setup_call_sites_pass_only_the_detect_tofu_switch():
+def test_setup_call_sites_pass_only_the_tofu_and_cache_save_switches():
     """Mutations: drop `tofu` from plan.yml's detect site; add `tofu: "false"` to drift.yml's
     cell site; add `tofu-version: x` to apply.yml's detect site; delete drift.yml's cell
-    site; rename plan.yml's detect site `id: setup` to `id: tools`.
+    site; rename plan.yml's detect site `id: setup` to `id: tools`; drop `cache-save` from
+    unlock.yml's cell site; add `cache-save: "false"` to drift.yml's cell site.
     """
     got = {
         name: [{k: v for k, v in s.items() if k != "uses"} for s in steps]

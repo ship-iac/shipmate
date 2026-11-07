@@ -212,10 +212,10 @@ def _engine_tree():
     return docs
 
 
-def test_only_drift_and_apply_save_the_provider_cache():
-    """Every `actions/cache/save` in the engine, by file and path, is apply's and drift's provider
-    saves and the state save. Mutation: a save step with
-    `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`."""
+def test_every_cache_save_is_pinned_by_file_and_path():
+    """Every `actions/cache/save` in the engine, by file and path: apply's and drift's provider
+    saves, setup's Terramate and OpenTofu release saves, and the state save. Mutation: a save
+    step with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`."""
     saves = sorted(
         (name, (step.get("with") or {}).get("path"))
         for name, doc in _engine_tree().items()
@@ -225,6 +225,8 @@ def test_only_drift_and_apply_save_the_provider_cache():
     assert saves == [
         ("apply-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
         ("drift-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
+        ("setup", "${{ runner.temp }}/terramate-release"),
+        ("setup", "${{ runner.temp }}/tofu-release"),
         ("state", "${{ inputs.path }}"),
     ]
 

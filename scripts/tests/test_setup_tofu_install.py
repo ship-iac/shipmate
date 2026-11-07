@@ -45,11 +45,15 @@ def _install(
     chmod_rc=0,
     tofu_rc=0,
     digest=_DIGEST,
+    cached_digest=None,
+    key=None,
     machine="x86_64",
     system="Linux",
 ):
     """Run the step's body with a curl that prints `curl_output` and exits `curl_rc`, and a
-    `uname` that prints `system` for `-s` and `machine` for `-m`.
+    `uname` that prints `system` for `-s` and `machine` for `-m`. `key`, when given, is the
+    `SHIPMATE_CACHE_KEY`. The sha256sum stub prints `digest` once curl has run, else
+    `cached_digest` (default `digest`), so a restored archive and a fresh one hash apart.
 
     The sha256sum, python3 and chmod stubs append their names to the shared `order` log. The
     python3 stub exits `python_rc` when non-zero; otherwise it writes a `tofu` stub, without the
@@ -62,12 +66,13 @@ def _install(
     logs = tmp_path / "logs"
     runner_temp = tmp_path / "runner-temp"
     for d in (bin_dir, logs, runner_temp):
-        d.mkdir()
+        d.mkdir(exist_ok=True)
     log = logs.as_posix()
     _stub(
         bin_dir,
         "curl",
-        f"printf '%s\\n' \"$@\" > '{log}/curl'\nprintf '{curl_output}'\nexit {curl_rc}",
+        f"printf '%s\\n' \"$@\" >> '{log}/curl'\ntouch '{log}/downloaded'\n"
+        f"printf '{curl_output}'\nexit {curl_rc}",
     )
     _stub(
         bin_dir,
@@ -90,8 +95,9 @@ def _install(
     _stub(
         bin_dir,
         "sha256sum",
-        f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/sha256sum'\n"
-        f'echo "{digest}  $1"',
+        f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" >> '{log}/sha256sum'\n"
+        f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={cached_digest or digest}; fi\n"
+        'echo "$d  $1"',
     )
     _stub(
         bin_dir,
@@ -111,6 +117,8 @@ def _install(
             "SHIPMATE_TOFU_VERSION": _VERSION,
             "SHIPMATE_TOFU_SHA256": _PINNED,
             "STUB_TOFU_VERSION": binary_version,
+            "GITHUB_REPOSITORY": "o/r",
+            **({} if key is None else {"SHIPMATE_CACHE_KEY": key}),
         },
     )
     return r, runner_temp.as_posix(), logs
@@ -265,3 +273,87 @@ def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path, system, 
     )
     assert _argv(logs, "curl") is None
     assert _github_path(tmp_path) == ""
+
+
+_CACHE_KEY = f"shipmate-tools-Linux-X64-tofu-{_VERSION}"
+
+
+def _cached(tmp_path, data=b"cached"):
+    """Place a restored archive where the cache restore writes it."""
+    release = tmp_path / "runner-temp" / "tofu-release"
+    release.mkdir(parents=True)
+    (release / _ASSET).write_bytes(data)
+
+
+def _mismatch(got):
+    return (
+        f"{_URL} has sha256 {got}, not the {_DIGEST} the signed {_SUMS} names; the release "
+        "asset differs from the signed one."
+    )
+
+
+def _warning(reason):
+    return (
+        f"::warning title=Tool cache entry failed verification::OpenTofu {_VERSION}: {reason} "
+        "Downloaded the release files again. Every job repeats this download until the entry is "
+        f"deleted: gh cache delete {_CACHE_KEY} --repo o/r\n"
+    )
+
+
+def _curl(archive):
+    """curl's whole argv for one download of the archive to `archive`."""
+    return [archive if a == "{zip}" else a for a in _CURL_ARGV]
+
+
+def _install_cached(tmp_path, **kwargs):
+    """`_install` on a runner temp holding a restored archive, with the entry's key."""
+    _cached(tmp_path)
+    return _install(tmp_path, "200", 0, key=_CACHE_KEY, **kwargs)
+
+
+@bash_only
+def test_a_restored_archive_whose_digest_matches_is_not_downloaded(tmp_path):
+    """Mutation: download the archive unconditionally (curl is called)."""
+    r, runner_temp, logs = _install_cached(tmp_path)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    archive = f"{runner_temp}/tofu-release/{_ASSET}"
+    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (None, [archive])
+    assert r.stdout == _VERIFIED
+    assert _argv(logs, "python3") == ["-m", "zipfile", "-e", archive, f"{runner_temp}/tofu"]
+    assert _github_path(tmp_path) == f"{runner_temp}/tofu\n"
+
+
+@bash_only
+def test_a_restored_archive_whose_digest_differs_is_downloaded_again_with_one_warning(tmp_path):
+    """Mutations: fail on the restored archive (trust the hit: exit 1); download again without
+    the warning."""
+    r, runner_temp, logs = _install_cached(tmp_path, cached_digest="c" * 64)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    archive = f"{runner_temp}/tofu-release/{_ASSET}"
+    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive, archive])
+    assert r.stdout == _warning(_mismatch("c" * 64)) + _VERIFIED
+    assert _argv(logs, "python3") == ["-m", "zipfile", "-e", archive, f"{runner_temp}/tofu"]
+    assert _github_path(tmp_path) == f"{runner_temp}/tofu\n"
+
+
+@bash_only
+def test_a_restored_archive_whose_fresh_copy_differs_too_fails_after_one_download(tmp_path):
+    """Mutation: download again until the digest matches (a bounded three-attempt loop: three
+    curl calls, not one)."""
+    r, runner_temp, logs = _install_cached(tmp_path, cached_digest="c" * 64, digest="d" * 64)
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert _argv(logs, "curl") == _curl(f"{runner_temp}/tofu-release/{_ASSET}")
+    assert r.stdout == _warning(_mismatch("c" * 64)) + _PREFIX + _mismatch("d" * 64) + "\n"
+    assert (_argv(logs, "python3"), _github_path(tmp_path)) == (None, "")
+
+
+@bash_only
+def test_an_archive_present_without_a_restored_key_is_downloaded_again(tmp_path):
+    """Nothing explains a file present on a miss, so it is replaced, never verified.
+
+    Mutation: ignore the key and keep any present archive (curl is not called).
+    """
+    _cached(tmp_path)
+    r, runner_temp, logs = _install(tmp_path, "200", 0, key="")
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert _argv(logs, "curl") == _curl(f"{runner_temp}/tofu-release/{_ASSET}")

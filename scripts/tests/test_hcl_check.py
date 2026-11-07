@@ -386,7 +386,7 @@ DETECT_STEPS = [
             "filter": "blob:none",
         },
     },
-    {"id": "setup", "uses": "$/actions/setup", "with": {"tofu": "false"}},
+    {"id": "setup", "uses": "$/actions/setup", "with": {"tofu": "false", "cache-save": "false"}},
     {
         "id": "matrix",
         "uses": "$/actions/build-matrix",
