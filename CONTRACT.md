@@ -2614,8 +2614,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
   PyYAML ≥ 6 importable by it), `git` ≥ 2.38 (the `auto` overlap check runs
   `git merge-tree --write-tree`), `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
-  coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate download
-  with it; `apply-cell` hashes the rendered plan from stdin and reads the first
+  coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate and OpenTofu
+  downloads with it; `apply-cell` hashes the rendered plan from stdin and reads the first
   field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on
   `ubuntu-26.04`, x64, and 2026-10-18 on `ubuntu-26.04-arm`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
@@ -2685,13 +2685,35 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `checksums.txt` and its `.sig`, decodes the signature with `base64` and
   verifies it with `openssl` against `keys/terramate-cosign.pub`. Both keys are
   committed in the engine and never fetched at run time. The verified file's
-  Linux `x86_64`/`amd64` and `arm64` digests then bind the download. Any
-  failure fails the step with one `::error::`: a missing tool, a failed fetch, a
-  signature that does not verify, a file with no line for the asset, a download
-  whose digest differs. Nothing installs unverified and nothing falls back.
+  Linux `x86_64`/`amd64` and `arm64` digests then bind each tool's archive,
+  which `setup` fetches with the same `curl` call as the checksum files: the
+  Terramate `.tar.gz`, extracted with `tar`, and the OpenTofu `.zip`, extracted
+  with `python3`. Any failure of a fresh download fails the step with one
+  `::error::`: a missing tool, a failed fetch, a signature that does not
+  verify, a file with no line for the asset, an archive whose digest differs.
+  Nothing installs unverified and nothing falls back.
   Neither key carries an expiry, so the keys change only when upstream changes
   its signer: from then on, every install of a release the new signer signs
   fails until an engine release ships the new key.
+- `setup` keeps each tool's three release files (checksum file, signature,
+  archive) in the Actions cache, one entry per tool, version, runner OS and
+  runner architecture, keyed `shipmate-tools-<os>-<arch>-<tool>-<version>`,
+  exact match. Every job restores the entry and verifies every restored file as
+  it would a download: the checksum file against its signature and the
+  committed key, the archive against the verified digest. A restored file that
+  fails is deleted and downloaded once more, and the step warns
+  `Tool cache entry failed verification`, naming the entry's key and its
+  `gh cache delete` command; the entry stays, so every later job downloads
+  again until it is deleted. A job with `tofu: "false"` restores and saves no
+  OpenTofu entry. A job saves an entry after a restore that missed and only
+  after the tool installed; a failed save does not fail the job.
+  `plan.yml` and `unlock.yml` declare `cache-mode: read`, so their jobs
+  restore only and pass `setup` `cache-save: "false"`. Entries come from the
+  apply, deploy and drift runs, which save in the default branch's cache scope
+  that a pull request's plan reads, so a repository that has run none of them
+  downloads the release files in every plan job. An entry is keyed on its path, which
+  lives under `RUNNER_TEMP`: a job on a runner image whose `RUNNER_TEMP`
+  differs from the saving runner's misses and downloads.
 
 ## Fan-out
 

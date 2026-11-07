@@ -1368,23 +1368,27 @@ engine release ships that key (`docs/releasing.md` §Rotate a signer key). Pin a
 older version in `tools` until then, one the committed key signed. Do not install
 the tool by hand.
 
-### `Terramate install failed`
+### `Terramate install failed` or `OpenTofu install failed`
 
-The `Install Terramate` step in `actions/setup` failed. Every annotation starts
-"Terramate <version> did not install:" and ends with the cause:
+The `Install Terramate` or `Install OpenTofu` step in `actions/setup` failed.
+Every annotation starts "Terramate <version> did not install:" or "OpenTofu
+<version> did not install:" and ends with the cause. `<sums>` is the signed
+checksum file: Terramate's `checksums.txt`, OpenTofu's `tofu_<version>_SHA256SUMS`.
 
 | Annotation ends with | Cause and remedy |
 |---|---|
-| "the signed checksums.txt yields no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no digest in the signed file, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
-| "<url> answered HTTP 404 (curl exit <rc>); check the signed checksums.txt and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
+| "the signed <sums> yields no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no digest in the signed file, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
+| "<url> answered HTTP 404 (curl exit <rc>); check the signed <sums> and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
 | "<url> answered HTTP <code> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
-| "<url> has sha256 <got>, not the <want> the signed checksums.txt names; the release asset differs from the signed one." | The downloaded archive is not the one Terramate signed. A re-run downloads the same asset: report it, and do not install it by hand. |
-| "tar could not extract terramate from <url>." | The downloaded archive did not unpack. |
-| "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
-| "<url> delivered version <got>; check the signed checksums.txt and the release asset." | The binary reports another version than the one requested. |
+| "<url> has sha256 <got>, not the <want> the signed <sums> names; the release asset differs from the signed one." | The downloaded archive is not the one upstream signed. A re-run downloads the same asset: report it, and do not install it by hand. |
+| "tar could not extract terramate from <url>." or "python3 could not extract OpenTofu from <url>." | The downloaded archive did not unpack. |
+| "could not make the OpenTofu binary executable." | `chmod` failed on the unpacked binary under `RUNNER_TEMP`. |
+| "the binary from <url> failed to run terramate --version." or "the OpenTofu binary from <url> failed its version check." | The unpacked binary did not run. |
+| "<url> delivered version <got>; check the signed checksums.txt and the release asset." or "<url> delivered <got>; check the signed <sums> and the release asset." | The binary reports another version than the one requested. |
 
-Setup downloads five files with curl: the Terramate checksums and their signature,
-the OpenTofu checksums and their signature, and the Terramate archive. curl retries
+Setup downloads six files with curl, three per tool: the checksum file, its
+signature and the archive, each only when the tool cache did not supply it.
+curl retries
 each after a network error, a 408, 429 or 5xx response, or a transfer below 1 KiB/s
 for 30 seconds, with waits that double from 1 second or follow the server's
 `Retry-After`, and gives up at once when a `Retry-After` wait would pass the limit.
@@ -1392,14 +1396,21 @@ It decides on no new retry once 120 seconds have passed, so one file can take ab
 3 minutes before the step fails. A 403 or 404 is not retried. A step that still
 fails after retries met a longer outage: re-run the job.
 
-### `Failed to validate OpenTofu CLI zip checksum`
+### `Tool cache entry failed verification`
 
-The `Install OpenTofu` step fails with this when the downloaded zip's sha256 is
-not among the Linux `amd64` and `arm64` digests of the signed `SHA256SUMS`: the
-asset differs from the signed one, or the runner is not Linux `amd64` or
-`arm64`. A re-run downloads the same asset. `opentofu/setup-opentofu` downloads
-the zip with its own retry: 3 attempts, 10 to 20 seconds apart, on a 5xx, 408 or
-429 response or a network error.
+A release file `setup` restored from the tool cache failed the check a download
+gets: the checksum file or its signature in a `Verify Terramate checksums` or
+`Verify OpenTofu checksums` step, the archive in an `Install Terramate` or
+`Install OpenTofu` step. The step deleted it, downloaded the release files again
+and verified them, so the job went on. The warning ends with the reason the
+restored file failed, then `Every job repeats this download until the entry is
+deleted: gh cache delete <key> --repo <owner>/<repo>`. The entry is corrupt or
+was altered ([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites).
+
+1. Run the `gh cache delete` command the warning prints. The key starts
+   `shipmate-tools-`.
+2. Nothing needs a re-run. The next apply, deploy or drift job that misses
+   saves a fresh entry.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 

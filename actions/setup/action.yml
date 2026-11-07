@@ -1,5 +1,5 @@
 name: shipmate setup
-description: Install Terramate and, unless `tofu` is "false", OpenTofu, each at the version `tools` in .github/shipmate-config.yml names, else at this release's pin; point OpenTofu at a provider plugin cache directory.
+description: Install Terramate and, unless `tofu` is "false", OpenTofu, each at the version `tools` in .github/shipmate-config.yml names, else at this release's pin, from release files the Actions cache keeps per version and setup re-verifies; point OpenTofu at a provider plugin cache directory.
 inputs:
   tofu:
     description: Whether to install OpenTofu. "false" for jobs that never run it.
