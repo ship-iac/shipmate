@@ -125,7 +125,7 @@ def post():
         try:
             landed = landed_since(repo, t0, run=run)
         except (SystemExit, Exception) as e:
-            print(e, file=sys.stderr)
+            print(f"listing shipmate.yml runs failed: {type(e).__name__}: {e}", file=sys.stderr)
             raise SystemExit(UNDETERMINED) from None
         if landed:
             raise SystemExit(MAY_HAVE_STARTED)

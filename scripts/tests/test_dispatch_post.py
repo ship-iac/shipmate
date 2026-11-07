@@ -198,7 +198,8 @@ def test_a_created_at_without_a_zone_is_undetermined(calls, monkeypatch, capsys)
     code, _, err = post(capsys)
     assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
     assert err.endswith(
-        'listed run created_at without a zone: {"created_at": "2026-11-07T11:59:55"}\n'
+        "listing shipmate.yml runs failed: ValueError: listed run created_at without a zone: "
+        '{"created_at": "2026-11-07T11:59:55"}\n'
     )
 
 
@@ -208,13 +209,15 @@ def test_a_listing_that_raises_anything_is_undetermined(calls, monkeypatch, caps
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [OSError("disk gone")])
     code, _, err = post(capsys)
     assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
-    assert err.endswith("disk gone\n")
+    assert err.endswith("\nlisting shipmate.yml runs failed: OSError: disk gone\n")
 
 
 def test_a_failed_listing_prints_its_failure(calls, monkeypatch, capsys):
     """Mutation: drop the listing failure's print -> stderr ends at the retry warning."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit(FORBIDDEN)])
-    assert post(capsys)[2].endswith(FORBIDDEN + "\n")
+    assert post(capsys)[2].endswith(
+        "\nlisting shipmate.yml runs failed: SystemExit: " + FORBIDDEN + "\n"
+    )
 
 
 def test_three_transient_failures_are_undetermined(calls, monkeypatch, capsys):

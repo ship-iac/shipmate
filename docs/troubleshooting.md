@@ -1882,9 +1882,9 @@ which. The gate is unchanged and nothing applied. Comment `shipmate apply`.
 Actions tab before commenting `shipmate apply` `` means the dispatch failed with
 a server or network error and an `auto` run may have started (`CONTRACT.md`
 §Comment-ops). It is a `⚪` notice when a `shipmate.yml` run started since the
-dispatch, and `🔴 failed:` when the engine cannot tell. Find a `shipmate · auto` run created at the plan
-run's time in the Actions tab: if one runs, wait for its apply result comment;
-if none does, comment `shipmate apply`.
+dispatch, and `🔴 failed:` when the engine cannot tell. Find a `shipmate · auto`
+run created at the plan run's time in the Actions tab: if one runs, wait for its
+apply result comment; if none does, comment `shipmate apply`.
 
 When the first recurs, check the App's `actions: write` permission and reconcile
 `shipmate.yml` against the fence in [`getting-started.md`](getting-started.md)
@@ -2235,8 +2235,7 @@ and no later attempt succeeded, or the listing that decides whether to retry it
 failed, so the engine cannot tell whether a run started. The comment-handling
 run's log holds gh's error: the final failure printed is the dispatch's own,
 or the listing's when the listing failed, and then the dispatch's failures are
-in the retry warnings above it. When the dispatch ended on a refusal of the file itself, the
-log also carries the `has no .github/workflows/shipmate.yml` error.
+in the retry warnings above it.
 
 Check the Actions tab as above. When no run of this command started, comment
 it again.

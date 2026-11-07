@@ -66,7 +66,7 @@ runs:
         # the status.
         # Measured: an absent file answers 404, one with no such trigger `Workflow does not have
         # 'workflow_dispatch' trigger (HTTP 422)`, one with fewer inputs `Unexpected inputs
-        # provided`. Not the bare event name: a failed runs listing's argv carries it.
+        # provided`. Anything else is not skew.
         say_skew() {
           if [[ "$err" == *"HTTP 404"* || "$err" == *"'workflow_dispatch' trigger"* || "$err" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
         }
@@ -106,7 +106,6 @@ runs:
         fi
         if [ "$rc" -eq 4 ]; then
           echo "::error::dispatching $WORKFLOW failed with a server or network error, so a run may have started"
-          say_skew
           reply failed "the command was authorized, but dispatching its workflow failed with a server or network error, so a run may have started. Check the Actions tab before commenting again; the error is in this run's log." \
             || echo "::warning::could not post the dispatch failure reply"
           exit 1

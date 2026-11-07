@@ -1300,7 +1300,9 @@ three replies:
   with a server or network error, so a run may have started. Check the Actions
   tab before commenting again; the error is in this run's log.`` when the
   attempts ended on transient failures, a later attempt failed after a
-  transient one, or the listing failed or was malformed. The step fails.
+  transient one, or the listing failed or was malformed. The step fails. After
+  a failed listing, the final error in the log is the listing's; the
+  dispatch's own failures are in the retry warnings above it.
 
 Two ceilings remain. A run that landed but is not listed yet when the engine
 reads the listing is not seen, so that attempt is retried and the command can
