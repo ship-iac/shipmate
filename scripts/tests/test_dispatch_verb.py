@@ -11,6 +11,7 @@ from _loader import (
     ACTIONS,
     action_yaml,
     bash_only,
+    fail_script,
     load_script,
     run_step,
     step_by,
@@ -162,21 +163,12 @@ def _run_dispatch(
     stderr_text)`: for the engine script `name`, `python3` prints `stderr_text` to stderr and
     exits `exit_code`, and it runs every other one. `stubs` maps further command
     names to stub text on the same PATH directory. The step runs in `cwd`, or `tmp_path`."""
-    path_dir, python3_path = _create_stub_commands(tmp_path, gh_stub)
+    path_dir, _ = _create_stub_commands(tmp_path, gh_stub)
     for name, text in (stubs or {}).items():
         (Path(path_dir) / name).write_text(text, newline="\n")
         (Path(path_dir) / name).chmod(0o755)
     if failing_script:
-        name, exit_code, stderr_text = failing_script
-        real = tmp_path / "python3-real"
-        Path(python3_path).rename(real)
-        Path(python3_path).write_text(
-            f'#!/bin/bash\nif [[ "$1" == */{name} ]]; then\n'
-            f"cat >&2 <<'STDERR'\n{stderr_text}\nSTDERR\nexit {exit_code}\nfi\n"
-            f'exec "{real.as_posix()}" "$@"\n',
-            newline="\n",
-        )
-        Path(python3_path).chmod(0o755)
+        fail_script(Path(path_dir), *failing_script)
 
     env = os.environ.copy()
     env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
@@ -510,25 +502,23 @@ def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(
     assert sent.read_text(encoding="utf-8") == expected
 
 
-def _silent_answer_stub(out, rc):
+def _silent_answer_stub(out):
     """A gh stub answering the dispatch call with `out` on stdout, nothing on stderr, and exit
-    `rc`; every other call succeeds and prints nothing."""
-    return _on_dispatch_call(f"  printf '%s' '{out}'\n  exit {rc}")
+    0; every other call succeeds and prints nothing."""
+    return _on_dispatch_call(f"  printf '%s' '{out}'\n  exit 0")
 
 
 @pytest.mark.parametrize(
-    ("out", "rc"),
-    [("", 0), ('{"workflow_run_id":38481239914}', 0)],
-    ids=["204-empty", "200-answer"],
+    "out", ["", '{"workflow_run_id":38481239914}'], ids=["204-empty", "200-answer"]
 )
 @bash_only
-def test_the_log_prints_no_empty_line_for_a_missing_answer_or_error(tmp_path, out, rc):
-    """An empty answer (a 204) or an empty `post` stderr (every success) prints no line at all.
+def test_the_log_prints_no_empty_line_for_a_missing_answer(tmp_path, out):
+    """An empty answer (a 204), and the empty `post` stderr of every success, print no line.
 
     Mutation: print both with one `printf '%s\\n' "$out" "$err"`.
     """
-    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_silent_answer_stub(out, rc))
-    assert result.returncode == rc, f"unexpected exit: {result.stdout}{result.stderr}"
+    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_silent_answer_stub(out))
+    assert result.returncode == 0, f"unexpected exit: {result.stdout}{result.stderr}"
     assert "" not in result.stdout.splitlines(), f"the log has an empty line: {result.stdout!r}"
 
 
@@ -575,8 +565,8 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
     drop any one of the three message-text halves and its shape stops being explained; point
     the remedy at `docs/releasing.md`, or reword any other part of the message, and the
     whole-value comparison reddens; delete the `$err` `printf` line and the hint prints without
-    the answer it explains (gh writes it to stderr); match on `$out` alone and no shape is
-    explained.
+    the answer it explains (gh writes it to stderr); match on `$out` in place of `$err` and no
+    shape is explained.
     """
     result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=stub)
     output = result.stdout + result.stderr
@@ -745,12 +735,32 @@ def test_a_may_have_started_dispatch_replies_and_exits_zero(tmp_path):
 
 
 @bash_only
+def test_a_may_have_started_reply_that_cannot_be_posted_only_warns(tmp_path):
+    """A run may have started, so a notice reply whose every gh call fails warns and the step
+    still passes.
+
+    Mutation: drop the exit-3 branch's `|| echo` degrade.
+    """
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub="#!/bin/bash\nexit 1\n",
+        failing_script=("dispatch-body", 3, ""),
+    )
+    assert result.returncode == 0, f"a failed reply must not fail: {result.stdout}{result.stderr}"
+    assert "::warning::could not post the dispatch reply" in result.stdout.splitlines(), (
+        f"the failed reply must warn: {result.stdout}"
+    )
+
+
+@bash_only
 def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
     """`dispatch-body post` exits 4 when its attempts ended on server or network errors, or
     the listing that would have told could not be read: a run may have started, so the failure
     reply sends the commenter to the Actions tab, and `post`'s message prints to the log.
 
-    Mutation: map exit 4 to `say_no_run_started`.
+    Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo.
     """
     result, _ = _run_dispatch(
         tmp_path,
@@ -760,6 +770,10 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
         failing_script=("dispatch-body", 4, "gh: Bad Gateway (HTTP 502)"),
     )
     assert result.returncode == 1, f"an undetermined dispatch must fail: {result.returncode}"
+    assert (
+        "::error::dispatching shipmate.yml failed with a server or network error, so a run may "
+        "have started"
+    ) in result.stdout.splitlines(), f"the failure must be annotated whole: {result.stdout}"
     assert "gh: Bad Gateway (HTTP 502)" in result.stdout.splitlines(), (
         f"`post`'s message must reach the log: {result.stdout}"
     )

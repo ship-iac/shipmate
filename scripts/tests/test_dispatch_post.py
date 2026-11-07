@@ -117,17 +117,11 @@ def test_a_4xx_on_the_first_attempt_posts_once_and_exits_1(calls, monkeypatch, c
 
 
 def test_a_transient_failure_lists_then_retries(calls, monkeypatch, capsys):
-    """Mutation: pass no `before_retry` -> no listing between the POSTs."""
+    """The listing is read after the sleep: a run lists seconds after its POST, so a listing
+    before the sleep sees less. Mutations: pass no `before_retry` -> no listing between the
+    POSTs; list inside the attempt before raising -> the listing precedes the sleep."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [""])
     assert post(capsys)[:2] == (0, ANSWER)
-    assert calls == [SENT, SLEPT_2, LIST, SENT]
-
-
-def test_the_listing_is_read_after_the_sleep(calls, monkeypatch, capsys):
-    """A run lists seconds after its POST, so a listing before the sleep sees less. Mutation: list
-    inside the attempt before raising -> the listing precedes the sleep."""
-    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [""])
-    post(capsys)
     assert calls == [SENT, SLEPT_2, LIST, SENT]
 
 

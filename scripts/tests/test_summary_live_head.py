@@ -14,6 +14,7 @@ import pytest
 from _loader import (
     ACTIONS,
     bash_only,
+    fail_script,
     github_outputs,
     read_calls,
     run_step,
@@ -130,19 +131,6 @@ def _listed(status, conclusion):
     )
 
 
-def _exit_for_dispatch_body(bin_dir, rc):
-    """Make `bin_dir/python3` exit `rc` for `dispatch-body` and run every other script."""
-    real = bin_dir / "python3-real"
-    (bin_dir / "python3").rename(real)
-    (bin_dir / "python3").write_text(
-        f'#!/bin/bash\nif [[ "$1" == */dispatch-body ]]; then exit {rc}; fi\n'
-        f'exec "{real.as_posix()}" "$@"\n',
-        encoding="utf-8",
-        newline="\n",
-    )
-    (bin_dir / "python3").chmod(0o755)
-
-
 def _step_env(step, expressions):
     """The step's parsed `env:` with each `${{ }}` value resolved; an unknown one is a KeyError."""
     return {
@@ -170,7 +158,7 @@ def _run(
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
     if post_rc is not None:
-        _exit_for_dispatch_body(bin_dir, post_rc)
+        fail_script(bin_dir, "dispatch-body", post_rc)
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
     out = tmp_path / "out"

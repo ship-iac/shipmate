@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. An unlock dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id; plan and apply runs answer on the pull request themselves. `scripts/dispatch-body post` sends the dispatch and retries a transient failure unless a shipmate.yml run may have started since the first attempt. A failed dispatch of any verb posts a failure reply that says whether a run may have started; one followed by a shipmate.yml run posts a notice reply and passes. Every reply only warns when it cannot be posted.
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. An unlock dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id; plan and apply runs answer on the pull request themselves. `scripts/dispatch-body post` sends the dispatch and retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out. A failed dispatch of any verb posts a failure reply that says whether a run may have started; one followed by a shipmate.yml run posts a notice reply and passes. Every reply only warns when it cannot be posted.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -86,8 +86,8 @@ runs:
         errfile=$(mktemp) || { echo "::error::could not create a temporary file for the dispatch"; say_no_run_started; exit 1; }
         trap 'rm -f -- "$errfile"' EXIT
         rc=0
-        # stdout alone is the API's answer, parsed below; `post` writes a failure to stderr. Its
-        # exit codes are documented in scripts/dispatch-body.
+        # stdout alone is the API's answer, parsed below; `post` writes a failure to stderr.
+        # Exit codes are documented in scripts/dispatch-body.
         out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" post 2>"$errfile") || rc=$?
         err=$(<"$errfile")
         [ -z "$out" ] || printf '%s\n' "$out"
@@ -109,7 +109,7 @@ runs:
           # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
           # does not have 'workflow_dispatch' trigger (HTTP 422)`, one declaring fewer inputs
           # than the body names `Unexpected inputs provided`. Anything else is not skew.
-          if [[ "$out$err" == *"HTTP 404"* || "$out$err" == *workflow_dispatch* || "$out$err" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
+          if [[ "$err" == *"HTTP 404"* || "$err" == *workflow_dispatch* || "$err" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
           say_no_run_started
           exit "$rc"
         fi

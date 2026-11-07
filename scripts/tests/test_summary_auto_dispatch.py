@@ -13,6 +13,7 @@ import pytest
 from _loader import (
     ACTIONS,
     bash_only,
+    fail_script,
     github_outputs,
     load_script,
     read_calls,
@@ -220,19 +221,6 @@ fi
 """
 
 
-def _exit_for_dispatch_body(bin_dir, rc):
-    """Make `bin_dir/python3` exit `rc` for `dispatch-body` and run every other script."""
-    real = bin_dir / "python3-real"
-    (bin_dir / "python3").rename(real)
-    (bin_dir / "python3").write_text(
-        f'#!/bin/bash\nif [[ "$1" == */dispatch-body ]]; then exit {rc}; fi\n'
-        f'exec "{real.as_posix()}" "$@"\n',
-        encoding="utf-8",
-        newline="\n",
-    )
-    (bin_dir / "python3").chmod(0o755)
-
-
 def _run(
     tmp_path,
     step,
@@ -252,7 +240,7 @@ def _run(
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
     if post_rc is not None:
-        _exit_for_dispatch_body(bin_dir, post_rc)
+        fail_script(bin_dir, "dispatch-body", post_rc)
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
     for i, (env, changed) in enumerate(cells):
@@ -406,7 +394,8 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
 
     Mutations: `exit 1` in place of the failure branch's `exit 0`; drop the reply call; change
     the reply text; reply with `GH_TOKEN`, the dispatch token; treat every nonzero exit of
-    `dispatch-body post` as a run that may have started -- the reply differs."""
+    `dispatch-body post` as a run that may have started -- the reply differs; send `post`'s
+    stderr to /dev/null, and gh's answer leaves the log."""
     proc, calls, _ = _run(tmp_path, DISPATCH, dispatch_rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == [
@@ -417,6 +406,7 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
         "::warning::the auto apply dispatch for dev failed; comment shipmate apply to apply"
         in proc.stdout
     )
+    assert "gh: Validation Failed (HTTP 422)" in proc.stderr.splitlines()
     assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
     assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
 
