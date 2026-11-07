@@ -29,7 +29,7 @@ The check name uses
 the stack path, never a display name — so the code that *creates* the apply
 check (`pending-checks`, run by `actions/summary`),
 *completes* it (`scripts/apply-complete`, run by `actions/apply-complete` in
-`apply-env-level.yml`'s `complete` job), *filters the still-pending queue*
+`apply-env-level.yml`'s `waveN-complete` and `complete` jobs), *filters the still-pending queue*
 (`deploy-detect` / `apply-detect` / `unlock-detect`, which
 only ever have the path), and *reports it* (`apply-comment`) all reconstruct the identical name
 from the one value they share.
@@ -175,21 +175,24 @@ first, each through `scripts/gate-status` and one at a time per head
 - the post-merge deploy, which completes the gate on the merged PR's head
   SHA after its env-level applies finish.
 
-When `apply-env-level.yml`'s `complete` job completes an `apply / <stack> / <env>`
-check, it completes only the check-run ids `actions/apply-snapshot` recorded for
-that name in the `snapshot` job, before the first wave.
-`snapshot` also sets every recorded check to `in_progress` before wave0, one
-PATCH per check in sequence, so a level's checks read in progress while its
-waves run; a failed write only warns. After completing, `complete` sets every
-recorded check it did not complete back to `queued`, even when the completion
-failed; a failed revert only warns. Every reader treats `queued` and
-`in_progress` alike as pending. "Re-run failed jobs" skips `snapshot`, so a
-re-run cell applies while its check reads `queued`. A `snapshot` that ends
-after flipping some checks without succeeding (cancelled, failed, or cut off
-at the runner's time cap) skips `complete`, so those checks stay `in_progress`
-until a later apply of the same cells snapshots and completes or reverts them;
-a new plan adds fresh checks beside them and does not touch the old ones.
-Display only: every reader treats `in_progress` as pending.
+`apply-env-level.yml` completes an `apply / <stack> / <env>` check only through
+the check-run ids `actions/apply-snapshot` recorded for that name in the
+`snapshot` job, before the first wave. An apply check reads `queued` until its
+cell's wave ends; that wave's `waveN-complete` job then completes it when the
+cell's job succeeded. A failed, cancelled or skipped cell's check stays
+`queued`. A completion job runs only for a wave that ended `success` or
+`failure`; a cancelled wave's earned checks complete in `complete`.
+
+`complete` runs after every wave and every completion job and completes the
+whole snapshot again; a second completion of a completed check changes nothing.
+It keeps the all-unmatched floor, the retry and the fail-over. It repeats each
+completion job's selection over the whole level, so a failed cell is named
+twice per level by `these cells' apply jobs did not succeed`, and a completion
+job whose retry ran out (its `::error::… left pending` names the cells) may be
+followed by `complete` completing those same checks. A completion job's failure
+never fails the level (job-level `continue-on-error: true`): `complete`'s
+result alone decides whether the level fails over a check it could not
+complete. "Re-run failed jobs" skips `snapshot` and reuses its outputs.
 A plan re-run can create a fresh duplicate apply check; a duplicate created
 *after the snapshot* is therefore left pending (its plan was not applied by this run),
 while duplicates that predate the apply are all completed so the gate never
@@ -345,11 +348,13 @@ never used.
   - It costs a caller nothing, but not because it needs nothing: listing
     environments needs `actions: read` — on a private repository the default
     `GITHUB_TOKEN` gets a 403 with `checks: read` alone — and every apply route's
-    call site already grants `actions: read` for its wave jobs and `complete`, so
+    call site already grants `actions: read` for its wave jobs, `waveN-complete` and `complete`, so
     the `uses:` permission cap is already high enough. A hand-written wrapper
     calling `apply-env-level.yml` must grant it. The environment check uses no
-    App key or App permission; the same job mints an App token afterwards to
-    mark the apply checks in progress.
+    App key or App permission. The same job binds `shipmate-engine`, verifies
+    the App key arrived and mints an App token whose only use is to prove the
+    key authenticates, so a missing, revoked or wrong key fails `snapshot`
+    before any wave.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
     this pre-flight does not enumerate; an environment whose branch policy names
@@ -374,7 +379,8 @@ never used.
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `review`, `lock`, `summary` and `outcome`, `apply-env-level.yml`'s `snapshot` and `complete`,
+  `review`, `lock`, `summary` and `outcome`, `apply-env-level.yml`'s `snapshot`,
+  `wave0-complete` … `wave7-complete` and `complete`,
   `deploy.yml`'s `summary`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1009,7 +1015,8 @@ job each request `id-token: write` and run
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
 except that a shared environment (`split: false`) resolves `aws.apply` on
-every path. The `snapshot` and `complete` jobs deliberately get no token.
+every path. The `snapshot`, `waveN-complete` and `complete` jobs deliberately
+get no cloud credential.
 
 On the apply path the engine passes through whatever role the environment
 resolves, and nothing more: which role that is — and whether two environments'
@@ -1313,7 +1320,7 @@ A double-started `apply` or `auto` run fails safe at the exact-plan refusal.
 The two runs re-enter the same pull request's cell locks and serialize on each
 cell's `apply-<env>-<stack>` group, so whichever run reaches a cell second
 restores the state the first saved, and OpenTofu refuses the reviewed plan as
-stale; that run's comment shows the cell failed, its `complete` job writes
+stale; that run's comment shows the cell failed, its completion jobs write
 nothing to the check the first run completed, and it skips its later waves, so
 a double start that splits one wave's cells between the runs can leave
 downstream cells pending for another `shipmate apply`. The exception is a first
@@ -1784,10 +1791,9 @@ reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <stack> / <env>`) — created pending by
-  `actions/summary`, set in progress by `actions/apply-snapshot` in
-  `apply-env-level.yml`'s `snapshot` job, completed (or set back to queued) by
-  `actions/apply-complete` in its `complete` job (both bound to
-  `shipmate-engine`) — all three mint an App installation token, so completion works across the create/complete
+  `actions/summary`, completed by `actions/apply-complete` in
+  `apply-env-level.yml`'s `waveN-complete` jobs and its `complete` job (all
+  bound to `shipmate-engine`) — both mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
   consistent). Completion sends no `output`, so the plan a changed cell's check
@@ -2472,7 +2478,7 @@ The six jobs:
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (reading the review decision, acquiring cell
-  locks, marking apply checks in progress, completing apply checks, refreshing the gate, posting the apply result
+  locks, proving before any wave that the App key authenticates (`snapshot`), completing apply checks, refreshing the gate, posting the apply result
   comment or the outcome reply, releasing a merged pull request's cell locks) are likewise bound to
   `shipmate-engine`.
 - **`release.yml`**'s `release` job (engine, reached through the consumer's
@@ -2635,13 +2641,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
-  required. It sets the runner of every engine job but eleven, which run on
+  required. It sets the runner of every engine job but nineteen, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts`, `gate-hold`
   and `outcome`, `apply.yml`'s `guard`, `review`, `summary` and `outcome`, `deploy.yml`'s `summary`,
-  `apply-env-level.yml`'s `snapshot` and `complete`, and `unlock.yml`'s
+  `apply-env-level.yml`'s `snapshot`, `wave0-complete` … `wave7-complete` and
+  `complete`, and `unlock.yml`'s
   `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the eleven
+  for a runner. An account that cannot use `ubuntu-slim` leaves the nineteen
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
