@@ -9,10 +9,9 @@ verify steps and both installers, which read its versions -- and the behavioural
 script in-process against a hand-written VERSIONS fixture and a mocked contents read. One case
 runs the repository's own file, because that is the file every consumer of this release reads.
 
-The fail-closed property is what the behavioural cases exist for: `opentofu/setup-opentofu`
-resolves an empty `tofu_version` as "latest", and a table read that fails must not install the
-default in place of the consumer's version, so a refusal writes no version: its one output is
-`refusal`, which each detect job reads into the gate description.
+The fail-closed property is what the behavioural cases exist for: a table read that fails must
+not install the default in place of the consumer's version, so a refusal writes no version: its
+one output is `refusal`, which each detect job reads into the gate description.
 """
 
 import base64
