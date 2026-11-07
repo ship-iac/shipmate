@@ -1271,11 +1271,60 @@ repository with no `.github/workflows/shipmate.yml`, or one that declares no
 dispatch time on that comment-handling run — for every verb alike, since they share the file. That
 run is not visible from the pull request, so the refusal of an unwired verb or
 an unknown one, a failure building the request or creating the temporary file
-for gh's error output, and a rejected API call each try to post a `🔴 failed:`
-reply there whose footer links the run. The run holds the error; the failure
-reply never carries the API's answer. A failure reply that cannot be posted is a
-warning on the comment-handling run, and the step still fails with its own
-status. A dispatch that started a `plan` or `apply` run posts no reply: the
+for gh's error output, and a failed dispatch each try to post a reply there
+whose footer links the run. The run holds the error; a reply never carries the
+API's answer. A reply that cannot be posted is a warning on the
+comment-handling run, and the step keeps its own status.
+
+`scripts/dispatch-body post` sends the dispatch. A transient failure (gh's
+`TRANSIENT` class in `scripts/_shipmate.py`: a 5xx, a refused, reset or timed-out
+connection, a truncated body) may have started a run, since GitHub can start
+one and still answer 502, so it gets up to two more attempts, 2 and 5 seconds
+later. Before each retry the engine lists `shipmate.yml`'s `workflow_dispatch`
+runs (one page of 100, newest first, on the dispatch's own App token, the read
+itself retried on a transient failure) and stops when any was created at or
+after `t0`, five seconds before the first attempt, whatever its title: a run's
+title is the consumer's `run-name`, which nothing checks. A concurrent dispatch
+of another command landing in that window stops the retry too; a wrong stop
+costs a comment, a wrong retry a double start. A failed dispatch posts one of
+three replies:
+
+- ``🔴 failed: the command was authorized, but dispatching its workflow failed,
+  so no run started. The error is in this run's log.`` when it failed before the
+  first attempt, or the first attempt failed with a failure that is not
+  transient (a 4xx, the refusals of an unwired file included). The step fails.
+- ``⚪ the dispatch answered with an error, but a shipmate.yml run started since
+  it; it may be this command's. Check the Actions tab before commenting
+  again.`` when the listing found a run. The step warns and passes.
+- ``🔴 failed: the command was authorized, but dispatching its workflow failed
+  with a server or network error, so a run may have started. Check the Actions
+  tab before commenting again; the error is in this run's log.`` when the
+  attempts ended on transient failures, a later attempt failed after a
+  transient one, or the listing failed or was malformed. The step fails. After
+  a failed listing, the last failure `dispatch-body` prints is the listing's;
+  the dispatch's own failures are in the retry warnings above it.
+
+Two ceilings remain. A run that landed but is not listed yet when the engine
+reads the listing is not seen, so that attempt is retried and the command can
+start twice. A runner clock ahead of GitHub's by more than five seconds puts
+`t0` after a run that landed, with the same result.
+
+A double-started `apply` or `auto` run fails safe at the exact-plan refusal.
+The two runs re-enter the same pull request's cell locks and serialize on each
+cell's `apply-<env>-<stack>` group, so whichever run reaches a cell second
+restores the state the first saved, and OpenTofu refuses the reviewed plan as
+stale; that run's comment shows the cell failed, its `complete` job writes
+nothing to the check the first run completed, and it skips its later waves, so
+a double start that splits one wave's cells between the runs can leave
+downstream cells pending for another `shipmate apply`. The exception is a first
+run whose `Save state` failed on a local backend: the second run restores the
+pre-apply state and applies the plan again, the same risk a second `shipmate
+apply` comment already carries; `docs/troubleshooting.md` §`The apply step ran
+and its state was not saved` is the recovery. A double `plan` costs one extra
+plan run and one minimized comment, and a double `unlock` finds no lock and
+exits green.
+
+A dispatch that started a `plan` or `apply` run posts no reply: the
 `rocket` reaction acknowledged the command when it was accepted, and the run
 answers on the pull request itself, with its plan comment or apply result
 comment, or, in the cases §Outcome reply lists, with the outcome reply.
@@ -1304,13 +1353,14 @@ footer carries the help hint:
 
 ``[comment run](<run url>). Comment `shipmate help` for the available commands.``
 
-A notice asks nothing, so its footer is `[comment run](<run url>)` alone.
+A notice's footer is `[comment run](<run url>)` alone.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
 dispatch, an errored read or decision of the commenter's permission), and
-`⚪ <text>` for a notice, the unlock dispatch's started-run reply included.
+`⚪ <text>` for a notice, the unlock dispatch's started-run reply and a
+dispatch that may have started a run included.
 `scripts/reply-comment` renders and posts all of them.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
@@ -2055,7 +2105,12 @@ any other run, and a run without `auto: true` that is not a dispatch whose verb 
 exactly `apply`, unreadable dispatch inputs included; `shipmate doctor` compares the `auto` job's `with:` against the
 published one. A failed mint or
 dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply not
-started: the dispatch failed; comment `shipmate apply` ``. A run that cannot
+started: the dispatch failed; comment `shipmate apply` ``. The dispatch retries
+as a comment's does (§Comment-ops); one that may have started a run warns and
+posts ``auto apply may have started: the dispatch answered with an error; check
+the Actions tab before commenting `shipmate apply` `` instead, a `⚪` notice
+when the listing found a run and `🔴 failed:` when the outcome is undetermined.
+A run that cannot
 decide (`detect`'s `auto_envs` output missing or malformed, a cell summary
 unparseable) warns and posts no reply. Neither changes the gate.
 
@@ -3117,8 +3172,10 @@ no auto apply follows it (§`apply_mode: auto`). It joins the consumer's
 waiting run, and the plan that runs resolves the live head from the pull
 request. The listing holds only `pull_request_target` runs, so it does not see
 an earlier dispatched plan of the live head, and a second queued plan is
-possible. On this path a failed head read, run listing, token mint or dispatch
-warns with the remedy `comment shipmate plan` and fails nothing: this run's
+possible. The dispatch retries as a comment's does (§Comment-ops). On this
+path a failed head read, run listing, token mint or dispatch warns with the
+remedy `comment shipmate plan`, and a dispatch that may have started a plan
+warns to check the Actions tab before commenting it; neither fails anything: this run's
 head is not the pull request's, so nothing it writes or fails to write gates
 the merge.
 

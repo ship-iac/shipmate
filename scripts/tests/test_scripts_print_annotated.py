@@ -64,6 +64,7 @@ BLOCKS = {
     "apply-snapshot": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "build-matrix": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "cell-lock": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
+    "dispatch-body": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "gate-status": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "hcl-check": (
         "if __name__ == '__main__':\n"

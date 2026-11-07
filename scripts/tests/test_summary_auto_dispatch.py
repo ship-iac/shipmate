@@ -13,6 +13,7 @@ import pytest
 from _loader import (
     ACTIONS,
     bash_only,
+    fail_script,
     github_outputs,
     load_script,
     read_calls,
@@ -211,6 +212,7 @@ _GH = """\
 printf '%s\\n' "$@" -- >> "$CALLS"
 if [[ "$*" == *dispatches* ]]; then
   cat > "$DISPATCH_BODY"
+  [ "$FAKE_DISPATCH_RC" = 0 ] || echo "gh: Validation Failed (HTTP 422)" >&2
   exit "$FAKE_DISPATCH_RC"
 elif [[ "$*" == *comments* ]]; then
   cat > "$REPLY_BODY"
@@ -219,13 +221,26 @@ fi
 """
 
 
-def _run(tmp_path, step, *, cells=(), dispatch_rc=0, token="x", event=None, auto='["dev"]'):  # noqa: S107 - a stub token, never sent
+def _run(
+    tmp_path,
+    step,
+    *,
+    cells=(),
+    dispatch_rc=0,
+    post_rc=None,
+    token="x",  # noqa: S107 - a stub token, never sent
+    event=None,
+    auto='["dev"]',
+):
     """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
     is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default; `auto` is
-    build-matrix's `auto_envs` output."""
+    build-matrix's `auto_envs` output; `post_rc` makes `python3` exit with it for
+    `dispatch-body` in place of running it."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
+    if post_rc is not None:
+        fail_script(bin_dir, "dispatch-body", post_rc)
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
     for i, (env, changed) in enumerate(cells):
@@ -374,10 +389,13 @@ def test_a_failed_mint_replies_with_the_main_token_and_dispatches_nothing(tmp_pa
 
 @bash_only
 def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
-    """The step makes no status or check-run call, so the gate stays as written.
+    """The step makes no status or check-run call, so the gate stays as written. A 4xx cannot
+    have started a run: one POST, no retry.
 
     Mutations: `exit 1` in place of the failure branch's `exit 0`; drop the reply call; change
-    the reply text; reply with `GH_TOKEN`, the dispatch token."""
+    the reply text; reply with `GH_TOKEN`, the dispatch token; treat every nonzero exit of
+    `dispatch-body post` as a run that may have started -- the reply differs; send `post`'s
+    stderr to /dev/null, and gh's answer leaves the log."""
     proc, calls, _ = _run(tmp_path, DISPATCH, dispatch_rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == [
@@ -388,5 +406,35 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
         "::warning::the auto apply dispatch for dev failed; comment shipmate apply to apply"
         in proc.stdout
     )
+    assert "gh: Validation Failed (HTTP 422)" in proc.stderr.splitlines()
     assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
     assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
+
+
+@bash_only
+@pytest.mark.parametrize(("post_rc", "verdict"), [(3, "⚪ "), (4, "🔴 failed: ")])
+def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab(
+    tmp_path, post_rc, verdict
+):
+    """`dispatch-body post` exits 3 when a run started after an attempt that failed, a notice as
+    in comment-ops, and 4 when it cannot tell, a failure: either way "not started" would be false.
+    Mutations: reply the `auto apply not started` text on exit 3 and 4 -- both rows redden;
+    reply `failed` on exit 3 -- its row reddens."""
+    proc, calls, _ = _run(tmp_path, DISPATCH, post_rc=post_rc)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _paths(calls) == ["repos/acme/demo/issues/42/comments"]
+    assert proc.stdout.splitlines() == [
+        (
+            "::warning::the auto apply dispatch for dev answered with an error, and an auto run "
+            "may have started; check the Actions tab before commenting shipmate apply"
+        )
+    ]
+    assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
+    assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == [
+        "### shipmate apply",
+        "",
+        (
+            f"{verdict}auto apply may have started: the dispatch answered with an error; check "
+            "the Actions tab before commenting `shipmate apply`"
+        ),
+    ]

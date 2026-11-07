@@ -1861,7 +1861,7 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    has not finished or succeeded; nothing dispatched`). A
    dispatched plan is on demand, so no auto apply follows it: comment `shipmate
    apply` once it finishes.
-2. The pull request's comments: the `auto apply not started` reply (below), or
+2. The pull request's comments: the `auto apply not started` or `auto apply may have started` reply (below), or
    the `auto` run's apply result comment. A `detect` refusal sits in that
    comment's error fence; the entries below quote each one.
 3. The `auto` run in the Actions tab, for a run that posted no comment.
@@ -1871,13 +1871,22 @@ not, under the comment-time apply requirements, except a cell held because the
 base changed its stack: update the branch from the base and push (§`⚪ held, the
 base changed these stacks after this branch left it`).
 
-### `auto apply not started: the dispatch failed`
+### `auto apply not started: the dispatch failed`, or `auto apply may have started: the dispatch answered with an error`
 
 The pull request carries ``🔴 failed: auto apply not started: the dispatch
 failed; comment `shipmate apply` ``. The plan run's `summary` job could not mint
 its dispatch token or the dispatch call failed; a `::warning::` on that run names
 which. The gate is unchanged and nothing applied. Comment `shipmate apply`.
-When it recurs, check the App's `actions: write` permission and reconcile
+
+``auto apply may have started: the dispatch answered with an error; check the
+Actions tab before commenting `shipmate apply` `` means the dispatch failed with
+a server or network error and an `auto` run may have started (`CONTRACT.md`
+§Comment-ops). It is a `⚪` notice when a `shipmate.yml` run started since the
+dispatch, and `🔴 failed:` when the engine cannot tell. Find a `shipmate · auto`
+run created at the plan run's time in the Actions tab: if one runs, wait for its
+apply result comment; if none does, comment `shipmate apply`.
+
+When the first recurs, check the App's `actions: write` permission and reconcile
 `shipmate.yml` against the fence in [`getting-started.md`](getting-started.md)
 §The workflow file, which offers `auto` as a `verb` option and holds the `auto`
 job.
@@ -2201,6 +2210,36 @@ the stack in the changed set until the undo applies: any edit to the stack's own
 files plans the destroy of what the revert removed from configuration, and a
 `removed` block forgets it from state instead.
 
+### `the dispatch answered with an error, but a shipmate.yml run started since it`
+
+The pull request carries ``⚪ the dispatch answered with an error, but a
+shipmate.yml run started since it; it may be this command's. Check the Actions
+tab before commenting again.``. The dispatch call failed with a server or
+network error, and before retrying it the engine found a `shipmate.yml`
+`workflow_dispatch` run created since the first attempt, so it did not retry.
+That run is this command's, or another command's dispatched in the same
+seconds (`CONTRACT.md` §Comment-ops).
+
+Open the Actions tab and filter the runs of `shipmate.yml` created at the
+comment's time. A run titled `shipmate · <verb>` for this command means it
+started: wait for its answer on the pull request. When none is this command's,
+comment it again.
+
+### `dispatching its workflow failed with a server or network error, so a run may have started`
+
+The pull request carries ``🔴 failed: the command was authorized, but
+dispatching its workflow failed with a server or network error, so a run may
+have started. Check the Actions tab before commenting again; the error is in
+this run's log.``. The dispatch call failed with a server or network error
+and no later attempt succeeded, or the listing that decides whether to retry it
+failed, so the engine cannot tell whether a run started. The comment-handling
+run's log holds gh's error: the final failure printed is the dispatch's own,
+or the listing's when the listing failed, and then the dispatch's failures are
+in the retry warnings above it.
+
+Check the Actions tab as above. When no run of this command started, comment
+it again.
+
 ### A dispatched verb produced a run in which every job was skipped
 
 The comment was accepted, the dispatch succeeded and the run page shows seven
@@ -2262,7 +2301,8 @@ A push, open or reopen run of an older head that arrives while the live head's
 autoplan runs cancels that autoplan. When that older run's summary finds the
 head moved, it dispatches `shipmate plan` for the live head if the pull request
 is open, is not a draft, and the live head has no autoplan run unfinished or
-succeeded; it logs why otherwise. In every case, once no plan run is in flight,
+succeeded; it logs why otherwise, and warns to check the Actions tab when that
+dispatch may have started a plan. In every case, once no plan run is in flight,
 comment `shipmate plan` if the plan comment does not show the live head, then
 `shipmate apply` for an environment that applies automatically: an on-demand
 plan starts no auto apply.

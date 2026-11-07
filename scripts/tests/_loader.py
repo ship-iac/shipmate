@@ -327,6 +327,22 @@ def write_python3_shim(bin_dir):
     python3.chmod(0o755)
 
 
+def fail_script(bin_dir, name, rc, stderr=""):
+    """Make ``bin_dir/python3`` (``write_python3_shim``'s) exit ``rc`` for the engine script
+    ``name``, after printing ``stderr`` to stderr when it is not empty, and run every other
+    script."""
+    real = bin_dir / "python3-real"
+    (bin_dir / "python3").rename(real)
+    say = f"cat >&2 <<'STDERR'\n{stderr}\nSTDERR\n" if stderr else ""
+    (bin_dir / "python3").write_text(
+        f'#!/bin/bash\nif [[ "$1" == */{name} ]]; then\n{say}exit {rc}\nfi\n'
+        f'exec "{real.as_posix()}" "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (bin_dir / "python3").chmod(0o755)
+
+
 #: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
 #: per argument and ``--`` after each call, answers a ``--paginate`` listing with
 #: ``$FAKE_LISTING``, ``$FAKE_LIST_STDERR`` on stderr and exit ``$FAKE_LIST_RC``, a bare

@@ -2,17 +2,16 @@
 verb rides in the body — selecting the job that runs — alongside one body shape per verb.
 """
 
-import json
 import os
-import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from _loader import (
     ACTIONS,
-    SCRIPTS,
     action_yaml,
     bash_only,
+    fail_script,
     load_script,
     run_step,
     step_by,
@@ -25,6 +24,8 @@ DISPATCH_ACTION = "dispatch"
 #: there. Hand-written; never derived from the action, which is the file under test.
 CONSUMER_WORKFLOW = "shipmate.yml"
 
+DISPATCH_BODY = load_script("dispatch-body")
+
 
 def _extract_dispatch_run_block():
     """The full run: block of the dispatch step, exactly as written."""
@@ -35,25 +36,15 @@ def _extract_dispatch_run_block():
 
 def _build_dispatch_body(verb, environment=""):
     """The whole parsed dispatch body for `verb`."""
-    env = os.environ.copy()
-    env.update(
-        {
-            "DISPATCH_REF": "main",
-            "REF": "abc123def456",
-            "PR_NUMBER": "42",
-            "ENVIRONMENT": environment,
-            "VERB": verb,
-        }
-    )
-    result = subprocess.run(
-        [__import__("sys").executable, str(SCRIPTS / "dispatch-body")],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, f"python body builder failed: {result.stderr}"
-    return json.loads(result.stdout)
+    env = {
+        "DISPATCH_REF": "main",
+        "REF": "abc123def456",
+        "PR_NUMBER": "42",
+        "ENVIRONMENT": environment,
+        "VERB": verb,
+    }
+    with patch.dict(os.environ, env):
+        return DISPATCH_BODY.body()
 
 
 # Whole-body comparison, not key-by-key membership: "carries exactly these inputs" and
@@ -163,32 +154,25 @@ def _run_dispatch(
     verb,
     environment="",
     gh_stub=RECORDING_GH_STUB,
-    failing_script="",
+    failing_script=None,
     stubs=None,
     cwd=None,
 ):
     """Run the shipped step with a gh stub that records its argv; returns the
-    CompletedProcess and the recorded argv text. When `failing_script` names an engine script,
-    `python3` exits 1 for that script and runs every other one. `stubs` maps further command
+    CompletedProcess and the recorded argv text. `failing_script` is `(name, exit_code,
+    stderr_text)`: for the engine script `name`, `python3` prints `stderr_text` to stderr and
+    exits `exit_code`, and it runs every other one. `stubs` maps further command
     names to stub text on the same PATH directory. The step runs in `cwd`, or `tmp_path`."""
-    path_dir, python3_path = _create_stub_commands(tmp_path, gh_stub)
+    path_dir, _ = _create_stub_commands(tmp_path, gh_stub)
     for name, text in (stubs or {}).items():
         (Path(path_dir) / name).write_text(text, newline="\n")
         (Path(path_dir) / name).chmod(0o755)
     if failing_script:
-        real = tmp_path / "python3-real"
-        Path(python3_path).rename(real)
-        Path(python3_path).write_text(
-            f'#!/bin/bash\nif [[ "$1" == */{failing_script} ]]; then exit 1; fi\n'
-            f'exec "{real.as_posix()}" "$@"\n',
-            newline="\n",
-        )
-        Path(python3_path).chmod(0o755)
+        fail_script(Path(path_dir), *failing_script)
 
     env = os.environ.copy()
     env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
     env["GH_TOKEN"] = "test_token"  # noqa: S105
-    env["REPO"] = "org/repo"
     env["DISPATCH_REF"] = "main"
     env["ENVIRONMENT"] = environment
     env["VERB"] = verb
@@ -206,7 +190,7 @@ def _run_dispatch(
 
     result = run_step(tmp_path, _extract_dispatch_run_block(), env, cwd=cwd)
     argv_file = tmp_path / "argv.txt"
-    return result, (argv_file.read_text() if argv_file.exists() else "")
+    return result, (argv_file.read_text(encoding="utf-8") if argv_file.exists() else "")
 
 
 #: The path segment that means a dispatch was actually attempted. The comment the
@@ -305,14 +289,14 @@ def test_dispatch_step_env_mapping_is_complete():
     got VERB added to the step's env: block reddens here -- as does WORKFLOW still being read
     from an input, or the dispatch ref leaving the default branch. The dispatch ref picks which
     branch's copy of `shipmate.yml` runs: a head ref runs the pull request author's copy, and
-    the `shipmate-engine` environment's branch policy admits only the default branch.
+    the `shipmate-engine` environment's branch policy admits only the default branch. `REPO` is
+    absent: `dispatch-body post` reads the runner's `GITHUB_REPOSITORY`.
 
-    Mutation: rename VERB in the env: block, re-add WORKFLOW, or set
+    Mutation: rename VERB in the env: block, re-add WORKFLOW or REPO, or set
     `DISPATCH_REF: ${{ github.head_ref }}`.
     """
     assert step_by(DISPATCH_ACTION, name="workflow_dispatch apply").get("env") == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
-        "REPO": "${{ github.repository }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
         "ENVIRONMENT": "${{ inputs.environment }}",
         "VERB": "${{ inputs.verb }}",
@@ -368,7 +352,7 @@ def test_dispatch_success_exits_zero(tmp_path):
     job workspace (the step's working directory) stays empty.
 
     Mutations: make the wrapper return non-zero on success; drop the `trap` that removes
-    `$errfile`; write the body to `req.json` and pass `--input req.json`.
+    `$errfile`; make `post` write the body to `req.json` and pass `--input req.json`.
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -382,31 +366,29 @@ def test_dispatch_success_exits_zero(tmp_path):
     assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
 
 
-#: Fails the dispatch as gh does on an HTTP error, here a 500: the API's JSON error body on
-#: stdout, gh's own message on stderr. The reply call succeeds.
-_BODY_ON_STDOUT_STUB = _on_dispatch_call(
-    """  echo '{"message":"Server Error","status":"500"}'\n"""
-    "  echo 'gh: Server Error (HTTP 500)' >&2\n"
+#: Fails the dispatch as gh does on a 4xx: the API's JSON error body on stdout, gh's own
+#: message on stderr. Not transient, so `post` makes one attempt. The reply call succeeds.
+_GH_ERROR_STUB = _on_dispatch_call(
+    """  echo '{"message":"Not Found","status":"404"}'\n"""
+    "  echo 'gh: Not Found (HTTP 404)' >&2\n"
     "  exit 1"
 )
 
 
 @bash_only
-def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
-    """gh writes an HTTP error's JSON body to stdout, and the log is where the failure reply
-    sends the reader, so that body must print beside gh's stderr. The failure exit still
-    removes the file holding gh's stderr and leaves the job workspace (the step's working
-    directory) empty.
+def test_a_failed_dispatch_prints_ghs_error_to_the_log(tmp_path):
+    """`post` prints gh's message to stderr on a failure, and the log is where the failure reply
+    sends the reader, so that line must print. The failure exit still removes the file holding
+    it and leaves the job workspace (the step's working directory) empty.
 
-    Mutations: delete the `$out` `printf` line; drop the `trap` that removes `$errfile`;
-    write the body to `req.json` and pass `--input req.json`.
+    Mutations: delete the `$err` `printf` line; drop the `trap` that removes `$errfile`.
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_BODY_ON_STDOUT_STUB, cwd=workspace)
-    assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
-    assert '{"message":"Server Error","status":"500"}' in result.stdout.splitlines(), (
-        f"the API's answer must reach the log: {result.stdout}"
+    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_GH_ERROR_STUB, cwd=workspace)
+    assert result.returncode == 1, f"a failed dispatch must fail the step: {result.returncode}"
+    assert "gh: Not Found (HTTP 404)" in result.stdout.splitlines(), (
+        f"gh's message must reach the log: {result.stdout}"
     )
     assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
     assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
@@ -432,17 +414,19 @@ def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_
 
 @bash_only
 def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
-    """`python3` exits 1 for `dispatch-body` here. The step exits 1 without the dispatch call,
-    annotates the failure, and posts the failure reply carrying the run link.
+    """`dispatch-body post` exits 1 here, as it does when the body cannot be built or the first
+    attempt fails with a failure that is not transient. The step exits 1, annotates the failure
+    itself (`post` prints it unannotated), and posts the failure reply carrying the run link.
 
-    Mutations: drop the body build's `|| { ...; say_no_run_started; exit 1; }` handler; drop
-    the handler's `::error::` echo.
+    Mutations: drop the failure branch's `::error::` echo; drop its `say_no_run_started`.
     """
-    result, argv = _run_dispatch(tmp_path, verb="apply", failing_script="dispatch-body")
-    assert result.returncode == 1, f"a failed body build must fail the step: {result.stdout}"
-    assert "::error::could not build the dispatch request body" in result.stdout.splitlines(), (
-        f"the failure must be annotated: {result.stdout}"
+    result, argv = _run_dispatch(
+        tmp_path, verb="apply", failing_script=("dispatch-body", 1, "KeyError: 'REF'")
     )
+    assert result.returncode == 1, f"a failed body build must fail the step: {result.stdout}"
+    assert "::error::dispatching shipmate.yml failed, so no run started" in (
+        result.stdout.splitlines()
+    ), f"the failure must be annotated: {result.stdout}"
     assert _DISPATCH_PATH not in argv, f"a failed body build must dispatch nothing: {argv!r}"
     assert "/issues/42/comments" in argv and _RUN_URL in argv, (
         f"the commenter must be told no run started: {argv!r}"
@@ -469,7 +453,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, '
-                '"return_run_details": true}\n'
+                '"return_run_details": true}'
             ),
         ),
         (
@@ -477,7 +461,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "",
             (
                 '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"}, '
-                '"return_run_details": true}\n'
+                '"return_run_details": true}'
             ),
         ),
         (
@@ -485,7 +469,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
-                '"environment": "dev-eu"}, "return_run_details": true}\n'
+                '"environment": "dev-eu"}, "return_run_details": true}'
             ),
         ),
         (
@@ -493,7 +477,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "unlock", "ref": "abc123", '
-                '"environment": "dev-eu"}, "return_run_details": true}\n'
+                '"environment": "dev-eu"}, "return_run_details": true}'
             ),
         ),
     ],
@@ -504,10 +488,10 @@ def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(
     tmp_path, verb, environment, expected
 ):
     """For every verb, the dispatch call carries `--input -`, and its stdin is the hand-written
-    body for that verb byte for byte, with the one newline the here-string appends.
+    body for that verb byte for byte.
 
-    Mutations: drop `--input -` from the dispatch call; pass `"${body:0:5}"` instead of
-    `"$body"`; run `dispatch-body` with a different `ENVIRONMENT` when the verb is `unlock`.
+    Mutations: drop `--input -` from `post`'s argv; send `data[:5]` instead of `data`; run
+    `dispatch-body post` with a different `ENVIRONMENT` when the verb is `unlock`.
     """
     result, _ = _run_dispatch(
         tmp_path, verb=verb, environment=environment, gh_stub=_STDIN_SAVING_STUB
@@ -518,26 +502,23 @@ def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(
     assert sent.read_text(encoding="utf-8") == expected
 
 
-def _silent_answer_stub(out, rc):
+def _silent_answer_stub(out):
     """A gh stub answering the dispatch call with `out` on stdout, nothing on stderr, and exit
-    `rc`; every other call succeeds and prints nothing."""
-    return _on_dispatch_call(f"  printf '%s' '{out}'\n  exit {rc}")
+    0; every other call succeeds and prints nothing."""
+    return _on_dispatch_call(f"  printf '%s' '{out}'\n  exit 0")
 
 
 @pytest.mark.parametrize(
-    ("out", "rc"),
-    [("", 0), ('{"workflow_run_id":38481239914}', 0), ('{"message":"Server Error"}', 1)],
-    ids=["204-empty", "200-answer", "failure-empty-stderr"],
+    "out", ["", '{"workflow_run_id":38481239914}'], ids=["204-empty", "200-answer"]
 )
 @bash_only
-def test_the_log_prints_no_empty_line_for_a_missing_answer_or_error(tmp_path, out, rc):
-    """An empty answer (a 204) or an empty gh stderr (most successes, and a failure gh explains
-    on stdout alone) prints no line at all.
+def test_the_log_prints_no_empty_line_for_a_missing_answer(tmp_path, out):
+    """An empty answer (a 204), and the empty `post` stderr of every success, print no line.
 
     Mutation: print both with one `printf '%s\\n' "$out" "$err"`.
     """
-    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_silent_answer_stub(out, rc))
-    assert result.returncode == rc, f"unexpected exit: {result.stdout}{result.stderr}"
+    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_silent_answer_stub(out))
+    assert result.returncode == 0, f"unexpected exit: {result.stdout}{result.stderr}"
     assert "" not in result.stdout.splitlines(), f"the log has an empty line: {result.stdout!r}"
 
 
@@ -584,8 +565,8 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
     drop any one of the three message-text halves and its shape stops being explained; point
     the remedy at `docs/releasing.md`, or reword any other part of the message, and the
     whole-value comparison reddens; delete the `$err` `printf` line and the hint prints without
-    the answer it explains (gh writes it to stderr); match on `$out` alone and no shape is
-    explained.
+    the answer it explains (gh writes it to stderr); match on `$out` in place of `$err` and no
+    shape is explained.
     """
     result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=stub)
     output = result.stdout + result.stderr
@@ -635,7 +616,7 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     )
     result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu", gh_stub=stub)
     output = result.stdout + result.stderr
-    assert result.returncode == 22, f"gh's exit status must survive, got {result.returncode}"
+    assert result.returncode == 1, f"`post`'s exit status must survive, got {result.returncode}"
     assert "Required input 'plan_run_id' not provided" in output, (
         f"the API's own message must still print: {output}"
     )
@@ -654,6 +635,11 @@ _RECORDING_FAILURE_STUB = (
 )
 #: The run link, hand-written from the three runner variables the step reads.
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
+#: The verdict line of the reply to a dispatch that cannot have started a run.
+_NO_RUN_STARTED = (
+    "🔴 failed: the command was authorized, but dispatching its workflow failed, so no run "
+    "started. The error is in this run's log."
+)
 
 
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
@@ -664,8 +650,11 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
     commenter's last signal was comment-ops' rocket. One comment, on the pull request, carrying
     the run link.
 
+    A 4xx on the first attempt cannot have started a run, and the reply says so.
+
     Mutations: delete the comment call; scope it to one verb; swap `$COMMENT_TOKEN` back to
-    `$GH_TOKEN`, which is minted `actions: write` and cannot comment.
+    `$GH_TOKEN`, which is minted `actions: write` and cannot comment; map every nonzero exit
+    of `post` to the may-have-started failure text.
     """
     result, argv = _run_dispatch(
         tmp_path, verb=verb, environment="dev-eu", gh_stub=_RECORDING_FAILURE_STUB
@@ -678,6 +667,7 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
         f"a failed {verb} dispatch must comment with the workflow token, gh saw: {argv!r}"
     )
     assert _RUN_URL in argv, f"the comment must carry the run link, gh saw: {argv!r}"
+    assert f"\n{_NO_RUN_STARTED}\n" in argv, f"the reply must say no run started: {argv!r}"
     assert "Not Found (HTTP 404)" not in argv, (
         f"the API's answer is unbounded and must not be pasted into a comment: {argv!r}"
     )
@@ -698,16 +688,106 @@ def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
     footer that carries the run link.
 
     Mutations: post the old `:x: shipmate:` sentence without reply-comment; set the outcome to
-    `refused`.
+    `refused`; map every nonzero exit of `post` to the may-have-started failure text.
     """
     result, _ = _run_dispatch(
         tmp_path, verb="apply", environment="dev-eu", gh_stub=_BODY_FAILURE_STUB
     )
-    assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
+    assert result.returncode == 1, f"`post`'s exit status must survive: {result.returncode}"
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        f"### shipmate apply dev-eu\n\n{_NO_RUN_STARTED}\n\n"
+        f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
+    )
+
+
+#: Succeeds on every call and saves the comment body it is handed.
+_BODY_SAVING_STUB = (
+    '#!/bin/bash\nfor a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; done\n'
+)
+
+
+@bash_only
+def test_a_may_have_started_dispatch_replies_and_exits_zero(tmp_path):
+    """`dispatch-body post` exits 3 when a `shipmate.yml` run started after an attempt that
+    answered with an error. That run may be this command's, so the step warns, posts the whole
+    notice reply and passes.
+
+    Mutation: map exit 3 to `say_no_run_started`.
+    """
+    result, argv = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub=_BODY_SAVING_STUB,
+        failing_script=("dispatch-body", 3, ""),
+    )
+    assert result.returncode == 0, f"a run may have started: {result.stdout}{result.stderr}"
+    assert (
+        "::warning::the dispatch answered with an error, but a shipmate.yml run started since "
+        "it; not retried"
+    ) in result.stdout.splitlines(), f"the warning must print whole: {result.stdout}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
         "### shipmate apply dev-eu\n\n"
-        "🔴 failed: the command was authorized, but dispatching its workflow failed, so no run "
-        "started. The error is in this run's log.\n\n"
+        "⚪ the dispatch answered with an error, but a shipmate.yml run started since it; it "
+        "may be this command's. Check the Actions tab before commenting again.\n\n"
+        f"[comment run]({_RUN_URL})"
+    )
+
+
+@bash_only
+def test_a_may_have_started_reply_that_cannot_be_posted_only_warns(tmp_path):
+    """A run may have started, so a notice reply whose every gh call fails warns and the step
+    still passes.
+
+    Mutation: drop the exit-3 branch's `|| echo` degrade.
+    """
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub="#!/bin/bash\nexit 1\n",
+        failing_script=("dispatch-body", 3, ""),
+    )
+    assert result.returncode == 0, f"a failed reply must not fail: {result.stdout}{result.stderr}"
+    assert "::warning::could not post the dispatch reply" in result.stdout.splitlines(), (
+        f"the failed reply must warn: {result.stdout}"
+    )
+
+
+@bash_only
+def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
+    """`dispatch-body post` exits 4 when its attempts ended on server or network errors, or
+    the listing that would have told could not be read: a run may have started, so the failure
+    reply sends the commenter to the Actions tab, and `post`'s message prints to the log.
+
+    Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo; call
+    `say_skew` on exit 4 (the stderr ends with a 422 that would match it).
+    """
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub=_BODY_SAVING_STUB,
+        failing_script=(
+            "dispatch-body",
+            4,
+            "gh: Bad Gateway (HTTP 502)\ngh: Unexpected inputs provided (HTTP 422)",
+        ),
+    )
+    assert result.returncode == 1, f"an undetermined dispatch must fail: {result.returncode}"
+    assert (
+        "::error::dispatching shipmate.yml failed with a server or network error, so a run may "
+        "have started"
+    ) in result.stdout.splitlines(), f"the failure must be annotated whole: {result.stdout}"
+    assert "gh: Bad Gateway (HTTP 502)" in result.stdout.splitlines(), (
+        f"`post`'s message must reach the log: {result.stdout}"
+    )
+    assert _LAYOUT_SKEW not in result.stdout, f"exit 4 prints no layout hint: {result.stdout}"
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        "### shipmate apply dev-eu\n\n"
+        "🔴 failed: the command was authorized, but dispatching its workflow failed with a "
+        "server or network error, so a run may have started. Check the Actions tab before "
+        "commenting again; the error is in this run's log.\n\n"
         f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
     )
 
@@ -747,11 +827,9 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path):
     """A started unlock run replies on the pull request with the whole notice: the header, a
     verdict linking the started run by a URL the engine builds from `workflow_run_id`, and the
     footer linking the comment-handling run. Posted with the workflow token, since the App
-    token is minted `actions: write` and cannot comment. The stub's dispatch answer carries a
-    gh warning on stderr, which must not reach the parsed answer.
+    token is minted `actions: write` and cannot comment.
 
-    Mutations: parse `html_url` instead of `workflow_run_id`; capture the dispatch with `2>&1`
-    (the warning corrupts the JSON, and the link is lost); pass no run id to the reply;
+    Mutations: parse `html_url` instead of `workflow_run_id`; pass no run id to the reply;
     drop `GH_TOKEN="$COMMENT_TOKEN"` from `reply`.
     """
     result, argv = _run_dispatch(
@@ -847,15 +925,15 @@ def test_a_failed_comment_does_not_mask_the_dispatch_failure(tmp_path):
     Mutations: drop the `|| echo "::warning::..."` and this exits 1 (the comment's status)
     instead of 22; revert it to `|| true` and the warning is missing.
     """
-    # Succeeds at the dispatch, then refuses the comment: exactly a job without
-    # `pull-requests: write`.
-    stub = (
-        "#!/bin/bash\n"
-        'if [[ "$*" == *comments* ]]; then echo "HTTP 403: Forbidden" >&2; exit 1; fi\n'
-        "echo \"gh: Workflow does not have 'workflow_dispatch' trigger (HTTP 422)\" >&2\n"
-        "exit 22\n"
+    # `post` exits 22 here, a status distinct from the comment's 1; the comment is refused,
+    # exactly as in a job without `pull-requests: write`.
+    stub = '#!/bin/bash\necho "HTTP 403: Forbidden" >&2\nexit 1\n'
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="plan",
+        gh_stub=stub,
+        failing_script=("dispatch-body", 22, "gh: Validation Failed (HTTP 422)"),
     )
-    result, _ = _run_dispatch(tmp_path, verb="plan", gh_stub=stub)
     assert result.returncode == 22, (
         f"the dispatch's own status must survive a failed comment: {result.returncode}"
     )

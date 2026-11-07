@@ -23,7 +23,7 @@ before any `gh` call; a failed POST exits 1 unannotated, naming the pull request
 stderr, never the body.
 
 The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
-a notice or a started run asks nothing of the reader, so it carries no hint.
+a notice or a started run carries no hint.
 """
 
 import os
