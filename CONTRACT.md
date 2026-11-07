@@ -192,7 +192,8 @@ job whose retry ran out (its `::error::… left pending` names the cells) may be
 followed by `complete` completing those same checks. A completion job's failure
 never fails the level (job-level `continue-on-error: true`): `complete`'s
 result alone decides whether the level fails over a check it could not
-complete. "Re-run failed jobs" skips `snapshot` and reuses its outputs.
+complete, so a check a completion job left pending is completed there or the
+level is red. "Re-run failed jobs" skips `snapshot` and reuses its outputs.
 A plan re-run can create a fresh duplicate apply check; a duplicate created
 *after the snapshot* is therefore left pending (its plan was not applied by this run),
 while duplicates that predate the apply are all completed so the gate never

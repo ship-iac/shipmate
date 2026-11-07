@@ -3,8 +3,8 @@
 
 Reads check-run ids on stdin, one per line (blank lines skipped), and PATCHes each with `BODY`
 through `retried`, the body on gh's stdin. `GH_TOKEN` and `GITHUB_REPOSITORY` come from the
-environment. Stdout carries only the ids PATCHed, one per line as each is acknowledged; every
-diagnostic goes to stderr.
+environment. Stdout carries only the ids PATCHed, one per line as each is acknowledged, for the
+step log only: nothing reads them. Every diagnostic goes to stderr.
 
 Fails closed, because the gate's work queue is the pending checks: the first id that still
 fails (a permanent failure at once, a transient one once its retries are exhausted) stops the

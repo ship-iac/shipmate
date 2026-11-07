@@ -204,9 +204,9 @@ jobs:
     name: *wave-name
     steps: *wave-steps
 
-  # Completes one wave's checks as soon as that wave ends. Only a wave that ran: a skipped wave's
-  # listing row holds the literal matrix template, so every cell is unmatched and the action fails
-  # after its ~2-minute retry.
+  # Completes one wave's checks as soon as that wave ends. A skipped wave lists the literal matrix
+  # row, so it is excluded; a wave that fails before its matrix expands also lists it, so its job
+  # retries ~2 minutes and warns its checks were left pending, which `complete` then completes.
   wave0-complete:
     needs: [snapshot, wave0]
     if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') }}
