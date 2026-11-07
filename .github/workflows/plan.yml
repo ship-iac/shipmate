@@ -119,8 +119,8 @@ jobs:
           expected-head: ${{ needs.facts.outputs.head-sha }}
           encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
 
-  # Holds the App key, as `gate-hold` does. Neither checks anything out, so neither runs consumer
-  # repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust,
+  # Holds the App key, as `gate-hold` and `outcome` do. None checks anything out, so none runs
+  # consumer repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust,
   # reading only `facts`, the one producer of pull-request facts.
   summary:
     needs: [facts, detect, plan]
@@ -141,8 +141,12 @@ jobs:
     environment: { name: shipmate-engine, deployment: false }
     permissions:
       contents: read
+    outputs:
+      upsert: ${{ steps.summary.outputs.upsert }}
+      superseded: ${{ steps.summary.outputs.superseded }}
     steps:
       - uses: $/actions/summary
+        id: summary
         # `scripts/doctor`'s probes need the engine slug. `job` is unavailable in a job-level `env:`
         # (GitHub rejects the file) and `github.action_repository` is empty for a `$/` action, so
         # the step passes it; composite `run` steps inherit the caller's env.
@@ -187,3 +191,21 @@ jobs:
           hold-description: >-
             re-plan this pull request (comment shipmate plan or push): its plan summary was
             cancelled before it published
+
+  # `!cancelled()`, not `always()`: a push's autoplan cancels a dispatched plan and answers it.
+  # Holds the App key but checks nothing out.
+  outcome:
+    needs: [facts, summary]
+    if: ${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && needs.facts.outputs.head-repo != '' && needs.facts.outputs.head-repo == github.repository && needs.summary.outputs.superseded != 'true' && needs.summary.outputs.upsert != 'created' && needs.summary.outputs.upsert != 'moved' }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    steps:
+      - uses: $/actions/outcome-reply
+        with:
+          verb: plan
+          pr-number: ${{ needs.facts.outputs.pr-number }}
+          summary-result: ${{ needs.summary.result }}
+          run-cancelled: "false"
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

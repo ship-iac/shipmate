@@ -17,7 +17,7 @@ green. A failed read of either, or a failed
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
 
-`Create apply checks` runs after the sticky comment, so a failed `post` or `nothing-changed`
+`Create apply checks` runs after the plan comment write, so a failed `post` or `nothing-changed`
 comment write publishes no apply check. With nothing in `bodies.jsonl` it reads nothing;
 otherwise it runs `gate-status refuse-newer` first and refuses, writing nothing, over a newer
 run's hold: `gate-hold` writes outside the job's concurrency group, after the hold step's read.
@@ -54,7 +54,7 @@ RUN_ID = "42"
 APP_ID = "4242"
 HOLD = "Hold the gate while apply checks publish"
 CREATE = "Create apply checks (pending / no-changes)"
-UPSERT = "Upsert sticky comment"
+UPSERT = "Write the plan comment"
 GATE = "Create/refresh gate"
 HOLD_DESCRIPTION = (
     "re-plan this pull request (comment shipmate plan or push): "
@@ -497,7 +497,10 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
                 "api",
                 "--paginate",
                 "--jq",
-                '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}',
+                (
+                    '.[] | select(.user.type == "Bot") | '
+                    '{id, node_id, login: .user.login, head: ((.body // "")[0:64])}'
+                ),
                 "repos/acme/demo/issues/7/comments?per_page=100",
             ],
         ],
@@ -598,11 +601,6 @@ LATER_STEP_IFS = {
     "Decide whether to dispatch an auto apply": NOT_MOVED,
     "Mint the auto apply dispatch token": "${{ steps.autodecide.outputs.envs != '' }}",
     "Dispatch an auto apply": "${{ steps.autodecide.outputs.envs != '' }}",
-    "Collapse the started reply": (
-        "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true'"
-        " && (steps.upsert.outputs.result == 'created'"
-        " || steps.upsert.outputs.result == 'updated') }}"
-    ),
 }
 
 

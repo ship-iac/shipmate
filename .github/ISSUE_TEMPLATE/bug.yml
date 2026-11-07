@@ -62,7 +62,7 @@ body:
         over the repository's settings — gate ruleset, review requirements,
         GitHub Environments and their protection shape, plan environment secrets,
         engine pin freshness, the shipmate App installation.
-        It posts the consolidated result as a sticky comment. It reports settings
+        It posts the consolidated result as one comment, updated in place. It reports settings
         problems, not plan or apply failures, and never blocks. See
         [`docs/troubleshooting.md`](https://github.com/ship-iac/shipmate/blob/main/docs/troubleshooting.md#shipmate-doctor).
 

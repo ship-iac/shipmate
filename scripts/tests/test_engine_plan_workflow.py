@@ -42,6 +42,7 @@ def test_every_job_declares_its_own_permissions():
         "plan": {"contents": "read", "id-token": "write"},
         "summary": {"contents": "read"},
         "gate-hold": {},
+        "outcome": {},
     }
 
 

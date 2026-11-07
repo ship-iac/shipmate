@@ -46,7 +46,10 @@ _REVIEW_JOB = {
     "runs-on": "ubuntu-slim",
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
-    "outputs": {"decision": "${{ steps.rd.outputs.decision }}"},
+    "outputs": {
+        "decision": "${{ steps.rd.outputs.decision }}",
+        "unbound": "${{ steps.rd.outputs.unbound }}",
+    },
 }
 
 #: The whole `rd` step, its `run` with comment lines stripped, hand-written. The `--jq` program
@@ -76,6 +79,7 @@ _RD_STEP = {
                 '.isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv\')'
             ),
             'if [[ -z "$pr" ]]; then',
+            '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
                 '  echo "::error::Pull request #$PR_NUMBER does not exist in this repository; '
                 'nothing applies."'
@@ -84,6 +88,7 @@ _RD_STEP = {
             "fi",
             "IFS=$'\\t' read -r state draft cross head rd <<< \"$pr\"",
             'if [[ "$state" != OPEN ]]; then',
+            '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
                 '  echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. '
                 "A merged pull request's plans apply through the merge deploy.\""
@@ -276,11 +281,12 @@ def test_a_bare_null_pull_request_refuses(tmp_path):
     NOT_FOUND, above); select() still refuses it rather than reading empty fields.
 
     Mutation: replace the `-z "$pr"` branch's `echo ...; exit 1` with
-    `echo "decision=MISSING_PR" >> "$GITHUB_OUTPUT"; exit 0`."""
+    `echo "decision=MISSING_PR" >> "$GITHUB_OUTPUT"; exit 0`; drop its `unbound=true` write
+    (`outcome` would reply on a number naming no pull request)."""
     assert _run_rd(tmp_path, None) == (
         1,
         "::error::Pull request #7 does not exist in this repository; nothing applies.\n",
-        "",
+        "unbound=true\n",
     )
 
 
@@ -290,14 +296,16 @@ def test_a_bare_null_pull_request_refuses(tmp_path):
 def test_a_pull_request_that_is_not_open_refuses(tmp_path, state):
     """A pull request merged between the comment and the dispatch is the deploy's to apply.
 
-    Mutation: delete the `"$state" != OPEN` check."""
+    Writes `unbound`, so `outcome` posts no reply for it.
+
+    Mutations: delete the `"$state" != OPEN` check; drop its `unbound=true` write."""
     assert _run_rd(tmp_path, {**_OPEN, "state": state}) == (
         1,
         (
             f"::error::Pull request #7 is {state}, not OPEN; nothing applies. A merged pull "
             "request's plans apply through the merge deploy.\n"
         ),
-        "",
+        "unbound=true\n",
     )
 
 

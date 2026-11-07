@@ -469,7 +469,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except nine that run neither `terramate` nor `tofu` and stay on
+engine job except eleven that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
@@ -542,7 +542,7 @@ jobs:
       # Keep even without a repository secret: it passes the `<env>-plan` / `<env>-apply`
       # environment's envelope through. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    # Runner for engine jobs but the nine on ubuntu-slim (docs/aws.md §Runner choice);
+    # Runner for engine jobs but those on ubuntu-slim (docs/aws.md §Runner choice);
     # `*runner` reuses it, drift files set their own. ubuntu-latest for x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
@@ -865,7 +865,7 @@ Two reasons, and the second one is a hard failure:
   replaced the secrets context wholesale. So "add the environment and keep
   `inherit`" does not work; the App key never arrives, and every App-authored
   surface silently fails to exist — no `shipmate / gate`, no pending
-  `apply / <stack> / <env>` checks, no sticky comment.
+  `apply / <stack> / <env>` checks, no plan comment.
 
 Pass only what each callee declares. `comment-ops.yml` declares
 `SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan

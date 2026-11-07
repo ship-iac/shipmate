@@ -21,7 +21,6 @@ SCRIPTS_EXPECTED = [
     "auto-dispatch",
     "build-matrix",
     "cell-lock",
-    "collapse-reply",
     "comment-parse",
     "deploy-detect",
     "dispatch-body",

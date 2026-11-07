@@ -9,7 +9,7 @@ the excluded/skipped/held envs and the predecessors each skipped env waits on (b
 forms), the waiting cells and the held cells, locked (both forms) or overlap (auto form only),
 the envs left for a bare apply (auto form only),
 the detect or lock job's refusal, and the review-exempt and no-review envs, and writes a
-fresh comment.md -- this comment is never upserted, unlike the plan sticky comment. The
+fresh comment.md -- this comment carries no marker, so nothing edits or minimizes it. The
 review-exempt and no-review envs go to stdout, the step log, as `notices` annotations, not
 into the comment.
 

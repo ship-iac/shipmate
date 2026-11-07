@@ -13,7 +13,7 @@ queued apply check: an apply's refresh serialized before this write would otherw
 cells behind a `pending` nobody upgrades. The refresh only upgrades a fail-closed write, so its
 failure, a hold included, warns and the step passes.
 
-The upsert step leaves the sticky comment as it is on a draft run and makes no comment API call.
+The upsert step leaves the plan comment as it is on a draft run and makes no comment API call.
 
 Both steps run for real: `Create/refresh gate` through `_loader.run_with_gate_gh`, the upsert step
 through `run_with_gh_recorder`.
@@ -262,7 +262,7 @@ def _run_upsert(tmp_path, mode):
     (tmp_path / "comment.md").write_text("<!-- shipmate:summary -->\n", encoding="utf-8")
     return run_with_gh_recorder(
         tmp_path,
-        step_by("summary", name="Upsert sticky comment")["run"],
+        step_by("summary", name="Write the plan comment")["run"],
         {
             **os.environ,
             "GH_TOKEN": "x",
@@ -300,7 +300,10 @@ def test_the_upsert_stub_records_a_post_run(tmp_path):
             "api",
             "--paginate",
             "--jq",
-            '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}',
+            (
+                '.[] | select(.user.type == "Bot") | '
+                '{id, node_id, login: .user.login, head: ((.body // "")[0:64])}'
+            ),
             "repos/acme/demo/issues/7/comments?per_page=100",
         ],
         ["api", "repos/acme/demo/pulls/7"],

@@ -9,7 +9,7 @@ output text: the plan output is author-controlled, so no cell summary or plan te
 mirrored check.
 
 The step-order guard compares the action's whole step-name list against a hand-written constant.
-The mirror running before `Build comment + gate state` is the only thing making the sticky
+The mirror running before `Build comment + gate state` is the only thing making the plan
 comment's per-cell links resolve under a dispatch, and nothing else in the suite would notice it
 moving.
 """
@@ -205,7 +205,7 @@ EXPECTED_STEP_NAMES = [
     "Build comment + gate state",
     "Decide gate state and comment mode",
     "Download cell errors",
-    "Upsert sticky comment",
+    "Write the plan comment",
     "Create apply checks (pending / no-changes)",
     "Create/refresh gate",
     "Check whether the live head needs a plan",
@@ -214,7 +214,6 @@ EXPECTED_STEP_NAMES = [
     "Decide whether to dispatch an auto apply",
     "Mint the auto apply dispatch token",
     "Dispatch an auto apply",
-    "Collapse the started reply",
 ]
 
 

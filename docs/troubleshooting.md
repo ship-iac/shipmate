@@ -11,8 +11,8 @@ settings pages.
 findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
-pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
+pull request for a consolidated report: one comment per pull request (marker
+`<!-- shipmate:doctor -->`, upserted in place) combining fourteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -1503,10 +1503,10 @@ never apply. The summary job also holds the gate while it publishes the apply
 checks, reading "Plan run <id> holds this while it publishes; if that run has
 ended, re-plan (comment shipmate plan or push)". That hold stays when the run
 ends before its final gate write (a failed or cancelled summary job, or a
-cancelled plan job after the summary downloaded a cell summary). A sticky plan
+cancelled plan job after the summary downloaded a cell summary). A plan
 comment that could not be listed or written, or whose pull request head could
 not be read just before the write ("could not read the head of pull request
-#<n>, so the sticky plan comment was not updated"), fails the summary job
+#<n>, so no plan comment was written"), fails the summary job
 before that write too, and before any apply check is published; the error is
 in the job's annotation for a failed write and in the step log for a failed
 listing or head read. A held run's comment write, which only explains the red
@@ -1788,12 +1788,15 @@ landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
 A run refused or cancelled in `review` posts no apply comment and leaves the
-gate as it was: the red run is the signal. Find it from the dispatch reply on
-the pull request when that reply links it, otherwise in the Actions tab
-(`CONTRACT.md` §Comment-ops says when the reply links the run).
+gate as it was. It posts a `🔴` reply on the pull request instead, which links
+the run: `its review check stopped [the apply run](<url>) before any cell
+applied` for a refusal, `[the apply run](<url>) was cancelled before it posted a
+result` for a cancel (`CONTRACT.md` §Outcome reply).
 
 An apply run whose `summary` job was cancelled before it ran, because a later
-gate writer on the same head queued behind it, also posts no apply comment. Its
+gate writer on the same head queued behind it, also posts no apply comment. It
+replies `[the apply run](<url>) posted no result: a newer run for this head
+replaced its summary. Its cells' results are on their apply checks.` Its
 results and its waiting cells show only on that run's page. The writer that
 evicted it runs next: a plan `summary` writes the gate from its plan; an apply
 `summary` refreshes it, which greens it once every apply check is done and
@@ -1850,7 +1853,7 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    The next step, `Dispatch an auto apply`, logs `dispatched an auto apply of
    <envs> for PR #<n> (ref <sha>)`. Both steps are skipped when a newer plan
    run of the head refused this one, or when the pull request moved past this
-   run's head (the publish hold's or the sticky comment upsert's read). A moved
+   run's head (the publish hold's or the plan comment write's read). A moved
    run's step `Check whether the live head needs a plan` then dispatches
    `shipmate plan` for the live head, or logs why not (`pull request #<n> is
    <state>; nothing dispatched`, `pull request #<n> moved to <sha>, a draft;
@@ -2167,7 +2170,7 @@ is no remedy for any of these refusals: it runs no overlap check.
 ### A pull request planned zero cells
 
 No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
-posted — unless there is already a plan comment to keep current, `doctor`
+posted — unless a plan comment is visible, `doctor`
 raised a warning on that run outside the repository-settings probes, the
 pull request changes a stack with no `env/*` tag that is not local, it removes
 one `env/*` tag from a stack that keeps another (the lost pairs line), or a
@@ -2208,9 +2211,25 @@ The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
 do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless the job is missing or another job
-calls the same workflow — and the run is in the Actions tab, linked from the dispatch reply on
-the pull request when that reply carries a link. Reconcile the job against the
+calls the same workflow. The run is in the Actions tab. For `shipmate plan` and
+`shipmate apply` the pull request shows the 🚀 reaction (and 👀 for `shipmate
+plan`) and no reply, since the job that would answer never ran; for `shipmate
+unlock` the started-run reply links the run when it carries a link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
+
+### Rocket reaction and no plan comment or reply
+
+A `shipmate plan` or `shipmate apply` comment got the 🚀 reaction, and neither
+a result nor a 🔴 reply followed within a few minutes. The run ended before its
+`outcome` job could answer: an apply run's `guard` job refused it, a plan run's
+`facts` job failed, or the run failed at startup. Otherwise the run's
+`outcome` job's state and log name the cause; `CONTRACT.md` §Outcome reply lists
+when it is skipped.
+
+Open the Actions tab and filter the runs titled `shipmate · <verb>`. A failed
+`guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
+`review` names it in its job log. A startup failure shows on the run page with
+no jobs started, with GitHub's error for the workflow file.
 
 ### A cancelled autoplan left red checks on the pull request
 
@@ -2296,11 +2315,11 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All eleven jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review`, `lock`
-and `summary`, `apply-env-level.yml` `snapshot` and `complete`, `deploy.yml` `summary`,
+All thirteen jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `review`, `lock`,
+`summary` and `outcome`, `apply-env-level.yml` `snapshot` and `complete`, `deploy.yml` `summary`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
-sticky comment or comment reply is written, and no cell lock is released.
+plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 
 `shipmate-engine` has an enabled custom deployment protection rule. Every engine
 job binds that environment with `deployment: false`, which creates no deployment,

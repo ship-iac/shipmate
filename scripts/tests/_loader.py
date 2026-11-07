@@ -276,9 +276,19 @@ import os, runpy, subprocess, sys
 _run = subprocess.run
 
 
+def _windows_arg(arg):
+    # MSYS bash started by a native Windows process globs each unquoted argument, and one like
+    # `ids[]=X` crashes it (exit 0xC0000005); a double-quoted argument is not globbed.
+    if set(arg) & set("[*?") and not set(arg) & set(' \\t"\\\\'):
+        return f'"{{arg}}"'
+    return subprocess.list2cmdline([arg])
+
+
 def _gh_through_bash(args, *rest, **kwargs):
     if isinstance(args, (list, tuple)) and args and args[0] == "gh":
         args = [{bash}, {gh}, *args[1:]]
+        if os.name == "nt":
+            args = " ".join(_windows_arg(a) for a in args)
     return _run(args, *rest, **kwargs)
 
 
@@ -321,8 +331,10 @@ def write_python3_shim(bin_dir):
 #: per argument and ``--`` after each call, answers a ``--paginate`` listing with
 #: ``$FAKE_LISTING``, ``$FAKE_LIST_STDERR`` on stderr and exit ``$FAKE_LIST_RC``, a bare
 #: ``repos/<o>/<r>/pulls/<n>`` read with pull JSON of head ``$FAKE_HEAD``, open and not a draft,
-#: and exit ``$FAKE_HEAD_RC``, and any other call with JSON and ``$FAKE_WRITE_RC``, after printing
-#: ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
+#: and exit ``$FAKE_HEAD_RC``, a ``graphql`` query with every ``ids[]=`` node not minimized, a
+#: ``graphql`` mutation with a minimized comment, and any other call with JSON authored by
+#: ``shipmate[bot]`` and ``$FAKE_WRITE_RC``, after printing ``$FAKE_WRITE_STDERR`` (empty when
+#: unset) to stderr.
 _GH_RECORDER = """\
 #!/bin/bash
 printf '%s\\n' "$@" -- >> "$CALLS"
@@ -335,7 +347,21 @@ if [ "$#" = 2 ] && [[ "$2" =~ ^repos/[^/]+/[^/]+/pulls/[0-9]+$ ]]; then
   printf '{"head": {"sha": "%s"}, "draft": false, "state": "open"}\\n' "${FAKE_HEAD:-}"
   exit "${FAKE_HEAD_RC:-0}"
 fi
-echo '{"id": 99}'
+if [ "$2" = graphql ] && [[ "$4" == query=mutation* ]]; then
+  echo '{"data": {"minimizeComment": {"minimizedComment": {"isMinimized": true}}}}'
+  exit 0
+fi
+if [ "$2" = graphql ]; then
+  nodes=""
+  for arg in "$@"; do
+    if [[ "$arg" == "ids[]="* ]]; then
+      nodes="$nodes${nodes:+, }{\\"id\\": \\"${arg:6}\\", \\"isMinimized\\": false}"
+    fi
+  done
+  printf '{"data": {"nodes": [%s]}}\\n' "$nodes"
+  exit 0
+fi
+echo '{"id": 99, "user": {"login": "shipmate[bot]"}}'
 printf '%s' "${FAKE_WRITE_STDERR:-}" >&2
 exit "${FAKE_WRITE_RC:-0}"
 """

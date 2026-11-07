@@ -10,7 +10,7 @@ needs `actions: write`, and the engine's comment-ops job grants its
 `GITHUB_TOKEN` only `actions: read`: the write permission exists only in the
 App token the dispatch step mints once the command is authorized. The same App
 also authors every apply check, the `shipmate / gate` commit status, the
-sticky plan/result comments and drift issues, and writes the cell lock
+plan, doctor and apply result comments and drift issues, and writes the cell lock
 refs — installation tokens minted
 fresh per job, never a long-lived credential in the workflow. The bot
 identity is derived automatically from the App name once it's registered, so
@@ -65,7 +65,7 @@ accordingly.
 
 The knock-on is already handled: the bot identity is derived from the App name,
 so a renamed App comments as `shipmate-<your-org>[bot]` rather than
-`shipmate[bot]`. The sticky plan and doctor comments are looked up by their
+`shipmate[bot]`. The plan and doctor comments are looked up by their
 marker plus a `Bot` comment author, never by a hardcoded login.
 
 The manifest's `redirect_url` (`http://127.0.0.1:8723/callback`) is a working
@@ -277,12 +277,12 @@ as above, and step 5 runs in every consumer repository.
 - The App mints a fresh installation token per job and authors every
   `apply / <stack> / <env>` check (create pending, in progress while its level
   applies, queued again if its run did not apply it, completed on apply), the
-  aggregate `shipmate / gate` commit status, the sticky plan comment, the
-  `shipmate doctor` sticky report, the apply result comments, and drift
-  issues. With the same `pull_requests: write` token it minimizes (collapses
-  as outdated, GraphQL `minimizeComment`) the `github-actions[bot]` started
-  reply: a plan run after writing the gate, when its comment was created or
-  updated; an apply run after posting its result comment. The plan matrix
+  aggregate `shipmate / gate` commit status, the plan comment (a new one per
+  plan), the `shipmate doctor` report, the apply result comments, the outcome
+  reply of a plan or apply run that ends without its result, and drift
+  issues. With the same `pull_requests: write` token it minimizes its earlier
+  plan comments as outdated (GraphQL `minimizeComment`) after posting a new
+  one. Nothing minimizes a `github-actions[bot]` reply. The plan matrix
   job's own `plan / <env> / <stack>` auto check-run stays on the
   `github-actions` identity — it's the job's own check-run, not
   something a separate API call creates, so there's nothing for the App to
@@ -348,8 +348,8 @@ actual work here:
   bare `<env>` for a `split: false` entry). Detect refuses the name
   `shipmate-engine`, so no cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
-  is named only in the `summary` and `gate-hold` jobs of engine `plan.yml`,
-  neither of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
+  is named only in the `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
+  none of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
   names the secret in the `secrets:` block of each job that passes it, and
   `pull_request_target` runs the base copy of that file rather than the pull
   request's own. A dispatched `shipmate plan` is the same shape one ref along:
@@ -359,7 +359,7 @@ actual work here:
   never by anything the pull request writes.
 
   **The constraint that follows: no job in engine `plan.yml` other than
-  `summary` and `gate-hold` may reference a `shipmate-engine` secret.** Adding one hands it to a
+  `summary`, `gate-hold` and `outcome` may reference a `shipmate-engine` secret.** Adding one hands it to a
   plan cell whose environment the branch chooses.
   `scripts/tests/test_cells_hold_no_app_key.py` is the guard.
 - **A `push` to a non-default branch cannot reach the key.** Measured, not
@@ -392,8 +392,9 @@ actual work here:
   ref like the autoplan, and checks out nothing either: it reads only the event
   payload (`docs/hardening.md` §Contributors without push access).
 - **The plan-run jobs that hold the key run no consumer repository content.**
-  The `summary` job and `gate-hold`, which runs only when the gate-writer
-  concurrency group cancelled `summary`, check out nothing, and a consumer
+  The `summary` job, `gate-hold`, which runs only when the gate-writer
+  concurrency group cancelled `summary`, and `outcome`, which carries
+  `summary`'s fork clause, check out nothing, and a consumer
   cannot add a checkout: they call the workflow, they do not own its steps.
   Reaching the key from a pull-request-side trigger is safe only in that shape —
   see `CONTRACT.md`
