@@ -865,7 +865,7 @@ def test_a_first_cell_its_share_truncated_grows_by_what_is_left():
     sits within one six-character plan row of SIZE_BUDGET, less the four separator characters
     the budget counts and the body does not carry.
 
-    Mutation: pass 2 skipping truncated first cells (re-rendering bare lines only) leaves the
+    Mutation: pass 2 skipping truncated fold-outs (re-rendering bare lines only) leaves the
     body near 30,000 characters."""
     cells = [
         (_cell(stack="s1", environment="a"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)),
