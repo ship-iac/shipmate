@@ -263,7 +263,7 @@ prefix.
 Every engine workflow a consumer calls takes a `runs_on:` input whose default
 is `ubuntu-26.04-arm`. GitHub publishes no `ubuntu-latest`-style alias for
 arm64, so the default is a pinned label. The input sets the runner of every
-engine job but eleven:
+engine job but nineteen:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
@@ -274,10 +274,11 @@ engine job but eleven:
 - `comment-ops.yml`: `ops`.
 - `release.yml`: `release`.
 
-The input does not reach eleven jobs, which run on `ubuntu-slim` and run neither
+The input does not reach nineteen jobs, which run on `ubuntu-slim` and run neither
 `tofu` nor `terramate`: `facts`, `gate-hold` and `outcome` in `plan.yml`; `guard`,
-`review`, `summary` and `outcome` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`
-and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
+`review`, `summary` and `outcome` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`,
+`wave0-complete` … `wave7-complete` and `complete` in `apply-env-level.yml`; and
+`guard` in `unlock.yml`.
 
 `issues` in `drift.yml`, `lock` in `apply.yml` and `release` in `release.yml`
 run neither tool too, yet stay on the `runs_on` runner because an `ubuntu-slim`

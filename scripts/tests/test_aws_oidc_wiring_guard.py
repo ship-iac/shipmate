@@ -12,8 +12,8 @@ Invariants:
   real credentials from a branch-editable value for exactly the cell the table declined to give
   a role. The jobs may read repository variables elsewhere, and this says nothing about those;
 - every wave job in apply-env-level.yml carries id-token: write;
-- apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither
-  gets id-token: neither touches the cloud, and complete holds the App key.
+- apply-env-level's snapshot, waveN-complete and complete jobs declare exactly the scopes they
+  need. None gets id-token: none touches the cloud, and the completion jobs hold the App key.
 
 Whole parsed values, never substrings. An inverted gate must fail here.
 """
@@ -59,19 +59,21 @@ def test_every_wave_job_grants_id_token_write():
         assert perms.get("id-token") == "write", f"{wave}: permissions must include id-token: write"
 
 
-def test_snapshot_and_complete_jobs_get_exactly_their_declared_permissions():
+def test_snapshot_and_completion_jobs_get_exactly_their_declared_permissions():
+    """Mutation: add `checks: write` to `wave5-complete`'s permissions."""
     # Whole-mapping comparison, not `id-token is None`: the realistic break is the block being
     # deleted, and an absent block is not an absent scope. The job then inherits the caller's
     # grants, or, with the workflow-level floor, nothing.
     expected = {
         "snapshot": {"checks": "read", "actions": "read"},
+        **{f"wave{n}-complete": {"actions": "read"} for n in range(8)},
         "complete": {"actions": "read"},
     }
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     for name, perms in expected.items():
         assert jobs[name].get("permissions") == perms, (
             f"{name} must declare exactly {perms} -- it never touches the cloud, "
-            "and complete holds the App private key"
+            "and the completion jobs hold the App private key"
         )
 
 

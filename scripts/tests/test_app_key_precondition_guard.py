@@ -146,47 +146,48 @@ _SNAPSHOT_MINT = {
     },
 }
 
-#: apply-snapshot's flip step, whole.
-_SNAPSHOT_FLIP = {
-    "name": "Mark the apply checks in progress",
+_SNAP = 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot"'
+
+#: apply-snapshot's `snap` step, whole.
+_SNAPSHOT_SNAP = {
+    "id": "snap",
     "shell": "bash",
     "env": {
-        "GH_TOKEN": "${{ steps.token.outputs.token }}",
-        "SHIPMATE_SNAPSHOT_JSON": "${{ steps.snap.outputs.snapshot }}",
+        "GH_TOKEN": "${{ github.token }}",
+        "HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
+        "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     },
     "run": (
         "set -euo pipefail\n"
-        'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" ids |\n'
-        '  python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" in_progress\n'
+        'if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \\\n'
+        "  '.check_runs[]' > \"$RUNNER_TEMP/checks.jsonl\"; then\n"
+        '  echo "::error::could not list the check runs on $HEAD_SHA; the step log names the'
+        ' cause"\n'
+        "  exit 1\n"
+        "fi\n"
+        f'snap=$({_SNAP} < "$RUNNER_TEMP/checks.jsonl")\n'
+        'echo "snapshot=$snap" >> "$GITHUB_OUTPUT"\n'
+        f'by_wave=$(SHIPMATE_SNAPSHOT_JSON="$snap" {_SNAP} by-wave)\n'
+        'echo "by_wave=$by_wave" >> "$GITHUB_OUTPUT"\n'
     ),
 }
 
 
-def _snapshot_steps():
-    return _steps(ACTIONS / "apply-snapshot" / "action.yml", ("runs", "steps"))
+def test_snapshot_action_steps_are_the_key_check_the_snapshot_then_the_mint():
+    """The key check, the snapshot and the mint are hard: a missing, revoked or wrong key fails
+    snapshot before any wave applies, instead of `complete` failing after infrastructure
+    changed. The mint's token is used by no step; minting is the authenticated preflight.
 
-
-def test_snapshot_mints_before_it_flips():
-    """The key check, the snapshot and the mint are hard: a missing key fails snapshot before any
-    wave applies, instead of `complete` failing after infrastructure changed.
-
-    Mutations: `continue-on-error: true` on the mint; `if: always()` on `snap`; swap the mint
-    and the flip.
+    Mutations: delete the verify step; drop the mint step; restore the flip step; wire
+    `by_wave` to `steps.snap.outputs.snapshot`.
     """
-    steps = _snapshot_steps()
-    assert [s.get("id") or s.get("name") for s in steps] == [
-        _NAME,
-        "snap",
-        "token",
-        "Mark the apply checks in progress",
-    ]
-    assert steps[2] == _SNAPSHOT_MINT
-    assert [(s.get("if"), s.get("continue-on-error")) for s in steps[:3]] == [(None, None)] * 3
-
-
-def test_flip_sends_in_progress_from_the_snapshot():
-    """Mutation: invoke `patch-checks` with `completed`."""
-    assert _snapshot_steps()[3] == _SNAPSHOT_FLIP
+    doc = action_yaml(ACTIONS / "apply-snapshot" / "action.yml")
+    assert doc["runs"]["steps"] == [_call(_ACTION_WITH), _SNAPSHOT_SNAP, _SNAPSHOT_MINT]
+    assert {k: v["value"] for k, v in doc["outputs"].items()} == {
+        "snapshot": "${{ steps.snap.outputs.snapshot }}",
+        "by_wave": "${{ steps.snap.outputs.by_wave }}",
+    }
 
 
 def test_the_shared_check_says_why_the_key_did_not_arrive():

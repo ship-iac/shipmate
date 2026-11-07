@@ -1,5 +1,5 @@
 name: shipmate apply-complete
-description: Complete the apply checks for every wave cell whose job succeeded in this run, and revert the level's other snapshot checks to queued. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs.
+description: Complete the apply checks of the given snapshot (one wave's slice, or the whole level) whose wave job succeeded in this run. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs.
 inputs:
   snapshot:
     description: JSON object from apply-snapshot mapping each cell to its pre-existing apply-check ids.
@@ -85,10 +85,7 @@ runs:
         fi
 
     - name: Mint App installation token
-      # Minted after the jobs listing, so the token's lifetime never spans it. `always()`
-      # because the revert needs the token even when the listing failed. A missing key skips it,
-      # so verify-app-key's error is the only one.
-      if: ${{ always() && inputs.private-key != '' }}
+      # Minted after the jobs listing, so the token's lifetime never spans it.
       id: token
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
@@ -103,28 +100,10 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
       # Fails closed: a stranded check blocks the gate, and a re-run cannot recover it because
-      # the applied state has already advanced past the reviewed plan. completed-ids.txt holds
-      # only the acknowledged ids, so the revert resets the failed id and every one after it.
+      # the applied state has already advanced past the reviewed plan.
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" completed \
-          < "$RUNNER_TEMP/complete-ids.txt" > "$RUNNER_TEMP/completed-ids.txt"
-
-    - name: Revert uncompleted apply checks to queued
-      # Degrades as a whole: this job runs after the applies, and its failure skips every
-      # successor level on deploy. An absent completed-ids.txt reverts every snapshot id.
-      if: always()
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
-      run: |
-        set -uo pipefail
-        if [ -z "$GH_TOKEN" ] ||
-          ! python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" ids "$RUNNER_TEMP/completed-ids.txt" |
-            python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" queued; then
-          echo "::warning::the uncompleted apply checks were not reverted to queued and may still show in progress"
-        fi
+        python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" < "$RUNNER_TEMP/complete-ids.txt"
 
     - name: Fail over any cell the jobs listing never resolved
       shell: bash

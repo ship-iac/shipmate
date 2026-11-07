@@ -6,6 +6,7 @@ import pytest
 from _loader import ACTIONS, bash_only, load_script, run_with_gate_gh, step_by
 
 apply_snapshot = load_script("apply-snapshot")
+apply_complete = load_script("apply-complete")
 
 WAVES = {
     "wave0": [{"stack": "stacks/dns", "environment": "dev-eu"}],
@@ -173,55 +174,55 @@ def test_a_failed_listing_fails_the_snapshot_step(
     ]
 
 
-_IDS_SNAPSHOT = {"apply / a / dev": [3, 1], "apply / b / dev": [2]}
+_EIGHT_WAVES = {
+    "wave0": [{"stack": "dns", "environment": "dev"}],
+    "wave1": [{"stack": "app", "environment": "dev"}, {"stack": "web", "environment": "dev"}],
+    **{f"wave{n}": [] for n in range(2, 8)},
+}
+_EIGHT_SNAPSHOT = {
+    "apply / dns / dev": [1],
+    "apply / app / dev": [2, 5],
+    "apply / web / dev": [3],
+}
 
 
-@pytest.mark.parametrize(
-    ("except_lines", "expected"),
-    [(None, "1\n2\n3\n"), ("2\n", "1\n3\n")],
-)
-def test_ids_prints_every_snapshot_id_sorted_minus_the_except_file(
-    monkeypatch, capsys, tmp_path, except_lines, expected
-):
-    """Mutation: print the ids in snapshot order -> 3, 1, 2; ignore the except file ->
-    the second case prints `2` too."""
-    monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps(_IDS_SNAPSHOT))
-    argv = ["ids"]
-    if except_lines is not None:
-        (tmp_path / "done.txt").write_text(except_lines)
-        argv.append(str(tmp_path / "done.txt"))
-    apply_snapshot.main(argv)
-    assert capsys.readouterr() == (expected, "")
+def test_by_wave_slices_the_snapshot_per_wave():
+    """Mutations: put the whole snapshot under every key -> wave0 holds wave1's cells; drop the
+    keys whose wave is empty -> wave2..wave7 are missing."""
+    assert apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT) == {
+        "wave0": {"apply / dns / dev": [1]},
+        "wave1": {"apply / app / dev": [2, 5], "apply / web / dev": [3]},
+        "wave2": {},
+        "wave3": {},
+        "wave4": {},
+        "wave5": {},
+        "wave6": {},
+        "wave7": {},
+    }
 
 
-def test_ids_treats_an_absent_except_file_as_empty(monkeypatch, capsys, tmp_path):
-    """Mutation: open the except path unguarded -> `FileNotFoundError`."""
-    monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps(_IDS_SNAPSHOT))
-    apply_snapshot.main(["ids", str(tmp_path / "missing.txt")])
-    assert capsys.readouterr() == ("1\n2\n3\n", "")
+def test_a_wave_slice_reads_no_later_wave_as_unmatched():
+    """wave0's completion runs before wave1 has a job in the listing. Mutation: hand
+    `to_complete` the whole snapshot instead of wave0's slice -> wave1's cells read unmatched."""
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "status": "completed"}]
+    wave0 = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)["wave0"]
+    assert apply_complete.to_complete(wave0, jobs) == ([1], [], [], [])
 
 
-def test_ids_refuses_an_except_file_it_cannot_read(monkeypatch, tmp_path):
-    """A non-integer line and a directory path each refuse with an annotation. Mutation: catch
-    only `FileNotFoundError` -> a raw `ValueError` (and `OSError`) escapes."""
-    monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps(_IDS_SNAPSHOT))
-    bad = tmp_path / "done.txt"
-    bad.write_text("x\n")
-    with pytest.raises(SystemExit) as exc:
-        apply_snapshot.main(["ids", str(bad)])
-    assert str(exc.value) == (
-        f"::error::cannot read the except file {bad}: "
-        "invalid literal for int() with base 10: 'x\\n'"
-    )
-    with pytest.raises(SystemExit) as exc:
-        apply_snapshot.main(["ids", str(tmp_path)])
-    assert str(exc.value).startswith(f"::error::cannot read the except file {tmp_path}: ")
+def test_main_by_wave_prints_the_slices(monkeypatch, capsys):
+    """Mutation: print the snapshot unsliced -> stdout holds the input snapshot."""
+    waves = {"wave0": [{"stack": "dns", "environment": "dev"}], "wave1": []}
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", json.dumps(waves))
+    monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps({"apply / dns / dev": [1]}))
+    apply_snapshot.main(["by-wave"])
+    assert capsys.readouterr() == ('{"wave0": {"apply / dns / dev": [1]}, "wave1": {}}\n', "")
 
 
-@pytest.mark.parametrize("argv", [["ids", "a", "b"], ["foo"]])
+@pytest.mark.parametrize("argv", [["ids"], ["by-wave", "x"], ["foo"]])
 def test_an_unknown_argument_list_refuses(argv):
-    """Mutation: drop the `len(argv) <= 2` check -> `ids a b` raises `TypeError`; second: drop the
-    `if argv:` refusal -> `foo` runs the bare snapshot and fails on its environment."""
+    """Mutation: keep the `ids` mode -> `ids` prints instead of refusing; accept any argument
+    list starting `by-wave` -> `by-wave x` slices; drop the `if argv:` refusal -> `foo` runs the
+    bare snapshot and fails on its environment."""
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.main(argv)
-    assert str(exc.value) == "::error::usage: apply-snapshot [ids [EXCEPT_FILE]]"
+    assert str(exc.value) == "::error::usage: apply-snapshot [by-wave]"
