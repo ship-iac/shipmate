@@ -2222,10 +2222,11 @@ fence in [`getting-started.md`](getting-started.md) §The workflow file.
 A `shipmate plan` or `shipmate apply` comment got the 🚀 reaction, and neither
 a result nor a 🔴 reply followed within a few minutes. The run ended before its
 `outcome` job could answer: an apply run's `guard` job refused it, a plan run's
-`facts` job failed, or the run failed at startup. An apply whose `review` read
-the pull request as closed or merged gets no reply either; every other `review`
-failure replies refused. A push to a draft pull request or a manual cancel ends
-a `shipmate plan` run with no answer.
+`facts` job failed, or the run failed at startup. No reply follows either when
+the App key did not reach `shipmate-engine` (the `outcome` job fails at its key
+check), when an apply's `review` read the pull request as missing, closed or
+merged, or when an `auto` run was refused at review. A push to a draft pull
+request or a manual cancel ends a `shipmate plan` run with no answer.
 
 Open the Actions tab and filter the runs titled `shipmate · <verb>`. A failed
 `guard` names its refusal in an `apply refused:` annotation; a failed `facts` or

@@ -453,7 +453,7 @@ runs:
           exit 0
         fi
         # Nothing changed: post only over a visible plan comment, which would keep showing stale
-        # applies, or for a doctor warning outside the settings probes, the unmanaged stacks line,
+        # applies, or for a doctor warning outside the settings probes, the unmanaged line,
         # the lost pairs line, or a `shipmate plan` command (CONTRACT.md §Plan comment).
         args=("$PR" comment.md --new --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ] && [ "$ON_DEMAND" != "true" ]; then

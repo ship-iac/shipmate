@@ -3498,9 +3498,9 @@ degrade to the workflow-run URL on no match.
 ## Outcome reply
 
 An apply run (targeted, bare or `auto`) or a `shipmate plan` run that ends
-without posting its result posts one reply on the pull request, except an apply
-whose `review` read the pull request as missing or not open, and an `auto` run
-refused at review: those get a red run and no reply. The `outcome`
+without posting its result posts one reply on the pull request when its
+`outcome` job runs and can post; **Apply** and **Plan** below list when it does
+not run, and a missing App key or a failed mint or post leaves no reply. The `outcome`
 job of `apply.yml` and of `plan.yml` posts it: bound to `shipmate-engine`,
 `permissions: {}`, on `ubuntu-slim`, checking nothing out. It calls
 `actions/outcome-reply`, which mints an App installation token with
@@ -3524,9 +3524,9 @@ carries a pull request number, and `summary` did not output `posted` as `true`.
 succeeded. `review` outputs `unbound` as `true` just before its two refusals
 that read the pull request as missing (a null `pullRequest`) or not `OPEN`; a
 failed `review` with that output, or in an `auto` run, gets no reply. Every
-other failed `review` replies refused, including one that failed before it read
-the pull request (a failed key check, token mint or query; GitHub answers an
-unknown number with a query error). The reply is:
+other failed `review` replies refused, including one that failed at its token
+mint or query before it read the pull request (GitHub answers an unknown number
+with a query error, so that number replies). The reply is:
 
 - refused when `review` failed;
 - otherwise cancelled when a job other than `summary` ended `cancelled`: the
