@@ -2944,9 +2944,8 @@ Each plan run that writes the comment posts a new one, so each plan sits after
 the push or command it answers in the pull request timeline, except the quiet
 no-change run above, which PATCHes the newest visible plan comment in place
 (`scripts/upsert-comment --update-only`) and then minimizes the others as below.
-A draft autoplan,
-a cancelled plan job and a run whose pull request moved to a newer head write
-none. After the write, `scripts/upsert-comment` minimizes as outdated
+A draft autoplan, a cancelled plan job and a run whose pull request moved to a
+newer head write none. After the write, `scripts/upsert-comment` minimizes as outdated
 (GraphQL `minimizeComment`, classifier `OUTDATED`) every other visible plan
 comment by the written comment's author. A plan comment is a Bot-authored comment
 whose body starts with the marker: the shipmate App's bot login is derived from
@@ -2954,14 +2953,15 @@ the registered App name, which a consumer org may have had to slug differently
 than `shipmate[bot]`. The author compare leaves another App's plan comment
 visible, and the start-of-body match leaves out the doctor report, which may
 quote the marker. The minimized comments are the audit trail of
-earlier plans for the PR. Posting comes first, so the pull request never shows
+earlier plans for the PR. The write comes first, so the pull request never shows
 zero plan comments: a failed minimize warns "could not minimize an earlier plan
 comment of pull request #<n>; it stays visible: <error>" and leaves two visible,
 newest last. Visibility is GraphQL `isMinimized`, read for every plan comment
 the listing holds. A failed or incomplete read warns "could not read which plan
-comments of pull request #<n> are minimized, so all count as visible: <error>":
-the run writes, and minimizes the App's other plan comments anyway; a quiet
-no-change run rewrites the newest plan comment, minimized or not.
+comments of pull request #<n> are minimized, so all count as visible: <error>".
+A posting run then posts and minimizes the App's earlier plan comments anyway.
+A quiet no-change run rewrites the newest plan comment, which may be a minimized
+one, and minimizes nothing, so it never hides the only visible comment.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the superseded autoplan lines and a blank

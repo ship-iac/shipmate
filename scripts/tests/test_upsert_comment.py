@@ -486,15 +486,51 @@ def test_new_a_failed_visibility_read_counts_every_comment_visible(
     assert capsys.readouterr() == ("created\n", _READ_WARNING + error + "\n")
 
 
-def test_update_only_patches_after_a_failed_visibility_read(monkeypatch, tmp_path, capsys):
-    """Mutation: treat a failed read as "no visible comment" -- `skipped`."""
+def test_update_only_patches_and_minimizes_nothing_after_a_failed_visibility_read(
+    monkeypatch, tmp_path, capsys
+):
+    """The PATCHed comment may be a minimized one, so minimizing comment 5 could leave none
+    visible. Mutations: treat a failed read as "no visible comment" -- `skipped`; minimize after a
+    failed read -- an IC_5 call."""
     code, calls = _upsert(
-        monkeypatch, tmp_path, [_head(5, SUMMARY)], "--update-only", visibility_fails=True
+        monkeypatch,
+        tmp_path,
+        [_head(5, SUMMARY), _head(6, SUMMARY)],
+        "--update-only",
+        visibility_fails=True,
     )
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _patch(5, tmp_path)])
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5", "IC_6"), _patch(6, tmp_path)])
     assert capsys.readouterr() == (
         "updated\n",
         _READ_WARNING + "command failed (1): gh api graphql | HTTP 502\n",
+    )
+
+
+def test_new_an_authorless_response_with_nothing_to_minimize_does_not_warn(
+    monkeypatch, tmp_path, capsys
+):
+    """Mutation: drop the `if earlier` guard -- a minimize warning."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", post_response='{"id": 99}')
+    assert (code, calls) == (0, [LIST_ARGV, _post(tmp_path)])
+    assert capsys.readouterr() == ("created\n", "")
+
+
+def test_update_only_an_authorless_patch_response_warns_and_minimizes_nothing(
+    monkeypatch, tmp_path, capsys
+):
+    """Mutations: minimize without the response's author; hard-code `shipmate[bot]` -- an IC_5
+    call."""
+    code, calls = _upsert(
+        monkeypatch,
+        tmp_path,
+        [_head(5, SUMMARY), _head(6, SUMMARY)],
+        "--update-only",
+        post_response='{"id": 99}',
+    )
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5", "IC_6"), _patch(6, tmp_path)])
+    assert capsys.readouterr() == (
+        "updated\n",
+        _MINIMIZE_WARNING + 'unexpected answer: {"id": 99}\n',
     )
 
 

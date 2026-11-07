@@ -453,8 +453,9 @@ runs:
           exit 0
         fi
         # Nothing changed: rewrite the newest visible plan comment, which would keep showing stale
-        # applies, and post none; a doctor warning outside the settings probes, the unmanaged line,
-        # the lost pairs line, or a `shipmate plan` command still posts (CONTRACT.md §Plan comment).
+        # applies, minimize the others, and post none; a doctor warning outside the settings probes,
+        # the unmanaged line, the lost pairs line, or a `shipmate plan` command still posts
+        # (CONTRACT.md §Plan comment).
         write=--new
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ] && [ "$ON_DEMAND" != "true" ]; then
           write=--update-only

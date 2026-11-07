@@ -25,15 +25,18 @@ by the POST's author (its response's `user.login`) is minimized as outdated. Pos
 the pull request never shows zero plan comments, and the new comment is never one minimized.
 
 With `--update-only`, the newest visible marker comment is PATCHed instead, nothing is POSTed,
-and the other visible ones by the PATCH's author are minimized the same way.
+and the other visible ones by the PATCH's author are minimized the same way, unless the
+visibility read failed: the PATCHed comment may then be a minimized one, and minimizing the
+others could leave the pull request with no visible plan comment.
 
 Under either flag, visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids
 (`minimized_ids`). A read that fails or is incomplete, a non-boolean `isMinimized` included,
 prints one `::warning::` and every marker comment counts as visible: failing the step would drop
 the run's comment to save a no-op, since minimizing a minimized comment changes nothing, and the
 newest comment is the one to bring up to date either way. Each failed minimize prints one
-`::warning::`, as does a write response with no author, and the run goes on. Every warning goes
-to stderr on one line; one quoting an unexpected answer quotes its first 200 characters.
+`::warning::`, as does a write response with no author while there are comments to minimize,
+and the run goes on. Every warning goes to stderr on one line; one quoting an unexpected answer
+quotes its first 200 characters.
 
 With `--head`, the pull request's current head is read once a write is due, and nothing is
 written unless it is that SHA, so a run for an older head never writes over the newer head's
@@ -147,8 +150,6 @@ def _minimize_warning(pr, error):
 
 def _minimize_earlier(pr, visible, response):
     """Minimize each comment of `visible` by the author of the write `response`."""
-    if not visible:
-        return
     try:
         author = json.loads(response)["user"]["login"]
     except (ValueError, LookupError, TypeError):
@@ -208,9 +209,21 @@ def _head_stop(repo, pr, head):
 
 
 def _visible(found, pr):
-    """The comments of `found` that GraphQL reads as not minimized; all of them on a failed read."""
+    """(The comments of `found` that GraphQL reads as not minimized, whether the read succeeded);
+    all of them on a failed read."""
     hidden = minimized_ids([c["node_id"] for c in found], pr)
-    return found if hidden is None else [c for c in found if c["node_id"] not in hidden]
+    if hidden is None:
+        return found, False
+    return [c for c in found if c["node_id"] not in hidden], True
+
+
+def _targets(found, visible, read, new, update_only):
+    """(The comment id to PATCH, None to POST; the comments to minimize after the write)."""
+    if update_only:
+        return visible[-1]["id"], visible[:-1] if read else []
+    if new:
+        return None, visible
+    return (found[0]["id"] if found else None), []
 
 
 def _write(repo, pr, path, cid):
@@ -241,7 +254,7 @@ def main():
         print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    visible = _visible(found, pr) if new or update_only else found
+    visible, read = _visible(found, pr) if new or update_only else (found, True)
     if not visible and update_only:
         print("skipped")
         return
@@ -249,13 +262,10 @@ def main():
     if stop:
         print(stop)
         return
-    if update_only:
-        response, word = _write(repo, pr, path, visible[-1]["id"])
-        _minimize_earlier(pr, visible[:-1], response)
-    else:
-        response, word = _write(repo, pr, path, None if new or not found else found[0]["id"])
-        if new:
-            _minimize_earlier(pr, visible, response)
+    cid, earlier = _targets(found, visible, read, new, update_only)
+    response, word = _write(repo, pr, path, cid)
+    if earlier:
+        _minimize_earlier(pr, earlier, response)
     print(word)
 
 
