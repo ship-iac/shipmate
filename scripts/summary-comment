@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the sticky plan comment: a verdict line, then per environment a heading and its cells.
+"""Build the plan comment: a verdict line, then per environment a heading and its cells.
 
 Reads the plan matrix jobs' auto check-runs (named `plan / <env> / <stack>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and

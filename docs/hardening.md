@@ -1137,9 +1137,10 @@ rather than conventions. The trusted `summary` job declines unless the head
 repository `facts` reported equals `github.repository`, and an absent or empty
 value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
 deployment is created and the environment is never entered. And that job has no
-checkout, so even admitted it would run nothing the fork wrote. The other job
-holding the key, `gate-hold`, runs only when `summary` was cancelled; a refused
-`summary` is skipped, not cancelled, and `gate-hold` checks nothing out either.
+checkout, so even admitted it would run nothing the fork wrote. The other two
+jobs holding the key check nothing out either. `gate-hold` runs only when
+`summary` was cancelled; a refused `summary` is skipped, not cancelled.
+`outcome` carries `summary`'s head-repository clause in its own `if:`.
 Both the fact and
 the comparison live in engine-owned, SHA-pinned YAML (`CONTRACT.md` §Post-plan
 topology), so a consumer supplies neither and can neither fail it closed nor

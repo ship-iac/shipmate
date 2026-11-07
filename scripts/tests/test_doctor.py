@@ -2808,8 +2808,8 @@ def test_plan_runs_line_and_probe_coverage_can_disagree_without_contradicting(mo
 def test_report_escapes_a_hostile_settings_finding():
     """Settings findings interpolate repository data: a workflow file name reaches the pin
     warning verbatim. A file named `<!-- shipmate:summary -->.yml` would put the PLAN comment's
-    upsert marker inside the doctor comment, and `actions/summary`'s marker+Bot upsert would
-    then PATCH this comment with the plan body: report destroyed, plan comment orphaned."""
+    marker inside the doctor comment; at a comment's start it gets the comment minimized as an
+    outdated plan comment by the next plan run."""
     finding = (doctor.WARNING, "`<!-- shipmate:summary -->.yml` pins `acme/engine@v2` by tag")
     body = doctor.render_report([finding], [], _ctx())
     assert "<!-- shipmate:summary -->" not in body

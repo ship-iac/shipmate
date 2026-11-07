@@ -9,7 +9,7 @@ output text: the plan output is author-controlled, so no cell summary or plan te
 mirrored check.
 
 The step-order guard compares the action's whole step-name list against a hand-written constant.
-The mirror running before `Build comment + gate state` is the only thing making the sticky
+The mirror running before `Build comment + gate state` is the only thing making the plan
 comment's per-cell links resolve under a dispatch, and nothing else in the suite would notice it
 moving.
 """

@@ -36,7 +36,7 @@ A comment starts the comment-handling workflow, and the apply it authorizes is
 dispatched with a short-lived token minted by a private GitHub App. The same App
 authors every check, status, comment and issue that crosses a workflow-run
 boundary: the apply checks (a check run can be completed only by the App that
-created it), `shipmate / gate`, the sticky plan and `doctor` comments, the
+created it), `shipmate / gate`, the plan and `doctor` comments, the
 apply result comments and the drift issues.
 
 A comment-triggered apply runs only for a commenter with write or admin
@@ -91,11 +91,12 @@ repository's environment table on the default branch.
 A plan cell runs branch-authored code, so it holds no App credential. A
 trusted `summary` job, bound to the `shipmate-engine` GitHub Environment and
 checking out nothing, holds the App key and authors what the pull request
-shows: the pending `apply / <stack> / <env>` checks, the sticky plan comment
+shows: the pending `apply / <stack> / <env>` checks, the plan comment
 and `shipmate / gate` ([`github-app.md`](github-app.md) §Key-exposure
 boundary). Its sibling `gate-hold`, bound and checking out nothing the same way,
 also holds the App key and writes the gate: a hold when the plan run's
-`summary` was cancelled before it published. Fork pull requests are refused before any plan cell starts
+`summary` was cancelled before it published. A third, `outcome`, holds it to
+reply when a `shipmate plan` run ends without writing its plan comment. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check, and

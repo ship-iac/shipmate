@@ -372,9 +372,9 @@ never used.
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
-  `summary` and `gate-hold` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
+  `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot` and `complete`,
+  `review`, `lock`, `summary` and `outcome`, `apply-env-level.yml`'s `snapshot` and `complete`,
   `deploy.yml`'s `summary`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1275,32 +1275,23 @@ for gh's error output, and a rejected API call each try to post a `🔴 failed:`
 reply there whose footer links the run. The run holds the error; the failure
 reply never carries the API's answer. A failure reply that cannot be posted is a
 warning on the comment-handling run, and the step still fails with its own
-status. A dispatch that succeeded then tries to post the
-started-run reply, a `⚪` notice:
+status. A dispatch that started a `plan` or `apply` run posts no reply: the
+`rocket` reaction acknowledged the command when it was accepted, and the run
+answers on the pull request itself, with its plan comment or apply result
+comment, or with the outcome reply when it ends without one (§Outcome reply).
+A dispatch that started an `unlock` run then tries to post the started-run
+reply, a `⚪` notice:
 
-- With a usable run id it reads `started [the <verb> run](<url>)`, linking the
+- With a usable run id it reads `started [the unlock run](<url>)`, linking the
   run it started by a URL the engine builds from the `workflow_run_id` the API
   returns (accepted only as 1 to 20 digits, never the API's `html_url`).
-- Without one it reads `started the <verb> run; it is listed in this
+- Without one it reads `started the unlock run; it is listed in this
   repository's Actions tab` and links no started run.
 - It may not be posted at all: the run has already started, so a reply that
   fails is a warning on the comment-handling run, not a failure, and the pull
   request gets nothing.
 
-The started run collapses this reply as outdated once it posts the verb's
-result: a plan run after it writes the gate, when it created or updated the
-sticky plan comment; an apply run once it posts its result comment.
-`scripts/collapse-reply` minimizes each `github-actions[bot]` comment holding a
-line equal to the verdict that links that run; a failed collapse is a warning on
-that run. A run that posts no result leaves the reply: an apply refused at
-review, an `unlock`, a run that ends or is cancelled before its result, a
-superseded plan (a newer plan run of its head refused it, or the pull request
-moved past its head), a plan whose comment was not written, and a plan whose
-apply-check publish or gate write fails (for example a newer run of the same
-head holds the gate by then). A reply with no run link is never collapsed. A
-result posted before the reply exists leaves the reply too: nothing matches
-yet, and the reply is posted one API round trip after the dispatch answers,
-while the result needs at least three sequential jobs.
+Nothing minimizes or edits the started-run reply.
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
@@ -1319,17 +1310,17 @@ The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
 dispatch, an errored read or decision of the commenter's permission), and
-`⚪ <text>` for a notice, the dispatch's started-run reply included.
+`⚪ <text>` for a notice, the unlock dispatch's started-run reply included.
 `scripts/reply-comment` renders and posts all of them.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
-what a push-triggered plan authors: the sticky plan comment, the per-cell plan
+what a push-triggered plan authors: the plan comment, the per-cell plan
 checks, the plan artifacts an apply consumes, and `shipmate / gate` (§Plan
 comment; a dispatched run's cell checks reach the pull request head as
 App-authored mirrors, described with the App identities below). It differs in
 two ways: a run that plans no cell still posts the `⚪ nothing planned`
-comment, and once its comment and its gate are written it collapses the started
-reply that links it (above).
+comment, and a run that ends without writing its plan comment, and was neither
+cancelled nor superseded, posts the outcome reply (§Outcome reply).
 It takes no arguments — there is one plan of record per head commit, and a
 run holding a single environment's artifacts would leave every other
 environment's workset empty at the next apply, so an env alongside it is
@@ -1367,16 +1358,16 @@ source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with
 the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the
 three cannot drift from each other. Unlike the `:summary` and `:doctor`
-markers below, `<!-- shipmate:help -->` is not an upsert key — nothing reads
+markers below, `<!-- shipmate:help -->` is not a lookup key — nothing reads
 it back: `shipmate help` posts a fresh comment every time, and the marker
 only labels the output as shipmate's own. The list sits under the header
 `### shipmate help`, carries no verdict line (it examines nothing), and ends with
 `[comment run](<run url>)` alone, without the help hint.
 
-`shipmate doctor` posts a consolidated, sticky report — one comment per pull
+`shipmate doctor` posts a consolidated report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
-from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It opens with the header `### shipmate doctor` and a verdict line
+from the plan comment's `<!-- shipmate:summary -->`) and upserted in place
+through `scripts/upsert-comment`. It opens with the header `### shipmate doctor` and a verdict line
 counting errors (🔴, harvested failure annotations), warnings (🟠) and notices
 (⚪), zero counts omitted, plus `harvest incomplete` (⚪) when the harvest failed
 or is still pending; the line takes the worst circle, reads `🟢 no problems found`
@@ -1417,7 +1408,7 @@ live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it dispatches nothing and changes no setting, and writes nothing
-but its own sticky comment, a copy of its report in the job summary
+but its own report comment, a copy of its report in the job summary
 and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
 all get that acknowledgement as soon as the command is accepted — `rocket`
 marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
@@ -1790,23 +1781,24 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `summary`, a pending same-head re-plan `summary`, a third arrival evicting it)
   and the hold landing inside that round trip. Closing it needs a conditional
   write, which GitHub commit statuses lack.
-- **The sticky plan comment** — App-authored (marker + any Bot author for the
+- **The plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
-  `shipmate[bot]`), upserted in place by `actions/summary` through
-  `scripts/upsert-comment`, which reads the marker from the body's first line
-  and matches it only at the start of a comment.
-- **The `shipmate doctor` sticky report** — App-authored (its own marker +
+  `shipmate[bot]`), posted new by `actions/summary` on each plan run that
+  writes it, through `scripts/upsert-comment --new`, which reads the marker
+  from the body's first line and matches it only at the start of a comment.
+  Under the same `pull_requests: write` token it then minimizes the App's
+  earlier visible plan comments as outdated (GraphQL `minimizeComment`;
+  §Plan comment).
+- **The `shipmate doctor` report** — App-authored (its own marker +
   Bot-author lookup, same posture as the plan comment), upserted in place by
   `actions/comment-ops` through the same `scripts/upsert-comment`.
 - **The apply result comment** — posted fresh by `actions/apply-summary` on
-  every apply run (targeted, bare and `auto`); unlike the sticky plan
-  comment it is never upserted against a marker, so a failure-then-retry
-  sequence stays visible across separate comments — an audit trail.
-- **The collapsed started reply** — the reply itself is authored by
-  `github-actions[bot]`; `actions/summary` and `actions/apply-summary` minimize
-  it as outdated (GraphQL `minimizeComment`) through `scripts/collapse-reply`,
-  under the App token they already mint with `pull_requests: write`
-  (§Comment-ops).
+  every apply run (targeted, bare and `auto`); it carries no marker, so nothing
+  edits or minimizes it, and a failure-then-retry sequence stays visible across
+  separate comments — an audit trail.
+- **The outcome reply** — posted by `actions/outcome-reply` in the `outcome`
+  job of `plan.yml` and `apply.yml`, both bound to `shipmate-engine`
+  (§Outcome reply).
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
   artifact. A separate `issues` job, bound to `shipmate-engine`, calls
@@ -1824,7 +1816,7 @@ whose names begin `plan / ` — the cells plus `plan / facts` and
 `plan / detect`, and none of the consumer file's skipped sibling jobs — onto
 the head as App-authored check-runs holding a fixed line and a link back to the
 original, whose step summary keeps the plan text. They exist so the pull request
-shows the cells, a failed one above all — and because the sticky comment
+shows the cells, a failed one above all — and because the plan comment
 resolves each
 cell line's plan link across the checks on the head, which is why the mirror runs
 before the comment is built. No gate or apply queue reads them: neither the
@@ -2040,7 +2032,7 @@ bare and a targeted `shipmate apply` reach an `auto` environment as they reach a
 pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 
 - the run was not superseded, and its head is still the pull request's: neither
-  the publish hold's head read nor the sticky comment upsert found the pull
+  the publish hold's head read nor the plan comment write found the pull
   request moved past it, and no newer plan run of the head refused it
   (§Plan comment);
 - the run is a `pull_request_target` run, an autoplan, on its first attempt: a
@@ -2259,15 +2251,15 @@ The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
-Engine `plan.yml` is five jobs: `facts`, `detect`, `plan`, `summary`,
-`gate-hold`. `facts` is `actions/pr-facts`, the single producer of every
+Engine `plan.yml` is six jobs: `facts`, `detect`, `plan`, `summary`,
+`gate-hold`, `outcome`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
-check out the pull request's own head and hold no App credential. `summary` and
-`gate-hold` are the trusted jobs — bound to `shipmate-engine` with
-`deployment: false`, like every engine job binding it, and neither
+check out the pull request's own head and hold no App credential. `summary`,
+`gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
+`deployment: false`, like every engine job binding it, and none
 checks anything out. Every App-authored
-surface listed above (apply checks, the gate, the sticky comments, drift
-issues) is created by a job bound to that fixed GitHub Environment
+surface listed above (apply checks, the gate, the plan, doctor and apply result
+comments, the outcome reply, drift issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
 satisfies its default-branch-only policy for a different reason.
 
@@ -2330,19 +2322,19 @@ attaches to the dispatch ref rather than to the pull request — which is why th
 `summary` job mirrors this run's completed `plan / ` checks onto the head
 commit on an `on-demand` run.
 
-**Requirement: no job in engine `plan.yml` other than `summary` and `gate-hold`
-may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
+**Requirement: no job in engine `plan.yml` other than `summary`, `gate-hold` and
+`outcome` may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
 a ref the environment's policy admits — the base ref, or the ref the plan was
 dispatched on — and the `plan` job's `environment:` is chosen by
 branch-authored `env/*` tags, so the file naming no such secret outside
-`summary` and `gate-hold` is what keeps the key out of branch reach.
+`summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
 `plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
 that copy of the file is the base branch's or the default branch's — never the
 pull request's own.
 
-The five jobs:
+The six jobs:
 
 - **`facts`** (engine, either trigger) — `actions/pr-facts` alone. It authors
   nothing and mints no App token; it holds `pull-requests: read`, the one grant
@@ -2385,11 +2377,12 @@ The five jobs:
 - **`summary`** (engine, bound to `shipmate-engine`) — it calls
   `actions/summary`, which downloads this same run's cell summaries and, under
   an App token minted inside that environment, publishes the results. This is
-  what creates the pending `apply / <stack> / <env>` checks, the sticky plan
+  what creates the pending `apply / <stack> / <env>` checks, the plan
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
   mirror of this run's completed `plan / ` checks onto the pull request's
-  head, the `⚪ nothing planned` comment when no cell was planned, and the
-  collapse of the started reply that links the run (§Comment-ops). A run that
+  head and the `⚪ nothing planned` comment when no cell was planned. It
+  outputs what its comment write did (`upsert`) and whether the run was
+  superseded (`superseded`), which `outcome` reads. A run that
   sees its pull request moved past its head before the publish hold writes none
   of these on it; one that sees the move at the comment write leaves any publish
   hold it already wrote (whose text says to re-plan) and any mirrored checks,
@@ -2415,12 +2408,17 @@ The five jobs:
   `cancelled`, so `gate-hold` holds the App key only for a head `summary`
   admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes, as
   `facts` does.
+- **`outcome`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
+  posts the outcome reply when a `shipmate plan` run ends without writing its
+  plan comment (§Outcome reply). Its `if:` carries `summary`'s fork clause, so
+  it holds the App key only for a head `summary` would admit, and it checks
+  nothing out. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
 - **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (reading the review decision, acquiring cell
   locks, marking apply checks in progress, completing apply checks, refreshing the gate, posting the apply result
-  comment, releasing a merged pull request's cell locks) are likewise bound to
+  comment or the outcome reply, releasing a merged pull request's cell locks) are likewise bound to
   `shipmate-engine`.
 - **`release.yml`**'s `release` job (engine, reached through the consumer's
   `release` job on `pull_request_target` `closed`) — binds `shipmate-engine` to
@@ -2490,7 +2488,7 @@ was planned; comment `shipmate plan`, or mark it ready". Nothing greens that
 status: `gate-refresh` greens only over completed apply checks, and a draft run
 creates none. The draft status is written only on a head that carries no
 `shipmate / gate` status yet: an existing one is kept, and a failed read of it
-writes nothing. The sticky comment is left as it is.
+writes nothing. The plan comment is left as it is.
 
 **A consumer states none of these facts and can weaken none of them.**
 Producing them and comparing them are the same file, so a consumer has no site
@@ -2582,13 +2580,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
-  required. It sets the runner of every engine job but nine, which run on
-  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts` and `gate-hold`,
-  `apply.yml`'s `guard`, `review` and `summary`, `deploy.yml`'s `summary`,
+  required. It sets the runner of every engine job but eleven, which run on
+  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts`, `gate-hold`
+  and `outcome`, `apply.yml`'s `guard`, `review`, `summary` and `outcome`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot` and `complete`, and `unlock.yml`'s
   `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the nine
+  for a runner. An account that cannot use `ubuntu-slim` leaves the eleven
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -2762,7 +2760,7 @@ fails loud on a `cell.json` missing schema keys or carrying an out-of-enum
 
 ## Plan comment
 
-The `summary` action maintains at most one sticky comment per pull request,
+The `summary` action posts each plan as a new comment on the pull request,
 identified by the HTML marker written verbatim as the comment's first line:
 
 - `<!-- shipmate:summary -->`
@@ -2773,9 +2771,8 @@ Every other zero (a planned count that disagrees with the cell summaries
 actually read, a failed `detect`, plan cells that all failed
 before uploading a cell summary, a failed `cell-summary.*` download) leaves the
 plan unknown. Every hold the summary's gate decision writes (a `detect` that
-did not succeed, incomplete evidence) replaces the comment with the held body,
-which says why and makes no claim about any plan, and creates the comment when
-the pull request has none. `gate-hold`'s hold (below) leaves the comment as it
+did not succeed, incomplete evidence) posts the held body as the plan comment,
+which says why and makes no claim about any plan. `gate-hold`'s hold (below) leaves the comment as it
 is. What a summary job that fails part way leaves on the comment is stated with
 the publish hold (below). In order, blank lines between the parts:
 
@@ -2813,28 +2810,29 @@ the publish hold (below). In order, blank lines between the parts:
 - the help hint ``Comment `shipmate help` for the available commands.``
 
 The held body only explains a red gate, so it degrades: a failed render,
-listing or write warns "the sticky plan comment was not updated with why the
-gate is held; the gate description says it", and the job still writes the gate.
+listing or write warns "the plan comment does not say why the gate is held; the
+gate description says it", and the job still writes the gate.
 A run whose plan job was cancelled writes no final gate (below) and keeps the
 comment as it is, with a warning; a draft autoplan keeps it too (§Post-plan
 topology).
 
-The comment is per pull request, so a run of a head the pull request has left
-must not replace the live head's comment. A run that finds the pull request
+A run of a head the pull request has left must not post over the live head's
+comment, which its post would minimize. A run that finds the pull request
 moved past its head in the publish hold's read (below) writes no comment at
 all. Every comment write, the held body included, reads the head
 again once the comment listing shows a write follows, which catches a push
 during the run, and writes nothing when the pull request has moved past the
-head this run planned, with a notice. A run that writes nothing (no comment
-yet, nothing changed) makes no second read. A failed second read warns and
+head this run planned, with a notice. A run that writes nothing (no visible
+plan comment, nothing changed) makes no second read. A failed second read warns and
 writes nothing for the held body, and fails the job ("could not read the head
-of pull request #<n>, so the sticky plan comment was not updated") before any
+of pull request #<n>, so no plan comment was written") before any
 apply check or gate is written for the plan body.
 
-Where the zero *does* mean no stacks changed, the suppression is create-only: an
-existing comment is always updated to the no-changes body, because a pull
-request that planned changes and then pushed them away must not keep displaying
-applies that no longer exist. With no comment yet, none is posted — a docs-only
+Where the zero *does* mean no stacks changed, the run posts the no-changes body
+only over a visible plan comment, because a pull request that planned changes
+and then pushed them away must not keep displaying applies that no longer
+exist. With no visible plan comment (none yet, or every one minimized), none is
+posted — a docs-only
 or engine-pin-bump pull request carries no shipmate comment — with four
 exceptions. A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
@@ -2854,13 +2852,24 @@ environment pair, and the comment is where it says so; the same size rule
 applies. A run a `shipmate plan` command started also posts: the comment is that
 command's answer on the pull request (§Comment-ops).
 
-An existing comment is edited in place on every plan run but a draft autoplan, a
-cancelled plan job and a run whose pull request moved to a newer head (comment
-lookup is marker +
-any Bot author — the shipmate App's bot login is derived from the registered
-App name, which a consumer org may have had to slug differently than
-`shipmate[bot]`), so GitHub's comment revision history doubles as the audit
-trail of previous plans for the PR.
+Each plan run that writes the comment posts a new one, so each plan sits after
+the push or command it answers in the pull request timeline. A draft autoplan,
+a cancelled plan job and a run whose pull request moved to a newer head write
+none. After the post, `scripts/upsert-comment --new` minimizes as outdated
+(GraphQL `minimizeComment`, classifier `OUTDATED`) every earlier visible plan
+comment by the new comment's author. A plan comment is a Bot-authored comment
+whose body starts with the marker: the shipmate App's bot login is derived from
+the registered App name, which a consumer org may have had to slug differently
+than `shipmate[bot]`. The author compare leaves another App's plan comment
+visible, and the start-of-body match leaves out the doctor report, which may
+quote the marker. The minimized comments are the audit trail of
+earlier plans for the PR. Posting comes first, so the pull request never shows
+zero plan comments: a failed minimize warns "could not minimize an earlier plan
+comment of pull request #<n>; it stays visible: <error>" and leaves two visible,
+newest last. Visibility is GraphQL `isMinimized`, read for every plan comment
+the listing holds. A failed or incomplete read warns "could not read which plan
+comments of pull request #<n> are minimized, so all count as visible: <error>":
+the run posts, and minimizes the App's earlier plan comments anyway.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the superseded autoplan lines and a blank
@@ -3089,7 +3098,7 @@ comment, apply check or gate), with the notice
 or gate on it", and ends green: the merge gates on the live head, not on this
 one. A failed read warns ("could not read the head of pull request #<n> (<why>);
 this run publishes on <sha>") and the run publishes as below. A run that skips
-its publish this way, or whose sticky comment upsert later finds the head moved,
+its publish this way, or whose plan comment write later finds the head moved,
 then decides whether the live head needs a plan (`scripts/gate-status replan`).
 It dispatches `shipmate plan` for the pull request, with an App token minted for
 it alone with `actions: write`, when the pull request is open, the live head is
@@ -3119,11 +3128,11 @@ only some checks published leaves a hold that `gate-refresh` will not green. The
 same hold is written when the job cannot read the head's gate statuses, list the
 head's apply checks or build the ones to publish, whether or not it downloaded a
 cell summary: a failed download leaves none over planned cells. The apply checks
-publish after the sticky plan comment is written, so a plan comment that could
+publish after the plan comment is written, so a plan comment that could
 not be listed or written ends the job with no apply check published, and a
 pre-merge `shipmate apply` refuses as it does over a partial plan. A summary job
-that fails part way changes the comment only if its `Upsert sticky comment` step
-wrote it (created or replaced) before the failure. A run with no check to
+that fails part way posts a plan comment only if its `Write the plan comment`
+step posted it before the failure. A run with no check to
 publish (held, draft, no cell planned, or every check already published by this
 run) skips the publish step without reading anything. The job's final gate write
 replaces the hold. A run whose plan job was cancelled writes no final gate, and
@@ -3172,13 +3181,13 @@ with none it names no plan run and is refused (§Comment-ops, "undiverged").
 Every apply run — targeted `shipmate apply <env>`, bare `shipmate apply` and an
 `auto` apply, all through `apply.yml`; the merge-deploy path,
 `deploy.yml`, stays comment-less — posts a fresh PR comment via
-`actions/apply-summary`. Unlike the plan comment above, it is deliberately
-not upserted against a marker: every run's comment is new, so a
+`actions/apply-summary`. Unlike the plan comment above, it carries no marker
+and nothing minimizes it: every run's comment is new and stays visible, so a
 failure-then-retry sequence stays visible as separate comments rather than
-overwriting the evidence of the failure — an audit trail. A run refused or
+hiding the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
-turned draft since the comment) posts no comment and writes no gate: the red run
-is the signal. The started-run reply may link it (§Comment-ops says when).
+turned draft since the comment) posts no result comment and writes no gate; it
+posts the outcome reply, which links the run (§Outcome reply).
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, an `auto` run's line
@@ -3486,6 +3495,68 @@ log links resolve against the run's job-name listing using the
 `apply / <stack> / <env>` check-name grammar (see Check names, above), and
 degrade to the workflow-run URL on no match.
 
+## Outcome reply
+
+An apply run (targeted, bare or `auto`) or a `shipmate plan` run that ends
+without posting its result posts one reply on the pull request. The `outcome`
+job of `apply.yml` and of `plan.yml` posts it: bound to `shipmate-engine`,
+`permissions: {}`, on `ubuntu-slim`, checking nothing out. It calls
+`actions/outcome-reply`, which mints an App installation token with
+`pull_requests: write` and posts through `scripts/reply-comment`.
+
+The reply is the header `### shipmate apply` (with `<env>` for a targeted
+apply; an `auto` run uses `apply`) or `### shipmate plan`, a blank line, the
+verdict line, a blank line, and the footer
+``[comment run](<url>). Comment `shipmate help` for the available commands.``,
+where `<url>` links the run that posts the reply. The verdict line is one of:
+
+- refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
+- cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
+- summary evicted: ``🔴 failed: [the <verb> run](<url>) posted no result: a newer run for this head replaced its summary.``,
+  followed for `apply` by `` Its cells' results are on their apply checks.``
+- ended before a result: ``🔴 failed: [the <verb> run](<url>) ended before it posted a result; the error is in that run's log.``
+
+**Apply.** `outcome` runs under `always()` when `guard` succeeded, the run
+carries a pull request number, and `summary` did not output `posted` as `true`.
+`actions/apply-summary` writes `posted` only after its result comment's POST
+succeeded. The reply is:
+
+- refused when `review` failed;
+- otherwise cancelled when a job other than `summary` ended `cancelled`: the
+  run was cancelled;
+- otherwise summary evicted when `summary` ended `cancelled`: the per-head
+  gate-writer group evicted it while the run was not cancelled;
+- otherwise ended before a result.
+
+`summary` runs after a run cancel once `review` succeeded, and posts the
+result, so the cancelled text appears only when `review` was cancelled or
+`summary`'s post failed. Two known limits: a manual cancel landing while
+`summary` runs gets the summary-evicted text, and a wave job evicted by its
+cell's concurrency group, in a run whose `summary` post failed, gets the
+cancelled text.
+
+**Plan.** `outcome` runs under `!cancelled()`, so a cancelled `shipmate plan`
+run posts nothing: a push cancels a dispatched plan through the fence's
+`cancel-in-progress`, and the push's autoplan answers. It runs only on an
+on-demand run, under `summary`'s fork clause, when `summary` did not output
+`superseded` as `true` and its comment write printed neither `created` nor
+`moved`. A superseded run and one whose pull request moved past its head post
+nothing. The reply is:
+
+- summary evicted when `summary` ended `cancelled`: the gate-writer group
+  evicted it while the run was not cancelled, and `gate-hold` holds the gate;
+- otherwise ended before a result. That covers a `summary` that failed before
+  or at its comment write, and a plan cell that ended `cancelled` without a run
+  cancel (a job timeout): its `summary` holds the gate and writes no comment.
+
+A dispatched plan whose `facts` job failed posts nothing: no pull request
+number reaches `outcome`, and the pull request shows only the `rocket`
+reaction.
+
+A reply that cannot be posted warns `could not post the no-result reply` and
+the job passes. A missing App key or a failed token mint fails the job, in a
+run that already ended without its result.
+
 ## Apply-match fingerprint
 
 Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
@@ -3719,7 +3790,7 @@ that differ.
 
 §Secrets in published output, below, is unchanged by them and must not be read
 as relaxed by them. A supported envelope entry such as `TF_VAR_password` is
-masked in the job log and still lands in the sticky plan comment, the step
+masked in the job log and still lands in the plan comment, the step
 summary, each changed cell's apply check and the plan artifact whenever the
 consumer has not marked the variable `sensitive = true`. Redaction is the consumer's job, and OpenTofu's `sensitive`
 marking is the mechanism.
@@ -3727,7 +3798,7 @@ marking is the mechanism.
 ## Secrets in published output
 
 Both text files shipmate publishes — the rendered plan `plan.txt` in the
-sticky plan comment, the job step summary and each changed cell's apply check,
+plan comment, the job step summary and each changed cell's apply check,
 and `apply.txt` in the apply result comment — carry whatever the tool wrote
 (the cells run terramate with `--quiet`, so its routine lines never appear):
 shipmate never redacts either, and no surface is covered by GitHub's log secret
@@ -3847,7 +3918,7 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   re-run. The apply check stays pending in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
-  plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, the
+  plan `plan.txt` — in the `cell-summary` artifact, the PR plan comment, the
   job step summary and each changed cell's apply check — stays plaintext: it is the
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan and the cached state at rest and nothing else; redaction in the

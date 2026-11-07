@@ -280,7 +280,7 @@ def test_a_write_failure_exits_non_zero_with_an_error(monkeypatch, tmp_path, cap
 
 
 def test_the_marker_is_the_body_files_first_line(monkeypatch, tmp_path, capsys):
-    """A doctor body does not match the summary sticky.
+    """A doctor body does not match the summary marker.
 
     Mutation: hard-code the summary marker.
     """
@@ -618,8 +618,8 @@ def test_the_listing_filter_keeps_bot_heads_only(monkeypatch, tmp_path):
 
 @bash_only
 def test_a_listing_that_fails_after_printing_a_match_writes_nothing(tmp_path):
-    """A later page failing after an earlier one printed the sticky: no ids, so no POST, which
-    would create a second sticky.
+    """A later page failing after an earlier one printed the marker comment: no ids, so no POST,
+    which would create a second marker comment.
 
     Mutation: read the listing with a streaming reader that keeps partial output.
     """

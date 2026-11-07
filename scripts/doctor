@@ -2819,10 +2819,11 @@ def _finding_row(lvl, text):
     """One settings-probe finding as a list row.
 
     Escaped because a finding interpolates repository data (a file name, an
-    API error): an unescaped `<!-- shipmate:summary -->` in one would make
-    actions/summary's marker upsert PATCH this comment with the plan comment's
-    body. A `_Rendered` finding escaped its repository parts itself and is
-    printed as is."""
+    API error): an unescaped `<!-- shipmate:summary -->` at a comment's start
+    gets the comment minimized as an outdated plan comment by the next plan run.
+    upsert-comment matches only at the start, so the escape is the second guard.
+    A `_Rendered` finding escaped its repository parts itself and is printed as
+    is."""
     return f"- {_LEVEL_EMOJI[lvl]} {text if isinstance(text, _Rendered) else _md_escape(text)}"
 
 

@@ -209,8 +209,8 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        # Fresh comment every run (audit trail, not a sticky comment) -- never
-        # search for or PATCH an existing one.
+        # Fresh comment every run (audit trail) -- never search for, PATCH or minimize
+        # an existing one.
         [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::pr-number must be numeric (got: $PR_NUMBER)"; exit 1; }
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md >/dev/null
         # Written only after the POST: an unset `posted` makes apply.yml's outcome job reply.
