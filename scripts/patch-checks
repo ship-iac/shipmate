@@ -25,7 +25,8 @@ BODY = {"status": "completed", "conclusion": "success"}
 
 
 def main(argv: list[str] | None = None) -> None:
-    if sys.argv[1:] if argv is None else argv:
+    extra = sys.argv[1:] if argv is None else argv
+    if extra:
         raise SystemExit("::error::usage: patch-checks (ids on stdin, no arguments)")
     body = json.dumps(BODY)
     repo = os.environ["GITHUB_REPOSITORY"]

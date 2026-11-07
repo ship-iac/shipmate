@@ -513,7 +513,7 @@ def _patched(*ids):
 
 
 @bash_only
-def test_the_completion_patches_exactly_the_earned_ids(tmp_path):
+def test_the_completion_patches_exactly_the_deduplicated_ids(tmp_path):
     """The body and its no-file property are pinned in-process by `test_patch_checks.py`; this
     pins the step's input to the deduplicated complete-ids.txt. Mutation: feed
     `earned-ids.txt` instead -> 1 is patched twice.
