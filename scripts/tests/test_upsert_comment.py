@@ -645,13 +645,14 @@ def _post_of(body):
     return ["api", "repos/o/r/issues/7/comments", "-F", f"body=@{body}"]
 
 
-def _patch_of(body):
-    return ["api", "-X", "PATCH", "repos/o/r/issues/comments/5", "-F", f"body=@{body}"]
+#: The `--new` visibility read and minimize of `_head(5, ...)`'s comment, as the argv after `gh`.
+_READ_5 = _read("IC_5")[1:]
+_MINIMIZE_5 = _minimize("IC_5")[1:]
 
 
 _SUMMARY_LIST_FAILED = (
-    "::error::could not list this pull request's comments, so the sticky plan comment was not "
-    "updated; re-plan this pull request (comment shipmate plan or push)\n"
+    "::error::could not list this pull request's comments, so no plan comment was written; "
+    "re-plan this pull request (comment shipmate plan or push)\n"
 )
 _SUMMARY_SKIPPED = (
     "nothing changed, no existing plan comment, no doctor warning outside the settings "
@@ -661,8 +662,7 @@ _SHA = "a" * 40
 #: The pull request head read every writing mode makes after the comment listing.
 _PULLS = ["api", "repos/o/r/pulls/7"]
 _DEGRADED = (
-    "::warning::the sticky plan comment was not updated with why the gate is held; the gate "
-    "description says it\n"
+    "::warning::the plan comment does not say why the gate is held; the gate description says it\n"
 )
 #: The held body for `_run_summary`'s defaults, hand-written.
 _HELD_BODY = (
@@ -714,7 +714,7 @@ def _run_summary(
             full.pop(k, None)
         else:
             full[k] = v
-    run = step_by("summary", name="Upsert sticky comment")["run"]
+    run = step_by("summary", name="Write the plan comment")["run"]
     return run_with_gh_recorder(tmp_path, run, full, head=head, **gh)
 
 
@@ -726,7 +726,6 @@ def _run_summary(
             "draft",
             (
                 "the pull request was a draft when this run started and was not planned; the "
-                "sticky "
                 "plan comment was left as it is\n"
             ),
         ),
@@ -734,7 +733,7 @@ def _run_summary(
             "hold",
             (
                 "::warning::the plan job was cancelled, so this run writes no final gate; the "
-                "sticky plan comment was left as it is\n"
+                "plan comment was left as it is\n"
             ),
         ),
     ],
@@ -748,28 +747,23 @@ def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
 
 @bash_only
 @pytest.mark.parametrize(
-    ("listing", "write", "result"),
+    ("listing", "calls"),
     [
-        ("", _post_of("held.md"), "created"),
-        (_head(5, SUMMARY), _patch_of("held.md"), "updated"),
+        ("", [_LIST, _PULLS, _post_of("held.md")]),
+        (_head(5, SUMMARY), [_LIST, _READ_5, _PULLS, _post_of("held.md"), _MINIMIZE_5]),
     ],
     ids=["no-comment", "existing"],
 )
-def test_summary_held_writes_the_held_body(tmp_path, listing, write, result):
-    """A held gate creates the comment when there is none and replaces the existing one, and
-    writes upsert-comment's word as output `result` for the collapse step.
-    Mutations: pass `--update-only` on the held write -- `no-comment` writes nothing; render
-    without `SHIPMATE_COMMENT_MODE=held` -- no held body, and no write; drop the held branch's
-    `result=` line -- no output."""
-    proc, calls = _run_summary(tmp_path, "held", listing=listing + "\n")
-    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
-        0,
-        "",
-        "",
-        [_LIST, _PULLS, write],
-    )
+def test_summary_held_posts_the_held_body(tmp_path, listing, calls):
+    """A held gate posts a new comment and minimizes the earlier one, and writes upsert-comment's
+    word as output `result`.
+    Mutations: drop `--new` from the held write -- `existing` PATCHes; pass `--update-only` on
+    the held write -- `no-comment` writes nothing; render without `SHIPMATE_COMMENT_MODE=held` --
+    no held body, and no write; drop the held branch's `result=` line -- no output."""
+    proc, recorded = _run_summary(tmp_path, "held", listing=listing + "\n")
+    assert (proc.returncode, proc.stdout, proc.stderr, recorded) == (0, "", "", calls)
     assert (tmp_path / "held.md").read_text(encoding="utf-8") == _HELD_BODY
-    assert (tmp_path / "github_output").read_text(encoding="utf-8") == f"result={result}\n"
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=created\n"
 
 
 @bash_only
@@ -818,10 +812,7 @@ def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
     proc, calls = _run_summary(tmp_path, mode, head="b" * 40, warned="true")
     assert (proc.returncode, proc.stdout, calls) == (
         0,
-        (
-            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment was not "
-            "written\n"
-        ),
+        (f"::notice::pull request #7 has moved past {_SHA}; its plan comment was not written\n"),
         [_LIST, _PULLS],
     )
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=moved\n"
@@ -852,8 +843,8 @@ def test_summary_post_head_read_failure_fails_the_step(tmp_path, mode):
     assert (proc.returncode, proc.stdout, calls) == (
         1,
         (
-            "::error::could not read the head of pull request #7, so the sticky plan comment was "
-            "not updated; re-plan this pull request (comment shipmate plan or push)\n"
+            "::error::could not read the head of pull request #7, so no plan comment was "
+            "written; re-plan this pull request (comment shipmate plan or push)\n"
         ),
         [_LIST, _PULLS],
     )
@@ -879,24 +870,25 @@ _POSTS = [_LIST, _PULLS, _post_of("comment.md")]
             "false",
             "false",
             _head(5, SUMMARY),
-            [_LIST, _PULLS, _patch_of("comment.md")],
-            "updated",
+            [_LIST, _READ_5, _PULLS, _post_of("comment.md"), _MINIMIZE_5],
+            "created",
         ),
     ],
     ids=["quiet", "ordinary", "doctor-warned", "unmanaged", "lost", "on-demand", "quiet-existing"],
 )
-def test_summary_posts_unless_quiet_and_keeps_an_existing_comment_current(
+def test_summary_posts_unless_quiet_and_replaces_a_visible_comment(
     tmp_path, mode, warned, unmanaged, lost, on_demand, listing, expected, result
 ):
     """Nothing changed, no doctor warning, no unmanaged line, no lost pairs line and no
-    `shipmate plan` command: update only. upsert-comment's word is output `result`, which the
-    collapse step reads.
+    `shipmate plan` command: post only over a visible plan comment, which is then minimized.
+    upsert-comment's word is output `result`.
 
     A quiet run with no comment reads no head (`quiet`).
-    Mutations: delete the `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED`
-    clause (unmanaged red); delete the `LOST` clause (lost red); delete the `ON_DEMAND` clause
-    (on-demand red); delete the `nothing-changed` clause (ordinary red); drop the posted
-    branch's `result=` line (every case red).
+    Mutations: drop `--new` from the posted write (quiet-existing PATCHes); delete the
+    `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED` clause (unmanaged red);
+    delete the `LOST` clause (lost red); delete the `ON_DEMAND` clause (on-demand red); delete
+    the `nothing-changed` clause (ordinary red); drop the posted branch's `result=` line (every
+    case red).
     """
     proc, calls = _run_summary(
         tmp_path,

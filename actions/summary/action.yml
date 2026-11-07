@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and that head has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails, and an on-demand plan whose comment was created or updated collapses the started reply that links this run.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and that head has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails.
 inputs:
   pr-number:
     description: Pull request number.
@@ -47,9 +47,8 @@ inputs:
       request head, so they are mirrored onto the head here. Empty or "false" mirrors nothing:
       under a pull-request event those checks are already on the head, and a second copy would
       put two producers behind one check name. gate-state also reads it, with is-draft, to tell
-      an autoplan of a draft from a requested plan. "true" also posts the sticky comment when no
-      cell changed, and collapses the started reply that links this run after the gate is
-      written, when the comment was created or updated.
+      an autoplan of a draft from a requested plan. "true" also posts the plan comment when no
+      cell changed.
     required: false
     default: ""
   is-draft:
@@ -125,6 +124,17 @@ inputs:
       unreadable one warns once.
     required: false
     default: ""
+outputs:
+  upsert:
+    description: >-
+      What `Write the plan comment` did: upsert-comment's one word, or `failed` when the held
+      render or write failed. Empty when the step skipped or exited before writing.
+    value: ${{ steps.upsert.outputs.result }}
+  superseded:
+    description: >-
+      `true` when this run wrote nothing on the head: the pull request moved past it, or a newer
+      plan run holds its gate. Empty otherwise.
+    value: ${{ steps.hold.outputs.superseded }}
 runs:
   using: composite
   steps:
@@ -389,7 +399,7 @@ runs:
         pattern: cell-error.*
         path: cell-errors
 
-    - name: Upsert sticky comment
+    - name: Write the plan comment
       if: ${{ steps.hold.outputs.superseded != 'true' }}
       id: upsert
       shell: bash
@@ -410,19 +420,19 @@ runs:
         # A draft autoplan planned nothing, so an existing comment still describes a head
         # somebody planned; it is kept, and the draft run makes no comment API call.
         if [ "$MODE" = "draft" ]; then
-          echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
+          echo "the pull request was a draft when this run started and was not planned; the plan comment was left as it is"
           exit 0
         fi
         # A cancelled plan job: this run writes no final gate, so a held body could sit over a gate
         # it never wrote. The comment is kept.
         if [ "$MODE" = "hold" ]; then
-          echo "::warning::the plan job was cancelled, so this run writes no final gate; the sticky plan comment was left as it is"
+          echo "::warning::the plan job was cancelled, so this run writes no final gate; the plan comment was left as it is"
           exit 0
         fi
-        degraded="::warning::the sticky plan comment was not updated with why the gate is held; the gate description says it"
+        degraded="::warning::the plan comment does not say why the gate is held; the gate description says it"
         # `--head`: the comment is keyed per pull request, so a re-run of an old run would replace
         # a newer head's comment. upsert-comment then writes nothing and prints `moved`.
-        moved="::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment was not written"
+        moved="::notice::pull request #$PR has moved past $HEAD_SHA; its plan comment was not written"
         # Degrades: on a failed upsert `Create/refresh gate` still writes the gate, and a red gate
         # over a stale comment greens nothing; on `moved` that step is skipped. A failed render
         # writes no comment.
@@ -430,23 +440,23 @@ runs:
           result=failed
           if SHIPMATE_COMMENT_MODE=held python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" \
             < check-runs.jsonl 2>held.err; then
-            result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md --head "$HEAD_SHA" 2>>held.err) || result=failed
+            result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md --new --head "$HEAD_SHA" 2>>held.err) || result=failed
           fi
           # This step passes, so either script's `::error::` warns.
           sed 's/^::error::/::warning::/' held.err >&2
           echo "result=$result" >> "$GITHUB_OUTPUT"
           if [ "$result" = moved ]; then
             echo "$moved"
-          elif [ "$result" != created ] && [ "$result" != updated ]; then
+          elif [ "$result" != created ]; then
             echo "$degraded"
           fi
           exit 0
         fi
-        # Nothing changed: only an existing comment is kept current, or it would keep showing
-        # applies that no longer exist. A doctor warning outside the repository-settings probes
-        # (the comment links the run page its annotations live on), an unmanaged stacks line, a
-        # lost pairs line or a `shipmate plan` command still posts.
-        args=("$PR" comment.md --head "$HEAD_SHA")
+        # Nothing changed: a new comment is posted only over a visible plan comment, or that one
+        # would keep showing applies that no longer exist. A doctor warning outside the
+        # repository-settings probes (the comment links the run page its annotations live on), an
+        # unmanaged stacks line, a lost pairs line or a `shipmate plan` command still posts.
+        args=("$PR" comment.md --new --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ] && [ "$ON_DEMAND" != "true" ]; then
           args+=(--update-only)
         fi
@@ -455,10 +465,10 @@ runs:
         result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")
         echo "result=$result" >> "$GITHUB_OUTPUT"
         if [ "$result" = "list-failed" ]; then
-          echo "::error::could not list this pull request's comments, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
+          echo "::error::could not list this pull request's comments, so no plan comment was written; re-plan this pull request (comment shipmate plan or push)"
           exit 1
         elif [ "$result" = "head-failed" ]; then
-          echo "::error::could not read the head of pull request #$PR, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
+          echo "::error::could not read the head of pull request #$PR, so no plan comment was written; re-plan this pull request (comment shipmate plan or push)"
           exit 1
         elif [ "$result" = "moved" ]; then
           echo "$moved"
@@ -660,16 +670,3 @@ runs:
           not_started "the auto apply dispatch"
         fi
         echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"
-
-    - name: Collapse the started reply
-      if: ${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' && (steps.upsert.outputs.result == 'created' || steps.upsert.outputs.result == 'updated') }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        PR_NUMBER: ${{ inputs.pr-number }}
-        SHIPMATE_REPLY_VERB: plan
-      run: |
-        set -euo pipefail
-        # Reviewer-facing only, and last, after the gate: a failure or a hang degrades to a warning
-        # and the job's result stays the gate's.
-        timeout 120 python3 "$GITHUB_ACTION_PATH/../../scripts/collapse-reply" || echo "::warning::the started reply was not collapsed (exit $?); the result comment is posted"

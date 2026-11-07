@@ -205,7 +205,7 @@ EXPECTED_STEP_NAMES = [
     "Build comment + gate state",
     "Decide gate state and comment mode",
     "Download cell errors",
-    "Upsert sticky comment",
+    "Write the plan comment",
     "Create apply checks (pending / no-changes)",
     "Create/refresh gate",
     "Check whether the live head needs a plan",
@@ -214,7 +214,6 @@ EXPECTED_STEP_NAMES = [
     "Decide whether to dispatch an auto apply",
     "Mint the auto apply dispatch token",
     "Dispatch an auto apply",
-    "Collapse the started reply",
 ]
 
 

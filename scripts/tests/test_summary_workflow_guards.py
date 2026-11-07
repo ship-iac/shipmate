@@ -199,3 +199,37 @@ def test_a_moved_head_skips_the_apply_checks_and_the_gate():
     Mutations: `&&` -> `||` in either `if:`; drop the `moved` clause from either."""
     names = ["Create apply checks (pending / no-changes)", "Create/refresh gate"]
     assert {n: step_by("summary", name=n)["if"] for n in names} == dict.fromkeys(names, NOT_MOVED)
+
+
+#: The summary action's whole `outputs:` mapping, hand-written.
+EXPECTED_ACTION_OUTPUTS = {
+    "upsert": {
+        "description": (
+            "What `Write the plan comment` did: upsert-comment's one word, or `failed` when the "
+            "held render or write failed. Empty when the step skipped or exited before writing."
+        ),
+        "value": "${{ steps.upsert.outputs.result }}",
+    },
+    "superseded": {
+        "description": (
+            "`true` when this run wrote nothing on the head: the pull request moved past it, or a "
+            "newer plan run holds its gate. Empty otherwise."
+        ),
+        "value": "${{ steps.hold.outputs.superseded }}",
+    },
+}
+
+
+def test_the_summary_action_exposes_the_comment_write_and_the_supersede():
+    """Mutation: map `upsert` to `${{ steps.hold.outputs.superseded }}`."""
+    assert action_yaml("summary")["outputs"] == EXPECTED_ACTION_OUTPUTS
+
+
+def test_the_summary_job_passes_the_action_outputs_on():
+    """The plan `outcome` job reads both. Mutations: drop `superseded`; drop the step's `id`."""
+    job, _ = _summary_job()
+    assert job["outputs"] == {
+        "upsert": "${{ steps.summary.outputs.upsert }}",
+        "superseded": "${{ steps.summary.outputs.superseded }}",
+    }
+    assert job["steps"][0]["id"] == "summary"

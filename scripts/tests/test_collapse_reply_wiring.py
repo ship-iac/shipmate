@@ -1,4 +1,4 @@
-"""Guard the steps that run scripts/collapse-reply once a dispatched run posted its result.
+"""Guard the step that runs scripts/collapse-reply once a dispatched apply posted its result.
 
 Threat model: an accidental regression of the step's condition, order, env or command line. The
 collapse only decides what a reader sees, so it runs last, after anything the job's result rests
@@ -9,7 +9,7 @@ from _loader import action_steps, run_lines, step_by
 
 COLLAPSE = "Collapse the started reply"
 
-#: The whole `run:` of both collapse steps, hand-written.
+#: The whole `run:` of the collapse step, hand-written.
 COLLAPSE_RUN = [
     "set -euo pipefail",
     (
@@ -25,36 +25,6 @@ def _env(verb):
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_REPLY_VERB": verb,
     }
-
-
-def test_the_summary_collapse_runs_last_on_a_written_on_demand_plan_comment():
-    """Only a `shipmate plan` run collapses, only once its comment was created or updated, and
-    after `Create/refresh gate`, so no cosmetic call delays the gate.
-
-    Mutations: drop `inputs.on-demand == 'true' &&`; drop the `updated` alternative; swap the
-    step above `Create/refresh gate`; rename the upsert step's `id`; drop `timeout 120`; drop the
-    `|| echo` fallback; `SHIPMATE_REPLY_VERB: apply`.
-    """
-    names = [s.get("name") for s in action_steps("summary")]
-    assert names[-8:] == [
-        "Create/refresh gate",
-        "Check whether the live head needs a plan",
-        "Mint the plan dispatch token",
-        "Dispatch a plan of the live head",
-        "Decide whether to dispatch an auto apply",
-        "Mint the auto apply dispatch token",
-        "Dispatch an auto apply",
-        COLLAPSE,
-    ]
-    collapse = step_by("summary", name=COLLAPSE)
-    assert collapse["if"] == (
-        "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true'"
-        " && (steps.upsert.outputs.result == 'created'"
-        " || steps.upsert.outputs.result == 'updated') }}"
-    )
-    assert step_by("summary", id="upsert")["name"] == "Upsert sticky comment"
-    assert run_lines(collapse) == COLLAPSE_RUN
-    assert collapse["env"] == _env("plan")
 
 
 def test_the_apply_summary_collapse_runs_last_directly_after_the_result_post():

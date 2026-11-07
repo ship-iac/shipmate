@@ -1289,7 +1289,7 @@ def test_the_upsert_quiet_inputs_read_doctor_and_build():
     Mutations: bind `DOCTOR_WARNED` to another step's output; bind `UNMANAGED` or `LOST` to
     another output of step `build`.
     """
-    env = step_by("summary", name="Upsert sticky comment")["env"]
+    env = step_by("summary", name="Write the plan comment")["env"]
     assert env["DOCTOR_WARNED"] == "${{ steps.doctor.outputs.warned }}"
     assert env["UNMANAGED"] == "${{ steps.build.outputs.unmanaged }}"
     assert env["LOST"] == "${{ steps.build.outputs.lost }}"
@@ -1299,7 +1299,7 @@ def test_the_upsert_step_maps_exactly_these_env_vars():
     """The held render reads the uncut reason and the cells with no plan summary;
     the head comparison reads `HEAD_SHA`. Mutations: map `SHIPMATE_HOLD_REASON` to
     `steps.gate.outputs.description` -- the cut text; drop `HEAD_SHA` -- every write skips."""
-    assert step_by("summary", name="Upsert sticky comment")["env"] == {
+    assert step_by("summary", name="Write the plan comment")["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "PR": "${{ inputs.pr-number }}",
         "ON_DEMAND": "${{ inputs.on-demand }}",
@@ -1833,11 +1833,11 @@ def test_the_apply_checks_and_the_gate_follow_the_upsert_step_that_may_fail():
     nor `Create/refresh gate`, later steps, publishes over a comment that still shows the previous
     head's plan.
 
-    Mutations: move `Create/refresh gate` above `Upsert sticky comment`; move `Create apply checks`
+    Mutations: move `Create/refresh gate` above `Write the plan comment`; move `Create apply checks`
     back above the mirror step -- red."""
     names = [s.get("name") for s in action_steps("summary")]
     assert (
-        names.index("Upsert sticky comment")
+        names.index("Write the plan comment")
         < names.index("Create apply checks (pending / no-changes)")
         < names.index("Create/refresh gate")
     )
