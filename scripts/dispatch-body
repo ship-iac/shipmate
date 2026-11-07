@@ -2,11 +2,10 @@
 """Build the `workflow_dispatch` request body for `shipmate.yml` (one input shape per verb), and
 send it.
 
-    dispatch-body         print the body
     dispatch-body post    POST the body and print the API's answer
 
-Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `DISPATCH_REF`; `post` also reads
-`GITHUB_REPOSITORY` and `GH_TOKEN`. Any other argument list refuses with an `::error::` usage line.
+Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `DISPATCH_REF`, `GITHUB_REPOSITORY`, `GH_TOKEN`.
+Any other argument list refuses with an `::error::` usage line.
 
 `post` retries a transient failure (`_shipmate.retried`), and a transient failure may have
 started a run: GitHub can start it and still answer 502. Before each retry it lists `shipmate.yml`'s
@@ -39,7 +38,7 @@ from _shipmate import retried, run, run_annotated
 
 MAY_HAVE_STARTED = 3
 UNDETERMINED = 4
-_USAGE = "::error::usage: dispatch-body [post]"
+_USAGE = "::error::usage: dispatch-body post"
 #: How far `t0` sits before the first attempt: the margin for a runner clock behind GitHub's.
 _CLOCK_MARGIN = timedelta(seconds=5)
 
@@ -139,12 +138,9 @@ def post():
 
 
 def main(argv):
-    if argv == []:
-        print(json.dumps(body()))
-    elif argv == ["post"]:
-        post()
-    else:
+    if argv != ["post"]:
         raise SystemExit(_USAGE)
+    post()
 
 
 if __name__ == "__main__":

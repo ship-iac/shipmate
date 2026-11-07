@@ -239,11 +239,13 @@ def test_t0_is_five_seconds_before_the_first_attempt(calls, monkeypatch, capsys,
     assert post(capsys)[0] == code
 
 
-def test_no_argument_still_prints_the_body(calls, capsys):
-    """The three dispatch steps print the body this way until they call `post`. Mutation: drop the
-    no-argument mode -> it refuses."""
-    db.main([])
-    assert capsys.readouterr() == (BODY + "\n", "")
+def test_no_argument_refuses_with_the_usage(calls, capsys):
+    """Every dispatch step sends through `post`. Mutation: keep the no-argument print mode -> it
+    prints the body and exits 0."""
+    with pytest.raises(SystemExit) as exc:
+        db.main([])
+    assert exc.value.code == "::error::usage: dispatch-body post"
+    assert capsys.readouterr() == ("", "")
 
 
 @pytest.mark.parametrize("argv", [["x"], ["post", "x"]])
@@ -252,4 +254,4 @@ def test_an_unknown_argument_list_refuses(calls, monkeypatch, argv):
     answering(monkeypatch, calls, [ANSWER])
     with pytest.raises(SystemExit) as exc:
         db.main(argv)
-    assert exc.value.code == "::error::usage: dispatch-body [post]"
+    assert exc.value.code == "::error::usage: dispatch-body post"

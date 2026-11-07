@@ -100,6 +100,7 @@ fi
 if [[ "$*" == *dispatches* ]]; then
   cat > "$DISPATCH_BODY"
   printf '%s' "$GH_TOKEN" > "$DISPATCH_BODY.token"
+  [ "$FAKE_DISPATCH_RC" = 0 ] || echo "gh: Validation Failed (HTTP 422)" >&2
   exit "$FAKE_DISPATCH_RC"
 elif [ "$2" = "--paginate" ]; then
   printf '%s' "$FAKE_RUNS"
@@ -129,6 +130,19 @@ def _listed(status, conclusion):
     )
 
 
+def _exit_for_dispatch_body(bin_dir, rc):
+    """Make `bin_dir/python3` exit `rc` for `dispatch-body` and run every other script."""
+    real = bin_dir / "python3-real"
+    (bin_dir / "python3").rename(real)
+    (bin_dir / "python3").write_text(
+        f'#!/bin/bash\nif [[ "$1" == */dispatch-body ]]; then exit {rc}; fi\n'
+        f'exec "{real.as_posix()}" "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    (bin_dir / "python3").chmod(0o755)
+
+
 def _step_env(step, expressions):
     """The step's parsed `env:` with each `${{ }}` value resolved; an unknown one is a KeyError."""
     return {
@@ -147,12 +161,16 @@ def _run(
     runs_rc=0,
     plan_token="plan-token",  # noqa: S107 - a stub token, never sent
     dispatch_rc=0,
+    post_rc=None,
 ):
     """Run the livehead step, then the dispatch step when it set `live`, as the runner would.
+    `post_rc` makes `python3` exit with it for `dispatch-body` in place of running it.
     Return (stdout, stderr, gh calls, livehead outputs)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
+    if post_rc is not None:
+        _exit_for_dispatch_body(bin_dir, post_rc)
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
     out = tmp_path / "out"
@@ -215,7 +233,8 @@ def test_a_live_head_without_a_live_autoplan_is_planned_on_demand(tmp_path, runs
     token, and nothing else read. Mutations: invert the in-flight check in `_replan` (`if not
     any(...)`) -- no-run dispatches nothing; skip when any run is listed (`if runs:`) -- the
     cancelled and failure rows dispatch nothing; decide on the gate (list `statuses` instead) --
-    the call list differs."""
+    the call list differs; call `dispatch-body` without `post` -- it refuses with its usage, no
+    POST is sent and the step warns that the plan dispatch failed."""
     stdout, stderr, calls, outputs = _run(tmp_path, runs=runs)
     assert (calls, outputs) == ([PULL_READ, RUNS_LIST, DISPATCH_POST], {"live": LIVE})
     assert _sent_body(tmp_path) == {
@@ -317,13 +336,32 @@ def test_a_failed_mint_warns_and_dispatches_nothing(tmp_path):
 
 @bash_only
 def test_a_failed_dispatch_warns_with_the_remedy(tmp_path):
-    """Mutations: `exit 1` in place of the failure branch's `exit 0`; print the notice on a
-    failed POST."""
-    stdout, _, calls, _ = _run(tmp_path, dispatch_rc=1)
+    """A 4xx cannot have started a run: one POST, no retry, and the unchanged warning.
+    Mutations: `exit 1` in place of the failure branch's `exit 0`; print the notice on a
+    failed POST; treat every nonzero exit of `dispatch-body post` as a run that may have
+    started -- the may-have-started warning prints instead."""
+    stdout, stderr, calls, _ = _run(tmp_path, dispatch_rc=1)
     assert calls == [PULL_READ, RUNS_LIST, DISPATCH_POST]
     assert stdout.splitlines() == [
         (
             f"::warning::the plan dispatch failed, so {LIVE} has no plan; "
             "comment shipmate plan to plan pull request #42"
+        )
+    ]
+    assert "gh: Validation Failed (HTTP 422)" in stderr.splitlines()
+
+
+@bash_only
+@pytest.mark.parametrize("post_rc", [3, 4])
+def test_a_dispatch_that_may_have_started_a_run_warns_to_check_the_actions_tab(tmp_path, post_rc):
+    """`dispatch-body post` exits 3 when a run started after an attempt that failed, 4 when it
+    cannot tell: either way "has no plan" would be false. Mutation: send exit 3 to `not_planned`
+    -- the 3 row prints the no-plan warning."""
+    stdout, stderr, calls, _ = _run(tmp_path, post_rc=post_rc)
+    assert (calls, stderr) == ([PULL_READ, RUNS_LIST], "")
+    assert stdout.splitlines() == [
+        (
+            f"::warning::the plan dispatch answered with an error, so a plan of {LIVE} may have "
+            "started; check the Actions tab before commenting shipmate plan on pull request #42"
         )
     ]
