@@ -6,6 +6,8 @@ Two properties, because a rail can come back at either end: no workflow declares
 the input, and every wave job reads the value off its matrix row.
 """
 
+import re
+
 from _loader import WORKFLOWS, workflow_yaml
 
 #: Every `workflow_call`/`workflow_dispatch` input name in the engine, per file. Hand-written,
@@ -65,7 +67,7 @@ def test_no_engine_workflow_declares_a_plan_run_id_input():
 
 def test_every_wave_job_takes_the_plan_run_id_from_its_matrix_cell():
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    wave_jobs = sorted(j for j in jobs if j.startswith("wave"))
+    wave_jobs = sorted(j for j in jobs if re.fullmatch(r"wave[0-9]+", j))
     assert wave_jobs == EXPECTED_WAVE_JOBS, f"wave fan-out changed: {wave_jobs}"
     for job_id in wave_jobs:
         cell = [s for s in jobs[job_id]["steps"] if "actions/apply-cell" in (s.get("uses") or "")]

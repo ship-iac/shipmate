@@ -61,16 +61,16 @@ def test_cell_never_references_the_app_private_key(action):
         assert APP_KEY_ENV not in text, f"{action} references {APP_KEY_ENV}: {text!r}"
 
 
-def test_only_snapshot_and_complete_read_the_app_key():
-    """Neither checks out repository content; every wave does.
+def test_only_snapshot_and_completion_jobs_read_the_app_key():
+    """None checks out repository content; every wave does.
 
-    Mutation: remove `snapshot`'s `private-key` wiring.
+    Mutations: remove `snapshot`'s `private-key` wiring; remove `wave4-complete`'s.
     """
     # Parse, do not string-split: the secret stays declared at the top of the file, because the
-    # two jobs consume it and test_gate_name_consistency requires reusable targets called
+    # these jobs consume it and test_gate_name_consistency requires reusable targets called
     # with `secrets: inherit` to declare it. A textual "not in" assertion checks the wrong thing.
     reading = {n for n, job in workflow_jobs(LEVEL).items() if APP_KEY_ENV in yaml.safe_dump(job)}
-    assert reading == {"snapshot", "complete"}
+    assert reading == {"snapshot", "complete", *(f"wave{n}-complete" for n in range(8))}
 
 
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
@@ -101,8 +101,8 @@ def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
     assert "shipmate-engine" not in str(job.get("environment", ""))
 
 
-def test_snapshot_and_complete_are_the_only_jobs_naming_the_engine_environment():
-    """Mutation: drop `snapshot`'s `environment:` binding."""
+def test_snapshot_and_completion_jobs_are_the_only_jobs_naming_the_engine_environment():
+    """Mutations: drop `snapshot`'s `environment:` binding; drop `wave6-complete`'s."""
     # Parsed, not a `text.count(...) == 1` textual check: that form is satisfied by any single
     # job naming the environment, so moving it onto wave0, which runs tofu over branch content,
     # would keep the count at 1 and the test green while releasing the key to consumer code.
@@ -110,12 +110,13 @@ def test_snapshot_and_complete_are_the_only_jobs_naming_the_engine_environment()
     named = {
         n for n, j in workflow_jobs(LEVEL).items() if "shipmate-engine" in str(j.get("environment"))
     }
-    assert named == {"snapshot", "complete"}
+    assert named == {"snapshot", "complete", *(f"wave{n}-complete" for n in range(8))}
 
 
 #: Every (workflow, job) binding `shipmate-engine`, hand-written. Each holds the App key.
 ENGINE_BOUND_JOBS = {
     ("apply-env-level.yml", "snapshot"),
+    *(("apply-env-level.yml", f"wave{n}-complete") for n in range(8)),
     ("apply-env-level.yml", "complete"),
     ("apply.yml", "review"),
     ("apply.yml", "lock"),
