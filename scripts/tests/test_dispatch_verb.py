@@ -786,6 +786,49 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
     )
 
 
+@bash_only
+def test_an_undetermined_dispatch_ending_on_skew_prints_the_layout_message(tmp_path):
+    """A 502 and then `Unexpected inputs provided` is still a file that cannot take this body.
+    The reply stays the exit-4 one.
+
+    Mutation: drop the exit-4 branch's `say_skew`.
+    """
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub=_BODY_SAVING_STUB,
+        failing_script=("dispatch-body", 4, "gh: Unexpected inputs provided (HTTP 422)"),
+    )
+    lines = result.stdout.splitlines()
+    assert result.returncode == 1, f"an undetermined dispatch must fail: {result.stdout}"
+    assert _LAYOUT_MESSAGE in lines, f"the layout message must print whole: {result.stdout}"
+    assert "so a run may have started" in (tmp_path / "body.txt").read_text(encoding="utf-8")
+
+
+@bash_only
+def test_a_failed_runs_listing_is_not_reported_as_skew(tmp_path):
+    """A failed listing's message starts with its argv, which names the `workflow_dispatch`
+    event; that is not a missing trigger.
+
+    Mutation: match the bare `workflow_dispatch` in `say_skew`.
+    """
+    listing_failure = (
+        "command failed (1): gh api repos/acme/demo/actions/workflows/shipmate.yml/runs"
+        "?event=workflow_dispatch&per_page=100\ngh: Bad Gateway (HTTP 502)"
+    )
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub=_BODY_SAVING_STUB,
+        failing_script=("dispatch-body", 4, listing_failure),
+    )
+    assert result.returncode == 1, f"an undetermined dispatch must fail: {result.stdout}"
+    assert "event=workflow_dispatch" in result.stdout, f"the failure must print: {result.stdout}"
+    assert _LAYOUT_SKEW not in result.stdout, f"a failed listing is not skew: {result.stdout}"
+
+
 def _answering_stub(answer, reply_exit=0):
     """A gh stub that answers the dispatch call with `answer` on stdout and a warning on stderr,
     records each call's token and argv, saves the reply's body and the run id handed to

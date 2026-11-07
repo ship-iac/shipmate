@@ -187,15 +187,28 @@ def test_a_failed_or_malformed_listing_is_undetermined(calls, monkeypatch, capsy
 
 
 def test_a_created_at_without_a_zone_is_undetermined(calls, monkeypatch, capsys):
-    """A naive time cannot be compared with `t0`. Mutation: drop the `tzinfo` check -> the
-    comparison raises `TypeError` instead of exiting `UNDETERMINED`."""
+    """A naive time cannot be compared with `t0`, and the log says why. Mutation: drop the
+    `tzinfo` check -> the comparison's `TypeError` prints in place of the row."""
     answering(
         monkeypatch,
         calls,
         [SystemExit(BAD_GATEWAY), ANSWER],
         ['{"created_at": "2026-11-07T11:59:55"}'],
     )
-    assert (post(capsys)[0], calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
+    code, _, err = post(capsys)
+    assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
+    assert err.endswith(
+        'listed run created_at without a zone: {"created_at": "2026-11-07T11:59:55"}\n'
+    )
+
+
+def test_a_listing_that_raises_anything_is_undetermined(calls, monkeypatch, capsys):
+    """Any failure inside the listing leaves the question open. Mutation: catch only
+    `(SystemExit, ValueError)` -> the `OSError` escapes `post`."""
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [OSError("disk gone")])
+    code, _, err = post(capsys)
+    assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
+    assert err.endswith("disk gone\n")
 
 
 def test_a_failed_listing_prints_its_failure(calls, monkeypatch, capsys):

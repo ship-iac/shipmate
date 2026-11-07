@@ -2104,10 +2104,11 @@ exactly `apply`, unreadable dispatch inputs included; `shipmate doctor` compares
 published one. A failed mint or
 dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply not
 started: the dispatch failed; comment `shipmate apply` ``. The dispatch retries
-as a comment's does (§Comment-ops); one that may have started a run (the
-listing found a run, or the outcome is undetermined) warns and posts ``🔴
-failed: auto apply may have started: the dispatch answered with an error; check
-the Actions tab before commenting `shipmate apply` `` instead. A run that cannot
+as a comment's does (§Comment-ops); one that may have started a run warns and
+posts ``auto apply may have started: the dispatch answered with an error; check
+the Actions tab before commenting `shipmate apply` `` instead, a `⚪` notice
+when the listing found a run and `🔴 failed:` when the outcome is undetermined.
+A run that cannot
 decide (`detect`'s `auto_envs` output missing or malformed, a cell summary
 unparseable) warns and posts no reply. Neither changes the gate.
 

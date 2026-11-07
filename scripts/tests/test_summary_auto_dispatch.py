@@ -412,11 +412,14 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
 
 
 @bash_only
-@pytest.mark.parametrize("post_rc", [3, 4])
-def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab(tmp_path, post_rc):
-    """`dispatch-body post` exits 3 when a run started after an attempt that failed, 4 when it
-    cannot tell: either way "not started" would be false. Mutation: reply the `auto apply not
-    started` text on exit 3 and 4 -- both rows redden."""
+@pytest.mark.parametrize(("post_rc", "verdict"), [(3, "⚪ "), (4, "🔴 failed: ")])
+def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab(
+    tmp_path, post_rc, verdict
+):
+    """`dispatch-body post` exits 3 when a run started after an attempt that failed, a notice as
+    in comment-ops, and 4 when it cannot tell, a failure: either way "not started" would be false.
+    Mutations: reply the `auto apply not started` text on exit 3 and 4 -- both rows redden;
+    reply `failed` on exit 3 -- its row reddens."""
     proc, calls, _ = _run(tmp_path, DISPATCH, post_rc=post_rc)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == ["repos/acme/demo/issues/42/comments"]
@@ -431,7 +434,7 @@ def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab
         "### shipmate apply",
         "",
         (
-            "🔴 failed: auto apply may have started: the dispatch answered with an error; check "
+            f"{verdict}auto apply may have started: the dispatch answered with an error; check "
             "the Actions tab before commenting `shipmate apply`"
         ),
     ]

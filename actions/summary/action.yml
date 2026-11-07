@@ -659,13 +659,13 @@ runs:
         scripts="$GITHUB_ACTION_PATH/../../scripts"
         # Reviewer-facing degrade only: a failed mint or dispatch, or one that may have started a
         # run, warns, replies with the remedy and exits 0.
-        reply_failed() {
-          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$1" \
-            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply failure reply"
+        reply() {
+          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
+            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
         }
         not_started() {
           echo "::warning::$1 for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
-          reply_failed "auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          reply failed "auto apply not started: the dispatch failed; comment \`shipmate apply\`"
           exit 0
         }
         [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
@@ -674,7 +674,9 @@ runs:
         python3 "$scripts/dispatch-body" post >/dev/null || rc=$?
         if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
           echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS answered with an error, and an auto run may have started; check the Actions tab before commenting shipmate apply"
-          reply_failed "auto apply may have started: the dispatch answered with an error; check the Actions tab before commenting \`shipmate apply\`"
+          # Exit 3 saw a run start, so it is a notice, as in comment-ops; exit 4 cannot tell.
+          if [ "$rc" -eq 3 ]; then outcome=notice; else outcome=failed; fi
+          reply "$outcome" "auto apply may have started: the dispatch answered with an error; check the Actions tab before commenting \`shipmate apply\`"
           exit 0
         fi
         [ "$rc" -eq 0 ] || not_started "the auto apply dispatch"
