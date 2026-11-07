@@ -290,7 +290,7 @@ _APPLY_NEEDS += ["envlevel3"]
 
 def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel. `run-cancelled` ORs every needed job but
-    `summary`, whose `cancelled` is an eviction.
+    `guard`, whose success the `if:` requires, and `summary`, whose `cancelled` is an eviction.
 
     Mutations: drop `&& needs.summary.outputs.posted != 'true'`; drop `summary` from `needs`;
     `permissions: { pull-requests: write }`; pass `needs.review.result` as `summary-result`;
@@ -315,8 +315,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
                     "review-result": "${{ needs.review.result }}",
                     "summary-result": "${{ needs.summary.result }}",
                     "run-cancelled": (
-                        "${{ needs.guard.result == 'cancelled' || "
-                        "needs.review.result == 'cancelled' || "
+                        "${{ needs.review.result == 'cancelled' || "
                         "needs.detect.result == 'cancelled' || "
                         "needs.lock.result == 'cancelled' || "
                         "needs.envlevel0.result == 'cancelled' || "

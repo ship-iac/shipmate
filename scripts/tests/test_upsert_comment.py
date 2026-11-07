@@ -413,6 +413,13 @@ def test_new_reads_visibility_in_chunks_of_100(monkeypatch, tmp_path, capsys):
 
 _NULL_NODE = '{"data": {"nodes": [null, null]}}'
 _NO_FLAG = '{"data": {"nodes": [{"id": "IC_5"}, {"id": "IC_6", "isMinimized": true}]}}'
+_STRING_FLAG = (
+    '{"data": {"nodes": [{"id": "IC_5", "isMinimized": "true"}, '
+    '{"id": "IC_6", "isMinimized": false}]}}'
+)
+_LONG = "x" * 300
+#: `_LONG` as a warning quotes it, hand-written: its first 200 characters.
+_LONG_QUOTED = "unexpected answer: " + "xxxxxxxxxx" * 20
 
 
 @pytest.mark.parametrize(
@@ -421,15 +428,18 @@ _NO_FLAG = '{"data": {"nodes": [{"id": "IC_5"}, {"id": "IC_6", "isMinimized": tr
         (True, None, "command failed (1): gh api graphql | HTTP 502"),
         (False, _NULL_NODE, f"unexpected answer: {_NULL_NODE}"),
         (False, _NO_FLAG, f"unexpected answer: {_NO_FLAG}"),
+        (False, _STRING_FLAG, f"unexpected answer: {_STRING_FLAG}"),
+        (False, _LONG, _LONG_QUOTED),
     ],
-    ids=["gh-error", "null-node", "no-isMinimized"],
+    ids=["gh-error", "null-node", "no-isMinimized", "string-isMinimized", "long-answer"],
 )
 def test_new_a_failed_visibility_read_counts_every_comment_visible(
     monkeypatch, tmp_path, capsys, fails, answer, error
 ):
     """The run still posts, then minimizes every same-author marker comment. Mutations:
     `sys.exit` on a failed read -- no POST; treat a failed read as "all minimized" -- no
-    minimize call."""
+    minimize call; drop the boolean check (`is True` alone) -- `string-isMinimized` warns
+    nothing; quote the whole answer -- `long-answer` red."""
     listing = [_head(5, SUMMARY), _head(6, SUMMARY)]
     code, calls = _upsert(
         monkeypatch,
@@ -537,18 +547,27 @@ def test_new_a_failed_minimize_warns_and_attempts_the_rest(monkeypatch, tmp_path
     )
 
 
-@pytest.mark.parametrize("response", ["not json", '{"id": 99}', '{"user": null}'])
+@pytest.mark.parametrize(
+    ("response", "quoted"),
+    [
+        ("not json", "unexpected answer: not json"),
+        ('{"id": 99}', 'unexpected answer: {"id": 99}'),
+        ('{"user": null}', 'unexpected answer: {"user": null}'),
+        (_LONG, _LONG_QUOTED),
+    ],
+)
 def test_new_an_unparseable_post_response_warns_and_minimizes_nothing(
-    monkeypatch, tmp_path, capsys, response
+    monkeypatch, tmp_path, capsys, response, quoted
 ):
-    """The comment exists, so the run prints `created`. Mutation: let the parse error raise."""
+    """The comment exists, so the run prints `created`. Mutations: let the parse error raise;
+    quote the whole response -- the `_LONG` row red."""
     code, calls = _upsert(
         monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", post_response=response
     )
     assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _post(tmp_path)])
     assert capsys.readouterr() == (
         "created\n",
-        _MINIMIZE_WARNING + f"unexpected answer: {response}\n",
+        _MINIMIZE_WARNING + quoted + "\n",
     )
 
 
@@ -557,14 +576,17 @@ def test_new_an_unparseable_post_response_warns_and_minimizes_nothing(
     [
         ("d" * 40, False, "moved", ""),
         (_HEAD, True, "head-failed", "command failed (1): gh api | HTTP 502 | ::add-mask::x\n"),
+        (None, False, "head-failed", "pull request #7 has head SHA None and draft False\n"),
     ],
-    ids=["moved", "head-failed"],
+    ids=["moved", "head-failed", "null-head"],
 )
 def test_new_writes_nothing_when_the_head_check_stops(
     monkeypatch, tmp_path, capsys, head, head_fails, word, err
 ):
-    """The head is read after the visibility read and before the POST. Mutation: skip
-    `_head_stop` under `--new` -- a POST and a minimize follow."""
+    """The head is read after the visibility read and before the POST. Mutations: skip
+    `_head_stop` under `--new` -- a POST and a minimize follow; under `--new`, write on
+    `head-failed` -- the `head-failed` and `null-head` rows post; skip the SHA check in
+    `_shipmate.pr_head` -- `null-head` prints `moved`."""
     code, calls = _upsert(
         monkeypatch,
         tmp_path,
@@ -577,6 +599,17 @@ def test_new_writes_nothing_when_the_head_check_stops(
     )
     assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), PULLS_ARGV])
     assert capsys.readouterr() == (word + "\n", err)
+
+
+def test_new_with_a_matching_head_posts_then_minimizes(monkeypatch, tmp_path, capsys):
+    """The head is read after the visibility read and before the POST, and a match writes.
+    Mutation: skip the write under `--new` when `--head` is given -- no POST or minimize."""
+    code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", "--head", _HEAD)
+    assert (code, calls) == (
+        0,
+        [LIST_ARGV, _read("IC_5"), PULLS_ARGV, _post(tmp_path), _minimize("IC_5")],
+    )
+    assert capsys.readouterr() == ("created\n", "")
 
 
 def test_new_a_listing_failure_prints_list_failed(monkeypatch, tmp_path, capsys):
@@ -805,10 +838,11 @@ def test_summary_held_render_failure_writes_no_comment(tmp_path):
 @bash_only
 @pytest.mark.parametrize("mode", ["held", "post", "nothing-changed"])
 def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
-    """A re-run of an old run never replaces the comment of the head the pull request has moved
-    to. `result=moved` is what skips `Create apply checks` and `Create/refresh gate`.
-    Mutations: drop `--head` from either upsert-comment call -- a write follows; misspell
-    `moved` in the step -- no notice; drop the held branch's `result=` line -- no output."""
+    """A re-run of an old run never posts over (or minimizes) the comment of the head the pull
+    request has moved to. `result=moved` is what skips `Create apply checks` and
+    `Create/refresh gate`. Mutations: drop `--head` from either upsert-comment call -- a write
+    follows; misspell `moved` in the step -- no notice; drop the held branch's `result=` line --
+    no output."""
     proc, calls = _run_summary(tmp_path, mode, head="b" * 40, warned="true")
     assert (proc.returncode, proc.stdout, calls) == (
         0,

@@ -2212,9 +2212,9 @@ The job that serves that verb is not selected by its `if:` in
 do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless the job is missing or another job
 calls the same workflow. The run is in the Actions tab. For `shipmate plan` and
-`shipmate apply` the pull request shows the 🚀 reaction and no reply, since the
-job that would answer never ran; for `shipmate unlock` the started-run reply
-links the run when it carries a link. Reconcile the job against the
+`shipmate apply` the pull request shows the 🚀 reaction (and 👀 for `shipmate
+plan`) and no reply, since the job that would answer never ran; for `shipmate
+unlock` the started-run reply links the run when it carries a link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
 
 ### A cancelled autoplan left red checks on the pull request

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Post a one-verdict reply comment: a refusal, a failure, a notice or a started run.
 
-Every engine reply posts through this script, so every one carries the shared header and
-footer from `summary-comment`. Reads:
+Every engine reply but the `help` answer, which `comment-ops` posts as its own body, posts
+through this script, so each carries the shared header and footer from `summary-comment`. Reads:
 
 - `SHIPMATE_REPLY_VERB`, `SHIPMATE_REPLY_ENV`: the header words, `_md_escape`d there; an empty
   verb gives `### shipmate`.

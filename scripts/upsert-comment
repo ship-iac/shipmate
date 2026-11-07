@@ -24,10 +24,11 @@ With `--new`, the body is always POSTed, then every earlier marker comment that 
 by the POST's author (its response's `user.login`) is minimized as outdated. Posting first means
 the pull request never shows zero plan comments, and the new comment is never one minimized.
 Visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids (`minimized_ids`). A read
-that fails or is incomplete prints one `::warning::` and every marker comment counts as visible:
-failing the step would drop the run's comment to save a no-op, since minimizing a minimized
-comment changes nothing. A failed minimize, or a POST response with no author, prints one
-`::warning::` and the run goes on. Both warnings go to stderr on one line.
+that fails or is incomplete, a non-boolean `isMinimized` included, prints one `::warning::` and
+every marker comment counts as visible: failing the step would drop the run's comment to save a
+no-op, since minimizing a minimized comment changes nothing. Each failed minimize prints one
+`::warning::`, as does a POST response with no author, and the run goes on. Every warning goes
+to stderr on one line; one quoting an unexpected answer quotes its first 200 characters.
 
 With `--head`, the pull request's current head is read once a write is due, and nothing is
 written unless it is that SHA, so a run for an older head never writes over the newer head's
@@ -72,6 +73,8 @@ MINIMIZE = (
 )
 #: The `nodes(ids:)` cap.
 CHUNK = 100
+#: The characters of an unexpected answer a warning quotes.
+ANSWER_CAP = 200
 
 
 def marker_comments(repo, pr, marker):
@@ -103,7 +106,7 @@ def marker_comments(repo, pr, marker):
 def minimized_ids(node_ids, pr):
     """The node ids among `node_ids` whose `isMinimized` is true, or None after one stderr
     warning naming pull request `pr` when any chunk's read fails, does not parse, or answers a
-    `null` node or a node without `isMinimized`."""
+    `null` node or a node whose `isMinimized` is missing or not a boolean."""
     hidden = set()
     for start in range(0, len(node_ids), CHUNK):
         ids = [arg for n in node_ids[start : start + CHUNK] for arg in ("-F", f"ids[]={n}")]
@@ -114,10 +117,12 @@ def minimized_ids(node_ids, pr):
         else:
             try:
                 nodes = json.loads(out)["data"]["nodes"]
-                hidden |= {n["id"] for n in nodes if n["isMinimized"] is True}
-                continue
+                if all(isinstance(n["isMinimized"], bool) for n in nodes):
+                    hidden |= {n["id"] for n in nodes if n["isMinimized"]}
+                    continue
             except (ValueError, LookupError, TypeError):
-                error = f"unexpected answer: {out}"
+                pass
+            error = f"unexpected answer: {out[:ANSWER_CAP]}"
         print(
             f"::warning::could not read which plan comments of pull request #{pr} are minimized, "
             f"so all count as visible: {one_line(error)}",
@@ -140,7 +145,7 @@ def _minimize_earlier(pr, visible, response):
     try:
         author = json.loads(response)["user"]["login"]
     except (ValueError, LookupError, TypeError):
-        _minimize_warning(pr, f"unexpected answer: {response}")
+        _minimize_warning(pr, f"unexpected answer: {response[:ANSWER_CAP]}")
         return
     for comment in visible:
         if comment["login"] != author:

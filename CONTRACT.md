@@ -1278,7 +1278,7 @@ warning on the comment-handling run, and the step still fails with its own
 status. A dispatch that started a `plan` or `apply` run posts no reply: the
 `rocket` reaction acknowledged the command when it was accepted, and the run
 answers on the pull request itself, with its plan comment or apply result
-comment, or with the outcome reply when it ends without one (§Outcome reply).
+comment, or, in the cases §Outcome reply lists, with the outcome reply.
 A dispatch that started an `unlock` run then tries to post the started-run
 reply, a `⚪` notice:
 
