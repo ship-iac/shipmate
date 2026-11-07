@@ -27,7 +27,7 @@ from _shipmate import run_annotated
 _ACTION = "setup"
 _PYTHON_YAML = "$/actions/python-yaml"
 
-#: Every step, in order, by name or, for the unnamed install, by `uses:`. Hand-written: PyYAML
+#: Every step, in order, by name or, for the python-yaml step, by `uses:`. Hand-written: PyYAML
 #: must be present before the resolve step parses the table, the resolve step must precede the
 #: verify steps that read its versions, and both must precede the installers that read their
 #: outputs. The ungated Terramate verify step runs first because it checks the runner
@@ -52,16 +52,12 @@ _EXPECTED_RESOLVE = {
     "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/tool-versions"',
 }
 
-#: The OpenTofu installer's whole `with:` block. `uses:` is deliberately absent -- it is a pin,
-#: bumped on its own schedule, and pinning it here would red this guard on every pin bump.
-_EXPECTED_TOFU_WITH = {
-    "tofu_version": "${{ steps.versions.outputs.tofu }}",
-    "tofu_wrapper": False,
-    "checksums": "${{ steps.tofu-sums.outputs.tofu_sha256 }}",
+#: Both installers are `run:` steps; each whole `env:` block carries the version and the signed
+#: `sha256sum` lines.
+_EXPECTED_TOFU_ENV = {
+    "SHIPMATE_TOFU_VERSION": "${{ steps.versions.outputs.tofu }}",
+    "SHIPMATE_TOFU_SHA256": "${{ steps.tofu-sums.outputs.tofu_sha256 }}",
 }
-
-#: The Terramate installer is a `run:` step; its whole `env:` block carries the version and the
-#: signed `sha256sum` lines.
 _EXPECTED_TERRAMATE_ENV = {
     "SHIPMATE_TERRAMATE_VERSION": "${{ steps.versions.outputs.terramate }}",
     "SHIPMATE_TERRAMATE_SHA256": "${{ steps.terramate-sums.outputs.terramate_sha256 }}",
@@ -113,12 +109,14 @@ def test_the_resolve_step_runs_the_script_with_the_token():
 
 
 def test_both_installers_read_the_resolved_version_and_the_verified_digests():
-    """Mutation: point the OpenTofu installer's `checksums` at `steps.versions`."""
-    got = (
-        step_by(_ACTION, name="Install OpenTofu").get("with"),
-        step_by(_ACTION, name="Install Terramate").get("env"),
-    )
-    assert got == (_EXPECTED_TOFU_WITH, _EXPECTED_TERRAMATE_ENV)
+    """Neither installer is a third-party action.
+
+    Mutation: point the OpenTofu installer's `SHIPMATE_TOFU_SHA256` at `steps.versions`.
+    """
+    tofu = step_by(_ACTION, name="Install OpenTofu")
+    terramate = step_by(_ACTION, name="Install Terramate")
+    got = (tofu.get("env"), tofu.get("uses"), terramate.get("env"), terramate.get("uses"))
+    assert got == (_EXPECTED_TOFU_ENV, None, _EXPECTED_TERRAMATE_ENV, None)
 
 
 #: The action's whole `inputs:` mapping. A version override input would read as a second source

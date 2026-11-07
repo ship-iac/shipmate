@@ -728,7 +728,6 @@ Settings → Actions → General:
 
   ```
   ship-iac/shipmate/*@*
-  opentofu/setup-opentofu@*
   aws-actions/configure-aws-credentials@*
   ```
 

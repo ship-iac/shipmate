@@ -613,7 +613,6 @@ ENGINE_SLUG = "ship-iac/shipmate"
 #: `uses:` and to the `docs/hardening.md` "Allowed actions" fence, order included.
 ALLOWED_PATTERNS = (
     f"{ENGINE_SLUG}/*@*",
-    "opentofu/setup-opentofu@*",
     "aws-actions/configure-aws-credentials@*",
 )
 _DOC_PIN = re.compile(

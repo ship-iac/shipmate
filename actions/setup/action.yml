@@ -112,23 +112,62 @@ runs:
         fi
         got="$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print $NF}' <<<"$status")"
         [ "$got" = "$signer" ] || fail "${sums} is signed by ${got:-no key}, not the OpenTofu signer ${signer}."
-        digests=""
+        lines=""
         for arch in amd64 arm64; do
           asset="tofu_${v}_linux_${arch}.zip"
-          d="$(awk -v a="$asset" '$2 == a {print $1}' "$dir/$sums")"
-          [ -n "$d" ] || fail "${sums} has no line for ${asset}."
-          digests+="${d}"$'\n'
+          line="$(awk -v a="$asset" '$2 == a {print $1 "  " $2}' "$dir/$sums")"
+          [ -n "$line" ] || fail "${sums} has no line for ${asset}."
+          lines+="${line}"$'\n'
         done
-        printf 'tofu_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$digests" >> "$GITHUB_OUTPUT"
+        printf 'tofu_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
     - name: Install OpenTofu
       if: ${{ inputs.tofu != 'false' }}
-      uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
-      with:
-        tofu_version: ${{ steps.versions.outputs.tofu }}
-        tofu_wrapper: false
-        # A non-empty list makes setup-opentofu refuse a zip outside it; without one it
-        # installs unverified when the release's SHA256SUMS cannot be fetched.
-        checksums: ${{ steps.tofu-sums.outputs.tofu_sha256 }}
+      shell: bash
+      env:
+        SHIPMATE_TOFU_VERSION: ${{ steps.versions.outputs.tofu }}
+        SHIPMATE_TOFU_SHA256: ${{ steps.tofu-sums.outputs.tofu_sha256 }}
+      run: |
+        set -euo pipefail
+        v="$SHIPMATE_TOFU_VERSION"
+        sums="tofu_${v}_SHA256SUMS"
+        # Fail-closed: every cell runs tofu.
+        fail() { echo "::error title=OpenTofu install failed::OpenTofu ${v} did not install: $1"; exit 1; }
+        system="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        case "$(uname -m)" in
+          x86_64|x64) arch=amd64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) arch="$(uname -m)" ;;
+        esac
+        asset="tofu_${v}_${system}_${arch}.zip"
+        want="$(awk -v a="$asset" '$2 == a {print $1}' <<<"$SHIPMATE_TOFU_SHA256")"
+        [ -n "$want" ] || fail "the signed ${sums} yields no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
+        url="https://github.com/opentofu/opentofu/releases/download/v${v}/${asset}"
+        release="$RUNNER_TEMP/tofu-release"
+        bin="$RUNNER_TEMP/tofu"
+        mkdir -p "$release" "$bin"
+        rc=0
+        code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+          -o "$release/$asset" -w '%{http_code}' "$url")" || rc=$?
+        if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
+          if [ "${code:-000}" = 404 ]; then
+            fail "${url} answered HTTP 404 (curl exit ${rc}); check the signed ${sums} and the runner's OS and architecture."
+          fi
+          fail "${url} answered HTTP ${code:-000} (curl exit ${rc}); re-run the failed job."
+        fi
+        sum="$(sha256sum "$release/$asset" | awk '{print $1}')"
+        if [ "$sum" != "$want" ]; then
+          fail "${url} has sha256 ${sum}, not the ${want} the signed ${sums} names; the release asset differs from the signed one."
+        fi
+        echo "Verified ${asset} sha256 ${sum}."
+        python3 -m zipfile -e "$release/$asset" "$bin" || fail "python3 could not extract OpenTofu from ${url}."
+        # zipfile drops the archive's exec bit.
+        chmod +x "$bin/tofu" || fail "could not make the OpenTofu binary executable."
+        got="$("$bin/tofu" version)" || fail "the OpenTofu binary from ${url} failed its version check."
+        got="${got%%$'\n'*}"
+        if [ "$got" != "OpenTofu v${v}" ]; then
+          fail "${url} delivered ${got}; check the signed ${sums} and the release asset."
+        fi
+        echo "$bin" >> "$GITHUB_PATH"
     - name: Install Terramate
       shell: bash
       env:

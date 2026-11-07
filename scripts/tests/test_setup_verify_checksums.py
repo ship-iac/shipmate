@@ -48,8 +48,10 @@ def _refusal(stdout):
 #: Each step's whole $GITHUB_OUTPUT on the genuine fixtures, digests copied by hand from them.
 _TOFU_OUTPUT = (
     "tofu_sha256<<SHIPMATE_EOF\n"
-    "723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5\n"
-    "6e815c58a09ee957de606ff48cefad082942e70afc43b737ff975654c54ec453\n"
+    "723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5  "
+    f"tofu_{_TOFU}_linux_amd64.zip\n"
+    "6e815c58a09ee957de606ff48cefad082942e70afc43b737ff975654c54ec453  "
+    f"tofu_{_TOFU}_linux_arm64.zip\n"
     "SHIPMATE_EOF\n"
 )
 _TM_OUTPUT = (

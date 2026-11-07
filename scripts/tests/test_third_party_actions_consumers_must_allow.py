@@ -36,7 +36,6 @@ THIRD_PARTY = {
     "actions/download-artifact",
     "actions/upload-artifact",
     "aws-actions/configure-aws-credentials",
-    "opentofu/setup-opentofu",
 }
 
 #: The engine workflows a consumer calls, hand-written.
