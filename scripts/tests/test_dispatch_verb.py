@@ -760,14 +760,19 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
     the listing that would have told could not be read: a run may have started, so the failure
     reply sends the commenter to the Actions tab, and `post`'s message prints to the log.
 
-    Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo.
+    Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo; call
+    `say_skew` on exit 4 (the stderr ends with a 422 that would match it).
     """
     result, _ = _run_dispatch(
         tmp_path,
         verb="apply",
         environment="dev-eu",
         gh_stub=_BODY_SAVING_STUB,
-        failing_script=("dispatch-body", 4, "gh: Bad Gateway (HTTP 502)"),
+        failing_script=(
+            "dispatch-body",
+            4,
+            "gh: Bad Gateway (HTTP 502)\ngh: Unexpected inputs provided (HTTP 422)",
+        ),
     )
     assert result.returncode == 1, f"an undetermined dispatch must fail: {result.returncode}"
     assert (
@@ -777,6 +782,7 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
     assert "gh: Bad Gateway (HTTP 502)" in result.stdout.splitlines(), (
         f"`post`'s message must reach the log: {result.stdout}"
     )
+    assert _LAYOUT_SKEW not in result.stdout, f"exit 4 prints no layout hint: {result.stdout}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
         "### shipmate apply dev-eu\n\n"
         "🔴 failed: the command was authorized, but dispatching its workflow failed with a "

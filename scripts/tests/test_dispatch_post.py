@@ -198,7 +198,7 @@ def test_a_created_at_without_a_zone_is_undetermined(calls, monkeypatch, capsys)
     code, _, err = post(capsys)
     assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
     assert err.endswith(
-        "listing shipmate.yml runs failed: ValueError: listed run created_at without a zone: "
+        "\nlisting shipmate.yml runs failed: ValueError: listed run created_at without a zone: "
         '{"created_at": "2026-11-07T11:59:55"}\n'
     )
 
