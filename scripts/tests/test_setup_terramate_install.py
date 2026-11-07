@@ -269,7 +269,7 @@ def _mismatch(got):
 def _warning(reason):
     return (
         f"::warning title=Tool cache entry failed verification::Terramate {_VERSION}: {reason} "
-        f"Downloaded {_ASSET} again. Every job repeats this download until the entry is "
+        f"Downloading {_ASSET} again. Every job repeats this download until the entry is "
         f"deleted: gh cache delete {_CACHE_KEY} --repo o/r\n"
     )
 

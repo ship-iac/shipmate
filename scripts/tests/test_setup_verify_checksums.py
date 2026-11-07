@@ -61,7 +61,7 @@ def _warning(sid, reason):
         ),
     }[sid]
     return (
-        f"::warning title=Tool cache entry failed verification::{tool}: {reason} Downloaded "
+        f"::warning title=Tool cache entry failed verification::{tool}: {reason} Downloading "
         f"{names} again. Every job repeats this download until the entry is deleted: "
         f"gh cache delete {key} --repo {_REPO}\n"
     )

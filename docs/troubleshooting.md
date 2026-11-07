@@ -1352,7 +1352,8 @@ starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause
 
 | Annotation ends with | Cause and remedy |
 |---|---|
-| "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl` or `base64` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
+| "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
+| "sha256sum printed no digest for <archive>." | `sha256sum` could not read the downloaded archive (a disk or permission fault on the runner). Re-run the job. If it repeats and the step restored a tool cache entry, delete that entry (`gh cache delete <key> --repo <repo>`, the key `shipmate-tools-<os>-<arch>-<tool>-<version>`) so the next job downloads the archive. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
 | "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
@@ -1403,7 +1404,7 @@ gets, or is missing or not a regular file: the checksum file or its signature in
 a `Verify Terramate checksums` or `Verify OpenTofu checksums` step, the archive
 in an `Install Terramate` or `Install OpenTofu` step. The step deleted its
 files, downloaded them again and verified them, so the job went on. The warning
-gives the reason the restored files failed, then `Downloaded <files> again.
+gives the reason the restored files failed, then `Downloading <files> again.
 Every job repeats this download until the entry is deleted: gh cache delete
 <key> --repo <owner>/<repo>`, where `<files>` names the checksum file and its
 signature, or the archive. The entry is corrupt or was altered

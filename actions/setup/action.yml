@@ -105,7 +105,7 @@ runs:
         }
         # Without a restored entry, nothing explains a file already here.
         if [ -z "$key" ] || ! check; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloaded checksums.txt and checksums.txt.sig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading checksums.txt and checksums.txt.sig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           drop
           download
           check || fail "$reason"
@@ -171,7 +171,7 @@ runs:
         gpg --batch --import "$GITHUB_ACTION_PATH/../../keys/opentofu.asc" || fail "gpg could not import the committed OpenTofu key."
         # Without a restored entry, nothing explains a file already here.
         if [ -z "$key" ] || ! check; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloaded ${sums} and ${sums}.gpgsig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${sums} and ${sums}.gpgsig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           drop
           download
           check || fail "$reason"
@@ -224,7 +224,7 @@ runs:
         }
         # Without a restored entry, nothing explains an archive already here.
         if [ -z "$key" ] || ! check; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloaded ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           rm -rf "${archive:?}"
           download
           check || fail "$reason"
@@ -284,7 +284,7 @@ runs:
         }
         # Without a restored entry, nothing explains an archive already here.
         if [ -z "$key" ] || ! check; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloaded ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           rm -rf "${archive:?}"
           download
           check || fail "$reason"
