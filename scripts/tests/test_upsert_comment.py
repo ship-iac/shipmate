@@ -101,7 +101,7 @@ def _upsert(
 ):
     """Run `main` in-process against a fake API; return (exit code, `run` calls). The pull
     request's head reads as `head`, or fails with a gh error holding a CR and a command. A POST
-    answers `post_response`; `graphql` goes to `_fake_graphql`."""
+    or PATCH answers `post_response`; `graphql` goes to `_fake_graphql`."""
     body = tmp_path / "comment.md"
     body.write_text(f"{first_line}\n### shipmate plan\n", encoding="utf-8")
     calls = []

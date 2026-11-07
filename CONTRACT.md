@@ -2945,8 +2945,8 @@ the push or command it answers in the pull request timeline, except the quiet
 no-change run above, which PATCHes the newest visible plan comment in place
 (`scripts/upsert-comment --update-only`) and then minimizes the others as below.
 A draft autoplan, a cancelled plan job and a run whose pull request moved to a
-newer head write none. After the write, `scripts/upsert-comment` minimizes as outdated
-(GraphQL `minimizeComment`, classifier `OUTDATED`) every other visible plan
+newer head write none. After the write, `scripts/upsert-comment` minimizes as
+outdated (GraphQL `minimizeComment`, classifier `OUTDATED`) every other visible plan
 comment by the written comment's author. A plan comment is a Bot-authored comment
 whose body starts with the marker: the shipmate App's bot login is derived from
 the registered App name, which a consumer org may have had to slug differently
