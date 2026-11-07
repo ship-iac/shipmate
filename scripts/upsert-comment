@@ -1,36 +1,49 @@
 #!/usr/bin/env python3
-"""Create or update the sticky comment a body file names on a pull request.
+"""Write the comment a body file names on a pull request: replace it, or post a new one.
 
-Usage: `upsert-comment PR BODYFILE [--update-only] [--head SHA]`, with `gh` (`GH_TOKEN`) against
-`GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::` before the
-body file is read or any `gh` call, because it is bound into the API path; so does a `--head`
-that is not a 40-character lowercase hex SHA, and any other argument.
-
-With `--head`, the pull request's current head is read once the listing says a write follows,
-and nothing is written unless it is that SHA: the comment is keyed per pull request, so a run
-for an older head would otherwise replace the newer head's comment.
+Usage: `upsert-comment PR BODYFILE [--new] [--update-only] [--head SHA]`, with `gh` (`GH_TOKEN`)
+against `GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::`
+before the body file is read or any `gh` call, because it is bound into the API path; so does a
+`--head` that is not a 40-character lowercase hex SHA, and any other or repeated argument.
 
 The marker is BODYFILE's first line, which must be a whole `<!-- shipmate:<name> -->` with a
 1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. A
 renderer emits it first, so the body names its own comment.
 
 The listing keeps only Bot-authored comments, because the App's bot login derives from the App
-name, which an org may slug differently. A comment matches when its body starts with the marker,
-and the first match in listing order wins. `startswith`, not `contains`: the plan comment embeds
-`tofu plan` output and doctor's report interpolates repository data, so either can quote the
-other's marker, and a `contains` match would PATCH one body over the other comment. Only the
-first 64 characters of each body reach this script, which the marker's length bound keeps inside.
+name, which an org may slug differently. A marker comment is one whose body starts with the
+marker. `startswith`, not `contains`: the plan comment embeds `tofu plan` output and doctor's
+report interpolates repository data, so either can quote the other's marker, and a `contains`
+match would write over or minimize the other comment. Only the first 64 characters of each body
+reach this script, which the marker's length bound keeps inside.
+
+Without `--new`, the first marker comment in listing order is PATCHed, or the body is POSTed
+when there is none.
+
+With `--new`, the body is always POSTed, then every earlier marker comment that is visible and
+by the POST's author (its response's `user.login`) is minimized as outdated. Posting first means
+the pull request never shows zero plan comments, and the new comment is never one minimized.
+Visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids (`minimized_ids`). A read
+that fails or is incomplete prints one `::warning::` and every marker comment counts as visible:
+failing the step would drop the run's comment to save a no-op, since minimizing a minimized
+comment changes nothing. A failed minimize, or a POST response with no author, prints one
+`::warning::` and the run goes on. Both warnings go to stderr on one line.
+
+With `--head`, the pull request's current head is read once a write is due, and nothing is
+written unless it is that SHA, so a run for an older head never writes over the newer head's
+comment.
 
 Prints exactly one word and exits 0:
 
-- `updated`: the first match was PATCHed.
-- `created`: no match, so the body was POSTed.
-- `skipped`: no match under `--update-only`; nothing written, and the head is not read.
+- `updated`: the first marker comment was PATCHed (never with `--new`).
+- `created`: the body was POSTed.
+- `skipped`: `--update-only` and no marker comment (with `--new`, no visible one); nothing
+  written, and the head is not read.
 - `moved`: the pull request's head is not `--head`; nothing written.
 - `head-failed`: the head read failed or gave no head SHA; nothing written.
-- `list-failed`: the listing failed on any page, or printed a line that is not an `{id, head}`
-  object, so nothing was written. A POST here would create a second sticky that later runs
-  could PATCH instead of this one.
+- `list-failed`: the listing failed on any page, or printed a line that is not an
+  `{id, node_id, login, head}` object, so nothing was written. A POST here would create a second
+  comment that later runs could PATCH instead of this one.
 
 On `head-failed` and `list-failed` the error goes to stderr without `::error::`, so the caller
 decides how to report it, on one line (`one_line`), so no line of gh's text starts a workflow
@@ -48,40 +61,117 @@ import sys
 from _shipmate import is_head_sha, is_pr_number, one_line, pr_head, run, run_annotated
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
-JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
+JQ = (
+    '.[] | select(.user.type == "Bot") | {id, node_id, login: .user.login, head: ((.body // "")'
+    "[0:64])}"
+)
+VISIBILITY = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id isMinimized } } }"
+MINIMIZE = (
+    "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) "
+    "{ minimizedComment { isMinimized } } }"
+)
+#: The `nodes(ids:)` cap.
+CHUNK = 100
 
 
-def find_existing(repo, pr, marker):
-    """The id of the first Bot comment whose body starts with `marker`, or None.
+def marker_comments(repo, pr, marker):
+    """Each Bot comment whose body starts with `marker`, in listing order, as
+    `{id, node_id, login}`.
 
     Raises SystemExit when the listing fails: `run` returns stdout only on exit 0, so a failure
-    on a later page yields no ids at all rather than the earlier pages' ones. A line that does
-    not parse raises SystemExit too, so it degrades like a failed listing instead of a traceback.
+    on a later page yields no comments at all rather than the earlier pages' ones. A line that
+    does not parse raises SystemExit too, so it degrades like a failed listing instead of a
+    traceback.
     """
     out = run(
         ["gh", "api", "--paginate", "--jq", JQ, f"repos/{repo}/issues/{pr}/comments?per_page=100"]
     )
+    found = []
     for line in out.splitlines():
         if line.strip():
             try:
-                comment = json.loads(line)
-                cid, matched = comment["id"], comment["head"].startswith(marker)
+                row = json.loads(line)
+                comment = {k: row[k] for k in ("id", "node_id", "login")}
+                matched = row["head"].startswith(marker)
             except (ValueError, LookupError, TypeError, AttributeError) as exc:
                 raise SystemExit(f"unparseable comment listing line: {line!r}") from exc
             if matched:
-                return cid
-    return None
+                found.append(comment)
+    return found
+
+
+def minimized_ids(node_ids, pr):
+    """The node ids among `node_ids` whose `isMinimized` is true, or None after one stderr
+    warning naming pull request `pr` when any chunk's read fails, does not parse, or answers a
+    `null` node or a node without `isMinimized`."""
+    hidden = set()
+    for start in range(0, len(node_ids), CHUNK):
+        ids = [arg for n in node_ids[start : start + CHUNK] for arg in ("-F", f"ids[]={n}")]
+        try:
+            out = run(["gh", "api", "graphql", "-f", f"query={VISIBILITY}", *ids])
+        except SystemExit as exc:
+            error = exc.code
+        else:
+            try:
+                nodes = json.loads(out)["data"]["nodes"]
+                hidden |= {n["id"] for n in nodes if n["isMinimized"] is True}
+                continue
+            except (ValueError, LookupError, TypeError):
+                error = f"unexpected answer: {out}"
+        print(
+            f"::warning::could not read which plan comments of pull request #{pr} are minimized, "
+            f"so all count as visible: {one_line(error)}",
+            file=sys.stderr,
+        )
+        return None
+    return hidden
+
+
+def _minimize_warning(pr, error):
+    print(
+        f"::warning::could not minimize an earlier plan comment of pull request #{pr}; it stays "
+        f"visible: {one_line(error)}",
+        file=sys.stderr,
+    )
+
+
+def _minimize_earlier(pr, visible, response):
+    """Minimize each comment of `visible` by the author of the POST `response`."""
+    try:
+        author = json.loads(response)["user"]["login"]
+    except (ValueError, LookupError, TypeError):
+        _minimize_warning(pr, f"unexpected answer: {response}")
+        return
+    for comment in visible:
+        if comment["login"] != author:
+            continue
+        try:
+            run(
+                [
+                    "gh",
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={MINIMIZE}",
+                    "-f",
+                    f"id={comment['node_id']}",
+                ]
+            )
+        except SystemExit as exc:
+            _minimize_warning(pr, exc.code)
 
 
 def _args(argv):
-    """(PR, BODYFILE, update_only, head or None) from `argv`, or `::error::` usage."""
-    usage = "::error::usage: upsert-comment PR BODYFILE [--update-only] [--head SHA]"
+    """(PR, BODYFILE, new, update_only, head or None) from `argv`, or `::error::` usage."""
+    usage = "::error::usage: upsert-comment PR BODYFILE [--new] [--update-only] [--head SHA]"
     if len(argv) < 2:
         sys.exit(usage)
     pr, path, rest = argv[0], argv[1], argv[2:]
-    update_only, head = False, None
+    new, update_only, head = False, False, None
     while rest:
-        if rest[0] == "--update-only" and not update_only:
+        if rest[0] == "--new" and not new:
+            new, rest = True, rest[1:]
+        elif rest[0] == "--update-only" and not update_only:
             update_only, rest = True, rest[1:]
         elif rest[0] == "--head" and head is None and len(rest) > 1:
             head, rest = rest[1], rest[2:]
@@ -89,7 +179,7 @@ def _args(argv):
             sys.exit(usage)
     if head is not None and not is_head_sha(head):
         sys.exit(f"::error::--head must be a 40-char lowercase hex SHA (got: {head})")
-    return pr, path, update_only, head
+    return pr, path, new, update_only, head
 
 
 def _head_stop(repo, pr, head):
@@ -105,8 +195,26 @@ def _head_stop(repo, pr, head):
     return None if current == head else "moved"
 
 
+def _visible(found, pr):
+    """The comments of `found` that GraphQL reads as not minimized; all of them on a failed read."""
+    hidden = minimized_ids([c["node_id"] for c in found], pr)
+    return found if hidden is None else [c for c in found if c["node_id"] not in hidden]
+
+
+def _write(repo, pr, path, cid):
+    """(gh's response, result word) of PATCHing comment `cid`, or POSTing when `cid` is None."""
+    if cid is None:
+        argv, word = ["gh", "api", f"repos/{repo}/issues/{pr}/comments"], "created"
+    else:
+        argv, word = ["gh", "api", "-X", "PATCH", f"repos/{repo}/issues/comments/{cid}"], "updated"
+    try:
+        return run([*argv, "-F", f"body=@{path}"]), word
+    except SystemExit as exc:
+        sys.exit(f"::error::could not write the comment: {exc.code}")
+
+
 def main():
-    pr, path, update_only, head = _args(sys.argv[1:])
+    pr, path, new, update_only, head = _args(sys.argv[1:])
     # Bound into the API path.
     if not is_pr_number(pr):
         sys.exit(f"::error::PR must be a pull request number (got: {pr})")
@@ -116,26 +224,22 @@ def main():
         sys.exit(f"::error::{path}: the first line must be a shipmate marker (got: {marker})")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     try:
-        cid = find_existing(repo, pr, marker)
+        found = marker_comments(repo, pr, marker)
     except SystemExit as exc:
         print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    if cid is None and update_only:
+    visible = _visible(found, pr) if new else found
+    if not visible and update_only:
         print("skipped")
         return
     stop = _head_stop(repo, pr, head)
     if stop:
         print(stop)
         return
-    if cid is None:
-        argv, word = ["gh", "api", f"repos/{repo}/issues/{pr}/comments"], "created"
-    else:
-        argv, word = ["gh", "api", "-X", "PATCH", f"repos/{repo}/issues/comments/{cid}"], "updated"
-    try:
-        run([*argv, "-F", f"body=@{path}"])
-    except SystemExit as exc:
-        sys.exit(f"::error::could not write the sticky comment: {exc.code}")
+    response, word = _write(repo, pr, path, None if new or not found else found[0]["id"])
+    if new:
+        _minimize_earlier(pr, visible, response)
     print(word)
 
 

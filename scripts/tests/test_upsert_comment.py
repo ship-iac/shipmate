@@ -1,4 +1,4 @@
-"""Tests for scripts/upsert-comment: the sticky-comment lookup, write and one-word result."""
+"""Tests for scripts/upsert-comment: the marker lookup, write, minimize and one-word result."""
 
 import json
 import os
@@ -20,7 +20,10 @@ uc = load_script("upsert-comment")
 
 SUMMARY = "<!-- shipmate:summary -->"
 DOCTOR = "<!-- shipmate:doctor -->"
-_FILTER = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
+_FILTER = (
+    '.[] | select(.user.type == "Bot") | '
+    '{id, node_id, login: .user.login, head: ((.body // "")[0:64])}'
+)
 LIST_ARGV = [
     "gh",
     "api",
@@ -31,13 +34,55 @@ LIST_ARGV = [
 ]
 
 
-def _head(cid, head):
-    return json.dumps({"id": cid, "head": head})
+def _head(cid, head, login="shipmate[bot]"):
+    return json.dumps({"id": cid, "node_id": f"IC_{cid}", "login": login, "head": head})
 
 
 #: A pull request head, and the `--head` read's whole argv.
 _HEAD = "c" * 40
 PULLS_ARGV = ["gh", "api", "repos/o/r/pulls/7"]
+
+#: The `--new` GraphQL texts, hand-written.
+VISIBILITY = "query($ids: [ID!]!) { nodes(ids: $ids) { ... on IssueComment { id isMinimized } } }"
+MINIMIZE = (
+    "mutation($id: ID!) { minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) "
+    "{ minimizedComment { isMinimized } } }"
+)
+
+
+def _read(*node_ids):
+    """The whole argv of one visibility read of `node_ids`."""
+    ids = [arg for n in node_ids for arg in ("-F", f"ids[]={n}")]
+    return ["gh", "api", "graphql", "-f", f"query={VISIBILITY}", *ids]
+
+
+def _minimize(node_id):
+    return ["gh", "api", "graphql", "-f", f"query={MINIMIZE}", "-f", f"id={node_id}"]
+
+
+def _fake_graphql(
+    args, minimized=(), visibility_fails=False, visibility_answer=None, minimize_fails=()
+):
+    """A visibility read answers `isMinimized` true for the node ids in `minimized`, prints
+    `visibility_answer` when given, or fails. A minimize of a node id in `minimize_fails` fails."""
+    if args[4] == f"query={VISIBILITY}":
+        if visibility_fails:
+            raise SystemExit("command failed (1): gh api graphql\nHTTP 502")
+        if visibility_answer is not None:
+            return visibility_answer
+        ids = [a.removeprefix("ids[]=") for a in args[6::2]]
+        nodes = [{"id": n, "isMinimized": n in minimized} for n in ids]
+        return json.dumps({"data": {"nodes": nodes}})
+    assert args[4] == f"query={MINIMIZE}", args
+    if args[6].removeprefix("id=") in minimize_fails:
+        raise SystemExit("command failed (1): gh api graphql\nFORBIDDEN")
+    return '{"data": {"minimizeComment": {"minimizedComment": {"isMinimized": true}}}}'
+
+
+def _fake_head(head, fails):
+    if fails:
+        raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")
+    return json.dumps({"head": {"sha": head}, "draft": False, "state": "open"})
 
 
 def _upsert(
@@ -51,9 +96,12 @@ def _upsert(
     pr="7",
     head=_HEAD,
     head_fails=False,
+    post_response='{"id": 99, "body": "response", "user": {"login": "shipmate[bot]"}}',
+    **graphql,
 ):
     """Run `main` in-process against a fake API; return (exit code, `run` calls). The pull
-    request's head reads as `head`, or fails with a gh error holding a CR and a command."""
+    request's head reads as `head`, or fails with a gh error holding a CR and a command. A POST
+    answers `post_response`; `graphql` goes to `_fake_graphql`."""
     body = tmp_path / "comment.md"
     body.write_text(f"{first_line}\n### shipmate plan\n", encoding="utf-8")
     calls = []
@@ -61,16 +109,16 @@ def _upsert(
     def fake_run(args):
         calls.append(args)
         if args[2].startswith("repos/o/r/pulls/"):
-            if head_fails:
-                raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")
-            return json.dumps({"head": {"sha": head}, "draft": False, "state": "open"})
+            return _fake_head(head, head_fails)
         if args[2] == "--paginate":
             if list_fails:
                 raise SystemExit("command failed (1): gh api\nHTTP 502")
             return "".join(line + "\n" for line in listing)
+        if args[2] == "graphql":
+            return _fake_graphql(args, **graphql)
         if write_fails:
             raise SystemExit("command failed (1): gh api\nHTTP 403")
-        return '{"id": 99, "body": "response"}'
+        return post_response
 
     monkeypatch.setattr(uc, "run", fake_run)
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
@@ -226,9 +274,7 @@ def test_a_head_that_is_not_a_sha_is_refused_before_any_call(monkeypatch, tmp_pa
 def test_a_write_failure_exits_non_zero_with_an_error(monkeypatch, tmp_path, capsys):
     """Mutation: catch the write failure and print `created`."""
     code, calls = _upsert(monkeypatch, tmp_path, [], write_fails=True)
-    assert (
-        code == "::error::could not write the sticky comment: command failed (1): gh api\nHTTP 403"
-    )
+    assert code == "::error::could not write the comment: command failed (1): gh api\nHTTP 403"
     assert calls == [LIST_ARGV, _post(tmp_path)]
     assert capsys.readouterr().out == ""
 
@@ -313,28 +359,247 @@ def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
         ["--update-only", "--update-only"],
         ["--head"],
         ["--head", "c" * 40, "--head", "c" * 40],
+        ["--new", "--new"],
     ],
 )
 def test_unknown_arguments_are_refused_before_any_call(monkeypatch, tmp_path, flags):
-    """Mutation: accept any third argument as `--update-only`."""
+    """Mutations: accept any third argument as `--update-only`; accept `--new` repeated
+    (`--new --new` red)."""
     code, calls = _upsert(monkeypatch, tmp_path, [], *flags)
-    assert code == "::error::usage: upsert-comment PR BODYFILE [--update-only] [--head SHA]"
+    assert code == "::error::usage: upsert-comment PR BODYFILE [--new] [--update-only] [--head SHA]"
     assert calls == []
+
+
+#: `--new`'s two stderr warnings for pull request #7, hand-written up to the error.
+_READ_WARNING = (
+    "::warning::could not read which plan comments of pull request #7 are minimized, so all "
+    "count as visible: "
+)
+_MINIMIZE_WARNING = (
+    "::warning::could not minimize an earlier plan comment of pull request #7; it stays visible: "
+)
+
+
+def test_new_posts_then_minimizes_the_earlier_visible_comment(monkeypatch, tmp_path, capsys):
+    """The pull request never shows zero plan comments. Mutation: minimize before the POST --
+    the recorded order differs."""
+    code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new")
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _post(tmp_path), _minimize("IC_5")])
+    assert capsys.readouterr() == ("created\n", "")
+
+
+def test_new_leaves_a_comment_graphql_reads_as_minimized(monkeypatch, tmp_path, capsys):
+    """Visibility comes only from the GraphQL answer; the listing rows carry no `minimized`.
+    Mutations: read visibility from `row.get("minimized")` instead of the read -- no read, and
+    IC_5 is minimized again; drop the visibility filter after the read -- IC_5 is minimized."""
+    listing = [_head(5, SUMMARY), _head(6, SUMMARY)]
+    code, calls = _upsert(monkeypatch, tmp_path, listing, "--new", minimized={"IC_5"})
+    assert (code, calls) == (
+        0,
+        [LIST_ARGV, _read("IC_5", "IC_6"), _post(tmp_path), _minimize("IC_6")],
+    )
+    assert capsys.readouterr() == ("created\n", "")
+
+
+def test_new_reads_visibility_in_chunks_of_100(monkeypatch, tmp_path, capsys):
+    """`nodes(ids:)` takes at most 100 ids. Mutation: one read of all ids."""
+    listing = [_head(i, SUMMARY) for i in range(1, 102)]
+    hidden = {f"IC_{i}" for i in range(1, 102)}
+    code, calls = _upsert(monkeypatch, tmp_path, listing, "--new", minimized=hidden)
+    first = _read(*(f"IC_{i}" for i in range(1, 101)))
+    assert (code, calls) == (0, [LIST_ARGV, first, _read("IC_101"), _post(tmp_path)])
+    assert capsys.readouterr() == ("created\n", "")
+
+
+_NULL_NODE = '{"data": {"nodes": [null, null]}}'
+_NO_FLAG = '{"data": {"nodes": [{"id": "IC_5"}, {"id": "IC_6", "isMinimized": true}]}}'
+
+
+@pytest.mark.parametrize(
+    ("fails", "answer", "error"),
+    [
+        (True, None, "command failed (1): gh api graphql | HTTP 502"),
+        (False, _NULL_NODE, f"unexpected answer: {_NULL_NODE}"),
+        (False, _NO_FLAG, f"unexpected answer: {_NO_FLAG}"),
+    ],
+    ids=["gh-error", "null-node", "no-isMinimized"],
+)
+def test_new_a_failed_visibility_read_counts_every_comment_visible(
+    monkeypatch, tmp_path, capsys, fails, answer, error
+):
+    """The run still posts, then minimizes every same-author marker comment. Mutations:
+    `sys.exit` on a failed read -- no POST; treat a failed read as "all minimized" -- no
+    minimize call."""
+    listing = [_head(5, SUMMARY), _head(6, SUMMARY)]
+    code, calls = _upsert(
+        monkeypatch,
+        tmp_path,
+        listing,
+        "--new",
+        visibility_fails=fails,
+        visibility_answer=answer,
+    )
+    assert (code, calls) == (
+        0,
+        [
+            LIST_ARGV,
+            _read("IC_5", "IC_6"),
+            _post(tmp_path),
+            _minimize("IC_5"),
+            _minimize("IC_6"),
+        ],
+    )
+    assert capsys.readouterr() == ("created\n", _READ_WARNING + error + "\n")
+
+
+def test_new_update_only_posts_after_a_failed_visibility_read(monkeypatch, tmp_path, capsys):
+    """Mutation: treat a failed read as "no visible comment" -- `skipped`."""
+    code, calls = _upsert(
+        monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", "--update-only", visibility_fails=True
+    )
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _post(tmp_path), _minimize("IC_5")])
+    assert capsys.readouterr() == (
+        "created\n",
+        _READ_WARNING + "command failed (1): gh api graphql | HTTP 502\n",
+    )
+
+
+def test_new_minimizes_only_this_authors_plan_comments(monkeypatch, tmp_path, capsys):
+    """Another App's plan comment, the same App's doctor report quoting the summary marker after
+    its own, and a reply are left alone. Mutations: drop the author compare -- IC_6 minimized;
+    `startswith` -> `in` -- IC_7 read and minimized."""
+    listing = [
+        _head(5, SUMMARY + "\n### shipmate plan"),
+        _head(6, SUMMARY, login="other-app[bot]"),
+        _head(7, DOCTOR + SUMMARY),
+        _head(8, "### shipmate apply"),
+    ]
+    code, calls = _upsert(monkeypatch, tmp_path, listing, "--new")
+    assert (code, calls) == (
+        0,
+        [LIST_ARGV, _read("IC_5", "IC_6"), _post(tmp_path), _minimize("IC_5")],
+    )
+    assert capsys.readouterr() == ("created\n", "")
+
+
+def test_new_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_path, capsys):
+    """The newest plan comment minimized by a person, then a quiet run: nothing posted, no head
+    read. Mutation: test the listed comments instead of the visible ones -- a POST follows."""
+    code, calls = _upsert(
+        monkeypatch,
+        tmp_path,
+        [_head(5, SUMMARY)],
+        "--new",
+        "--update-only",
+        "--head",
+        _HEAD,
+        minimized={"IC_5"},
+    )
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5")])
+    assert capsys.readouterr() == ("skipped\n", "")
+
+
+def test_new_takes_the_author_from_the_post_response(monkeypatch, tmp_path, capsys):
+    """The App's bot login depends on its slug. Mutation: hard-code `shipmate[bot]` -- IC_6 is
+    minimized instead of IC_5."""
+    listing = [_head(5, SUMMARY, login="shipmate-x[bot]"), _head(6, SUMMARY)]
+    code, calls = _upsert(
+        monkeypatch,
+        tmp_path,
+        listing,
+        "--new",
+        post_response='{"id": 99, "user": {"login": "shipmate-x[bot]"}}',
+    )
+    assert (code, calls) == (
+        0,
+        [LIST_ARGV, _read("IC_5", "IC_6"), _post(tmp_path), _minimize("IC_5")],
+    )
+    assert capsys.readouterr() == ("created\n", "")
+
+
+def test_new_a_failed_minimize_warns_and_attempts_the_rest(monkeypatch, tmp_path, capsys):
+    """Mutations: `break` on a failed minimize -- no IC_6 call; `sys.exit` on it -- exit code."""
+    listing = [_head(5, SUMMARY), _head(6, SUMMARY)]
+    code, calls = _upsert(monkeypatch, tmp_path, listing, "--new", minimize_fails={"IC_5"})
+    assert (code, calls) == (
+        0,
+        [
+            LIST_ARGV,
+            _read("IC_5", "IC_6"),
+            _post(tmp_path),
+            _minimize("IC_5"),
+            _minimize("IC_6"),
+        ],
+    )
+    assert capsys.readouterr() == (
+        "created\n",
+        _MINIMIZE_WARNING + "command failed (1): gh api graphql | FORBIDDEN\n",
+    )
+
+
+@pytest.mark.parametrize("response", ["not json", '{"id": 99}', '{"user": null}'])
+def test_new_an_unparseable_post_response_warns_and_minimizes_nothing(
+    monkeypatch, tmp_path, capsys, response
+):
+    """The comment exists, so the run prints `created`. Mutation: let the parse error raise."""
+    code, calls = _upsert(
+        monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", post_response=response
+    )
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _post(tmp_path)])
+    assert capsys.readouterr() == (
+        "created\n",
+        _MINIMIZE_WARNING + f"unexpected answer: {response}\n",
+    )
+
+
+@pytest.mark.parametrize(
+    ("head", "head_fails", "word", "err"),
+    [
+        ("d" * 40, False, "moved", ""),
+        (_HEAD, True, "head-failed", "command failed (1): gh api | HTTP 502 | ::add-mask::x\n"),
+    ],
+    ids=["moved", "head-failed"],
+)
+def test_new_writes_nothing_when_the_head_check_stops(
+    monkeypatch, tmp_path, capsys, head, head_fails, word, err
+):
+    """The head is read after the visibility read and before the POST. Mutation: skip
+    `_head_stop` under `--new` -- a POST and a minimize follow."""
+    code, calls = _upsert(
+        monkeypatch,
+        tmp_path,
+        [_head(5, SUMMARY)],
+        "--new",
+        "--head",
+        _HEAD,
+        head=head,
+        head_fails=head_fails,
+    )
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), PULLS_ARGV])
+    assert capsys.readouterr() == (word + "\n", err)
+
+
+def test_new_a_listing_failure_prints_list_failed(monkeypatch, tmp_path, capsys):
+    """Mutation: drop the `except SystemExit` around the listing."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", list_fails=True)
+    assert (code, calls) == (0, [LIST_ARGV])
+    assert capsys.readouterr() == ("list-failed\n", "command failed (1): gh api | HTTP 502\n")
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")
 def test_the_listing_filter_keeps_bot_heads_only(monkeypatch, tmp_path):
     """The `--jq` string from the listing argv the script sends, run by jq over a crafted page.
 
-    Mutations: `"Bot"` -> `"bot"`; drop `// ""`.
+    Mutations: `"Bot"` -> `"bot"`; drop `// ""`; drop `node_id`; `.user.login` -> `.user.type`.
     """
     _, calls = _upsert(monkeypatch, tmp_path, [])
     jq_filter = calls[0][calls[0].index("--jq") + 1]
+    bot, human = {"type": "Bot", "login": "a[bot]"}, {"type": "User", "login": "h"}
     page = [
-        {"id": 1, "user": {"type": "Bot"}, "body": SUMMARY + "\nplan"},
-        {"id": 2, "user": {"type": "User"}, "body": SUMMARY + "\nhuman"},
-        {"id": 3, "user": {"type": "Bot"}, "body": None},
-        {"id": 4, "user": {"type": "Bot"}, "body": "x" * 60 + "TAIL-CUT-OFF"},
+        {"id": 1, "node_id": "N1", "user": bot, "body": SUMMARY + "\nplan"},
+        {"id": 2, "node_id": "N2", "user": human, "body": SUMMARY + "\nhuman"},
+        {"id": 3, "node_id": "N3", "user": bot, "body": None},
+        {"id": 4, "node_id": "N4", "user": bot, "body": "x" * 60 + "TAIL-CUT-OFF"},
     ]
     jq = subprocess.run(
         ["jq", "-c", jq_filter],
@@ -345,9 +610,9 @@ def test_the_listing_filter_keeps_bot_heads_only(monkeypatch, tmp_path):
     )
     assert jq.returncode == 0, jq.stderr
     assert jq.stdout.splitlines() == [
-        '{"id":1,"head":"<!-- shipmate:summary -->\\nplan"}',
-        '{"id":3,"head":""}',
-        '{"id":4,"head":"' + "x" * 60 + 'TAIL"}',
+        '{"id":1,"node_id":"N1","login":"a[bot]","head":"<!-- shipmate:summary -->\\nplan"}',
+        '{"id":3,"node_id":"N3","login":"a[bot]","head":""}',
+        '{"id":4,"node_id":"N4","login":"a[bot]","head":"' + "x" * 60 + 'TAIL"}',
     ]
 
 
@@ -519,7 +784,7 @@ def test_summary_held_write_failure_degrades(tmp_path):
         [_LIST, _PULLS, _post_of("held.md")],
     )
     assert proc.stderr == (
-        "::warning::could not write the sticky comment: command failed (1): gh api "
+        "::warning::could not write the comment: command failed (1): gh api "
         "repos/o/r/issues/7/comments -F body=@held.md%0AHTTP 502\n"
     )
 
@@ -670,7 +935,7 @@ _WRITE_STDERR = "unexpected end of JSON input\nHTTP 502 (50% of retries)\n"
 def _write_annotation(body):
     """The whole stderr of a step whose write of `body` failed with `_WRITE_STDERR`."""
     return (
-        "::error::could not write the sticky comment: command failed (1): gh api "
+        "::error::could not write the comment: command failed (1): gh api "
         f"repos/o/r/issues/7/comments -F body=@{body}"
         "%0Aunexpected end of JSON input%0AHTTP 502 (50%25 of retries)\n"
     )
