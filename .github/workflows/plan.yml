@@ -195,7 +195,7 @@ jobs:
   # `!cancelled()`, not `always()`: a push's autoplan cancels a dispatched plan and answers it.
   # Holds the App key but checks nothing out.
   outcome:
-    needs: [facts, detect, plan, summary]
+    needs: [facts, summary]
     if: ${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && needs.facts.outputs.head-repo != '' && needs.facts.outputs.head-repo == github.repository && needs.summary.outputs.superseded != 'true' && needs.summary.outputs.upsert != 'created' && needs.summary.outputs.upsert != 'moved' }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }

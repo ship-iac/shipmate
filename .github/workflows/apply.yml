@@ -67,6 +67,7 @@ jobs:
     permissions: {}
     outputs:
       decision: ${{ steps.rd.outputs.decision }}
+      open: ${{ steps.rd.outputs.open }}
     steps:
       - name: Verify the App key arrived
         uses: $/actions/verify-app-key
@@ -106,6 +107,7 @@ jobs:
             echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. A merged pull request's plans apply through the merge deploy."
             exit 1
           fi
+          echo "open=true" >> "$GITHUB_OUTPUT"
           if [[ "$draft" != false ]]; then
             echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. Mark it ready for review first."
             exit 1
@@ -285,9 +287,9 @@ jobs:
 
   summary:
     needs: [guard, review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3]
-    # A rejected dispatch or an unbound `pr_number`/`ref` gets a red run, no App comment, no gate
-    # write. Keyed on `review`, not `detect`: a `detect` failure after a bound review still gets
-    # both, as a failed or cancelled apply does.
+    # A rejected dispatch or a `pr_number` naming no open pull request gets a red run and no App
+    # comment or gate write; an `auto` run refused at review gets none either. Keyed on `review`:
+    # a `detect` failure after a bound review still gets both, as a failed or cancelled apply does.
     if: ${{ always() && needs.review.result == 'success' }}
     runs-on: ubuntu-slim
     # One gate writer per head at a time, across the plan, apply and deploy runs.
@@ -346,7 +348,7 @@ jobs:
   # status functions see that cancel. Holds the App key but checks nothing out.
   outcome:
     needs: [guard, review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3, summary]
-    if: ${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && needs.summary.outputs.posted != 'true' }}
+    if: ${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && needs.summary.outputs.posted != 'true' && (needs.review.result != 'failure' || (needs.review.outputs.open == 'true' && !inputs.auto)) }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}

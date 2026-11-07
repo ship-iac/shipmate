@@ -3514,12 +3514,15 @@ where `<url>` links the run that posts the reply. The verdict line is one of:
 - cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
 - summary evicted: ``🔴 failed: [the <verb> run](<url>) posted no result: a newer run for this head replaced its summary.``,
   followed for `apply` by `` Its cells' results are on their apply checks.``
-- ended before a result: ``🔴 failed: [the <verb> run](<url>) ended before it posted a result; the error is in that run's log.``
+- ended before a result: ``🔴 failed: [the <verb> run](<url>) ended before it posted a result; the reason is in that run's log.``
 
 **Apply.** `outcome` runs under `always()` when `guard` succeeded, the run
 carries a pull request number, and `summary` did not output `posted` as `true`.
 `actions/apply-summary` writes `posted` only after its result comment's POST
-succeeded. The reply is:
+succeeded. A failed `review` replies only when it found the pull request open
+(`review` outputs `open` as `true`), and never in an `auto` run: a number naming
+no open pull request, or an `auto` run refused at review, gets a red run and no
+reply. The reply is:
 
 - refused when `review` failed;
 - otherwise cancelled when a job other than `summary` ended `cancelled`: the
@@ -3552,6 +3555,13 @@ nothing. The reply is:
 A dispatched plan whose `facts` job failed posts nothing: no pull request
 number reaches `outcome`, and the pull request shows only the `rocket`
 reaction.
+
+A push to a draft pull request, or a manual cancel, cancels a dispatched
+`shipmate plan` run, which then ends with no answer: a draft autoplan writes no
+plan comment, and `outcome` does not run in a cancelled plan run.
+
+A run that never reaches `outcome` (a failed `guard`, a workflow startup
+failure) leaves only the `rocket` reaction on the command comment.
 
 A reply that cannot be posted warns `could not post the no-result reply` and
 the job passes. A missing App key or a failed token mint fails the job, in a

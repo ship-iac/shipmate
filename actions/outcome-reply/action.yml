@@ -44,55 +44,28 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-pull-requests: write
-    # Exactly one of the four `if:`s holds for any inputs (test_outcome_reply.py). They read
-    # inputs only, never a status function: see `run-cancelled`.
-    - name: Reply that the review refused the apply
-      if: ${{ inputs.review-result == 'failure' }}
+    # Reads inputs only, never a status function: see `run-cancelled`.
+    - name: Reply that the run posted no result
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
         SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+        REVIEW_RESULT: ${{ inputs.review-result }}
+        RUN_CANCELLED: ${{ inputs.run-cancelled }}
+        SUMMARY_RESULT: ${{ inputs.summary-result }}
       run: |
-        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-        SHIPMATE_REPLY_OUTCOME=refused SHIPMATE_REPLY_TEXT="its review check stopped [the apply run]($url) before any cell applied; the reason is in that run's log." \
-          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
-    - name: Reply that the apply run was cancelled
-      if: ${{ inputs.review-result != 'failure' && inputs.run-cancelled == 'true' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        PR_NUMBER: ${{ inputs.pr-number }}
-        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
-        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
-      run: |
-        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-        SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="[the apply run]($url) was cancelled before it posted a result." \
-          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
-    - name: Reply that a newer run replaced the summary
-      if: ${{ inputs.review-result != 'failure' && inputs.run-cancelled != 'true' && inputs.summary-result == 'cancelled' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        PR_NUMBER: ${{ inputs.pr-number }}
-        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
-        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
-      run: |
-        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-        text="[the $SHIPMATE_REPLY_VERB run]($url) posted no result: a newer run for this head replaced its summary."
-        if [ "$SHIPMATE_REPLY_VERB" = apply ]; then text+=" Its cells' results are on their apply checks."; fi
-        SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="$text" \
-          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
-    - name: Reply that the run ended without a result
-      if: ${{ inputs.review-result != 'failure' && inputs.run-cancelled != 'true' && inputs.summary-result != 'cancelled' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        PR_NUMBER: ${{ inputs.pr-number }}
-        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
-        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
-      run: |
-        url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-        SHIPMATE_REPLY_OUTCOME=failed SHIPMATE_REPLY_TEXT="[the $SHIPMATE_REPLY_VERB run]($url) ended before it posted a result; the error is in that run's log." \
+        run="[the $SHIPMATE_REPLY_VERB run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+        if [ "$REVIEW_RESULT" = failure ]; then
+          outcome=refused text="its review check stopped $run before any cell applied; the reason is in that run's log."
+        elif [ "$RUN_CANCELLED" = true ]; then
+          outcome=failed text="$run was cancelled before it posted a result."
+        elif [ "$SUMMARY_RESULT" = cancelled ]; then
+          outcome=failed text="$run posted no result: a newer run for this head replaced its summary."
+          if [ "$SHIPMATE_REPLY_VERB" = apply ]; then text+=" Its cells' results are on their apply checks."; fi
+        else
+          outcome=failed text="$run ended before it posted a result; the reason is in that run's log."
+        fi
+        SHIPMATE_REPLY_OUTCOME=$outcome SHIPMATE_REPLY_TEXT=$text \
           python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"

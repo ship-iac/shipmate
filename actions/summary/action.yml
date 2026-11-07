@@ -452,10 +452,9 @@ runs:
           fi
           exit 0
         fi
-        # Nothing changed: a new comment is posted only over a visible plan comment, or that one
-        # would keep showing applies that no longer exist. A doctor warning outside the
-        # repository-settings probes (the comment links the run page its annotations live on), an
-        # unmanaged stacks line, a lost pairs line or a `shipmate plan` command still posts.
+        # Nothing changed: post only over a visible plan comment, which would keep showing stale
+        # applies, or for a doctor warning outside the settings probes, an unmanaged or lost pairs
+        # line, or a `shipmate plan` command (CONTRACT.md §Plan comment).
         args=("$PR" comment.md --new --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ] && [ "$ON_DEMAND" != "true" ]; then
           args+=(--update-only)

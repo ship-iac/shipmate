@@ -1,11 +1,10 @@
 """`actions/outcome-reply` answers a command whose run ended without its result, and the apply and
 plan `outcome` jobs call it only then.
 
-Each reply step's `if:` reads inputs only: in a job that starts after a run cancel, a step-level
-`cancelled()` is false, so the apply job passes the cancel in as `run-cancelled`.
+The reply step picks its text from inputs only: in a job that starts after a run cancel, a
+step-level `cancelled()` is false, so the apply job passes the cancel in as `run-cancelled`.
 """
 
-import itertools
 import os
 import re
 
@@ -25,54 +24,15 @@ from _loader import (
 )
 
 ACTION = "outcome-reply"
-REFUSED = "Reply that the review refused the apply"
-CANCELLED = "Reply that the apply run was cancelled"
-EVICTED = "Reply that a newer run replaced the summary"
-ENDED = "Reply that the run ended without a result"
-REPLIES = [REFUSED, CANCELLED, EVICTED, ENDED]
-
-IFS = {
-    REFUSED: "${{ inputs.review-result == 'failure' }}",
-    CANCELLED: "${{ inputs.review-result != 'failure' && inputs.run-cancelled == 'true' }}",
-    EVICTED: (
-        "${{ inputs.review-result != 'failure' && inputs.run-cancelled != 'true' && "
-        "inputs.summary-result == 'cancelled' }}"
-    ),
-    ENDED: (
-        "${{ inputs.review-result != 'failure' && inputs.run-cancelled != 'true' && "
-        "inputs.summary-result != 'cancelled' }}"
-    ),
-}
+REPLY = "Reply that the run posted no result"
 
 URL = "https://example.invalid/acme/demo/actions/runs/999"
 HINT = "Comment `shipmate help` for the available commands."
 TOKEN = "minted-token"  # noqa: S105 - a stub token, never sent
 
-_TERM = re.compile(r"inputs\.([a-z-]+) (==|!=) '([^']*)'")
-
-
-def _selects(expr, inputs):
-    """Evaluate a reply step's `if:`: `&&` of `inputs.<name> ==|!= '<value>'` terms, compared
-    case-insensitively as GitHub compares strings. Any other shape fails the test."""
-    assert expr.startswith("${{ ") and expr.endswith(" }}"), expr
-    result = True
-    for term in expr[4:-3].split(" && "):
-        m = _TERM.fullmatch(term)
-        assert m, f"unexpected term {term!r} in {expr!r}"
-        name, op, value = m.groups()
-        equal = inputs.get(name, "").lower() == value.lower()
-        result = result and (equal if op == "==" else not equal)
-    return result
-
-
-def _selected(inputs):
-    return [s["name"] for s in action_steps(ACTION) if "if" in s and _selects(s["if"], inputs)]
-
-
-#: (step, inputs, whole body) for each text selection.
+#: (inputs, whole body) for each precedence case: refused, run cancelled, evicted, ended.
 SELECTIONS = {
     "refused": (
-        REFUSED,
         {
             "verb": "apply",
             "environment": "dev-eu",
@@ -87,8 +47,22 @@ SELECTIONS = {
             f"[comment run]({URL}). {HINT}"
         ),
     ),
-    "run cancelled": (
-        CANCELLED,
+    "refused over a cancelled run": (
+        {
+            "verb": "apply",
+            "environment": "dev-eu",
+            "review-result": "failure",
+            "summary-result": "cancelled",
+            "run-cancelled": "true",
+        },
+        (
+            "### shipmate apply dev-eu\n\n"
+            f"🔴 refused: its review check stopped [the apply run]({URL}) before any cell applied; "
+            "the reason is in that run's log.\n\n"
+            f"[comment run]({URL}). {HINT}"
+        ),
+    ),
+    "run cancelled over an evicted summary": (
         {
             "verb": "apply",
             "environment": "dev-eu",
@@ -103,7 +77,6 @@ SELECTIONS = {
         ),
     ),
     "apply summary evicted": (
-        EVICTED,
         {
             "verb": "apply",
             "environment": "dev-eu",
@@ -119,7 +92,6 @@ SELECTIONS = {
         ),
     ),
     "plan summary evicted": (
-        EVICTED,
         {"verb": "plan", "summary-result": "cancelled", "run-cancelled": "false"},
         (
             "### shipmate plan\n\n"
@@ -129,7 +101,6 @@ SELECTIONS = {
         ),
     ),
     "apply ended": (
-        ENDED,
         {
             "verb": "apply",
             "environment": "dev-eu",
@@ -139,17 +110,16 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) ended before it posted a result; the error is in "
+            f"🔴 failed: [the apply run]({URL}) ended before it posted a result; the reason is in "
             "that run's log.\n\n"
             f"[comment run]({URL}). {HINT}"
         ),
     ),
     "plan ended": (
-        ENDED,
         {"verb": "plan", "summary-result": "success", "run-cancelled": "false"},
         (
             "### shipmate plan\n\n"
-            f"🔴 failed: [the plan run]({URL}) ended before it posted a result; the error is in "
+            f"🔴 failed: [the plan run]({URL}) ended before it posted a result; the reason is in "
             "that run's log.\n\n"
             f"[comment run]({URL}). {HINT}"
         ),
@@ -174,14 +144,14 @@ def _render(value, inputs):
     return value
 
 
-def _run(tmp_path, name, inputs, *, rc=0):
-    """Run reply step `name` with its env rendered for `inputs`; return (process, gh calls)."""
+def _run(tmp_path, inputs, *, rc=0):
+    """Run the reply step with its env rendered for `inputs`; return (process, gh calls)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
-    step = step_by(ACTION, name=name)
+    step = step_by(ACTION, name=REPLY)
     inputs = {"pr-number": "42", **inputs}
     env = {
         **os.environ,
@@ -201,62 +171,40 @@ def _run(tmp_path, name, inputs, *, rc=0):
 
 @bash_only
 @pytest.mark.parametrize("case", list(SELECTIONS))
-def test_each_case_selects_one_step_and_posts_its_whole_body(tmp_path, case):
-    """Mutations: swap the `if:` of the run-cancelled and summary-evicted steps (an eviction
-    reads as a cancelled run); swap the `if:` of the summary-evicted and ended-before steps;
-    drop the `verb` check from the evicted text (the plan body gains the apply sentence); post
-    with `github.token` in place of the minted token."""
-    name, inputs, body = SELECTIONS[case]
-    assert step_by(ACTION, name=name)["if"] == IFS[name]
-    assert _selected(inputs) == [name]
-    proc, calls = _run(tmp_path, name, inputs)
+def test_each_case_posts_its_whole_body(tmp_path, case):
+    """Mutations: swap the run-cancelled and summary-evicted texts in the `elif` chain; swap the
+    run-cancelled and summary-evicted conditions; drop the run-cancelled branch (a cancelled run
+    whose summary was cancelled reads as an eviction); drop the `verb` check from the evicted
+    text; post with `github.token` in place of the minted token."""
+    inputs, body = SELECTIONS[case]
+    proc, calls = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert calls == [["api", "-X", "POST", "repos/acme/demo/issues/42/comments", "-F", "body=@-"]]
     assert (tmp_path / "reply.md").read_text(encoding="utf-8") == body
     assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == TOKEN
 
 
-def test_exactly_one_reply_step_runs_for_every_input_combination():
-    """Mutations: drop `inputs.run-cancelled != 'true'` from the summary-evicted step (a
-    cancelled run whose summary was cancelled selects two steps); drop
-    `inputs.review-result != 'failure'` from the ended-before step."""
-    for review, cancelled, summary, verb in itertools.product(
-        ["", "success", "failure", "cancelled", "skipped"],
-        ["true", "false", ""],
-        ["success", "failure", "cancelled", "skipped"],
-        ["apply", "plan"],
-    ):
-        inputs = {
-            "verb": verb,
-            "review-result": review,
-            "run-cancelled": cancelled,
-            "summary-result": summary,
-        }
-        assert len(_selected(inputs)) == 1, inputs
-
-
 def test_the_steps_run_in_order():
-    """Mutation: swap the run-cancelled and summary-evicted steps."""
+    """Mutations: give the reply step an `if:`; add a second reply step."""
     assert [s.get("name") for s in action_steps(ACTION)] == [
         "Verify the App key arrived",
         "Mint App installation token",
-        *REPLIES,
+        REPLY,
     ]
+    assert "if" not in step_by(ACTION, name=REPLY)
 
 
 @bash_only
-@pytest.mark.parametrize("name", REPLIES)
-def test_a_failed_post_warns_once_and_exits_zero(tmp_path, name):
-    """Mutation: drop the `||` degrade from one step (its row exits 1)."""
-    proc, _ = _run(tmp_path, name, SELECTIONS["apply ended"][1], rc=1)
+def test_a_failed_post_warns_once_and_exits_zero(tmp_path):
+    """Mutation: drop the `||` degrade (the step exits 1)."""
+    proc, _ = _run(tmp_path, SELECTIONS["apply ended"][0], rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert proc.stdout.splitlines().count("::warning::could not post the no-result reply") == 1
 
 
 def test_the_composite_mints_only_a_pull_request_write_token():
     """Mutations: add `permission-issues: write` to the mint; give the mint or the verify step an
-    `if:`; set a reply step's `GH_TOKEN: ${{ github.token }}`; post from a step without the
-    minted token."""
+    `if:`; set the reply step's `GH_TOKEN: ${{ github.token }}`."""
     verify = step_by(ACTION, name="Verify the App key arrived")
     assert verify == {
         "name": "Verify the App key arrived",
@@ -274,13 +222,15 @@ def test_the_composite_mints_only_a_pull_request_write_token():
         "repositories": "${{ github.event.repository.name }}",
         "permission-pull-requests": "write",
     }
-    for name in REPLIES:
-        assert step_by(ACTION, name=name)["env"] == {
-            "GH_TOKEN": "${{ steps.token.outputs.token }}",
-            "PR_NUMBER": "${{ inputs.pr-number }}",
-            "SHIPMATE_REPLY_VERB": "${{ inputs.verb }}",
-            "SHIPMATE_REPLY_ENV": "${{ inputs.environment }}",
-        }
+    assert step_by(ACTION, name=REPLY)["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+        "SHIPMATE_REPLY_VERB": "${{ inputs.verb }}",
+        "SHIPMATE_REPLY_ENV": "${{ inputs.environment }}",
+        "REVIEW_RESULT": "${{ inputs.review-result }}",
+        "RUN_CANCELLED": "${{ inputs.run-cancelled }}",
+        "SUMMARY_RESULT": "${{ inputs.summary-result }}",
+    }
     assert not [s for s in strings(action_yaml(ACTION)) if "github.token" in s]
 
 
@@ -292,7 +242,10 @@ def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel. `run-cancelled` ORs every needed job but
     `guard`, whose success the `if:` requires, and `summary`, whose `cancelled` is an eviction.
 
-    Mutations: drop `&& needs.summary.outputs.posted != 'true'`; drop `summary` from `needs`;
+    A failed `review` replies only for an open pull request and never for an `auto` run.
+
+    Mutations: drop `&& needs.summary.outputs.posted != 'true'`; drop
+    `needs.review.outputs.open == 'true' &&`; drop `&& !inputs.auto`; drop `summary` from `needs`;
     `permissions: { pull-requests: write }`; pass `needs.review.result` as `summary-result`;
     replace `always()` with `!cancelled()`; drop `needs.lock.result == 'cancelled'` from
     `run-cancelled`."""
@@ -300,7 +253,9 @@ def test_the_apply_outcome_job_is_wired_exactly():
         "needs": [*_APPLY_NEEDS, "summary"],
         "if": (
             "${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && "
-            "needs.summary.outputs.posted != 'true' }}"
+            "needs.summary.outputs.posted != 'true' && "
+            "(needs.review.result != 'failure' || "
+            "(needs.review.outputs.open == 'true' && !inputs.auto)) }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -336,9 +291,9 @@ def test_the_plan_outcome_job_is_wired_exactly():
 
     Mutations: drop the `superseded` clause; drop the `moved` clause; replace `!cancelled()` with
     `always()`; drop the fork clause's `head-repo == github.repository`; drop `summary-result`
-    from `with:`; pass `run-cancelled: 'true'`."""
+    from `with:`; pass `run-cancelled: 'true'`; add `plan` to `needs`."""
     assert workflow_jobs("plan.yml")["outcome"] == {
-        "needs": ["facts", "detect", "plan", "summary"],
+        "needs": ["facts", "summary"],
         "if": (
             "${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && "
             "needs.facts.outputs.head-repo != '' && "
