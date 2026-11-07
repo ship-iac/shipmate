@@ -2,15 +2,13 @@
 verb rides in the body — selecting the job that runs — alongside one body shape per verb.
 """
 
-import json
 import os
-import subprocess
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from _loader import (
     ACTIONS,
-    SCRIPTS,
     action_yaml,
     bash_only,
     load_script,
@@ -25,6 +23,8 @@ DISPATCH_ACTION = "dispatch"
 #: there. Hand-written; never derived from the action, which is the file under test.
 CONSUMER_WORKFLOW = "shipmate.yml"
 
+DISPATCH_BODY = load_script("dispatch-body")
+
 
 def _extract_dispatch_run_block():
     """The full run: block of the dispatch step, exactly as written."""
@@ -35,25 +35,15 @@ def _extract_dispatch_run_block():
 
 def _build_dispatch_body(verb, environment=""):
     """The whole parsed dispatch body for `verb`."""
-    env = os.environ.copy()
-    env.update(
-        {
-            "DISPATCH_REF": "main",
-            "REF": "abc123def456",
-            "PR_NUMBER": "42",
-            "ENVIRONMENT": environment,
-            "VERB": verb,
-        }
-    )
-    result = subprocess.run(
-        [__import__("sys").executable, str(SCRIPTS / "dispatch-body")],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, f"python body builder failed: {result.stderr}"
-    return json.loads(result.stdout)
+    env = {
+        "DISPATCH_REF": "main",
+        "REF": "abc123def456",
+        "PR_NUMBER": "42",
+        "ENVIRONMENT": environment,
+        "VERB": verb,
+    }
+    with patch.dict(os.environ, env):
+        return DISPATCH_BODY.body()
 
 
 # Whole-body comparison, not key-by-key membership: "carries exactly these inputs" and
