@@ -775,6 +775,100 @@ def test_headings_are_reserved_before_a_fold_out_is_sized():
     )
 
 
+def _kinds(body, cells):
+    """Per cell of `cells`, which the caller lists in render order: `full` for its fold-out
+    without the truncation trailer, `truncated` with it, `bare` for its bare line."""
+    kinds, at = [], 0
+    for c, _ in cells:
+        if c["changed"]:
+            line = f'🟡 {c["stack"]}: +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
+        else:
+            line = f'🟢 {c["stack"]}: no changes <a href="https://gh/run/1">plan</a>'
+        at = body.index(line, at)
+        opening = f"<details><summary>{line}</summary>"
+        if body[: at + len(line) + len("</summary>")].endswith(opening):
+            end = body.index("</details>", at)
+            kinds.append("truncated" if "_Truncated; see" in body[at:end] else "full")
+            at = end
+        else:
+            kinds.append("bare")
+            at += len(line)
+    return kinds
+
+
+def test_every_changed_environment_gets_a_fold_out_before_any_gets_a_second():
+    """#948's shape: each plan fits a third of the free room, not a quarter, so a share counted
+    over the three changed environments holds one and a share counted over all four does not.
+
+    Mutations: a single greedy pass (pass 1 deleted) folds dev-eu's first cells out and leaves
+    dev-us and prod-eu `bare`; `n` counting every environment, `qa` included, truncates the
+    three first cells; deleting pass 2 leaves dev-eu's second cell `bare`."""
+    plan = "  + r\n" * 2667
+    cells = (
+        [(_cell(stack=f"s{i:02}", environment="dev-eu"), plan) for i in range(19)]
+        + [(_cell(stack=f"s{i:02}", environment="dev-us"), plan) for i in range(6)]
+        + [(_cell(stack="s00", environment="prod-eu"), plan)]
+        + [(_cell(stack="s00", environment="qa", changed=False), None)]
+    )
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert _kinds(body, cells) == (
+        ["full", "truncated"] + ["bare"] * 17 + ["full"] + ["bare"] * 5 + ["full", "bare"]
+    )
+
+
+def test_fold_outs_keep_comment_order_when_sized_out_of_it():
+    """Pass 1 sizes `b`'s first cell before `a`'s unchanged cell, and each fold-out still
+    renders under its own heading.
+
+    Mutation: appending sections in sizing order (pass-1 cells, then the rest) instead of
+    assigning them by entry index reddens it."""
+    cells = [
+        (_cell(stack="s1", environment="a"), "  + x"),
+        (_cell(stack="s2", environment="a", changed=False), None),
+        (_cell(stack="s1", environment="b"), "  + y"),
+    ]
+    assert sc.build_comment(cells, {}, RUN_URL, SHA)[0] == (
+        HEAD + f"🟡 2 of 3 cells change {AT}\n\n"
+        "#### a: 2 cells, 1 changed\n\n"
+        '<details><summary>🟡 s1: +1 ~0 -0 <a href="https://gh/run/1">plan</a></summary>\n\n'
+        "```diff\n+   x\n```\n</details>\n\n"
+        '🟢 s2: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### b: 1 cell, 1 changed\n\n"
+        '<details><summary>🟡 s1: +1 ~0 -0 <a href="https://gh/run/1">plan</a></summary>\n\n'
+        "```diff\n+   y\n```\n</details>"
+    )
+
+
+def test_a_share_a_first_cell_leaves_unspent_goes_to_later_cells():
+    """`a`'s first cell has no plan text, so its share of about 29,900 characters stays free and
+    `a`'s second cell, sized in pass 2, takes more than one share.
+
+    Mutation: limiting pass 2 to `len(bare) + share` instead of `len(bare) + free` cuts that
+    fold-out under 40,000 characters."""
+    cells = [
+        (_cell(stack="s1", environment="a"), None),
+        (_cell(stack="s2", environment="a"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)),
+        (_cell(stack="s1", environment="b"), "  + x"),
+    ]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert _kinds(body, cells) == ["bare", "truncated", "full"]
+    start = body.index('<details><summary>🟡 s2: +1 ~0 -0 <a href="https://gh/run/1">')
+    assert body.index("</details>", start) - start > 40_000
+    assert len(body) <= sc.SIZE_BUDGET
+
+
+def test_a_share_too_small_for_a_fold_out_fills_in_comment_order():
+    """100 changed environments leave each a share under `MIN_PLAN_CHARS` of plan room, so pass
+    1 keeps every first cell bare and pass 2 folds out the first in comment order, as a single
+    greedy pass does.
+
+    Mutation: pass 2 skipping the cells pass 1 visited leaves all 100 `bare`."""
+    giant = "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)
+    cells = [(_cell(stack="s", environment=f"e{i:03}"), giant) for i in range(100)]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert _kinds(body, cells) == ["truncated"] + ["bare"] * 99
+
+
 def test_the_footer_hint_points_at_the_command_list_and_not_at_doctor():
     """The hint is a pointer to the command list, not a report of doctor's output, so no
     comment carrying it gains a coupling to doctor. Mutation: naming `shipmate doctor` in
