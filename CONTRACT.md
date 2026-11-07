@@ -3118,8 +3118,8 @@ an early giant plan cannot starve a later cell, and every cell keeps its line
 and its link. The room left after the head, every heading and every bare line
 is spent in two passes. First, each environment with a changed cell gets an
 equal share for its first changed cell's fold-out. Then every changed cell
-still on its bare line gets what is left, in comment order, including what a
-first cell did not use. So every changed environment shows a fold-out before
+still on its bare line, and every first cell its share truncated, gets what is
+left, in comment order, including what a first cell did not use. So every changed environment shows a fold-out before
 any shows a second, unless a share is too small to hold a truncated plan; then
 the cells fill in comment order. The command section is left out before any of
 these steps: it is added after every cell is sized, only when the whole body

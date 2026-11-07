@@ -657,25 +657,28 @@ def _entries(cells, order, checks, run_url, locks, stacked, default_branch):
 def _fold_outs(entries, free):
     """Each entry's section, in `entries` order, sized from `free`, the room fold-outs may add
     over the bare lines. Pass 1 gives each changed environment's first changed cell an equal
-    share; pass 2 gives every changed cell still on its bare line, in comment order, what is
-    left."""
+    share; pass 2 walks every changed cell in comment order and lets a bare line or a truncated
+    first cell grow by what is left."""
     sections = [bare for bare, _, _ in entries]
     changed = [i for i, (_, c, _) in enumerate(entries) if c is not None and c["changed"]]
     # `by_env` lists an environment's changed cells first, so its first one follows the heading.
     firsts = [i for i in changed if entries[i - 1][1] is None]
 
-    def size(i, room):
-        bare, _, text = entries[i]
-        sections[i] = render_section(bare, text, len(bare) + room)
-        return len(sections[i]) - len(bare)
+    def grow(i, room):
+        old = sections[i]
+        new = render_section(entries[i][0], entries[i][2], len(old) + room)
+        # A full fold-out re-rendered with little room left drops to its bare line.
+        if len(new) <= len(old):
+            return 0
+        sections[i] = new
+        return len(new) - len(old)
 
     if firsts:
         share = free // len(firsts)
         for i in firsts:
-            free -= size(i, share)
+            free -= grow(i, share)
     for i in changed:
-        if sections[i] == entries[i][0]:
-            free -= size(i, free)
+        free -= grow(i, free)
     return sections
 
 
@@ -711,8 +714,9 @@ def build_comment(
     `default_branch` go to `_plan_line` and `stacked_lines`. Every cell is guaranteed its bare
     line: the space all headings and bare lines need is reserved up front, so an early giant plan
     cannot starve a later cell. The free room left after the head and every bare line is shared
-    equally among the changed environments' first changed cells, then what is left goes to every
-    changed cell still on its bare line, in comment order. Each of the six blocks yields, with a
+    equally among the changed environments' first changed cells, then what is left goes, in
+    comment order, to every changed cell still on its bare line and every first cell its share
+    truncated. Each of the six blocks yields, with a
     warning, when the headings and bare lines leave it no room under HARD_CAP. Returns
     `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]

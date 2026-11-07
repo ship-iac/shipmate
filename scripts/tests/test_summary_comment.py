@@ -857,6 +857,21 @@ def test_a_share_a_first_cell_leaves_unspent_goes_to_later_cells():
     assert len(body) <= sc.SIZE_BUDGET
 
 
+def test_a_first_cell_its_share_truncated_grows_by_what_is_left():
+    """`a`'s giant plan is truncated at its share of about 29,800 characters in pass 1, and `b`'s
+    tiny plan leaves the rest of its share free, so pass 2 grows `a`'s fold-out until the body
+    sits within one plan row of SIZE_BUDGET.
+
+    Mutation: pass 2 skipping truncated first cells (re-rendering bare lines only) leaves the
+    body near 30,000 characters."""
+    cells = [
+        (_cell(stack="s1", environment="a"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)),
+        (_cell(stack="s1", environment="b"), "  + x"),
+    ]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert (_kinds(body, cells), len(body)) == (["truncated", "full"], 59_993)
+
+
 def test_a_share_too_small_for_a_fold_out_fills_in_comment_order():
     """100 changed environments leave each a share under `MIN_PLAN_CHARS` of plan room, so pass
     1 keeps every first cell bare and pass 2 folds out the first in comment order, as a single
