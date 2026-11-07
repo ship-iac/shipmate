@@ -2,7 +2,9 @@
 
 Each verify step's real `run:` body executes here with real `gpg`, `openssl` and `base64`. Only
 `curl` is a stub: it appends its argv to a log and serves the raw upstream files under
-`fixtures/release-sums/` by URL basename. A `gpg` wrapper logs its argv and runs the real gpg.
+`fixtures/release-sums/` by URL basename. `gpg` and `openssl` wrappers log their argv and run the
+real tools. A cache hit is simulated by files placed in `$RUNNER_TEMP/<tool>-release` before the
+step runs, with `SHIPMATE_CACHE_KEY` set to the entry's key.
 
 Threat model: an accidental regression in a SHA-pinned, reviewed engine file -- a dropped
 signature check, an exit-code-only check, a fetched key, a lost guard. A hostile edit to the
@@ -12,6 +14,7 @@ fingerprint constant) substituted.
 """
 
 import base64
+import hashlib
 import os
 import shutil
 import stat
@@ -38,6 +41,31 @@ _SIGNER = "E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80"
 _TOFU_ERROR = f"::error title=OpenTofu checksum verification failed::OpenTofu {_TOFU}: "
 _TM_ERROR = f"::error title=Terramate checksum verification failed::Terramate {_TERRAMATE}: "
 
+_REPO = "o/r"
+_TOFU_CACHE_KEY = f"shipmate-tools-Linux-X64-tofu-{_TOFU}"
+_TM_CACHE_KEY = f"shipmate-tools-Linux-X64-terramate-{_TERRAMATE}"
+
+
+def _warning(sid, reason):
+    """The one warning step `sid` prints before it downloads a failed cache entry's files again."""
+    tool, key, names = {
+        "tofu-sums": (
+            f"OpenTofu {_TOFU}",
+            _TOFU_CACHE_KEY,
+            f"{_TOFU_SUMS} and {_TOFU_SUMS}.gpgsig",
+        ),
+        "terramate-sums": (
+            f"Terramate {_TERRAMATE}",
+            _TM_CACHE_KEY,
+            "checksums.txt and checksums.txt.sig",
+        ),
+    }[sid]
+    return (
+        f"::warning title=Tool cache entry failed verification::{tool}: {reason} Downloading "
+        f"{names} again. Every job repeats this download until the entry is deleted: "
+        f"gh cache delete {key} --repo {_REPO}\n"
+    )
+
 
 def _refusal(stdout):
     """The `refusal=` line a failed step writes: its one annotation without the
@@ -48,8 +76,10 @@ def _refusal(stdout):
 #: Each step's whole $GITHUB_OUTPUT on the genuine fixtures, digests copied by hand from them.
 _TOFU_OUTPUT = (
     "tofu_sha256<<SHIPMATE_EOF\n"
-    "723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5\n"
-    "6e815c58a09ee957de606ff48cefad082942e70afc43b737ff975654c54ec453\n"
+    "723bebb0df8411daff1e5fc3862e28ff5581fe5634087f4c29a9aa41d78208b5  "
+    f"tofu_{_TOFU}_linux_amd64.zip\n"
+    "6e815c58a09ee957de606ff48cefad082942e70afc43b737ff975654c54ec453  "
+    f"tofu_{_TOFU}_linux_arm64.zip\n"
     "SHIPMATE_EOF\n"
 )
 _TM_OUTPUT = (
@@ -71,13 +101,19 @@ _EXPECTED_STEPS = {
         "id": "tofu-sums",
         "if": "${{ inputs.tofu != 'false' }}",
         "shell": "bash",
-        "env": {"SHIPMATE_TOFU_VERSION": "${{ steps.versions.outputs.tofu }}"},
+        "env": {
+            "SHIPMATE_TOFU_VERSION": "${{ steps.versions.outputs.tofu }}",
+            "SHIPMATE_CACHE_KEY": "${{ steps.tofu-cache.outputs.cache-matched-key }}",
+        },
     },
     "terramate-sums": {
         "name": "Verify Terramate checksums",
         "id": "terramate-sums",
         "shell": "bash",
-        "env": {"SHIPMATE_TERRAMATE_VERSION": "${{ steps.versions.outputs.terramate }}"},
+        "env": {
+            "SHIPMATE_TERRAMATE_VERSION": "${{ steps.versions.outputs.terramate }}",
+            "SHIPMATE_CACHE_KEY": "${{ steps.terramate-cache.outputs.cache-matched-key }}",
+        },
     },
 }
 
@@ -101,7 +137,8 @@ def test_the_verify_steps_are_fail_closed():
     """No `continue-on-error`, and no `if:` beyond the OpenTofu step's own.
 
     Mutations: remove the `if:` on `Verify OpenTofu checksums`; add `continue-on-error: true`
-    to `Verify Terramate checksums`.
+    to `Verify Terramate checksums`; map `Verify Terramate checksums`' `SHIPMATE_CACHE_KEY` to
+    `steps.tofu-cache.outputs.cache-primary-key`.
     """
     got = {}
     for sid in _EXPECTED_STEPS:
@@ -121,11 +158,14 @@ def _genuine():
     return {p.name: p.read_bytes() for p in _FIXTURES.iterdir() if p.name != "README"}
 
 
-def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0):
+def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cached=None, key=None):
     """Run step `sid`'s body (or `body`) with curl serving `served` (basename -> bytes; the
     genuine fixtures by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`.
+    `cached` (basename -> bytes, or None for a directory) is placed in the step's release
+    directory first, and `key`, when given, is the `SHIPMATE_CACHE_KEY`.
 
-    Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP).
+    Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP);
+    openssl's argv per call is in `tmp_path/logs/openssl`.
     """
     tmp_path.mkdir(exist_ok=True)
     bin_dir, logs, serve, rt = (tmp_path / d for d in ("bin", "logs", "serve", "runner-temp"))
@@ -133,6 +173,13 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0):
         d.mkdir()
     for name, data in (_genuine() if served is None else served).items():
         (serve / name).write_bytes(data)
+    release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    for name, data in (cached or {}).items():
+        release.mkdir(exist_ok=True)
+        if data is None:
+            (release / name).mkdir()
+        else:
+            (release / name).write_bytes(data)
     for name, code in (codes or {}).items():
         (serve / f"{name}.code").write_text(code, encoding="utf-8")
     log = logs.as_posix()
@@ -155,6 +202,13 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0):
         f"printf '%s\\x1f' \"$@\" >> '{log}/gpg'\necho >> '{log}/gpg'\n"
         f'exec "{gpg and gpg.replace(os.sep, "/")}" "$@"',
     )
+    openssl = shutil.which("openssl")
+    _stub(
+        bin_dir,
+        "openssl",
+        f"printf '%s\\x1f' \"$@\" >> '{log}/openssl'\necho >> '{log}/openssl'\n"
+        f'exec "{openssl and openssl.replace(os.sep, "/")}" "$@"',
+    )
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     r = run_step(
@@ -168,6 +222,8 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0):
             "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
+            "GITHUB_REPOSITORY": _REPO,
+            **({} if key is None else {"SHIPMATE_CACHE_KEY": key}),
         },
         timeout=120,
     )
@@ -203,6 +259,44 @@ def _curl(url, out):
     ]
 
 
+def _downloads(sid, rt):
+    """curl's whole argv for each of step `sid`'s two downloads, in order."""
+    if sid == "tofu-sums":
+        base, names, d = _TOFU_BASE, [_TOFU_SUMS, f"{_TOFU_SUMS}.gpgsig"], "tofu-release"
+    else:
+        base, names, d = _TM_BASE, ["checksums.txt", "checksums.txt.sig"], "terramate-release"
+    return [_curl(f"{base}/{n}", f"{rt.as_posix()}/{d}/{n}") for n in names]
+
+
+def _verifier(sid, rt):
+    """The signature tool's whole argv per call: gpg for OpenTofu, openssl for Terramate."""
+    action = (ENGINE / "actions" / "setup").as_posix()
+    if sid == "tofu-sums":
+        d = f"{rt.as_posix()}/tofu-release"
+        return [
+            ["--batch", "--import", f"{action}/../../keys/opentofu.asc"],
+            [
+                "--batch",
+                "--status-fd",
+                "1",
+                "--verify",
+                f"{d}/{_TOFU_SUMS}.gpgsig",
+                f"{d}/{_TOFU_SUMS}",
+            ],
+        ]
+    return [
+        [
+            "dgst",
+            "-sha256",
+            "-verify",
+            f"{action}/../../keys/terramate-cosign.pub",
+            "-signature",
+            f"{rt.as_posix()}/terramate-checksums.der",
+            f"{rt.as_posix()}/terramate-release/checksums.txt",
+        ]
+    ]
+
+
 def _edit(body, old, new):
     """`body` with its one `old` replaced: a renamed target must red, not no-op."""
     assert body.count(old) == 1, f"{old!r} occurs {body.count(old)} times in the step body"
@@ -223,7 +317,7 @@ def test_genuine_opentofu_sums_verify_and_write_both_digests(tmp_path):
     r, out, curl, gpg, rt = _run(tmp_path, "tofu-sums")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert out == _TOFU_OUTPUT
-    d = f"{rt.as_posix()}/tofu-sums"
+    d = f"{rt.as_posix()}/tofu-release"
     assert curl == [
         _curl(f"{_TOFU_BASE}/{_TOFU_SUMS}", f"{d}/{_TOFU_SUMS}"),
         _curl(f"{_TOFU_BASE}/{_TOFU_SUMS}.gpgsig", f"{d}/{_TOFU_SUMS}.gpgsig"),
@@ -245,16 +339,17 @@ def test_genuine_opentofu_sums_verify_and_write_both_digests(tmp_path):
 @bash_only
 @needs_tools
 def test_genuine_terramate_sums_verify_and_write_both_lines(tmp_path):
-    """Mutations: swap the output names; add a third curl call fetching a key."""
+    """The DER signature is written outside the release directory, which the cache saves.
+
+    Mutations: swap the output names; add a third curl call fetching a key; write the DER
+    signature to `$dir/checksums.txt.der`.
+    """
     r, out, curl, gpg, rt = _run(tmp_path, "terramate-sums")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert out == _TM_OUTPUT
-    d = f"{rt.as_posix()}/terramate-sums"
-    assert curl == [
-        _curl(f"{_TM_BASE}/checksums.txt", f"{d}/checksums.txt"),
-        _curl(f"{_TM_BASE}/checksums.txt.sig", f"{d}/checksums.txt.sig"),
-    ]
+    assert curl == _downloads("terramate-sums", rt)
     assert gpg == []
+    assert _calls(tmp_path / "logs" / "openssl") == _verifier("terramate-sums", rt)
 
 
 @bash_only
@@ -327,8 +422,8 @@ def test_a_signature_by_another_key_fails_the_whole_fingerprint_compare(tmp_path
 def test_an_html_signature_at_200_fails_with_one_annotation(tmp_path, sid, name, message):
     """A proxy or rate-limit page served as the signature.
 
-    Mutations: append `|| true` to the gpg verify inside its `$(...)`; drop the `|| fail` after
-    `base64 -d` (bash exits on the bare failure with no annotation).
+    Mutations: append `|| true` to the gpg verify inside its `$(...)`; drop the `|| { ... }` after
+    `base64 -d` (openssl then refuses the DER, and the annotation names openssl).
     """
     served = _genuine()
     served[name] = _HTML
@@ -382,9 +477,10 @@ def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
 @pytest.mark.parametrize(
     ("sid", "missing", "present"),
     [
-        ("terramate-sums", "curl", ("openssl", "base64")),
-        ("terramate-sums", "openssl", ("curl", "base64")),
-        ("terramate-sums", "base64", ("curl", "openssl")),
+        ("terramate-sums", "curl", ("openssl", "base64", "sha256sum")),
+        ("terramate-sums", "openssl", ("curl", "base64", "sha256sum")),
+        ("terramate-sums", "base64", ("curl", "openssl", "sha256sum")),
+        ("terramate-sums", "sha256sum", ("curl", "openssl", "base64")),
         ("tofu-sums", "gpg", ()),
     ],
 )
@@ -395,7 +491,8 @@ def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
     """PATH holds only never-run stubs for `present`. The Terramate step runs first and checks
     the tools it and the installers need; the OpenTofu step checks gpg alone.
 
-    Mutations: drop `curl`, `openssl` or `base64` from the Terramate step's `command -v` loop;
+    Mutations: drop `curl`, `openssl`, `base64` or `sha256sum` from the Terramate step's
+    `command -v` loop;
     delete the OpenTofu step's `command -v gpg` line.
     """
     bin_dir = tmp_path / "bin"
@@ -489,7 +586,7 @@ def _drop(data, *suffixes):
 def test_signed_opentofu_sums_without_an_asset_line_fail_naming_it(
     tmp_path, gnupg_home, dropped, missing
 ):
-    """Mutation: drop the `[ -n "$d" ] || fail` guard (an empty digest line is written)."""
+    """Mutation: drop the `[ -n "$line" ] || { ... }` guard (an empty digest line is written)."""
     pub, fpr, _, _ = _keygen(tmp_path, gnupg_home)
     sums = _drop(_genuine()[_TOFU_SUMS], *dropped)
     sig = _sign(
@@ -523,7 +620,7 @@ def test_signed_opentofu_sums_without_an_asset_line_fail_naming_it(
 def test_signed_terramate_sums_without_an_asset_line_fail_naming_it(
     tmp_path, gnupg_home, dropped, missing
 ):
-    """Mutation: drop the `[ -n "$line" ] || fail` guard (an empty line is written)."""
+    """Mutation: drop the `[ -n "$line" ] || { ... }` guard (an empty line is written)."""
     _, _, pem, pub = _keygen(tmp_path, gnupg_home)
     sums = _drop(_genuine()["checksums.txt"], *dropped)
     der = _sign(
@@ -538,3 +635,215 @@ def test_signed_terramate_sums_without_an_asset_line_fail_naming_it(
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TM_ERROR}checksums.txt has no line for {missing}.\n"
     assert out == _refusal(r.stdout)
+
+
+_SUMS_NAMES = {
+    "tofu-sums": (_TOFU_SUMS, f"{_TOFU_SUMS}.gpgsig"),
+    "terramate-sums": ("checksums.txt", "checksums.txt.sig"),
+}
+_CACHE_KEYS = {"tofu-sums": _TOFU_CACHE_KEY, "terramate-sums": _TM_CACHE_KEY}
+_TOOLS = {"tofu-sums": f"OpenTofu {_TOFU}", "terramate-sums": f"Terramate {_TERRAMATE}"}
+_OUTPUTS = {"tofu-sums": _TOFU_OUTPUT, "terramate-sums": _TM_OUTPUT}
+
+
+def _signature_log(sid, tmp_path, gpg):
+    return gpg if sid == "tofu-sums" else _calls(tmp_path / "logs" / "openssl")
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_a_genuine_cache_hit_downloads_nothing_and_verifies_the_same_way(tmp_path, sid):
+    """Mutation: run `download` before the restored-entry `if` (curl is called twice)."""
+    r, out, curl, gpg, rt = _run(
+        tmp_path, sid, cached={n: _genuine()[n] for n in _SUMS_NAMES[sid]}, key=_CACHE_KEYS[sid]
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert (r.stdout, out, curl) == ("", _OUTPUTS[sid], [])
+    assert _signature_log(sid, tmp_path, gpg) == _verifier(sid, rt)
+
+
+#: A cached file that fails verification, per tool and file kind, and the reason `fail()` would
+#: have given after its `<Tool> <version>: ` prefix.
+_POISONED = [
+    (
+        "tofu-sums",
+        _TOFU_SUMS,
+        b"723bebb0",
+        (
+            f"the signature on {_TOFU_SUMS} did not verify against the committed OpenTofu key "
+            "(gpg exit 1)."
+        ),
+    ),
+    (
+        "terramate-sums",
+        "checksums.txt",
+        b"303fd597",
+        (
+            "the signature on checksums.txt did not verify against the committed Terramate key "
+            "(openssl exit 1)."
+        ),
+    ),
+    (
+        "tofu-sums",
+        f"{_TOFU_SUMS}.gpgsig",
+        None,
+        (
+            f"the signature on {_TOFU_SUMS} did not verify against the committed OpenTofu key "
+            "(gpg exit 2)."
+        ),
+    ),
+    (
+        "terramate-sums",
+        "checksums.txt.sig",
+        None,
+        f"{_TM_BASE}/checksums.txt.sig is not base64.",
+    ),
+]
+
+
+def _poison(name, needle):
+    """The genuine `name` with a flipped byte at `needle`, or an HTML page when `needle` is None."""
+    return _HTML if needle is None else _flip(_genuine()[name], needle)
+
+
+@pytest.mark.parametrize(("sid", "name", "needle", "reason"), _POISONED)
+@bash_only
+@needs_tools
+def test_a_cached_file_that_fails_is_downloaded_again_with_one_warning(
+    tmp_path, sid, name, needle, reason
+):
+    """A poisoned entry costs a download, never a wrong digest, and names its key for deletion.
+
+    Mutations: fail instead of downloading again (trust the hit: exit 1); download again without
+    the warning.
+    """
+    cached = {n: _genuine()[n] for n in _SUMS_NAMES[sid]}
+    cached[name] = _poison(name, needle)
+    r, out, curl, _, rt = _run(tmp_path, sid, cached=cached, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == _warning(sid, reason)
+    assert (out, curl) == (_OUTPUTS[sid], _downloads(sid, rt))
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_a_restored_checksum_path_that_is_a_directory_is_downloaded_again(tmp_path, sid):
+    """A restored path that is not a regular file costs a download, not the job.
+
+    Mutation: `rm -f` in place of `rm -rf` in `drop` (the step exits 1 on the directory).
+    """
+    name, sig = _SUMS_NAMES[sid]
+    cached = {name: None, sig: _genuine()[sig]}
+    r, out, curl, _, rt = _run(tmp_path, sid, cached=cached, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    d = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    reason = f"{d.as_posix()}/{name} is not a regular file."
+    assert r.stdout == _warning(sid, reason)
+    assert (out, curl) == (_OUTPUTS[sid], _downloads(sid, rt))
+
+
+@pytest.mark.parametrize(("sid", "name", "needle", "reason"), _POISONED[:2])
+@bash_only
+@needs_tools
+def test_a_failed_entry_whose_fresh_copy_fails_too_fails_after_one_download(
+    tmp_path, sid, name, needle, reason
+):
+    """Mutation: download again until verification succeeds (a bounded three-attempt loop: six
+    curl calls, not two; an unbounded one never ends)."""
+    cached = {n: _genuine()[n] for n in _SUMS_NAMES[sid]}
+    cached[name] = _poison(name, needle)
+    served = _genuine()
+    served[name] = cached[name]
+    r, out, curl, _, rt = _run(tmp_path, sid, served=served, cached=cached, key=_CACHE_KEYS[sid])
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    error = f"{_TOFU_ERROR if sid == 'tofu-sums' else _TM_ERROR}{reason}\n"
+    assert r.stdout == _warning(sid, reason) + error
+    assert (out, curl) == (f"refusal={_TOOLS[sid]}: {reason}\n", _downloads(sid, rt))
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_files_present_without_a_restored_key_are_downloaded_again(tmp_path, sid):
+    """Nothing explains a file present on a miss, so it is replaced, never verified.
+
+    Mutation: ignore the key and keep any present file (curl is not called).
+    """
+    cached = {n: _genuine()[n] for n in _SUMS_NAMES[sid]}
+    r, out, curl, _, rt = _run(tmp_path, sid, cached=cached, key="")
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert (r.stdout, out, curl) == ("", _OUTPUTS[sid], _downloads(sid, rt))
+
+
+#: Per verify step id, the install step that follows it: (its name, its digest variable, the
+#: archive name, the extracting command to stub, that stub's body).
+_INSTALLS = {
+    "tofu-sums": (
+        "Install OpenTofu",
+        "SHIPMATE_TOFU_SHA256",
+        f"tofu_{_TOFU}_linux_amd64.zip",
+        "python3",
+        (
+            'mkdir -p "$5"\n'
+            f'printf "#!/usr/bin/env bash\\necho \\"OpenTofu v{_TOFU}\\"\\n" > "$5/tofu"'
+        ),
+    ),
+    "terramate-sums": (
+        "Install Terramate",
+        "SHIPMATE_TERRAMATE_SHA256",
+        f"terramate_{_TERRAMATE}_linux_x86_64.tar.gz",
+        "tar",
+        (
+            f'printf "#!/usr/bin/env bash\\necho {_TERRAMATE}\\n" > "$4/terramate"\n'
+            'chmod +x "$4/terramate"'
+        ),
+    ),
+}
+
+#: Each release directory's whole listing after verify and install, hand-written.
+_RELEASE_FILES = {
+    "tofu-sums": sorted([_TOFU_SUMS, f"{_TOFU_SUMS}.gpgsig", f"tofu_{_TOFU}_linux_amd64.zip"]),
+    "terramate-sums": sorted(
+        ["checksums.txt", "checksums.txt.sig", f"terramate_{_TERRAMATE}_linux_x86_64.tar.gz"]
+    ),
+}
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
+    """The cache saves the whole directory, so a derived file there would be saved and restored.
+
+    Mutation: write the DER signature into `terramate-release` (`$dir/checksums.txt.der`).
+    """
+    step, digest_var, asset, extract, extract_body = _INSTALLS[sid]
+    archive = b"release archive"
+    served = {**_genuine(), asset: archive}
+    r, _, _, _, rt = _run(tmp_path, sid, served=served)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    bin_dir = tmp_path / "bin"
+    _stub(bin_dir, "uname", 'if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi')
+    _stub(bin_dir, extract, extract_body)
+    path = tmp_path / "github_path"
+    path.write_text("", encoding="utf-8")
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, name=step)["run"],
+        {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "RUNNER_TEMP": rt.as_posix(),
+            "GITHUB_PATH": str(path),
+            "SHIPMATE_TOFU_VERSION": _TOFU,
+            "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
+            digest_var: f"{hashlib.sha256(archive).hexdigest()}  {asset}",
+        },
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    assert sorted(os.listdir(release)) == _RELEASE_FILES[sid]
+    if sid == "terramate-sums":
+        assert (rt / "terramate-checksums.der").is_file()

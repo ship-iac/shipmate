@@ -728,18 +728,16 @@ Settings → Actions → General:
 
   ```
   ship-iac/shipmate/*@*
-  opentofu/setup-opentofu@*
   aws-actions/configure-aws-credentials@*
   ```
 
   The list must cover what the engine pulls in, not what your own workflows
   name. shipmate's composite actions execute inside your job, so their `uses:`
   refs are resolved against your repository's list: a consumer whose
-  `shipmate.yml` names no action at all still needs both third-party
-  actions above — `opentofu/setup-opentofu` and
-  `aws-actions/configure-aws-credentials`,
-  the second on every cell path (plan, drift, apply and unlock) even when no cell
-  resolves a role (the step is gated, the `uses:` is not). Omit it and a plan run fails at "Set up job", not
+  `shipmate.yml` names no action at all still needs the one third-party
+  action above, `aws-actions/configure-aws-credentials`, on every cell path
+  (plan, drift, apply and unlock) even when no cell resolves a role (the step
+  is gated, the `uses:` is not). Omit it and a plan run fails at "Set up job", not
   only an apply. Allowing
   GitHub-owned actions covers the engine's other transitive dependencies
   (`actions/cache`, `actions/create-github-app-token`,
@@ -1265,6 +1263,14 @@ for exactly the exposure control 1 exists to limit.
   the same stack and environment saved again under a newer key (a rollback),
   nor anything code that runs with the encryption key writes: code in an apply cell
   holds it, so an entry it saves verifies like any other.
+  The same jobs save the Terramate and OpenTofu release files that `setup`
+  restores in every job (`CONTRACT.md` §Runner prerequisites). Every job
+  verifies those three files per tool against the committed signer keys, so a
+  planted tool entry costs each job a download until it is deleted, never an
+  unverified release file. `actions/cache` restores an entry with `tar -P`,
+  though, so a crafted tool or provider entry can write files outside its cache
+  directory, which nothing verifies; writing one takes a job that
+  saves in the default branch's scope: an apply, deploy or drift run.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval

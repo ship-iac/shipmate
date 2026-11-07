@@ -84,7 +84,7 @@ CUSTOM_POLICY = {"protected_branches": False, "custom_branch_policies": True}
 ACTIONS = "repos/o/r/actions/permissions"
 ACTIONS_WORKFLOW = f"{ACTIONS}/workflow"
 SELECTED_ACTIONS = f"{ACTIONS}/selected-actions"
-#: Every Actions-settings row met, with one consumer pattern beyond the engine's three.
+#: Every Actions-settings row met, with one consumer pattern beyond the engine's two.
 ACTIONS_OK_ROUTES = {
     ACTIONS: {"enabled": True, "allowed_actions": "selected", "sha_pinning_required": True},
     ACTIONS_WORKFLOW: {
@@ -96,7 +96,6 @@ ACTIONS_OK_ROUTES = {
         "verified_allowed": False,
         "patterns_allowed": [
             "ship-iac/shipmate/*@*",
-            "opentofu/setup-opentofu@*",
             "aws-actions/configure-aws-credentials@*",
             "terramate-io/terramate-action@*",
         ],
@@ -119,7 +118,6 @@ LIST_PUT = (
     "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
     "-F github_owned_allowed=true -F verified_allowed=false "
     "-f 'patterns_allowed[]=ship-iac/shipmate/*@*' "
-    "-f 'patterns_allowed[]=opentofu/setup-opentofu@*' "
     "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*'"
 )
 
@@ -2557,7 +2555,7 @@ def _settings_rows(monkeypatch, answers, drop=()):
 
 
 def test_hardened_actions_settings_are_ok_beside_extra_consumer_patterns(monkeypatch):
-    """A consumer's own pattern beyond the engine's three keeps row 12 `ok`.
+    """A consumer's own pattern beyond the engine's two keeps row 12 `ok`.
 
     Mutation: add `or set(current) != set(ALLOWED_PATTERNS)` to the `missing` test in
     `_allowed_actions_gaps`, comparing the list for equality instead of as a superset.
@@ -2654,7 +2652,6 @@ def test_a_missing_required_pattern_is_appended_to_the_current_list(monkeypatch)
         "patterns_allowed": [
             "terramate-io/terramate-action@*",
             "ship-iac/shipmate/*@*",
-            "aws-actions/configure-aws-credentials@*",
         ],
     }
     items = _settings_rows(monkeypatch, {SELECTED_ACTIONS: selected})
@@ -2662,14 +2659,13 @@ def test_a_missing_required_pattern_is_appended_to_the_current_list(monkeypatch)
         "todo",
         ROW_12,
         [
-            "missing opentofu/setup-opentofu@*.",
+            "missing aws-actions/configure-aws-credentials@*.",
             (
                 "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
                 "-F github_owned_allowed=true -F verified_allowed=false "
                 "-f 'patterns_allowed[]=terramate-io/terramate-action@*' "
                 "-f 'patterns_allowed[]=ship-iac/shipmate/*@*' "
-                "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*' "
-                "-f 'patterns_allowed[]=opentofu/setup-opentofu@*'"
+                "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*'"
             ),
         ],
     )
@@ -2712,7 +2708,6 @@ def test_either_selected_actions_boolean_off_alone_makes_row_12_todo(
                 "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
                 "-F github_owned_allowed=true -F verified_allowed=false "
                 "-f 'patterns_allowed[]=ship-iac/shipmate/*@*' "
-                "-f 'patterns_allowed[]=opentofu/setup-opentofu@*' "
                 "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*' "
                 "-f 'patterns_allowed[]=terramate-io/terramate-action@*'"
             ),

@@ -1,18 +1,17 @@
 """actions/setup resolves its tool versions with `scripts/tool-versions`.
 
 Each version is the consumer table's `tools` entry, read from the default branch, else the
-release's own `VERSIONS` pin. No action input selects a version: its one input, `tofu`, only
-decides whether OpenTofu is installed at all.
+release's own `VERSIONS` pin. No action input selects a version: `tofu` decides whether OpenTofu
+is installed at all, and `cache-save` whether the release files are saved to the Actions cache.
 
 The structural guards pin the shape that makes the script the source -- it runs before the
 verify steps and both installers, which read its versions -- and the behavioural ones run the
 script in-process against a hand-written VERSIONS fixture and a mocked contents read. One case
 runs the repository's own file, because that is the file every consumer of this release reads.
 
-The fail-closed property is what the behavioural cases exist for: `opentofu/setup-opentofu`
-resolves an empty `tofu_version` as "latest", and a table read that fails must not install the
-default in place of the consumer's version, so a refusal writes no version: its one output is
-`refusal`, which each detect job reads into the gate description.
+The fail-closed property is what the behavioural cases exist for: a table read that fails must
+not install the default in place of the consumer's version, so a refusal writes no version: its
+one output is `refusal`, which each detect job reads into the gate description.
 """
 
 import base64
@@ -27,18 +26,24 @@ from _shipmate import run_annotated
 _ACTION = "setup"
 _PYTHON_YAML = "$/actions/python-yaml"
 
-#: Every step, in order, by name or, for the unnamed install, by `uses:`. Hand-written: PyYAML
+#: Every step, in order, by name or, for the python-yaml step, by `uses:`. Hand-written: PyYAML
 #: must be present before the resolve step parses the table, the resolve step must precede the
 #: verify steps that read its versions, and both must precede the installers that read their
-#: outputs. The ungated Terramate verify step runs first because it checks the runner
-#: prerequisites (curl and its floor) for every later step. One whole-list comparison pins this.
+#: outputs. The restores, keyed on the versions, precede the verify steps that read their files;
+#: the saves follow the installers, so only verified files are saved. The ungated Terramate verify
+#: step is the first verify step because it checks the runner prerequisites (curl and its floor)
+#: for every later step. One whole-list comparison pins this.
 _EXPECTED_STEPS = [
     _PYTHON_YAML,
     "Resolve versions",
+    "Restore the Terramate release",
+    "Restore the OpenTofu release",
     "Verify Terramate checksums",
     "Verify OpenTofu checksums",
     "Install OpenTofu",
     "Install Terramate",
+    "Save the Terramate release",
+    "Save the OpenTofu release",
     "Provider plugin cache",
 ]
 
@@ -52,19 +57,17 @@ _EXPECTED_RESOLVE = {
     "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/tool-versions"',
 }
 
-#: The OpenTofu installer's whole `with:` block. `uses:` is deliberately absent -- it is a pin,
-#: bumped on its own schedule, and pinning it here would red this guard on every pin bump.
-_EXPECTED_TOFU_WITH = {
-    "tofu_version": "${{ steps.versions.outputs.tofu }}",
-    "tofu_wrapper": False,
-    "checksums": "${{ steps.tofu-sums.outputs.tofu_sha256 }}",
+#: Both installers are `run:` steps; each whole `env:` block carries the version, the signed
+#: `sha256sum` lines and its own tool's restored cache key.
+_EXPECTED_TOFU_ENV = {
+    "SHIPMATE_TOFU_VERSION": "${{ steps.versions.outputs.tofu }}",
+    "SHIPMATE_TOFU_SHA256": "${{ steps.tofu-sums.outputs.tofu_sha256 }}",
+    "SHIPMATE_CACHE_KEY": "${{ steps.tofu-cache.outputs.cache-matched-key }}",
 }
-
-#: The Terramate installer is a `run:` step; its whole `env:` block carries the version and the
-#: signed `sha256sum` lines.
 _EXPECTED_TERRAMATE_ENV = {
     "SHIPMATE_TERRAMATE_VERSION": "${{ steps.versions.outputs.terramate }}",
     "SHIPMATE_TERRAMATE_SHA256": "${{ steps.terramate-sums.outputs.terramate_sha256 }}",
+    "SHIPMATE_CACHE_KEY": "${{ steps.terramate-cache.outputs.cache-matched-key }}",
 }
 
 #: Two versions with their floors.
@@ -113,47 +116,72 @@ def test_the_resolve_step_runs_the_script_with_the_token():
 
 
 def test_both_installers_read_the_resolved_version_and_the_verified_digests():
-    """Mutation: point the OpenTofu installer's `checksums` at `steps.versions`."""
-    got = (
-        step_by(_ACTION, name="Install OpenTofu").get("with"),
-        step_by(_ACTION, name="Install Terramate").get("env"),
-    )
-    assert got == (_EXPECTED_TOFU_WITH, _EXPECTED_TERRAMATE_ENV)
+    """Neither installer is a third-party action.
+
+    Mutations: point the OpenTofu installer's `SHIPMATE_TOFU_SHA256` at `steps.versions`; map
+    the Terramate installer's `SHIPMATE_CACHE_KEY` to `steps.tofu-cache.outputs.cache-primary-key`.
+    """
+    tofu = step_by(_ACTION, name="Install OpenTofu")
+    terramate = step_by(_ACTION, name="Install Terramate")
+    got = (tofu.get("env"), tofu.get("uses"), terramate.get("env"), terramate.get("uses"))
+    assert got == (_EXPECTED_TOFU_ENV, None, _EXPECTED_TERRAMATE_ENV, None)
 
 
-#: The action's whole `inputs:` mapping. A version override input would read as a second source
-#: beside VERSIONS, so any input beyond `tofu` reds this.
+#: The action's whole `inputs:` mapping. A version input would be a second source of the version
+#: beside VERSIONS, so any added input reds this.
 _EXPECTED_INPUTS = {
     "tofu": {
         "description": 'Whether to install OpenTofu. "false" for jobs that never run it.',
         "required": False,
         "default": "true",
     },
+    "cache-save": {
+        "description": (
+            '"false" where the workflow declares cache-mode: read, whose token cannot save; '
+            "a save there only warns."
+        ),
+        "required": False,
+        "default": "true",
+    },
 }
 
 
-def test_the_only_input_is_the_tofu_switch():
-    """Mutations: `default: "true"` -> `"false"`; add a `tofu-version` input."""
+def test_the_inputs_are_the_tofu_and_cache_save_switches():
+    """Mutations: `tofu` `default: "true"` -> `"false"`; `cache-save` `default: "true"` ->
+    `"false"`; add a `tofu-version` input."""
     assert action_yaml(_ACTION).get("inputs") == _EXPECTED_INPUTS
 
 
-def test_only_the_opentofu_steps_are_gated_on_the_tofu_input():
+def test_each_steps_if_is_pinned():
     """Composite inputs are strings, and expression string comparison ignores case, so
     anything but "false" in any case installs OpenTofu. A job that never runs tofu skips its
-    verify step too, so an OpenTofu signer change or outage cannot fail it.
+    restore, verify and save steps too, so an OpenTofu signer change or outage cannot fail it.
+    No save `if:` holds a status function, so a failed verify or install saves nothing.
 
     Mutations: `!=` -> `==` in the `Install OpenTofu` step's `if:`; remove the `if:` on
     `Verify OpenTofu checksums`; add `if: ${{ inputs.tofu != 'false' }}` to `Install Terramate`;
-    add one to the python-yaml step.
+    add one to the python-yaml step; drop `inputs.tofu != 'false' &&` from the OpenTofu save;
+    remove the `if:` on the OpenTofu restore.
     """
+    tofu = "${{ inputs.tofu != 'false' }}"
     got = {s.get("name") or s.get("uses"): s.get("if") for s in action_steps(_ACTION)}
     assert got == {
         _PYTHON_YAML: None,
         "Resolve versions": None,
-        "Verify OpenTofu checksums": "${{ inputs.tofu != 'false' }}",
+        "Restore the Terramate release": None,
+        "Restore the OpenTofu release": tofu,
+        "Verify OpenTofu checksums": tofu,
         "Verify Terramate checksums": None,
-        "Install OpenTofu": "${{ inputs.tofu != 'false' }}",
+        "Install OpenTofu": tofu,
         "Install Terramate": None,
+        "Save the Terramate release": (
+            "${{ inputs.cache-save != 'false' && "
+            "steps.terramate-cache.outputs.cache-hit != 'true' }}"
+        ),
+        "Save the OpenTofu release": (
+            "${{ inputs.tofu != 'false' && inputs.cache-save != 'false' && "
+            "steps.tofu-cache.outputs.cache-hit != 'true' }}"
+        ),
         "Provider plugin cache": None,
     }
 

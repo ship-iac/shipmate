@@ -10,8 +10,7 @@ here, in every job: an unreadable file, invalid YAML, a top level that is not a 
 to refuse.
 
 Writes `terramate` and `tofu`. Every failure refuses and writes neither, only the `refusal`
-output: setup-opentofu installs "latest" for an empty version, and a failed table read must not
-install the default in place of the consumer's version.
+output: a failed table read must not install the default in place of the consumer's version.
 """
 
 import os
