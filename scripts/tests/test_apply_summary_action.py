@@ -30,6 +30,7 @@ from _loader import (
     action_yaml,
     bash_only,
     load_script,
+    run_step,
     run_with_gate_gh,
     step_by,
     workflow_yaml,
@@ -511,3 +512,66 @@ def test_the_lock_inputs_are_optional_with_empty_defaults():
         "auto": {"required": False, "default": "false"},
         "pusher": {"required": False, "default": ""},
     }
+
+
+_POST = "Post apply result comment"
+
+
+def _run_post(tmp_path, gh_rc):
+    """Run the shipped POST step with a PATH `gh` stub exiting `gh_rc`; return the process and
+    the `GITHUB_OUTPUT` text."""
+    gh = tmp_path / "gh"
+    gh.write_text(f"#!/bin/bash\nexit {gh_rc}\n", newline="\n")
+    gh.chmod(0o755)
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}",
+        "GH_TOKEN": "x",
+        "PR_NUMBER": "42",
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_OUTPUT": str(output),
+    }
+    proc = run_step(tmp_path, step_by("apply-summary", name=_POST)["run"], env)
+    return proc, output.read_text(encoding="utf-8")
+
+
+@bash_only
+def test_a_posted_result_writes_posted_true(tmp_path):
+    """The apply `outcome` job replies only when `posted` is not `true`.
+    Mutation: drop the `posted=true` write -> the output is empty."""
+    proc, output = _run_post(tmp_path, gh_rc=0)
+    assert (proc.returncode, output) == (0, "posted=true\n"), proc.stderr
+
+
+@bash_only
+def test_a_failed_post_writes_nothing(tmp_path):
+    """A result comment that never arrived must leave `posted` unset, so the outcome job
+    replies. Mutation: write `posted=true` before the POST -> the output holds it."""
+    proc, output = _run_post(tmp_path, gh_rc=1)
+    assert proc.returncode != 0, "a failed POST must fail the step"
+    assert output == ""
+
+
+def test_the_action_exposes_posted_from_the_post_step():
+    """Mutation: map `posted` to `${{ steps.token.outputs.posted }}`; drop the POST step's
+    `id: post`; append a step after the POST."""
+    assert action_yaml("apply-summary")["outputs"] == {
+        "posted": {
+            "description": (
+                "`true` once the result comment is posted. Empty when the POST failed or never ran."
+            ),
+            "value": "${{ steps.post.outputs.posted }}",
+        }
+    }
+    assert step_by("apply-summary", id="post")["name"] == _POST
+    assert [s.get("name") for s in _steps()][-1] == _POST
+
+
+def test_the_apply_summary_job_passes_posted_on():
+    """Mutations: map the job's `posted` to another step id; drop the step's `id: result`."""
+    job = workflow_yaml("apply.yml")["jobs"]["summary"]
+    assert job["outputs"] == {"posted": "${{ steps.result.outputs.posted }}"}
+    step = _find_step(job["steps"], uses_contains="actions/apply-summary")
+    assert step["id"] == "result"

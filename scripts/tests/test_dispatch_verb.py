@@ -742,17 +742,9 @@ _STARTED_ANSWER = (
 _STARTED_URL = "https://github.com/org/repo/actions/runs/38481239914"
 
 
-@pytest.mark.parametrize(
-    ("verb", "environment", "header"),
-    [
-        ("apply", "dev-eu", "### shipmate apply dev-eu"),
-        ("unlock", "dev-eu", "### shipmate unlock dev-eu"),
-        ("plan", "", "### shipmate plan"),
-    ],
-)
 @bash_only
-def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, header):
-    """Every dispatching verb replies on the pull request with the whole notice: the header, a
+def test_a_started_run_gets_a_reply_linking_it(tmp_path):
+    """A started unlock run replies on the pull request with the whole notice: the header, a
     verdict linking the started run by a URL the engine builds from `workflow_run_id`, and the
     footer linking the comment-handling run. Posted with the workflow token, since the App
     token is minted `actions: write` and cannot comment. The stub's dispatch answer carries a
@@ -760,20 +752,36 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, head
 
     Mutations: parse `html_url` instead of `workflow_run_id`; capture the dispatch with `2>&1`
     (the warning corrupts the JSON, and the link is lost); pass no run id to the reply;
-    skip the reply for one verb (`[ "$VERB" = plan ] ||`); drop `GH_TOKEN="$COMMENT_TOKEN"`
-    from `reply`.
+    drop `GH_TOKEN="$COMMENT_TOKEN"` from `reply`.
+    """
+    result, argv = _run_dispatch(
+        tmp_path, verb="unlock", environment="dev-eu", gh_stub=_answering_stub(_STARTED_ANSWER)
+    )
+    assert result.returncode == 0, f"unlock dispatch failed: {result.stdout}{result.stderr}"
+    assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
+    assert "token=workflow_token\napi\n-X\nPOST\nrepos/org/repo/issues/42/comments\n" in argv, (
+        f"the reply must be posted with the workflow token, gh saw: {argv!r}"
+    )
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        "### shipmate unlock dev-eu\n\n"
+        f"⚪ started [the unlock run]({_STARTED_URL})\n\n[comment run]({_RUN_URL})"
+    )
+
+
+@pytest.mark.parametrize(("verb", "environment"), [("plan", ""), ("apply", "dev-eu")])
+@bash_only
+def test_a_started_plan_or_apply_run_posts_no_reply(tmp_path, verb, environment):
+    """A plan or apply run answers on the pull request itself, with its result comment or its
+    outcome reply, so a successful dispatch of either verb makes no comment call and exits 0.
+
+    Mutation: drop the `[ "$VERB" = unlock ]` condition around the started reply.
     """
     result, argv = _run_dispatch(
         tmp_path, verb=verb, environment=environment, gh_stub=_answering_stub(_STARTED_ANSWER)
     )
     assert result.returncode == 0, f"{verb} dispatch failed: {result.stdout}{result.stderr}"
     assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
-    assert "token=workflow_token\napi\n-X\nPOST\nrepos/org/repo/issues/42/comments\n" in argv, (
-        f"the reply must be posted with the workflow token, gh saw: {argv!r}"
-    )
-    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
-        f"{header}\n\n⚪ started [the {verb} run]({_STARTED_URL})\n\n[comment run]({_RUN_URL})"
-    )
+    assert "issues/42/comments" not in argv, f"a {verb} dispatch must not reply: {argv!r}"
 
 
 @pytest.mark.parametrize(
@@ -798,12 +806,12 @@ def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path,
     The id check itself is `_shipmate.is_run_id`, pinned in `test_reply_comment.py`.
     """
     result, _ = _run_dispatch(
-        tmp_path, verb="apply", environment="dev-eu", gh_stub=_answering_stub(answer)
+        tmp_path, verb="unlock", environment="dev-eu", gh_stub=_answering_stub(answer)
     )
     assert result.returncode == 0, f"dispatch failed: {result.stdout}{result.stderr}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
-        "### shipmate apply dev-eu\n\n"
-        "⚪ started the apply run; it is listed in this repository's Actions tab\n\n"
+        "### shipmate unlock dev-eu\n\n"
+        "⚪ started the unlock run; it is listed in this repository's Actions tab\n\n"
         f"[comment run]({_RUN_URL})"
     )
     assert (tmp_path / "run_id.txt").read_text(encoding="utf-8") == passed_id
@@ -819,7 +827,7 @@ def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
     """
     result, _ = _run_dispatch(
         tmp_path,
-        verb="apply",
+        verb="unlock",
         environment="dev-eu",
         gh_stub=_answering_stub(_STARTED_ANSWER, reply_exit=1),
     )

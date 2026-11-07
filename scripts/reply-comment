@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Post a one-verdict reply comment: a refusal, a failure, a notice or a started run.
 
-The bash sites in `actions/comment-ops` and `actions/dispatch` post their replies through this
-script, so every one carries the shared header and footer from `summary-comment`. Reads:
+Every engine reply posts through this script, so every one carries the shared header and
+footer from `summary-comment`. Reads:
 
 - `SHIPMATE_REPLY_VERB`, `SHIPMATE_REPLY_ENV`: the header words, `_md_escape`d there; an empty
   verb gives `### shipmate`.
 - `SHIPMATE_REPLY_OUTCOME`: `refused` (the engine decided not to run the command), `failed` (it
-  could not), `notice`, or `started` (a dispatch started the verb's run). Anything else prints
+  could not), `notice`, or `started` (the unlock dispatch started its run). Anything else prints
   `::error::` to stderr and exits 1, posting nothing.
 - `SHIPMATE_REPLY_TEXT`: the reason or notice, posted unescaped. Engine text, holding a
   commenter's text only inside a code span (`comment-parse`'s `_quotable`). Not read for

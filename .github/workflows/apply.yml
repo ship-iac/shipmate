@@ -302,6 +302,8 @@ jobs:
     # one GITHUB_TOKEN scope needed is actions:read, for apply-summary's artifact download and
     # run-jobs listing.
     permissions: { actions: read }
+    outputs:
+      posted: ${{ steps.result.outputs.posted }}
     steps:
       - name: Complete gate if every apply check is done
         uses: $/actions/gate-refresh
@@ -311,6 +313,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # A failed gate refresh still posts the run's results; the job stays red.
       - name: Post apply result comment
+        id: result
         if: ${{ !cancelled() }}
         uses: $/actions/apply-summary
         with:
