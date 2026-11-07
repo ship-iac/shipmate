@@ -192,6 +192,18 @@ def test_a_failed_or_malformed_listing_is_undetermined(calls, monkeypatch, capsy
     assert (post(capsys)[0], calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
 
 
+def test_a_created_at_without_a_zone_is_undetermined(calls, monkeypatch, capsys):
+    """A naive time cannot be compared with `t0`. Mutation: drop the `tzinfo` check -> the
+    comparison raises `TypeError` instead of exiting `UNDETERMINED`."""
+    answering(
+        monkeypatch,
+        calls,
+        [SystemExit(BAD_GATEWAY), ANSWER],
+        ['{"created_at": "2026-11-07T11:59:55"}'],
+    )
+    assert (post(capsys)[0], calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
+
+
 def test_a_failed_listing_prints_its_failure(calls, monkeypatch, capsys):
     """Mutation: drop the listing failure's print -> stderr ends at the retry warning."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit(FORBIDDEN)])
