@@ -211,8 +211,8 @@ jobs:
     needs: [snapshot, wave0]
     if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') }}
     runs-on: ubuntu-slim
-    # Warn only: `complete` re-completes every check and fails the level itself; failing here
-    # would skip successor env-levels over a check `complete` then completes.
+    # Never fails the level: `complete` handles every check again, so failing here would skip
+    # successor env-levels over a check `complete` then completes.
     continue-on-error: true
     permissions: { actions: read }
     environment: { name: shipmate-engine, deployment: false }

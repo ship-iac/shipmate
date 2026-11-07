@@ -541,7 +541,7 @@ _LAYOUT_SKEW = "has no .github/workflows/shipmate.yml"
 #: value to compare and a part-check would only relocate the hole -- the remedy half in
 #: particular, which must name the page that publishes the file the consumer has to author:
 #: a pin bump does not write it, and `docs/releasing.md` is the maintainer's runbook.
-#: `_LAYOUT_SKEW` stays a substring for the two tests that assert this message is ABSENT.
+#: `_LAYOUT_SKEW` stays a substring for the three tests that assert this message is ABSENT.
 _LAYOUT_MESSAGE = (
     "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no "
     "workflow_dispatch trigger or not the inputs this verb's dispatch sends. "

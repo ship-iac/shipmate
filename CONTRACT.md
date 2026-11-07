@@ -190,9 +190,10 @@ completion job's selection over the whole level, so a failed cell is named
 twice per level by `these cells' apply jobs did not succeed`, and a completion
 job whose retry ran out (its `::error::… left pending` names the cells) may be
 followed by `complete` completing those same checks. A completion job's failure
-never fails the level (job-level `continue-on-error: true`): `complete`'s
-result alone decides it, and `complete` lists the whole level again, so a check
-a completion job left pending gets the same floor, retry and fail-over there. "Re-run failed jobs" skips `snapshot` and reuses its outputs.
+never fails the level (job-level `continue-on-error: true`): `complete` then
+handles every check of the level, those a completion job left pending
+included, as it handles any level's checks. "Re-run failed jobs" skips
+`snapshot` and reuses its outputs.
 A plan re-run can create a fresh duplicate apply check; a duplicate created
 *after the snapshot* is therefore left pending (its plan was not applied by this run),
 while duplicates that predate the apply are all completed so the gate never

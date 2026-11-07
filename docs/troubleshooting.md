@@ -1353,7 +1353,6 @@ starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause
 | Annotation ends with | Cause and remedy |
 |---|---|
 | "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
-| "sha256sum printed no digest for <archive>." | `sha256sum` could not read the downloaded archive (a disk or permission fault on the runner). Re-run the job. If it repeats and the step restored a tool cache entry, delete that entry (`gh cache delete <key> --repo <repo>`, the key `shipmate-tools-<os>-<arch>-<tool>-<version>`) so the next job downloads the archive. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
 | "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
@@ -1381,6 +1380,7 @@ checksum file: Terramate's `checksums.txt`, OpenTofu's `tofu_<version>_SHA256SUM
 | "the signed <sums> yields no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no digest in the signed file, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
 | "<url> answered HTTP 404 (curl exit <rc>); check the signed <sums> and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
 | "<url> answered HTTP <code> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
+| "sha256sum printed no digest for <archive>." | `sha256sum` could not read the downloaded archive (a disk or permission fault on the runner). Re-run the job. If it repeats and the step restored a tool cache entry, delete that entry (`gh cache delete <key> --repo <repo>`, the key `shipmate-tools-<os>-<arch>-<tool>-<version>`) so the next job downloads the archive. |
 | "<url> has sha256 <got>, not the <want> the signed <sums> names; the release asset differs from the signed one." | The downloaded archive is not the one upstream signed. A re-run downloads the same asset: report it, and do not install it by hand. |
 | "tar could not extract terramate from <url>." or "python3 could not extract OpenTofu from <url>." | The downloaded archive did not unpack. |
 | "could not make the OpenTofu binary executable." | `chmod` failed on the unpacked binary under `RUNNER_TEMP`. |
@@ -1402,8 +1402,9 @@ fails after retries met a longer outage: re-run the job.
 A release file `setup` restored from the tool cache failed the check a download
 gets, or is missing or not a regular file: the checksum file or its signature in
 a `Verify Terramate checksums` or `Verify OpenTofu checksums` step, the archive
-in an `Install Terramate` or `Install OpenTofu` step. The step deleted its
-files, downloaded them again and verified them, so the job went on. The warning
+in an `Install Terramate` or `Install OpenTofu` step. The step deletes its
+files, downloads them again and verifies them; the job goes on when that fresh
+copy passes, and fails with the step's own annotation when it does not. The warning
 gives the reason the restored files failed, then `Downloading <files> again.
 Every job repeats this download until the entry is deleted: gh cache delete
 <key> --repo <owner>/<repo>`, where `<files>` names the checksum file and its
@@ -1412,8 +1413,8 @@ signature, or the archive. The entry is corrupt or was altered
 
 1. Run the `gh cache delete` command the warning prints. The key starts
    `shipmate-tools-`.
-2. Nothing needs a re-run. The next apply, deploy or drift job that misses
-   saves a fresh entry.
+2. Re-run the job only if it failed. The next apply, deploy or drift job that
+   misses saves a fresh entry.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 
@@ -2276,8 +2277,9 @@ A `shipmate plan` or `shipmate apply` comment got the 🚀 reaction, and neither
 a result nor a 🔴 reply followed within a few minutes. The run ended before its
 `outcome` job could answer: an apply run's `guard` job refused it, a plan run's
 `facts` job failed, or the run failed at startup. Otherwise the run's
-`outcome` job's state and log name the cause; `CONTRACT.md` §Outcome reply lists
-when it is skipped.
+`outcome` job shows why: skipped (`CONTRACT.md` §Outcome reply lists when),
+failed at its key check or token mint, or green with a
+`could not post the no-result reply` warning.
 
 Open the Actions tab and filter the runs titled `shipmate · <verb>`. A failed
 `guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
