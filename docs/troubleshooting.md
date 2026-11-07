@@ -2223,9 +2223,8 @@ A `shipmate plan` or `shipmate apply` comment got the 🚀 reaction, and neither
 a result nor a 🔴 reply followed within a few minutes. The run ended before its
 `outcome` job could answer: an apply run's `guard` job refused it, a plan run's
 `facts` job failed, or the run failed at startup. Otherwise the run's
-`outcome` job says why: skipped (`CONTRACT.md` §Outcome reply lists when),
-failed at its key check or token mint, or done with a
-`could not post the no-result reply` warning.
+`outcome` job's state and log name the cause; `CONTRACT.md` §Outcome reply lists
+when it is skipped.
 
 Open the Actions tab and filter the runs titled `shipmate · <verb>`. A failed
 `guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
