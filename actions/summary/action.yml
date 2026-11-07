@@ -452,12 +452,12 @@ runs:
           fi
           exit 0
         fi
-        # Nothing changed: post only over a visible plan comment, which would keep showing stale
-        # applies, or for a doctor warning outside the settings probes, the unmanaged line,
-        # the lost pairs line, or a `shipmate plan` command (CONTRACT.md §Plan comment).
+        # Nothing changed: rewrite the newest visible plan comment, which would keep showing stale
+        # applies, and post none; a doctor warning outside the settings probes, the unmanaged line,
+        # the lost pairs line, or a `shipmate plan` command still posts (CONTRACT.md §Plan comment).
         args=("$PR" comment.md --new --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ] && [ "$ON_DEMAND" != "true" ]; then
-          args+=(--update-only)
+          args=("$PR" comment.md --update-only --head "$HEAD_SHA")
         fi
         # A failed listing or write fails the job before any apply check or gate: a gate over a
         # stale comment shows the previous head's plan. A publish hold this run wrote stays.

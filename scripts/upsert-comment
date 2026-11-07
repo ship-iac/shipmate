@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write the comment a body file names on a pull request: replace it, or post a new one.
 
-Usage: `upsert-comment PR BODYFILE [--new] [--update-only] [--head SHA]`, with `gh` (`GH_TOKEN`)
+Usage: `upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]`, with `gh` (`GH_TOKEN`)
 against `GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::`
 before the body file is read or any `gh` call, because it is bound into the API path; so does a
 `--head` that is not a 40-character lowercase hex SHA, and any other or repeated argument.
@@ -17,16 +17,19 @@ report interpolates repository data, so either can quote the other's marker, and
 match would write over or minimize the other comment. Only the first 64 characters of each body
 reach this script, which the marker's length bound keeps inside.
 
-Without `--new`, the first marker comment in listing order is PATCHed, or the body is POSTed
+Without a flag, the first marker comment in listing order is PATCHed, or the body is POSTed
 when there is none.
+
+With `--update-only`, the newest visible marker comment is PATCHed, and nothing is POSTed.
 
 With `--new`, the body is always POSTed, then every earlier marker comment that is visible and
 by the POST's author (its response's `user.login`) is minimized as outdated. Posting first means
 the pull request never shows zero plan comments, and the new comment is never one minimized.
-Visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids (`minimized_ids`). A read
-that fails or is incomplete, a non-boolean `isMinimized` included, prints one `::warning::` and
-every marker comment counts as visible: failing the step would drop the run's comment to save a
-no-op, since minimizing a minimized comment changes nothing. Each failed minimize prints one
+Under either flag, visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids
+(`minimized_ids`). A read that fails or is incomplete, a non-boolean `isMinimized` included,
+prints one `::warning::` and every marker comment counts as visible: failing the step would drop
+the run's comment to save a no-op, since minimizing a minimized comment changes nothing, and the
+newest comment is the one to bring up to date either way. Each failed minimize prints one
 `::warning::`, as does a POST response with no author, and the run goes on. Every warning goes
 to stderr on one line; one quoting an unexpected answer quotes its first 200 characters.
 
@@ -36,10 +39,10 @@ comment.
 
 Prints exactly one word and exits 0:
 
-- `updated`: the first marker comment was PATCHed (never with `--new`).
+- `updated`: a marker comment was PATCHed (never with `--new`).
 - `created`: the body was POSTed.
-- `skipped`: `--update-only` and no marker comment (with `--new`, no visible one); nothing
-  written, and the head is not read.
+- `skipped`: `--update-only` and no visible marker comment; nothing written, and the head is
+  not read.
 - `moved`: the pull request's head is not `--head`; nothing written.
 - `head-failed`: the head read failed or gave no head SHA; nothing written.
 - `list-failed`: the listing failed on any page, or printed a line that is not an
@@ -168,15 +171,15 @@ def _minimize_earlier(pr, visible, response):
 
 def _args(argv):
     """(PR, BODYFILE, new, update_only, head or None) from `argv`, or `::error::` usage."""
-    usage = "::error::usage: upsert-comment PR BODYFILE [--new] [--update-only] [--head SHA]"
+    usage = "::error::usage: upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]"
     if len(argv) < 2:
         sys.exit(usage)
     pr, path, rest = argv[0], argv[1], argv[2:]
     new, update_only, head = False, False, None
     while rest:
-        if rest[0] == "--new" and not new:
+        if rest[0] == "--new" and not new and not update_only:
             new, rest = True, rest[1:]
-        elif rest[0] == "--update-only" and not update_only:
+        elif rest[0] == "--update-only" and not update_only and not new:
             update_only, rest = True, rest[1:]
         elif rest[0] == "--head" and head is None and len(rest) > 1:
             head, rest = rest[1], rest[2:]
@@ -234,7 +237,7 @@ def main():
         print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    visible = _visible(found, pr) if new else found
+    visible = _visible(found, pr) if new or update_only else found
     if not visible and update_only:
         print("skipped")
         return
@@ -242,6 +245,8 @@ def main():
     if stop:
         print(stop)
         return
+    if update_only:
+        found = visible[-1:]
     response, word = _write(repo, pr, path, None if new or not found else found[0]["id"])
     if new:
         _minimize_earlier(pr, visible, response)

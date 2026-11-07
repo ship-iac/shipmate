@@ -196,7 +196,7 @@ def test_update_only_with_a_match_still_patches(monkeypatch, tmp_path, capsys):
     """Mutation: treat `--update-only` as "write nothing"."""
     code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY)], "--update-only")
     assert code == 0
-    assert calls == [LIST_ARGV, _patch(5, tmp_path)]
+    assert calls == [LIST_ARGV, _read("IC_5"), _patch(5, tmp_path)]
     assert capsys.readouterr().out == "updated\n"
 
 
@@ -251,6 +251,16 @@ def test_a_null_head_prints_head_failed_not_moved(monkeypatch, tmp_path, capsys)
         "head-failed\n",
         "pull request #7 has head SHA None and draft False\n",
     )
+
+
+def test_update_only_patches_the_newest_visible_comment(monkeypatch, tmp_path, capsys):
+    """A quiet run rewrites the plan comment people see, and posts and minimizes nothing.
+    Mutations: PATCH the first listed comment -- comment 5; PATCH the newest listed one, minimized
+    or not -- comment 7; skip the visibility read under `--update-only` -- comment 5."""
+    listing = [_head(5, SUMMARY), _head(6, SUMMARY), _head(7, SUMMARY)]
+    code, calls = _upsert(monkeypatch, tmp_path, listing, "--update-only", minimized={"IC_7"})
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5", "IC_6", "IC_7"), _patch(6, tmp_path)])
+    assert capsys.readouterr() == ("updated\n", "")
 
 
 def test_update_only_with_no_match_never_reads_the_head(monkeypatch, tmp_path, capsys):
@@ -360,13 +370,15 @@ def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
         ["--head"],
         ["--head", "c" * 40, "--head", "c" * 40],
         ["--new", "--new"],
+        ["--new", "--update-only"],
+        ["--update-only", "--new"],
     ],
 )
 def test_unknown_arguments_are_refused_before_any_call(monkeypatch, tmp_path, flags):
     """Mutations: accept any third argument as `--update-only`; accept `--new` repeated
-    (`--new --new` red)."""
+    (`--new --new` red); accept `--new` with `--update-only` (both orders red)."""
     code, calls = _upsert(monkeypatch, tmp_path, [], *flags)
-    assert code == "::error::usage: upsert-comment PR BODYFILE [--new] [--update-only] [--head SHA]"
+    assert code == "::error::usage: upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]"
     assert calls == []
 
 
@@ -462,14 +474,14 @@ def test_new_a_failed_visibility_read_counts_every_comment_visible(
     assert capsys.readouterr() == ("created\n", _READ_WARNING + error + "\n")
 
 
-def test_new_update_only_posts_after_a_failed_visibility_read(monkeypatch, tmp_path, capsys):
+def test_update_only_patches_after_a_failed_visibility_read(monkeypatch, tmp_path, capsys):
     """Mutation: treat a failed read as "no visible comment" -- `skipped`."""
     code, calls = _upsert(
-        monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", "--update-only", visibility_fails=True
+        monkeypatch, tmp_path, [_head(5, SUMMARY)], "--update-only", visibility_fails=True
     )
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _post(tmp_path), _minimize("IC_5")])
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), _patch(5, tmp_path)])
     assert capsys.readouterr() == (
-        "created\n",
+        "updated\n",
         _READ_WARNING + "command failed (1): gh api graphql | HTTP 502\n",
     )
 
@@ -492,14 +504,13 @@ def test_new_minimizes_only_this_authors_plan_comments(monkeypatch, tmp_path, ca
     assert capsys.readouterr() == ("created\n", "")
 
 
-def test_new_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_path, capsys):
-    """The newest plan comment minimized by a person, then a quiet run: nothing posted, no head
-    read. Mutation: test the listed comments instead of the visible ones -- a POST follows."""
+def test_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_path, capsys):
+    """The newest plan comment minimized by a person, then a quiet run: nothing written, no head
+    read. Mutation: test the listed comments instead of the visible ones -- a PATCH follows."""
     code, calls = _upsert(
         monkeypatch,
         tmp_path,
         [_head(5, SUMMARY)],
-        "--new",
         "--update-only",
         "--head",
         _HEAD,
@@ -676,6 +687,10 @@ _LIST = LIST_ARGV[1:]
 
 def _post_of(body):
     return ["api", "repos/o/r/issues/7/comments", "-F", f"body=@{body}"]
+
+
+def _patch_of(cid, body):
+    return ["api", "-X", "PATCH", f"repos/o/r/issues/comments/{cid}", "-F", f"body=@{body}"]
 
 
 #: The `--new` visibility read and minimize of `_head(5, ...)`'s comment, as the argv after `gh`.
@@ -904,21 +919,41 @@ _POSTS = [_LIST, _PULLS, _post_of("comment.md")]
             "false",
             "false",
             _head(5, SUMMARY),
+            [_LIST, _READ_5, _PULLS, _patch_of(5, "comment.md")],
+            "updated",
+        ),
+        (
+            "post",
+            "false",
+            "false",
+            "false",
+            "false",
+            _head(5, SUMMARY),
             [_LIST, _READ_5, _PULLS, _post_of("comment.md"), _MINIMIZE_5],
             "created",
         ),
     ],
-    ids=["quiet", "ordinary", "doctor-warned", "unmanaged", "lost", "on-demand", "quiet-existing"],
+    ids=[
+        "quiet",
+        "ordinary",
+        "doctor-warned",
+        "unmanaged",
+        "lost",
+        "on-demand",
+        "quiet-existing",
+        "ordinary-existing",
+    ],
 )
-def test_summary_posts_unless_quiet_and_replaces_a_visible_comment(
+def test_summary_posts_unless_quiet_and_rewrites_a_visible_comment_when_quiet(
     tmp_path, mode, warned, unmanaged, lost, on_demand, listing, expected, result
 ):
     """Nothing changed, no doctor warning, no unmanaged line, no lost pairs line and no
-    `shipmate plan` command: post only over a visible plan comment, which is then minimized.
-    upsert-comment's word is output `result`.
+    `shipmate plan` command: rewrite the newest visible plan comment and post none. Any other run
+    posts and minimizes the earlier comment. upsert-comment's word is output `result`.
 
     A quiet run with no comment reads no head (`quiet`).
-    Mutations: drop `--new` from the posted write (quiet-existing PATCHes); delete the
+    Mutations: drop `--new` from the posted write (ordinary-existing PATCHes); keep `--new` on
+    the quiet write (quiet-existing posts); delete the
     `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED` clause (unmanaged red);
     delete the `LOST` clause (lost red); delete the `ON_DEMAND` clause (on-demand red); delete
     the `nothing-changed` clause (ordinary red); drop the posted branch's `result=` line (every
