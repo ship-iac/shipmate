@@ -1840,11 +1840,12 @@ check/status/comment/issue that crosses a workflow-run boundary:
   write, which GitHub commit statuses lack.
 - **The plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
-  `shipmate[bot]`), posted new by `actions/summary` on each plan run that
-  writes it, through `scripts/upsert-comment --new`, which reads the marker
-  from the body's first line and matches it only at the start of a comment.
-  Under the same `pull_requests: write` token it then minimizes the App's
-  earlier visible plan comments as outdated (GraphQL `minimizeComment`;
+  `shipmate[bot]`), posted new by `actions/summary` through
+  `scripts/upsert-comment --new`, or, on a quiet no-change run, written over
+  the newest visible one through `--update-only` (§Plan comment). The script
+  reads the marker from the body's first line and matches it only at the start
+  of a comment. Under the same `pull_requests: write` token it then minimizes
+  the App's other visible plan comments as outdated (GraphQL `minimizeComment`;
   §Plan comment).
 - **The `shipmate doctor` report** — App-authored (its own marker +
   Bot-author lookup, same posture as the plan comment), upserted in place by
@@ -2914,13 +2915,14 @@ writes nothing for the held body, and fails the job ("could not read the head
 of pull request #<n>, so no plan comment was written") before any
 apply check or gate is written for the plan body.
 
-Where the zero *does* mean no stacks changed, the run posts the no-changes body
-only over a visible plan comment, because a pull request that planned changes
-and then pushed them away must not keep displaying applies that no longer
-exist. With no visible plan comment (none yet, or every one minimized), none is
-posted — a docs-only
+Where the zero *does* mean no stacks changed, the run posts no new comment: it
+rewrites the newest visible plan comment with the no-changes body, because a
+pull request that planned changes and then pushed them away must not keep
+displaying applies that no longer exist. With no visible plan comment (none yet,
+or every one minimized), it writes none — a docs-only
 or engine-pin-bump pull request carries no shipmate comment — with four
-exceptions. A run where `doctor` emitted a warning still posts: doctor's
+exceptions, each of which posts a new comment like a run that planned changes.
+A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
 (see §Comment-ops), and this comment's doctor line links that run from the pull
 request. `::notice::` findings do not trigger the exception: they are
@@ -2939,23 +2941,27 @@ applies. A run a `shipmate plan` command started also posts: the comment is that
 command's answer on the pull request (§Comment-ops).
 
 Each plan run that writes the comment posts a new one, so each plan sits after
-the push or command it answers in the pull request timeline. A draft autoplan,
-a cancelled plan job and a run whose pull request moved to a newer head write
-none. After the post, `scripts/upsert-comment --new` minimizes as outdated
-(GraphQL `minimizeComment`, classifier `OUTDATED`) every earlier visible plan
-comment by the new comment's author. A plan comment is a Bot-authored comment
+the push or command it answers in the pull request timeline, except the quiet
+no-change run above, which PATCHes the newest visible plan comment in place
+(`scripts/upsert-comment --update-only`) and then minimizes the others as below.
+A draft autoplan, a cancelled plan job and a run whose pull request moved to a
+newer head write none. After the write, `scripts/upsert-comment` minimizes as
+outdated (GraphQL `minimizeComment`, classifier `OUTDATED`) every other visible plan
+comment by the written comment's author. A plan comment is a Bot-authored comment
 whose body starts with the marker: the shipmate App's bot login is derived from
 the registered App name, which a consumer org may have had to slug differently
 than `shipmate[bot]`. The author compare leaves another App's plan comment
 visible, and the start-of-body match leaves out the doctor report, which may
 quote the marker. The minimized comments are the audit trail of
-earlier plans for the PR. Posting comes first, so the pull request never shows
+earlier plans for the PR. The write comes first, so the pull request never shows
 zero plan comments: a failed minimize warns "could not minimize an earlier plan
 comment of pull request #<n>; it stays visible: <error>" and leaves two visible,
 newest last. Visibility is GraphQL `isMinimized`, read for every plan comment
 the listing holds. A failed or incomplete read warns "could not read which plan
-comments of pull request #<n> are minimized, so all count as visible: <error>":
-the run posts, and minimizes the App's earlier plan comments anyway.
+comments of pull request #<n> are minimized, so all count as visible: <error>".
+A posting run then posts and minimizes the App's earlier plan comments anyway.
+A quiet no-change run rewrites the newest plan comment, which may be a minimized
+one, and minimizes nothing, so it never hides the only visible comment.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the superseded autoplan lines and a blank
