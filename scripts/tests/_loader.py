@@ -1,14 +1,8 @@
 """Shared test-side helpers: load a ``scripts/`` helper, read an engine YAML file or a docs code
 fence, or run a shipped shell body.
 
-Six jobs: ``load_script`` for the extension-less helpers; ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus
-``action_yaml``, ``workflow_yaml``, ``action_steps``, ``step_by``, ``workflow_jobs``, ``step_using``
-and ``strings`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
-the docs fence guards; ``bash_only``, ``run_step``, ``write_python3_shim`` and
-``run_with_gh_recorder`` for the tests that execute a step's bash; ``github_outputs`` for
-reading back what a helper or step wrote to ``GITHUB_OUTPUT``; and ``jsonl`` for a ``gh``
-listing's stdout. The YAML parser behind ``action_yaml`` and ``workflow_yaml`` is load-bearing,
-because a guard that silently parses to ``[]`` asserts nothing, so it has one definition.
+The YAML parser behind ``action_yaml`` and ``workflow_yaml`` is load-bearing, because a guard
+that silently parses to ``[]`` asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -30,7 +24,6 @@ import json
 import os
 import pathlib
 import shutil
-import stat
 import subprocess
 import sys
 import textwrap
@@ -318,21 +311,19 @@ def write_python3_shim(bin_dir):
     shim.write_text(
         _PYTHON3_SHIM.format(bash=repr(bash), gh=repr(str(bin_dir / "gh"))), encoding="utf-8"
     )
-    python3 = bin_dir / "python3"
-    python3.write_text(
-        f'#!/bin/bash\nif [ "$1" = -c ]; then exec "{sys.executable}" "$@"; fi\n'
-        f'exec "{sys.executable}" "{shim}" "$@"\n',
-        encoding="utf-8",
-        newline="\n",
+    write_stub(
+        bin_dir,
+        "python3",
+        f'if [ "$1" = -c ]; then exec "{sys.executable}" "$@"; fi\n'
+        f'exec "{sys.executable}" "{shim}" "$@"',
     )
-    python3.chmod(0o755)
 
 
 def write_stub(bin_dir, name, body):
     """Write an executable bash script ``bin_dir/name`` that runs ``body``."""
     path = bin_dir / name
     path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    path.chmod(0o755)
 
 
 def fail_script(bin_dir, name, rc, stderr=""):
@@ -342,13 +333,11 @@ def fail_script(bin_dir, name, rc, stderr=""):
     real = bin_dir / "python3-real"
     (bin_dir / "python3").rename(real)
     say = f"cat >&2 <<'STDERR'\n{stderr}\nSTDERR\n" if stderr else ""
-    (bin_dir / "python3").write_text(
-        f'#!/bin/bash\nif [[ "$1" == */{name} ]]; then\n{say}exit {rc}\nfi\n'
-        f'exec "{real.as_posix()}" "$@"\n',
-        encoding="utf-8",
-        newline="\n",
+    write_stub(
+        bin_dir,
+        "python3",
+        f'if [[ "$1" == */{name} ]]; then\n{say}exit {rc}\nfi\nexec "{real.as_posix()}" "$@"',
     )
-    (bin_dir / "python3").chmod(0o755)
 
 
 #: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
@@ -360,7 +349,6 @@ def fail_script(bin_dir, name, rc, stderr=""):
 #: ``shipmate[bot]`` and ``$FAKE_WRITE_RC``, after printing ``$FAKE_WRITE_STDERR`` (empty when
 #: unset) to stderr.
 _GH_RECORDER = """\
-#!/bin/bash
 printf '%s\\n' "$@" -- >> "$CALLS"
 if [ "$2" = "--paginate" ]; then
   printf '%s' "${FAKE_LISTING:-}"
@@ -426,16 +414,7 @@ def run_with_gh_recorder(
     ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced, with PATH
     and the stub's variables.
     """
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    write_python3_shim(bin_dir)
-    (bin_dir / "gh").write_text(_GH_RECORDER, encoding="utf-8", newline="\n")
-    (bin_dir / "gh").chmod(0o755)
-    calls = tmp_path / "gh-calls"
-    env = {
-        **env,
-        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-        "CALLS": str(calls),
+    fake = {
         "FAKE_LISTING": listing,
         "FAKE_LIST_RC": str(list_rc),
         "FAKE_LIST_STDERR": list_stderr,
@@ -444,7 +423,24 @@ def run_with_gh_recorder(
         "FAKE_HEAD": head,
         "FAKE_HEAD_RC": str(head_rc),
     }
-    proc = run_step(tmp_path, body, env)
+    return _run_with_gh(tmp_path, body, env, _GH_RECORDER, fake)
+
+
+def _run_with_gh(tmp_path, body, env, gh, fake, text=True):
+    """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and the bash ``gh`` stub
+    ``gh`` first on PATH and ``fake`` added to ``env``; return (process, recorded calls)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    write_python3_shim(bin_dir)
+    write_stub(bin_dir, "gh", gh)
+    calls = tmp_path / "gh-calls"
+    env = {
+        **env,
+        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        "CALLS": str(calls),
+        **fake,
+    }
+    proc = run_step(tmp_path, body, env, text=text)
     return proc, read_calls(calls)
 
 
@@ -495,7 +491,6 @@ def jsonl(*rows):
 #: ``$FAKE_PAGE1$FAKE_PAGE2`` when paginated and ``$FAKE_PAGE1`` alone when not, as GitHub would.
 #: The check-runs listing also prints ``$FAKE_CHECKS_STDERR`` (empty when unset) to stderr.
 _GATE_GH = """\
-#!/bin/bash
 printf '%s\n' "$@" -- >> "$CALLS"
 head="repos/acme/demo/commits/$FAKE_SHA"
 checks="$head/check-runs?filter=all&per_page=100 --jq $FAKE_CHECKS_JQ"
@@ -544,16 +539,7 @@ def run_with_gate_gh(
     ``checks_jq`` projection (exit ``checks_rc``); ``page1``/``page2`` the statuses listing's two
     pages, JSON Lines each (paginated exit ``statuses_rc``). ``text`` goes to ``run_step``.
     """
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    write_python3_shim(bin_dir)
-    (bin_dir / "gh").write_text(_GATE_GH, encoding="utf-8", newline="\n")
-    (bin_dir / "gh").chmod(0o755)
-    calls = tmp_path / "gh-calls"
-    env = {
-        **env,
-        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-        "CALLS": str(calls),
+    fake = {
         "FAKE_SHA": sha,
         "FAKE_CHECKS_JQ": checks_jq,
         "FAKE_STATUSES_JQ": GATE_STATUSES_JQ,
@@ -563,8 +549,7 @@ def run_with_gate_gh(
         "FAKE_PAGE2": page2,
         "FAKE_STATUSES_RC": str(statuses_rc),
     }
-    proc = run_step(tmp_path, body, env, text=text)
-    return proc, read_calls(calls)
+    return _run_with_gh(tmp_path, body, env, _GATE_GH, fake, text)
 
 
 def record_calls(monkeypatch, module, *names):

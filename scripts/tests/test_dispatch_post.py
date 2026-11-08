@@ -1,4 +1,4 @@
-"""Tests for `dispatch-body post`: one `workflow_dispatch` POST, retried on a transient failure
+"""Tests for `dispatch-body`: one `workflow_dispatch` POST, retried on a transient failure
 unless a `shipmate.yml` run created since `t0` may be this dispatch's."""
 
 import json
@@ -86,9 +86,9 @@ def answering(monkeypatch, log, posts, listings=()):
 
 
 def post(capsys):
-    """`(exit code, stdout, stderr)` of `main(["post"])`."""
+    """`(exit code, stdout, stderr)` of `main()`."""
     try:
-        db.main(["post"])
+        db.main()
         code = 0
     except SystemExit as e:
         code = e.code
@@ -248,21 +248,3 @@ def test_t0_is_five_seconds_before_the_first_attempt(calls, monkeypatch, capsys,
     created = (NOW - timedelta(seconds=ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [row(created)])
     assert post(capsys)[0] == code
-
-
-def test_no_argument_refuses_with_the_usage(calls, capsys):
-    """Every dispatch step sends through `post`. Mutation: keep the no-argument print mode -> it
-    prints the body and exits 0."""
-    with pytest.raises(SystemExit) as exc:
-        db.main([])
-    assert exc.value.code == "::error::usage: dispatch-body post"
-    assert capsys.readouterr() == ("", "")
-
-
-@pytest.mark.parametrize("argv", [["x"], ["post", "x"]])
-def test_an_unknown_argument_list_refuses(calls, monkeypatch, argv):
-    """Mutation: match `post` on `argv[:1]` -> `post x` posts."""
-    answering(monkeypatch, calls, [ANSWER])
-    with pytest.raises(SystemExit) as exc:
-        db.main(argv)
-    assert exc.value.code == "::error::usage: dispatch-body post"

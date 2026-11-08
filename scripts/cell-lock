@@ -391,14 +391,20 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
     state, _, head = _pr_state(repo, pr, run) if closed_at and mine else (None, None, None)
     if state == "MERGED":
         pending = pending_names(*_head_names(repo, run, head))
-    gone, refused = [], []
-    for lock in mine:
+
+    def keep(lock):
         if pending is not None:
-            keep = ag.check_name(lock.stack, lock.env) in pending
-        else:
-            keep = state == "OPEN" and _when(lock.committed_at) > _when(closed_at)
-        if keep:
-            continue
+            return ag.check_name(lock.stack, lock.env) in pending
+        return state == "OPEN" and _when(lock.committed_at) > _when(closed_at)
+
+    return _delete_each(repo, [lock for lock in mine if not keep(lock)], run)
+
+
+def _delete_each(repo, locks, run):
+    """Delete each of `locks`. Returns (deleted locks, [(lock, refusal)]): a refusal does not
+    stop the rest."""
+    gone, refused = [], []
+    for lock in locks:
         try:
             if delete(repo, lock, run=run):
                 gone.append(lock)
@@ -412,27 +418,13 @@ def evict(repo, env: str, pr: int, stacks: set[str], *, run=_run):
     holder included. Returns (deleted locks, [(lock, refusal)] for each delete refused): a
     refusal does not stop the rest, so every lock deleted is reported and its holder told."""
     wanted = {ref_name(env, s) for s in stacks}
-    gone, refused = [], []
-    for lock in read_locks(repo, [env], run=run).values():
-        if lock.ref not in wanted or lock.pr == pr:
-            continue
-        try:
-            if delete(repo, lock, run=run):
-                gone.append(lock)
-        except SystemExit as exc:
-            refused.append((lock, exc.code))
-    return gone, refused
+    locks = read_locks(repo, [env], run=run).values()
+    return _delete_each(repo, [lock for lock in locks if lock.ref in wanted and lock.pr != pr], run)
 
 
 def evict_stacks(names, env):
-    """The stack of each apply check name in `env`: with the env known, stripping
-    `apply / ` and ` / <env>` inverts `apply-gate.check_name` exactly."""
-    suffix = f" / {env}"
-    return {
-        n.removeprefix(ag.APPLY_PREFIX).removesuffix(suffix)
-        for n in names
-        if n.startswith(ag.APPLY_PREFIX) and n.endswith(suffix)
-    }
+    """The stack of each apply check name in `env`."""
+    return {stack for stack, e in map(ag.parse_check_name, names) if e == env}
 
 
 def pending_names(lines, app_id):

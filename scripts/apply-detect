@@ -642,10 +642,10 @@ def bare_main(auto=False):
     # An absent decision reads as '' and holds every env. It is reachable only through
     # wiring drift: the review job has no `if:`, and a failed one skips this script.
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
-    targeted = bm.ec.targeted_envs(table)
+    targeted = bm.ec.mode_envs(table, "targeted")
     stopped = pending_envs & set(targeted + held)
     # Pending envs the auto form leaves to a bare apply: neither targeted nor held, not auto.
-    unselected = pending_envs - set(bm.ec.auto_envs(table)) - stopped if auto else set()
+    unselected = pending_envs - set(bm.ec.mode_envs(table, "auto")) - stopped if auto else set()
     stopped |= unselected
     # Envs neither held nor excluded as targeted; a needs-skipped env's lock stays because a
     # waiting cell's remedy names it.

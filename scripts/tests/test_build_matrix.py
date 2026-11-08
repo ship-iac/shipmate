@@ -1874,7 +1874,7 @@ def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_pat
 
 
 def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path, capsys):
-    """Mutation: drop the `isinstance` check from `is_refusal` -- `int.startswith` raises
+    """Mutation: drop the `isinstance` check from `run_annotated` -- `int.startswith` raises
     `AttributeError`."""
 
     def exit_one(repository, head_repo, sweep):
@@ -2647,7 +2647,7 @@ def test_detect_writes_the_tables_auto_envs(monkeypatch, tmp_path, modes, expect
 def test_detect_writes_the_tables_targeted_envs(monkeypatch, tmp_path):
     """The plan summary reads this output to name `shipmate apply <env>` per targeted environment.
 
-    Mutation: write `ec.auto_envs(table)` into it -- `["b"]`."""
+    Mutation: write `ec.mode_envs(table, "auto")` into it -- `["b"]`."""
     table = {
         "layout": "folder",
         "environments": {

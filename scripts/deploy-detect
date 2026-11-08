@@ -105,22 +105,16 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
     remedy pull request must change their stacks as well.
 
     A check names its env only in its name, and after the merge no env set holds the one a
-    stack lost (under `folder` or `workspace` a table may declare none), so the env is the
-    rest of the name after the stack's `check_name` prefix, taken only when it is an env
-    name. An env name holds no ` / `, so a longer stack path sharing the prefix leaves a rest
-    that is no env name, and its check is never taken for this stack's."""
+    stack lost (under `folder` or `workspace` a table may declare none), so the env is read
+    back with `parse_check_name`, taken only when it is an env name."""
     cells = {(c["stack"], c["environment"]) for c in tree}
     scanned = {s for s, _ in cells} | set(unmanaged)
-    stranded = []
-    for name in open_names:
-        for stack in scanned:
-            prefix = ad.ag.check_name(stack, "")
-            if (
-                name.startswith(prefix)
-                and bm.ec.is_env_name(rest := name[len(prefix) :])
-                and (stack, rest) not in cells
-            ):
-                stranded.append(name)
+    stranded = [
+        name
+        for name in open_names
+        for stack, env in [ad.ag.parse_check_name(name)]
+        if stack in scanned and bm.ec.is_env_name(env) and (stack, env) not in cells
+    ]
     if not stranded:
         return
     others = sorted(f"{c['stack']} / {c['environment']}" for c in pending)

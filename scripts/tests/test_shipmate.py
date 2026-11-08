@@ -571,7 +571,7 @@ def test_run_annotated_cuts_the_refusal_output_at_the_reason_cap(monkeypatch, tm
 @pytest.mark.parametrize("code", [1, "plain"])
 def test_run_annotated_writes_no_refusal_output_for_another_exit(monkeypatch, tmp_path, code):
     """A crash or a non-refusal exit leaves the comment as it is without a refusal. Mutation:
-    write the output before the `is_refusal` check -- red."""
+    write the output before the `::error::` check -- red."""
     main = _raising(code)
     assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (code, b"")
 

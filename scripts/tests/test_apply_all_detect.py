@@ -655,7 +655,7 @@ def test_a_targeted_env_is_held_back_from_a_bare_apply(tmp_path, monkeypatch):
     """`apply_mode: targeted` keeps the environment off a bare apply. The table goes through
     the real parser.
 
-    Mutation: `targeted_envs` tests `apply_mode` for `True` -- prod applies with dev-eu."""
+    Mutation: `mode_envs` tests `apply_mode` for `True` -- prod applies with dev-eu."""
     text = "layout: folder\nenvironments:\n  prod:\n    apply_mode: targeted\n"
     parsed = _run_main(
         tmp_path,
@@ -831,7 +831,7 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
 
     Every assertion is on a populated value, because the broken shape returns the empty
     default rather than raising. Mutation: replace `bare_main`'s `bm.ec.env_order(table)` and
-    `bm.ec.targeted_envs(table)` with the bare `{}` and `[]` -- dev-us drops to
+    `bm.ec.mode_envs(table, "targeted")` with the bare `{}` and `[]` -- dev-us drops to
     env-level 0 and prod-eu applies instead of being excluded.
     """
     parsed = _run_main(

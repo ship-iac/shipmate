@@ -889,7 +889,7 @@ _PARSED_ENV = "${{ steps.parse.outputs.env }}"
 
 #: Every reply step's shell body, hand-written: reply-comment renders and posts the comment, so
 #: no step formats a header, verdict or footer of its own.
-_REPLY_RUN = 'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"\n'
+_REPLY_RUN = 'python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"'
 
 #: Each reply step's header words, outcome and text, hand-written. `refused` where the engine
 #: decided not to run the command, `failed` where it could not.
@@ -1034,7 +1034,8 @@ def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
 
 #: The gate step's whole body: no later step keys on its outcome, so its `exit 1` is the only
 #: thing that stops an unresolvable gate configuration from reaching authorization.
-_GATE_UNREADABLE_RUN = _REPLY_RUN + (
+_GATE_UNREADABLE_RUN = (
+    f"set -euo pipefail\n{_REPLY_RUN}\n"
     "# The resolve's own failure, re-raised: `continue-on-error` above kept the job alive\n"
     "# long enough to post this, and a green run over an unauthorized command is not a\n"
     "# verdict this action may render.\n"
@@ -1044,7 +1045,7 @@ _GATE_UNREADABLE_RUN = _REPLY_RUN + (
 
 #: The permission failure reply's whole body. The job has already failed by the time it runs;
 #: the `exit 1` keeps the step itself from reading as a handled command.
-_PERMISSION_FAILED_RUN = _REPLY_RUN + "exit 1\n"
+_PERMISSION_FAILED_RUN = f"set -euo pipefail\n{_REPLY_RUN}\nexit 1\n"
 _FAILING_REPLY_RUNS = {
     "Gate configuration unreadable": _GATE_UNREADABLE_RUN,
     "Permission check failed": _PERMISSION_FAILED_RUN,

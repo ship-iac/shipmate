@@ -308,13 +308,13 @@ _MODES_TABLE = {
 
 
 def test_targeted_envs_leaves_an_auto_environment_on_a_bare_apply():
-    """Mutation: `targeted_envs` keeps every mode but `bare` -- the auto entries join prod."""
-    assert env_config.targeted_envs(_MODES_TABLE) == ["prod"]
+    """Mutation: `mode_envs` keeps every mode but `bare` -- the auto entries join prod."""
+    assert env_config.mode_envs(_MODES_TABLE, "targeted") == ["prod"]
 
 
 def test_auto_envs_names_exactly_the_auto_entries():
-    """Mutation: `auto_envs` returns the `targeted` entries -- `["prod"]`."""
-    assert env_config.auto_envs(_MODES_TABLE) == ["dev-eu", "stage"]
+    """Mutation: `mode_envs(table, "auto")` returns the `targeted` entries -- `["prod"]`."""
+    assert env_config.mode_envs(_MODES_TABLE, "auto") == ["dev-eu", "stage"]
 
 
 @pytest.mark.parametrize(

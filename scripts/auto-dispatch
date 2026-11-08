@@ -22,11 +22,10 @@ The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
 """
 
-import json
 import os
 import sys
 
-from _shipmate import _load, cell_summaries, event_action, run_annotated
+from _shipmate import _load, cell_summaries, event_action, json_or_none, run_annotated
 
 ag = _load("apply-gate")
 
@@ -77,10 +76,7 @@ def changed_auto_envs(cells, auto):
 def auto_set(raw):
     """build-matrix's `auto_envs` output `raw`, a JSON list of environment names, or None when it
     is not that shape."""
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
+    value = json_or_none(raw)
     if isinstance(value, list) and all(isinstance(e, str) for e in value):
         return value
     return None

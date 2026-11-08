@@ -173,10 +173,6 @@ runs:
       # rewritten, so the file is materialised from it at the last possible moment.
       run: |
         set -euo pipefail
-        if [ -z "${PLANNED_HEAD:-}" ]; then
-          echo "::error::the planned commit was not captured; refusing to publish a plan with no provenance."
-          exit 1
-        fi
         printf '%s\n' "$PLANNED_HEAD" > planned-head.txt
 
     - name: Upload plan artifact

@@ -125,7 +125,7 @@ def _parse_object(raw, message, null_is_empty=False):
     return parsed
 
 
-def parse_enumeration(raw, source):
+def parse_enumeration(raw):
     """The consumer's GitHub variables, as `toJSON(vars)` renders them.
 
     `null` and `''` both mean `{}`: the input is engine-built, so an empty rendering
@@ -135,7 +135,7 @@ def parse_enumeration(raw, source):
     """
 
     def message(rule):
-        return f"::error::{source} must be the object toJSON(vars) renders, and {raw!r} {rule}."
+        return f"::error::{_ENUM} must be the object toJSON(vars) renders, and {raw!r} {rule}."
 
     return _parse_object(raw, message, null_is_empty=True)
 
@@ -269,7 +269,7 @@ def compose(environ):
     pins both properties.
     """
     table = resolve(environ)
-    enumerated = parse_enumeration(environ.get(_ENUM, ""), _ENUM)
+    enumerated = parse_enumeration(environ.get(_ENUM, ""))
     envelope = envelope_exports(enumerated.pop(_VARS, None), _VARS, table)
     secrets = envelope_exports(environ.get(_SECRETS, ""), _SECRETS, table)
     merged = merge_exports(

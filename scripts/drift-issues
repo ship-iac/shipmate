@@ -122,12 +122,7 @@ def existing_issue_numbers(rows):
     guarantees no particular listing order. Picking arbitrarily would leave the
     other one unreachable by title lookup: never edited, and closed only once its
     cell leaves the repository."""
-    out = {}
-    for row in rows:
-        title, number = row["title"], row["number"]
-        if title not in out or number < out[title]:
-            out[title] = number
-    return out
+    return {r["title"]: r["number"] for r in sorted(rows, key=lambda r: r["number"], reverse=True)}
 
 
 def _title(cell):

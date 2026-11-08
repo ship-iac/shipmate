@@ -164,7 +164,7 @@ def test_the_enumeration_treats_null_and_empty_as_no_variables(raw):
     `_parse_object`'s `if not raw` case raise (the other two, shared with the envelope
     no-op guard above).
     """
-    assert env_inject.parse_enumeration(raw, ENUM) == {}
+    assert env_inject.parse_enumeration(raw) == {}
 
 
 def test_malformed_enumeration_json_refuses_and_may_quote_the_value():
@@ -174,7 +174,7 @@ def test_malformed_enumeration_json_refuses_and_may_quote_the_value():
     Mutation: return `{}` instead of raising on `ValueError`.
     """
     with pytest.raises(SystemExit) as excinfo:
-        env_inject.parse_enumeration("{oops}", ENUM)
+        env_inject.parse_enumeration("{oops}")
     assert str(excinfo.value) == (
         f"::error::{ENUM} must be the object toJSON(vars) renders, and '{{oops}}' is not JSON."
     )

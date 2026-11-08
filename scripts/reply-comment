@@ -29,7 +29,15 @@ a notice or a started run carries no hint.
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, is_run_id, run, run_annotated
+from _shipmate import (
+    _load,
+    current_run_url,
+    is_pr_number,
+    is_run_id,
+    one_line,
+    run,
+    run_annotated,
+)
 
 sc = _load("summary-comment")
 
@@ -84,7 +92,7 @@ def main():
         post(pr, text)
     except SystemExit as exc:
         # One line: unannotated, so a raw stderr line could start a workflow command.
-        reason = " | ".join(str(exc.code).splitlines())
+        reason = one_line(exc.code)
         sys.exit(f"could not post the reply on pull request #{pr}: {reason}")
 
 
