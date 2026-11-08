@@ -17,7 +17,6 @@ from _loader import (
     step_by,
 )
 from _loader import ENGINE as _ENGINE
-from _shipmate import load_workflow_text
 
 sc = load_script("summary-comment")
 
@@ -1555,7 +1554,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "auto-envs",
         "targeted-envs",
     ):
-        decl = load_workflow_text(src)["inputs"][name]
+        decl = _shipmate.load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {
             "required": False,
             "default": "",

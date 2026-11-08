@@ -125,11 +125,12 @@ def minimized_ids(node_ids, pr):
         else:
             try:
                 nodes = json.loads(out)["data"]["nodes"]
-                if all(isinstance(n["isMinimized"], bool) for n in nodes):
-                    hidden |= {n["id"] for n in nodes if n["isMinimized"]}
-                    continue
+                parsed = all(isinstance(n["isMinimized"], bool) for n in nodes)
             except (ValueError, LookupError, TypeError):
-                pass
+                parsed = False
+            if parsed:
+                hidden |= {n["id"] for n in nodes if n["isMinimized"]}
+                continue
             error = f"unexpected answer: {out[:ANSWER_CAP]}"
         print(
             f"::warning::could not read which plan comments of pull request #{pr} are minimized, "
@@ -235,7 +236,7 @@ def _write(repo, pr, path, cid):
     try:
         return run([*argv, "-F", f"body=@{path}"]), word
     except SystemExit as exc:
-        sys.exit(f"::error::could not write the comment: {exc.code}")
+        raise SystemExit(f"::error::could not write the comment: {exc.code}") from exc
 
 
 def main():

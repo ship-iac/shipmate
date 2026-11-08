@@ -143,7 +143,8 @@ def test_the_verify_steps_are_fail_closed():
     got = {}
     for sid in _EXPECTED_STEPS:
         step = dict(step_by(_ACTION, id=sid))
-        assert step.pop("run")
+        run = step.pop("run")
+        assert run
         got[sid] = step
     assert got == _EXPECTED_STEPS
 

@@ -104,7 +104,8 @@ def test_the_auto_job_is_the_apply_job_with_auto_set():
     jobs = _jobs("shipmate")
     assert jobs["apply"]["permissions"] == _APPLY_PERMISSIONS
     auto = dict(jobs["auto"])
-    assert auto.pop("uses").split("@", 1)[0] == "ship-iac/shipmate/.github/workflows/apply.yml"
+    uses = auto.pop("uses")
+    assert uses.split("@", 1)[0] == "ship-iac/shipmate/.github/workflows/apply.yml"
     assert auto == {
         "if": "github.event_name == 'workflow_dispatch' && inputs.verb == 'auto'",
         "permissions": _APPLY_PERMISSIONS,

@@ -4,7 +4,6 @@ import subprocess
 import sys
 import types
 
-import _shipmate
 import pytest
 from _loader import ENGINE
 from _shipmate import (
@@ -19,7 +18,9 @@ from _shipmate import (
     gate_check,
     is_head_sha,
     is_pr_number,
+    is_transient,
     named,
+    retried,
     review_count,
     run_annotated,
     utf8_output,
@@ -295,7 +296,7 @@ _REFUSED = (
 @pytest.fixture
 def sleeps(monkeypatch):
     slept = []
-    monkeypatch.setattr(_shipmate, "_sleep", slept.append)
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
     return slept
 
 
@@ -326,7 +327,7 @@ def test_retried_calls_again_after_a_transient_failure(message, sleeps, capsys):
     re-raises; drop `connection refused` -> the probe's message re-raises; drop `: EOF$` -> the
     EOF message re-raises; write the warning to stdout -> the streams swap."""
     calls, call = _failing(message)
-    assert _shipmate.retried(call) == "x"
+    assert retried(call) == "x"
     head = "%0A".join(message.removeprefix("::error::").splitlines()[:2])
     assert (len(calls), sleeps, capsys.readouterr()) == (2, [2], ("", f"::warning::{head}\n"))
 
@@ -334,7 +335,7 @@ def test_retried_calls_again_after_a_transient_failure(message, sleeps, capsys):
 def test_retried_warns_the_command_and_first_stderr_line_whole(sleeps, capsys):
     """Mutations, each run: keep `::error::` -> a nested prefix; print every line -> `retry 50%25`
     trails; skip `command_data` -> a raw newline."""
-    _shipmate.retried(_failing(_BAD_GATEWAY)[1])
+    retried(_failing(_BAD_GATEWAY)[1])
     assert capsys.readouterr().err == (
         "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
     )
@@ -345,7 +346,7 @@ def test_retried_re_raises_a_4xx_at_once(sleeps, capsys):
     message = "::error::command failed (1): gh api x\ngh: Not Found (HTTP 404)"
     calls, call = _failing(message)
     with pytest.raises(SystemExit) as exc:
-        _shipmate.retried(call)
+        retried(call)
     assert (exc.value.code, len(calls), sleeps, capsys.readouterr()) == (message, 1, [], ("", ""))
 
 
@@ -357,7 +358,7 @@ def test_retried_ignores_transient_text_in_the_argv_line(sleeps):
     )
     calls, call = _failing(message)
     with pytest.raises(SystemExit) as exc:
-        _shipmate.retried(call)
+        retried(call)
     assert (exc.value.code, len(calls), sleeps) == (message, 1, [])
 
 
@@ -369,7 +370,7 @@ def test_retried_gives_up_after_three_attempts_with_the_last_failure(sleeps, cap
     ]
     calls, call = _failing(*messages)
     with pytest.raises(SystemExit) as exc:
-        _shipmate.retried(call)
+        retried(call)
     assert (exc.value.code, len(calls), sleeps) == (messages[2], 3, [2, 5])
     assert capsys.readouterr().err == (
         "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 500)\n"
@@ -493,7 +494,8 @@ def test_run_annotated_passes_its_arguments_to_main():
     """The arguments after `main` reach `main` unchanged. Mutation: call `main()` without
     `*args` -- red."""
     calls = []
-    assert run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y") is None
+    result = run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y")
+    assert result is None
     assert calls == [(["refresh", "x"], "y")]
 
 
@@ -550,7 +552,7 @@ def test_run_annotated_prints_the_annotation_before_it_writes_the_refusal_output
     def fail(**pairs):
         raise OSError("GITHUB_OUTPUT not writable")
 
-    monkeypatch.setattr(_shipmate, "write_outputs", fail)
+    monkeypatch.setattr("_shipmate.write_outputs", fail)
     with pytest.raises(OSError):
         run_annotated(_raising("::error::first\nmore"), refusal_output=True)
     assert capsys.readouterr().err == "::error::first%0Amore\n"
@@ -638,4 +640,4 @@ def test_the_go_transport_errors_are_transient(stderr, transient):
     """Mutations, each run: drop one of `: EOF$`, `Client.Timeout exceeded`, `context deadline
     exceeded`, `GOAWAY` -> its row; drop the `$` anchor -> `eof-mid-line`."""
     exc = SystemExit(f"::error::command failed (1): gh api x\n{stderr}")
-    assert _shipmate.is_transient(exc) is transient
+    assert is_transient(exc) is transient
