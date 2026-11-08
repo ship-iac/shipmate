@@ -358,7 +358,7 @@ _DOCTOR_ROUTE_IFS = {
     ),
     "Doctor: probe the manifest's full permission set": _DOCTOR_MINTED,
     "Doctor: gather head SHA, declared environments, annotations": _DOCTOR_MINTED,
-    "Doctor: render and upsert the sticky comment": _DOCTOR_MINTED,
+    "Doctor: render and post the report comment": _DOCTOR_MINTED,
 }
 
 
@@ -1006,11 +1006,11 @@ def test_every_reply_step_names_its_header_outcome_and_text():
 _POSTS = re.compile(r"/comments\b(?!/)|scripts/(?:reply-comment|upsert-comment|evict-reply)\b")
 
 #: The steps that post a comment reply-comment does not render: help prints its own frame, and
-#: the doctor report is a sticky upsert of doctor's own body, and `evict-reply` renders the
+#: the doctor report is doctor's own body, and `evict-reply` renders the
 #: eviction's notices and replies (`test_evict_reply.py`).
 _NON_REPLY_POSTERS = {
     "Post help",
-    "Doctor: render and upsert the sticky comment",
+    "Doctor: render and post the report comment",
     "Evict: tell the holders and reply",
     "Evict: failed",
 }
@@ -1315,7 +1315,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
         ("comment-ops", "Resolve gate configuration"): "${{ inputs.github-vars }}",
         (
             "comment-ops",
-            "Doctor: render and upsert the sticky comment",
+            "Doctor: render and post the report comment",
         ): "${{ inputs.github-vars }}",
         (
             "summary",
@@ -1376,7 +1376,7 @@ _STEP_NAMES = [
     "Doctor: App token unavailable",
     "Doctor: probe the manifest's full permission set",
     "Doctor: gather head SHA, declared environments, annotations",
-    "Doctor: render and upsert the sticky comment",
+    "Doctor: render and post the report comment",
     "Mint App token for evict",
     "Evict: App token unavailable",
     "Evict: read the pull request head",

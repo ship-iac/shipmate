@@ -143,20 +143,11 @@ def _post(tmp_path):
     return ["gh", "api", "repos/o/r/issues/7/comments", "-F", f"body=@{tmp_path / 'comment.md'}"]
 
 
-def test_a_match_is_patched_and_prints_updated(monkeypatch, tmp_path, capsys):
-    """The whole listing and PATCH argv, hand-written; stdout is the one word, never gh's response.
-
-    Mutations: drop `per_page=100`; swap the PATCH and POST branches; print the PATCH's return.
-    """
-    code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY + "\n### shipmate plan")])
-    assert code == 0
-    assert calls == [LIST_ARGV, _patch(5, tmp_path)]
-    assert capsys.readouterr().out == "updated\n"
-
-
 def test_no_match_is_posted_and_prints_created(monkeypatch, tmp_path, capsys):
-    """Mutations: swap the PATCH and POST branches; print the POST's return."""
-    code, calls = _upsert(monkeypatch, tmp_path, [])
+    """The whole listing and POST argv, hand-written; stdout is the one word, never gh's response.
+
+    Mutations: drop `per_page=100`; print the POST's return."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new")
     assert code == 0
     assert calls == [LIST_ARGV, _post(tmp_path)]
     assert capsys.readouterr().out == "created\n"
@@ -164,21 +155,12 @@ def test_no_match_is_posted_and_prints_created(monkeypatch, tmp_path, capsys):
 
 def test_a_comment_quoting_the_marker_mid_body_is_not_matched(monkeypatch, tmp_path, capsys):
     """Mutation: `startswith` -> `in`."""
-    code, calls = _upsert(monkeypatch, tmp_path, [_head(5, f"### shipmate doctor\n`{SUMMARY}`")])
+    code, calls = _upsert(
+        monkeypatch, tmp_path, [_head(5, f"### shipmate doctor\n`{SUMMARY}`")], "--new"
+    )
     assert code == 0
     assert calls == [LIST_ARGV, _post(tmp_path)]
     assert capsys.readouterr().out == "created\n"
-
-
-def test_the_first_match_wins_across_pages(monkeypatch, tmp_path):
-    """`--paginate` runs `--jq` per page and concatenates the lines, so pages arrive as one list.
-
-    Mutation: iterate the listing reversed.
-    """
-    listing = [_head(1, "hello"), _head(5, SUMMARY), _head(6, SUMMARY + "x")]
-    code, calls = _upsert(monkeypatch, tmp_path, listing)
-    assert code == 0
-    assert calls == [LIST_ARGV, _patch(5, tmp_path)]
 
 
 def test_update_only_with_no_match_writes_nothing(monkeypatch, tmp_path, capsys):
@@ -202,7 +184,7 @@ def test_a_listing_failure_prints_list_failed_and_writes_nothing(monkeypatch, tm
 
     Mutation: drop the `except SystemExit` around the listing.
     """
-    code, calls = _upsert(monkeypatch, tmp_path, [], list_fails=True)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--update-only", list_fails=True)
     assert code == 0
     assert calls == [LIST_ARGV]
     out, err = capsys.readouterr()
@@ -210,19 +192,24 @@ def test_a_listing_failure_prints_list_failed_and_writes_nothing(monkeypatch, tm
     assert err == "command failed (1): gh api | HTTP 502\n"
 
 
-@pytest.mark.parametrize("listing", [[], [_head(5, SUMMARY)]], ids=["post", "patch"])
-def test_a_head_match_writes(monkeypatch, tmp_path, capsys, listing):
-    """The head is read after the listing and before the write. Mutation: skip the head read
-    before a write -- no pulls call."""
-    code, calls = _upsert(monkeypatch, tmp_path, listing, "--head", _HEAD)
-    write = _post(tmp_path) if not listing else _patch(5, tmp_path)
-    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV, write])
-    assert capsys.readouterr().out == ("created\n" if not listing else "updated\n")
+@pytest.mark.parametrize("flag", ["--new", "--update-only"])
+def test_a_head_match_writes(monkeypatch, tmp_path, capsys, flag):
+    """The head is read after the visibility read and before the write. Mutation: skip the head
+    read before a write -- no pulls call."""
+    listing = [] if flag == "--new" else [_head(5, SUMMARY)]
+    code, calls = _upsert(monkeypatch, tmp_path, listing, flag, "--head", _HEAD)
+    expected = (
+        [LIST_ARGV, PULLS_ARGV, _post(tmp_path)]
+        if flag == "--new"
+        else [LIST_ARGV, _read("IC_5"), PULLS_ARGV, _patch(5, tmp_path)]
+    )
+    assert (code, calls) == (0, expected)
+    assert capsys.readouterr().out == ("created\n" if flag == "--new" else "updated\n")
 
 
 def test_a_moved_head_prints_moved_and_writes_nothing(monkeypatch, tmp_path, capsys):
     """Mutation: compare `!=` -> `==` in `_head_stop` -- red."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", "d" * 40)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", "--head", "d" * 40)
     assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
     assert capsys.readouterr() == ("moved\n", "")
 
@@ -231,7 +218,7 @@ def test_a_failed_head_read_prints_head_failed_on_one_stderr_line(monkeypatch, t
     """gh's error, a CR-led `::add-mask::` included, stays on one line, so none of it starts a
     workflow command. Mutations: drop the CR from `one_line`'s split -- `::add-mask::x` starts a
     line; print the raw error -- red."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", _HEAD, head_fails=True)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", "--head", _HEAD, head_fails=True)
     assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
     assert capsys.readouterr() == (
         "head-failed\n",
@@ -242,7 +229,7 @@ def test_a_failed_head_read_prints_head_failed_on_one_stderr_line(monkeypatch, t
 def test_a_null_head_prints_head_failed_not_moved(monkeypatch, tmp_path, capsys):
     """A pull request read with no head SHA is a failed read, not a moved head. Mutation: skip
     the SHA check in `_shipmate.pr_head` -- `moved`."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", _HEAD, head=None)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", "--head", _HEAD, head=None)
     assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
     assert capsys.readouterr() == (
         "head-failed\n",
@@ -286,7 +273,7 @@ def test_update_only_with_no_match_never_reads_the_head(monkeypatch, tmp_path, c
 @pytest.mark.parametrize("head", ["C" * 40, "c" * 39, "../x"])
 def test_a_head_that_is_not_a_sha_is_refused_before_any_call(monkeypatch, tmp_path, head):
     """Mutation: drop the `is_head_sha` check -- red."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", head)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", "--head", head)
     assert (code, calls) == (
         f"::error::--head must be a 40-char lowercase hex SHA (got: {head})",
         [],
@@ -295,7 +282,7 @@ def test_a_head_that_is_not_a_sha_is_refused_before_any_call(monkeypatch, tmp_pa
 
 def test_a_write_failure_exits_non_zero_with_an_error(monkeypatch, tmp_path, capsys):
     """Mutation: catch the write failure and print `created`."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], write_fails=True)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", write_fails=True)
     assert code == "::error::could not write the comment: command failed (1): gh api\nHTTP 403"
     assert calls == [LIST_ARGV, _post(tmp_path)]
     assert capsys.readouterr().out == ""
@@ -306,7 +293,7 @@ def test_the_marker_is_the_body_files_first_line(monkeypatch, tmp_path, capsys):
 
     Mutation: hard-code the summary marker.
     """
-    code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY)], first_line=DOCTOR)
+    code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", first_line=DOCTOR)
     assert code == 0
     assert calls == [LIST_ARGV, _post(tmp_path)]
     assert capsys.readouterr().out == "created\n"
@@ -326,7 +313,7 @@ def test_a_first_line_that_is_not_a_whole_marker_is_refused_before_any_call(
     monkeypatch, tmp_path, first_line
 ):
     """Mutations: `fullmatch` -> `match`; drop the `{1,40}` bound."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], first_line=first_line)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", first_line=first_line)
     path = tmp_path / "comment.md"
     assert code == f"::error::{path}: the first line must be a shipmate marker (got: {first_line})"
     assert calls == []
@@ -338,7 +325,7 @@ def test_a_value_that_is_not_a_pull_request_number_is_refused_before_any_call(
 ):
     """`PR` is bound into the API path. Mutations: delete the check; check with `isdigit()`
     (`0` and `007` red)."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], pr=pr)
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--new", pr=pr)
     assert code == f"::error::PR must be a pull request number (got: {pr})"
     assert calls == []
 
@@ -347,7 +334,7 @@ def test_the_pull_request_number_is_checked_before_the_body_file_is_read(monkeyp
     """Mutation: open BODYFILE above the PR check (FileNotFoundError instead of the refusal)."""
     missing = tmp_path / "missing.md"
     monkeypatch.setattr(uc, "run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
-    monkeypatch.setattr(sys, "argv", ["upsert-comment", "0", str(missing)])
+    monkeypatch.setattr(sys, "argv", ["upsert-comment", "0", str(missing), "--new"])
     with pytest.raises(SystemExit) as exc:
         uc.main()
     assert exc.value.code == "::error::PR must be a pull request number (got: 0)"
@@ -364,7 +351,7 @@ def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
 
     Mutation: drop the `try`/`except` around the line's parse.
     """
-    code, calls = _upsert(monkeypatch, tmp_path, [line])
+    code, calls = _upsert(monkeypatch, tmp_path, [line], "--new")
     assert code == 0
     assert calls == [LIST_ARGV]
     assert capsys.readouterr() == (
@@ -376,6 +363,8 @@ def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
 @pytest.mark.parametrize(
     "flags",
     [
+        [],
+        ["--head", "c" * 40],
         ["--update"],
         ["--update-only", "x"],
         ["--update-only", "--update-only"],
@@ -387,20 +376,22 @@ def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
     ],
 )
 def test_unknown_arguments_are_refused_before_any_call(monkeypatch, tmp_path, flags):
-    """Mutations: accept any third argument as `--update-only`; accept `--new` repeated
+    """Mutations: drop the missing-mode refusal (`[]` and `--head` alone red); accept any third
+    argument as `--update-only`; accept `--new` repeated
     (`--new --new` red); accept `--new` with `--update-only` (both orders red)."""
     code, calls = _upsert(monkeypatch, tmp_path, [], *flags)
-    assert code == "::error::usage: upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]"
+    assert code == "::error::usage: upsert-comment PR BODYFILE (--new | --update-only) [--head SHA]"
     assert calls == []
 
 
 #: `--new`'s two stderr warnings for pull request #7, hand-written up to the error.
 _READ_WARNING = (
-    "::warning::could not read which plan comments of pull request #7 are minimized, so all "
+    "::warning::could not read which shipmate comments of pull request #7 are minimized, so all "
     "count as visible: "
 )
 _MINIMIZE_WARNING = (
-    "::warning::could not minimize an earlier plan comment of pull request #7; it stays visible: "
+    "::warning::could not minimize an earlier shipmate comment of pull request #7; it stays "
+    "visible: "
 )
 
 
@@ -687,7 +678,7 @@ def test_the_listing_filter_keeps_bot_heads_only(monkeypatch, tmp_path):
 
     Mutations: `"Bot"` -> `"bot"`; drop `// ""`; drop `node_id`; `.user.login` -> `.user.type`.
     """
-    _, calls = _upsert(monkeypatch, tmp_path, [])
+    _, calls = _upsert(monkeypatch, tmp_path, [], "--new")
     jq_filter = calls[0][calls[0].index("--jq") + 1]
     bot, human = {"type": "Bot", "login": "a[bot]"}, {"type": "User", "login": "h"}
     page = [
@@ -722,7 +713,7 @@ def test_a_listing_that_fails_after_printing_a_match_writes_nothing(tmp_path):
     script = (SCRIPTS / "upsert-comment").as_posix()
     proc, calls = run_with_gh_recorder(
         tmp_path,
-        f'python3 "{script}" 7 comment.md\n',
+        f'python3 "{script}" 7 comment.md --new\n',
         {**os.environ, "GITHUB_REPOSITORY": "o/r"},
         listing=_head(5, SUMMARY) + "\n",
         list_rc=1,
@@ -1067,7 +1058,7 @@ _DOCTOR_LINE = 'python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md\n
 
 def _run_doctor(tmp_path, **gh):
     """comment-ops' doctor step with the doctor run replaced by a fixed marker-led report."""
-    run = step_by("comment-ops", name="Doctor: render and upsert the sticky comment")["run"]
+    run = step_by("comment-ops", name="Doctor: render and post the report comment")["run"]
     # A replace that misses leaves the real doctor running, passing for the wrong reason.
     assert run.count(_DOCTOR_LINE) == 1
     report = f"printf '%s\\n' '{DOCTOR}' '### shipmate doctor' > doctor.md\n"
@@ -1084,10 +1075,17 @@ def _run_doctor(tmp_path, **gh):
 
 
 @bash_only
-def test_doctor_posts_its_report_and_writes_the_job_summary(tmp_path):
-    """Mutation: change `_DOCTOR_LINE`'s text (the occurs-once assertion goes red)."""
-    proc, calls = _run_doctor(tmp_path, listing=_head(5, SUMMARY) + "\n")
-    assert (proc.returncode, proc.stdout, calls) == (0, "", [_LIST, _post_of("doctor.md")])
+def test_doctor_posts_a_new_report_and_minimizes_the_earlier_one(tmp_path):
+    """The plan comment is not doctor's, so it is neither read nor minimized; the job summary
+    carries the report. Mutations: change `_DOCTOR_LINE`'s text (the occurs-once assertion goes
+    red); `--new` -> `--update-only` on the doctor write -- comment 5 is PATCHed."""
+    listing = _head(4, SUMMARY) + "\n" + _head(5, DOCTOR) + "\n"
+    proc, calls = _run_doctor(tmp_path, listing=listing)
+    assert (proc.returncode, proc.stdout, calls) == (
+        0,
+        "",
+        [_LIST, _READ_5, _post_of("doctor.md"), _MINIMIZE_5],
+    )
     summary = (tmp_path / "step-summary.md").read_text(encoding="utf-8")
     assert summary == f"{DOCTOR}\n### shipmate doctor\n"
 

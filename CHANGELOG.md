@@ -18,6 +18,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
+- **`shipmate doctor` posts each report as a new comment and minimizes the earlier ones as outdated**, as the plan comment does, instead of rewriting one comment in place.
 - **The plan comment gives every environment with a changed cell that has plan text a fold-out before any environment gets a second one.** Each environment's first changed cell with plan text gets an equal share of the room left after the cell lines, then what is left goes in comment order to every changed cell still without a full fold-out, so a later environment's only change no longer renders as a bare line.
 - **Each apply check completes in the job after its wave, and no apply check reads in progress.** `apply-env-level.yml` gains `wave0-complete` … `wave7-complete`, each completing its wave's checks; `complete` then completes the whole level again, and alone completes a cancelled wave's checks. `snapshot` still fails before any wave when the App key is missing, revoked or wrong.
 - **The plan comment folds OpenTofu's `Objects have changed outside of OpenTofu` note into one line**, `ℹ️ <n> object(s) changed outside OpenTofu; the full note is in this cell's apply check.`; the apply check and the step summary keep the full note.
