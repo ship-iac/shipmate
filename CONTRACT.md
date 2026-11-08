@@ -1422,10 +1422,11 @@ only labels the output as shipmate's own. The list sits under the header
 `### shipmate help`, carries no verdict line (it examines nothing), and ends with
 `[comment run](<run url>)` alone, without the help hint.
 
-`shipmate doctor` posts a consolidated report — one comment per pull
-request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
-from the plan comment's `<!-- shipmate:summary -->`) and upserted in place
-through `scripts/upsert-comment`. It opens with the header `### shipmate doctor` and a verdict line
+`shipmate doctor` posts a consolidated report — a new comment each run,
+identified by the HTML marker `<!-- shipmate:doctor -->` (distinct from the plan
+comment's `<!-- shipmate:summary -->`) and posted through
+`scripts/upsert-comment --new`, which then minimizes the App's earlier visible
+reports as outdated, as §Plan comment describes for the plan comment. It opens with the header `### shipmate doctor` and a verdict line
 counting errors (🔴, harvested failure annotations), warnings (🟠) and notices
 (⚪), zero counts omitted, plus `harvest incomplete` (⚪) when the harvest failed
 or is still pending; the line takes the worst circle, reads `🟢 no problems found`
@@ -1848,8 +1849,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
   the App's other visible plan comments as outdated (GraphQL `minimizeComment`;
   §Plan comment).
 - **The `shipmate doctor` report** — App-authored (its own marker +
-  Bot-author lookup, same posture as the plan comment), upserted in place by
-  `actions/comment-ops` through the same `scripts/upsert-comment`.
+  Bot-author lookup, same posture as the plan comment), posted new by
+  `actions/comment-ops` through `scripts/upsert-comment --new`, which minimizes
+  the App's earlier visible reports as outdated.
 - **The apply result comment** — posted fresh by `actions/apply-summary` on
   every apply run (targeted, bare and `auto`); it carries no marker, so nothing
   edits or minimizes it, and a failure-then-retry sequence stays visible across
@@ -2954,11 +2956,11 @@ than `shipmate[bot]`. The author compare leaves another App's plan comment
 visible, and the start-of-body match leaves out the doctor report, which may
 quote the marker. The minimized comments are the audit trail of
 earlier plans for the PR. The write comes first, so the pull request never shows
-zero plan comments: a failed minimize warns "could not minimize an earlier plan
-comment of pull request #<n>; it stays visible: <error>" and leaves two visible,
-newest last. Visibility is GraphQL `isMinimized`, read for every plan comment
-the listing holds. A failed or incomplete read warns "could not read which plan
-comments of pull request #<n> are minimized, so all count as visible: <error>".
+zero plan comments: a failed minimize warns "could not minimize an earlier
+shipmate comment of pull request #<n>; it stays visible: <error>" and leaves two
+visible, newest last. Visibility is GraphQL `isMinimized`, read for every plan comment
+the listing holds. A failed or incomplete read warns "could not read which
+shipmate comments of pull request #<n> are minimized, so all count as visible: <error>".
 A posting run then posts and minimizes the App's earlier plan comments anyway.
 A quiet no-change run rewrites the newest plan comment, which may be a minimized
 one, and minimizes nothing, so it never hides the only visible comment.

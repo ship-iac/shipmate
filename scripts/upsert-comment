@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Write the comment a body file names on a pull request: replace it, or post a new one.
+"""Write the comment a body file names on a pull request: post a new one, or rewrite the newest.
 
-Usage: `upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]`, with `gh` (`GH_TOKEN`)
+Usage: `upsert-comment PR BODYFILE (--new | --update-only) [--head SHA]`, with `gh` (`GH_TOKEN`)
 against `GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::`
 before the body file is read or any `gh` call, because it is bound into the API path; so does a
-`--head` that is not a 40-character lowercase hex SHA, and any other or repeated argument.
+`--head` that is not a 40-character lowercase hex SHA, a missing mode, and any other or
+repeated argument.
 
 The marker is BODYFILE's first line, which must be a whole `<!-- shipmate:<name> -->` with a
 1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. A
@@ -17,19 +18,16 @@ report interpolates repository data, so either can quote the other's marker, and
 match would write over or minimize the other comment. Only the first 64 characters of each body
 reach this script, which the marker's length bound keeps inside.
 
-Without a flag, the first marker comment in listing order is PATCHed, or the body is POSTed
-when there is none.
-
 With `--new`, the body is always POSTed, then every earlier marker comment that is visible and
 by the POST's author (its response's `user.login`) is minimized as outdated. Posting first means
-the pull request never shows zero plan comments, and the new comment is never one minimized.
+the pull request never shows zero marker comments, and the new comment is never one minimized.
 
 With `--update-only`, the newest visible marker comment is PATCHed instead, nothing is POSTed,
 and the other visible ones by the PATCH's author are minimized the same way, unless the
 visibility read failed: the PATCHed comment may then be a minimized one, and minimizing the
-others could leave the pull request with no visible plan comment.
+others could leave the pull request with no visible marker comment.
 
-Under either flag, visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids
+Visibility is GraphQL's `isMinimized`, read in chunks of 100 node ids
 (`minimized_ids`). A read that fails or is incomplete, a non-boolean `isMinimized` included,
 prints one `::warning::` and every marker comment counts as visible: failing the step would drop
 the run's comment to save a no-op, since minimizing a minimized comment changes nothing, and the
@@ -44,15 +42,15 @@ comment.
 
 Prints exactly one word and exits 0:
 
-- `updated`: a marker comment was PATCHed (never with `--new`).
+- `updated`: a marker comment was PATCHed (only with `--update-only`).
 - `created`: the body was POSTed.
 - `skipped`: `--update-only` and no visible marker comment; nothing written, and the head is
   not read.
 - `moved`: the pull request's head is not `--head`; nothing written.
 - `head-failed`: the head read failed or gave no head SHA; nothing written.
 - `list-failed`: the listing failed on any page, or printed a line that is not an
-  `{id, node_id, login, head}` object, so nothing was written. A POST here would create a second
-  comment that later runs could PATCH instead of this one.
+  `{id, node_id, login, head}` object, so nothing was written. A POST here would leave the earlier
+  marker comments visible beside it.
 
 On `head-failed` and `list-failed` the error goes to stderr without `::error::`, so the caller
 decides how to report it, on one line (`one_line`), so no line of gh's text starts a workflow
@@ -135,8 +133,8 @@ def minimized_ids(node_ids, pr):
                 continue
             error = f"unexpected answer: {out[:ANSWER_CAP]}"
         print(
-            f"::warning::could not read which plan comments of pull request #{pr} are minimized, "
-            f"so all count as visible: {one_line(error)}",
+            f"::warning::could not read which shipmate comments of pull request #{pr} are "
+            f"minimized, so all count as visible: {one_line(error)}",
             file=sys.stderr,
         )
         return None
@@ -145,8 +143,8 @@ def minimized_ids(node_ids, pr):
 
 def _minimize_warning(pr, error):
     print(
-        f"::warning::could not minimize an earlier plan comment of pull request #{pr}; it stays "
-        f"visible: {one_line(error)}",
+        f"::warning::could not minimize an earlier shipmate comment of pull request #{pr}; it "
+        f"stays visible: {one_line(error)}",
         file=sys.stderr,
     )
 
@@ -178,9 +176,9 @@ def _minimize_earlier(pr, visible, response):
 
 
 def _args(argv):
-    """(PR, BODYFILE, mode, head or None) from `argv`, or `::error::` usage; mode is `--new`,
-    `--update-only` or None."""
-    usage = "::error::usage: upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]"
+    """(PR, BODYFILE, mode, head or None) from `argv`, or `::error::` usage; mode is `--new` or
+    `--update-only`."""
+    usage = "::error::usage: upsert-comment PR BODYFILE (--new | --update-only) [--head SHA]"
     if len(argv) < 2:
         sys.exit(usage)
     pr, path, rest = argv[0], argv[1], argv[2:]
@@ -192,6 +190,8 @@ def _args(argv):
             head, rest = rest[1], rest[2:]
         else:
             sys.exit(usage)
+    if mode is None:
+        sys.exit(usage)
     if head is not None and not is_head_sha(head):
         sys.exit(f"::error::--head must be a 40-char lowercase hex SHA (got: {head})")
     return pr, path, mode, head
@@ -219,13 +219,11 @@ def _visible(found, pr):
     return [c for c in found if c["node_id"] not in hidden], True
 
 
-def _targets(mode, found, visible, read):
+def _targets(mode, visible, read):
     """(The comment id to PATCH, None to POST; the comments to minimize after the write)."""
     if mode == "--update-only":
         return visible[-1]["id"], visible[:-1] if read else []
-    if mode == "--new":
-        return None, visible
-    return (found[0]["id"] if found else None), []
+    return None, visible
 
 
 def _write(repo, pr, path, cid):
@@ -256,7 +254,7 @@ def main():
         print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    visible, read = _visible(found, pr) if mode else (found, True)
+    visible, read = _visible(found, pr)
     if not visible and mode == "--update-only":
         print("skipped")
         return
@@ -264,7 +262,7 @@ def main():
     if stop:
         print(stop)
         return
-    cid, earlier = _targets(mode, found, visible, read)
+    cid, earlier = _targets(mode, visible, read)
     response, word = _write(repo, pr, path, cid)
     if earlier:
         _minimize_earlier(pr, earlier, response)
