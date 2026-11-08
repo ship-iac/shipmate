@@ -251,8 +251,9 @@ def test_t0_is_five_seconds_before_the_first_attempt(calls, monkeypatch, capsys,
 
 
 @pytest.mark.parametrize("argv", [["post"], ["--help"]])
-def test_an_argument_refuses_before_any_call(calls, argv):
-    """Mutation: drop the `if argv:` refusal -> `--help` sends a real dispatch."""
+def test_an_argument_refuses_before_any_call(calls, monkeypatch, argv):
+    """Mutation: drop the `if argv:` refusal -> `--help` sends the dispatch."""
+    answering(monkeypatch, calls, [ANSWER])
     with pytest.raises(SystemExit) as exc:
         db.main(argv)
     assert exc.value.code == "::error::usage: dispatch-body"

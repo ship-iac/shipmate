@@ -53,6 +53,7 @@ def env_pr_number():
 
 def check_name(stack, env):
     """The apply check's name, `apply / <stack> / <env>`; `parse_check_name` inverts it.
+    The format persists: after a merge, the env a stack lost exists only in its check's name.
     `stack` is the stack path, so a deploy that knows only the path rebuilds it exactly."""
     return f"{APPLY_PREFIX}{stack} / {env}"
 
