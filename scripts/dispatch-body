@@ -123,7 +123,8 @@ def main(argv=()):
         try:
             landed = landed_since(repo, t0, run=run)
         except (SystemExit, Exception) as e:
-            print(f"listing shipmate.yml runs failed: {type(e).__name__}: {e}", file=sys.stderr)
+            why = e if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
+            print(f"listing shipmate.yml runs failed: {why}", file=sys.stderr)
             raise SystemExit(UNDETERMINED) from None
         if landed:
             raise SystemExit(MAY_HAVE_STARTED)

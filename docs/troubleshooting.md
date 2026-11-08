@@ -996,7 +996,8 @@ a merged pull request:
   repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request. If it never
   does, or the commit was a direct push, open a pull request that changes the
   unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
-  environment the refusal names, then apply it.
+  environment the refusal names (the `<env>` of each `<stack> / <env>` cell or
+  `apply / <stack> / <env>` check), then apply it.
 
 ### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`
 
