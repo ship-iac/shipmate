@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and that head has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body post, which retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and that head has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out.
 inputs:
   pr-number:
     description: Pull request number.
@@ -385,9 +385,7 @@ runs:
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
         SHIPMATE_STACKED_HOLD: ${{ steps.build.outputs.stacked_hold }}
-      run: |
-        set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"
 
     - name: Download cell errors
       if: ${{ steps.hold.outputs.superseded != 'true' && steps.gate.outputs.comment_mode == 'held' }}
@@ -597,7 +595,7 @@ runs:
         [ -n "${GH_TOKEN:-}" ] || not_planned "the plan dispatch token mint"
         rc=0
         # Exit codes are documented in scripts/dispatch-body.
-        python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" post >/dev/null || rc=$?
+        python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" >/dev/null || rc=$?
         if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
           echo "::warning::the plan dispatch answered with an error, so a plan of $SHIPMATE_LIVE may have started; check the Actions tab before commenting shipmate plan on pull request #$PR_NUMBER"
           exit 0
@@ -672,7 +670,7 @@ runs:
         [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
         rc=0
         # Exit codes are documented in scripts/dispatch-body.
-        python3 "$scripts/dispatch-body" post >/dev/null || rc=$?
+        python3 "$scripts/dispatch-body" >/dev/null || rc=$?
         if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
           echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS answered with an error, and an auto run may have started; check the Actions tab before commenting shipmate apply"
           # Exit 3 saw a run start, so it is a notice, as in comment-ops; exit 4 cannot tell.

@@ -174,7 +174,8 @@ HARVEST_PENDING = (
 
 def _read_once(ctx, path):
     """`_gh_json(path)`, read once per run and kept on `ctx`. A failure is kept too and
-    re-raised to every probe that asks, so `warnings()` still degrades each probe on its own."""
+    re-raised to every probe that asks, so `warnings_and_count()` still degrades each probe on
+    its own."""
     reads = ctx.setdefault("gh_reads", {})
     if path not in reads:
         try:
@@ -388,7 +389,7 @@ def _existing_env_names(ctx):
     absence from that read would let a token lacking `environments` access
     produce loud findings about environments that are fine, while a genuine 403
     on a present one passes as healthy. A failure of this listing is the
-    caller's precondition and propagates to `warnings()`' degrade note.
+    caller's precondition and propagates to `warnings_and_count()`' degrade note.
 
     per_page=100 covers >=50 logical env pairs, and `_gh_json` does not
     multi-page merge, so a repository past that raises rather than reports on half
@@ -690,7 +691,7 @@ def _engine_environment_warnings(ctx):
         ]
     try:
         env = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}")
-    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings_and_count()
         ec.log_failure(e, f"environment {_ENGINE_ENV}")
         return [
             (
@@ -729,7 +730,7 @@ def _engine_environment_warnings(ctx):
         ]
     try:
         policies = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}/deployment-branch-policies")
-    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings_and_count()
         ec.log_failure(e, f"environment {_ENGINE_ENV} branch policies")
         return [
             (
@@ -954,7 +955,7 @@ def _unverified(subject, path=_WORKFLOWS_DIR):
     """The (UNREADABLE, NO_COMMIT) degrade pair of a workflow probe checking `subject` by
     reading `path`.
 
-    Both NOTICE, never the generic WARNING degrade in warnings(): an unreadable path is
+    Both NOTICE, never the generic WARNING degrade in warnings_and_count(): an unreadable path is
     not a misconfiguration, for the reasons each caller states, and an unknown
     commit may not be silently substituted with a weaker read.
     """
@@ -1957,8 +1958,8 @@ def _config_defaults(table):
     one a reader already assumes.
     """
     order = ec.env_order(table)
-    envs = ec.targeted_envs(table)
-    autos = ec.auto_envs(table)
+    envs = ec.mode_envs(table, "targeted")
+    autos = ec.mode_envs(table, "auto")
     cap = ec.max_parallel(table)
     cap_head = (
         f"`max_parallel: {cap}`:" if "max_parallel" in table else "`max_parallel`: not set, so"
@@ -2039,7 +2040,7 @@ def _config_table(ctx):
     try:
         table = ec.validate_structure(ec.parse_table(text))
     except SystemExit as exc:
-        # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
+        # The refusal IS the finding, and it must not reach warnings_and_count()'s degrade handler:
         # that one reports a probe as skipped and truncates the message to 120 characters.
         lines = [_one_line(line.removeprefix("::error::"), 400) for line in str(exc).splitlines()]
         errors = " ".join(lines[:CONFIG_ERROR_LINES])
@@ -2088,7 +2089,7 @@ def config_status(ctx):
     cache would outlive a single run. `_contents_ref` pins
     a 40-char SHA, so both reads see the same bytes.
 
-    Never raises: `report` mode renders this outside `warnings()`' degrade handler, and
+    Never raises: `report` mode renders this outside `warnings_and_count()`' degrade handler, and
     `doctor` must not fail the run over it.
     """
     try:
@@ -2281,11 +2282,6 @@ def _degrade_reason(e):
     endpoint is an internal detail no reader can act on. Every caller also passes `e`
     to `ec.log_failure`, because the cut drops the HTTP status that says why."""
     return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
-
-
-def warnings(ctx):
-    """`warnings_and_count`'s findings."""
-    return warnings_and_count(ctx)[0]
 
 
 def warnings_and_count(ctx):
@@ -2789,7 +2785,8 @@ def _verdict(findings, sections, ctx):
     return circle, f"{circle} {', '.join(t for _, t in tokens)} {sha}"
 
 
-#: Not a finding: in `warnings()` it would suppress the all-clear and annotate every plan run.
+#: Not a finding: in `warnings_and_count()` it would suppress the all-clear and annotate every
+#: plan run.
 NOT_CHECKED = (
     "_Not checked: the repository's Actions settings (docs/hardening.md rows 10 to 12 and 20), "
     "which no token a workflow can obtain reads. `scripts/onboard` checks rows 10, 12 and 20._"
@@ -2875,7 +2872,7 @@ def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending
 
 
 #: Heading of the fixed section `config_status` renders under. Its own section because the
-#: lines are status rather than findings: mixed into `warnings()` they would suppress the
+#: lines are status rather than findings: mixed into `warnings_and_count()` they would suppress the
 #: settings-probe all-clear on every repository and annotate every plan run.
 CONFIG_HEADING = "#### the environment table at this commit"
 #: Heading of the fixed section `tool_status` renders under: the default branch's versions,

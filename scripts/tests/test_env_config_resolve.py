@@ -355,7 +355,7 @@ def test_exempt_envs_names_the_entries_holding_review_false():
 
 
 def test_targeted_envs_names_the_entries_holding_apply_mode_targeted():
-    """Mutation: `== "targeted"` -> `!= "bare"` in `targeted_envs` -- the absent `prd` joins."""
+    """Mutation: `== "targeted"` -> `!= "bare"` in `mode_envs` -- the absent `prd` joins."""
     table = {
         "layout": "folder",
         "environments": {
@@ -364,7 +364,7 @@ def test_targeted_envs_names_the_entries_holding_apply_mode_targeted():
             "prd": {},
         },
     }
-    assert env_config.targeted_envs(table) == ["dev"]
+    assert env_config.mode_envs(table, "targeted") == ["dev"]
 
 
 _FLAGGED = {
@@ -387,9 +387,9 @@ def test_the_flag_accessors_read_each_entry_against_its_default(capsys):
     `apply_mode` for presence rather than `targeted` -- `open` joins.
     """
     assert env_config.validate_structure(_FLAGGED) is _FLAGGED
-    assert env_config.targeted_envs(_FLAGGED) == ["held", "mixed"]
+    assert env_config.mode_envs(_FLAGGED, "targeted") == ["held", "mixed"]
     assert env_config.exempt_envs(_FLAGGED) == frozenset({"open", "mixed"})
-    assert env_config.targeted_envs({"layout": "folder"}) == []
+    assert env_config.mode_envs({"layout": "folder"}, "targeted") == []
     assert env_config.exempt_envs({"layout": "folder"}) == frozenset()
     assert capsys.readouterr().out == ""
 
@@ -400,7 +400,7 @@ def test_the_flag_accessors_read_only_a_boolean_as_set():
     bare apply exactly as `validate_structure` would otherwise have refused it.
 
     Mutations: `shared_envs` or `exempt_envs` tests its key for falsiness -- `zero` joins;
-    either compares the lowercased string to `"false"` -- `quoted` joins; `targeted_envs`
+    either compares the lowercased string to `"false"` -- `quoted` joins; `mode_envs`
     compares casefolded -- `cased` joins.
     """
     table = {
@@ -412,7 +412,7 @@ def test_the_flag_accessors_read_only_a_boolean_as_set():
     }
     assert env_config.shared_envs(table) == set()
     assert env_config.exempt_envs(table) == frozenset()
-    assert env_config.targeted_envs(table) == []
+    assert env_config.mode_envs(table, "targeted") == []
 
 
 # --- no fallback to vars.* ------------------------------------------------------------

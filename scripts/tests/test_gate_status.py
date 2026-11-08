@@ -417,7 +417,7 @@ def test_checks_writes_the_listing_bytes_as_utf8_with_lf(tmp_path):
 
 @bash_only
 def test_checks_sends_the_projection_it_is_given(tmp_path):
-    """Mutation: ignore the argument and send `CHECK_RUNS_JQ` -> the stub refuses the call."""
+    """Mutation: ignore the argument and send `.check_runs[]` -> the stub refuses the call."""
     jq = ".check_runs[] | {name, status}"
     proc, calls = _run(tmp_path, "checks", SHA, jq, checks="{}\n", checks_jq=jq)
     assert (proc.returncode, proc.stdout) == (0, "{}\n"), proc.stderr

@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. An unlock dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id; plan and apply runs answer on the pull request themselves. `scripts/dispatch-body post` sends the dispatch and retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out. A failed dispatch of any verb posts a failure reply that says whether a run may have started; one followed by a shipmate.yml run posts a notice reply and passes. Every reply only warns when it cannot be posted.
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. An unlock dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id; plan and apply runs answer on the pull request themselves. `scripts/dispatch-body` sends the dispatch and retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out. A failed dispatch of any verb posts a failure reply that says whether a run may have started; one followed by a shipmate.yml run posts a notice reply and passes. Every reply only warns when it cannot be posted.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -86,15 +86,15 @@ runs:
         # would accept (the input is declared) and then skip every job over, reading as a
         # successful run that did nothing.
         case "$VERB" in
-          plan|apply|unlock) WORKFLOW=shipmate.yml ;;
+          plan|apply|unlock) ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
         errfile=$(mktemp) || { echo "::error::could not create a temporary file for the dispatch"; say_no_run_started; exit 1; }
         trap 'rm -f -- "$errfile"' EXIT
         rc=0
-        # stdout alone is the API's answer, parsed below; `post` writes a failure to stderr.
+        # stdout alone is the API's answer, parsed below; dispatch-body writes a failure to stderr.
         # Exit codes are documented in scripts/dispatch-body.
-        out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" post 2>"$errfile") || rc=$?
+        out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" 2>"$errfile") || rc=$?
         err=$(<"$errfile")
         [ -z "$out" ] || printf '%s\n' "$out"
         [ -z "$err" ] || printf '%s\n' "$err"
@@ -105,21 +105,21 @@ runs:
           exit 0
         fi
         if [ "$rc" -eq 4 ]; then
-          echo "::error::dispatching $WORKFLOW failed with a server or network error, so a run may have started"
+          echo "::error::dispatching shipmate.yml failed with a server or network error, so a run may have started"
           reply failed "the command was authorized, but dispatching its workflow failed with a server or network error, so a run may have started. Check the Actions tab before commenting again; the error is in this run's log." \
             || echo "::warning::could not post the dispatch failure reply"
           exit 1
         fi
         if [ "$rc" -ne 0 ]; then
-          echo "::error::dispatching $WORKFLOW failed, so no run started"
+          echo "::error::dispatching shipmate.yml failed, so no run started"
           say_skew
           say_no_run_started
           exit "$rc"
         fi
         if [ "$VERB" = plan ]; then
-          echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for PR #$PR_NUMBER"
+          echo "::notice title=dispatch::dispatched shipmate.yml on $DISPATCH_REF for PR #$PR_NUMBER"
         else
-          echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"
+          echo "::notice title=dispatch::dispatched shipmate.yml on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"
         fi
         # Plan and apply runs answer on the pull request themselves. The unlock run has started, so
         # its reply only warns on failure. Only `workflow_run_id` is passed on, cut to 21

@@ -115,8 +115,8 @@ def test_an_empty_expected_head_is_refused_and_emits_nothing(tmp_path):
         "and it is empty. The engine's plan workflow supplies it, so no consumer setting causes "
         "this. Report it with this run's link through the bug report template."
     )
-    # Nothing emitted: a downstream step reading an output that was never set gets the empty
-    # string, which `record-head` refuses, but only if this step wrote no plausible value first.
+    # Nothing emitted: a failed step skips `record-head`, so the artifact carries no record and
+    # apply-cell refuses it, but only if this step wrote no plausible value first.
     assert written == "", written
 
 
@@ -145,10 +145,3 @@ def test_record_head_writes_the_captured_commit_with_a_trailing_newline(tmp_path
     r = _run_record(tmp_path, planned_head=_SHA)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert (tmp_path / "planned-head.txt").read_bytes() == f"{_SHA}\n".encode()
-
-
-@bash_only
-def test_an_uncaptured_commit_writes_no_record(tmp_path):
-    r = _run_record(tmp_path, planned_head="")
-    assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert not (tmp_path / "planned-head.txt").exists()

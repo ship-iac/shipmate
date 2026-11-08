@@ -246,7 +246,7 @@ def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, caps
 
     Mutations: post with `-f body={text}` and no stdin -- the body appears in the message and
     stdin is empty; prefix the message with `::error::` -- an annotation on stderr; drop the
-    `" | ".join` -- gh's stderr on its own lines.
+    `one_line` -- gh's stderr on its own lines.
     """
     calls = []
     failed = subprocess.CompletedProcess([], 1, b"", b"HTTP 403: forbidden\nsecond line")

@@ -21,7 +21,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, lock_who, run_annotated
+from _shipmate import _load, current_run_url, is_pr_number, lock_who, one_line, run_annotated
 
 sc = _load("summary-comment")
 rc = _load("reply-comment")
@@ -118,7 +118,7 @@ def main():
             _post(holder, notice(locks, login, pr))
         except SystemExit as exc:
             # One line: a raw stderr line could start a workflow command.
-            reason = " | ".join(str(exc.code).splitlines())
+            reason = one_line(exc.code)
             print(f"::warning::could not post the eviction notice on #{holder}: {reason}")
             untold.add(holder)
     outcome, text = reply(evicted, refused, os.environ["SHIPMATE_ENV"], untold)

@@ -234,6 +234,11 @@ def _list_stacks(all_stacks, base, tree=None):
     return [s.strip() for s in _run(args).splitlines() if s.strip()]
 
 
+def _joined(lines):
+    """`lines` stripped, blank ones dropped, joined into one line by ` | `."""
+    return " | ".join(x.strip() for x in lines if x.strip())
+
+
 def merge_base(base, retry="Re-run the workflow"):
     """The merge base of `base` and `HEAD`, which plan detect diffs from, so a branch behind its
     base plans only the stacks its own commits change. Refuses when the two share no history
@@ -253,8 +258,10 @@ def merge_base(base, retry="Re-run the workflow"):
             "base, or recreate it from the base, and push."
         )
     else:
-        lines = [line.strip() for line in p.stderr.splitlines() if line.strip()]
-        error = " | ".join(lines) or f"git merge-base exited {p.returncode} with no message"
+        error = (
+            _joined(p.stderr.splitlines())
+            or f"git merge-base exited {p.returncode} with no message"
+        )
         message = (
             f"could not resolve the merge base of the pull request's base {base} and its head: "
             f"{error}. {retry}; if it fails again, the base commit is not reachable from this "
@@ -318,7 +325,7 @@ def base_changed_stacks(base_ref, candidates):
         fetch = ["git", "fetch", "--quiet", "--no-tags", "origin", base_ref]  # noqa: S607
         p = subprocess.run(fetch, capture_output=True, encoding="utf-8", errors="replace")  # noqa: S603
         if p.returncode:
-            error = " | ".join(x.strip() for x in p.stderr.splitlines() if x.strip())
+            error = _joined(p.stderr.splitlines())
             raise SystemExit(
                 f"::error::could not fetch the base tip {base_ref} ({error or p.returncode}). "
                 f"{_BASE_REMEDY}."
@@ -366,7 +373,7 @@ def _merge_stacks(base_ref, candidates):
                 run(["git", "worktree", "remove", "--force", tree])
     except (SystemExit, OSError) as e:
         message = str(e.code if isinstance(e, SystemExit) else e).removeprefix("::error::")
-        cause = " | ".join(x.strip() for x in message.splitlines()[1:] if x.strip()) or message
+        cause = _joined(message.splitlines()[1:]) or message
     raise SystemExit(
         "::error::change detection on the merge of the base into the branch failed: "
         f"{cause.removesuffix('.')}. {_BASE_REMEDY}."
@@ -378,10 +385,10 @@ def _merge_tree_failure(p):
     printed a tree: its `CONFLICT` lines on exit 1, else its stderr."""
     if not p.returncode:
         return None if p.stdout.split() else "git merge-tree printed no tree"
-    lines = [x.strip() for x in p.stdout.splitlines() if x.startswith("CONFLICT")]
+    lines = [x for x in p.stdout.splitlines() if x.startswith("CONFLICT")]
     if p.returncode != 1 or not lines:
-        lines = [x.strip() for x in p.stderr.splitlines() if x.strip()]
-    return " | ".join(lines) or f"git merge-tree exited {p.returncode}"
+        lines = p.stderr.splitlines()
+    return _joined(lines) or f"git merge-tree exited {p.returncode}"
 
 
 def _inside(path, stack, stacks):
@@ -963,8 +970,8 @@ def main():
         count=len(cells),
         max_parallel=cap,
         command_hints=hints,
-        auto_envs=json.dumps(ec.auto_envs(table)),
-        targeted_envs=json.dumps(ec.targeted_envs(table)),
+        auto_envs=json.dumps(ec.mode_envs(table, "auto")),
+        targeted_envs=json.dumps(ec.mode_envs(table, "targeted")),
         cells=json.dumps(tree),
         unmanaged=json.dumps(named),
         lost=lost,

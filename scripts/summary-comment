@@ -78,6 +78,7 @@ from _shipmate import (
     current_run_url,
     event_action,
     is_head_sha,
+    json_or_none,
     lock_who,
     one_line,
     retried,
@@ -913,10 +914,7 @@ def _named_output(raw, input_name, key, noun):
     negative `N` fails too). `noun` names, in the warning, what the comment then omits."""
     if not raw:
         return None
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        value = None
+    value = json_or_none(raw)
     if isinstance(value, dict):
         count, names = value.get("count"), value.get(key)
         if (
@@ -939,10 +937,7 @@ def lock_marks(raw):
     warning when it is not that shape."""
     if not raw:
         return {}
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        value = None
+    value = json_or_none(raw)
     if isinstance(value, dict) and all(h is None or type(h) is int for h in value.values()):
         return value
     print("::warning::the cell locks are not a JSON map of holders; the plan comment marks none")
@@ -954,10 +949,7 @@ def stacked_marks(raw):
     when `raw` is empty, and empty with one warning when it is not a JSON list of ints."""
     if not raw:
         return frozenset()
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        value = None
+    value = json_or_none(raw)
     if isinstance(value, list) and all(type(h) is int for h in value):
         return frozenset(value)
     print(

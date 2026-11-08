@@ -4,18 +4,6 @@
 suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is cached in
 ``sys.modules``: every call returns a fresh module, so a test that monkeypatches one sibling's
 ``bm._run`` cannot leak the patch into every other holder of ``build-matrix``.
-
-Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
-scripts, the workflow-command data and property escapers and the annotated scripts' refusal
-printer, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
-share, and the UTF-8 switch for their console output. It also holds the pull-request number
-check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the head-SHA check and
-the one check-runs listing every reader of a head's checks uses, the ruleset, environment and
-``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
-``cell.json`` summaries, builds this run's page link, joins a capped list of names and parses a
-list of cell names. It retries a ``gh`` read that failed transiently. It parses YAML: the
-strings-only config loader and the YAML 1.2 workflow loader, both importing PyYAML only when
-first called.
 """
 
 import functools
@@ -31,7 +19,6 @@ import sys
 import time
 import urllib.parse
 from importlib.machinery import SourceFileLoader
-from typing import TypeGuard
 
 _D = pathlib.Path(__file__).resolve().parent
 
@@ -55,8 +42,6 @@ APP_ID_VAR = "SHIPMATE_APP_ID"
 _PR_NUMBER = re.compile(r"[1-9][0-9]{0,9}")
 _HEAD_SHA = re.compile(r"[0-9a-f]{40}")
 _RUN_ID = re.compile(r"[0-9]{1,20}")
-#: The default projection of `check_runs`: each check-run object whole.
-CHECK_RUNS_JQ = ".check_runs[]"
 
 
 def gate_check(rules, gate):
@@ -254,11 +239,6 @@ REASON_CAP = 4000
 CHECK_OUTPUT_CAP = 65_535
 
 
-def is_refusal(code) -> TypeGuard[str]:
-    """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`."""
-    return isinstance(code, str) and code.startswith("::error::")
-
-
 def run_annotated(main, *args, refusal_output=False):
     """Call `main(*args)`; print an `::error::` exit as one escaped workflow command per error.
 
@@ -281,7 +261,7 @@ def run_annotated(main, *args, refusal_output=False):
         main(*args)
     except SystemExit as exc:
         code = exc.code
-        if not is_refusal(code):
+        if not (isinstance(code, str) and code.startswith("::error::")):
             raise
         errors = []
         for line in code.splitlines():
@@ -427,7 +407,7 @@ def pr_head(repo, pr, run=run):
     return sha, draft, state
 
 
-def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None, name=None):
+def check_runs(repo, sha, jq=".check_runs[]", run=None, name=None):
     """Every check-run on `sha`, or only those named `name`, as `gh api --jq` output: one `jq`
     projection per line.
 
@@ -450,6 +430,14 @@ def named(items, cap):
     if len(items) > cap:
         listed += f", and {len(items) - cap} more"
     return listed
+
+
+def json_or_none(raw):
+    """`raw` parsed as JSON, or None when it is not JSON."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
 
 
 def cell_names(raw):

@@ -294,8 +294,8 @@ def _paths(calls):
 def test_a_changed_auto_cell_decides_to_dispatch(tmp_path):
     """The auto set comes from `SHIPMATE_AUTO_ENVS_TABLE`; the decision makes no API call.
 
-    Mutations: write `envs=` with no value; restore `ec.auto_envs(ec.read_table())` (the stub
-    answers the contents read with nothing, the read fails and a call is recorded)."""
+    Mutations: write `envs=` with no value; restore `ec.mode_envs(ec.read_table(), "auto")` (the
+    stub answers the contents read with nothing, the read fails and a call is recorded)."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True), ("prod", True)])
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (calls, outputs) == ([], {"envs": "dev"})
@@ -394,7 +394,7 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
 
     Mutations: `exit 1` in place of the failure branch's `exit 0`; drop the reply call; change
     the reply text; reply with `GH_TOKEN`, the dispatch token; treat every nonzero exit of
-    `dispatch-body post` as a run that may have started -- the reply differs; send `post`'s
+    `dispatch-body` as a run that may have started -- the reply differs; send dispatch-body's
     stderr to /dev/null, and gh's answer leaves the log."""
     proc, calls, _ = _run(tmp_path, DISPATCH, dispatch_rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -416,7 +416,7 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
 def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab(
     tmp_path, post_rc, verdict
 ):
-    """`dispatch-body post` exits 3 when a run started after an attempt that failed, a notice as
+    """`dispatch-body` exits 3 when a run started after an attempt that failed, a notice as
     in comment-ops, and 4 when it cannot tell, a failure: either way "not started" would be false.
     Mutations: reply the `auto apply not started` text on exit 3 and 4 -- both rows redden;
     reply `failed` on exit 3 -- its row reddens."""

@@ -292,18 +292,14 @@ def _expected_cells():
     targeted apply fills level 0 alone); '' contributes nothing. Cell identity is
     (environment, stack) -- a wave element is
     `{"stack": "<stack path>", "environment": "<env>"}`."""
-    raw_values = [
-        os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(wv.MAX_ENV_LEVELS)
-    ]
-    expected = set()
-    for raw in raw_values:
-        if not raw:
-            continue
-        waves = json.loads(raw)
-        for cells in waves.values():
-            for item in cells:
-                expected.add((item["environment"], item["stack"]))
-    return expected
+    raws = (os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") for i in range(wv.MAX_ENV_LEVELS))
+    return {
+        (item["environment"], item["stack"])
+        for raw in raws
+        if raw
+        for cells in json.loads(raw).values()
+        for item in cells
+    }
 
 
 def build_rows(expected, downloaded):
@@ -311,10 +307,8 @@ def build_rows(expected, downloaded):
     by (environment, stack). An expected cell with no downloaded artifact is
     'not attempted'. A downloaded cell outside the expected set is still
     rendered (never silently drop evidence that an apply ran)."""
-    by_key = {}
-    for cell, text in downloaded:
-        key = (cell["environment"], cell["stack"])
-        by_key[key] = {
+    by_key = {
+        (cell["environment"], cell["stack"]): {
             "environment": cell["environment"],
             "stack": cell["stack"],
             "status": cell["result"],
@@ -322,20 +316,21 @@ def build_rows(expected, downloaded):
             "state_lost": cell["state_lost"],
             "apply_text": text,
         }
+        for cell, text in downloaded
+    }
     for env, stack in expected:
-        key = (env, stack)
-        if key not in by_key:
-            by_key[key] = {
+        by_key.setdefault(
+            (env, stack),
+            {
                 "environment": env,
                 "stack": stack,
                 "status": "not_attempted",
                 "reason": "",
                 "state_lost": False,
                 "apply_text": None,
-            }
-    rows = list(by_key.values())
-    rows.sort(key=lambda r: (r["environment"], r["stack"]))
-    return rows
+            },
+        )
+    return sorted(by_key.values(), key=lambda r: (r["environment"], r["stack"]))
 
 
 def load_check_maps(path, app_id):
@@ -985,7 +980,7 @@ def main():
         os.environ.get("SHIPMATE_APP_ID", ""),
     )
     rows = apply_check_state(build_rows(expected, downloaded), present, done)
-    env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "") or ""
+    env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "")
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
     for line in notices(
         rows,
@@ -1000,7 +995,7 @@ def main():
         json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]"),
         env_name,
-        os.environ.get("SHIPMATE_RESULTS", "") or "",
+        os.environ.get("SHIPMATE_RESULTS", ""),
         json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]"),
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
         json.loads(os.environ.get("SHIPMATE_WAITING_CELLS") or "[]"),

@@ -217,10 +217,11 @@ def _env(name, rules=(), branch_policy=None):
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
     pin-freshness, fork-trigger, `shipmate.yml`, drift-file and CODEOWNERS probes, so tests
-    exercising the older gate/environment probes through `warnings()` collect no incidental
-    noise from these eight.
+    exercising the older gate/environment probes through `warnings_and_count()` collect no
+    incidental noise from these eight.
     The config probe's read is here too, serving the design's canonical file: a sound table
-    is silent in `warnings()`, and its status lines are rendered from `config_status` instead.
+    is silent in `warnings_and_count()`, and its status lines are rendered from `config_status`
+    instead.
 
     The pin and fork-trigger probes read the workflow listing, and the `shipmate.yml` probe
     one file of it. `_SHIPMATE_WF`'s `uses:` lines are engine pins -- `_PIN` matches a
@@ -274,7 +275,7 @@ def test_healthy_repo_emits_nothing(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == []
+    assert doctor.warnings_and_count(_ctx())[0] == []
 
 
 def test_one_run_reads_the_default_branch_table_once(monkeypatch):
@@ -301,7 +302,7 @@ def test_one_run_reads_the_default_branch_table_once(monkeypatch):
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     ctx = _ctx()
-    doctor.warnings(ctx)
+    doctor.warnings_and_count(ctx)
     doctor.config_status(ctx)
     doctor.tool_status(ctx)
     assert asked.count(_CONFIG_ON_DEFAULT) == 1
@@ -319,7 +320,7 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -466,7 +467,7 @@ def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
 
     Mutation: have `_default_branch_table` keep the unvalidated `parse_table` result, so
     `_bound_names` calls `shared_envs` on it -- the non-table entry raises inside every
-    environment probe and `warnings()` degrades them."""
+    environment probe and `warnings_and_count()` degrades them."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
@@ -475,7 +476,7 @@ def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
         _CONFIG_ON_DEFAULT: _wf_file(_INVALID_TABLE),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         _DEFAULT_TABLE_SKIPPED,
         (
             doctor.WARNING,
@@ -671,7 +672,7 @@ def test_gate_rule_wrong_integration_id_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -691,7 +692,7 @@ def test_gate_rule_absent_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -707,7 +708,7 @@ def test_strict_policy_off_warned(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert len(out) == 1
     level, text = out[0]
     assert level == doctor.WARNING
@@ -717,7 +718,7 @@ def test_strict_policy_off_warned(monkeypatch):
 def test_probe_403_degrades_to_note_not_failure(monkeypatch):
     """`_gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
     from BaseException, so a catch of only `except Exception` lets a 403 on `rules/branches`
-    propagate past `warnings()`. The environments probe still succeeds and its own finding
+    propagate past `warnings_and_count()`. The environments probe still succeeds and its own finding
     must surface beside the degrade note: one probe failing may not swallow the other."""
     quiet = _quiet_new_probes()
 
@@ -731,7 +732,7 @@ def test_probe_403_degrades_to_note_not_failure(monkeypatch):
         )  # `dev-eu-apply` is missing, so that probe adds its own warning.
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     # Two probes read rules/branches and degrade independently -- that is the
     # point of the per-probe read; one endpoint failing must not let either
     # finding be silently attributed to the other.
@@ -757,7 +758,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
         return _environments("dev-eu-plan", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", fake_gh_json)
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert len(out) == 2
     assert all(level == doctor.WARNING for level, _ in out)
     assert all("could not verify" in t and "probe skipped" in t for _, t in out)
@@ -778,7 +779,7 @@ def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monk
         return _environments("dev-eu-plan", "dev-eu-apply", "shipmate-engine")
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert len(out) == 2
     level, text = next((lv, t) for lv, t in out if "gate rule" in t)
     assert level == doctor.WARNING
@@ -1075,7 +1076,7 @@ def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatc
 
 def test_env_protection_listing_failure_propagates_to_the_degrade_note(monkeypatch):
     """The listing is this probe's precondition: without it no name can be
-    classified present-or-absent, so the failure must reach `warnings()`' outer
+    classified present-or-absent, so the failure must reach `warnings_and_count()`' outer
     handler and become the "could not verify the env protection settings"
     degrade instead of a silent empty result."""
 
@@ -1085,7 +1086,7 @@ def test_env_protection_listing_failure_propagates_to_the_degrade_note(monkeypat
     monkeypatch.setattr(doctor, "_gh_json", boom)
     with pytest.raises(SystemExit):
         doctor._env_protection_warnings(_ctx())
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert any("env protection" in t and "probe skipped" in t for _, t in out)
 
 
@@ -1217,7 +1218,7 @@ def test_correctly_scoped_engine_environment_is_silent(monkeypatch):
 def test_engine_environment_listing_failure_propagates_to_the_degrade_note(monkeypatch):
     """The listing is this probe's precondition, exactly like
     `_env_protection_warnings`': without it no existence verdict can be
-    reached, so the failure must reach `warnings()`'s outer handler and
+    reached, so the failure must reach `warnings_and_count()`'s outer handler and
     become the "could not verify" degrade instead of a silent empty result."""
 
     def boom(path):
@@ -1226,7 +1227,7 @@ def test_engine_environment_listing_failure_propagates_to_the_degrade_note(monke
     monkeypatch.setattr(doctor, "_gh_json", boom)
     with pytest.raises(SystemExit):
         doctor._engine_environment_warnings(_ctx())
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert any("engine environment" in t and "probe skipped" in t for _, t in out)
 
 
@@ -1273,7 +1274,7 @@ def test_engine_environment_policies_unreadable_degrades_to_a_note(monkeypatch):
 
 def test_engine_environment_probe_is_registered(monkeypatch):
     """An unregistered probe function runs nowhere while its own unit tests
-    stay green -- assert it actually executes as part of `warnings()`."""
+    stay green -- assert it actually executes as part of `warnings_and_count()`."""
     assert doctor._engine_environment_warnings in doctor.PROBES
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
@@ -1282,7 +1283,7 @@ def test_engine_environment_probe_is_registered(monkeypatch):
         **_quiet_new_probes(),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert any("shipmate-engine" in t for _, t in out)
 
 
@@ -1604,7 +1605,8 @@ def test_missing_workflows_directory_degrades_to_a_note(monkeypatch):
     """A brand-new consumer's first shipmate pull request is the one that ADDS
     `.github/workflows`, so this listing legitimately fails -- as it also does on a 403 or a
     transient 5xx. Being the default outcome of the first-ever `shipmate doctor`, it degrades
-    at NOTICE; `warnings()`' generic WARNING renders `::error::` and `gh api` in the body."""
+    at NOTICE; `warnings_and_count()`' generic WARNING renders `::error::` and `gh api` in the
+    body."""
 
     def gh(path):
         assert path == f"{_WF_DIR}{_REF}"
@@ -2837,9 +2839,9 @@ def test_the_defaults_name_each_auto_environment_after_the_apply_mode_line():
     environment, sorted and escaped, directly after the `apply_mode` line, and the rows render the
     escaped names once.
 
-    Mutations: drop the notice; render `ec.targeted_envs` in its place; drop the `sorted` in
-    env-config `_mode_envs`; drop the `_md_escape`; drop the `_Rendered` -- `&amp;lt;` shows;
-    append the notice after the `max_parallel` line.
+    Mutations: drop the notice; render `ec.mode_envs(table, "targeted")` in its place; drop the
+    `sorted` in env-config `mode_envs`; drop the `_md_escape`; drop the `_Rendered` --
+    `&amp;lt;` shows; append the notice after the `max_parallel` line.
     """
     table = {
         "environments": {
@@ -3548,7 +3550,7 @@ def test_fork_trigger_unreadable_file_degrades_to_a_note(monkeypatch):
 
 def test_fork_trigger_probe_is_registered(monkeypatch):
     """An unregistered probe runs nowhere while its own unit tests stay green --
-    assert it actually executes as part of `warnings()`."""
+    assert it actually executes as part of `warnings_and_count()`."""
     assert doctor._fork_trigger_warnings in doctor.PROBES
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
@@ -3558,7 +3560,7 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
         f"{_WF_DIR}/label.yml{_REF}": _wf_file("on:\n  pull_request_target:\n"),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert any("pull_request_target" in t for _, t in out)
 
 
@@ -3681,7 +3683,7 @@ def test_an_unparseable_shipmate_yml_is_one_notice_from_the_parse_probe(monkeypa
     `_workflow_parse_warnings` (none)."""
     responses = _healthy_responses(**{"shipmate.yml": _UNPARSEABLE_WF})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == [(doctor.NOTICE, _UNPARSEABLE_TEXT)]
+    assert doctor.warnings_and_count(_ctx())[0] == [(doctor.NOTICE, _UNPARSEABLE_TEXT)]
 
 
 def test_an_unparseable_file_does_not_stop_the_scan_of_the_others(monkeypatch):
@@ -3793,7 +3795,7 @@ def test_an_alias_graph_costs_bounded_time_wherever_it_sits(monkeypatch, request
     responses = _healthy_responses(**{"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     start = time.monotonic()
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert time.monotonic() - start < 2
     assert not [t for _, t in out if "could not verify" in t], out
     if unused:
@@ -3813,7 +3815,7 @@ def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(mon
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     monkeypatch.setitem(sys.modules, "yaml", None)
     ctx = _ctx()
-    assert doctor.warnings(ctx) == [
+    assert doctor.warnings_and_count(ctx)[0] == [
         (
             doctor.NOTICE,
             (
@@ -3840,7 +3842,7 @@ def test_a_runner_without_pyyaml_skips_the_count_zero_review_finding(monkeypatch
     responses[_CONFIG_ON_DEFAULT] = _wf_file(_REVIEWED_AND_EXEMPT_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     monkeypatch.setitem(sys.modules, "yaml", None)
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         (
             doctor.NOTICE,
             (
@@ -3854,7 +3856,7 @@ def test_a_runner_without_pyyaml_skips_the_count_zero_review_finding(monkeypatch
 
 def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_order(monkeypatch):
     """An unregistered probe runs nowhere while its finders' unit tests stay green -- assert it
-    executes as part of `warnings()`, and that one file read feeds all three finders.
+    executes as part of `warnings_and_count()`, and that one file read feeds all three finders.
 
     Mutation: drop any one finder from `_shipmate_yml_warnings` (its finding leaves the list),
     or reorder them."""
@@ -3870,7 +3872,7 @@ def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_orde
         f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(text),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT),
         (doctor.WARNING, _NO_TRIGGER_TEXT),
         (doctor.WARNING, _EDITED_IF_TEXT),
@@ -4153,7 +4155,7 @@ def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     monkeypatch.setattr(doctor, "_routing_finding", boom)
     monkeypatch.setattr(doctor, "PROBES", (doctor._shipmate_yml_warnings,))
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         (
             doctor.WARNING,
             "doctor could not verify the `shipmate.yml` settings (boom): probe skipped.",
@@ -4170,7 +4172,7 @@ def test_a_degraded_probe_logs_the_whole_failure_to_stderr(monkeypatch, capsys):
         raise SystemExit("::error::command failed (1): gh api x\ngh: HTTP 403")
 
     monkeypatch.setattr(doctor, "PROBES", (_pin_warnings,))
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         (
             doctor.WARNING,
             "doctor could not verify the pin settings (command failed (1)): probe skipped.",
@@ -4842,7 +4844,7 @@ def test_a_failing_drift_probe_degrades_to_a_notice(monkeypatch):
 
     monkeypatch.setattr(doctor, "_contents_ref", boom)
     monkeypatch.setattr(doctor, "PROBES", (doctor._drift_file_warnings,))
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         (
             doctor.NOTICE,
             "doctor could not verify the drift workflow files settings (boom): probe skipped.",
@@ -5078,7 +5080,7 @@ def test_a_failed_codeowners_read_degrades_that_probe_alone(monkeypatch):
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    assert doctor.warnings(_ctx()) == [
+    assert doctor.warnings_and_count(_ctx())[0] == [
         (
             doctor.WARNING,
             "doctor could not verify the CODEOWNERS settings (command failed (1)): probe skipped.",
@@ -5271,7 +5273,7 @@ def test_review_rule_count_zero_with_an_unreadable_table_is_the_notice(monkeypat
 @pytest.mark.parametrize("table", [_INVALID_TABLE, "layout: ["], ids=["invalid", "not-yaml"])
 def test_review_rule_count_zero_with_an_invalid_table_is_the_notice(monkeypatch, table):
     """An invalid or unparseable default-branch table degrades like an unreadable one, and
-    never raises: `warnings()` would drop the code-owner finding with it.
+    never raises: `warnings_and_count()` would drop the code-owner finding with it.
 
     Mutation: remove the `except SystemExit` in `_default_branch_table` -- the probe raises."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
@@ -5608,7 +5610,7 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
     """doctor needs no `variables: read` permission -- `app/manifest.json` does not
     declare one, and adding it costs every installation a re-accept. A probe that starts
     reading a repository variable must break here rather than degrade silently. Asserted
-    over every path `warnings()` reads."""
+    over every path `warnings_and_count()` reads."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments(
@@ -5623,7 +5625,7 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", fake)
-    assert doctor.warnings(_ctx()) == []
+    assert doctor.warnings_and_count(_ctx())[0] == []
     assert asked, "the probes read nothing, so this would pass vacuously"
     assert not [p for p in asked if "variables" in p], asked
 
@@ -5755,7 +5757,7 @@ def test_split_false_app_key_warning_does_not_call_the_env_a_plan_environment(mo
 
 def test_a_truncated_environments_listing_refuses_to_report_existence(monkeypatch):
     """A partial listing produces a false "does not exist" for every environment past the
-    page. So it raises, and `warnings()` degrades every environment probe loudly rather
+    page. So it raises, and `warnings_and_count()` degrades every environment probe loudly rather
     than reporting on half the names."""
     monkeypatch.setattr(doctor, "_gh_json", lambda path: _environments("dev-eu-plan", total=140))
     with pytest.raises(SystemExit, match="truncated"):
@@ -5765,7 +5767,7 @@ def test_a_truncated_environments_listing_refuses_to_report_existence(monkeypatc
 def test_an_environments_listing_without_a_total_count_is_not_taken_as_complete(monkeypatch):
     """Absence-means-complete would be fail-open: a listing that stops reporting
     `total_count` would silently pass as the whole set. The KeyError reaches
-    `warnings()`' degrade instead."""
+    `warnings_and_count()`' degrade instead."""
     monkeypatch.setattr(doctor, "_gh_json", lambda path: {"environments": [{"name": "dev-eu"}]})
     with pytest.raises(KeyError):
         doctor._existing_env_names(_ctx())
@@ -5848,7 +5850,7 @@ def test_one_env_listing_failure_is_a_warning_and_the_others_still_report(monkey
 def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypatch):
     """The environments listing is this probe's precondition -- without it no
     name can be classified present-or-absent -- so its failure must reach
-    `warnings()`' outer handler and become a "could not verify" degrade rather
+    `warnings_and_count()`' outer handler and become a "could not verify" degrade rather
     than a silent empty result that reads as "no secrets anywhere"."""
 
     def boom(path):
@@ -5857,7 +5859,7 @@ def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypa
     monkeypatch.setattr(doctor, "_gh_json", boom)
     with pytest.raises(SystemExit):
         doctor._plan_env_secret_warnings(_ctx())
-    out = doctor.warnings(_ctx())
+    out = doctor.warnings_and_count(_ctx())[0]
     assert any("plan env secret" in t and "probe skipped" in t for _, t in out)
 
 
@@ -5977,7 +5979,7 @@ def test_the_config_probe_reads_the_examined_commit_and_reports_a_misindented_co
 
 
 def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
-    """`validate_structure` raises SystemExit, and `warnings()` turns an escaped one into
+    """`validate_structure` raises SystemExit, and `warnings_and_count()` turns an escaped one into
     "could not verify ... probe skipped" with the reason cut at 120 characters -- a
     validation refusal misreported as a probe that never ran, and truncated mid-sentence.
 
@@ -5992,7 +5994,7 @@ def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
         **_config_responses(MISINDENTED_CONTROL),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == [_MISINDENTED_FINDING]
+    assert doctor.warnings_and_count(_ctx())[0] == [_MISINDENTED_FINDING]
 
 
 def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypatch):
@@ -6938,7 +6940,8 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
 
 
 def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
-    """End to end, the way `main` runs it: healthy fixture -> `warnings()` -> `render_report`.
+    """End to end, the way `main` runs it: healthy fixture -> `warnings_and_count()` ->
+    `render_report`.
 
     Every other all-clear guard hands `[]` straight to the renderer, so none of them can see
     a probe that reports on a healthy repository -- which is exactly how the status lines
@@ -6957,7 +6960,9 @@ def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     ctx = _ctx()
-    body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
+    body = doctor.render_report(
+        doctor.warnings_and_count(ctx)[0], [], ctx, doctor.config_status(ctx)
+    )
     assert "no problems found by the settings probes" in body
     assert "changed in this pull request" in body
     # The status section renders too, and below the all-clear rather than instead of it.
@@ -6991,7 +6996,9 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     ctx = _ctx()
     assert doctor.config_status(ctx) == []
-    body = doctor.render_report(doctor.warnings(ctx), [], ctx, doctor.config_status(ctx))
+    body = doctor.render_report(
+        doctor.warnings_and_count(ctx)[0], [], ctx, doctor.config_status(ctx)
+    )
     assert doctor.CONFIG_HEADING not in body
 
 
@@ -7153,7 +7160,7 @@ def test_a_cycle_across_needs_is_a_finding_and_gets_no_valid_verdict(monkeypatch
 
 
 def test_status_never_fails_the_run(monkeypatch):
-    """`report` mode renders the status outside `warnings()`' degrade handler, so an
+    """`report` mode renders the status outside `warnings_and_count()`' degrade handler, so an
     exception here would take down a `shipmate doctor` comment that the probe has already
     reported the same failure in. Mutation: drop the `except` clause in `config_status`."""
 

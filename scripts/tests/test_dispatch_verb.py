@@ -290,7 +290,7 @@ def test_dispatch_step_env_mapping_is_complete():
     from an input, or the dispatch ref leaving the default branch. The dispatch ref picks which
     branch's copy of `shipmate.yml` runs: a head ref runs the pull request author's copy, and
     the `shipmate-engine` environment's branch policy admits only the default branch. `REPO` is
-    absent: `dispatch-body post` reads the runner's `GITHUB_REPOSITORY`.
+    absent: `dispatch-body` reads the runner's `GITHUB_REPOSITORY`.
 
     Mutation: rename VERB in the env: block, re-add WORKFLOW or REPO, or set
     `DISPATCH_REF: ${{ github.head_ref }}`.
@@ -414,7 +414,7 @@ def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_
 
 @bash_only
 def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
-    """`dispatch-body post` exits 1 here, as it does when the body cannot be built or the first
+    """`dispatch-body` exits 1 here, as it does when the body cannot be built or the first
     attempt fails with a failure that is not transient. The step exits 1, annotates the failure
     itself (`post` prints it unannotated), and posts the failure reply carrying the run link.
 
@@ -490,8 +490,8 @@ def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(
     """For every verb, the dispatch call carries `--input -`, and its stdin is the hand-written
     body for that verb byte for byte.
 
-    Mutations: drop `--input -` from `post`'s argv; send `data[:5]` instead of `data`; run
-    `dispatch-body post` with a different `ENVIRONMENT` when the verb is `unlock`.
+    Mutations: drop `--input -` from dispatch-body's argv; send `data[:5]` instead of `data`; run
+    `dispatch-body` with a different `ENVIRONMENT` when the verb is `unlock`.
     """
     result, _ = _run_dispatch(
         tmp_path, verb=verb, environment=environment, gh_stub=_STDIN_SAVING_STUB
@@ -616,7 +616,9 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     )
     result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu", gh_stub=stub)
     output = result.stdout + result.stderr
-    assert result.returncode == 1, f"`post`'s exit status must survive, got {result.returncode}"
+    assert result.returncode == 1, (
+        f"dispatch-body's exit status must survive, got {result.returncode}"
+    )
     assert "Required input 'plan_run_id' not provided" in output, (
         f"the API's own message must still print: {output}"
     )
@@ -693,7 +695,7 @@ def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
     result, _ = _run_dispatch(
         tmp_path, verb="apply", environment="dev-eu", gh_stub=_BODY_FAILURE_STUB
     )
-    assert result.returncode == 1, f"`post`'s exit status must survive: {result.returncode}"
+    assert result.returncode == 1, f"dispatch-body's exit status must survive: {result.returncode}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
         f"### shipmate apply dev-eu\n\n{_NO_RUN_STARTED}\n\n"
         f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
@@ -708,7 +710,7 @@ _BODY_SAVING_STUB = (
 
 @bash_only
 def test_a_may_have_started_dispatch_replies_and_exits_zero(tmp_path):
-    """`dispatch-body post` exits 3 when a `shipmate.yml` run started after an attempt that
+    """`dispatch-body` exits 3 when a `shipmate.yml` run started after an attempt that
     answered with an error. That run may be this command's, so the step warns, posts the whole
     notice reply and passes.
 
@@ -756,9 +758,9 @@ def test_a_may_have_started_reply_that_cannot_be_posted_only_warns(tmp_path):
 
 @bash_only
 def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
-    """`dispatch-body post` exits 4 when its attempts ended on server or network errors, or
+    """`dispatch-body` exits 4 when its attempts ended on server or network errors, or
     the listing that would have told could not be read: a run may have started, so the failure
-    reply sends the commenter to the Actions tab, and `post`'s message prints to the log.
+    reply sends the commenter to the Actions tab, and dispatch-body's message prints to the log.
 
     Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo; call
     `say_skew` on exit 4 (the stderr ends with a 422 that would match it).
@@ -780,7 +782,7 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
         "have started"
     ) in result.stdout.splitlines(), f"the failure must be annotated whole: {result.stdout}"
     assert "gh: Bad Gateway (HTTP 502)" in result.stdout.splitlines(), (
-        f"`post`'s message must reach the log: {result.stdout}"
+        f"dispatch-body's message must reach the log: {result.stdout}"
     )
     assert _LAYOUT_SKEW not in result.stdout, f"exit 4 prints no layout hint: {result.stdout}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (

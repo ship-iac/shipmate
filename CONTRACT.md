@@ -1284,7 +1284,7 @@ whose footer links the run. The run holds the error; a reply never carries the
 API's answer. A reply that cannot be posted is a warning on the
 comment-handling run, and the step keeps its own status.
 
-`scripts/dispatch-body post` sends the dispatch. A transient failure (gh's
+`scripts/dispatch-body` sends the dispatch. A transient failure (gh's
 `TRANSIENT` class in `scripts/_shipmate.py`: a 5xx, a refused, reset or timed-out
 connection, a truncated body) may have started a run, since GitHub can start
 one and still answer 502, so it gets up to two more attempts, 2 and 5 seconds

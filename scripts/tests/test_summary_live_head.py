@@ -221,8 +221,7 @@ def test_a_live_head_without_a_live_autoplan_is_planned_on_demand(tmp_path, runs
     token, and nothing else read. Mutations: invert the in-flight check in `_replan` (`if not
     any(...)`) -- no-run dispatches nothing; skip when any run is listed (`if runs:`) -- the
     cancelled and failure rows dispatch nothing; decide on the gate (list `statuses` instead) --
-    the call list differs; call `dispatch-body` without `post` -- it refuses with its usage, no
-    POST is sent and the step warns that the plan dispatch failed."""
+    the call list differs."""
     stdout, stderr, calls, outputs = _run(tmp_path, runs=runs)
     assert (calls, outputs) == ([PULL_READ, RUNS_LIST, DISPATCH_POST], {"live": LIVE})
     assert _sent_body(tmp_path) == {
@@ -326,7 +325,7 @@ def test_a_failed_mint_warns_and_dispatches_nothing(tmp_path):
 def test_a_failed_dispatch_warns_with_the_remedy(tmp_path):
     """A 4xx cannot have started a run: one POST, no retry, and the unchanged warning.
     Mutations: `exit 1` in place of the failure branch's `exit 0`; print the notice on a
-    failed POST; treat every nonzero exit of `dispatch-body post` as a run that may have
+    failed POST; treat every nonzero exit of `dispatch-body` as a run that may have
     started -- the may-have-started warning prints instead."""
     stdout, stderr, calls, _ = _run(tmp_path, dispatch_rc=1)
     assert calls == [PULL_READ, RUNS_LIST, DISPATCH_POST]
@@ -342,7 +341,7 @@ def test_a_failed_dispatch_warns_with_the_remedy(tmp_path):
 @bash_only
 @pytest.mark.parametrize("post_rc", [3, 4])
 def test_a_dispatch_that_may_have_started_a_run_warns_to_check_the_actions_tab(tmp_path, post_rc):
-    """`dispatch-body post` exits 3 when a run started after an attempt that failed, 4 when it
+    """`dispatch-body` exits 3 when a run started after an attempt that failed, 4 when it
     cannot tell: either way "has no plan" would be false. Mutation: send exit 3 to `not_planned`
     -- the 3 row prints the no-plan warning."""
     stdout, stderr, calls, _ = _run(tmp_path, post_rc=post_rc)
