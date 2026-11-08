@@ -358,7 +358,7 @@ _DOCTOR_ROUTE_IFS = {
     ),
     "Doctor: probe the manifest's full permission set": _DOCTOR_MINTED,
     "Doctor: gather head SHA, declared environments, annotations": _DOCTOR_MINTED,
-    "Doctor: render and upsert the sticky comment": _DOCTOR_MINTED,
+    "Doctor: render and post the report comment": _DOCTOR_MINTED,
 }
 
 
@@ -1010,7 +1010,7 @@ _POSTS = re.compile(r"/comments\b(?!/)|scripts/(?:reply-comment|upsert-comment|e
 #: eviction's notices and replies (`test_evict_reply.py`).
 _NON_REPLY_POSTERS = {
     "Post help",
-    "Doctor: render and upsert the sticky comment",
+    "Doctor: render and post the report comment",
     "Evict: tell the holders and reply",
     "Evict: failed",
 }
@@ -1315,7 +1315,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
         ("comment-ops", "Resolve gate configuration"): "${{ inputs.github-vars }}",
         (
             "comment-ops",
-            "Doctor: render and upsert the sticky comment",
+            "Doctor: render and post the report comment",
         ): "${{ inputs.github-vars }}",
         (
             "summary",
@@ -1376,7 +1376,7 @@ _STEP_NAMES = [
     "Doctor: App token unavailable",
     "Doctor: probe the manifest's full permission set",
     "Doctor: gather head SHA, declared environments, annotations",
-    "Doctor: render and upsert the sticky comment",
+    "Doctor: render and post the report comment",
     "Mint App token for evict",
     "Evict: App token unavailable",
     "Evict: read the pull request head",

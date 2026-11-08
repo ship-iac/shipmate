@@ -11,9 +11,9 @@ settings pages.
 findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
-pull request for a consolidated report: one comment per pull request (marker
-`<!-- shipmate:doctor -->`, upserted in place) combining fourteen
-live probes.
+pull request for a consolidated report: a new comment each time (marker
+`<!-- shipmate:doctor -->`, the earlier report minimized as outdated)
+combining fourteen live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
   No active ruleset requires it, or one does but does not pin `integration_id`
@@ -243,8 +243,8 @@ degrade paths: an unreadable PR head SHA, unreadable plan records on this
 commit's apply checks, a plan run whose cell summaries could not be downloaded,
 a failed check-runs listing or reduction, a failed per-check annotations fetch,
 a failed job-summary write, and a failed listing of the pull request's
-comments, on which the report is not posted for that run rather than posted as
-a second sticky comment. Those annotations land on the `issue_comment` run
+comments, on which the report is not posted for that run rather than posted
+beside an earlier report it could not minimize. Those annotations land on the `issue_comment` run
 executing `shipmate doctor`, at `github.sha`, not on the PR head SHA whose
 check runs the harvest reads, so the harvest never reads them back. That job
 checks out no consumer content and reads entirely through `gh api` and
@@ -285,8 +285,9 @@ write access asks for it, everyone who can read the pull request can read it.
 The same rendered report is also written to the run's job summary, so that a
 GitHub API outage which loses the comment does not discard the probes. That
 surface needs repository read access too, so it admits no one the comment did
-not — but it is not as retractable. The comment is a single sticky one you can
-edit or delete, and the next `shipmate doctor` overwrites it; a job summary
+not — but it is not as retractable. Each report is its own comment, which you
+can edit or delete; the next `shipmate doctor` minimizes it, which still leaves it
+readable, so delete it instead to retract it. A job summary
 cannot be edited or redacted at all, and every past run keeps its own copy for
 the repository's Actions retention window (90 days by default). So if a report
 disclosed something you did not want recorded, deleting the comment is not
