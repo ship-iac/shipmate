@@ -172,7 +172,8 @@ def test_the_listing_argv_is_exact(monkeypatch):
     projection -> the argv differs."""
     seen = []
     monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
-    assert db.landed_since("acme/demo", NOW, run=lambda args: seen.append(args) or "") is False
+    landed = db.landed_since("acme/demo", NOW, run=lambda args: seen.append(args) or "")
+    assert landed is False
     assert seen == [list(LIST)]
 
 

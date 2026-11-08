@@ -114,7 +114,8 @@ def marker_comments(repo, pr, marker):
 def minimized_ids(node_ids, pr):
     """The node ids among `node_ids` whose `isMinimized` is true, or None after one stderr
     warning naming pull request `pr` when any chunk's read fails, does not parse, or answers a
-    `null` node or a node whose `isMinimized` is missing or not a boolean."""
+    `null` node, a node whose `isMinimized` is missing or not a boolean, or a minimized node
+    with no usable `id`."""
     hidden = set()
     for start in range(0, len(node_ids), CHUNK):
         ids = [arg for n in node_ids[start : start + CHUNK] for arg in ("-F", f"ids[]={n}")]
@@ -125,11 +126,13 @@ def minimized_ids(node_ids, pr):
         else:
             try:
                 nodes = json.loads(out)["data"]["nodes"]
-                if all(isinstance(n["isMinimized"], bool) for n in nodes):
-                    hidden |= {n["id"] for n in nodes if n["isMinimized"]}
-                    continue
+                parsed = all(isinstance(n["isMinimized"], bool) for n in nodes)
+                minimized = {n["id"] for n in nodes if n["isMinimized"]} if parsed else set()
             except (ValueError, LookupError, TypeError):
-                pass
+                parsed = False
+            if parsed:
+                hidden |= minimized
+                continue
             error = f"unexpected answer: {out[:ANSWER_CAP]}"
         print(
             f"::warning::could not read which plan comments of pull request #{pr} are minimized, "
@@ -235,7 +238,7 @@ def _write(repo, pr, path, cid):
     try:
         return run([*argv, "-F", f"body=@{path}"]), word
     except SystemExit as exc:
-        sys.exit(f"::error::could not write the comment: {exc.code}")
+        raise SystemExit(f"::error::could not write the comment: {exc.code}") from exc
 
 
 def main():

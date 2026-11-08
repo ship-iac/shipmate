@@ -761,14 +761,16 @@ def test_a_failed_delete_of_a_lock_that_moved_on_is_not_ours(read_back):
     """Mutation: refuse on every delete error."""
     gh = Gh().on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), FAIL)
     gh.on(ref_read(AUTH_REF), read_back)
-    assert cl.delete(REPO, lock(AUTH_REF, OLD), run=gh) is False
+    deleted = cl.delete(REPO, lock(AUTH_REF, OLD), run=gh)
+    assert deleted is False
     assert gh.drained()
 
 
 def test_a_delete_that_succeeds_returns_true():
     """Mutation: return False when `updateRefs` succeeds."""
     gh = Gh().on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
-    assert cl.delete(REPO, lock(AUTH_REF, OLD), run=gh) is True
+    deleted = cl.delete(REPO, lock(AUTH_REF, OLD), run=gh)
+    assert deleted is True
     assert gh.drained()
 
 

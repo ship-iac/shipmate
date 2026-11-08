@@ -540,12 +540,14 @@ def _construct_object(self, node, deep=False):
 
     try:
         return SafeLoader.construct_object(self, node, deep)
-    except (ValueError, LookupError, AttributeError, TypeError):
+    except (ValueError, LookupError, AttributeError, TypeError) as exc:
         if node.id != "scalar":
             raise
         tag = node.tag.replace("tag:yaml.org,2002:", "!!")
         value = node.value if len(node.value) <= 80 else node.value[:80] + "..."
-        _refuse(ConstructorError, f"{value!r} is not a valid {tag}", node.start_mark)
+        raise ConstructorError(
+            None, None, f"{value!r} is not a valid {tag}", node.start_mark
+        ) from exc
 
 
 @functools.cache

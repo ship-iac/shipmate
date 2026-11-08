@@ -3709,8 +3709,6 @@ def test_a_file_nested_too_deeply_is_one_notice_and_the_others_are_still_checked
 
     Mutation: drop the `except RecursionError` in `_shipmate._parse` -- `RecursionError`
     escapes `_workflow_file` and both probes raise."""
-    import re
-
     deep = "on: push\nx: " + "[" * 5000 + "]" * 5000 + "\n"
     b = _STEPS + "      - uses: acme/engine/actions/setup@v2\n"
     responses = {
