@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.55.0] — 2026-11-09
 
+Tags `e2c1771`.
+
 ### Added
 
 - **A `shipmate plan` comment names each earlier autoplan run whose checks still read red on the head**, one line per run under the verdict: `⚪ <n> check(s) from autoplan run [#<run>](<url>) still read red on this head; this run's plan supersedes them, and they stay until a push plans a new head or a re-run of that run replaces them.`
