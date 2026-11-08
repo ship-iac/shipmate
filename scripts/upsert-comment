@@ -114,7 +114,8 @@ def marker_comments(repo, pr, marker):
 def minimized_ids(node_ids, pr):
     """The node ids among `node_ids` whose `isMinimized` is true, or None after one stderr
     warning naming pull request `pr` when any chunk's read fails, does not parse, or answers a
-    `null` node or a node whose `isMinimized` is missing or not a boolean."""
+    `null` node, a node whose `isMinimized` is missing or not a boolean, or a minimized node
+    with no usable `id`."""
     hidden = set()
     for start in range(0, len(node_ids), CHUNK):
         ids = [arg for n in node_ids[start : start + CHUNK] for arg in ("-F", f"ids[]={n}")]
