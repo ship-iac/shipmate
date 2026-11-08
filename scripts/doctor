@@ -8,7 +8,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the fourteen live probes'
+- report: render the PR report comment on demand — the fourteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: gather what `report` reads, one step ahead of it: the PR head SHA,
