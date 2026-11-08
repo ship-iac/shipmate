@@ -61,8 +61,8 @@ def by_wave(waves, snap):
 
 
 def main(argv=()):
-    """Write outputs `snapshot` and `by_wave` of `SHIPMATE_WAVES_JSON` and the check runs on
-    stdin."""
+    """Write outputs `snapshot` and `by_wave` to `GITHUB_OUTPUT`, from `SHIPMATE_WAVES_JSON`,
+    `SHIPMATE_APP_ID` (an empty one refuses first) and the check runs on stdin."""
     if argv:
         raise SystemExit("::error::usage: apply-snapshot")
     app_id = os.environ["SHIPMATE_APP_ID"]

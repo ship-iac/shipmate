@@ -17,7 +17,6 @@ import base64
 import hashlib
 import os
 import shutil
-import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -493,9 +492,7 @@ def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name in present:
-        path = bin_dir / name
-        path.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8", newline="\n")
-        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+        write_stub(bin_dir, name, "exit 99")
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     r = run_step(

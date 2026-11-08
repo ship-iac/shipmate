@@ -158,7 +158,8 @@ def test_complete_waits_for_every_wave_and_every_completion():
 
 def test_no_wave_waits_for_a_completion():
     """Mutation: add `wave0-complete` to `wave1.needs`."""
-    assert {w: workflow_jobs("apply-env-level.yml")[w]["needs"] for w in WAVES} == WAVE_NEEDS
+    jobs = workflow_jobs("apply-env-level.yml")
+    assert {w: jobs[w]["needs"] for w in WAVES} == WAVE_NEEDS
 
 
 def test_snapshot_publishes_both_maps():

@@ -24,7 +24,7 @@ from _shipmate import retried, run, run_annotated
 BODY = {"status": "completed", "conclusion": "success"}
 
 
-def main(argv: list[str]) -> None:
+def main(argv=()):
     if argv:
         raise SystemExit("::error::usage: patch-checks (ids on stdin, no arguments)")
     body = json.dumps(BODY)
