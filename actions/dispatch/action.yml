@@ -65,8 +65,8 @@ runs:
         # so the pull request would show nothing. A reply that fails only warns: it cannot mask
         # the status.
 
-        # Measured skew answers: no file 404, no trigger HTTP 422, fewer inputs `Unexpected inputs
-        # provided`. Anything else is not skew.
+        # Measured skew answers: no file `HTTP 404`, no trigger `'workflow_dispatch' trigger`, fewer
+        # inputs `Unexpected inputs provided`. Anything else is not skew.
         say_skew() {
           if [[ "$err" == *"HTTP 404"* || "$err" == *"'workflow_dispatch' trigger"* || "$err" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
         }

@@ -452,7 +452,7 @@ runs:
           fi
           exit 0
         fi
-        # Nothing changed: rewrite the newest visible plan comment (it shows stale applies), unless
+        # Nothing changed: rewrite the newest visible plan comment, or write none when there is none, unless
         # a doctor warning outside the settings probes, the unmanaged or lost pairs line, or a
         # `shipmate plan` command calls for a new comment (CONTRACT.md §Plan comment).
         write=--new
