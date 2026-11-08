@@ -126,10 +126,11 @@ def minimized_ids(node_ids, pr):
             try:
                 nodes = json.loads(out)["data"]["nodes"]
                 parsed = all(isinstance(n["isMinimized"], bool) for n in nodes)
+                minimized = {n["id"] for n in nodes if n["isMinimized"]} if parsed else set()
             except (ValueError, LookupError, TypeError):
                 parsed = False
             if parsed:
-                hidden |= {n["id"] for n in nodes if n["isMinimized"]}
+                hidden |= minimized
                 continue
             error = f"unexpected answer: {out[:ANSWER_CAP]}"
         print(

@@ -437,6 +437,7 @@ def test_new_reads_visibility_in_chunks_of_100(monkeypatch, tmp_path, capsys):
 
 _NULL_NODE = '{"data": {"nodes": [null, null]}}'
 _NO_FLAG = '{"data": {"nodes": [{"id": "IC_5"}, {"id": "IC_6", "isMinimized": true}]}}'
+_NO_ID = '{"data": {"nodes": [{"isMinimized": true}, {"id": "IC_6", "isMinimized": false}]}}'
 _STRING_FLAG = (
     '{"data": {"nodes": [{"id": "IC_5", "isMinimized": "true"}, '
     '{"id": "IC_6", "isMinimized": false}]}}'
@@ -453,9 +454,10 @@ _LONG_QUOTED = "unexpected answer: " + "xxxxxxxxxx" * 20
         (False, _NULL_NODE, f"unexpected answer: {_NULL_NODE}"),
         (False, _NO_FLAG, f"unexpected answer: {_NO_FLAG}"),
         (False, _STRING_FLAG, f"unexpected answer: {_STRING_FLAG}"),
+        (False, _NO_ID, f"unexpected answer: {_NO_ID}"),
         (False, _LONG, _LONG_QUOTED),
     ],
-    ids=["gh-error", "null-node", "no-isMinimized", "string-isMinimized", "long-answer"],
+    ids=["gh-error", "null-node", "no-isMinimized", "string-isMinimized", "no-id", "long-answer"],
 )
 def test_new_a_failed_visibility_read_counts_every_comment_visible(
     monkeypatch, tmp_path, capsys, fails, answer, error
@@ -463,7 +465,8 @@ def test_new_a_failed_visibility_read_counts_every_comment_visible(
     """The run still posts, then minimizes every same-author marker comment. Mutations:
     `sys.exit` on a failed read -- no POST; treat a failed read as "all minimized" -- no
     minimize call; drop the boolean check (`is True` alone) -- `string-isMinimized` warns
-    nothing; quote the whole answer -- `long-answer` red."""
+    nothing; read the ids outside the parse guard -- `no-id` raises; quote the whole answer --
+    `long-answer` red."""
     listing = [_head(5, SUMMARY), _head(6, SUMMARY)]
     code, calls = _upsert(
         monkeypatch,
