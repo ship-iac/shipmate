@@ -764,7 +764,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
-    """The degrade text renders verbatim into the sticky comment and into `::warning ...::`
+    """The degrade text renders verbatim into the report comment and into `::warning ...::`
     annotation data, so echoing `_gh_json`'s `::error::command failed (N): gh api <path>`
     would put a literal workflow command in the comment body, nest one inside another in
     annotate mode, and leak the internal endpoint. Name the probe skipped; keep the reason."""

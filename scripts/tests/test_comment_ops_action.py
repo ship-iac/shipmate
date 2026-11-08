@@ -1006,7 +1006,7 @@ def test_every_reply_step_names_its_header_outcome_and_text():
 _POSTS = re.compile(r"/comments\b(?!/)|scripts/(?:reply-comment|upsert-comment|evict-reply)\b")
 
 #: The steps that post a comment reply-comment does not render: help prints its own frame, and
-#: the doctor report is a sticky upsert of doctor's own body, and `evict-reply` renders the
+#: the doctor report is doctor's own body, and `evict-reply` renders the
 #: eviction's notices and replies (`test_evict_reply.py`).
 _NON_REPLY_POSTERS = {
     "Post help",
