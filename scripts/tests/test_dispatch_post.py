@@ -214,7 +214,8 @@ def test_a_listing_that_raises_anything_is_undetermined(calls, monkeypatch, caps
 
 
 def test_a_failed_listing_prints_its_failure(calls, monkeypatch, capsys):
-    """gh's failure prints alone; another exception keeps its type name, as above. Mutations:
+    """gh's failure prints alone; another exception keeps its type name
+    (`test_a_listing_that_raises_anything_is_undetermined`). Mutations:
     drop the listing failure's print -> stderr ends at the retry warning; print the type name for
     a `SystemExit` too -> `SystemExit: ` before gh's text."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit(FORBIDDEN)])
