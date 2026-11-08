@@ -12,7 +12,7 @@ Threat model: an accidental edit to the workflow (a dropped clause, a wrong slic
 """
 
 import pytest
-from _loader import workflow_yaml
+from _loader import workflow_jobs
 
 WAVES = [f"wave{n}" for n in range(8)]
 
@@ -135,21 +135,17 @@ WAVE_NEEDS = {
 }
 
 
-def _jobs():
-    return workflow_yaml("apply-env-level.yml")["jobs"]
-
-
 @pytest.mark.parametrize("n", range(8))
 def test_each_wave_completion_job_is_exactly(n):
     """Mutations: drop the `result` clause from `wave2-complete`'s `if:`; `.wave1` in
     `wave2-complete`'s slice; `needs: [snapshot]` on `wave5-complete`; add `checks: write` to
     `wave5-complete`'s permissions; drop `continue-on-error` from `wave3-complete`."""
-    assert _jobs()[f"wave{n}-complete"] == _completion(n)
+    assert workflow_jobs("apply-env-level.yml")[f"wave{n}-complete"] == _completion(n)
 
 
 def test_wave3_completion_job_is_written_out():
     """Mutation: drop `continue-on-error` from `wave3-complete`."""
-    assert _jobs()["wave3-complete"] == WAVE3_COMPLETE
+    assert workflow_jobs("apply-env-level.yml")["wave3-complete"] == WAVE3_COMPLETE
 
 
 def test_complete_waits_for_every_wave_and_every_completion():
@@ -157,17 +153,17 @@ def test_complete_waits_for_every_wave_and_every_completion():
 
     Mutations: drop `wave7-complete` from `complete.needs`; add `continue-on-error: true` to
     `complete`."""
-    assert _jobs()["complete"] == COMPLETE
+    assert workflow_jobs("apply-env-level.yml")["complete"] == COMPLETE
 
 
 def test_no_wave_waits_for_a_completion():
     """Mutation: add `wave0-complete` to `wave1.needs`."""
-    assert {w: _jobs()[w]["needs"] for w in WAVES} == WAVE_NEEDS
+    assert {w: workflow_jobs("apply-env-level.yml")[w]["needs"] for w in WAVES} == WAVE_NEEDS
 
 
 def test_snapshot_publishes_both_maps():
     """Mutation: drop `snapshot`'s `by_wave` output."""
-    assert _jobs()["snapshot"]["outputs"] == {
+    assert workflow_jobs("apply-env-level.yml")["snapshot"]["outputs"] == {
         "snapshot": "${{ steps.snap.outputs.snapshot }}",
         "by_wave": "${{ steps.snap.outputs.by_wave }}",
     }
@@ -175,4 +171,4 @@ def test_snapshot_publishes_both_maps():
 
 def test_the_job_set_is_exactly():
     """Mutation: rename `wave4-complete`."""
-    assert sorted(_jobs()) == JOB_IDS
+    assert sorted(workflow_jobs("apply-env-level.yml")) == JOB_IDS

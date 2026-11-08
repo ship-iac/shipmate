@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import ENGINE, bash_only, run_step, step_by
+from _loader import ENGINE, bash_only, run_step, step_by, write_stub
 
 _ACTION = "setup"
 _FIXTURES = ENGINE / "scripts" / "tests" / "fixtures" / "release-sums"
@@ -149,12 +149,6 @@ def test_the_verify_steps_are_fail_closed():
     assert got == _EXPECTED_STEPS
 
 
-def _stub(bin_dir, name, body):
-    path = bin_dir / name
-    path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-
-
 def _genuine():
     return {p.name: p.read_bytes() for p in _FIXTURES.iterdir() if p.name != "README"}
 
@@ -184,7 +178,7 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
     for name, code in (codes or {}).items():
         (serve / f"{name}.code").write_text(code, encoding="utf-8")
     log = logs.as_posix()
-    _stub(
+    write_stub(
         bin_dir,
         "curl",
         f"printf '%s\\x1f' \"$@\" >> '{log}/curl'\necho >> '{log}/curl'\n"
@@ -197,14 +191,14 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
         f"exit {curl_exit}",
     )
     gpg = shutil.which("gpg")
-    _stub(
+    write_stub(
         bin_dir,
         "gpg",
         f"printf '%s\\x1f' \"$@\" >> '{log}/gpg'\necho >> '{log}/gpg'\n"
         f'exec "{gpg and gpg.replace(os.sep, "/")}" "$@"',
     )
     openssl = shutil.which("openssl")
-    _stub(
+    write_stub(
         bin_dir,
         "openssl",
         f"printf '%s\\x1f' \"$@\" >> '{log}/openssl'\necho >> '{log}/openssl'\n"
@@ -826,8 +820,8 @@ def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
     r, _, _, _, rt = _run(tmp_path, sid, served=served)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     bin_dir = tmp_path / "bin"
-    _stub(bin_dir, "uname", 'if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi')
-    _stub(bin_dir, extract, extract_body)
+    write_stub(bin_dir, "uname", 'if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi')
+    write_stub(bin_dir, extract, extract_body)
     path = tmp_path / "github_path"
     path.write_text("", encoding="utf-8")
     r = run_step(

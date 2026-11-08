@@ -42,10 +42,7 @@ runs:
           echo "::error::could not list the check runs on $HEAD_SHA; the step log names the cause"
           exit 1
         fi
-        snap=$(python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl")
-        echo "snapshot=$snap" >> "$GITHUB_OUTPUT"
-        by_wave=$(SHIPMATE_SNAPSHOT_JSON="$snap" python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" by-wave)
-        echo "by_wave=$by_wave" >> "$GITHUB_OUTPUT"
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl"
 
     # An authenticated preflight whose token no step uses: a present but revoked or wrong key
     # fails snapshot here, before any wave applies.

@@ -166,10 +166,7 @@ _SNAPSHOT_SNAP = {
         ' cause"\n'
         "  exit 1\n"
         "fi\n"
-        f'snap=$({_SNAP} < "$RUNNER_TEMP/checks.jsonl")\n'
-        'echo "snapshot=$snap" >> "$GITHUB_OUTPUT"\n'
-        f'by_wave=$(SHIPMATE_SNAPSHOT_JSON="$snap" {_SNAP} by-wave)\n'
-        'echo "by_wave=$by_wave" >> "$GITHUB_OUTPUT"\n'
+        f'{_SNAP} < "$RUNNER_TEMP/checks.jsonl"\n'
     ),
 }
 

@@ -5,15 +5,15 @@ Runs BEFORE wave0: the trailing completer marks only these ids done, so an apply
 created mid-run by a fresh plan is left pending (its plan was never applied here) instead of
 being greened. Only checks authored by the shipmate App are eligible — a forged same-name
 check from any other identity is never completed. The `snapshot` job holds the App key and
-checks out no repository content, so no branch content runs beside the key. `by-wave` slices a
-snapshot per wave, so each wave's checks complete right after that wave.
+checks out no repository content, so no branch content runs beside the key. `by_wave` slices
+the snapshot per wave, so each wave's checks complete right after that wave.
 """
 
 import json
 import os
 import sys
 
-from _shipmate import _load, run_annotated
+from _shipmate import _load, run_annotated, write_outputs
 
 ag = _load("apply-gate")
 
@@ -61,21 +61,17 @@ def by_wave(waves, snap):
 
 
 def main(argv=()):
-    """Bare: the snapshot JSON on stdout. `by-wave`: `by_wave` of `SHIPMATE_WAVES_JSON` and
-    `SHIPMATE_SNAPSHOT_JSON`, one line."""
-    if list(argv) == ["by-wave"]:
-        waves = json.loads(os.environ["SHIPMATE_WAVES_JSON"])
-        print(json.dumps(by_wave(waves, json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"]))))
-        return
+    """Write outputs `snapshot` and `by_wave` of `SHIPMATE_WAVES_JSON` and the check runs on
+    stdin."""
     if argv:
-        raise SystemExit("::error::usage: apply-snapshot [by-wave]")
+        raise SystemExit("::error::usage: apply-snapshot")
     app_id = os.environ["SHIPMATE_APP_ID"]
     # Refuses an empty id before the waves or the listing are parsed, so a misconfiguration is
     # reported first.
     ag.from_app([], app_id)
     waves = json.loads(os.environ["SHIPMATE_WAVES_JSON"])
-    check_runs = ag.parse_jsonl(sys.stdin)
-    json.dump(snapshot(waves, check_runs, app_id), sys.stdout)
+    snap = snapshot(waves, ag.parse_jsonl(sys.stdin), app_id)
+    write_outputs(snapshot=json.dumps(snap), by_wave=json.dumps(by_wave(waves, snap)))
 
 
 if __name__ == "__main__":
