@@ -104,7 +104,9 @@ def landed_since(repo: str, t0: datetime, run=run) -> bool:
     return landed
 
 
-def main():
+def main(argv=()):
+    if argv:
+        raise SystemExit("::error::usage: dispatch-body")
     repo = os.environ["GITHUB_REPOSITORY"]
     data = json.dumps(body())
     args = ["gh", "api", "-X", "POST", f"repos/{repo}/actions/workflows/shipmate.yml/dispatches"]
@@ -138,4 +140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, sys.argv[1:])

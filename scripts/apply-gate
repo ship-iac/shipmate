@@ -52,11 +52,8 @@ def env_pr_number():
 
 
 def check_name(stack, env):
-    """The apply check's name, `apply / <stack> / <env>`: built forward. `parse_check_name`
-    reads it back for `deploy-detect.refuse_stranded_checks`, because after the merge the env a
-    stack lost exists only in its check's name, for `apply-complete`, because its snapshot is
-    keyed by check name, and for `cell-lock.evict_stacks`. `stack` is the stack path, so a
-    deploy that knows only the path rebuilds it exactly."""
+    """The apply check's name, `apply / <stack> / <env>`; `parse_check_name` inverts it.
+    `stack` is the stack path, so a deploy that knows only the path rebuilds it exactly."""
     return f"{APPLY_PREFIX}{stack} / {env}"
 
 

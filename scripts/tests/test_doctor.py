@@ -302,7 +302,7 @@ def test_one_run_reads_the_default_branch_table_once(monkeypatch):
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
     ctx = _ctx()
-    doctor.warnings_and_count(ctx)[0]
+    doctor.warnings_and_count(ctx)
     doctor.config_status(ctx)
     doctor.tool_status(ctx)
     assert asked.count(_CONFIG_ON_DEFAULT) == 1

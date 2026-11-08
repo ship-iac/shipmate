@@ -248,3 +248,12 @@ def test_t0_is_five_seconds_before_the_first_attempt(calls, monkeypatch, capsys,
     created = (NOW - timedelta(seconds=ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [row(created)])
     assert post(capsys)[0] == code
+
+
+@pytest.mark.parametrize("argv", [["post"], ["--help"]])
+def test_an_argument_refuses_before_any_call(calls, argv):
+    """Mutation: drop the `if argv:` refusal -> `--help` sends a real dispatch."""
+    with pytest.raises(SystemExit) as exc:
+        db.main(argv)
+    assert exc.value.code == "::error::usage: dispatch-body"
+    assert calls == []
