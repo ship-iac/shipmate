@@ -178,24 +178,23 @@ def _minimize_earlier(pr, visible, response):
 
 
 def _args(argv):
-    """(PR, BODYFILE, new, update_only, head or None) from `argv`, or `::error::` usage."""
+    """(PR, BODYFILE, mode, head or None) from `argv`, or `::error::` usage; mode is `--new`,
+    `--update-only` or None."""
     usage = "::error::usage: upsert-comment PR BODYFILE [--new | --update-only] [--head SHA]"
     if len(argv) < 2:
         sys.exit(usage)
     pr, path, rest = argv[0], argv[1], argv[2:]
-    new, update_only, head = False, False, None
+    mode, head = None, None
     while rest:
-        if rest[0] == "--new" and not new and not update_only:
-            new, rest = True, rest[1:]
-        elif rest[0] == "--update-only" and not update_only and not new:
-            update_only, rest = True, rest[1:]
+        if rest[0] in ("--new", "--update-only") and mode is None:
+            mode, rest = rest[0], rest[1:]
         elif rest[0] == "--head" and head is None and len(rest) > 1:
             head, rest = rest[1], rest[2:]
         else:
             sys.exit(usage)
     if head is not None and not is_head_sha(head):
         sys.exit(f"::error::--head must be a 40-char lowercase hex SHA (got: {head})")
-    return pr, path, new, update_only, head
+    return pr, path, mode, head
 
 
 def _head_stop(repo, pr, head):
@@ -220,11 +219,11 @@ def _visible(found, pr):
     return [c for c in found if c["node_id"] not in hidden], True
 
 
-def _targets(found, visible, read, new, update_only):
+def _targets(mode, found, visible, read):
     """(The comment id to PATCH, None to POST; the comments to minimize after the write)."""
-    if update_only:
+    if mode == "--update-only":
         return visible[-1]["id"], visible[:-1] if read else []
-    if new:
+    if mode == "--new":
         return None, visible
     return (found[0]["id"] if found else None), []
 
@@ -242,7 +241,7 @@ def _write(repo, pr, path, cid):
 
 
 def main():
-    pr, path, new, update_only, head = _args(sys.argv[1:])
+    pr, path, mode, head = _args(sys.argv[1:])
     # Bound into the API path.
     if not is_pr_number(pr):
         sys.exit(f"::error::PR must be a pull request number (got: {pr})")
@@ -257,15 +256,15 @@ def main():
         print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    visible, read = _visible(found, pr) if new or update_only else (found, True)
-    if not visible and update_only:
+    visible, read = _visible(found, pr) if mode else (found, True)
+    if not visible and mode == "--update-only":
         print("skipped")
         return
     stop = _head_stop(repo, pr, head)
     if stop:
         print(stop)
         return
-    cid, earlier = _targets(found, visible, read, new, update_only)
+    cid, earlier = _targets(mode, found, visible, read)
     response, word = _write(repo, pr, path, cid)
     if earlier:
         _minimize_earlier(pr, earlier, response)

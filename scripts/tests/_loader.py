@@ -30,6 +30,7 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 import textwrap
@@ -325,6 +326,13 @@ def write_python3_shim(bin_dir):
         newline="\n",
     )
     python3.chmod(0o755)
+
+
+def write_stub(bin_dir, name, body):
+    """Write an executable bash script ``bin_dir/name`` that runs ``body``."""
+    path = bin_dir / name
+    path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
 def fail_script(bin_dir, name, rc, stderr=""):

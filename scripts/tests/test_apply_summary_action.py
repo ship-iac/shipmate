@@ -33,7 +33,7 @@ from _loader import (
     run_step,
     run_with_gate_gh,
     step_by,
-    workflow_yaml,
+    workflow_jobs,
 )
 
 SCRIPT = ENGINE / "scripts" / "apply-comment"
@@ -461,7 +461,7 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
     Mutation: drop `auto:` from the step's `with:` -- red.
     Mutation: drop `pusher:` from the step's `with:` -- red."""
-    steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
+    steps = workflow_jobs("apply.yml")["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
 
@@ -571,7 +571,7 @@ def test_the_action_exposes_posted_from_the_post_step():
 
 def test_the_apply_summary_job_passes_posted_on():
     """Mutations: map the job's `posted` to another step id; drop the step's `id: result`."""
-    job = workflow_yaml("apply.yml")["jobs"]["summary"]
+    job = workflow_jobs("apply.yml")["summary"]
     assert job["outputs"] == {"posted": "${{ steps.result.outputs.posted }}"}
     step = _find_step(job["steps"], uses_contains="actions/apply-summary")
     assert step["id"] == "result"

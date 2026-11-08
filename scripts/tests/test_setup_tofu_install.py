@@ -7,10 +7,9 @@ added `--fail`, reds it.
 """
 
 import os
-import stat
 
 import pytest
-from _loader import bash_only, run_step, step_by
+from _loader import bash_only, run_step, step_by, write_stub
 
 _ACTION = "setup"
 _STEP = "Install OpenTofu"
@@ -28,12 +27,6 @@ _VERIFIED = f"Verified {_ASSET} sha256 {_DIGEST}.\n"
 
 def _annotation(code, rc):
     return f"{_PREFIX}{_URL} answered HTTP {code} (curl exit {rc}); re-run the failed job."
-
-
-def _stub(bin_dir, name, body):
-    path = bin_dir / name
-    path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
 def _install(
@@ -68,14 +61,14 @@ def _install(
     for d in (bin_dir, logs, runner_temp):
         d.mkdir(exist_ok=True)
     log = logs.as_posix()
-    _stub(
+    write_stub(
         bin_dir,
         "curl",
         f"printf '%s\\n' \"$@\" >> '{log}/curl'\ntouch '{log}/downloaded'\n"
         'prev=""; for a in "$@"; do if [ "$prev" = -o ]; then : > "$a"; fi; prev="$a"; done\n'
         f"printf '{curl_output}'\nexit {curl_rc}",
     )
-    _stub(
+    write_stub(
         bin_dir,
         "python3",
         f"echo python3 >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/python3'\n"
@@ -86,21 +79,21 @@ def _install(
         f'echo "$STUB_TOFU_VERSION"\\necho on linux_amd64\\nexit {tofu_rc}\\n\''
         ' > "$5/tofu"',
     )
-    _stub(
+    write_stub(
         bin_dir,
         "chmod",
         f"echo chmod >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/chmod'\n"
         f"[ {chmod_rc} = 0 ] || exit {chmod_rc}\n"
         'exec /usr/bin/chmod "$@"',
     )
-    _stub(
+    write_stub(
         bin_dir,
         "sha256sum",
         f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" >> '{log}/sha256sum'\n"
         f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={cached_digest or digest}; fi\n"
         'if [ -n "$d" ]; then echo "$d  $1"; fi',
     )
-    _stub(
+    write_stub(
         bin_dir,
         "uname",
         f'if [ "$1" = -s ]; then echo {system}; elif [ "$1" = -m ]; then echo {machine}; fi',

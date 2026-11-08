@@ -209,20 +209,27 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
     assert apply_complete.to_complete(wave0, jobs) == ([1], [], [], [])
 
 
-def test_main_by_wave_prints_the_slices(monkeypatch, capsys):
-    """Mutation: print the snapshot unsliced -> stdout holds the input snapshot."""
+def test_main_writes_the_snapshot_and_its_slices(monkeypatch, tmp_path, capsys):
+    """Mutation: write the snapshot unsliced as `by_wave` -> its line holds the whole snapshot."""
     waves = {"wave0": [{"stack": "dns", "environment": "dev"}], "wave1": []}
+    out = tmp_path / "out.txt"
+    monkeypatch.setenv("SHIPMATE_APP_ID", str(APP_ID))
     monkeypatch.setenv("SHIPMATE_WAVES_JSON", json.dumps(waves))
-    monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps({"apply / dns / dev": [1]}))
-    apply_snapshot.main(["by-wave"])
-    assert capsys.readouterr() == ('{"wave0": {"apply / dns / dev": [1]}, "wave1": {}}\n', "")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    stdin = io.StringIO(json.dumps(check("apply / dns / dev", 1)))
+    monkeypatch.setattr(apply_snapshot.sys, "stdin", stdin)
+    apply_snapshot.main()
+    assert out.read_text(encoding="utf-8") == (
+        'snapshot={"apply / dns / dev": [1]}\n'
+        'by_wave={"wave0": {"apply / dns / dev": [1]}, "wave1": {}}\n'
+    )
+    assert capsys.readouterr() == ("", "")
 
 
-@pytest.mark.parametrize("argv", [["ids"], ["by-wave", "x"], ["foo"]])
+@pytest.mark.parametrize("argv", [["ids"], ["by-wave"], ["foo"]])
 def test_an_unknown_argument_list_refuses(argv):
-    """Mutation: keep the `ids` mode -> `ids` prints instead of refusing; accept any argument
-    list starting `by-wave` -> `by-wave x` slices; drop the `if argv:` refusal -> `foo` runs the
-    bare snapshot and fails on its environment."""
+    """Mutation: keep a `by-wave` mode -> `by-wave` runs instead of refusing; drop the `if argv:`
+    refusal -> `foo` runs the snapshot and fails on its environment."""
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.main(argv)
-    assert str(exc.value) == "::error::usage: apply-snapshot [by-wave]"
+    assert str(exc.value) == "::error::usage: apply-snapshot"

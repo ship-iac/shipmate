@@ -24,9 +24,8 @@ from _shipmate import retried, run, run_annotated
 BODY = {"status": "completed", "conclusion": "success"}
 
 
-def main(argv: list[str] | None = None) -> None:
-    extra = sys.argv[1:] if argv is None else argv
-    if extra:
+def main(argv=()):
+    if argv:
         raise SystemExit("::error::usage: patch-checks (ids on stdin, no arguments)")
     body = json.dumps(BODY)
     repo = os.environ["GITHUB_REPOSITORY"]
@@ -40,4 +39,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, sys.argv[1:])

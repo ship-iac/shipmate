@@ -8,12 +8,11 @@ a successful `install` makes the `python3` stub's import succeed from then on.
 """
 
 import os
-import stat
 import subprocess
 import sys
 
 import pytest
-from _loader import ACTIONS, ENGINE, action_steps, bash_only, load_script, usable_bash
+from _loader import ACTIONS, ENGINE, action_steps, bash_only, load_script, usable_bash, write_stub
 
 ec = load_script("env-config")
 
@@ -34,12 +33,6 @@ _COMMENT_OPS_IF = (
 )
 
 
-def _stub(bin_dir, name, body):
-    path = bin_dir / name
-    path.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8", newline="\n")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC)
-
-
 def _run(tmp_path, *, has_yaml=False, sudo_rc=None, install_rc=0):
     """Run the step body; return (result, calls), `calls[name]` being each call's argv in order.
 
@@ -57,10 +50,10 @@ def _run(tmp_path, *, has_yaml=False, sudo_rc=None, install_rc=0):
     def record(name):
         return "{ printf '%s\\n' \"$@\"; echo --; } >> '" + f"{log}/{name}'"
 
-    _stub(bin_dir, "python3", record("python3") + f"\n[ -e '{marker}' ]")
+    write_stub(bin_dir, "python3", record("python3") + f"\n[ -e '{marker}' ]")
     sudo_tail = f"exit {sudo_rc}" if sudo_rc is not None else 'shift\nexec "$@"'
-    _stub(bin_dir, "sudo", record("sudo") + "\n" + sudo_tail)
-    _stub(
+    write_stub(bin_dir, "sudo", record("sudo") + "\n" + sudo_tail)
+    write_stub(
         bin_dir,
         "apt-get",
         record("apt-get") + "\n"
