@@ -2252,7 +2252,7 @@ and no later attempt succeeded, or the listing that decides whether to retry it
 failed, so the engine cannot tell whether a run started. The comment-handling
 run's log holds gh's error: the final failure printed is the dispatch's own,
 or the listing's when the listing failed, and then the dispatch's failures are
-in the retry warnings above it.
+in the retry notices above it.
 
 Check the Actions tab as above. When no run of this command started, comment
 it again.
@@ -2470,9 +2470,15 @@ cause: search this page for its text. A `command failed` annotation names the
 command that failed (`gh api`, `terramate`, `git`) and carries its stderr; for
 that case only, re-run the deploy once, and if it fails the same way, that
 stderr is the cause. A transient failure (a 5xx, a dropped connection, a
-truncated body) of a `shipmate / gate` read or write or a check-run listing is retried
-twice first, each retry logged as a warning naming the command and gh's first
-stderr line. When no annotation but `Process completed with exit code`
+truncated body) is retried twice first, each retry logged as a notice naming the
+command and gh's first stderr line, for: the `shipmate / gate` read and write, a
+dispatch, an apply-check update, and the engine's Python reads of a pull request
+(the merge's mapping included), a pusher's permission, a branch tip, a run's
+check suite, the cell locks, the plan comments, the check-run and autoplan run
+listings and the environment table. `shipmate doctor`'s reads other than its
+check-run listing, the plan comment's locked-by read of another pull request and
+the reads a workflow step makes directly (the commenter's permission among them)
+are single-attempt. When no annotation but `Process completed with exit code`
 names the cause, read the failed step's log: a traceback or a failed checkout or
 setup step shows there.
 
