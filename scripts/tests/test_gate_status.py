@@ -426,9 +426,9 @@ def test_checks_sends_the_projection_it_is_given(tmp_path):
 
 @bash_only
 def test_checks_fails_unannotated_when_the_listing_fails(tmp_path):
-    """Degrading sites warn and continue, so the listing's failure must not annotate their green
-    step. Mutations: catch the `SystemExit` and return -> exit 0; call `check_runs` without
-    `run=run` -> the default `_run` prefixes `::error::`."""
+    """Degrading sites warn and continue, so the listing's failure must not add a warning or error
+    annotation to their green step. Mutations: catch the `SystemExit` and return -> exit 0; call
+    `check_runs` without `run=run` -> the default `_run` prefixes `::error::`."""
     proc, calls = _run(
         tmp_path,
         "checks",
