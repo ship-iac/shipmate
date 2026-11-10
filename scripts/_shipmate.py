@@ -191,17 +191,17 @@ def is_transient(exc):
     return TRANSIENT.search("\n".join(exc.code.splitlines()[1:])) is not None
 
 
-def warn_retry(exc):
-    """Print `exc`'s first two lines (the command and gh's first stderr line) as one `::warning::`
+def note_retry(exc):
+    """Print `exc`'s first two lines (the command and gh's first stderr line) as one `::notice::`
     on stderr, never stdout: `gate-status checks` writes data there."""
     head = "\n".join(str(exc.code).removeprefix("::error::").splitlines()[:2])
-    sys.stderr.write(f"::warning::{command_data(head)}\n")
+    sys.stderr.write(f"::notice::{command_data(head)}\n")
     sys.stderr.flush()
 
 
 def retried(call, before_retry=None):
     """`call()`, called again after each `RETRY_DELAYS` sleep while it raises a transient
-    `SystemExit` (`is_transient`), each retry warned (`warn_retry`). `before_retry`, when given,
+    `SystemExit` (`is_transient`), each retry noted (`note_retry`). `before_retry`, when given,
     runs after each sleep and may raise to stop. Any other `SystemExit` re-raises at once; the
     third transient one re-raises unchanged. A write can land and still fail, so a retried write
     can overwrite what another run wrote since; a caller that must not passes `before_retry`."""
@@ -211,7 +211,7 @@ def retried(call, before_retry=None):
         except SystemExit as e:
             if not is_transient(e):
                 raise
-            warn_retry(e)
+            note_retry(e)
         _sleep(delay)
         if before_retry:
             before_retry()

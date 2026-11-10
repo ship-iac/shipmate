@@ -17,7 +17,7 @@ a stale one when a commit carries two plan runs, which blocks the merge forever.
 `target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
 `GITHUB_RUN_ID`, and `SHIPMATE_APP_ID` for `refresh`. A `<sha>` that is not 40 lowercase hex
 characters is refused before any API call. A failed API call exits 1 with an `::error::` line,
-except in `checks`. A call that fails transiently retries twice, each retry warned on stderr.
+except in `checks`. A call that fails transiently retries twice, each retry noted on stderr.
 `refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
 its write retries: each caller decides whether a hold fails its step. `refuse-newer` prints its
 refusal as an `::error::` line and exits `NEWER`, so a caller tells a newer run from a failed

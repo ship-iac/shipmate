@@ -325,19 +325,20 @@ _EOF = (
 def test_retried_calls_again_after_a_transient_failure(message, sleeps, capsys):
     """Mutations, each run: drop the `HTTP 5xx` alternative from `TRANSIENT` -> the 502
     re-raises; drop `connection refused` -> the probe's message re-raises; drop `: EOF$` -> the
-    EOF message re-raises; write the warning to stdout -> the streams swap."""
+    EOF message re-raises; write the notice to stdout -> the streams swap."""
     calls, call = _failing(message)
     assert retried(call) == "x"
     head = "%0A".join(message.removeprefix("::error::").splitlines()[:2])
-    assert (len(calls), sleeps, capsys.readouterr()) == (2, [2], ("", f"::warning::{head}\n"))
+    assert (len(calls), sleeps, capsys.readouterr()) == (2, [2], ("", f"::notice::{head}\n"))
 
 
-def test_retried_warns_the_command_and_first_stderr_line_whole(sleeps, capsys):
+def test_retried_notes_the_command_and_first_stderr_line_whole(sleeps, capsys):
     """Mutations, each run: keep `::error::` -> a nested prefix; print every line -> `retry 50%25`
-    trails; skip `command_data` -> a raw newline."""
+    trails; skip `command_data` -> a raw newline; print `::warning::` -> the annotation differs."""
     retried(_failing(_BAD_GATEWAY)[1])
-    assert capsys.readouterr().err == (
-        "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+    assert capsys.readouterr() == (
+        "",
+        "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n",
     )
 
 
@@ -373,8 +374,8 @@ def test_retried_gives_up_after_three_attempts_with_the_last_failure(sleeps, cap
         retried(call)
     assert (exc.value.code, len(calls), sleeps) == (messages[2], 3, [2, 5])
     assert capsys.readouterr().err == (
-        "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 500)\n"
-        "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 502)\n"
+        "::notice::command failed (1): gh api x%0Agh: Server Error (HTTP 500)\n"
+        "::notice::command failed (1): gh api x%0Agh: Server Error (HTTP 502)\n"
     )
 
 

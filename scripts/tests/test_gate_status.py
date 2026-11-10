@@ -476,7 +476,7 @@ def test_a_multi_line_failure_prints_as_one_escaped_annotation(tmp_path):
 
 
 _BAD_GATEWAY = "command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)"
-_RETRY_WARNING = "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+_RETRY_NOTICE = "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
 
 
 @pytest.fixture
@@ -489,9 +489,9 @@ def in_process(monkeypatch):
     return slept
 
 
-def test_checks_keeps_a_retry_warning_off_its_stdout(in_process, monkeypatch, capsys):
+def test_checks_keeps_a_retry_notice_off_its_stdout(in_process, monkeypatch, capsys):
     """Stdout is the JSONL listing `apply-gate.parse_jsonl` reads, so a stray line fails it.
-    Mutation: write `warn_retry`'s line to stdout -> the warning leads the listing."""
+    Mutation: write `note_retry`'s line to stdout -> the notice leads the listing."""
     calls = []
 
     def run(args):
@@ -502,7 +502,7 @@ def test_checks_keeps_a_retry_warning_off_its_stdout(in_process, monkeypatch, ca
 
     monkeypatch.setattr(gs, "run", run)
     gs.main(["checks", SHA, ".check_runs[]"])
-    assert capsys.readouterr() == ("{}\n", _RETRY_WARNING)
+    assert capsys.readouterr() == ("{}\n", _RETRY_NOTICE)
     assert (len(calls), in_process) == (2, [2])
 
 
@@ -532,7 +532,7 @@ def test_post_retries_a_transient_failure(in_process, monkeypatch, capsys):
     """Mutation: `_run(args)` without `retried` in `post` -> the 502 raises."""
     calls = _flaky_run(monkeypatch, [])
     gs.post(SHA, "pending", "the reason")
-    assert (calls, in_process, capsys.readouterr()) == ([_POST, _POST], [2], ("", _RETRY_WARNING))
+    assert (calls, in_process, capsys.readouterr()) == ([_POST, _POST], [2], ("", _RETRY_NOTICE))
 
 
 def test_gates_retries_a_transient_failure(in_process, monkeypatch):
@@ -564,7 +564,7 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
     assert (exc.value.code, calls, capsys.readouterr()) == (
         gs.HELD,
         [_READ, green, _READ],
-        (HELD, _RETRY_WARNING),
+        (HELD, _RETRY_NOTICE),
     )
 
 
@@ -807,7 +807,7 @@ def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, cap
     calls = _live_head(monkeypatch, runs=[transient, _rows()])
     assert _cli("replan", SHA, "7") == 0
     assert (capsys.readouterr(), calls, in_process) == (
-        (f"{_LIVE}\n", "::warning::command failed (1): gh api --paginate x%0AHTTP 502\n"),
+        (f"{_LIVE}\n", "::notice::command failed (1): gh api --paginate x%0AHTTP 502\n"),
         [_PULL_READ, _RUNS_READ, _RUNS_READ],
         [2],
     )
