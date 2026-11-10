@@ -462,8 +462,7 @@ def test_default_branch_head_is_none_after_three_transient_failures(monkeypatch)
 
 
 def test_default_branch_head_is_none_after_one_404(monkeypatch):
-    """Green before the retry. Mutation: retry any `SystemExit` (a loop around `read`) -- a
-    second call."""
+    """Mutation: retry any `SystemExit` (a loop around `read`) -- a second call."""
     seen, slept = _head_reads(monkeypatch, _Proc(1, "", "gh: Not Found (HTTP 404)\n"))
     assert di.default_branch_head("main") is None
     assert (seen, slept) == ([(_HEAD_READ, "workflow-token")], [])

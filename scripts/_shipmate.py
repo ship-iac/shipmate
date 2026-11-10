@@ -283,7 +283,8 @@ def gh_json(path, run=None, *, retry=True):
     """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
     with the tool's stderr in the message, from a single definition, so no caller repeats the
     `json.loads(_run(...))` pair. A transient failure is retried (`retried`); `retry=False`
-    reads once, for reads that degrade to a warning: `doctor`'s and `cell-lock._stacked`.
+    reads once, for reads that degrade rather than fail: `doctor`'s, each to a report row, and
+    `cell-lock._stacked`'s, to a warning.
 
     Homed beside `_run` for the same reason.
     """

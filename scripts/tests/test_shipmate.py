@@ -458,8 +458,8 @@ def test_gh_json_without_retry_reads_once(sleeps):
 
 
 def test_gh_json_raises_a_404_at_once(sleeps):
-    """Green before `gh_json` retried. Mutation: retry any `SystemExit` (a loop around `fetch`
-    catching every `SystemExit`) -> a second call returns `{}`."""
+    """Mutation: retry any `SystemExit` (a loop around `fetch` catching every `SystemExit`) -> a
+    second call returns `{}`."""
     message = "::error::command failed (1): gh api x\ngh: Not Found (HTTP 404)"
     calls, run = _answering("{}", message)
     with pytest.raises(SystemExit) as exc:

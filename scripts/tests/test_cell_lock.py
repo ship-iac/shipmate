@@ -391,8 +391,9 @@ def test_repo_id_retries_a_transient_failure(sleeps):
 
 
 def test_repo_id_reads_again_after_a_failure(sleeps):
-    """A failure is not cached; the success is. Mutation: catch the `SystemExit` inside
-    `_repo_id` and return it -- the first call returns it, and the second returns it cached."""
+    """A failure is not cached; the success is. Mutations, each run: catch the `SystemExit`
+    inside `_repo_id` and return it -- the first call returns it; drop `@functools.cache` -- the
+    third call is an unexpected read."""
     gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, BAD_GATEWAY, BAD_GATEWAY, REPO_ID)
     with pytest.raises(SystemExit):
         cl._repo_id(REPO, gh)
