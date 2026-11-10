@@ -326,17 +326,19 @@ def write_stub(bin_dir, name, body):
     path.chmod(0o755)
 
 
-def fail_script(bin_dir, name, rc, stderr=""):
+def fail_script(bin_dir, name, rc, stderr="", *, subcommand=None, stdout=""):
     """Make ``bin_dir/python3`` (``write_python3_shim``'s) exit ``rc`` for the engine script
-    ``name``, after printing ``stderr`` to stderr when it is not empty, and run every other
-    script."""
+    ``name``, or only for its ``subcommand`` when given, after printing ``stdout`` to stdout and
+    ``stderr`` to stderr, each when it is not empty, and run every other script or subcommand."""
     real = bin_dir / "python3-real"
     (bin_dir / "python3").rename(real)
-    say = f"cat >&2 <<'STDERR'\n{stderr}\nSTDERR\n" if stderr else ""
+    say = f"printf '%s' '{stdout}'\n" if stdout else ""
+    say += f"cat >&2 <<'STDERR'\n{stderr}\nSTDERR\n" if stderr else ""
+    match = f'"$1" == */{name}' + (f' && "$2" == {subcommand}' if subcommand else "")
     write_stub(
         bin_dir,
         "python3",
-        f'if [[ "$1" == */{name} ]]; then\n{say}exit {rc}\nfi\nexec "{real.as_posix()}" "$@"',
+        f'if [[ {match} ]]; then\n{say}exit {rc}\nfi\nexec "{real.as_posix()}" "$@"',
     )
 
 

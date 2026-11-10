@@ -150,15 +150,19 @@ def _run(
     plan_token="plan-token",  # noqa: S107 - a stub token, never sent
     dispatch_rc=0,
     post_rc=None,
+    replan_stderr=None,
 ):
     """Run the livehead step, then the dispatch step when it set `live`, as the runner would.
-    `post_rc` makes `python3` exit with it for `dispatch-body` in place of running it.
+    `post_rc` makes `python3` exit with it for `dispatch-body` in place of running it;
+    `replan_stderr` makes `gate-status replan` print it to stderr and exit 1.
     Return (stdout, stderr, gh calls, livehead outputs)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
     if post_rc is not None:
         fail_script(bin_dir, "dispatch-body", post_rc)
+    if replan_stderr is not None:
+        fail_script(bin_dir, "gate-status", 1, replan_stderr, subcommand="replan")
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
     out = tmp_path / "out"
@@ -297,6 +301,20 @@ def test_a_failed_run_listing_warns_with_the_remedy(tmp_path):
     assert stdout.splitlines() == _warning(
         f"command failed (1): gh api --paginate {RUNS_LIST[2]} --jq {RUNS_LIST[4]}"
     )
+
+
+@bash_only
+def test_a_retried_failed_decision_warns_on_its_last_line(tmp_path):
+    """The retry notices pass through unchanged and only the script's last line enters the
+    warning. Mutation: `$(tail -n 1 replan.err)` -> `$(cat replan.err)` -> the warning holds
+    every line."""
+    notices = (
+        "::notice::command failed (1): gh api repos/acme/demo/pulls/42%0Agh: HTTP 502\n"
+        "::notice::command failed (1): gh api repos/acme/demo/pulls/42%0Agh: HTTP 503\n"
+    )
+    failed = "command failed (1): gh api repos/acme/demo/pulls/42"
+    stdout, stderr, calls, outputs = _run(tmp_path, replan_stderr=notices + failed)
+    assert (calls, outputs, stderr, stdout) == ([], {}, notices, f"{_warning(failed)[0]}\n")
 
 
 @bash_only

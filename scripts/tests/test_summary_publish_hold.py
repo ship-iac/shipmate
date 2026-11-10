@@ -39,6 +39,7 @@ from _loader import (
     ACTIONS,
     action_steps,
     bash_only,
+    fail_script,
     load_script,
     read_calls,
     run_lines,
@@ -229,17 +230,22 @@ def _run(
     plan_result="success",
     planned_cells=None,
     run_id=RUN_ID,
+    moved=None,
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
     `run_id` is for HOLD-only runs: the CREATE fakes and `FAKE_REFRESH_CHECKS` stay keyed to run
     42, and a `run_id` below 42 beside a run-42 hold (a `failure` gate) in `statuses` makes
-    `refuse-newer` supersede the run."""
+    `refuse-newer` supersede the run. `moved=(rc, stderr, stdout)` replaces `gate-status moved`
+    with a stub that prints them and exits `rc`."""
     if planned_cells is None:
         planned_cells = str(len(list((tmp_path / "cells").rglob("cell.json"))))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     write_python3_shim(bin_dir)
+    if moved is not None:
+        rc, stderr, stdout = moved
+        fail_script(bin_dir, "gate-status", rc, stderr, subcommand="moved", stdout=stdout)
     (bin_dir / "gh").write_text(GH_STUB, encoding="utf-8", newline="\n")
     # Without the exec bit, bash on Linux skips the stub on PATH and runs the real `gh`.
     (bin_dir / "gh").chmod(0o755)
@@ -749,3 +755,50 @@ def test_a_failed_head_read_publishes_as_before(tmp_path):
         "::warning::could not read the head of pull request #7 (command failed (1): gh api "
         f"repos/acme/demo/pulls/7); this run publishes on {HEAD_SHA}\n"
     )
+
+
+#: Two retries of the pull request read, as `_shipmate.note_retry` prints them.
+RETRY_NOTICES = (
+    "::notice::command failed (1): gh api repos/acme/demo/pulls/7%0Agh: HTTP 502\n"
+    "::notice::command failed (1): gh api repos/acme/demo/pulls/7%0Agh: HTTP 503\n"
+)
+PULL_FAILED = "command failed (1): gh api repos/acme/demo/pulls/7"
+
+
+@bash_only
+def test_a_retried_failed_head_read_warns_on_its_last_line(tmp_path):
+    """The retry notices pass through unchanged and only the script's last line enters the
+    warning. Mutations: `$(tail -n 1 moved.err)` -> `$(cat moved.err)` -> the warning holds every
+    line; move `cat moved.err >&2` after the `fi` -> the notices print twice."""
+    _write_cells(tmp_path, "a")
+    codes, calls, stderr, stdout = _run(
+        tmp_path, steps=(HOLD,), moved=(1, RETRY_NOTICES + PULL_FAILED, "")
+    )
+    assert (codes, calls, stderr) == ([0], ONE_CELL_RUN[1:4], RETRY_NOTICES)
+    assert stdout == (
+        f"::warning::could not read the head of pull request #7 ({PULL_FAILED}); "
+        f"this run publishes on {HEAD_SHA}\n"
+    )
+
+
+@bash_only
+def test_a_recovered_head_read_passes_its_retry_notices_through(tmp_path):
+    """Mutation: drop `cat moved.err >&2` -> no stderr."""
+    _write_cells(tmp_path, "a")
+    codes, calls, stderr, stdout = _run(
+        tmp_path, steps=(HOLD,), moved=(0, RETRY_NOTICES.rstrip("\n"), "")
+    )
+    assert (codes, calls, stderr, stdout) == ([0], ONE_CELL_RUN[1:4], RETRY_NOTICES, "")
+
+
+@bash_only
+def test_a_recovered_read_of_a_moved_head_passes_its_retry_notices_through(tmp_path):
+    """Mutation: move `cat moved.err >&2` after the `fi` -> the moved branch's `exit 0` skips
+    it and stderr is empty."""
+    _write_cells(tmp_path, "a")
+    codes, calls, stderr, stdout = _run(
+        tmp_path, steps=(HOLD,), moved=(0, RETRY_NOTICES.rstrip("\n"), NEWER_HEAD)
+    )
+    assert (codes, calls, stderr, stdout) == ([0], [], RETRY_NOTICES, MOVED_NOTICE)
+    output = (tmp_path / "github_output").read_text(encoding="utf-8")
+    assert output == "superseded=true\nmoved=true\n"
