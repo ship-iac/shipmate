@@ -422,8 +422,51 @@ def test_an_unread_head_closes_no_removed_cells_issue_and_fails_the_run(
 
 
 class _Proc:
-    def __init__(self, returncode, stdout):
-        self.returncode, self.stdout = returncode, stdout
+    def __init__(self, returncode, stdout, stderr=""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+_HEAD_READ = ["gh", "api", "repos/acme/demo/branches/main", "--jq", ".commit.sha"]
+_502 = _Proc(1, "", "gh: Bad Gateway (HTTP 502)\n")
+
+
+def _head_reads(monkeypatch, *procs):
+    """Answer each `subprocess.run` with the next of `procs`; return each call's argv and
+    `GH_TOKEN`, and the patched sleeps."""
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("SHIPMATE_READ_TOKEN", "workflow-token")
+    seen, slept = [], []
+
+    def fake(args, **kw):
+        seen.append((args, kw["env"]["GH_TOKEN"]))
+        return procs[len(seen) - 1]
+
+    monkeypatch.setattr("subprocess.run", fake)
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
+    return seen, slept
+
+
+def test_default_branch_head_retries_a_transient_failure(monkeypatch):
+    """Mutations, each run: call the read without `retried` -- None after one call; put gh's
+    stderr on the argv line of the read's `SystemExit` -- `is_transient` misses it, one call."""
+    seen, slept = _head_reads(monkeypatch, _502, _Proc(0, _SHA + "\n"))
+    assert di.default_branch_head("main") == _SHA
+    assert (seen, slept) == ([(_HEAD_READ, "workflow-token")] * 2, [2])
+
+
+def test_default_branch_head_is_none_after_three_transient_failures(monkeypatch):
+    """Mutation: call the read without `retried` -- one call."""
+    seen, slept = _head_reads(monkeypatch, _502, _502, _502)
+    assert di.default_branch_head("main") is None
+    assert (seen, slept) == ([(_HEAD_READ, "workflow-token")] * 3, [2, 5])
+
+
+def test_default_branch_head_is_none_after_one_404(monkeypatch):
+    """Green before the retry. Mutation: retry any `SystemExit` (a loop around `read`) -- a
+    second call."""
+    seen, slept = _head_reads(monkeypatch, _Proc(1, "", "gh: Not Found (HTTP 404)\n"))
+    assert di.default_branch_head("main") is None
+    assert (seen, slept) == ([(_HEAD_READ, "workflow-token")], [])
 
 
 def test_default_branch_head_reads_the_branch_with_the_workflow_token(monkeypatch):

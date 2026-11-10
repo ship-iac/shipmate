@@ -48,6 +48,7 @@ from _shipmate import (
     command_data,
     current_run_url,
     is_head_sha,
+    retried,
     run_annotated,
 )
 
@@ -168,7 +169,8 @@ def upsert_or_close(cell, existing, run_url):
 
 
 def default_branch_head(branch):
-    """The default branch's live head SHA, or None when it cannot be read.
+    """The default branch's live head SHA, or None when it cannot be read. A transient failure
+    is retried (`retried`).
 
     Read with the workflow token in `SHIPMATE_READ_TOKEN`, not the App token in `GH_TOKEN`:
     the App token is minted with `issues: write` alone and cannot read contents on a
@@ -178,8 +180,18 @@ def default_branch_head(branch):
         return None
     args = ["gh", "api", f"repos/{repo}/branches/{quote(branch)}", "--jq", ".commit.sha"]
     env = {**os.environ, "GH_TOKEN": os.environ.get("SHIPMATE_READ_TOKEN", "")}
-    p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
-    head = p.stdout.strip() if p.returncode == 0 else ""
+
+    def read():
+        p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
+        if p.returncode != 0:
+            # `is_transient` reads gh's stderr under the first line, the argv.
+            raise SystemExit(f"command failed ({p.returncode}): {' '.join(args)}\n{p.stderr}")
+        return p.stdout
+
+    try:
+        head = retried(read).strip()
+    except SystemExit:
+        return None
     return head if is_head_sha(head) else None
 
 

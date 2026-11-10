@@ -1,5 +1,8 @@
 """`_run` and `gh_json` have one definition each, in `_shipmate`, and every CI script holds
-that object rather than a copy: one definition decides how a nonzero `gh api` exit surfaces."""
+that object (`doctor` a `functools.partial` of it) rather than a copy: one definition decides
+how a nonzero `gh api` exit surfaces."""
+
+import functools
 
 import _shipmate
 from _loader import load_script
@@ -21,7 +24,6 @@ def test_every_gh_json_holder_holds_the_shipmate_definition():
     Mutation: give `onboard` its own `def gh_json` -- `onboard.gh_json` turns False."""
     holders = {
         "deploy-detect._gh_json": dd._gh_json,
-        "doctor._gh_json": doctor._gh_json,
         "env-config.gh_json": ec.gh_json,
         "mirror-checks.gh_json": mc.gh_json,
         "onboard.gh_json": ob.gh_json,
@@ -29,12 +31,22 @@ def test_every_gh_json_holder_holds_the_shipmate_definition():
     }
     assert {name: obj is _shipmate.gh_json for name, obj in holders.items()} == {
         "deploy-detect._gh_json": True,
-        "doctor._gh_json": True,
         "env-config.gh_json": True,
         "mirror-checks.gh_json": True,
         "onboard.gh_json": True,
         "pr-facts._gh_json": True,
     }
+
+
+def test_doctor_holds_the_shipmate_gh_json_without_retry():
+    """Mutation: `_gh_json = gh_json` in `doctor` -- not a `functools.partial`."""
+    held = doctor._gh_json
+    assert isinstance(held, functools.partial)
+    assert (held.func is _shipmate.gh_json, held.args, held.keywords) == (
+        True,
+        (),
+        {"retry": False},
+    )
 
 
 def test_every_run_holder_holds_the_shipmate_definition():

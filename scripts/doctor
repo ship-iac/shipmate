@@ -52,6 +52,7 @@ Probes:
 import base64
 import collections
 import contextlib
+import functools
 import importlib.util
 import json
 import os
@@ -69,6 +70,7 @@ from _shipmate import (
     current_run_url,
     first_codeowners,
     gate_check,
+    gh_json,
     is_head_sha,
     is_run_id,
     load_workflow_text,
@@ -81,7 +83,10 @@ from _shipmate import (
 )
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import ENGINE_ENV as _ENGINE_ENV
-from _shipmate import gh_json as _gh_json
+
+# Each read degrades to a row, and the environment reads run once per binding in every plan
+# summary: a retry would hold the summary for its sleeps.
+_gh_json = functools.partial(gh_json, retry=False)
 
 ec = _load("env-config")
 sc = _load("summary-comment")

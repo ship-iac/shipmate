@@ -63,6 +63,7 @@ from _shipmate import (
     is_head_sha,
     is_run_id,
     lock_who,
+    retried,
     run_annotated,
     write_outputs,
 )
@@ -185,7 +186,9 @@ def foreign(locks, cells, pr: int) -> list[dict]:
 
 @functools.cache
 def _repo_id(repo, run):
-    return run(["gh", "api", f"repos/{repo}", "--jq", ".node_id"]).strip()
+    """The node id of `repo`. A transient failure is retried (`retried`); a failure is not
+    cached, so a later call reads again."""
+    return retried(lambda: run(["gh", "api", f"repos/{repo}", "--jq", ".node_id"])).strip()
 
 
 def _update(repo, ref, before, after, force, run):
@@ -333,16 +336,13 @@ def _when(stamp):
 
 def _pr_state(repo, pr, run):
     """`(state, close times, head)` of `pr`: `OPEN`, `CLOSED` or `MERGED`, the time of its
-    newest close, if any, and its head commit (the one it merged at, once merged). Refuses when
-    the read fails or its answer is malformed."""
+    newest close, if any, and its head commit (the one it merged at, once merged). A transient
+    failure is retried (`retried`). Refuses when the read fails or its answer is malformed."""
     owner, name = repo.split("/", 1)
+    args = ["gh", "api", "graphql", "-f", f"query={PR_STATE}", "-f", f"owner={owner}"]
+    args += ["-f", f"name={name}", "-F", f"pr={pr}", "--jq", ".data.repository.pullRequest"]
     try:
-        pull = json.loads(
-            run(
-                ["gh", "api", "graphql", "-f", f"query={PR_STATE}", "-f", f"owner={owner}"]
-                + ["-f", f"name={name}", "-F", f"pr={pr}", "--jq", ".data.repository.pullRequest"]
-            )
-        )
+        pull = json.loads(retried(lambda: run(args)))
         closes = [_when(n["createdAt"]) for n in pull["timelineItems"]["nodes"]]
         if pull["state"] in ("OPEN", "CLOSED", "MERGED"):
             return pull["state"], closes, pull["headRefOid"]
@@ -532,7 +532,9 @@ def _stacked(repo, holders, head_ref, run):
     stacked = []
     for holder in sorted(holders):
         try:
-            pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
+            # Reviewer-facing and read once per holder in every plan summary: a failure
+            # warns at once rather than holding the summary for the retries.
+            pull = gh_json(f"repos/{repo}/pulls/{holder}", run, retry=False)
             base = pull["base"]["ref"]
         except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
             print(

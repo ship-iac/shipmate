@@ -279,14 +279,19 @@ def run_annotated(main, *args, refusal_output=False):
         raise SystemExit(1) from None
 
 
-def gh_json(path, run=None):
+def gh_json(path, run=None, *, retry=True):
     """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
     with the tool's stderr in the message, from a single definition, so no caller repeats the
-    `json.loads(_run(...))` pair.
+    `json.loads(_run(...))` pair. A transient failure is retried (`retried`); `retry=False`
+    reads once, for reads that degrade to a warning: `doctor`'s and `cell-lock._stacked`.
 
     Homed beside `_run` for the same reason.
     """
-    return json.loads((run or _run)(["gh", "api", path]))
+
+    def fetch():
+        return (run or _run)(["gh", "api", path])
+
+    return json.loads(retried(fetch) if retry else fetch())
 
 
 def write_outputs(**pairs):
@@ -387,14 +392,14 @@ def one_line(text):
 
 def pr_head(repo, pr, run=run):
     """`(head SHA, draft, state)` of pull request `pr` from one `gh api repos/{repo}/pulls/{pr}`
-    read; `state` is GitHub's `open` or `closed`.
+    read; `state` is GitHub's `open` or `closed`. A transient failure is retried (`retried`).
 
     Raises `SystemExit` with one unannotated line when the read fails, its body is not a pull
     request, the SHA is not 40 lowercase hex characters, `draft` is not a bool, or `state` is not
     a string; each caller decides how to report it. `pr` is bound into the path: validate it
     first."""
     try:
-        pull = json.loads(run(["gh", "api", f"repos/{repo}/pulls/{pr}"]))
+        pull = gh_json(f"repos/{repo}/pulls/{pr}", run)
         sha, draft, state = pull["head"]["sha"], pull["draft"], pull["state"]
     except SystemExit as exc:
         raise SystemExit(one_line(exc.code)) from None

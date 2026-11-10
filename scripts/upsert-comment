@@ -65,7 +65,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_head_sha, is_pr_number, one_line, pr_head, run, run_annotated
+from _shipmate import is_head_sha, is_pr_number, one_line, pr_head, retried, run, run_annotated
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
 JQ = (
@@ -87,14 +87,20 @@ def marker_comments(repo, pr, marker):
     """Each Bot comment whose body starts with `marker`, in listing order, as
     `{id, node_id, login}`.
 
-    Raises SystemExit when the listing fails: `run` returns stdout only on exit 0, so a failure
-    on a later page yields no comments at all rather than the earlier pages' ones. A line that
-    does not parse raises SystemExit too, so it degrades like a failed listing instead of a
-    traceback.
+    A transient failure is retried (`retried`). Raises SystemExit when the listing fails: `run`
+    returns stdout only on exit 0, so a failure on a later page yields no comments at all rather
+    than the earlier pages' ones. A line that does not parse raises SystemExit too, so it
+    degrades like a failed listing instead of a traceback.
     """
-    out = run(
-        ["gh", "api", "--paginate", "--jq", JQ, f"repos/{repo}/issues/{pr}/comments?per_page=100"]
-    )
+    args = [
+        "gh",
+        "api",
+        "--paginate",
+        "--jq",
+        JQ,
+        f"repos/{repo}/issues/{pr}/comments?per_page=100",
+    ]
+    out = retried(lambda: run(args))
     found = []
     for line in out.splitlines():
         if line.strip():

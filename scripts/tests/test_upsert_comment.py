@@ -79,6 +79,17 @@ def _fake_graphql(
     return '{"data": {"minimizeComment": {"minimizedComment": {"isMinimized": true}}}}'
 
 
+#: The notice each retry of a fake's 502 prints before the failure line.
+_NOTICE = "::notice::command failed (1): gh api%0AHTTP 502\n"
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    slept = []
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
+    return slept
+
+
 def _fake_head(head, fails):
     if fails:
         raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")
@@ -179,17 +190,38 @@ def test_update_only_with_a_match_still_patches(monkeypatch, tmp_path, capsys):
     assert capsys.readouterr().out == "updated\n"
 
 
-def test_a_listing_failure_prints_list_failed_and_writes_nothing(monkeypatch, tmp_path, capsys):
-    """`_shipmate.run` raises SystemExit on a failed `gh`; the caller decides on `list-failed`.
+def test_a_listing_failure_prints_list_failed_and_writes_nothing(
+    monkeypatch, tmp_path, capsys, sleeps
+):
+    """`_shipmate.run` raises SystemExit on a failed `gh`; the caller decides on `list-failed`,
+    after the retries' notices.
 
     Mutation: drop the `except SystemExit` around the listing.
     """
     code, calls = _upsert(monkeypatch, tmp_path, [], "--update-only", list_fails=True)
     assert code == 0
-    assert calls == [LIST_ARGV]
+    assert (calls, sleeps) == ([LIST_ARGV] * 3, [2, 5])
     out, err = capsys.readouterr()
     assert out == "list-failed\n"
-    assert err == "command failed (1): gh api | HTTP 502\n"
+    assert err == 2 * _NOTICE + "command failed (1): gh api | HTTP 502\n"
+
+
+def test_marker_comments_retries_a_transient_listing_failure(monkeypatch):
+    """Mutation: call `run([...])` without `retried` -- the 502 raises."""
+    slept, calls = [], []
+
+    def fake_run(args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise SystemExit("command failed (1): gh api\ngh: Bad Gateway (HTTP 502)")
+        return _head(5, SUMMARY) + "\n"
+
+    monkeypatch.setattr(uc, "run", fake_run)
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
+    assert uc.marker_comments("o/r", "7", SUMMARY) == [
+        {"id": 5, "node_id": "IC_5", "login": "shipmate[bot]"}
+    ]
+    assert (calls, slept) == ([LIST_ARGV, LIST_ARGV], [2])
 
 
 @pytest.mark.parametrize("flag", ["--new", "--update-only"])
@@ -214,15 +246,17 @@ def test_a_moved_head_prints_moved_and_writes_nothing(monkeypatch, tmp_path, cap
     assert capsys.readouterr() == ("moved\n", "")
 
 
-def test_a_failed_head_read_prints_head_failed_on_one_stderr_line(monkeypatch, tmp_path, capsys):
+def test_a_failed_head_read_prints_head_failed_on_one_stderr_line(
+    monkeypatch, tmp_path, capsys, sleeps
+):
     """gh's error, a CR-led `::add-mask::` included, stays on one line, so none of it starts a
-    workflow command. Mutations: drop the CR from `one_line`'s split -- `::add-mask::x` starts a
-    line; print the raw error -- red."""
+    workflow command; the retries' notices print only its first two lines. Mutations: drop the
+    CR from `one_line`'s split -- `::add-mask::x` starts a line; print the raw error -- red."""
     code, calls = _upsert(monkeypatch, tmp_path, [], "--new", "--head", _HEAD, head_fails=True)
-    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
+    assert (code, calls, sleeps) == (0, [LIST_ARGV] + [PULLS_ARGV] * 3, [2, 5])
     assert capsys.readouterr() == (
         "head-failed\n",
-        "command failed (1): gh api | HTTP 502 | ::add-mask::x\n",
+        2 * _NOTICE + "command failed (1): gh api | HTTP 502 | ::add-mask::x\n",
     )
 
 
@@ -628,13 +662,18 @@ def test_new_an_unparseable_post_response_warns_and_minimizes_nothing(
     ("head", "head_fails", "word", "err"),
     [
         ("d" * 40, False, "moved", ""),
-        (_HEAD, True, "head-failed", "command failed (1): gh api | HTTP 502 | ::add-mask::x\n"),
+        (
+            _HEAD,
+            True,
+            "head-failed",
+            2 * _NOTICE + "command failed (1): gh api | HTTP 502 | ::add-mask::x\n",
+        ),
         (None, False, "head-failed", "pull request #7 has head SHA None and draft False\n"),
     ],
     ids=["moved", "head-failed", "null-head"],
 )
 def test_new_writes_nothing_when_the_head_check_stops(
-    monkeypatch, tmp_path, capsys, head, head_fails, word, err
+    monkeypatch, tmp_path, capsys, sleeps, head, head_fails, word, err
 ):
     """The head is read after the visibility read and before the POST. Mutations: skip
     `_head_stop` under `--new` -- a POST and a minimize follow; under `--new`, write on
@@ -650,7 +689,9 @@ def test_new_writes_nothing_when_the_head_check_stops(
         head=head,
         head_fails=head_fails,
     )
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), PULLS_ARGV])
+    reads = 3 if head_fails else 1
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5")] + [PULLS_ARGV] * reads)
+    assert sleeps == ([2, 5] if head_fails else [])
     assert capsys.readouterr() == (word + "\n", err)
 
 
@@ -665,11 +706,14 @@ def test_new_with_a_matching_head_posts_then_minimizes(monkeypatch, tmp_path, ca
     assert capsys.readouterr() == ("created\n", "")
 
 
-def test_new_a_listing_failure_prints_list_failed(monkeypatch, tmp_path, capsys):
+def test_new_a_listing_failure_prints_list_failed(monkeypatch, tmp_path, capsys, sleeps):
     """Mutation: drop the `except SystemExit` around the listing."""
     code, calls = _upsert(monkeypatch, tmp_path, [], "--new", list_fails=True)
-    assert (code, calls) == (0, [LIST_ARGV])
-    assert capsys.readouterr() == ("list-failed\n", "command failed (1): gh api | HTTP 502\n")
+    assert (code, calls, sleeps) == (0, [LIST_ARGV] * 3, [2, 5])
+    assert capsys.readouterr() == (
+        "list-failed\n",
+        2 * _NOTICE + "command failed (1): gh api | HTTP 502\n",
+    )
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")

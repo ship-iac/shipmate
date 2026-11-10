@@ -677,13 +677,15 @@ def test_moved_prints_the_live_head_only_when_it_is_not_the_sha(
 
 @pytest.mark.parametrize("cmd", ["moved", "replan"])
 def test_a_failed_head_read_exits_1_on_one_unannotated_line(in_process, monkeypatch, capsys, cmd):
-    """gh's CR-led `::add-mask::` stays inside the one line. Mutation: re-raise `run`'s
-    `SystemExit` raw in `pr_head` -- two lines."""
+    """gh's CR-led `::add-mask::` stays inside the one line, after the retries' notices.
+    Mutation: re-raise `run`'s `SystemExit` raw in `pr_head` -- two lines."""
     calls = _live_head(monkeypatch, pull_fails=True)
-    assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls) == (
+    notice = "::notice::command failed (1): gh api repos/acme/demo/pulls/7%0AHTTP 502\n"
+    assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls, in_process) == (
         _PULL_FAILED,
-        ("", ""),
-        [_PULL_READ],
+        ("", 2 * notice),
+        [_PULL_READ] * 3,
+        [2, 5],
     )
 
 

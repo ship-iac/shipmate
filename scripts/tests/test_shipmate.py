@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import subprocess
 import sys
@@ -16,10 +17,12 @@ from _shipmate import (
     event_action,
     event_payload,
     gate_check,
+    gh_json,
     is_head_sha,
     is_pr_number,
     is_transient,
     named,
+    pr_head,
     retried,
     review_count,
     run_annotated,
@@ -400,6 +403,96 @@ def test_check_runs_retries_a_transient_failure_through_the_injected_run(sleeps)
         ".check_runs[]",
     ]
     assert (calls, sleeps) == ([argv, argv], [2])
+
+
+def _answering(answer, *messages):
+    """A `run` double raising each of `messages` in turn, then returning `answer`; and its argv
+    list."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if len(calls) <= len(messages):
+            raise SystemExit(messages[len(calls) - 1])
+        return answer
+
+    return calls, run
+
+
+_GH_JSON_ARGV = ["gh", "api", "repos/o/r"]
+
+
+def test_gh_json_retries_a_transient_failure_through_the_injected_run(sleeps):
+    """Mutation: `json.loads(fetch())` without `retried` -> the 502 raises."""
+    calls, run = _answering('{"a": 1}', _BAD_GATEWAY)
+    assert (gh_json("repos/o/r", run), calls, sleeps) == (
+        {"a": 1},
+        [_GH_JSON_ARGV, _GH_JSON_ARGV],
+        [2],
+    )
+
+
+def test_gh_json_retries_a_transient_failure_through_the_default_run(monkeypatch, sleeps):
+    """Mutation: retry only when `run` is given (`retried(fetch) if retry and run else fetch()`)
+    -> the 502 raises."""
+    calls, run = _answering('{"a": 1}', _BAD_GATEWAY)
+    monkeypatch.setattr("_shipmate._run", run)
+    assert (gh_json("repos/o/r"), calls, sleeps) == ({"a": 1}, [_GH_JSON_ARGV, _GH_JSON_ARGV], [2])
+
+
+def test_gh_json_gives_up_after_three_attempts_with_the_last_failure(sleeps):
+    """Mutation: `retried(lambda: retried(fetch))` -> nine calls."""
+    messages = [f"::error::command failed (1): gh api x\ngh: Error (HTTP 50{i})" for i in (0, 2, 3)]
+    calls, run = _answering("{}", *messages, *messages, *messages)
+    with pytest.raises(SystemExit) as exc:
+        gh_json("repos/o/r", run)
+    assert (exc.value.code, calls, sleeps) == (messages[2], [_GH_JSON_ARGV] * 3, [2, 5])
+
+
+def test_gh_json_without_retry_reads_once(sleeps):
+    """Mutation: ignore `retry` (always `retried(fetch)`) -> a second call returns `{}`."""
+    calls, run = _answering("{}", _BAD_GATEWAY)
+    with pytest.raises(SystemExit) as exc:
+        gh_json("repos/o/r", run, retry=False)
+    assert (exc.value.code, calls, sleeps) == (_BAD_GATEWAY, [_GH_JSON_ARGV], [])
+
+
+def test_gh_json_raises_a_404_at_once(sleeps):
+    """Green before `gh_json` retried. Mutation: retry any `SystemExit` (a loop around `fetch`
+    catching every `SystemExit`) -> a second call returns `{}`."""
+    message = "::error::command failed (1): gh api x\ngh: Not Found (HTTP 404)"
+    calls, run = _answering("{}", message)
+    with pytest.raises(SystemExit) as exc:
+        gh_json("repos/o/r", run)
+    assert (exc.value.code, calls, sleeps) == (message, [_GH_JSON_ARGV], [])
+
+
+_PULL_ARGV = ["gh", "api", "repos/o/r/pulls/7"]
+#: A failure through the unprefixed `run` that `pr_head` defaults to.
+_PULL_502 = "command failed (1): gh api repos/o/r/pulls/7\ngh: Bad Gateway (HTTP 502)"
+
+
+def test_pr_head_retries_a_transient_failure(sleeps):
+    """Mutation: read through `json.loads(run([...]))` directly -> the 502 raises."""
+    pull = {"head": {"sha": _SHA}, "draft": True, "state": "open"}
+    calls, run = _answering(json.dumps(pull), _PULL_502)
+    assert (pr_head("o/r", 7, run), calls, sleeps) == (
+        (_SHA, True, "open"),
+        [_PULL_ARGV, _PULL_ARGV],
+        [2],
+    )
+
+
+def test_pr_head_raises_one_unannotated_line_after_three_failures(sleeps):
+    """Mutation: read through `json.loads(run([...]))` directly -> one call, no sleep."""
+    calls, run = _answering("{}", _PULL_502, _PULL_502, _PULL_502)
+    with pytest.raises(SystemExit) as exc:
+        pr_head("o/r", 7, run)
+    assert (exc.value.code, calls, sleeps) == (
+        "command failed (1): gh api repos/o/r/pulls/7 | gh: Bad Gateway (HTTP 502)",
+        [_PULL_ARGV] * 3,
+        [2, 5],
+    )
 
 
 @pytest.mark.parametrize("sha", ["A" * 40, "a" * 39, "../x"])
