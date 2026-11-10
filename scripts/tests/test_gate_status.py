@@ -804,7 +804,8 @@ def test_replan_prints_nothing_when_the_live_head_has_its_autoplan(
 
 
 def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, capsys):
-    """Mutation: call `autoplan_runs` outside `retried` -- the 502 exits 1, red."""
+    """Mutation: list without `retried` in `autoplan_runs` (`listing = run(args)`) -- the 502
+    exits 1, red."""
     transient = SystemExit("command failed (1): gh api --paginate x\nHTTP 502")
     calls = _live_head(monkeypatch, runs=[transient, _rows()])
     assert _cli("replan", SHA, "7") == 0
@@ -812,6 +813,19 @@ def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, cap
         (f"{_LIVE}\n", "::notice::command failed (1): gh api --paginate x%0AHTTP 502\n"),
         [_PULL_READ, _RUNS_READ, _RUNS_READ],
         [2],
+    )
+
+
+def test_replan_spends_three_listing_reads_on_a_persistent_5xx(in_process, monkeypatch, capsys):
+    """The listing retries inside `autoplan_runs` only. Mutation: call it through
+    `retried(lambda: ag.autoplan_runs(...))` again -- nine listing calls."""
+    calls = _live_head(monkeypatch, runs_fail=502)
+    notice = "::notice::command failed (1): gh api --paginate x%0AHTTP 502\n"
+    assert (_cli("replan", SHA, "7"), capsys.readouterr(), calls, in_process) == (
+        "command failed (1): gh api --paginate x | HTTP 502",
+        ("", notice * 2),
+        [_PULL_READ] + [_RUNS_READ] * 3,
+        [2, 5],
     )
 
 

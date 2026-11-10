@@ -26,7 +26,6 @@ from _shipmate import (
     _load,
     command_data,
     lock_who,
-    retried,
     run_annotated,
     validate_head_sha,
     write_outputs,
@@ -58,9 +57,9 @@ def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
     requests into `branch` is read, and only a pull request with `merge_commit_sha ==
     merge_sha` and `merged_at` set is taken: GitHub fills `merge_commit_sha` with the
     test-merge commit on a closed unmerged pull request. A merge older than that page is not
-    found. The listing read is retried on a transient failure (`retried`); any other failure
-    raises, as the first read's does. With no match it writes a warning to stderr, flushed so
-    it precedes a refusal in the log, and returns `(merge_sha, "")`.
+    found. Each poll and the listing are reads of their own through `gh_json`, which retries a
+    transient failure; any other failure raises. With no match it writes a warning to stderr,
+    flushed so it precedes a refusal in the log, and returns `(merge_sha, "")`.
     """
     for attempt in range(_attempts):
         pulls = _gh_json(f"repos/{repo}/commits/{merge_sha}/pulls")
@@ -74,7 +73,7 @@ def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
         f"repos/{repo}/pulls?state=closed&base={quote(branch, safe='')}"
         "&sort=updated&direction=desc&per_page=100"
     )
-    closed = retried(lambda: _gh_json(path))
+    closed = _gh_json(path)
     for p in closed:
         if p.get("merge_commit_sha") == merge_sha and p.get("merged_at"):
             return p["head"]["sha"], str(p["number"])

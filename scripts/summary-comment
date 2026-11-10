@@ -81,7 +81,6 @@ from _shipmate import (
     json_or_none,
     lock_who,
     one_line,
-    retried,
     run_annotated,
     write_outputs,
 )
@@ -1003,7 +1002,7 @@ def _superseded(rows):
         return []
     head = os.environ.get("HEAD_SHA", "")
     try:
-        runs = retried(lambda: ag.autoplan_runs(os.environ["GITHUB_REPOSITORY"], head, run=_run))
+        runs = ag.autoplan_runs(os.environ["GITHUB_REPOSITORY"], head, run=_run)
     except SystemExit as exc:
         cause = command_data(one_line(str(exc.code).removeprefix("::error::")))
     except ValueError as exc:

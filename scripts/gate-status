@@ -245,7 +245,7 @@ def _replan(sha, pr):
         print(f"pull request #{pr} moved to {live}, a draft; nothing dispatched", file=sys.stderr)
         return
     try:
-        runs = retried(lambda: ag.autoplan_runs(_repo(), live, run=run))
+        runs = ag.autoplan_runs(_repo(), live, run=run)
     except SystemExit as exc:
         raise SystemExit(one_line(exc.code)) from None
     except ValueError as exc:
