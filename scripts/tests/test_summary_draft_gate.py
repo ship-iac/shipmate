@@ -23,7 +23,16 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, bash_only, run_with_gate_gh, run_with_gh_recorder, step_by
+from _loader import (
+    ACTIONS,
+    bash_only,
+    fail_script,
+    run_step,
+    run_with_gate_gh,
+    run_with_gh_recorder,
+    step_by,
+    write_python3_shim,
+)
 
 HEAD_SHA = "a" * 40
 RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
@@ -144,6 +153,33 @@ def test_a_draft_run_keeps_an_existing_gate(tmp_path, head_state):
     assert calls == [USER_ARGV, READ_ARGV]
     assert proc.stdout == (
         f"{HEAD_SHA} keeps its {head_state} gate status; the draft gate status was not written\n"
+    )
+
+
+@bash_only
+def test_a_draft_read_that_recovered_logs_its_retry_notice(tmp_path):
+    """A `newest` that succeeds after a retry keeps its notice in the step log. Mutation: drop the
+    `cat newest.err >&2` after a successful read -> stderr is empty."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_python3_shim(bin_dir)
+    notice = "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)"
+    fail_script(bin_dir, "gate-status", 0, notice, subcommand="newest", stdout="failure 5")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
+        "HEAD_SHA": HEAD_SHA,
+        "STATE": "pending",
+        "DESCRIPTION": "the reason",
+        "MODE": "draft",
+        "PLAN_RESULT": "skipped",
+    }
+    proc = run_step(tmp_path, step_by("summary", name="Create/refresh gate")["run"], env)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (
+        0,
+        f"{HEAD_SHA} keeps its failure gate status; the draft gate status was not written\n",
+        f"{notice}\n",
     )
 
 

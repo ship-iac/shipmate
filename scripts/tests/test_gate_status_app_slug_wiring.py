@@ -3,9 +3,9 @@
 `newest`, `refuse-newer`, `post` and `refresh` judge only the gate statuses the bot user behind
 `SHIPMATE_APP_SLUG` created, and refuse when it is empty. The slug comes from the `app-slug`
 output of the same `id: token` mint whose token the step reads with: a slug from an input or a
-variable could name another valid bot and hide every real hold. The env of "Hold the gate while
-apply checks publish" and "Write the gate" is pinned whole by `test_pending_checks.py` and
-`test_gate_name_consistency.py`.
+variable could name another valid bot and hide every real hold. This file asserts the slug of
+every reading step; `test_pending_checks.py` and `test_gate_name_consistency.py` also pin the
+whole env of "Hold the gate while apply checks publish" and "Write the gate".
 """
 
 import shlex
@@ -71,12 +71,15 @@ def gate_status_invocations(label, step):
             raise AssertionError(f"{where}: cannot tokenize") from err
         if tokens == [ASSIGNMENT]:
             continue
+        mentions = [i for i, t in enumerate(tokens) if "gate-status" in t or "gate_status" in t]
         subcommands = [
             tokens[i + 1]
-            for i, token in enumerate(tokens[:-1])
-            if token in (SCRIPT, "$gate_status") and tokens[i + 1] in SUBCOMMANDS
+            for i in mentions
+            if tokens[i] in (SCRIPT, "$gate_status")
+            and i + 1 < len(tokens)
+            and tokens[i + 1] in SUBCOMMANDS
         ]
-        assert subcommands, f"{where}: no recognised gate-status invocation"
+        assert len(subcommands) == len(mentions), f"{where}: unrecognised gate-status invocation"
         found += subcommands
     return found
 
@@ -90,7 +93,9 @@ def test_the_reading_steps_are_exactly_these():
     recognise: `python3 "${gate_status}" newest "$HEAD_SHA"` in summary's "Mirror this run's
     per-cell plan checks onto the head";
     `python3 "${GITHUB_ACTION_PATH}/../../scripts/gate-status" refresh "$HEAD_SHA"` in
-    apply-summary. A `hold` through `"$gate_status"` in an unlisted step stays green."""
+    apply-summary; `python3 "$gate_status" hold "$S" x || python3 "${gate_status}" newest "$S"`
+    in summary's "Build comment + gate state" (every mention on a line must be an invocation). A
+    `hold` through `"$gate_status"` in an unlisted step stays green."""
     reading = {
         (label, step.get("name"))
         for label, step in engine_steps()
