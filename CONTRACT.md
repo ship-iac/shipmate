@@ -2697,7 +2697,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   [`ubuntu-26.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Readme.md) and
   [`ubuntu-26.04-arm`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Arm64-Readme.md) images name `gnupg2`
   (read 2026-10-31); `gpg`, `gpgconf` and `base64` on those runners are unmeasured.
-  Self-hosted runners must preinstall both.
+  Self-hosted runners must preinstall these.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
@@ -2763,7 +2763,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   they do for any other command that fails them; the cache restore and save steps
   and `Provider plugin cache` write none. Nothing installs unverified and nothing
   falls back. The OpenTofu verify imports the key into a temporary keyring and
-  stops that keyring's `gpg-agent` when the step ends, whether it passes or fails.
+  stops that keyring's `gpg-agent`, then removes the keyring, when the step ends, whether
+  it passes or fails.
   Neither key carries an expiry, so the keys change only when upstream changes
   its signer: from then on, every install of a release the new signer signs
   fails until an engine release ships the new key.

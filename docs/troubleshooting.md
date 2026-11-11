@@ -1442,8 +1442,11 @@ release's checksum file against a signer key committed in the engine
 starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause.
 `<base>` is the release's download URL, `<sums>` OpenTofu's `tofu_<version>_SHA256SUMS`,
 and `<answering-url>` the URL that answered after redirects, its query removed.
-The verify and install steps also write the annotation as `setup`'s `refusal`
-output, which reaches the gate description and the apply result comment.
+The verify and install steps also write the annotation, its lines joined into
+one, as `setup`'s `refusal` output. Only the `detect` jobs of `plan.yml` and
+`apply.yml` read it: plan's into the gate description, apply's into the apply
+result comment. A failure in any other job, a cell included, shows only in that
+job's log.
 
 | Annotation ends with | Cause and remedy |
 |---|---|
@@ -1479,23 +1482,30 @@ the pull request's branch and push.
 | Annotation continues with | Cause and remedy |
 |---|---|
 | a `tools` refusal, such as "tools.<tool> is …, below <floor>, …" | The head's `tools` is invalid; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. Nothing was downloaded. |
-| "the path is a directory or a dangling symlink, not a file. Make it the config file, or remove it." | The head has something other than a file at that path. A head with no file resolves to the pins. |
+| "the path is a directory or a symlink, not a file. Make it the config file, or remove it." | The head has a directory or a symlink at that path. A symlink refuses even when it points at a file, so the read never leaves the checkout. A head with no file resolves to the pins. |
 | "could not be read: <error>" | The file exists but the runner could not read it, or it is not UTF-8. `<error>` is the system's or the decoder's message. |
 | "is not valid YAML: <problem> (line <L>, column <C>)" or "must hold a mapping at the top level, got <type>" | The head's file does not parse. |
 | "Terramate <version>: " or "OpenTofu <version>: " then a reason from §`Terramate checksum verification failed` or `OpenTofu checksum verification failed` | The head's version's release did not verify. A 404 ends "no <tool> <version> release publishes <file>; set tools.<key> to a released version.": that version was never released. |
+
+A failure inside one tool's turn of `Verify changed tools` carries the head
+prefix and that tool's label, such as "OpenTofu <version>: gpg is not installed
+on the runner.", and the row above applies. A command that fails before the turn
+has read its version gives "OpenTofu: " or "Terramate: " with no version, then
+"a command exited <rc> under "<title>"; the step log names it.".
 
 These carry no head prefix and are engine wiring or runner faults:
 
 - `build-matrix's tools input is …`: the plan workflow did not pass `setup`'s
   `tools` output to `build-matrix`. Pin a released engine commit.
 - `<tool> is not installed on the runner.`: the runner lacks `curl`, `openssl`,
-  `base64`, `sha256sum`, `jq`, `gpg` or `gpgconf`. Install it on the runner image.
-- `build-matrix wrote verify=<value>, which names no tool to verify.`: the
-  `Verify changed tools` step got no tool from `Compute plan matrix`. Pin a
-  released engine commit.
-- "OpenTofu <version>: mktemp could not create a gpg keyring directory." or
-  "OpenTofu <version>: gpg could not import the committed OpenTofu key.": see
-  §`Terramate checksum verification failed` or `OpenTofu checksum verification failed`.
+  `base64`, `sha256sum` or `jq`. Install it on the runner image.
+- `build-matrix wrote verify=<value>, which does not map terramate or tofu, or both,
+  to an X.Y.Z version.`: the `Verify changed tools` step got no tool, or a
+  version that is not X.Y.Z, from `Compute plan matrix`. Pin a released engine
+  commit.
+- `a command exited <rc> under "<title>"; the step log names it.`: a command
+  the step runs before either tool's turn failed without a cause of its own. The
+  step log shows the command's error. Re-run the failed job.
 
 ### `Terramate install failed` or `OpenTofu install failed`
 
