@@ -2068,14 +2068,15 @@ refuses the whole run with one line:
 cell(s) were applied: <stack> / <env>, .... Open a pull request that changes
 these stacks. Comment `shipmate unlock <env> --evict` on it to release the
 locks <who> hold(s); applying it after that may overwrite what <who> applied to
-<env>. The eviction also releases any other pull request's lock on its cells in
-<env>, so wait for any holder still open to merge or close first. ... Then
-apply it. ``
+<env>. The eviction releases only locks on the new pull request's pending cells
+in <env>, any holder's, so wait for any holder still open to merge or close
+first. ... Then apply it. ``
 
 `<who>` is `#<n>`, or `an unknown holder`; both lists are sorted. The remedy has
 one `Comment` sentence pair per environment, sorted, naming that environment's
-holders ascending, then an unknown holder; its hazard clause is the plan
-comment's evict line's (`_shipmate.evict_release`). The refusal reads no
+holders ascending, then an unknown holder; its hazard clause is built by the
+same function as the plan comment's evict line, `_shipmate.evict_release`, with
+a different environment name and subject. The refusal reads no
 holder's state, so it states eviction's consequence and leaves the order of
 recovery to `docs/troubleshooting.md`. For a mapped merge, the refusal names one
 recovery and offers no re-run: a new pull request that changes the cells.
@@ -2102,9 +2103,9 @@ other than the merged one, or an unknown holder, holds the cell's lock:
 this deploy's pull request. Open a pull request that changes this stack.
 Comment `shipmate unlock <env> --evict` on it to release the locks <who> holds;
 applying it after that may overwrite what <who> applied to <env>. The eviction
-also releases any other pull request's lock on its cells in <env>, so wait for
-any holder still open to merge or close first. Then apply it ``. An unlocked cell, or one the merged pull request
-holds, passes. A failed read refuses with
+releases only locks on the new pull request's pending cells in <env>, any
+holder's, so wait for any holder still open to merge or close first. Then apply
+it ``. An unlocked cell, or one the merged pull request holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
 wave cell assumes no cloud role and keeps its apply check pending, and the waves

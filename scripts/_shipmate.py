@@ -349,8 +349,8 @@ def deploy_lock_remedy(holders, stacks: str) -> str:
         by_env.setdefault(env, []).append(holder)
     steps = " ".join(
         f"Comment `shipmate unlock {env} --evict` on it to {evict_release(hs, env, 'it')}. The "
-        f"eviction also releases any other pull request's lock on its cells in {env}, so wait "
-        "for any holder still open to merge or close first."
+        f"eviction releases only locks on the new pull request's pending cells in {env}, any "
+        "holder's, so wait for any holder still open to merge or close first."
         for env, hs in sorted(by_env.items())
     )
     return f"Open a pull request that changes {stacks}. {steps} Then apply it"

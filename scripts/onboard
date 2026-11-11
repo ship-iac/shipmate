@@ -867,8 +867,8 @@ _LITERAL_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 def _policy_gap(policy):
     """The events of `SHIPMATE_EVENTS` an active policy restricting events for `shipmate.yml`
     does not allow; `None` for any other policy. For an active restricting policy whose
-    reach is unprobed, the reason as a string: a pattern in `include` or `exclude` (any path
-    holding a character outside `_LITERAL_PATH`), or no `include` entry.
+    reach is unprobed, the reason as a string: a pattern in `include` or `exclude` (a path
+    that is not a non-empty run of `_LITERAL_PATH` characters), or no `include` entry.
     """
     rules = [r for r in policy.get("rules") or [] if r.get("type") == "restrict_action_events"]
     if policy.get("enforcement") != "active" or not rules:

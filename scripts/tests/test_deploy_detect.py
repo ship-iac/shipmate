@@ -1231,8 +1231,8 @@ def _evict(who, hold, applied):
     return (
         f"Comment `shipmate unlock dev-eu --evict` on it to release the locks {who} {hold}; "
         f"applying it after that may overwrite what {applied} applied to dev-eu. The eviction "
-        "also releases any other pull request's lock on its cells in dev-eu, so wait for any "
-        "holder still open to merge or close first."
+        "releases only locks on the new pull request's pending cells in dev-eu, any holder's, so "
+        "wait for any holder still open to merge or close first."
     )
 
 
@@ -1336,11 +1336,12 @@ def test_the_lock_remedy_has_one_eviction_sentence_per_environment_in_order():
     assert dd.deploy_lock_remedy([(9, "prod"), (7, "dev")], "these stacks") == (
         "Open a pull request that changes these stacks. Comment `shipmate unlock dev --evict` on "
         "it to release the locks #7 holds; applying it after that may overwrite what #7 applied "
-        "to dev. The eviction also releases any other pull request's lock on its cells in dev, so "
-        "wait for any holder still open to merge or close first. Comment `shipmate unlock prod "
-        "--evict` on it to release the locks #9 holds; applying it after that may overwrite what "
-        "#9 applied to prod. The eviction also releases any other pull request's lock on its "
-        "cells in prod, so wait for any holder still open to merge or close first. Then apply it"
+        "to dev. The eviction releases only locks on the new pull request's pending cells in dev, "
+        "any holder's, so wait for any holder still open to merge or close first. Comment "
+        "`shipmate unlock prod --evict` on it to release the locks #9 holds; applying it after "
+        "that may overwrite what #9 applied to prod. The eviction releases only locks on the new "
+        "pull request's pending cells in prod, any holder's, so wait for any holder still open to "
+        "merge or close first. Then apply it"
     )
 
 

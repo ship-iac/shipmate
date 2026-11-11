@@ -1904,9 +1904,9 @@ HELD_BY_9 = (
     "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
     "this deploy's pull request. Open a pull request that changes this stack. Comment "
     "`shipmate unlock dev --evict` on it to release the locks #9 holds; applying it after that "
-    "may overwrite what #9 applied to dev. The eviction also releases any other pull request's "
-    "lock on its cells in dev, so wait for any holder still open to merge or close first. Then "
-    "apply it"
+    "may overwrite what #9 applied to dev. The eviction releases only locks on the new pull "
+    "request's pending cells in dev, any holder's, so wait for any holder still open to merge or "
+    "close first. Then apply it"
 )
 
 
@@ -1948,9 +1948,9 @@ def test_verify_deploy_names_the_cells_environment(monkeypatch, tmp_path):
         "::error::apply aborted for `prod` / `stacks/auth`: its cell lock is held by #9, not by "
         "this deploy's pull request. Open a pull request that changes this stack. Comment "
         "`shipmate unlock prod --evict` on it to release the locks #9 holds; applying it after "
-        "that may overwrite what #9 applied to prod. The eviction also releases any other pull "
-        "request's lock on its cells in prod, so wait for any holder still open to merge or close "
-        "first. Then apply it"
+        "that may overwrite what #9 applied to prod. The eviction releases only locks on the new "
+        "pull request's pending cells in prod, any holder's, so wait for any holder still open to "
+        "merge or close first. Then apply it"
     )
 
 
@@ -1978,8 +1978,8 @@ def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
         "holder, not by this deploy's pull request. Open a pull request that changes this stack. "
         "Comment `shipmate unlock dev --evict` on it to release the locks an unknown holder "
         "holds; applying it after that may overwrite what an unknown holder applied to dev. The "
-        "eviction also releases any other pull request's lock on its cells in dev, so wait for "
-        "any holder still open to merge or close first. Then apply it"
+        "eviction releases only locks on the new pull request's pending cells in dev, any "
+        "holder's, so wait for any holder still open to merge or close first. Then apply it"
     )
 
 

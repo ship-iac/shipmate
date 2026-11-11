@@ -368,8 +368,9 @@ its workflow path `include` names `.github/workflows/shipmate.yml` and its
   [`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository);
 - `cannot check` when a read fails, when the list's `total_count` differs from
   the number of policies it returned (onboard reads one page of 100), or when a
-  considered policy has a pattern in `include` or `exclude` (a path holding any
-  character but letters, digits, `.`, `_`, `/` and `-`) or no `include` entry,
+  considered policy has a pattern in `include` or `exclude` (a path that is not
+  a non-empty run of letters, digits, `.`, `_`, `/` and `-`) or no `include`
+  entry,
   because which workflows such a policy reaches is unprobed.
 
 `ok` covers the repository's own policies only: onboard does not read an
@@ -1081,7 +1082,10 @@ a merged pull request:
   does, or the commit was a direct push, open a pull request that changes the
   unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
   environment the refusal names (the `<env>` after the last ` / ` of each
-  `<stack> / <env>` cell or `apply / <stack> / <env>` check), then apply it.
+  `<stack> / <env>` cell or `apply / <stack> / <env>` check). The eviction
+  releases every pull request's lock on those pending cells, so wait for any
+  pull request still open that holds one to merge or close first, then apply
+  it.
 
 ### `could not map <sha> to the pull request that merged it: #<n> contains it but none records it as its merge commit; deploying it as a push to <branch>`
 
@@ -1112,9 +1116,9 @@ pending cell(s) are locked by another pull request: <stack> / <env> (locked by
 <who>), .... None of this deploy's <m> pending cell(s) were applied: <stack> /
 <env>, .... Open a pull request that changes these stacks. Comment `shipmate
 unlock <env> --evict` on it to release the locks <who> hold(s); applying it
-after that may overwrite what <who> applied to <env>. The eviction also releases
-any other pull request's lock on its cells in <env>, so wait for any holder
-still open to merge or close first. ... Then apply it. ``, with one `Comment`
+after that may overwrite what <who> applied to <env>. The eviction releases only
+locks on the new pull request's pending cells in <env>, any holder's, so wait
+for any holder still open to merge or close first. ... Then apply it. ``, with one `Comment`
 sentence pair per environment, sorted, naming that environment's holders
 ascending, then an unknown holder.
 
@@ -1133,8 +1137,7 @@ gate is written on the merge commit. The apply checks stay pending.
    close: its merge deploy or close releases its locks. Evicting an open holder
    lets the new pull request's apply overwrite what that holder applied. Once a
    holder has merged, update the new pull request's branch from the base and
-   push, so its plan starts from what the holder applied; a bare or targeted
-   `shipmate apply` runs no overlap check that would ask for it.
+   push, so its plan starts from what the holder applied.
 3. Once the new pull request has planned, comment `shipmate unlock <env>
    --evict` on it, with write access, for each environment the message names.
    In `<env>` it deletes every other pull request's lock, an unknown holder's
@@ -1154,9 +1157,9 @@ A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
 `<env>` / `<stack>`: its cell lock is held by <who>, not by this deploy's pull
 request. Open a pull request that changes this stack. Comment `shipmate unlock
 <env> --evict` on it to release the locks <who> holds; applying it after that
-may overwrite what <who> applied to <env>. The eviction also releases any other
-pull request's lock on its cells in <env>, so wait for any holder still open to
-merge or close first. Then apply it ``.
+may overwrite what <who> applied to <env>. The eviction releases only locks on
+the new pull request's pending cells in <env>, any holder's, so wait for any
+holder still open to merge or close first. Then apply it ``.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
