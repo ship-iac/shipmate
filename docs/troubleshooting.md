@@ -1601,11 +1601,11 @@ The step that refuses judges no gate status, and nothing greens the gate:
 
 ### `could not read the shipmate App's bot user <slug>[bot]: <cause>`
 
-GitHub did not answer the read of the shipmate App's bot user
-(`users/<slug>[bot]`, where `<slug>` is the slug the step's App token mint
-reported); a transient failure was retried first. `<cause>` is gh's error.
-`its id is <value>` in place of the cause means GitHub answered without an
-integer id. The step judged no gate status and did what the list under
+The read of the shipmate App's bot user (`users/<slug>[bot]`, where `<slug>`
+is the slug the step's App token mint reported) failed; a transient failure was
+retried first. `<cause>` is gh's error, or the parse error when GitHub's answer
+was not JSON. `its id is <value>` in place of the cause means GitHub answered
+without an integer id. The step judged no gate status and did what the list under
 §`SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the
 shipmate App created and cannot tell which those are` states. A gate the run
 held says to re-plan, and a re-plan reads the same bot user, so it repeats this
