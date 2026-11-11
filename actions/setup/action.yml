@@ -1,6 +1,14 @@
 name: shipmate setup
-description: Install Terramate and, unless `tofu` is "false", OpenTofu, each at the version `tools` in .github/shipmate-config.yml names, else at this release's pin, from release files the Actions cache keeps per version and setup re-verifies; point OpenTofu at a provider plugin cache directory.
+description: Install Terramate and, unless `tofu` is "false", OpenTofu, each at the version `tools` in .github/shipmate-config.yml names, else at this release's pin, resolved once per run by the detect job, from release files the Actions cache keeps per version and setup re-verifies; point OpenTofu at a provider plugin cache directory.
 inputs:
+  resolve:
+    description: '"true" in a detect job: resolve the versions from the table and output them as `tools`. Set exactly one of `resolve` and `versions`.'
+    required: false
+    default: ""
+  versions:
+    description: "In a cell: the `tools` output of this run's detect job, a JSON object of terramate and tofu to X.Y.Z versions. The cell installs these and reads no table; an empty or invalid value refuses before any download."
+    required: false
+    default: ""
   tofu:
     description: Whether to install OpenTofu. "false" for jobs that never run it.
     required: false
@@ -11,8 +19,11 @@ inputs:
     default: "true"
 outputs:
   refusal:
-    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table or of `tools`, or a failed read) or a verify or install step (a download, signature, digest or install failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
+    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table, of `tools` or of the `resolve` and `versions` inputs, or a failed read) or a verify or install step (a download, signature, digest or install failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
     value: ${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal || steps.tofu-sums.outputs.refusal || steps.tofu-install.outputs.refusal || steps.terramate-install.outputs.refusal }}
+  tools:
+    description: 'The installed pair as compact JSON, `{"terramate":"X.Y.Z","tofu":"X.Y.Z"}`. A detect job outputs it for its cells to pass as `versions`.'
+    value: ${{ steps.versions.outputs.tools }}
 runs:
   using: composite
   steps:
@@ -22,6 +33,8 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        SHIPMATE_RESOLVE: ${{ inputs.resolve }}
+        SHIPMATE_VERSIONS: ${{ inputs.versions }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/tool-versions"
     # A restored entry is never trusted: the verify and install steps check each of its files as
     # they check a download, and download again the files of an entry that fails.

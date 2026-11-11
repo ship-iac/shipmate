@@ -386,7 +386,11 @@ DETECT_STEPS = [
             "filter": "blob:none",
         },
     },
-    {"id": "setup", "uses": "$/actions/setup", "with": {"tofu": "false", "cache-save": "false"}},
+    {
+        "id": "setup",
+        "uses": "$/actions/setup",
+        "with": {"tofu": "false", "cache-save": "false", "resolve": "true"},
+    },
     {
         "id": "matrix",
         "uses": "$/actions/build-matrix",
@@ -403,7 +407,8 @@ DETECT_STEPS = [
 
 def test_detect_runs_hcl_check_after_build_matrix():
     """Mutations: swap `matrix` and `checks`; restore `plan.yml`'s `fmt check` step; add
-    `if: always()` to `checks`; set setup's `tofu` to "true" -- each red."""
+    `if: always()` to `checks`; set setup's `tofu` to "true"; drop setup's `resolve` -- each
+    red."""
     assert workflow_jobs("plan.yml")["detect"]["steps"] == DETECT_STEPS
 
 

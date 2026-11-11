@@ -5,6 +5,8 @@ on:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
       runs_on: { required: true, type: string }
+      # The version pair the caller's detect job resolved; every wave cell installs exactly it.
+      tools: { required: true, type: string }
       # On apply, each cell refuses unless this pull request holds its lock. With `deploy` (the
       # merge deploy) it is the merged pull request, empty on a push, and each cell refuses only
       # a lock another pull request holds.
@@ -91,6 +93,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.head_sha }}", persist-credentials: false }
       - uses: $/actions/setup
+        with: { versions: "${{ inputs.tools }}" }
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.
       - name: Configure cloud credentials (AWS OIDC)

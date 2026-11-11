@@ -113,7 +113,10 @@ UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
 #: The whole `outputs:` mapping of unlock's `detect`. `test_matrix_max_parallel_guard.py` pins
 #: the consumer end of this wire, and without this one the producer end can be re-aimed at
 #: `waves`, the empty string here, which fans the job out and dies at fromJSON.
-DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
+DETECT_OUTPUTS = {
+    "cells": "${{ steps.d.outputs.cells }}",
+    "tools": "${{ steps.setup.outputs.tools }}",
+}
 
 #: Named so a failure says which one leaked in.
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
@@ -278,12 +281,13 @@ def test_the_unlock_workflow_applies_nothing():
     )
 
 
-def test_the_unlock_detect_publishes_the_queue_and_nothing_else():
+def test_the_unlock_detect_publishes_the_queue_and_the_tool_versions():
     got = _job(UNLOCK, "detect").get("outputs")
     assert got == DETECT_OUTPUTS, (
         f"unlock's detect publishes {got!r}, not {DETECT_OUTPUTS!r} -- the matrix reads "
         "`cells`, and a producer re-aimed at `waves` hands it the empty string, which "
-        "`!= '[]'` reads as a queue and fromJSON then kills"
+        "`!= '[]'` reads as a queue and fromJSON then kills; without `tools` every unlock "
+        "cell's setup refuses"
     )
 
 

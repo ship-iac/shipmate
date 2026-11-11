@@ -25,6 +25,7 @@ EXPECTED_INPUTS = {
             "pr_number",
             "provenance_run",
             "runs_on",
+            "tools",
             "waves_json",
         ]
     },

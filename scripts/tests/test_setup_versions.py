@@ -1,8 +1,10 @@
 """actions/setup resolves its tool versions with `scripts/tool-versions`.
 
 Each version is the consumer table's `tools` entry, read from the default branch, else the
-release's own `VERSIONS` pin. No action input selects a version: `tofu` decides whether OpenTofu
-is installed at all, and `cache-save` whether the release files are saved to the Actions cache.
+release's own `VERSIONS` pin. A detect job resolves them (`resolve: "true"`) and outputs `tools`;
+its cells pass that output back as `versions`, so one run installs one version pair and no cell
+reads the table. `tofu` decides whether OpenTofu is installed at all, and `cache-save` whether
+the release files are saved to the Actions cache.
 
 The structural guards pin the shape that makes the script the source -- it runs before the
 verify steps and both installers, which read its versions -- and the behavioural ones run the
@@ -49,12 +51,16 @@ _EXPECTED_STEPS = [
 ]
 
 #: The resolve step, whole. The token reads the table through the contents API; every job
-#: calling `setup` holds `contents: read`.
+#: calling `setup` holds `contents: read`. Both mode inputs reach the script through `env:`.
 _EXPECTED_RESOLVE = {
     "name": "Resolve versions",
     "id": "versions",
     "shell": "bash",
-    "env": {"GH_TOKEN": "${{ github.token }}"},
+    "env": {
+        "GH_TOKEN": "${{ github.token }}",
+        "SHIPMATE_RESOLVE": "${{ inputs.resolve }}",
+        "SHIPMATE_VERSIONS": "${{ inputs.versions }}",
+    },
     "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/tool-versions"',
 }
 
@@ -79,7 +85,7 @@ _FIXTURE_VERSIONS = "terramate=9.9.9\nterramate_min=9.9.0\ntofu=8.8.8\ntofu_min=
 _TABLE = "layout: tf_vars\nenvironments:\n  dev:\n    region: {vars: DEV_REGION}\n"
 
 #: The whole $GITHUB_OUTPUT `_TABLE` resolves to, hand-written.
-_FIXTURE_OUTPUT = "terramate=9.9.9\ntofu=8.8.8\n"
+_FIXTURE_OUTPUT = 'terramate=9.9.9\ntofu=8.8.8\ntools={"terramate":"9.9.9","tofu":"8.8.8"}\n'
 
 #: The contents read, whole: no `ref`, so GitHub answers from the default branch.
 _CONTENTS_PATH = "repos/o/r/contents/.github/shipmate-config.yml"
@@ -128,9 +134,28 @@ def test_both_installers_read_the_resolved_version_and_the_verified_digests():
     assert got == (_EXPECTED_TOFU_ENV, None, _EXPECTED_TERRAMATE_ENV, None)
 
 
-#: The action's whole `inputs:` mapping. A version input would be a second source of the version
-#: beside VERSIONS, so any added input reds this.
+#: The action's whole `inputs:` mapping. A per-tool version input would be a second source of
+#: the version beside the detect job's resolution, so any added input reds this. Both mode inputs
+#: default to empty: a composite action does not enforce `required`, so `tool-versions` refuses
+#: a call that sets neither.
 _EXPECTED_INPUTS = {
+    "resolve": {
+        "description": (
+            '"true" in a detect job: resolve the versions from the table and output them as '
+            "`tools`. Set exactly one of `resolve` and `versions`."
+        ),
+        "required": False,
+        "default": "",
+    },
+    "versions": {
+        "description": (
+            "In a cell: the `tools` output of this run's detect job, a JSON object of terramate "
+            "and tofu to X.Y.Z versions. The cell installs these and reads no table; an empty or "
+            "invalid value refuses before any download."
+        ),
+        "required": False,
+        "default": "",
+    },
     "tofu": {
         "description": 'Whether to install OpenTofu. "false" for jobs that never run it.',
         "required": False,
@@ -147,9 +172,9 @@ _EXPECTED_INPUTS = {
 }
 
 
-def test_the_inputs_are_the_tofu_and_cache_save_switches():
+def test_the_inputs_are_the_mode_and_the_tofu_and_cache_save_switches():
     """Mutations: `tofu` `default: "true"` -> `"false"`; `cache-save` `default: "true"` ->
-    `"false"`; add a `tofu-version` input."""
+    `"false"`; add a `tofu-version` input; `resolve` `default: ""` -> `"true"`."""
     assert action_yaml(_ACTION).get("inputs") == _EXPECTED_INPUTS
 
 
@@ -201,11 +226,14 @@ def _resolve(
     fetch=None,
     run=None,
     entry=False,
+    resolve="true",
+    given=None,
 ):
     """Run `tool-versions` in-process against a fixture VERSIONS and a mocked contents read.
 
     `main` alone by default; `entry=True` runs the script as `__main__`, its own
-    `run_annotated` call included.
+    `run_annotated` call included. `resolve` is the `resolve` input; `given`, when not None, is
+    the `versions` input, which is otherwise unset.
 
     Returns (exit code, the raw $GITHUB_OUTPUT text, stderr, the paths read, the VERSIONS path).
     `versions=None` writes no file; `versions` is written as bytes, so a CRLF reaches the script
@@ -233,6 +261,11 @@ def _resolve(
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
+    monkeypatch.setenv("SHIPMATE_RESOLVE", resolve)
+    if given is None:
+        monkeypatch.delenv("SHIPMATE_VERSIONS", raising=False)
+    else:
+        monkeypatch.setenv("SHIPMATE_VERSIONS", given)
     if entry:
         monkeypatch.setattr(sys.modules["_shipmate"], "_load", lambda name: tv.ec)
     try:
@@ -263,7 +296,7 @@ def test_the_tables_tools_entry_wins_over_versions(monkeypatch, capsys, tmp_path
     table = _TABLE + "tools:\n  tofu: 8.8.7\n"
     code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path, table=table)
     assert code == 0, err
-    assert out == "terramate=9.9.9\ntofu=8.8.7\n"
+    assert out == 'terramate=9.9.9\ntofu=8.8.7\ntools={"terramate":"9.9.9","tofu":"8.8.7"}\n'
 
 
 def test_the_table_is_read_from_the_default_branch(monkeypatch, capsys, tmp_path):
@@ -377,8 +410,10 @@ def test_the_repositorys_own_versions_file_resolves(monkeypatch, capsys, tmp_pat
     code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path, versions=real)
     assert code == 0, err
     got = _outputs(out)
-    assert set(got) == {"terramate", "tofu"}, out
+    assert set(got) == {"terramate", "tofu", "tools"}, out
+    tools = json.loads(got.pop("tools"))
     assert all(re.fullmatch(r"\d+\.\d+\.\d+", v) for v in got.values()), out
+    assert tools == got, out
 
 
 def test_a_missing_versions_file_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path):
@@ -401,19 +436,21 @@ def test_a_missing_key_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path)
     assert err == f"::error::{path} holds no terramate_min= line; restore it.\n"
 
 
-def test_the_action_outputs_the_first_failed_steps_refusal():
-    """Every step that writes a refusal, in run order: `Resolve versions`, the two verify steps,
-    the two install steps.
+def test_the_action_outputs_the_first_failed_steps_refusal_and_the_versions():
+    """`refusal`: every step that writes a refusal, in run order: `Resolve versions`, the two
+    verify steps, the two install steps. `tools`: the pair `Resolve versions` installs.
 
     Mutations: delete the `outputs:` block; drop `steps.tofu-sums.outputs.refusal` or
-    `steps.terramate-install.outputs.refusal` from `refusal`; swap its first two operands."""
+    `steps.terramate-install.outputs.refusal` from `refusal`; swap its first two operands;
+    drop the `tools` output."""
     outputs = action_yaml(_ACTION)["outputs"]
     assert {name: spec["value"] for name, spec in outputs.items()} == {
         "refusal": (
             "${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal"
             " || steps.tofu-sums.outputs.refusal || steps.tofu-install.outputs.refusal"
             " || steps.terramate-install.outputs.refusal }}"
-        )
+        ),
+        "tools": "${{ steps.versions.outputs.tools }}",
     }
 
 
@@ -434,3 +471,102 @@ def test_the_script_writes_its_first_refusal_as_the_refusal_output(monkeypatch, 
             "such as 1.13.2, with no v, pre-release or range."
         },
     )
+
+
+def test_a_cell_installs_the_given_versions_and_reads_nothing(monkeypatch, capsys, tmp_path):
+    """No table read and no VERSIONS file: a cell installs its detect job's pair.
+
+    Mutation: resolve from the table whenever `versions` is set (the contents read is
+    recorded, and the missing VERSIONS file refuses)."""
+    code, out, err, calls, _ = _resolve(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        versions=None,
+        resolve="",
+        given='{"terramate": "1.2.3", "tofu": "4.5.6"}',
+    )
+    assert code == 0, err
+    assert (out, calls) == (
+        'terramate=1.2.3\ntofu=4.5.6\ntools={"terramate":"1.2.3","tofu":"4.5.6"}\n',
+        [],
+    )
+
+
+_NEITHER = (
+    '::error::setup was given neither resolve: "true" nor versions. A detect job sets '
+    "resolve; a cell passes its detect job's tools output as versions, and an empty one means "
+    "that job wrote none.\n"
+)
+
+
+def _invalid(value):
+    return (
+        f"::error::setup's versions input is {value!r}; it must be the detect job's tools "
+        "output, a JSON object of terramate and tofu to X.Y.Z versions.\n"
+    )
+
+
+_VALID = '{"terramate":"1.2.3","tofu":"4.5.6"}'
+
+
+@pytest.mark.parametrize(
+    ("resolve", "given", "message"),
+    [
+        ("", None, _NEITHER),
+        ("", "", _NEITHER),
+        (
+            "true",
+            _VALID,
+            (
+                '::error::setup was given both resolve: "true" and versions; a detect job sets '
+                "resolve, a cell passes versions.\n"
+            ),
+        ),
+        ("", "{", _invalid("{")),
+        ("", '["terramate","tofu"]', _invalid('["terramate","tofu"]')),
+        ("", '{"terramate":"1.2.3"}', _invalid('{"terramate":"1.2.3"}')),
+        (
+            "",
+            '{"terramate":"1.2.3","tofu":"4.5.6","terraform":"1.0.0"}',
+            _invalid('{"terramate":"1.2.3","tofu":"4.5.6","terraform":"1.0.0"}'),
+        ),
+        (
+            "",
+            '{"terramate":"v1.2.3","tofu":"4.5.6"}',
+            _invalid('{"terramate":"v1.2.3","tofu":"4.5.6"}'),
+        ),
+        (
+            "",
+            '{"terramate":"1.2.3-rc1","tofu":"4.5.6"}',
+            _invalid('{"terramate":"1.2.3-rc1","tofu":"4.5.6"}'),
+        ),
+        ("", '{"terramate":1,"tofu":"4.5.6"}', _invalid('{"terramate":1,"tofu":"4.5.6"}')),
+    ],
+    ids=[
+        "neither",
+        "empty-versions",
+        "both",
+        "not-json",
+        "not-an-object",
+        "missing-key",
+        "extra-key",
+        "v-prefix",
+        "pre-release",
+        "not-a-string",
+    ],
+)
+def test_a_mode_other_than_exactly_one_refuses_before_any_read(
+    monkeypatch, capsys, tmp_path, resolve, given, message
+):
+    """Each refusal is whole, writes nothing and reads no table.
+
+    Mutations: drop the both-inputs refusal (both resolves from the table); drop the
+    neither-input refusal (empty-versions gets the invalid-JSON text, neither resolves from the
+    table); drop the `JSONDecodeError` handler (not-json raises a traceback); drop the
+    mapping check (not-an-object raises `AttributeError`); accept extra keys with
+    `set(given) >= set(ec.TOOLS)` (extra-key installs); `_VERSION.match` for `fullmatch`
+    (pre-release installs); drop the `isinstance(v, str)` check (not-a-string raises
+    `TypeError`)."""
+    code, out, err, calls, _ = _resolve(monkeypatch, capsys, tmp_path, resolve=resolve, given=given)
+    assert (code, out, calls, err) == (1, "", [], message)

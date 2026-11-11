@@ -157,6 +157,7 @@ jobs:
       base_sha: ${{ steps.d.outputs.base_sha }}
       bare_envs: ${{ steps.d.outputs.bare_envs }}
       refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
+      tools: ${{ steps.setup.outputs.tools }}
     steps:
       - if: ${{ !inputs.auto }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -170,7 +171,7 @@ jobs:
           fetch-depth: 0
       - id: setup
         uses: $/actions/setup
-        with: { tofu: "false" }
+        with: { tofu: "false", resolve: "true" }
       - id: d
         uses: $/actions/apply-detect
         with:
@@ -223,6 +224,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ inputs.pr_number }}
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
@@ -248,6 +250,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ inputs.pr_number }}
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
@@ -264,6 +267,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ inputs.pr_number }}
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}
@@ -280,6 +284,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ inputs.pr_number }}
       auto: ${{ inputs.auto }}
       provenance_run: ${{ needs.detect.outputs.provenance_run }}

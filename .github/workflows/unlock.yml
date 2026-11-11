@@ -34,11 +34,13 @@ jobs:
     permissions: { contents: read, checks: read, actions: read }
     outputs:
       cells: ${{ steps.d.outputs.cells }}
+      tools: ${{ steps.setup.outputs.tools }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.ref }}" }
-      - uses: $/actions/setup
-        with: { tofu: "false", cache-save: "false" }
+      - id: setup
+        uses: $/actions/setup
+        with: { tofu: "false", cache-save: "false", resolve: "true" }
       - id: d
         uses: $/actions/unlock-detect
         with:
@@ -90,7 +92,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.ref }}", persist-credentials: false }
       - uses: $/actions/setup
-        with: { cache-save: "false" }
+        with: { cache-save: "false", versions: "${{ needs.detect.outputs.tools }}" }
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.
       # Byte-identical to the wave jobs' step (scripts/tests/test_aws_oidc_wiring_guard.py).
