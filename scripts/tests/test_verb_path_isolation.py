@@ -307,6 +307,24 @@ def test_the_unlock_detect_passes_exactly_these_inputs():
     assert got == DETECT_WITH, f"unlock's unlock-detect inputs are {got!r}, not {DETECT_WITH!r}"
 
 
+def test_the_unlock_checkouts_take_the_ref_and_only_unlock_drops_the_token():
+    """`unlock` runs the pull request's HCL through `tofu init`, so its checkout keeps the job
+    token out of git config; `detect` runs none of it. Mutations: delete `persist-credentials`
+    from `unlock`'s checkout; add `persist-credentials: false` to `detect`'s."""
+    got = {
+        job_id: [
+            s.get("with")
+            for s in _job(UNLOCK, job_id)["steps"]
+            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
+        ]
+        for job_id in ("detect", "unlock")
+    }
+    assert got == {
+        "detect": [{"ref": "${{ inputs.ref }}"}],
+        "unlock": [{"ref": "${{ inputs.ref }}", "persist-credentials": False}],
+    }
+
+
 def test_the_unlock_detect_refuses_an_unlock_into_a_missing_environment():
     """Mutation: point the unlock pre-flight step's `uses:` at `$/actions/verify-app-key`."""
     steps = _job(UNLOCK, "detect")["steps"]

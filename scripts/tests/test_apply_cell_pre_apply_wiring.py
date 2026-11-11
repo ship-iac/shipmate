@@ -103,6 +103,24 @@ def test_every_wave_checks_first_and_refuses_through_apply_cell():
     assert found == dict.fromkeys(WAVES, expected)
 
 
+def test_every_wave_checks_out_the_head_without_persisting_the_token():
+    """The parsed jobs, not the anchor: the waves share one step list, and a wave whose `steps:`
+    is written out in full stops aliasing it. Mutation: delete `persist-credentials` from the
+    anchor's checkout (all eight redden)."""
+    jobs = workflow_jobs("apply-env-level.yml")
+    found = {
+        wave: [
+            s.get("with")
+            for s in jobs[wave]["steps"]
+            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
+        ]
+        for wave in WAVES
+    }
+    assert found == dict.fromkeys(
+        WAVES, [{"ref": "${{ inputs.head_sha }}", "persist-credentials": False}]
+    )
+
+
 def test_pre_apply_exposes_the_checks_refusal():
     """Mutation: point `refusal` at `steps.pre-apply.outputs.refusal` (no such inner step)."""
     assert action_yaml("pre-apply")["outputs"]["refusal"]["value"] == (

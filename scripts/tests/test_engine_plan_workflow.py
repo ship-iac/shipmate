@@ -95,16 +95,19 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     load-bearing in `detect` only: without the full history `terramate list --changed` and
     `lost_env_tags`' `git diff` find nothing and report it as no change. `plan` diffs nothing.
     `filter: blob:none` keeps that history and fetches file contents on demand.
+    `persist-credentials: false` keeps the job token out of the git config of a checkout whose
+    pull request code `plan` then runs; `detect` runs none of it.
 
     Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
-    from `detect`, `filter` deleted from `detect`, `fetch-depth: 0` added to `plan`, and
-    `expected-head: ${{ github.sha }}` on the cell.
+    from `detect`, `filter` deleted from `detect`, `fetch-depth: 0` added to `plan`,
+    `persist-credentials` deleted from `plan`, `persist-credentials: false` added to `detect`,
+    and `expected-head: ${{ github.sha }}` on the cell.
     """
     head = "${{ needs.facts.outputs.head-sha }}"
     # PyYAML gives the int 0, not "0".
     expected = {
         "detect": {"ref": head, "fetch-depth": 0, "filter": "blob:none"},
-        "plan": {"ref": head},
+        "plan": {"ref": head, "persist-credentials": False},
     }
     for job_id, with_block in expected.items():
         checkouts = [
@@ -149,6 +152,40 @@ def test_the_cell_passes_this_whole_with_block():
         "expected-head": "${{ needs.facts.outputs.head-sha }}",
         "encryption-key": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
     }
+
+
+def _values(node):
+    """Every scalar string value in a parsed subtree, mapping keys excluded."""
+    if isinstance(node, dict):
+        for value in node.values():
+            yield from _values(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _values(item)
+    elif isinstance(node, str):
+        yield node
+
+
+#: A `secrets` context reference inside an expression: a property, an index, or the whole
+#: context, but not a longer identifier such as `consumer-secrets` or `inputs.secrets`.
+_SECRETS_REF = re.compile(r"(?<![\w.-])secrets(?:\.[\w-]+|\[[^\]]*\]|(?![\w-]))")
+
+
+def test_the_cell_job_references_exactly_these_secrets():
+    """The plan job runs pull request code, so every secret it references reaches that code.
+    Every string value of the whole job is walked, and within each only its `${{ }}`
+    expressions; the App key's absence is `test_cells_hold_no_app_key.py`'s.
+
+    Mutations: a job-level `env: { K: ${{ secrets.SHIPMATE_VARS }} }`; a plan-cell input
+    `${{ toJSON(secrets) }}`; a plan-cell input `${{ secrets['SHIPMATE_VARS'] }}`.
+    """
+    found = sorted(
+        ref
+        for s in _values(workflow_jobs(WF)["plan"])
+        for expr in re.findall(r"\$\{\{(.*?)\}\}", s, re.S)
+        for ref in _SECRETS_REF.findall(expr)
+    )
+    assert found == ["secrets.SHIPMATE_ENCRYPTION_KEY", "secrets.SHIPMATE_SECRETS"]
 
 
 def test_the_workflow_reads_the_event_payload_nowhere():
