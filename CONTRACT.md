@@ -2787,7 +2787,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   apply, deploy and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
   downloads the release files in every plan job. A deploy run's `warm` job
-  runs only on a deploy with no cells, because a cell saves the entry itself,
+  runs only on a deploy with no cells, because a cell that reaches its `setup`
+  step saves the entry (one refused before it saves nothing),
   and installs OpenTofu at the versions its `detect` resolved. It saves
   the entry for the deploy runner's operating system and architecture, which
   the key carries, so a plan cell on another runner type still misses. The

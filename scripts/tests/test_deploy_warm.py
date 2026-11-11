@@ -2,8 +2,8 @@
 
 `detect` installs no OpenTofu, so a merge that runs no cell (a `tools.tofu` bump changes no
 stack) would leave the new version's entry missing until the next cell, and every plan cell
-downloads OpenTofu until then. `warm` runs only when every env-level is empty, because cells
-save the entry themselves. It installs OpenTofu from the versions `detect` resolved, on the
+downloads OpenTofu until then. `warm` runs only when every env-level is empty, because a cell
+that reaches its `setup` step saves the entry. It installs OpenTofu from the versions `detect` resolved, on the
 cells' runner, because the cache key carries the runner's OS and `runner.arch`. The deploy run
 waits for it, so it holds the deploy concurrency group up to its 15-minute timeout. It is a
 degrade job: no job needs it and the gate never reads it, so `continue-on-error` keeps its
