@@ -128,6 +128,18 @@ def action_steps(action):
     return (action_yaml(action).get("runs") or {}).get("steps") or []
 
 
+def engine_steps():
+    """(label, step) for every step in the composite actions and engine workflows. The label is
+    the action's directory name or the workflow's file name."""
+    for path in sorted(ACTIONS.glob("*/action.yml")):
+        for step in action_yaml(path)["runs"].get("steps") or []:
+            yield path.parent.name, step
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for job in (workflow_yaml(path).get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                yield path.name, step
+
+
 def step_by(action, *, name=None, id=None):
     """The one step of ``action`` whose ``name``, or ``id``, equals the value given.
 

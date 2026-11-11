@@ -183,6 +183,7 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
@@ -483,6 +484,7 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         # After the comment: a failed plan-comment listing, head read or write publishes no apply
@@ -508,6 +510,7 @@ runs:
         MODE: ${{ steps.gate.outputs.comment_mode }}
         PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
