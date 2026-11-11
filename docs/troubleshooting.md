@@ -1470,8 +1470,9 @@ the tool by hand.
 
 ### `the pull request head's .github/shipmate-config.yml:` refusals
 
-Plan `detect` checks the pull request's own `tools` before merge, in the
-`build-matrix` action. The head resolves each tool as `setup` would after the
+Plan `detect` checks the pull request's own `.github/shipmate-config.yml`
+before merge, in the `build-matrix` action: it applies every check `setup`
+applies to the default branch's copy, then checks `tools`. The head resolves each tool as `setup` would after the
 merge: its `tools` entry, else the engine's `VERSIONS` pin. Every tool whose
 version differs from the default branch's has its release's checksum file and
 signature downloaded and verified. Nothing is installed or run. Each refusal
@@ -1485,6 +1486,7 @@ the pull request's branch and push.
 | "the path is a directory, or it or a parent directory is a symlink. Make it a regular file in the checkout, or remove it." | The head has a directory at that path, or the path resolves through a symlink, at the file or at `.github`. A symlink refuses even when it points at a file, so the read never leaves the checkout. A head with no file resolves to the pins. |
 | "could not be read: <error>" | The file exists but the runner could not read it, or it is not UTF-8. `<error>` is the system's or the decoder's message. |
 | "is not valid YAML: <problem> (line <L>, column <C>)" or "must hold a mapping at the top level, got <type>" | The head's file does not parse. |
+| any other refusal of the file, such as "layout must be a string, got list." | The head's file fails a check the default branch's copy must pass; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. |
 | "Terramate <version>: " or "OpenTofu <version>: " then a reason from §`Terramate checksum verification failed` or `OpenTofu checksum verification failed` | The head's version's release did not verify. A 404 ends "no <tool> <version> release publishes <file>; set tools.<key> to a released version.": that version was never released. |
 
 A failure inside one tool's turn of `Verify changed tools` carries the head
