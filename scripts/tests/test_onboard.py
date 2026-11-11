@@ -3090,23 +3090,53 @@ UNSCOPED = ["`repos/o/r/actions/policies/12890` names no workflow path to includ
     [
         (_paths([".github/workflows/*.yml"]), PATTERN),
         (_paths([".github/workflows/shipmate.yml"], [".github/workflows/*"]), PATTERN),
+        (_paths([".github/workflows/shipmate.ym?"]), PATTERN),
+        (_paths([".github/workflows/[s]hipmate.yml"]), PATTERN),
+        (_paths(["!.github/workflows/other.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate.yml"], [".github/workflows/shipmate.ym?"]), PATTERN),
+        (_paths([".github/workflows/shipmate.yml"], [".github/workflows/[s]hipmate.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate.yml"], ["!.github/workflows/shipmate.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate+x.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate.yml"], [r".github\workflows\shipmate.yml"]), PATTERN),
         (_paths([]), UNSCOPED),
         ({"workflow_path": {"exclude": []}}, UNSCOPED),
     ],
-    ids=["include-pattern", "exclude-pattern", "empty-include", "missing-include"],
+    ids=[
+        "include-star",
+        "exclude-star",
+        "include-question",
+        "include-bracket",
+        "include-negation",
+        "exclude-question",
+        "exclude-bracket",
+        "exclude-negation",
+        "include-plus",
+        "exclude-backslash",
+        "empty-include",
+        "missing-include",
+    ],
 )
 def test_a_policy_whose_scope_is_unprobed_cannot_be_checked(monkeypatch, conditions, lines):
     """GitHub's pattern matching and an unscoped policy's reach are unprobed.
 
-    Mutations, each proven: drop the `*` test on `include`, reading the pattern policy as
-    one for other paths; test `include` alone for `*`, so the excluding pattern is `ok`;
-    drop the empty-`include` test, so both unscoped policies are `todo`.
+    Mutations, each proven: test for `*` alone, so each `?`, `[` and `!` case reads as a
+    literal path; the denylist (a leading `!`, or `*`, `?` or `[`) for the allowlist, so the `+`
+    and backslash cases read as literal; drop the pattern test on `include`, reading the include
+    patterns as paths;
+    test `include` alone, so every exclude pattern is `ok`; drop the empty-`include` test, so
+    both unscoped policies are `todo`.
     """
     assert _event_row(monkeypatch, _policy(conditions=conditions))[0] == (
         "cannot check",
         EVENT_ROW,
         lines,
     )
+
+
+def test_a_policy_path_of_allowlisted_characters_is_literal(monkeypatch):
+    """Mutation: drop `-` or `_` from `_LITERAL_PATH` -- `cannot check`."""
+    paths = _paths([".github/workflows/shipmate.yml", ".github/workflows/my_other-flow.v2.yml"])
+    assert _event_row(monkeypatch, _policy(conditions=paths))[0][0] == "ok"
 
 
 def test_a_policy_list_longer_than_its_page_cannot_be_checked(monkeypatch):

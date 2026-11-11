@@ -42,8 +42,9 @@ that is not a draft ends with the `commands` section, when the body has room for
 SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments in apply order:
 each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
 `shipmate apply` once (`to apply the other environments` when a targeted line renders), then
-`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked, and
-`shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
+`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked,
+unless one of that environment's holders is stacked on this pull request, where evict refuses,
+and `shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
 section degrades to the bare `shipmate apply` even when every changed environment is targeted;
 the unreadable one warns.
 
@@ -77,6 +78,7 @@ from _shipmate import (
     command_data,
     current_run_url,
     event_action,
+    evict_release,
     is_head_sha,
     json_or_none,
     lock_who,
@@ -392,16 +394,8 @@ def stacked_hold(cells, locks, stacked, default_branch):
 def _evict_line(env, holders):
     """`shipmate unlock <env> --evict` naming `holders` (known ascending, then an unknown one)
     and that applying after it may overwrite what they applied."""
-    names = [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
-    if None in holders:
-        names.append(lock_who(None))
-    who = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
-    hold, applied = ("holds", who) if len(names) == 1 else ("hold", "they")
-    return (
-        f"Comment `shipmate unlock {env} --evict` to release the locks {who} {hold}; applying "
-        f"this pull request after that may overwrite what {applied} applied to {_md_name(env)}."
-        "\n\n"
-    )
+    release = evict_release(holders, _md_name(env), "this pull request")
+    return f"Comment `shipmate unlock {env} --evict` to {release}.\n\n"
 
 
 def commands(locked, targeted=(), changed=(), stacked=()):

@@ -64,6 +64,7 @@ from _shipmate import (
     cell_names,
     check_runs,
     command_data,
+    deploy_lock_remedy,
     gh_json,
     is_head_sha,
     is_run_id,
@@ -678,8 +679,7 @@ def _verify_deploy(repo, pr, env, stack, where, run):
         return
     raise SystemExit(
         f"::error::apply aborted for {where}: its cell lock is held by {lock_who(held.pr)}, not "
-        "by this deploy's pull request. Open a pull request that changes this stack, comment "
-        f"`shipmate unlock {env} --evict` on it, then apply it"
+        f"by this deploy's pull request. {deploy_lock_remedy([(held.pr, env)], 'this stack')}"
     )
 
 

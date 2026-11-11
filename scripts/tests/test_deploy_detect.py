@@ -1227,9 +1227,17 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
     ]
 
 
+def _evict(who, hold, applied):
+    return (
+        f"Comment `shipmate unlock dev-eu --evict` on it to release the locks {who} {hold}; "
+        f"applying it after that may overwrite what {applied} applied to dev-eu. The eviction "
+        "releases only locks on the new pull request's pending cells in dev-eu, any holder's, so "
+        "wait for any holder still open to merge or close first."
+    )
+
+
 LOCK_REMEDY = (
-    "Open a pull request that changes these stacks, comment `shipmate unlock <env> --evict` on it "
-    "for each environment above, then apply it."
+    f"Open a pull request that changes these stacks. {_evict('#7', 'holds', '#7')} Then apply it."
 )
 
 
@@ -1295,7 +1303,45 @@ def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monk
         "::error::deploy refused: 2 pending cell(s) are locked by another pull request: "
         "stacks/app / dev-eu (locked by an unknown holder), stacks/dns / dev-eu (locked by #9). "
         "None of this deploy's 2 pending cell(s) were applied: "
-        "stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
+        "stacks/app / dev-eu, stacks/dns / dev-eu. Open a pull request that changes these "
+        f"stacks. {_evict('#9 and an unknown holder', 'hold', 'they')} Then apply it."
+    )
+
+
+@pytest.mark.parametrize(
+    ("app", "dns", "step"),
+    [
+        pytest.param(7, 7, _evict("#7", "holds", "#7"), id="one-holder-two-cells"),
+        pytest.param(9, 7, _evict("#7 and #9", "hold", "they"), id="two-holders"),
+    ],
+)
+def test_the_lock_remedy_names_each_holder_once_in_order(tmp_path, monkeypatch, app, dns, step):
+    """Mutation: drop `set(...)` in `evict_release` -- one-holder-two-cells names #7 twice.
+    Mutation: `dict.fromkeys` for the `sorted(...)` in `evict_release` -- two-holders names #9
+    first.
+    Mutation: drop the overwrite clause from `evict_release` -- red."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(
+            tmp_path, monkeypatch, {("stacks/app", "dev-eu"): app, ("stacks/dns", "dev-eu"): dns}
+        )
+    assert str(exc.value).endswith(
+        "were applied: stacks/app / dev-eu, stacks/dns / dev-eu. Open a pull request that "
+        f"changes these stacks. {step} Then apply it."
+    )
+
+
+def test_the_lock_remedy_has_one_eviction_sentence_per_environment_in_order():
+    """Mutation: iterate `by_env.items()` unsorted -- prod comes first. Mutation: drop the
+    wait-for-open-holders sentence -- red."""
+    assert dd.deploy_lock_remedy([(9, "prod"), (7, "dev")], "these stacks") == (
+        "Open a pull request that changes these stacks. Comment `shipmate unlock dev --evict` on "
+        "it to release the locks #7 holds; applying it after that may overwrite what #7 applied "
+        "to dev. The eviction releases only locks on the new pull request's pending cells in dev, "
+        "any holder's, so wait for any holder still open to merge or close first. Comment "
+        "`shipmate unlock prod --evict` on it to release the locks #9 holds; applying it after "
+        "that may overwrite what #9 applied to prod. The eviction releases only locks on the new "
+        "pull request's pending cells in prod, any holder's, so wait for any holder still open to "
+        "merge or close first. Then apply it"
     )
 
 

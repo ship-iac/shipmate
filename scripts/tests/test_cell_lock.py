@@ -1902,8 +1902,11 @@ MERGED = 4
 DEPLOY = {"SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": str(MERGED)}
 HELD_BY_9 = (
     "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
-    "this deploy's pull request. Open a pull request that changes this stack, comment "
-    "`shipmate unlock dev --evict` on it, then apply it"
+    "this deploy's pull request. Open a pull request that changes this stack. Comment "
+    "`shipmate unlock dev --evict` on it to release the locks #9 holds; applying it after that "
+    "may overwrite what #9 applied to dev. The eviction releases only locks on the new pull "
+    "request's pending cells in dev, any holder's, so wait for any holder still open to merge or "
+    "close first. Then apply it"
 )
 
 
@@ -1914,7 +1917,8 @@ def _locked_by(msg):
 
 
 def test_verify_deploy_refuses_a_cell_another_pull_request_locks(monkeypatch, tmp_path):
-    """Mutation: drop the holder compare (pass any lock): the lock by #9 passes."""
+    """Mutation: drop the holder compare (pass any lock): the lock by #9 passes. Mutation:
+    drop the overwrite clause from `evict_release` -- red."""
     gh = _locked_by(message(9, "dev", "stacks/auth"))
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == HELD_BY_9
 
@@ -1942,8 +1946,11 @@ def test_verify_deploy_names_the_cells_environment(monkeypatch, tmp_path):
     gh.on(commit_read(OLD), commit(OLD, message(9, "prod", "stacks/auth")))
     assert _verify_refusal(monkeypatch, tmp_path, gh, {**DEPLOY, "SHIPMATE_ENV": "prod"}) == (
         "::error::apply aborted for `prod` / `stacks/auth`: its cell lock is held by #9, not by "
-        "this deploy's pull request. Open a pull request that changes this stack, comment "
-        "`shipmate unlock prod --evict` on it, then apply it"
+        "this deploy's pull request. Open a pull request that changes this stack. Comment "
+        "`shipmate unlock prod --evict` on it to release the locks #9 holds; applying it after "
+        "that may overwrite what #9 applied to prod. The eviction releases only locks on the new "
+        "pull request's pending cells in prod, any holder's, so wait for any holder still open to "
+        "merge or close first. Then apply it"
     )
 
 
@@ -1968,8 +1975,11 @@ def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
     gh = _locked_by("garbage")
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
         "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an unknown "
-        "holder, not by this deploy's pull request. Open a pull request that changes this stack, "
-        "comment `shipmate unlock dev --evict` on it, then apply it"
+        "holder, not by this deploy's pull request. Open a pull request that changes this stack. "
+        "Comment `shipmate unlock dev --evict` on it to release the locks an unknown holder "
+        "holds; applying it after that may overwrite what an unknown holder applied to dev. The "
+        "eviction releases only locks on the new pull request's pending cells in dev, any "
+        "holder's, so wait for any holder still open to merge or close first. Then apply it"
     )
 
 

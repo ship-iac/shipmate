@@ -323,6 +323,39 @@ def lock_wait_remedy(who: str, env: str) -> str:
     )
 
 
+def evict_release(holders, env_name: str, subject: str) -> str:
+    """`release the locks <who> hold(s); applying <subject> after that may overwrite what <who>
+    applied to <env_name>`, naming `holders` known ascending, then an unknown one (None)."""
+    names = [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
+    if None in holders:
+        names.append(lock_who(None))
+    who = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    hold, applied = ("holds", who) if len(names) == 1 else ("hold", "they")
+    return (
+        f"release the locks {who} {hold}; applying {subject} after that may overwrite what "
+        f"{applied} applied to {env_name}"
+    )
+
+
+# Threat model: the refusal never offers eviction without its consequence. Eviction is
+# environment-wide and the holder's state is unread, so no sentence branches on it; the order
+# of recovery steps lives in docs/troubleshooting.md.
+def deploy_lock_remedy(holders, stacks: str) -> str:
+    """What frees the cell locks `holders`, `(holder, env)` pairs (holder None: unknown), that
+    refuse a merge deploy, with no final period: a new pull request changing `stacks`, one
+    eviction sentence per environment (`evict_release`), then its apply."""
+    by_env = {}
+    for holder, env in holders:
+        by_env.setdefault(env, []).append(holder)
+    steps = " ".join(
+        f"Comment `shipmate unlock {env} --evict` on it to {evict_release(hs, env, 'it')}. The "
+        f"eviction releases only locks on the new pull request's pending cells in {env}, any "
+        "holder's, so wait for any holder still open to merge or close first."
+        for env, hs in sorted(by_env.items())
+    )
+    return f"Open a pull request that changes {stacks}. {steps} Then apply it"
+
+
 def event_payload(path):
     """The event payload at `path`, or {} when `path` is empty or the file cannot be read as a
     JSON object."""

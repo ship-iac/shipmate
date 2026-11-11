@@ -368,7 +368,9 @@ its workflow path `include` names `.github/workflows/shipmate.yml` and its
   [`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository);
 - `cannot check` when a read fails, when the list's `total_count` differs from
   the number of policies it returned (onboard reads one page of 100), or when a
-  considered policy has a `*` in `include` or `exclude` or no `include` entry,
+  considered policy has a pattern in `include` or `exclude` (a path that is not
+  a non-empty run of letters, digits, `.`, `_`, `/` and `-`) or no `include`
+  entry,
   because which workflows such a policy reaches is unprobed.
 
 `ok` covers the repository's own policies only: onboard does not read an
@@ -1080,7 +1082,10 @@ a merged pull request:
   does, or the commit was a direct push, open a pull request that changes the
   unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
   environment the refusal names (the `<env>` after the last ` / ` of each
-  `<stack> / <env>` cell or `apply / <stack> / <env>` check), then apply it.
+  `<stack> / <env>` cell or `apply / <stack> / <env>` check). The eviction
+  releases every pull request's lock on those pending cells, so wait for any
+  pull request still open that holds one to merge or close first, then apply
+  it.
 
 ### `could not map <sha> to the pull request that merged it: #<n> contains it but none records it as its merge commit; deploying it as a push to <branch>`
 
@@ -1109,8 +1114,13 @@ requests (`#<n>, #<m> contain it` for more than one) but none of them has
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
 pending cell(s) are locked by another pull request: <stack> / <env> (locked by
 <who>), .... None of this deploy's <m> pending cell(s) were applied: <stack> /
-<env>, .... Open a pull request that changes these stacks, comment `shipmate
-unlock <env> --evict` on it for each environment above, then apply it. ``
+<env>, .... Open a pull request that changes these stacks. Comment `shipmate
+unlock <env> --evict` on it to release the locks <who> hold(s); applying it
+after that may overwrite what <who> applied to <env>. The eviction releases only
+locks on the new pull request's pending cells in <env>, any holder's, so wait
+for any holder still open to merge or close first. ... Then apply it. ``, with one `Comment`
+sentence pair per environment, sorted, naming that environment's holders
+ascending, then an unknown holder.
 
 Another pull request, or an unknown holder, locks one of the merge's pending
 cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
@@ -1123,11 +1133,21 @@ gate is written on the merge commit. The apply checks stay pending.
 
 1. Open a pull request that changes every stack the message lists as not
    applied (any edit `terramate list --changed` marks, such as a comment line).
-2. Once it has planned, comment `shipmate unlock <env> --evict` on it, with
-   write access, for each environment the message names. It releases the
-   locks other pull requests, or an unknown holder, hold on its cells there.
-   Its plan comment can mark a locked cell `🔒 locked by`.
-3. Its cells are applied before merge under a required gate (`shipmate apply`,
+2. Wait for each holder the message names that is still open to merge or
+   close: its merge deploy or close releases its locks. Evicting an open holder
+   lets the new pull request's apply overwrite what that holder applied. Once a
+   holder has merged, update the new pull request's branch from the base and
+   push, so its plan starts from what the holder applied.
+3. Once the new pull request has planned, comment `shipmate unlock <env>
+   --evict` on it, with write access, for each environment the message names.
+   In `<env>` it deletes every other pull request's lock, an unknown holder's
+   included, on the cells whose apply check is pending on its head (failed and
+   cancelled included), so it also releases the locks a merged pull request
+   kept on those cells. It refuses with a `🔴 refused:` reply,
+   releasing nothing, when a holder is stacked on the new pull request
+   (§`shipmate unlock <env> --evict` is refused: `#<h> is stacked on this pull
+   request`).
+4. Its cells are applied before merge under a required gate (`shipmate apply`,
    and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.
 
@@ -1135,8 +1155,11 @@ gate is written on the merge commit. The apply checks stay pending.
 
 A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
 `<env>` / `<stack>`: its cell lock is held by <who>, not by this deploy's pull
-request. Open a pull request that changes this stack, comment `shipmate unlock
-<env> --evict` on it, then apply it ``.
+request. Open a pull request that changes this stack. Comment `shipmate unlock
+<env> --evict` on it to release the locks <who> holds; applying it after that
+may overwrite what <who> applied to <env>. The eviction releases only locks on
+the new pull request's pending cells in <env>, any holder's, so wait for any
+holder still open to merge or close first. Then apply it ``.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
@@ -1145,8 +1168,7 @@ env-levels are skipped, as after any failed cell. Follow the steps in §A
 merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another
 pull request`, with this stack and every other stack whose cell did not apply.
 The merged pull request keeps its locks on the cells that did not apply, other
-than the refused one, and `shipmate unlock <env> --evict` from the recovery pull
-request releases those as well.
+than the refused one; step 3's eviction releases those as well.
 
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs `` is a failed lock read: re-run the deploy's failed jobs.
@@ -1509,7 +1531,10 @@ version differs from the default branch's has its release's checksum file and
 signature downloaded and verified. Nothing is installed or run. Each refusal
 of the head's file starts "the pull request head's .github/shipmate-config.yml: ",
 so it never reads like the default branch's refusal from `setup`. Fix the file on
-the pull request's branch and push.
+the pull request's branch and push. `setup` checks only the parse
+(`env-config.load_config`) and `tools`, so the rest of the head's table, such as
+its environments, `needs` and identities, is not checked before merge: plan
+`detect` reads those from the default branch.
 
 | Annotation continues with | Cause and remedy |
 |---|---|
@@ -1517,7 +1542,7 @@ the pull request's branch and push.
 | "the path is a directory, or it or a parent directory is a symlink. Make it a regular file in the checkout, or remove it." | The head has a directory at that path, or the path resolves through a symlink, at the file or at `.github`. A symlink refuses even when it points at a file, so the read never leaves the checkout. A head with no file resolves to the pins. |
 | "could not be read: <error>" | The file exists but the runner could not read it, or it is not UTF-8. `<error>` is the system's or the decoder's message. |
 | "is not valid YAML: <problem> (line <L>, column <C>)" or "must hold a mapping at the top level, got <type>" | The head's file does not parse. |
-| any other refusal of the file, such as "layout must be a string, got list." | The head's file fails a check the default branch's copy must pass; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. |
+| any other refusal of the file, such as "layout must be a string, got list." | The head's file fails a check `setup` applies to the default branch's copy before reading its `tools`; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. |
 | "Terramate <version>: " or "OpenTofu <version>: " then a reason from §`Terramate checksum verification failed` or `OpenTofu checksum verification failed` | The head's version's release did not verify. A 404 ends "no <tool> <version> release publishes <file>; set tools.<key> to a released version.": that version was never released. |
 
 A failure inside one tool's turn of `Verify changed tools` carries the head
