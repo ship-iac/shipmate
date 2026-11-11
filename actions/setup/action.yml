@@ -66,6 +66,7 @@ runs:
         v="$SHIPMATE_TERRAMATE_VERSION"
         release_init "Terramate checksum verification failed" "Terramate ${v}: "
         require
+        key="${SHIPMATE_CACHE_KEY:-}"
         dir="$RUNNER_TEMP/terramate-release"
         release_sums terramate "$v"
         release_dir "$dir"
@@ -88,6 +89,7 @@ runs:
         v="$SHIPMATE_TOFU_VERSION"
         release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
         require gpg gpgconf
+        key="${SHIPMATE_CACHE_KEY:-}"
         dir="$RUNNER_TEMP/tofu-release"
         release_sums tofu "$v"
         release_dir "$dir"
