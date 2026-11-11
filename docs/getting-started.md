@@ -41,6 +41,11 @@ does with that wiring.
   repository, environment required reviewers and wait timers need GitHub
   Enterprise, and rulesets and environments need Pro, Team or Enterprise.
   [`hardening.md`](hardening.md) §Plan prerequisites has the table.
+- **On a public repository, a repository Actions event policy allowing
+  shipmate's events.** From 2026-12-02 GitHub blocks `pull_request_target` in a
+  public repository without one. `scripts/onboard` reports whether it is in
+  place but does not create it; §Allow shipmate's events on a public repository
+  has the settings.
 - **Remote state you control, or a local backend materialized in the working
   tree.** AWS S3 is what [`aws.md`](aws.md) covers.
 - **A `.gitignore` covering what shipmate writes into your working tree:**
@@ -186,8 +191,10 @@ yours: `SHIPMATE_ENCRYPTION_KEY`, the table with the cloud role, region and env
 identity your layout injects, adding the repository to the App installation, an
 approving review before apply, a `CODEOWNERS` entry, a git-tracked
 `.terraform.lock.hcl` in each stack, the repository's Actions settings
-([`hardening.md`](hardening.md) §10–12 and 20 lists the rows it checks), and
-the pull request carrying the workflow file. Three items check the whole tree
+([`hardening.md`](hardening.md) §10–12 and 20 lists the rows it checks), on a
+public repository the Actions event policy that allows shipmate's events (§Allow
+shipmate's events on a public repository; it reads the policy and does not
+create it), and the pull request carrying the workflow file. Three items check the whole tree
 before a run does: `unmanaged stacks` names the stacks with no `env/*` tag and
 no `shipmate/local` tag, `stack tags` the workload and slug refusals a plan
 would raise and the workload tags that disagree with the table, and
@@ -203,7 +210,9 @@ exists, whether its entries cover the IaC, the workflows,
 `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`, which is GitHub's
 matching; `drift sweeps`, when a drift file's `tags` query cannot be read, or a
 stack carrying two `workload/*` tags or two stack paths that slug alike leave no
-whole tree to cover; and an Actions-settings item whose read failed
+whole tree to cover; an Actions-settings item whose read failed; and the event
+policy item, when a policy read fails, the policy list spans more than one page,
+or a policy names a workflow path pattern or no workflow path
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
 
 The checklist reads the working tree: stack tags, `.github/shipmate-config.yml` and
@@ -719,6 +728,39 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 - As different values on `<env>-plan` and `<env>-apply`, every apply in that
   environment refuses at `Decrypt reviewed plan artifact`
   ([`troubleshooting.md`](troubleshooting.md) has the remedy).
+
+#### Allow shipmate's events on a public repository
+
+From 2026-12-02 GitHub blocks `pull_request_target` in a public repository
+unless a repository Actions event policy allows it. A private or internal
+repository needs no policy. Without one, every autoplan ends `startup_failure`
+with no job: no `plan / ` check, no plan comment and no `shipmate / gate`
+status. The `release` run of a closed pull request is blocked the same way, so
+its cell locks stay ([`troubleshooting.md`](troubleshooting.md) §A public
+repository's pull request gets no plan, comment or gate status).
+
+Once `shipmate.yml` is committed, create the policy in Settings → Actions →
+Policies:
+
+- target the workflow path `.github/workflows/shipmate.yml`, and exclude none;
+- set enforcement to active;
+- allow exactly the events under `on:` in the `shipmate.yml` fence above:
+  `pull_request_target`, `issue_comment`, `push` and `workflow_dispatch`.
+
+`scripts/onboard` reports whether the repository's own policies allow these
+events; it does not create the policy, and it does not read an organization or
+enterprise policy. To read the policy back, find its ID with
+`gh api repos/OWNER/REPO/actions/policies`, then run:
+
+```bash
+gh api repos/OWNER/REPO/actions/policies/ID --jq '{enforcement, conditions, rules}'
+```
+
+It prints:
+
+```json
+{"conditions":{"workflow_path":{"exclude":[],"include":[".github/workflows/shipmate.yml"]}},"enforcement":"active","rules":[{"parameters":{"allowed_events":["pull_request_target","issue_comment","push","workflow_dispatch"]},"type":"restrict_action_events"}]}
+```
 
 ## Required — apply
 

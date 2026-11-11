@@ -340,7 +340,7 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, `drift sweeps` cannot compute coverage (see below), and a read of the repository's Actions settings failed. Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, `drift sweeps` cannot compute coverage (see below), a read of the repository's Actions settings failed, and the event policy item cannot judge the repository's policies (see below). Confirm it by hand. |
 
 `custom deployment protection rules on shipmate-engine` appears only when the
 environment exists and has an enabled custom deployment protection rule, or its
@@ -352,6 +352,26 @@ While a `pull_request` rule on the default branch requires code-owner review,
 the `CODEOWNERS` item is `todo` when the checkout has no `CODEOWNERS` file or the
 first one GitHub reads holds no line that is not blank or a `#` comment: no path
 then has a code owner, so that review holds no pull request.
+
+`a repository Actions event policy allows shipmate's events (public repository)`
+is `ok` on a private or internal repository without a read. On a public one it
+reads `repos/OWNER/REPO/actions/policies`, then each policy, and considers the
+active policies carrying a `restrict_action_events` rule. A policy matches when
+its workflow path `include` names `.github/workflows/shipmate.yml` and its
+`exclude` does not. The item is:
+
+- `ok` when at least one policy matches and every match allows every `on:` event
+  of the `shipmate.yml` fence in [`getting-started.md`](getting-started.md);
+- `todo` when none matches or a match lacks an event, naming the policy and the
+  events, with a link to
+  [`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository);
+- `cannot check` when a read fails, when the list's `total_count` differs from
+  the number of policies it returned (onboard reads one page), or when a
+  considered policy has a `*` in `include` or `exclude` or no `include` entry,
+  because which workflows such a policy reaches is unprobed.
+
+`ok` covers the repository's own policies only: onboard does not read an
+organization or enterprise policy. It creates no policy.
 
 Three items check the working tree's stacks and drift files the way a run
 would, so a run that would refuse or skip shows up before the pull request
@@ -982,6 +1002,12 @@ merged or closed.
   the close.** The release keeps a lock taken after the close while #<n> is
   open again. An apply that took the lock after the close refuses and deletes
   it itself; one that remains is evicted with `shipmate unlock <env> --evict`.
+- **On a public repository, GitHub blocked the closing run.** Its `shipmate.yml`
+  run ended `startup_failure` with no job, because no repository Actions event
+  policy allows `pull_request_target` (§A public repository's pull request gets
+  no plan, comment or gate status). Create the policy
+  ([`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository))
+  so later closes release their locks; evict the lock already left, as below.
 
 For the second and third causes, re-pin the fence
 (`python <engine>/scripts/repin <consumer> <tag> --write-fence`) where it
@@ -1626,7 +1652,10 @@ merge, which is the intended direction. The head repository comes from the
 `facts` job in the same engine file, so a skipped `summary` is not a wiring
 mistake: check the pull request's head repository. A pull request whose head is
 in a fork is refused earlier still, at `detect` ("Fork pull request
-refused", below).
+refused", below). On a public repository where no Actions event policy
+allows `pull_request_target`, the autoplan starts no job and writes no gate
+either (§A public repository's pull request gets no plan, comment or gate
+status).
 
 **The gate is pending with the draft reason.** The description reads "the pull
 request was a draft when this run started, so nothing was planned; comment
@@ -2385,6 +2414,24 @@ GitHub reported the pull request mergeable. If the runner's git is older than
 2.38 (`git --version`), merge-tree fails here; see
 [`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites. A bare `shipmate apply`
 is no remedy for any of these refusals: it runs no overlap check.
+
+### A public repository's pull request gets no plan, comment or gate status
+
+A push to a pull request in a public repository starts a `shipmate.yml` run that
+ends `startup_failure` with zero jobs. It creates no new `plan / ` check, no plan
+comment update and no `shipmate / gate` status; the results of an earlier run on
+the same head may remain. From 2026-12-02 GitHub blocks `pull_request_target` in
+a public repository unless a repository Actions event policy allows it. A
+private or internal repository is unaffected.
+
+The `release` run of a closed pull request is blocked the same way, so its cell
+locks stay (§A cell stays locked after its pull request closed). A drift sweep
+is unaffected: it runs on `schedule` and `workflow_dispatch`.
+
+Create the policy
+([`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository)).
+`scripts/onboard --app-id <id> --dry-run` reports whether the repository's own
+policies allow shipmate's events (§What `scripts/onboard` reports).
 
 ### A pull request planned zero cells
 

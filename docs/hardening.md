@@ -111,6 +111,7 @@ event selects the `plan` job, or on `closed` the `release` job, and no other. do
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` and `release`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 | 21 | Row 4's `pull_request` rule targets every branch a pull request may use as a base (for example `~ALL`) | Branch ruleset | An unreviewed apply: a pull request into a branch no review rule covers has no review decision, which the apply path reads as no review required |
+| 22 | On a public repository, a repository Actions event policy for `.github/workflows/shipmate.yml` alone, enforcement active, allowing exactly the `on:` events of the published `shipmate.yml` ("What pull-request code holds") | Settings → Actions → Policies | Nothing — it is required: from 2026-12-02 GitHub blocks `pull_request_target` in a public repository without one, so no autoplan or `release` run starts. A private or internal repository needs none |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
@@ -143,8 +144,11 @@ always available and row 6 is the one a production posture usually rests on.
 | 3–5 (branch ruleset) | any plan | Pro / Team / Enterprise |
 | 6 (required reviewers, wait timer) | any plan | Enterprise only |
 | 16, 17 (environments, deployment branch policies) | any plan | Pro / Team / Enterprise |
+| 22 (Actions event policy) | required from 2026-12-02, any plan | not needed |
 
-Row 2's push ruleset is plan-gated on its own axis — see §2.
+Row 2's push ruleset is plan-gated on its own axis — see §2. Row 22 turns on
+visibility, not plan: from 2026-12-02 a public repository needs the event
+policy, and a private or internal one does not ("What pull-request code holds").
 
 On GitHub Free, Pro or Team, *"required reviewers are only available for public
 repositories"* and *"wait timers are only available for public repositories"*
@@ -1290,6 +1294,18 @@ repository, so that code then reaches only that repository's cache, token and
 key. Replace the key when someone who could push such code loses that
 access, as for the App key (row 14); `CONTRACT.md` §Plan artifact encryption,
 "Rotation", states what a new key leaves undecryptable.
+
+**A public repository allows `pull_request_target` for `shipmate.yml` alone
+(row 22).** From 2026-12-02 GitHub blocks that event in a public repository
+unless a repository Actions event policy allows it; a private or internal
+repository is unaffected. A private repository needs no policy, but below Pro
+or Team it cannot hold the environments shipmate needs ("Plan prerequisites"),
+so on Free a public repository with the policy is the only option. The policy
+targets the workflow path `.github/workflows/shipmate.yml`, so the events are
+allowed for that file and never repository-wide. With it, a fork's pull
+request reaches what it reached before the block: it still starts `facts`,
+`detect` and `release`, while plan and apply refuse it ("Contributors without
+push access") and unlock refuses it (`CONTRACT.md` §Comment-ops).
 
 ## What none of this fixes
 
