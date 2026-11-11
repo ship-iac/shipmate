@@ -60,6 +60,7 @@ runs:
         DEPLOY_RESULTS: ${{ inputs.deploy-results }}
         DETECT_RESULT: ${{ inputs.detect-result }}
         HOLD_DESCRIPTION: ${{ inputs.hold-description }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"

@@ -15,9 +15,13 @@
 The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
 `target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
-`GITHUB_RUN_ID`, and `SHIPMATE_APP_ID` for `refresh`. A `<sha>` that is not 40 lowercase hex
-characters is refused before any API call. A failed API call exits 1 with an `::error::` line,
-except in `checks`. A call that fails transiently retries twice, each retry noted on stderr.
+`GITHUB_RUN_ID`, `SHIPMATE_APP_ID` for `refresh`, and `SHIPMATE_APP_SLUG`, the shipmate App's
+slug, for `newest`, `refuse-newer`, `refresh` and `post`: each refuses an empty one before any
+API call, and looks up the id of the App's bot user `<slug>[bot]` once, before its first
+statuses listing; an invocation that lists no statuses makes no lookup. A `<sha>` that is not 40
+lowercase hex characters is refused before any API call. A failed API call exits 1 with an
+`::error::` line, except in `checks`. A call that fails transiently retries twice, each retry
+noted on stderr.
 `refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
 its write retries: each caller decides whether a hold fails its step. `refuse-newer` prints its
 refusal as an `::error::` line and exits `NEWER`, so a caller tells a newer run from a failed
@@ -36,9 +40,12 @@ malformed `<sha>`, a failed head read and a failed or malformed run listing exit
 unannotated stderr line, after any retry notices.
 """
 
+import functools
+import json
 import os
 import re
 import sys
+from urllib.parse import quote
 
 from _shipmate import (
     GATE_CONTEXT,
@@ -46,6 +53,7 @@ from _shipmate import (
     _run,
     check_runs,
     current_run_url,
+    gh_json,
     is_pr_number,
     is_run_id,
     one_line,
@@ -61,7 +69,7 @@ ag = _load("apply-gate")
 _RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
 #: The fields `apply-gate` judges.
 _CHECK_RUNS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
-_STATUSES_JQ = ".[] | {context, state, target_url}"
+_STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
 _GOOD_RESULTS = {"success", "skipped"}
 HELD = 3
 NEWER = 4
@@ -89,12 +97,46 @@ def deploy_verdict(detect, results):
     return "failure", "deploy incomplete (deploy env-level applies completed)"
 
 
-def _gates(sha):
-    """`(state, run id)` of every gate status on `sha`, newest first.
+def _require_slug():
+    """`SHIPMATE_APP_SLUG`, or an `::error::` exit when it is empty or unset."""
+    slug = os.environ.get("SHIPMATE_APP_SLUG", "")
+    if not slug:
+        raise SystemExit(
+            "::error::SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the "
+            "shipmate App created and cannot tell which those are"
+        )
+    return slug
 
+
+@functools.cache
+def app_user():
+    """The integer id of the shipmate App's bot user, `<SHIPMATE_APP_SLUG>[bot]`, read once per
+    process. A failed read (after `gh_json`'s retries), an answer that is not JSON, or an `id`
+    that is not an integer exits 1 with one `::error::` line naming the bot user."""
+    login = f"{_require_slug()}[bot]"
+    lead = f"::error::could not read the shipmate App's bot user {login}"
+    try:
+        user = gh_json(f"users/{quote(login, safe='')}", _run)
+    except SystemExit as exc:
+        raise SystemExit(f"{lead}: {one_line(str(exc.code).removeprefix('::error::'))}") from None
+    except ValueError as exc:
+        raise SystemExit(f"{lead}: {one_line(exc)}") from None
+    uid = user.get("id") if isinstance(user, dict) else None
+    if type(uid) is not int:
+        raise SystemExit(f"{lead}: its id is {json.dumps(uid)}")
+    return uid
+
+
+def _gates(sha):
+    """`(state, run id)` of every gate status on `sha` the shipmate App created, newest first.
+
+    A status's creator must be the App's bot user (`app_user`), read before the listing: any
+    token with `statuses: write` can post this context, so a status from another identity would
+    otherwise add or hide a hold. That identity is never defaulted: without it no status counts.
     The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none. The
     statuses listing is paginated: a head with many other contexts can push its gate past the
     first page."""
+    app = app_user()
     args = [
         "gh",
         "api",
@@ -106,14 +148,15 @@ def _gates(sha):
     out = retried(lambda: _run(args))
     gates = []
     for status in ag.parse_jsonl(out.splitlines()):
-        if status.get("context") == GATE_CONTEXT:
+        if status.get("context") == GATE_CONTEXT and status["creator"] == app:
             m = _RUN_ID.search(status.get("target_url") or "")
             gates.append((status["state"], m.group(1) if m else "-"))
     return gates
 
 
 def newest_gate(sha):
-    """(state, run id) of the newest gate status on `sha`, or None when it carries none."""
+    """(state, run id) of the newest gate status the shipmate App created on `sha`, or None when
+    it carries none. Statuses from other identities are not counted."""
     gates = _gates(sha)
     return gates[0] if gates else None
 
@@ -122,9 +165,9 @@ def newer_hold(sha):
     """The highest run id among the `failure` gates on `sha` written by a run newer than this one,
     or None.
 
-    Every status in the history counts, not only the newest: this run's own hold, written after a
-    failed read, must not hide a newer run's earlier one. Only plan runs write a `failure` gate
-    before a merge, so a newer one is a newer plan of the same head."""
+    Every App-created status in the history counts, not only the newest: this run's own hold,
+    written after a failed read, must not hide a newer run's earlier one. Only plan runs write a
+    `failure` gate before a merge, so a newer one is a newer plan of the same head."""
     this_run = os.environ.get("GITHUB_RUN_ID", "")
     if not is_run_id(this_run):
         raise SystemExit(f"::error::GITHUB_RUN_ID must be a decimal run id (got: {this_run!r})")
@@ -183,6 +226,7 @@ def refresh(sha):
 
     A check re-created mid-apply stays open until its own plan is applied: `apply-gate` judges
     the newest run per name."""
+    _require_slug()
     out = check_runs(_repo(), sha, _CHECK_RUNS_JQ)
     runs = ag.app_runs(out.splitlines(), os.environ.get("SHIPMATE_APP_ID", ""))
     if ag.verdict(runs) == "pending":
@@ -217,6 +261,12 @@ def _refuse_newer(sha):
             file=sys.stderr,
         )
         raise SystemExit(NEWER)
+
+
+def _post(sha, state, description):
+    _require_slug()
+    # The summary writes after `refuse-newer`; a retried write re-runs it first.
+    post(sha, state, description, lambda: _refuse_newer(sha))
 
 
 def _checks(sha, jq):
@@ -267,8 +317,7 @@ _COMMANDS = {
     "checks": (1, _checks),
     "moved": (1, _moved),
     "replan": (1, _replan),
-    # The summary writes after `refuse-newer`; a retried write re-runs it first.
-    "post": (2, lambda sha, state, desc: post(sha, state, desc, lambda: _refuse_newer(sha))),
+    "post": (2, _post),
     "hold": (1, lambda sha, description: post(sha, "failure", description)),
     "refresh": (0, refresh),
     "deploy": (2, lambda sha, detect, results: post(sha, *deploy_verdict(detect, results))),

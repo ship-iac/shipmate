@@ -1805,7 +1805,24 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `plan.yml`'s `summary` job (the plan run's gate) and by `actions/gate-refresh`
   in `apply.yml`'s `summary` job (the pre-merge refresh), `deploy.yml`'s
   `summary` job (the post-merge verdict) and `plan.yml`'s `gate-hold` job (a
-  hold). The three `summary` jobs run in one job-level concurrency group,
+  hold). `scripts/gate-status` counts only the gate statuses the shipmate App's
+  bot user created: it compares each status's creator user id with the id of
+  `<slug>[bot]`, where `<slug>` is the shipmate App's slug. The gate read takes
+  the slug from the `app-slug` output of the calling step's App token mint
+  (`SHIPMATE_APP_SLUG`); the `auto` actor check reads it from the App-authored
+  check runs instead (§`apply_mode: auto`). The commands that list the gate
+  statuses (`newest`, `refuse-newer`, a `refresh` once every apply check is done,
+  a `post` before a retry) read `users/<slug>[bot]` once per invocation, retried
+  on a transient failure, before the first listing. `newest`, `refuse-newer`,
+  `refresh` and `post` refuse with an `::error::` line, before any API call, when
+  `SHIPMATE_APP_SLUG` is empty, and a failed read of the bot user refuses the
+  same way: no status counts without it. `hold` and `deploy` read no status and
+  need no slug. Any token with `statuses: write` can post the context; a status
+  from another identity, such as a workflow `GITHUB_TOKEN` or a personal access
+  token, neither holds the gate nor hides a hold, and the gate ruleset's
+  `integration_id` pin keeps it from satisfying the required check
+  (`docs/branch-protection.md`). The three `summary` jobs run in one job-level
+  concurrency group,
   `shipmate-gate-<head sha>` with `cancel-in-progress: false`, shared across
   runs and called workflows, so one of them at a time reads and writes a head's
   gate. An empty head SHA (a failed plan `facts`, or a deploy `detect` that
@@ -2148,9 +2165,11 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
 on the pull request to apply it.``
 
 - **Actor.** The run's `github.actor` and `github.triggering_actor` must each
-  equal `<slug>[bot]`, compared whole, where `<slug>` is the `app.slug` of the
-  App-authored check runs on the head; a head with no App-authored check
-  refuses. A `GITHUB_TOKEN` dispatch runs as `github-actions[bot]`, which the
+  equal `<slug>[bot]`, compared whole, where `<slug>` is the shipmate App's
+  slug, read here from the `app.slug` of the App-authored check runs on the
+  head (the gate read takes it from its token mint, §Comment-ops, "The
+  aggregate gate"); a head with no App-authored check refuses. A
+  `GITHUB_TOKEN` dispatch runs as `github-actions[bot]`, which the
   `guard` job admits and this check refuses. A human's "Re-run all jobs" of an
   `auto` run makes the human its triggering actor, so the re-run refuses;
   comment `shipmate apply` instead. "Re-run failed jobs" keeps the passed
@@ -3229,7 +3248,8 @@ the merge.
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
 only some checks published leaves a hold that `gate-refresh` will not green. The
-same hold is written when the job cannot read the head's gate statuses, list the
+same hold is written when the job cannot read the head's gate statuses or the
+shipmate App's bot user their creators are compared with, list the
 head's apply checks or build the ones to publish, whether or not it downloaded a
 cell summary: a failed download leaves none over planned cells. The apply checks
 publish after the plan comment is written, so a plan comment that could

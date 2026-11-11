@@ -9,12 +9,11 @@ whole argv of every write, the commit-statuses endpoint included.
 import ast
 
 from _loader import (
-    ACTIONS,
     ENGINE,
     ENGINE_CALL_SECRETS,
     SCRIPTS,
     WORKFLOWS,
-    action_yaml,
+    engine_steps,
     step_by,
     workflow_yaml,
 )
@@ -46,22 +45,11 @@ def test_the_gate_literal_is_defined_once():
     assert _gate_literals() == ["_shipmate.py"]
 
 
-def _run_blocks():
-    """(file, `run:` value) for every step in the composite actions and engine workflows."""
-    for path in sorted(ACTIONS.glob("*/action.yml")):
-        for step in action_yaml(path)["runs"].get("steps") or []:
-            yield path.parent.name, step.get("run") or ""
-    for path in sorted(WORKFLOWS.glob("*.yml")):
-        for job in (workflow_yaml(path).get("jobs") or {}).values():
-            for step in job.get("steps") or []:
-                yield path.name, step.get("run") or ""
-
-
 def test_no_run_block_names_the_gate():
     """Every gate read and write goes through `scripts/gate-status`, so no shell body spells the
     context. Mutations: re-inline deploy.yml's status write; a `select(.context == "shipmate /
     gate")` read in a summary step."""
-    offenders = [where for where, run in _run_blocks() if GATE in run]
+    offenders = [where for where, step in engine_steps() if GATE in (step.get("run") or "")]
     assert offenders == []
 
 
@@ -115,6 +103,7 @@ EXPECTED_WRITE_ENV = {
     "DEPLOY_RESULTS": "${{ inputs.deploy-results }}",
     "DETECT_RESULT": "${{ inputs.detect-result }}",
     "HOLD_DESCRIPTION": "${{ inputs.hold-description }}",
+    "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
 }
 
 
@@ -123,7 +112,8 @@ def test_gate_refresh_mints_an_app_statuses_token():
     `integration_id` to the App, so the gate is written with the App token gate-refresh mints.
     test_no_engine_job_grants_stale_checks_or_statuses_write covers the GITHUB_TOKEN side.
 
-    Mutations: drop `permission-statuses` from the mint; `GH_TOKEN: ${{ github.token }}`.
+    Mutations: drop `permission-statuses` from the mint; `GH_TOKEN: ${{ github.token }}`; drop
+    `SHIPMATE_APP_SLUG`; read it from `steps.plantoken`.
     """
     assert step_by("gate-refresh", name="Mint App installation token")["with"] == (
         EXPECTED_GATE_MINT

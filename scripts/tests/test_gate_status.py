@@ -16,13 +16,15 @@ import os
 import _shipmate
 import pytest
 from _detect_fixtures import autoplans_read, listed_autoplan
-from _loader import SCRIPTS, bash_only, load_script, run_with_gate_gh
+from _loader import GATE_USER, SCRIPTS, bash_only, load_script, run_with_gate_gh
 
 gs = load_script("gate-status")
 
 SHA = "a" * 40
 APP_ID = "4242"
 RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
+#: The App's bot user id the gh fakes answer, unlike `APP_ID`, so an App-id comparison reddens.
+BOT_ID = 306306466
 ENV = {
     **os.environ,
     "GH_TOKEN": "x",
@@ -32,12 +34,20 @@ ENV = {
     # A different SHA, so posting to the merge commit instead of the head reddens.
     "GITHUB_SHA": "b" * 40,
     "SHIPMATE_APP_ID": APP_ID,
+    "SHIPMATE_APP_SLUG": "shipmate-test",
 }
+NO_SLUG = {k: v for k, v in ENV.items() if k != "SHIPMATE_APP_SLUG"}
 HELD = (
     f"shipmate / gate is held for {SHA}; its status description on the pull request "
     "names the cause. A hold clears only when a new plan run rewrites the gate: comment "
     "shipmate plan, or push.\n"
 )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_app_user():
+    """`app_user` caches for the process, which every in-process test here shares."""
+    gs.app_user.cache_clear()
 
 
 def _status_argv(state, description):
@@ -69,8 +79,10 @@ STATUSES_ARGV = [
     "--paginate",
     f"repos/acme/demo/commits/{SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url}",
+    ".[] | {context, state, target_url, creator: .creator.id}",
 ]
+#: The App bot user lookup, hand-written: `[` and `]` percent-encoded in the path.
+USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
 GREEN = _status_argv("success", "all applies complete, nothing left to apply")
 
 
@@ -80,8 +92,8 @@ def _check(cid, status, conclusion=None, name="apply / a / dev"):
     )
 
 
-def _status(context, state, url=RUN_URL):
-    return json.dumps({"context": context, "state": state, "target_url": url})
+def _status(context, state, url=RUN_URL, creator=BOT_ID):
+    return json.dumps({"context": context, "state": state, "target_url": url, "creator": creator})
 
 
 def _lines(*items):
@@ -91,10 +103,10 @@ def _lines(*items):
 DONE = _lines(_check(1, "completed", "success"), _check(2, "completed", "neutral", "apply / b / x"))
 
 
-def _run(tmp_path, *args, **fakes):
+def _run(tmp_path, *args, env=ENV, **fakes):
     cmd = " ".join(f"'{a}'" for a in args)
     return run_with_gate_gh(
-        tmp_path, f'python3 "{(SCRIPTS / "gate-status").as_posix()}" {cmd}', ENV, sha=SHA, **fakes
+        tmp_path, f'python3 "{(SCRIPTS / "gate-status").as_posix()}" {cmd}', env, sha=SHA, **fakes
     )
 
 
@@ -158,7 +170,7 @@ def test_refresh_greens_a_pending_gate_once_every_check_is_done(tmp_path):
         tmp_path, "refresh", SHA, checks=DONE, page1=_lines(_status("shipmate / gate", "pending"))
     )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [CHECKS_ARGV, STATUSES_ARGV, GREEN]
+    assert calls == [CHECKS_ARGV, USER_ARGV, STATUSES_ARGV, GREEN]
 
 
 @bash_only
@@ -170,12 +182,13 @@ def test_refresh_refuses_to_green_a_held_gate(tmp_path):
         tmp_path, "refresh", SHA, checks=DONE, page1=_lines(_status("shipmate / gate", "failure"))
     )
     assert (proc.returncode, proc.stdout, proc.stderr) == (3, HELD, "")
-    assert calls == [CHECKS_ARGV, STATUSES_ARGV]
+    assert calls == [CHECKS_ARGV, USER_ARGV, STATUSES_ARGV]
 
 
 @bash_only
 def test_refresh_leaves_the_gate_while_a_check_is_open(tmp_path):
-    """Mutation: ignore the verdict (`if False:`) -> the statuses are read and the gate greened."""
+    """Mutations: ignore the verdict (`if False:`) -> the statuses are read and the gate greened;
+    call `app_user()` at `refresh`'s entry -> a lookup precedes the listing."""
     checks = DONE + _lines(_check(3, "queued", name="apply / c / dev"))
     proc, calls = _run(tmp_path, "refresh", SHA, checks=checks)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
@@ -199,7 +212,7 @@ def test_refresh_finds_a_hold_past_the_first_statuses_page(tmp_path):
         page2=_lines(_status("shipmate / gate", "failure")),
     )
     assert (proc.returncode, proc.stdout, proc.stderr) == (3, HELD, "")
-    assert calls == [CHECKS_ARGV, STATUSES_ARGV]
+    assert calls == [CHECKS_ARGV, USER_ARGV, STATUSES_ARGV]
 
 
 @bash_only
@@ -241,7 +254,7 @@ def test_newest_prints_the_newest_gate_state_and_run_id(tmp_path, page1, printed
     """Mutation: take the first digits anywhere in `target_url` -> `pending 1`."""
     proc, calls = _run(tmp_path, "newest", SHA, page1=page1)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert (proc.stdout, calls) == (printed, [STATUSES_ARGV])
+    assert (proc.stdout, calls) == (printed, [USER_ARGV, STATUSES_ARGV])
 
 
 @bash_only
@@ -262,7 +275,9 @@ def test_newest_prints_the_newest_gate_state_and_run_id(tmp_path, page1, printed
     ],
 )
 def test_post_and_hold_send_this_whole_argv(tmp_path, args, argv):
-    """Mutations: change `GATE_CONTEXT`; drop the `[:140]`; post `pending` in `hold`."""
+    """A write that succeeds first time reads no gate, so it makes no bot user lookup.
+    Mutations: change `GATE_CONTEXT`; drop the `[:140]`; post `pending` in `hold`; call
+    `app_user()` at the `post` command's entry -> a lookup precedes the POST."""
     proc, calls = _run(tmp_path, *args)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [argv]
@@ -359,7 +374,7 @@ def test_refuse_newer_names_the_newest_hold_written_after_this_run(tmp_path, pag
     proc, calls = _run(tmp_path, "refuse-newer", SHA, page1=page1, page2=page2)
     expected = (4, "", _newer(newer)) if newer else (0, "", "")
     assert (proc.returncode, proc.stdout, proc.stderr) == expected
-    assert calls == [STATUSES_ARGV]
+    assert calls == [USER_ARGV, STATUSES_ARGV]
 
 
 @bash_only
@@ -377,7 +392,7 @@ def test_refuse_newer_fails_when_the_statuses_listing_fails(tmp_path):
         1,
         "",
         f"::error::command failed (1): gh {' '.join(STATUSES_ARGV)}\n",
-        [STATUSES_ARGV],
+        [USER_ARGV, STATUSES_ARGV],
     )
 
 
@@ -471,7 +486,7 @@ def test_a_multi_line_failure_prints_as_one_escaped_annotation(tmp_path):
         1,
         "",
         f"::error::command failed (1): gh {argv}%0Aunexpected gh call: {argv}\n",
-        [STATUSES_ARGV],
+        [USER_ARGV, STATUSES_ARGV],
     )
 
 
@@ -482,7 +497,7 @@ _RETRY_NOTICE = "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 
 @pytest.fixture
 def in_process(monkeypatch):
     """`gate-status` called in this process: its env set and every retry sleep recorded."""
-    for name in ("GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "GITHUB_RUN_ID"):
+    for name in ("GITHUB_REPOSITORY", "GITHUB_SERVER_URL", "GITHUB_RUN_ID", "SHIPMATE_APP_SLUG"):
         monkeypatch.setenv(name, ENV[name])
     slept = []
     monkeypatch.setattr(_shipmate, "_sleep", slept.append)
@@ -508,15 +523,19 @@ def test_checks_keeps_a_retry_notice_off_its_stdout(in_process, monkeypatch, cap
 
 _POST = ["gh", *_status_argv("pending", "the reason")]
 _READ = ["gh", *STATUSES_ARGV]
+_USER = ["gh", *USER_ARGV]
 
 
 def _flaky_run(monkeypatch, statuses):
-    """`gs._run` failing the first call of each argv with a 502 and answering a statuses read
-    with the next of `statuses`, each a gate `(state, run id)`. Returns the calls."""
+    """`gs._run` answering the bot user lookup, failing the first call of each other argv with a
+    502 and answering a statuses read with the next of `statuses`, each a gate `(state, run id)`.
+    Returns the calls."""
     calls = []
 
     def run(args):
         calls.append(args)
+        if args == _USER:
+            return GATE_USER
         if calls.count(args) == 1:
             raise SystemExit(f"::error::{_BAD_GATEWAY}")
         if args == _READ:
@@ -538,7 +557,11 @@ def test_post_retries_a_transient_failure(in_process, monkeypatch, capsys):
 def test_gates_retries_a_transient_failure(in_process, monkeypatch):
     """Mutation: `_run(args)` without `retried` in `_gates` -> the 502 raises."""
     calls = _flaky_run(monkeypatch, [("failure", "42")])
-    assert (gs.newest_gate(SHA), calls, in_process) == (("failure", "42"), [_READ, _READ], [2])
+    assert (gs.newest_gate(SHA), calls, in_process) == (
+        ("failure", "42"),
+        [_USER, _READ, _READ],
+        [2],
+    )
 
 
 def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, monkeypatch, capsys):
@@ -550,8 +573,10 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
 
     def run(args):
         calls.append(args)
+        if args == _USER:
+            return GATE_USER
         if args == _READ:
-            state = "pending" if len(calls) == 1 else "failure"
+            state = "pending" if calls.count(_READ) == 1 else "failure"
             return _lines(_status("shipmate / gate", state, _run_url(42)))
         if calls.count(args) == 1:
             raise SystemExit(f"::error::{_BAD_GATEWAY}")
@@ -563,7 +588,7 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
         gs.refresh(SHA)
     assert (exc.value.code, calls, capsys.readouterr()) == (
         gs.HELD,
-        [_READ, green, _READ],
+        [_USER, _READ, green, _READ],
         (HELD, _RETRY_NOTICE),
     )
 
@@ -584,7 +609,7 @@ def test_the_post_command_stops_when_a_newer_run_holds_before_its_retry(in_proce
     calls = _flaky_run(monkeypatch, [("failure", "1000")])
     with pytest.raises(SystemExit) as exc:
         gs.main(["post", SHA, "pending", "the reason"])
-    assert (exc.value.code, calls) == (gs.NEWER, [_POST, _READ, _READ])
+    assert (exc.value.code, calls) == (gs.NEWER, [_POST, _USER, _READ, _READ])
 
 
 def test_the_post_command_writes_again_when_no_newer_run_holds(in_process, monkeypatch):
@@ -592,7 +617,7 @@ def test_the_post_command_writes_again_when_no_newer_run_holds(in_process, monke
     exits `NEWER` on any `failure` gate -> no second POST."""
     calls = _flaky_run(monkeypatch, [("failure", "1")])
     gs.main(["post", SHA, "pending", "the reason"])
-    assert calls == [_POST, _READ, _READ, _POST]
+    assert calls == [_POST, _USER, _READ, _READ, _POST]
 
 
 #: The pull request's live head, and the whole argv of its one read.
@@ -879,4 +904,271 @@ def test_replan_exits_1_on_one_unannotated_line_when_the_listing_fails(
         message,
         ("", ""),
         [_PULL_READ, _RUNS_READ],
+    )
+
+
+_GATE = "shipmate / gate"
+#: Each gate-reading command's argv after the sha, its whole call list when it reads a head with
+#: no App hold (`refresh` over done checks), and its stdout.
+_READS_NO_HOLD = {
+    "newest": ([USER_ARGV, STATUSES_ARGV], ""),
+    "refuse-newer": ([USER_ARGV, STATUSES_ARGV], ""),
+    "refresh": ([CHECKS_ARGV, USER_ARGV, STATUSES_ARGV, GREEN], ""),
+}
+
+
+@bash_only
+@pytest.mark.parametrize("creator", [4242, None], ids=["app-id", "null"])
+@pytest.mark.parametrize("cmd", list(_READS_NO_HOLD))
+def test_a_gate_status_another_identity_created_is_no_hold(tmp_path, cmd, creator):
+    """A `failure` gate by a newer run, created by an id that is not the App's bot user (the App
+    id itself, or none): `newest` prints nothing, `refuse-newer` exits 0, `refresh` greens.
+    Mutation: drop the creator filter in `_gates` -> `failure 1000`, exit `NEWER`, exit `HELD`."""
+    page1 = _lines(_status(_GATE, "failure", _run_url(1000), creator=creator))
+    proc, calls = _run(tmp_path, cmd, SHA, checks=DONE, page1=page1)
+    expected_calls, stdout = _READS_NO_HOLD[cmd]
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (0, stdout, "", expected_calls)
+
+
+@bash_only
+def test_newest_ignores_a_gate_another_user_created(tmp_path):
+    """The parametrized case above, written out. Mutation: drop the creator filter in `_gates` ->
+    `failure 1000`."""
+    page1 = (
+        '{"context": "shipmate / gate", "state": "failure", "target_url": '
+        '"https://example.invalid/acme/demo/actions/runs/1000", "creator": 7}\n'
+    )
+    proc, calls = _run(tmp_path, "newest", SHA, page1=page1)
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        0,
+        "",
+        "",
+        [USER_ARGV, STATUSES_ARGV],
+    )
+
+
+_FOREIGN_GREEN_OVER_HOLD = _lines(
+    _status(_GATE, "success", _run_url(1000), creator=7), _status(_GATE, "failure")
+)
+
+
+@bash_only
+def test_a_foreign_green_does_not_hide_the_apps_hold_from_newest(tmp_path):
+    """Mutation: drop the creator filter in `_gates` -> `success 1000`."""
+    proc, calls = _run(tmp_path, "newest", SHA, page1=_FOREIGN_GREEN_OVER_HOLD)
+    assert (proc.returncode, proc.stdout, calls) == (0, "failure 999\n", [USER_ARGV, STATUSES_ARGV])
+
+
+@bash_only
+def test_a_foreign_green_does_not_hide_the_apps_hold_from_refresh(tmp_path):
+    """Mutation: drop the creator filter in `_gates` -> the hold is greened."""
+    proc, calls = _run(tmp_path, "refresh", SHA, checks=DONE, page1=_FOREIGN_GREEN_OVER_HOLD)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (3, HELD, "")
+    assert calls == [CHECKS_ARGV, USER_ARGV, STATUSES_ARGV]
+
+
+@bash_only
+def test_a_foreign_newer_hold_does_not_refuse(tmp_path):
+    """A newer run id on a status another identity created, over the App's older hold.
+    Mutation: drop the creator filter in `_gates` -> exit `NEWER` naming run 1000."""
+    page1 = _lines(
+        _status(_GATE, "failure", _run_url(1000), creator=7),
+        _status(_GATE, "failure", _run_url(998)),
+    )
+    proc, calls = _run(tmp_path, "refuse-newer", SHA, page1=page1)
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        0,
+        "",
+        "",
+        [USER_ARGV, STATUSES_ARGV],
+    )
+
+
+_SLUG_ERROR = (
+    "::error::SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the shipmate "
+    "App created and cannot tell which those are\n"
+)
+_OPEN = DONE + _lines(_check(3, "queued", name="apply / c / dev"))
+
+
+@bash_only
+@pytest.mark.parametrize("env", [NO_SLUG, {**ENV, "SHIPMATE_APP_SLUG": ""}], ids=["unset", "empty"])
+@pytest.mark.parametrize(
+    ("args", "checks"),
+    [
+        (("newest", SHA), ""),
+        (("refuse-newer", SHA), ""),
+        (("post", SHA, "pending", "waiting"), ""),
+        (("refresh", SHA), DONE),
+        (("refresh", SHA), _OPEN),
+    ],
+    ids=["newest", "refuse-newer", "post", "refresh-done", "refresh-open"],
+)
+def test_a_gate_reader_without_the_slug_refuses_before_any_call(tmp_path, env, args, checks):
+    """`refresh` and `post` check the slug at entry, because an API call (the check-run listing,
+    the POST) comes before their first gate read. `newest` and `refuse-newer` make no call before
+    `app_user`, which checks it before its lookup.
+
+    Mutations: drop `_require_slug()` from `refresh` -> `refresh-open` exits 0 after listing the
+    check runs, `refresh-done` lists them; drop it from `_post` -> `post` writes; move
+    `app_user()` below the listing in `_gates` -> `newest` and `refuse-newer` list the statuses."""
+    proc, calls = _run(tmp_path, *args, env=env, checks=checks)
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (1, "", _SLUG_ERROR, [])
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("args", "checks", "argv"),
+    [
+        (("hold", SHA, "re-plan"), "", _status_argv("failure", "re-plan")),
+        (
+            ("deploy", SHA, "success", "success"),
+            "",
+            _status_argv("success", "all env-levels applied (deploy env-level applies completed)"),
+        ),
+        (("checks", SHA, ".check_runs[]"), "{}\n", _checks_argv(".check_runs[]")),
+    ],
+    ids=["hold", "deploy", "checks"],
+)
+def test_a_command_that_reads_no_gate_needs_no_slug(tmp_path, args, checks, argv):
+    """Mutation: call `_require_slug()` in `main` for every subcommand -> each exits 1."""
+    proc, calls = _run(tmp_path, *args, env=NO_SLUG, checks=checks, checks_jq=".check_runs[]")
+    assert (proc.returncode, proc.stderr, calls) == (0, "", [argv])
+
+
+@pytest.mark.parametrize("cmd", ["moved", "replan"])
+def test_a_pull_request_read_needs_no_slug(in_process, monkeypatch, capsys, cmd):
+    """Mutation: call `_require_slug()` in `main` for every subcommand -> each exits 1."""
+    monkeypatch.delenv("SHIPMATE_APP_SLUG")
+    calls = _live_head(monkeypatch)
+    assert _cli(cmd, SHA, "7") == 0
+    assert (capsys.readouterr().out, calls) == (
+        f"{_LIVE}\n",
+        [_PULL_READ] if cmd == "moved" else [_PULL_READ, _RUNS_READ],
+    )
+
+
+_LOOKUP_404 = (
+    "::error::could not read the shipmate App's bot user shipmate-test[bot]: command failed (1): "
+    "gh api users/shipmate-test%255Bbot%255D | gh: Not Found (HTTP 404)\n"
+)
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("cmd", "expected_calls"),
+    [
+        ("newest", [USER_ARGV]),
+        ("refuse-newer", [USER_ARGV]),
+        ("refresh", [CHECKS_ARGV, USER_ARGV]),
+    ],
+)
+def test_a_failed_bot_user_lookup_refuses_before_the_statuses_read(tmp_path, cmd, expected_calls):
+    """gh's cause stays on the one `::error::` line, `%` escaped as `run_annotated` prints it.
+    Mutation: return None from `app_user` on a failed read -> exit 0 and a statuses read."""
+    proc, calls = _run(
+        tmp_path,
+        cmd,
+        SHA,
+        checks=DONE,
+        page1=_lines(_status(_GATE, "failure")),
+        user='{"message": "Not Found"}',
+        user_rc=1,
+        user_stderr="gh: Not Found (HTTP 404)\n",
+    )
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        1,
+        "",
+        _LOOKUP_404,
+        expected_calls,
+    )
+
+
+@pytest.mark.parametrize(
+    ("user", "cause"),
+    [
+        ('{"id": null}', "its id is null"),
+        ('{"id": "306306466"}', 'its id is "306306466"'),
+        ('{"id": true}', "its id is true"),
+        ("{}", "its id is null"),
+        ("<html>", "Expecting value: line 1 column 1 (char 0)"),
+        ("", "Expecting value: line 1 column 1 (char 0)"),
+    ],
+    ids=["null", "str", "bool", "missing", "html", "empty"],
+)
+@pytest.mark.parametrize("cmd", ["newest", "refuse-newer", "refresh"])
+def test_a_bot_user_answer_without_an_integer_id_refuses(
+    in_process, monkeypatch, capsys, cmd, user, cause
+):
+    """Mutations: accept any `id` (drop the `type(uid) is not int` refusal) -> a statuses read
+    and exit 0 or `HELD`; test `isinstance(uid, int)` -> `bool` reads the statuses; drop the
+    `ValueError` arm -> `html` and `empty` raise `JSONDecodeError`, not the refusal."""
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setattr(gs, "check_runs", lambda *_: DONE)
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return user
+        return _lines(_status(_GATE, "failure"))
+
+    monkeypatch.setattr(gs, "_run", run)
+    lead = "::error::could not read the shipmate App's bot user shipmate-test[bot]"
+    assert (_cli(cmd, SHA), capsys.readouterr(), calls) == (
+        1,
+        ("", f"{lead}: {cause}\n"),
+        [_USER],
+    )
+
+
+def test_the_post_command_looks_the_bot_user_up_once_across_retries(in_process, monkeypatch):
+    """The write 502s twice; each retry re-reads the gates under `refuse-newer`, which finds only
+    an older run's hold. Mutation: `functools.cache` -> `functools.lru_cache(maxsize=0)` (no
+    caching) -> a second lookup before the second read."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ:
+            return _lines(_status(_GATE, "failure", _run_url(1)))
+        if calls.count(args) <= 2:
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    gs.main(["post", SHA, "pending", "the reason"])
+    assert (calls, in_process) == ([_POST, _USER, _READ, _POST, _READ, _POST], [2, 5])
+
+
+def test_the_post_command_stops_when_the_bot_user_lookup_fails_before_its_retry(
+    in_process, monkeypatch
+):
+    """The write 502s once; the lookup under `refuse-newer` 502s on each of its own three
+    attempts, and its refusal ends the command before a second POST. Mutations: `retry=False` on
+    the lookup's `gh_json` -> one lookup and one sleep; return None from `app_user`'s `except` ->
+    the statuses are read and the second POST lands."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER or (args == _POST and calls.count(_POST) == 1):
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        if args == _READ:
+            return _lines(_status(_GATE, "failure", _run_url(1)))
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        gs.main(["post", SHA, "pending", "the reason"])
+    refusal = (
+        "::error::could not read the shipmate App's bot user shipmate-test[bot]: command failed "
+        "(1): gh api x | gh: Bad Gateway (HTTP 502)"
+    )
+    assert (exc.value.code, calls, in_process) == (
+        refusal,
+        [_POST, _USER, _USER, _USER],
+        [2, 2, 5],
     )

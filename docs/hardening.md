@@ -10,7 +10,8 @@ A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
 `SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way, so a branch-pushed
-workflow mints no App token, writes no gate status, submits no App review and
+workflow mints no App token, writes no gate status the required check or the
+engine counts (row 3), submits no App review and
 completes no apply check (row 16; `docs/github-app.md` §Key-exposure boundary)
 — but the gate's verdict is still computed from artifacts the branch's own plan
 run produced (see "What none of this fixes"). It can still dispatch the apply
@@ -90,7 +91,7 @@ event selects the `plan` job, or on `closed` the `release` job, and no other. do
 |---|---------|-------|--------|
 | 1 | Write access only for people trusted to apply | Repo/team access | Everything below is downstream of this |
 | 2 | Push ruleset restricting `.github/workflows/**` *and every other path a workflow executes* | Repo/org ruleset (push target) | Branch-authored workflows |
-| 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity |
+| 3 | Required check `shipmate / gate` with `integration_id`, strict | Branch ruleset | A *third party* posting `shipmate / gate` under another identity: any token with `statuses: write` can post that context, and the pin keeps such a status from satisfying the required check. The engine ignores it on its own side (`scripts/gate-status` counts only the statuses the shipmate App's bot user created), so it neither holds the gate nor hides a hold |
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is unforgeable at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |

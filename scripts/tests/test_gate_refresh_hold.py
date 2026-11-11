@@ -33,7 +33,13 @@ DONE = json.dumps(
 
 
 def _gate(state):
-    return json.dumps({"context": "shipmate / gate", "state": state, "target_url": RUN_URL}) + "\n"
+    status = {
+        "context": "shipmate / gate",
+        "state": state,
+        "target_url": RUN_URL,
+        "creator": 306306466,
+    }
+    return json.dumps(status) + "\n"
 
 
 def _status_argv(state, description):
@@ -64,6 +70,7 @@ def _run_step(tmp_path, *, gate="", detect_result="", deploy_results="", hold_de
             "GITHUB_ACTION_PATH": str(ACTIONS / "gate-refresh"),
             "HEAD_SHA": HEAD_SHA,
             "SHIPMATE_APP_ID": "7",
+            "SHIPMATE_APP_SLUG": "shipmate-test",
             "DETECT_RESULT": detect_result,
             "DEPLOY_RESULTS": deploy_results,
             "HOLD_DESCRIPTION": hold_description,

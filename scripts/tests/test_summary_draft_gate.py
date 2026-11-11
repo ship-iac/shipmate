@@ -23,7 +23,16 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, bash_only, run_with_gate_gh, run_with_gh_recorder, step_by
+from _loader import (
+    ACTIONS,
+    bash_only,
+    fail_script,
+    run_step,
+    run_with_gate_gh,
+    run_with_gh_recorder,
+    step_by,
+    write_python3_shim,
+)
 
 HEAD_SHA = "a" * 40
 RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
@@ -32,8 +41,10 @@ READ_ARGV = [
     "--paginate",
     f"repos/acme/demo/commits/{HEAD_SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url}",
+    ".[] | {context, state, target_url, creator: .creator.id}",
 ]
+#: `gate-status`'s App bot user lookup, once per process before its first statuses read.
+USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
 CHECKS_ARGV = [
     "api",
     "--paginate",
@@ -68,8 +79,19 @@ def _write_argv(state, description):
 
 
 def _gate(state):
-    return json.dumps({"context": "shipmate / gate", "state": state, "target_url": RUN_URL}) + "\n"
+    status = {
+        "context": "shipmate / gate",
+        "state": state,
+        "target_url": RUN_URL,
+        "creator": 306306466,
+    }
+    return json.dumps(status) + "\n"
 
+
+_DRAFT_NOT_WRITTEN = (
+    f"::warning::could not read the gate status of {HEAD_SHA}; the draft gate status was not "
+    "written\n"
+)
 
 #: A no-changes body, as `pending-checks` writes it: completed, so the refresh still runs.
 NO_CHANGES_BODY = json.dumps(
@@ -87,6 +109,8 @@ def _run_gate(
     checks_rc=0,
     checks_stderr="",
     bodies=NO_CHANGES_BODY + "\n",
+    user_rc=0,
+    user_stderr="",
 ):
     if bodies is not None:
         (tmp_path / "bodies.jsonl").write_text(bodies, encoding="utf-8")
@@ -100,6 +124,7 @@ def _run_gate(
         "MODE": mode,
         "PLAN_RESULT": "skipped",
         "SHIPMATE_APP_ID": "7",
+        "SHIPMATE_APP_SLUG": "shipmate-test",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://example.invalid",
         "GITHUB_RUN_ID": "999",
@@ -114,6 +139,8 @@ def _run_gate(
         checks_rc=checks_rc,
         page1=_gate(head_state) if head_state else "",
         statuses_rc=1 if read_fails else 0,
+        user_rc=user_rc,
+        user_stderr=user_stderr,
     )
 
 
@@ -123,9 +150,36 @@ def test_a_draft_run_keeps_an_existing_gate(tmp_path, head_state):
     """Mutation: delete the read -> the draft status overwrites the `failure` hold."""
     proc, calls = _run_gate(tmp_path, "draft", head_state)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV]
+    assert calls == [USER_ARGV, READ_ARGV]
     assert proc.stdout == (
         f"{HEAD_SHA} keeps its {head_state} gate status; the draft gate status was not written\n"
+    )
+
+
+@bash_only
+def test_a_draft_read_that_recovered_logs_its_retry_notice(tmp_path):
+    """A `newest` that succeeds after a retry keeps its notice in the step log. Mutation: drop the
+    `cat newest.err >&2` after a successful read -> stderr is empty."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_python3_shim(bin_dir)
+    notice = "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)"
+    fail_script(bin_dir, "gate-status", 0, notice, subcommand="newest", stdout="failure 5")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
+        "HEAD_SHA": HEAD_SHA,
+        "STATE": "pending",
+        "DESCRIPTION": "the reason",
+        "MODE": "draft",
+        "PLAN_RESULT": "skipped",
+    }
+    proc = run_step(tmp_path, step_by("summary", name="Create/refresh gate")["run"], env)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (
+        0,
+        f"{HEAD_SHA} keeps its failure gate status; the draft gate status was not written\n",
+        f"{notice}\n",
     )
 
 
@@ -136,7 +190,13 @@ def test_a_draft_run_writes_the_gate_on_a_head_with_none_and_does_not_refresh(tm
     proc, calls = _run_gate(tmp_path, "draft", "")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     # The `newest` read, then the `refuse-newer` read before the write.
-    assert calls == [READ_ARGV, READ_ARGV, _write_argv("pending", "the reason")]
+    assert calls == [
+        USER_ARGV,
+        READ_ARGV,
+        USER_ARGV,
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+    ]
 
 
 @bash_only
@@ -147,19 +207,37 @@ def test_a_held_run_writes_its_failure_gate_without_a_read_or_a_refresh(tmp_path
     -- a check-runs listing follows."""
     proc, calls = _run_gate(tmp_path, "held", "", state="failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("failure", "the reason")]
+    assert calls == [USER_ARGV, READ_ARGV, _write_argv("failure", "the reason")]
 
 
 @bash_only
 def test_a_failed_read_writes_nothing_and_warns(tmp_path):
-    """Mutation: drop the `if !` around the read -> `set -e` fails the step."""
+    """Mutations: drop the `if !` around the read -> `set -e` fails the step; print the read's
+    stderr unswapped (`cat newest.err >&2`) -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "draft", "", read_fails=True)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV]
-    assert proc.stdout == (
-        f"::warning::could not read the gate status of {HEAD_SHA}; the draft gate status was "
-        "not written\n"
+    assert calls == [USER_ARGV, READ_ARGV]
+    assert (proc.stdout, proc.stderr) == (
+        _DRAFT_NOT_WRITTEN,
+        f"::warning::command failed (1): gh {' '.join(READ_ARGV)}\n",
     )
+
+
+@bash_only
+def test_a_failed_bot_user_lookup_writes_nothing_and_warns(tmp_path):
+    """Mutation: print the read's stderr unswapped (`cat newest.err >&2`) -> the lookup's
+    `::error::` line."""
+    proc, calls = _run_gate(
+        tmp_path, "draft", "", user_rc=1, user_stderr="gh: Not Found (HTTP 404)"
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [USER_ARGV]
+    # `run_annotated` escapes `%` in the workflow command.
+    warning = (
+        "::warning::could not read the shipmate App's bot user shipmate-test[bot]: command failed "
+        "(1): gh api users/shipmate-test%255Bbot%255D | gh: Not Found (HTTP 404)\n"
+    )
+    assert (proc.stdout, proc.stderr) == (_DRAFT_NOT_WRITTEN, warning)
 
 
 @bash_only
@@ -168,7 +246,7 @@ def test_a_post_run_writes_over_this_runs_own_hold(tmp_path):
     Mutation: key the `newest` read on `post` instead of `draft` -> it keeps the hold, no write."""
     proc, calls = _run_gate(tmp_path, "post", "failure", state="success")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("success", "the reason")]
+    assert calls == [USER_ARGV, READ_ARGV, _write_argv("success", "the reason")]
 
 
 @bash_only
@@ -179,9 +257,11 @@ def test_a_pending_post_run_refreshes_the_gate_it_wrote(tmp_path):
     proc, calls = _run_gate(tmp_path, "post", "pending")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [
+        USER_ARGV,
         READ_ARGV,
         _write_argv("pending", "the reason"),
         CHECKS_ARGV,
+        USER_ARGV,
         READ_ARGV,
         _write_argv("success", "all applies complete, nothing left to apply"),
     ]
@@ -194,7 +274,7 @@ def test_no_bodies_file_skips_the_refresh(tmp_path):
     file, its negation passes, and the refresh greens the gate."""
     proc, calls = _run_gate(tmp_path, "post", "pending", bodies=None)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("pending", "the reason")]
+    assert calls == [USER_ARGV, READ_ARGV, _write_argv("pending", "the reason")]
 
 
 @bash_only
@@ -204,7 +284,12 @@ def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
     the `sed` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "pending", checks_rc=1)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV]
+    assert calls == [
+        USER_ARGV,
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+        CHECKS_ARGV,
+    ]
     assert (proc.stdout, proc.stderr) == (
         (
             f"::warning::command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
@@ -245,7 +330,14 @@ def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
     prefix the hold text with `::error::` in `gate-status` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV, READ_ARGV]
+    assert calls == [
+        USER_ARGV,
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+        CHECKS_ARGV,
+        USER_ARGV,
+        READ_ARGV,
+    ]
     assert (proc.stdout, proc.stderr) == (
         (
             f"shipmate / gate is held for {HEAD_SHA}; its status description on the pull request "
