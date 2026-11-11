@@ -111,14 +111,16 @@ def _require_slug():
 @functools.cache
 def app_user():
     """The integer id of the shipmate App's bot user, `<SHIPMATE_APP_SLUG>[bot]`, read once per
-    process. A failed read (after `gh_json`'s retries) or an `id` that is not an integer exits 1
-    with one `::error::` line naming the bot user."""
+    process. A failed read (after `gh_json`'s retries), an answer that is not JSON, or an `id`
+    that is not an integer exits 1 with one `::error::` line naming the bot user."""
     login = f"{_require_slug()}[bot]"
     lead = f"::error::could not read the shipmate App's bot user {login}"
     try:
         user = gh_json(f"users/{quote(login, safe='')}", lambda args: _run(args))
     except SystemExit as exc:
         raise SystemExit(f"{lead}: {one_line(str(exc.code).removeprefix('::error::'))}") from None
+    except ValueError as exc:
+        raise SystemExit(f"{lead}: {one_line(exc)}") from None
     uid = user.get("id") if isinstance(user, dict) else None
     if type(uid) is not int:
         raise SystemExit(f"{lead}: its id is {json.dumps(uid)}")

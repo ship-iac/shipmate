@@ -188,7 +188,7 @@ def test_refresh_refuses_to_green_a_held_gate(tmp_path):
 @bash_only
 def test_refresh_leaves_the_gate_while_a_check_is_open(tmp_path):
     """Mutations: ignore the verdict (`if False:`) -> the statuses are read and the gate greened;
-    call `app_user()` at `refresh`'s entry -> a lookup follows the listing."""
+    call `app_user()` at `refresh`'s entry -> a lookup precedes the listing."""
     checks = DONE + _lines(_check(3, "queued", name="apply / c / dev"))
     proc, calls = _run(tmp_path, "refresh", SHA, checks=checks)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
@@ -1080,21 +1080,24 @@ def test_a_failed_bot_user_lookup_refuses_before_the_statuses_read(tmp_path, cmd
 
 
 @pytest.mark.parametrize(
-    ("user", "shown"),
+    ("user", "cause"),
     [
-        ('{"id": null}', "null"),
-        ('{"id": "306306466"}', '"306306466"'),
-        ('{"id": true}', "true"),
-        ("{}", "null"),
+        ('{"id": null}', "its id is null"),
+        ('{"id": "306306466"}', 'its id is "306306466"'),
+        ('{"id": true}', "its id is true"),
+        ("{}", "its id is null"),
+        ("<html>", "Expecting value: line 1 column 1 (char 0)"),
+        ("", "Expecting value: line 1 column 1 (char 0)"),
     ],
-    ids=["null", "str", "bool", "missing"],
+    ids=["null", "str", "bool", "missing", "html", "empty"],
 )
 @pytest.mark.parametrize("cmd", ["newest", "refuse-newer", "refresh"])
-def test_a_bot_user_id_that_is_not_an_integer_refuses(
-    in_process, monkeypatch, capsys, cmd, user, shown
+def test_a_bot_user_answer_without_an_integer_id_refuses(
+    in_process, monkeypatch, capsys, cmd, user, cause
 ):
     """Mutations: accept any `id` (drop the `type(uid) is not int` refusal) -> a statuses read
-    and exit 0 or `HELD`; test `isinstance(uid, int)` -> `bool` reads the statuses."""
+    and exit 0 or `HELD`; test `isinstance(uid, int)` -> `bool` reads the statuses; drop the
+    `ValueError` arm -> `html` and `empty` raise `JSONDecodeError`, not the refusal."""
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setattr(gs, "check_runs", lambda *_: DONE)
     calls = []
@@ -1109,7 +1112,7 @@ def test_a_bot_user_id_that_is_not_an_integer_refuses(
     lead = "::error::could not read the shipmate App's bot user shipmate-test[bot]"
     assert (_cli(cmd, SHA), capsys.readouterr(), calls) == (
         1,
-        ("", f"{lead}: its id is {shown}\n"),
+        ("", f"{lead}: {cause}\n"),
         [_USER],
     )
 
@@ -1133,3 +1136,34 @@ def test_the_post_command_looks_the_bot_user_up_once_across_retries(in_process, 
     monkeypatch.setattr(gs, "_run", run)
     gs.main(["post", SHA, "pending", "the reason"])
     assert (calls, in_process) == ([_POST, _USER, _READ, _POST, _READ, _POST], [2, 5])
+
+
+def test_the_post_command_stops_when_the_bot_user_lookup_fails_before_its_retry(
+    in_process, monkeypatch
+):
+    """The write 502s once; the lookup under `refuse-newer` 502s on each of its own three
+    attempts, and its refusal ends the command before a second POST. Mutations: `retry=False` on
+    the lookup's `gh_json` -> one lookup and one sleep; return None from `app_user`'s `except` ->
+    the statuses are read and the second POST lands."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER or (args == _POST and calls.count(_POST) == 1):
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        if args == _READ:
+            return _lines(_status(_GATE, "failure", _run_url(1)))
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        gs.main(["post", SHA, "pending", "the reason"])
+    refusal = (
+        "::error::could not read the shipmate App's bot user shipmate-test[bot]: command failed "
+        "(1): gh api x | gh: Bad Gateway (HTTP 502)"
+    )
+    assert (exc.value.code, calls, in_process) == (
+        refusal,
+        [_POST, _USER, _USER, _USER],
+        [2, 2, 5],
+    )

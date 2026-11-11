@@ -524,11 +524,8 @@ fi
 #: unexpected call rather than one the stub follows.
 GATE_CHECKS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
 GATE_STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
-#: The `SHIPMATE_APP_SLUG` every gate harness sets, the id its bot user lookup answers (unlike
-#: any fixture's `SHIPMATE_APP_ID`, so an App-id comparison reddens), and the lookup's argv.
-GATE_APP_SLUG = "shipmate-test"
-GATE_BOT_ID = 306306466
-GATE_USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
+#: The `_GATE_GH` bot user lookup's default answer for `SHIPMATE_APP_SLUG=shipmate-test`; its id
+#: is unlike any fixture's `SHIPMATE_APP_ID`, so an App-id comparison reddens.
 GATE_USER = '{"id": 306306466, "login": "shipmate-test[bot]"}'
 
 
