@@ -4070,12 +4070,19 @@ def test_a_head_without_tools_verifies_the_pin_when_it_differs(monkeypatch, tmp_
             "1.13.2, with no v, pre-release or range.",
             id="grammar",
         ),
+        pytest.param(
+            "tools:\n  tofu:\n    vars: TOFU_VERSION\n",
+            "tools holds a variable reference, and it accepts none. Write the version into the "
+            "file.",
+            id="reference",
+        ),
     ],
 )
 def test_a_heads_invalid_tools_refuses_before_any_download(monkeypatch, tmp_path, head, refusal):
     """`tool_version_errors` runs on the head's table before any comparison, so no head string
-    reaches a release URL. Mutation: skip `tool_version_errors` in `changed_tools` -- every row
-    reddens."""
+    reaches a release URL, and `env-config.load_config` refuses a reference first. Mutations:
+    skip `tool_version_errors` in `changed_tools` -- every row but the reference reddens; parse
+    with `load_config_text` in place of `ec.load_config` -- the reference row reddens."""
     assert _head_refusal(monkeypatch, tmp_path, head) == f"{_HEAD}{refusal}"
 
 
@@ -4090,8 +4097,8 @@ def test_every_invalid_head_tools_entry_is_named_under_the_head_prefix(monkeypat
 
 
 _NOT_A_FILE = (
-    f"{_HEAD}the path is a directory or a symlink, not a file. Make it the config "
-    "file, or remove it."
+    f"{_HEAD}the path is a directory, or it or a parent directory is a symlink. Make it a "
+    "regular file in the checkout, or remove it."
 )
 
 
@@ -4113,9 +4120,9 @@ def test_a_dangling_symlink_at_the_heads_config_path_refuses(monkeypatch, tmp_pa
 @bash_only
 def test_a_symlink_to_a_file_at_the_heads_config_path_refuses(monkeypatch, tmp_path):
     """The target is a valid config whose `tools` would refuse differently, so following the link
-    cannot pass. Mutation: drop `os.path.islink(path) or` from `_head_table` (the target's
-    `tools` refusal replaces this one); not yet seen red, because the host it was written on
-    skips it."""
+    cannot pass. Mutation: drop the `os.path.realpath` comparison from `_head_table` (the
+    target's `tools` refusal replaces this one); not yet seen red, because the host it was
+    written on skips it."""
     target = tmp_path / "elsewhere.yml"
     target.write_text("tools:\n  tofu: 1.13.0\n", encoding="utf-8")
     (tmp_path / ".github").mkdir()
@@ -4130,17 +4137,42 @@ def test_a_symlink_to_a_file_at_the_heads_config_path_refuses(monkeypatch, tmp_p
     assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
 
 
-def test_a_path_reported_as_a_symlink_refuses_though_it_reads_as_a_file(monkeypatch, tmp_path):
-    """The host-independent half of the symlink case above, which Windows without the symlink
-    privilege skips: a regular file that `os.path.islink` reports as a link. Mutation: drop
-    `os.path.islink(path) or` from `_head_table` (the file's `tools` refusal replaces this one)."""
+@bash_only
+def test_a_symlinked_parent_directory_of_the_heads_config_path_refuses(monkeypatch, tmp_path):
+    """A head that commits `.github` itself as a symlink: the file is a regular file, and only
+    its parent leaves the checkout. The target holds a config whose `tools` would refuse
+    differently, so following the link cannot pass. Mutation: test `os.path.islink` on the
+    last component only (the target's `tools` refusal replaces this one); not yet seen red,
+    because the host it was written on skips it."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "shipmate-config.yml").write_text("tools:\n  tofu: 1.13.0\n", encoding="utf-8")
+    bash_symlink(tmp_path, outside, tmp_path / ".github")
+    if not os.path.isfile(tmp_path / ".github" / "shipmate-config.yml"):
+        # Without the symlink privilege, MSYS makes a link Python neither follows nor reports.
+        reason = "this host makes no symlink Python follows; Linux CI does"
+        if os.environ.get("CI") == "true":
+            pytest.fail(reason)
+        pytest.skip(reason)
+    assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
+
+
+def test_a_path_that_resolves_outside_the_checkout_refuses(monkeypatch, tmp_path):
+    """The host-independent half of the symlink cases above, which Windows without the symlink
+    privilege skips: a regular file that `os.path.realpath` resolves elsewhere. Mutations: test
+    `os.path.islink` on the last component only; drop the `os.path.realpath` comparison -- each
+    lets the file's `tools` refusal replace this one."""
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "shipmate-config.yml").write_text(
         "tools:\n  tofu: 1.13.0\n", encoding="utf-8"
     )
-    real = os.path.islink
+    real = os.path.realpath
     monkeypatch.setattr(
-        os.path, "islink", lambda p: str(p).endswith("shipmate-config.yml") or real(p)
+        os.path,
+        "realpath",
+        lambda p, **kw: (
+            str(tmp_path / "x.yml") if str(p).endswith("shipmate-config.yml") else real(p, **kw)
+        ),
     )
     assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
 
@@ -4160,8 +4192,8 @@ def test_a_path_reported_as_a_symlink_refuses_though_it_reads_as_a_file(monkeypa
     ],
 )
 def test_a_head_config_that_does_not_parse_refuses(monkeypatch, tmp_path, head, refusal):
-    """Mutations: drop the `yaml.YAMLError` handler; drop the mapping check -- each row's
-    refusal is lost."""
+    """Mutations: parse with `load_config_text` in place of `ec.load_config`; re-raise
+    `load_config`'s refusal without `_at_head` -- each row reddens."""
     assert _head_refusal(monkeypatch, tmp_path, head) == f"{_HEAD}{refusal}"
 
 

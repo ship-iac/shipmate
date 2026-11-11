@@ -1482,7 +1482,7 @@ the pull request's branch and push.
 | Annotation continues with | Cause and remedy |
 |---|---|
 | a `tools` refusal, such as "tools.<tool> is …, below <floor>, …" | The head's `tools` is invalid; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. Nothing was downloaded. |
-| "the path is a directory or a symlink, not a file. Make it the config file, or remove it." | The head has a directory or a symlink at that path. A symlink refuses even when it points at a file, so the read never leaves the checkout. A head with no file resolves to the pins. |
+| "the path is a directory, or it or a parent directory is a symlink. Make it a regular file in the checkout, or remove it." | The head has a directory at that path, or the path resolves through a symlink, at the file or at `.github`. A symlink refuses even when it points at a file, so the read never leaves the checkout. A head with no file resolves to the pins. |
 | "could not be read: <error>" | The file exists but the runner could not read it, or it is not UTF-8. `<error>` is the system's or the decoder's message. |
 | "is not valid YAML: <problem> (line <L>, column <C>)" or "must hold a mapping at the top level, got <type>" | The head's file does not parse. |
 | "Terramate <version>: " or "OpenTofu <version>: " then a reason from §`Terramate checksum verification failed` or `OpenTofu checksum verification failed` | The head's version's release did not verify. A 404 ends "no <tool> <version> release publishes <file>; set tools.<key> to a released version.": that version was never released. |

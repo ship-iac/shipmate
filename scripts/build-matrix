@@ -22,12 +22,10 @@ from _shipmate import (
     _load,
     _run,
     command_data,
-    load_config_text,
     named,
     run,
     run_annotated,
     write_outputs,
-    yaml_error_text,
 )
 
 ag = _load("apply-gate")
@@ -933,35 +931,39 @@ def tag_filter_error(tags, sweep: bool):
 HEAD_PREFIX = f"the pull request head's {ec.CONFIG_PATH}: "
 
 
+def _at_head(refusal):
+    """`refusal`, an `env-config` `::error::` line, under `HEAD_PREFIX` in place of the path."""
+    return refusal.replace(f"::error::{ec.CONFIG_PATH} ", "::error::", 1).replace(
+        "::error::", f"::error::{HEAD_PREFIX}", 1
+    )
+
+
 def _head_table():
-    """The head's config file parsed by the strings-only loader; `{}` when the head has none.
-    A symlink refuses, so the head cannot point the read at a file outside its tree."""
+    """The head's config file parsed by `env-config.load_config`; `{}` when the head has none.
+    A path that resolves anywhere but itself in the checkout refuses, so a symlink at it or at a
+    parent directory cannot point the read at a file outside the tree."""
     path = ec.CONFIG_PATH
     if not os.path.lexists(path):
         return {}
-    if os.path.islink(path) or not os.path.isfile(path):
+    inside = os.path.normpath(os.path.join(os.path.realpath(os.getcwd()), path))
+    if os.path.realpath(path) != inside or not os.path.isfile(path):
         raise SystemExit(
-            f"::error::{HEAD_PREFIX}the path is a directory or a symlink, not a file. "
-            "Make it the config file, or remove it."
+            f"::error::{HEAD_PREFIX}the path is a directory, or it or a parent directory is a "
+            "symlink. Make it a regular file in the checkout, or remove it."
         )
+    # Unprefixed and first: a runner refusal is about the runner, not the head's file.
     refusal = ec.runner_refusal()
     if refusal:
         raise SystemExit(refusal)
-    import yaml
-
     try:
         with open(path, encoding="utf-8") as fh:
-            table = load_config_text(fh.read())
+            text = fh.read()
     except (OSError, UnicodeDecodeError) as e:
         raise SystemExit(f"::error::{HEAD_PREFIX}could not be read: {e}") from None
-    except yaml.YAMLError as e:
-        raise SystemExit(f"::error::{HEAD_PREFIX}is not valid YAML: {yaml_error_text(e)}") from None
-    if not isinstance(table, dict):
-        raise SystemExit(
-            f"::error::{HEAD_PREFIX}must hold a mapping at the top level, got "
-            f"{type(table).__name__}"
-        )
-    return table
+    try:
+        return ec.load_config(text)
+    except SystemExit as e:
+        raise SystemExit(_at_head(str(e.code))) from None
 
 
 def changed_tools(raw, sweep: bool):
@@ -986,9 +988,7 @@ def changed_tools(raw, sweep: bool):
     engine = ec.engine_versions(ec.VERSIONS_PATH)
     errors = ec.tool_version_errors(head, engine)
     if errors:
-        raise SystemExit(
-            "\n".join(e.replace("::error::", f"::error::{HEAD_PREFIX}", 1) for e in errors)
-        )
+        raise SystemExit("\n".join(_at_head(e) for e in errors))
     resolved = ec.tool_versions(head, engine)
     return {tool: v for tool, (v, _) in resolved.items() if v != given[tool]}
 
