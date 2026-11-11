@@ -1058,13 +1058,16 @@ requests (`#<n>, #<m> contain it` for more than one) but none of them has
 - Cause: `<sha>` reached `<branch>` by a direct push, such as one by an actor
   the branch ruleset lets bypass it, of a commit an open or an earlier merged
   pull request contains. Deploying a listed pull request's plans would apply
-  more than, or other than, what the branch holds, so none of them deploys.
+  more than, or other than, what the branch holds, so the deploy maps none of
+  them.
 - Effect: As for `could not map <sha> to a merged pull request (...)` above:
   the deploy runs as a push to `<branch>`, maps no pull request and releases no
   cell lock.
 - Remedy: Re-running the deploy maps nothing new: the same pull requests are
   listed. When the deploy refuses with `deploy refused: ... locked by another
-  pull request`, follow §A merge deploy refused below.
+  pull request`, follow §A merge deploy refused below. When it refuses with
+  `apply aborted: no plan run recorded`, open a pull request that changes the
+  unapplied stacks and apply it, as in the section above.
 
 ### A merge deploy refused: `deploy refused: <n> pending cell(s) are locked by another pull request`
 

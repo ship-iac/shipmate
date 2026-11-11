@@ -1266,8 +1266,8 @@ request; an unknown holder never is. Evicting a stacked holder and then
 applying this pull request would overwrite what the holder applied, so any
 stacked holder refuses the whole command and nothing is released. The reply
 is ``🔴 refused: no cell lock in `<env>` was released.`` with the refusal
-fenced, one sentence pair per stacked holder, lowest first: `#<h> is stacked on this pull
-request and holds <n> of its cell(s) in <env>; applying this pull request after
+fenced, one sentence pair per stacked holder, lowest first:
+`#<h> is stacked on this pull request and holds <n> of its cell(s) in <env>; applying this pull request after
 evicting it would overwrite what it applied. Retarget #<h> to <default branch>
 and merge it first, or close it, which releases its locks.` With no stacked
 holder, a holder whose read fails or answers malformed refuses too, releasing
