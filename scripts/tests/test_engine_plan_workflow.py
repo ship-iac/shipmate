@@ -168,7 +168,7 @@ def _values(node):
 
 #: A `secrets` context reference inside an expression: a property, an index, or the whole
 #: context, but not a longer identifier such as `consumer-secrets` or `inputs.secrets`.
-_SECRETS_REF = re.compile(r"(?<![\w.-])secrets(?:\.[\w-]+|\[[^\]]*\]|(?![\w-]))")
+_SECRETS_REF = re.compile(r"(?<![\w.-])secrets(?:\.[\w-]+|\[[^\]]*\]|(?![\w-]))", re.IGNORECASE)
 
 
 def test_the_cell_job_references_exactly_these_secrets():
