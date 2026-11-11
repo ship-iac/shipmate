@@ -1240,10 +1240,10 @@ App key (§16).
 
 The pull-request condition is the review decision GitHub reports for the pull
 request. `scripts/authorize` reads it when `shipmate apply` is commented and
-refuses `CHANGES_REQUESTED` there; `apply.yml`'s `review` job reads it again in
-the apply run, and `scripts/apply-detect` decides on that value: a targeted
-apply refuses, and a bare apply holds every environment the decision does not
-admit. The decision admits an apply to an environment when it is:
+refuses there any decision the list below does not admit; `apply.yml`'s
+`review` job reads it again in the apply run, and `scripts/apply-detect`
+decides on that value: a targeted apply refuses, and a bare apply holds every
+environment the decision does not admit. The decision admits an apply to an environment when it is:
 
 - `APPROVED`. The engine checks no freshness of its own: whether a push after
   the approval resets the decision is up to the ruleset's freshness settings

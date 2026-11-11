@@ -13,7 +13,7 @@ on:
 # Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
 # id-token: write.
 permissions: {}
-# A dispatched run holds the default branch's cache scope while it runs the pull request's HCL,
+# An unlock run holds the default branch's cache scope while it runs the pull request's HCL,
 # and nothing in this file saves an Actions-cache entry.
 cache-mode: read
 jobs:

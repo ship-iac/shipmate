@@ -333,7 +333,7 @@ def test_the_unlock_job_references_exactly_these_secrets():
 def test_no_workflow_level_value_hands_a_secret_to_every_job(workflow):
     """A workflow-level `env:` reaches every job, the cells that run the pull request's HCL
     included, so the per-job secret pins would not see it. Mutation: add a top-level
-    `env: { K: ${{ secrets.SHIPMATE_VARS }} }` to `apply-env-level.yml`."""
+    `env: { K: "${{ secrets.SHIPMATE_VARS }}" }` to `apply-env-level.yml`."""
     wf = workflow_yaml(workflow)
     assert secrets_refs({k: v for k, v in wf.items() if k not in ("on", True, "jobs")}) == []
 
