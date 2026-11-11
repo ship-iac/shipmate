@@ -10,8 +10,9 @@ nothing.
 Each step, `uses:` aside, is asserted whole against a hand-written table: `id: setup` and
 `resolve: "true"` at the five detect jobs, whose `tools` output reads that id; `versions` at every
 cell, from its detect job's output (`apply-env-level.yml` from its `tools` input, which
-`apply.yml` and `deploy.yml` fill from theirs); `tofu: "false"` at the detect jobs, which never
-run OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml site, whose workflow-level
+`apply.yml` and `deploy.yml` fill from theirs) and at `deploy.yml`'s `warm` job, which installs
+OpenTofu only to save its cache entry; `tofu: "false"` at the detect jobs, which never run
+OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml site, whose workflow-level
 `cache-mode: read` denies the save with a warning; and `if: false` on the manifest-load parse
 probe.
 """
@@ -45,7 +46,7 @@ _FROM_DETECT = "${{ needs.detect.outputs.tools }}"
 EXPECTED_STEPS = {
     "apply-env-level.yml": [{"with": {"versions": "${{ inputs.tools }}"}}] * 8,
     "apply.yml": [_DETECT],
-    "deploy.yml": [_DETECT],
+    "deploy.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     "drift.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     # The remote parse probe never runs a step.
     "manifest-load.yml": [{"if": False}],
@@ -66,7 +67,7 @@ def test_setup_call_sites_resolve_once_and_pass_only_the_switches():
     site; rename plan.yml's detect site `id: setup` to `id: tools`; drop `cache-save` from
     unlock.yml's cell site; add `cache-save: "false"` to drift.yml's cell site; add
     `resolve: "true"` to plan.yml's cell site; set the wave cells' `versions` to `""`; drop
-    `resolve` from deploy.yml's detect site.
+    `resolve` from deploy.yml's detect site; add `tofu: "false"` to deploy.yml's warm site.
     """
     got = {
         name: [{k: v for k, v in s.items() if k != "uses"} for s in steps]

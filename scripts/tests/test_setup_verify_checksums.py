@@ -104,7 +104,7 @@ _TM_OUTPUT = (
 _HTML = b"<!DOCTYPE html><html><body>rate limit exceeded</body></html>\n"
 
 #: The verify steps' whole definitions but `run:`. The OpenTofu one carries the same `if:` as
-#: `Install OpenTofu`: a job that never runs tofu must not fail on an OpenTofu signer change.
+#: `Install OpenTofu`: a job passing `tofu: "false"` must not fail on an OpenTofu signer change.
 _EXPECTED_STEPS = {
     "tofu-sums": {
         "name": "Verify OpenTofu checksums",

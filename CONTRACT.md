@@ -2786,7 +2786,15 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   restore only and pass `setup` `cache-save: "false"`. Entries come from the
   apply, deploy and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
-  downloads the release files in every plan job. An entry is keyed on its path, which
+  downloads the release files in every plan job. A deploy run's `warm` job
+  runs only on a deploy with no cells, because a cell that reaches its `setup`
+  step saves the entry (one refused before it saves nothing),
+  and installs OpenTofu at the versions its `detect` resolved. It saves
+  the entry for the deploy runner's operating system and architecture, which
+  the key carries, so a plan cell on another runner type still misses. The
+  deploy run waits for `warm`, so it holds the deploy concurrency group for up
+  to its 15-minute timeout; no job, the gate, the cells or the lock release
+  read it, and its failure shows on that job only. An entry is keyed on its path, which
   lives under `RUNNER_TEMP`: a job on a runner image whose `RUNNER_TEMP`
   differs from the saving runner's misses and downloads. This replacement handles
   a corrupt or stale entry; it does not defend against a crafted one, which
@@ -4407,7 +4415,9 @@ stack-wave by stack-wave exactly as described above (see Fan-out).
 
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
-`apply-env-level.yml` → gate completion + cell lock release), the
+`apply-env-level.yml` → gate completion + cell lock release; beside the
+env-levels, `warm` saves the OpenTofu cache entry on a deploy with no cells; the
+run waits for it, but no job, the gate, the cells or the lock release read it), the
 apply path as `.github/workflows/apply.yml` (detect → cell lock acquisition →
 env-levels 0..3 via `apply-env-level.yml` → gate refresh + result comment; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one
