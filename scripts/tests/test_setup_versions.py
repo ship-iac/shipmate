@@ -157,7 +157,7 @@ _EXPECTED_INPUTS = {
         "default": "",
     },
     "tofu": {
-        "description": 'Whether to install OpenTofu. "false" for jobs that never run it.',
+        "description": 'Whether to install OpenTofu. "false" for jobs that need no OpenTofu.',
         "required": False,
         "default": "true",
     },
@@ -174,13 +174,14 @@ _EXPECTED_INPUTS = {
 
 def test_the_inputs_are_the_mode_and_the_tofu_and_cache_save_switches():
     """Mutations: `tofu` `default: "true"` -> `"false"`; `cache-save` `default: "true"` ->
-    `"false"`; add a `tofu-version` input; `resolve` `default: ""` -> `"true"`."""
+    `"false"`; add a `tofu-version` input; `resolve` `default: ""` -> `"true"`; `tofu`'s
+    description back to `"false" for jobs that never run it.`"""
     assert action_yaml(_ACTION).get("inputs") == _EXPECTED_INPUTS
 
 
 def test_each_steps_if_is_pinned():
     """Composite inputs are strings, and expression string comparison ignores case, so
-    anything but "false" in any case installs OpenTofu. A job that never runs tofu skips its
+    anything but "false" in any case installs OpenTofu. A job passing `tofu: "false"` skips its
     restore, verify and save steps too, so an OpenTofu signer change or outage cannot fail it.
     No save `if:` holds a status function, so a failed verify or install saves nothing.
 

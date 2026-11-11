@@ -2786,7 +2786,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   restore only and pass `setup` `cache-save: "false"`. Entries come from the
   apply, deploy and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
-  downloads the release files in every plan job. An entry is keyed on its path, which
+  downloads the release files in every plan job. A deploy run's `warm` job
+  installs OpenTofu at the versions its `detect` resolved, so a merge deploy
+  saves the OpenTofu entry even when it runs no cell; nothing waits on `warm`,
+  and its failure shows on that job only. An entry is keyed on its path, which
   lives under `RUNNER_TEMP`: a job on a runner image whose `RUNNER_TEMP`
   differs from the saving runner's misses and downloads. This replacement handles
   a corrupt or stale entry; it does not defend against a crafted one, which

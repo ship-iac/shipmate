@@ -268,8 +268,8 @@ engine job but nineteen:
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
 - `apply.yml` and `deploy.yml`: `detect`, the apply cells in
-  `apply-env-level.yml`, to which both pass `runs_on`, and `lock` in
-  `apply.yml`.
+  `apply-env-level.yml`, to which both pass `runs_on`, `lock` in
+  `apply.yml` and `warm` in `deploy.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
 - `release.yml`: `release`.
