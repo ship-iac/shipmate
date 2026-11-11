@@ -2066,15 +2066,23 @@ refuses the whole run with one line:
 `` deploy refused: <n> pending cell(s) are locked by another pull request:
 <stack> / <env> (locked by <who>), .... None of this deploy's <m> pending
 cell(s) were applied: <stack> / <env>, .... Open a pull request that changes
-these stacks, comment `shipmate unlock <env> --evict` on it for each
-environment above, then apply it. ``
+these stacks. For #<h> in <env>: wait for #<h> to merge or close, then
+re-plan. If #<h> has already merged or closed, comment `shipmate unlock <env>
+--evict` on the new pull request. ... Then apply it. ``
 
-`<who>` is `#<n>`, or `an unknown holder`; both lists are sorted, and `<env>`
-is the command's placeholder. For a mapped merge, the refusal names one
-recovery and offers no re-run: `--evict` from a pull request that changes the
-cells releases the locks other pull requests, or an unknown holder, hold on
-them. It releases a cell only once that pull request's plan has published the cell's apply check
-(§Comment-ops), so the comment comes after the plan. Before it refuses,
+`<who>` is `#<n>`, or `an unknown holder`; both lists are sorted. The remedy
+has one `For` sentence per holder and environment, sorted by environment, then
+holder; an unknown holder's reads `` For an unknown holder in <env>: comment
+`shipmate unlock <env> --evict` on the new pull request. ``, since no pull
+request of it can merge or close. For a mapped merge, the refusal names one
+recovery and offers no re-run: a new pull request that changes the cells.
+An open holder is waited for, not evicted: its merge deploy or close releases
+its locks, and evicting it lets the new pull request overwrite what it applied.
+`--evict` releases only the locks on cells whose apply check is pending on the
+evicting pull request's head (failed and cancelled included), so the comment
+comes after its plan has published them (§Comment-ops). It refuses with a
+`🔴 refused:` reply, releasing nothing, when a holder is stacked on the evicting
+pull request (§Comment-ops). Before it refuses,
 `detect` writes the output `refused_locked` `true`, and the deploy's release
 step passes it to `actions/lock-release` as `release-pending`, so the merged
 pull request's locks are released on its pending cells too: none of them
@@ -2088,16 +2096,18 @@ input `deploy: true`, with the merged pull request as `pr_number`, empty on a
 push), which runs none of the checks above and refuses only when a pull request
 other than the merged one, or an unknown holder, holds the cell's lock:
 `` apply aborted for `<env>` / `<stack>`: its cell lock is held by <who>, not by
-this deploy's pull request. Open a pull request that changes this stack, comment
-`shipmate unlock <env> --evict` on it, then apply it ``, where `<env>` in the
-command is the cell's own environment. An unlocked cell, or one the merged pull request
+this deploy's pull request. Open a pull request that changes this stack. For
+<who> in <env>: wait for <who> to merge or close, then re-plan. If <who> has
+already merged or closed, comment `shipmate unlock <env> --evict` on the new
+pull request. Then apply it ``, with the `For` sentence an unknown holder gets
+as above. An unlocked cell, or one the merged pull request
 holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
 wave cell assumes no cloud role and keeps its apply check pending, and the waves
 before it have applied. The merged pull request keeps its locks on the cells
 that did not apply, other than the refused one, and the recovery pull request's
-`--evict` releases those too.
+`--evict` releases those too, on the cells it changes.
 
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the

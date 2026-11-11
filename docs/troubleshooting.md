@@ -1077,10 +1077,8 @@ a merged pull request:
   cell refuses with `apply aborted: no plan run recorded`.
 - Remedy: For a merge commit, re-run the deploy once `gh api
   repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request. If it never
-  does, or the commit was a direct push, open a pull request that changes the
-  unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
-  environment the refusal names (the `<env>` after the last ` / ` of each
-  `<stack> / <env>` cell or `apply / <stack> / <env>` check), then apply it.
+  does, or the commit was a direct push, follow the refusal's remedy, as in
+  §A merge deploy refused below.
 
 ### `could not map <sha> to the pull request that merged it: #<n> contains it but none records it as its merge commit; deploying it as a push to <branch>`
 
@@ -1109,8 +1107,12 @@ requests (`#<n>, #<m> contain it` for more than one) but none of them has
 The deploy's `detect` annotation reads, on one line, `` deploy refused: <n>
 pending cell(s) are locked by another pull request: <stack> / <env> (locked by
 <who>), .... None of this deploy's <m> pending cell(s) were applied: <stack> /
-<env>, .... Open a pull request that changes these stacks, comment `shipmate
-unlock <env> --evict` on it for each environment above, then apply it. ``
+<env>, .... Open a pull request that changes these stacks. For #<h> in <env>:
+wait for #<h> to merge or close, then re-plan. If #<h> has already merged or
+closed, comment `shipmate unlock <env> --evict` on the new pull request. ...
+Then apply it. ``, with one `For` sentence per holder and environment. An
+unknown holder's reads `` For an unknown holder in <env>: comment `shipmate
+unlock <env> --evict` on the new pull request. ``
 
 Another pull request, or an unknown holder, locks one of the merge's pending
 cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
@@ -1123,11 +1125,18 @@ gate is written on the merge commit. The apply checks stay pending.
 
 1. Open a pull request that changes every stack the message lists as not
    applied (any edit `terramate list --changed` marks, such as a comment line).
-2. Once it has planned, comment `shipmate unlock <env> --evict` on it, with
-   write access, for each environment the message names. It releases the
-   locks other pull requests, or an unknown holder, hold on its cells there.
-   Its plan comment can mark a locked cell `🔒 locked by`.
-3. Its cells are applied before merge under a required gate (`shipmate apply`,
+2. For each holder `#<h>` the message names that is still open, wait for it to
+   merge or close, then re-plan the new pull request: its merge deploy or close
+   releases its locks, and evicting it would let the new pull request overwrite
+   what it applied. The new pull request's plan comment can mark a locked cell
+   `🔒 locked by`.
+3. For each holder that has already merged or closed, and each unknown holder,
+   comment `shipmate unlock <env> --evict` on the new pull request, with write
+   access, once it has planned. It releases only the locks on cells whose
+   apply check is pending on its head, and refuses with a `🔴 refused:` reply,
+   releasing nothing, when a holder is stacked on it (§`shipmate unlock <env>
+   --evict` is refused: `#<h> is stacked on this pull request`).
+4. Its cells are applied before merge under a required gate (`shipmate apply`,
    and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.
 
@@ -1135,8 +1144,11 @@ gate is written on the merge commit. The apply checks stay pending.
 
 A merge deploy's wave cell fails at `Pre-apply check` with `` apply aborted for
 `<env>` / `<stack>`: its cell lock is held by <who>, not by this deploy's pull
-request. Open a pull request that changes this stack, comment `shipmate unlock
-<env> --evict` on it, then apply it ``.
+request. Open a pull request that changes this stack. For <who> in <env>: wait
+for <who> to merge or close, then re-plan. If <who> has already merged or
+closed, comment `shipmate unlock <env> --evict` on the new pull request. Then
+apply it ``; an unknown holder's `For` sentence reads as in §A merge deploy
+refused.
 
 Another pull request, or an unknown holder, took the cell's lock after this
 deploy's `detect` read the locks. The cell assumes no cloud role and its apply
