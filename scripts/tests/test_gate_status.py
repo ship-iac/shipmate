@@ -426,9 +426,9 @@ def test_checks_sends_the_projection_it_is_given(tmp_path):
 
 @bash_only
 def test_checks_fails_unannotated_when_the_listing_fails(tmp_path):
-    """Degrading sites warn and continue, so the listing's failure must not annotate their green
-    step. Mutations: catch the `SystemExit` and return -> exit 0; call `check_runs` without
-    `run=run` -> the default `_run` prefixes `::error::`."""
+    """Degrading sites warn and continue, so the listing's failure must not add a warning or error
+    annotation to their green step. Mutations: catch the `SystemExit` and return -> exit 0; call
+    `check_runs` without `run=run` -> the default `_run` prefixes `::error::`."""
     proc, calls = _run(
         tmp_path,
         "checks",
@@ -476,7 +476,7 @@ def test_a_multi_line_failure_prints_as_one_escaped_annotation(tmp_path):
 
 
 _BAD_GATEWAY = "command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)"
-_RETRY_WARNING = "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+_RETRY_NOTICE = "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
 
 
 @pytest.fixture
@@ -489,9 +489,9 @@ def in_process(monkeypatch):
     return slept
 
 
-def test_checks_keeps_a_retry_warning_off_its_stdout(in_process, monkeypatch, capsys):
+def test_checks_keeps_a_retry_notice_off_its_stdout(in_process, monkeypatch, capsys):
     """Stdout is the JSONL listing `apply-gate.parse_jsonl` reads, so a stray line fails it.
-    Mutation: write `warn_retry`'s line to stdout -> the warning leads the listing."""
+    Mutation: write `note_retry`'s line to stdout -> the notice leads the listing."""
     calls = []
 
     def run(args):
@@ -502,7 +502,7 @@ def test_checks_keeps_a_retry_warning_off_its_stdout(in_process, monkeypatch, ca
 
     monkeypatch.setattr(gs, "run", run)
     gs.main(["checks", SHA, ".check_runs[]"])
-    assert capsys.readouterr() == ("{}\n", _RETRY_WARNING)
+    assert capsys.readouterr() == ("{}\n", _RETRY_NOTICE)
     assert (len(calls), in_process) == (2, [2])
 
 
@@ -532,7 +532,7 @@ def test_post_retries_a_transient_failure(in_process, monkeypatch, capsys):
     """Mutation: `_run(args)` without `retried` in `post` -> the 502 raises."""
     calls = _flaky_run(monkeypatch, [])
     gs.post(SHA, "pending", "the reason")
-    assert (calls, in_process, capsys.readouterr()) == ([_POST, _POST], [2], ("", _RETRY_WARNING))
+    assert (calls, in_process, capsys.readouterr()) == ([_POST, _POST], [2], ("", _RETRY_NOTICE))
 
 
 def test_gates_retries_a_transient_failure(in_process, monkeypatch):
@@ -564,7 +564,7 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
     assert (exc.value.code, calls, capsys.readouterr()) == (
         gs.HELD,
         [_READ, green, _READ],
-        (HELD, _RETRY_WARNING),
+        (HELD, _RETRY_NOTICE),
     )
 
 
@@ -677,13 +677,15 @@ def test_moved_prints_the_live_head_only_when_it_is_not_the_sha(
 
 @pytest.mark.parametrize("cmd", ["moved", "replan"])
 def test_a_failed_head_read_exits_1_on_one_unannotated_line(in_process, monkeypatch, capsys, cmd):
-    """gh's CR-led `::add-mask::` stays inside the one line. Mutation: re-raise `run`'s
-    `SystemExit` raw in `pr_head` -- two lines."""
+    """gh's CR-led `::add-mask::` stays inside the one line, after the retries' notices.
+    Mutation: re-raise `run`'s `SystemExit` raw in `pr_head` -- two lines."""
     calls = _live_head(monkeypatch, pull_fails=True)
-    assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls) == (
+    notice = "::notice::command failed (1): gh api repos/acme/demo/pulls/7%0AHTTP 502\n"
+    assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls, in_process) == (
         _PULL_FAILED,
-        ("", ""),
-        [_PULL_READ],
+        ("", 2 * notice),
+        [_PULL_READ] * 3,
+        [2, 5],
     )
 
 
@@ -802,14 +804,28 @@ def test_replan_prints_nothing_when_the_live_head_has_its_autoplan(
 
 
 def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, capsys):
-    """Mutation: call `autoplan_runs` outside `retried` -- the 502 exits 1, red."""
+    """Mutation: list without `retried` in `autoplan_runs` (`listing = run(args)`) -- the 502
+    exits 1, red."""
     transient = SystemExit("command failed (1): gh api --paginate x\nHTTP 502")
     calls = _live_head(monkeypatch, runs=[transient, _rows()])
     assert _cli("replan", SHA, "7") == 0
     assert (capsys.readouterr(), calls, in_process) == (
-        (f"{_LIVE}\n", "::warning::command failed (1): gh api --paginate x%0AHTTP 502\n"),
+        (f"{_LIVE}\n", "::notice::command failed (1): gh api --paginate x%0AHTTP 502\n"),
         [_PULL_READ, _RUNS_READ, _RUNS_READ],
         [2],
+    )
+
+
+def test_replan_spends_three_listing_reads_on_a_persistent_5xx(in_process, monkeypatch, capsys):
+    """The listing retries inside `autoplan_runs` only. Mutation: call it through
+    `retried(lambda: ag.autoplan_runs(...))` again -- nine listing calls."""
+    calls = _live_head(monkeypatch, runs_fail=502)
+    notice = "::notice::command failed (1): gh api --paginate x%0AHTTP 502\n"
+    assert (_cli("replan", SHA, "7"), capsys.readouterr(), calls, in_process) == (
+        "command failed (1): gh api --paginate x | HTTP 502",
+        ("", notice * 2),
+        [_PULL_READ] + [_RUNS_READ] * 3,
+        [2, 5],
     )
 
 

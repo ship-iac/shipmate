@@ -96,6 +96,41 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
     )
 
 
+def test_a_persistent_5xx_costs_three_reads_then_refuses_with_its_reason(monkeypatch, capsys):
+    """The read retries inside `gh_json` only, and the final failure still reaches stderr.
+    Mutations: wrap the read in `_reporting_fetch` in `retried(lambda: gh_json(path))` again --
+    nine calls; drop the `log_failure` call -- stderr holds only the notices."""
+    _env(monkeypatch)
+    sleeps = []
+    monkeypatch.setattr(sys.modules["_shipmate"], "_sleep", sleeps.append)
+    calls = []
+
+    def run(args):
+        calls.append(list(args))
+        raise SystemExit(
+            "::error::command failed (1): gh api repos/an-org/a-repo/contents/.github/"
+            "shipmate-config.yml\ngh: HTTP 502"
+        )
+
+    monkeypatch.setattr(sys.modules["_shipmate"], "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        ec.read_table()
+    notice = (
+        "::notice::command failed (1): gh api repos/an-org/a-repo/contents/.github/"
+        "shipmate-config.yml%0Agh: HTTP 502\n"
+    )
+    logged = (
+        "command failed (1): gh api repos/an-org/a-repo/contents/.github/shipmate-config.yml\n"
+        "gh: HTTP 502\n"
+    )
+    assert (str(exc.value), calls, sleeps, capsys.readouterr().err) == (
+        _UNREADABLE,
+        [["gh", "api", "repos/an-org/a-repo/contents/.github/shipmate-config.yml"]] * 3,
+        [2, 5],
+        notice * 2 + logged,
+    )
+
+
 def test_a_missing_gh_refuses_with_its_reason_on_stderr(monkeypatch, capsys):
     """A fetch failing with something other than `SystemExit` still writes its reason.
     Reddens on narrowing `_reporting_fetch`'s `except` to `SystemExit`: `contents_text`
@@ -213,7 +248,7 @@ def test_a_failing_gh_refuses(monkeypatch):
     _env(monkeypatch)
     stdout = json.dumps(_blob("layout: tf_vars\n")).encode()
 
-    def fake_subprocess_run(args, capture_output=False, input=None):
+    def fake_subprocess_run(args, capture_output=False, input=None, env=None):
         return types.SimpleNamespace(returncode=1, stdout=stdout, stderr=b"gh: boom\n")
 
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)

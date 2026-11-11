@@ -23,7 +23,6 @@ from _shipmate import (
     command_data,
     gh_json,
     load_config_text,
-    retried,
     yaml_error_text,
 )
 
@@ -291,14 +290,14 @@ def log_failure(e, label=""):
 
 
 def _reporting_fetch(path):
-    """`gh_json`, retried on a transient failure (`retried`), writing the final failure's
-    reason to stderr before re-raising it.
+    """`gh_json`, which retries a transient failure, writing the final failure's reason to
+    stderr before re-raising it.
 
     `contents_text` swallows every exception, so this is the only place a 404, a 403, a
     missing `gh` or a non-JSON answer is seen.
     """
     try:
-        return retried(lambda: gh_json(path))
+        return gh_json(path)
     except (Exception, SystemExit) as e:
         log_failure(e)
         raise

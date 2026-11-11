@@ -2252,7 +2252,7 @@ and no later attempt succeeded, or the listing that decides whether to retry it
 failed, so the engine cannot tell whether a run started. The comment-handling
 run's log holds gh's error: the final failure printed is the dispatch's own,
 or the listing's when the listing failed, and then the dispatch's failures are
-in the retry warnings above it.
+in the retry notices above it.
 
 Check the Actions tab as above. When no run of this command started, comment
 it again.
@@ -2467,14 +2467,17 @@ not re-run the refused deploy: it checks out the same commit and refuses again.
 The same gate description appears for any `detect` failure after it named the
 head. Read the `detect` job's `::error::` annotation. A refusal states its
 cause: search this page for its text. A `command failed` annotation names the
-command that failed (`gh api`, `terramate`, `git`) and carries its stderr; for
-that case only, re-run the deploy once, and if it fails the same way, that
-stderr is the cause. A transient failure (a 5xx, a dropped connection, a
-truncated body) of a `shipmate / gate` read or write or a check-run listing is retried
-twice first, each retry logged as a warning naming the command and gh's first
-stderr line. When no annotation but `Process completed with exit code`
-names the cause, read the failed step's log: a traceback or a failed checkout or
-setup step shows there.
+command that failed (`gh api`, `terramate`, `git`) and carries its stderr. The
+engine's Python scripts retry a transient failure (a 5xx, a dropped connection,
+a truncated body) of a `gh api` call twice, 2 and 5 seconds later, for most
+reads whose failure would fail the job and for the writes of the gate, a
+dispatch and an apply check; each retry is logged as a notice naming the command
+and gh's first stderr line. A retry notice naming the same command above a
+`command failed` annotation in the step log means that call was retried; none
+means it was a single attempt. For a `command failed` annotation only, re-run
+the deploy once, and if it fails the same way, that stderr is the cause. When no
+annotation but `Process completed with exit code` names the cause, read the
+failed step's log: a traceback or a failed checkout or setup step shows there.
 
 A gate reading `deploy gate got no detect result; see the run` means the deploy
 workflow passed no `detect` result to its `summary`; the engine's `deploy.yml`

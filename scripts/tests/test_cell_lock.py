@@ -373,6 +373,64 @@ PR_STATE_READ = [
     ".data.repository.pullRequest",
 ]
 OPEN = _pr_state("OPEN")
+BAD_GATEWAY = SystemExit("::error::command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)")
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    slept = []
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
+    return slept
+
+
+def test_repo_id_retries_a_transient_failure(sleeps):
+    """The double serves both answers from one argv. Mutation: call `run([...])` without
+    `retried` -- the 502 raises."""
+    gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, REPO_ID + "\n")
+    assert (cl._repo_id(REPO, gh), gh.drained(), sleeps) == (REPO_ID, True, [2])
+
+
+def test_repo_id_reads_again_after_a_failure(sleeps):
+    """A failure is not cached; the success is. Mutations, each run: catch the `SystemExit`
+    inside `_repo_id` and return it -- the first call returns it; drop `@functools.cache` -- the
+    third call is an unexpected read."""
+    gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, BAD_GATEWAY, BAD_GATEWAY, REPO_ID)
+    with pytest.raises(SystemExit):
+        cl._repo_id(REPO, gh)
+    assert (cl._repo_id(REPO, gh), cl._repo_id(REPO, gh), gh.drained()) == (REPO_ID, REPO_ID, True)
+
+
+TWO_LOCKS = [lock(AUTH_REF, OLD), lock(DNS_REF, OTHER, stack="stacks/dns")]
+
+
+def test_delete_each_reads_the_repository_id_once_for_every_lock(sleeps):
+    """A persistent 502 costs one retried read, not one per lock. Mutation: drop the pre-loop
+    `_repo_id` call -- the second lock's delete reads again and the double refuses it."""
+    gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, BAD_GATEWAY, BAD_GATEWAY)
+    with pytest.raises(SystemExit) as exc:
+        cl._delete_each(REPO, TWO_LOCKS, gh)
+    assert (exc.value.code, sleeps, gh.drained()) == (BAD_GATEWAY.code, [2, 5], True)
+
+
+def test_rollback_reads_the_repository_id_once_for_every_lock(sleeps):
+    """The read's failure joins `reason` and no delete is sent. Mutation: drop the pre-loop
+    `_repo_id` read -- the second lock's delete reads again and the double refuses it."""
+    gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, BAD_GATEWAY, BAD_GATEWAY)
+    assert (cl._rollback(REPO, TWO_LOCKS, "::error::why", gh), sleeps, gh.drained()) == (
+        f"::error::why\n{BAD_GATEWAY.code}",
+        [2, 5],
+        True,
+    )
+
+
+def test_pr_state_retries_a_transient_failure(sleeps):
+    """Mutation: call `run([...])` without `retried` -- the read refuses."""
+    gh = Gh().on(PR_STATE_READ, BAD_GATEWAY, OPEN)
+    assert (cl._pr_state(REPO, PR, gh), gh.drained(), sleeps) == (
+        ("OPEN", [], MERGED_HEAD),
+        True,
+        [2],
+    )
 
 
 @pytest.mark.parametrize(
@@ -924,6 +982,18 @@ def test_an_empty_head_ref_reads_no_holder(monkeypatch, tmp_path):
         "stacked": "[]",
     }
     assert gh.drained()
+
+
+def test_stacked_reads_a_holder_once_on_a_transient_failure(sleeps, capsys):
+    """Reviewer-facing, so a transient failure warns at once. Mutation: drop `retry=False` from
+    `_stacked`'s read -- the double refuses the second call."""
+    gh = Gh().on(pull_read(12), BAD_GATEWAY)
+    assert (cl._stacked(REPO, {12}, "feat-a", gh), gh.drained(), sleeps) == ([], True, [])
+    assert capsys.readouterr().out == (
+        "::warning::could not read pull request #12 (command failed (1): gh api x | gh: Bad "
+        "Gateway (HTTP 502)), so the plan comment does not say whether it is stacked on this "
+        "pull request\n"
+    )
 
 
 HEAD = "d" * 40
@@ -1730,15 +1800,18 @@ def test_verify_deploy_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path):
     )
 
 
-def test_verify_deploy_names_a_failed_read_on_one_line(monkeypatch, tmp_path):
-    """A gh failure whose stderr runs to a second line stays one line in the refusal.
-    Mutation: return `why` unjoined from `_why` -- the refusal splits, red."""
-    gh = Gh().on(ref_read(AUTH_REF), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
+def test_verify_deploy_names_a_failed_read_on_one_line(monkeypatch, tmp_path, sleeps):
+    """A gh failure whose stderr runs to a second line stays one line in the refusal, which a
+    502 reaches after its retries unchanged. Mutation: return `why` unjoined from `_why` -- the
+    refusal splits, red."""
+    failure = SystemExit("::error::command failed (1): gh api\nHTTP 502")
+    gh = Gh().on(ref_read(AUTH_REF), failure, failure, failure)
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
         "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
         "holds its cell lock (command failed (1): gh api | HTTP 502); re-run the failed deploy "
         "jobs"
     )
+    assert sleeps == [2, 5]
 
 
 def test_verify_names_a_malformed_deploy_mode_before_an_empty_pull_request(monkeypatch, tmp_path):

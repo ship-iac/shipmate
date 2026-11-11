@@ -29,7 +29,7 @@ import re
 import sys
 import urllib.parse
 
-from _shipmate import gh_json, is_head_sha, is_pr_number, is_run_id, run_annotated
+from _shipmate import gh_json, is_head_sha, is_pr_number, is_run_id, retried, run_annotated
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
@@ -298,23 +298,22 @@ def autoplan_runs(repo, head, *, run):
     `triggering_actor`, which the projection always emits as `{"login": ...}` mappings, the
     login null when GitHub gives none. A missing actor so reaches `authorize.pusher_reason`
     and refuses there, never as a malformed listing. The logins equal a single-run read's.
-    Raises `ValueError` on a line that is not such an object or whose `id` is not an
-    integer; `status` and `conclusion` are not checked."""
+    A transient failure is retried (`retried`). Raises `ValueError` on a line that is not such
+    an object or whose `id` is not an integer; `status` and `conclusion` are not checked."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
-    listing = run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/{repo}/actions/workflows/{posixpath.basename(PLAN_WORKFLOW)}/runs?{query}",
-            "--jq",
-            (
-                ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
-                "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
-                "| tojson"
-            ),
-        ]
-    )
+    args = [
+        "gh",
+        "api",
+        "--paginate",
+        f"repos/{repo}/actions/workflows/{posixpath.basename(PLAN_WORKFLOW)}/runs?{query}",
+        "--jq",
+        (
+            ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
+            "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
+            "| tojson"
+        ),
+    ]
+    listing = retried(lambda: run(args))
     runs = [json.loads(line) for line in listing.splitlines() if line.strip()]
     for listed in runs:
         if not isinstance(listed, dict) or any(k not in listed for k in _LISTED_KEYS):
@@ -325,8 +324,8 @@ def autoplan_runs(repo, head, *, run):
 
 
 def newest_autoplan(repo, head, *, run):
-    """The `autoplan_runs` entry with the greatest `id`, or None when none is listed. Raises as
-    `autoplan_runs` does."""
+    """The `autoplan_runs` entry with the greatest `id`, or None when none is listed. Retries and
+    raises as `autoplan_runs` does."""
     return max(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], default=None)
 
 

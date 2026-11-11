@@ -15,6 +15,7 @@ one output is `refusal`, which each detect job reads into the gate description.
 """
 
 import base64
+import json
 import re
 import runpy
 import sys
@@ -198,6 +199,7 @@ def _resolve(
     versions=_FIXTURE_VERSIONS,
     table=_TABLE,
     fetch=None,
+    run=None,
     entry=False,
 ):
     """Run `tool-versions` in-process against a fixture VERSIONS and a mocked contents read.
@@ -208,6 +210,8 @@ def _resolve(
     Returns (exit code, the raw $GITHUB_OUTPUT text, stderr, the paths read, the VERSIONS path).
     `versions=None` writes no file; `versions` is written as bytes, so a CRLF reaches the script
     untranslated. `fetch` replaces the whole contents read; by default it answers `table`.
+    `run` replaces `_shipmate._run` instead, below `gh_json`'s retry; the paths read are then
+    not recorded.
     """
     tv = load_script("tool-versions")
     path = tmp_path / "VERSIONS"
@@ -220,7 +224,10 @@ def _resolve(
         calls.append(p)
         return fetch(p) if fetch else _blob(table)
 
-    monkeypatch.setattr(tv.ec, "gh_json", gh_json)
+    if run:
+        monkeypatch.setattr(sys.modules["_shipmate"], "_run", run)
+    else:
+        monkeypatch.setattr(tv.ec, "gh_json", gh_json)
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -269,20 +276,23 @@ def test_the_table_is_read_from_the_default_branch(monkeypatch, capsys, tmp_path
 def test_a_transient_read_failure_is_retried(monkeypatch, capsys, tmp_path):
     """Every cell job runs setup, so a 502 must not fail it with a remedy naming the merge.
 
-    Mutation: drop the `retried` wrapper in `_reporting_fetch` (the unreadable refusal).
+    Mutation: read without `retried` in `gh_json` (`json.loads(fetch())`) -- the unreadable
+    refusal.
     """
     sleeps = []
     monkeypatch.setattr(sys.modules["_shipmate"], "_sleep", sleeps.append)
     failures = [SystemExit("::error::command failed (1): gh api x\ngh: HTTP 502")]
+    calls = []
 
-    def fetch(path):
+    def run(args):
+        calls.append(args)
         if failures:
             raise failures.pop()
-        return _blob(_TABLE)
+        return json.dumps(_blob(_TABLE))
 
-    code, out, err, calls, _ = _resolve(monkeypatch, capsys, tmp_path, fetch=fetch)
+    code, out, err, _, _ = _resolve(monkeypatch, capsys, tmp_path, run=run)
     assert code == 0, err
-    assert (out, calls, sleeps) == (_FIXTURE_OUTPUT, [_CONTENTS_PATH] * 2, [2])
+    assert (out, calls, sleeps) == (_FIXTURE_OUTPUT, [["gh", "api", _CONTENTS_PATH]] * 2, [2])
 
 
 def test_an_invalid_tools_entry_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path):

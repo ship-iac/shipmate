@@ -1310,7 +1310,7 @@ three replies:
   attempts ended on transient failures, a later attempt failed after a
   transient one, or the listing failed or was malformed. The step fails. After
   a failed listing, the last failure `dispatch-body` prints is the listing's;
-  the dispatch's own failures are in the retry warnings above it.
+  the dispatch's own failures are in the retry notices above it.
 
 Two ceilings remain. A run that landed but is not listed yet when the engine
 reads the listing is not seen, so that attempt is retried and the command can

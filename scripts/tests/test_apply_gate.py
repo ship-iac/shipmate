@@ -650,6 +650,22 @@ def test_autoplan_runs_returns_every_listed_run_in_listing_order():
     assert argv == [autoplans_read("o/r", _HEAD)]
 
 
+def test_autoplan_runs_retries_a_transient_listing_failure(monkeypatch):
+    """Mutation: call `run([...])` without `retried` -- the 502 raises."""
+    slept = []
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        if len(argv) == 1:
+            raise SystemExit("::error::command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)")
+        return json.dumps(listed_autoplan(5, _HEAD)) + "\n"
+
+    assert ag.autoplan_runs("o/r", _HEAD, run=run) == [listed_autoplan(5, _HEAD)]
+    assert (argv, slept) == ([autoplans_read("o/r", _HEAD)] * 2, [2])
+
+
 def test_newest_autoplan_of_an_empty_listing_is_none():
     """Mutation: `default=0` for `default=None` in the `max`."""
     assert _newest()[0] is None

@@ -198,13 +198,16 @@ runs:
         # A head the pull request has left is not the one it merges, so this run writes nothing on
         # it. Degrades: a failed read publishes on this head as before, which holds and gates it.
         if live=$(python3 "$gate_status" moved "$SHIPMATE_HEAD_SHA" "$SHIPMATE_PR_NUMBER" 2>moved.err); then
+          cat moved.err >&2
           if [ -n "$live" ]; then
             echo "::notice::pull request #$SHIPMATE_PR_NUMBER has moved past $SHIPMATE_HEAD_SHA; this run writes no comment, apply check or gate on it"
             printf 'superseded=true\nmoved=true\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
         else
-          echo "::warning::could not read the head of pull request #$SHIPMATE_PR_NUMBER ($(cat moved.err)); this run publishes on $SHIPMATE_HEAD_SHA"
+          # Retry notices precede the script's one-line error.
+          sed '$d' moved.err >&2
+          echo "::warning::could not read the head of pull request #$SHIPMATE_PR_NUMBER ($(tail -n 1 moved.err)); this run publishes on $SHIPMATE_HEAD_SHA"
         fi
         # A failed read holds, which is always safe: a failed artifact download leaves `cells/`
         # empty over planned cells, so no cell summary is no proof of no work. A newer run's hold or
@@ -555,7 +558,9 @@ runs:
         set -euo pipefail
         # Degrades: this run's head is not the pull request's, so nothing here gates the merge.
         if ! live=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" replan "$SHIPMATE_HEAD_SHA" "$SHIPMATE_PR_NUMBER" 2>replan.err); then
-          echo "::warning::could not decide whether pull request #$SHIPMATE_PR_NUMBER needs a plan ($(cat replan.err)); comment shipmate plan to plan it"
+          # Retry notices precede the script's one-line error.
+          sed '$d' replan.err >&2
+          echo "::warning::could not decide whether pull request #$SHIPMATE_PR_NUMBER needs a plan ($(tail -n 1 replan.err)); comment shipmate plan to plan it"
           exit 0
         fi
         cat replan.err >&2

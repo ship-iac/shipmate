@@ -435,6 +435,7 @@ def test_run_passes_stdin_as_bytes_with_text_mode_off(monkeypatch):
     assert seen["kwargs"] == {
         "capture_output": True,
         "input": b"-----BEGIN-----\nabc\n",
+        "env": None,
     }
 
 

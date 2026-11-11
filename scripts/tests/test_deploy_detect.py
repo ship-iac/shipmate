@@ -190,7 +190,8 @@ def test_merged_head_lists_the_closed_pulls_of_a_quoted_branch(monkeypatch, caps
 
 def test_merged_head_retries_a_transient_failure_of_the_closed_listing(monkeypatch):
     """One 502 on the closed listing is retried, not raised: a deploy with nothing pending
-    must not fail on it. Mutation: read the listing without `retried` -- the 502 raises."""
+    must not fail on it. Mutation: read without `retried` in `gh_json` (`json.loads(fetch())`)
+    -- the 502 raises."""
     closed = [
         {
             "number": 7,
@@ -199,22 +200,49 @@ def test_merged_head_retries_a_transient_failure_of_the_closed_listing(monkeypat
             "head": {"sha": "right"},
         }
     ]
-    answers = iter([SystemExit(f"::error::gh api {CLOSED_PATH}\nHTTP 502: Bad Gateway"), closed])
-    paths = []
+    answers = iter(
+        [SystemExit(f"::error::gh api {CLOSED_PATH}\nHTTP 502: Bad Gateway"), json.dumps(closed)]
+    )
+    calls = []
 
-    def gh_json(path):
-        paths.append(path)
-        if path == PULLS_PATH:
-            return []
+    def run(args):
+        calls.append(args)
+        if args == ["gh", "api", PULLS_PATH]:
+            return "[]"
         answer = next(answers)
         if isinstance(answer, BaseException):
             raise answer
         return answer
 
-    monkeypatch.setattr(dd, "_gh_json", gh_json)
+    monkeypatch.setattr(_shipmate, "_run", run)
     monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
     assert dd._merged_head("o/r", "merge123", "main", _attempts=1) == ("right", "7")
-    assert paths == [PULLS_PATH, CLOSED_PATH, CLOSED_PATH]
+    assert calls == [["gh", "api", path] for path in (PULLS_PATH, CLOSED_PATH, CLOSED_PATH)]
+
+
+def test_a_persistent_5xx_on_the_closed_listing_costs_three_reads(monkeypatch, capsys):
+    """The listing retries inside `gh_json` only. Mutation: read it through
+    `retried(lambda: _gh_json(path))` again -- nine listing calls."""
+    calls = []
+    sleeps = []
+
+    def run(args):
+        calls.append(args)
+        if args == ["gh", "api", PULLS_PATH]:
+            return "[]"
+        raise SystemExit(f"::error::command failed (1): gh api {CLOSED_PATH}\nHTTP 502")
+
+    monkeypatch.setattr(_shipmate, "_run", run)
+    monkeypatch.setattr(_shipmate, "_sleep", sleeps.append)
+    with pytest.raises(SystemExit) as exc:
+        dd._merged_head("o/r", "merge123", "main", _attempts=1)
+    notice = f"::notice::command failed (1): gh api {CLOSED_PATH}%0AHTTP 502\n"
+    assert (exc.value.code, calls, sleeps, capsys.readouterr().err) == (
+        f"::error::command failed (1): gh api {CLOSED_PATH}\nHTTP 502",
+        [["gh", "api", PULLS_PATH]] + [["gh", "api", CLOSED_PATH]] * 3,
+        [2, 5],
+        notice * 2,
+    )
 
 
 def test_merged_head_retries_until_pulls_populated(monkeypatch):

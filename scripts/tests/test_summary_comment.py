@@ -2984,7 +2984,8 @@ def test_main_names_the_superseded_autoplan_checks_of_a_commanded_plan(tmp_path,
 
 
 def test_a_transient_listing_failure_is_retried(tmp_path, monkeypatch):
-    """Mutation: call `autoplan_runs` outside `retried` -- the first failure warns, no line."""
+    """Mutation: list without `retried` in `autoplan_runs` (`listing = run(args)`) -- the first
+    failure warns, no line."""
     monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
     transient = SystemExit("::error::command failed (1): gh api\nHTTP 502: Bad Gateway")
     calls = _stub_runner(monkeypatch, transient, _listed(42) + "\n")
@@ -2992,6 +2993,27 @@ def test_a_transient_listing_failure_is_retried(tmp_path, monkeypatch):
     assert calls == [_AUTOPLAN_ARGV, _AUTOPLAN_ARGV]
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
         HEAD + f"⚪ nothing planned {MAIN_AT}\n\n" + _superseded(1, 42)
+    )
+
+
+def test_a_persistent_listing_5xx_costs_three_reads_and_warns_once(tmp_path, monkeypatch, capsys):
+    """The listing retries inside `autoplan_runs` only. Mutation: call it through
+    `retried(lambda: ag.autoplan_runs(...))` again -- nine listing calls."""
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
+    transient = SystemExit("::error::command failed (1): gh api\nHTTP 502: Bad Gateway")
+    calls = _stub_runner(monkeypatch, *[transient] * 9)
+    sleeps = []
+    monkeypatch.setattr(_shipmate, "_sleep", sleeps.append)
+    _run_main(tmp_path, monkeypatch, [], stdin=_FAILED_42)
+    warning = (
+        f"::warning::could not list the autoplan runs of {SHA} (command failed (1): gh api "
+        "| HTTP 502: Bad Gateway); the plan comment names no superseded checks\n"
+    )
+    notice = "::notice::command failed (1): gh api%0AHTTP 502: Bad Gateway\n"
+    assert (calls, sleeps, capsys.readouterr()) == (
+        [_AUTOPLAN_ARGV] * 3,
+        [2, 5],
+        (warning, notice * 2),
     )
 
 

@@ -21,7 +21,7 @@ comment, a wrong retry a double start. Exit codes:
 
 On 1 and 4 the final failure's message goes to stderr, unannotated. When 4 follows a failed or
 malformed listing, that message is the listing's error; the dispatch's own failure is in the
-retry warnings printed above it.
+retry notices printed above it.
 
 Known ceilings: a run that landed but is not listed yet when the listing is read is not seen, so
 that attempt can be retried and start twice. A runner clock ahead of GitHub's by more than five

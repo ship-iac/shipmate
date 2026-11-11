@@ -116,7 +116,7 @@ def scrub(text, secrets):
     return text
 
 
-def run(args, secrets=(), stdin=None):
+def run(args, secrets=(), stdin=None, *, env=None):
     r"""Run a `gh`, `git` or `terramate` invocation, returning stdout; raise on a nonzero exit.
 
     `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
@@ -131,6 +131,8 @@ def run(args, secrets=(), stdin=None):
     so that `onboard`'s `_gh_json_or_none` can swallow a 404 without printing it.
     Nothing else prints, so a caller that discards the exception discards the
     noise too.
+
+    `env`, when given, is the child's whole environment; None inherits this process's.
     """
     # args is a code-controlled gh/git/terramate argv run with shell=False, so no value in
     # it is shell-parsed. Values bound into a path are validated where they enter the script.
@@ -138,6 +140,7 @@ def run(args, secrets=(), stdin=None):
         args,
         capture_output=True,
         input=None if stdin is None else stdin.encode("utf-8"),
+        env=env,
     )
     if p.returncode != 0:
         # gh's stderr is the only diagnosis a hand-run script gets.
@@ -191,17 +194,17 @@ def is_transient(exc):
     return TRANSIENT.search("\n".join(exc.code.splitlines()[1:])) is not None
 
 
-def warn_retry(exc):
-    """Print `exc`'s first two lines (the command and gh's first stderr line) as one `::warning::`
+def note_retry(exc):
+    """Print `exc`'s first two lines (the command and gh's first stderr line) as one `::notice::`
     on stderr, never stdout: `gate-status checks` writes data there."""
     head = "\n".join(str(exc.code).removeprefix("::error::").splitlines()[:2])
-    sys.stderr.write(f"::warning::{command_data(head)}\n")
+    sys.stderr.write(f"::notice::{command_data(head)}\n")
     sys.stderr.flush()
 
 
 def retried(call, before_retry=None):
     """`call()`, called again after each `RETRY_DELAYS` sleep while it raises a transient
-    `SystemExit` (`is_transient`), each retry warned (`warn_retry`). `before_retry`, when given,
+    `SystemExit` (`is_transient`), each retry noted (`note_retry`). `before_retry`, when given,
     runs after each sleep and may raise to stop. Any other `SystemExit` re-raises at once; the
     third transient one re-raises unchanged. A write can land and still fail, so a retried write
     can overwrite what another run wrote since; a caller that must not passes `before_retry`."""
@@ -211,7 +214,7 @@ def retried(call, before_retry=None):
         except SystemExit as e:
             if not is_transient(e):
                 raise
-            warn_retry(e)
+            note_retry(e)
         _sleep(delay)
         if before_retry:
             before_retry()
@@ -279,14 +282,21 @@ def run_annotated(main, *args, refusal_output=False):
         raise SystemExit(1) from None
 
 
-def gh_json(path, run=None):
+def gh_json(path, run=None, *, retry=True):
     """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
     with the tool's stderr in the message, from a single definition, so no caller repeats the
-    `json.loads(_run(...))` pair.
+    `json.loads(_run(...))` pair. A transient failure is retried (`retried`); `retry=False`
+    reads once, for a read that degrades per item inside a loop that runs in every plan summary,
+    where retries would hold the summary for their sleeps: `doctor`'s reads, each to a report
+    row, and `cell-lock._stacked`'s, once per lock holder.
 
     Homed beside `_run` for the same reason.
     """
-    return json.loads((run or _run)(["gh", "api", path]))
+
+    def fetch():
+        return (run or _run)(["gh", "api", path])
+
+    return json.loads(retried(fetch) if retry else fetch())
 
 
 def write_outputs(**pairs):
@@ -387,14 +397,14 @@ def one_line(text):
 
 def pr_head(repo, pr, run=run):
     """`(head SHA, draft, state)` of pull request `pr` from one `gh api repos/{repo}/pulls/{pr}`
-    read; `state` is GitHub's `open` or `closed`.
+    read; `state` is GitHub's `open` or `closed`. A transient failure is retried (`retried`).
 
     Raises `SystemExit` with one unannotated line when the read fails, its body is not a pull
     request, the SHA is not 40 lowercase hex characters, `draft` is not a bool, or `state` is not
     a string; each caller decides how to report it. `pr` is bound into the path: validate it
     first."""
     try:
-        pull = json.loads(run(["gh", "api", f"repos/{repo}/pulls/{pr}"]))
+        pull = gh_json(f"repos/{repo}/pulls/{pr}", run)
         sha, draft, state = pull["head"]["sha"], pull["draft"], pull["state"]
     except SystemExit as exc:
         raise SystemExit(one_line(exc.code)) from None

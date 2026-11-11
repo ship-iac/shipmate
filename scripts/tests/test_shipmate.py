@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import subprocess
 import sys
@@ -16,12 +17,15 @@ from _shipmate import (
     event_action,
     event_payload,
     gate_check,
+    gh_json,
     is_head_sha,
     is_pr_number,
     is_transient,
     named,
+    pr_head,
     retried,
     review_count,
+    run,
     run_annotated,
     utf8_output,
     validate_head_sha,
@@ -153,7 +157,7 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
     nothing itself: the stderr rides in the message. Reddens on returning `run(args)` with no
     `except` (the prefix is gone), and on writing stderr before raising."""
 
-    def fake_subprocess_run(args, capture_output=False, input=None):
+    def fake_subprocess_run(args, capture_output=False, input=None, env=None):
         return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"gh: boom\n")
 
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
@@ -161,6 +165,20 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
         _run(["gh", "api", "repos/an-org/a-repo"])
     assert str(exc.value) == "::error::command failed (1): gh api repos/an-org/a-repo\ngh: boom"
     assert capsys.readouterr().err == ""
+
+
+def test_run_hands_env_to_the_child(monkeypatch):
+    """Mutation: drop the `env=` pass-through from `run`'s `subprocess.run` call -- the child
+    gets no `env` and `seen` reads `[None]`."""
+    seen = []
+
+    def fake_subprocess_run(args, **kwargs):
+        seen.append(kwargs.get("env"))
+        return types.SimpleNamespace(returncode=0, stdout=b"out", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    assert run(["gh", "api", "x"], env={"GH_TOKEN": "t"}) == "out"
+    assert seen == [{"GH_TOKEN": "t"}]
 
 
 def test_named_lists_cap_items_whole_and_counts_the_rest():
@@ -325,19 +343,20 @@ _EOF = (
 def test_retried_calls_again_after_a_transient_failure(message, sleeps, capsys):
     """Mutations, each run: drop the `HTTP 5xx` alternative from `TRANSIENT` -> the 502
     re-raises; drop `connection refused` -> the probe's message re-raises; drop `: EOF$` -> the
-    EOF message re-raises; write the warning to stdout -> the streams swap."""
+    EOF message re-raises; write the notice to stdout -> the streams swap."""
     calls, call = _failing(message)
     assert retried(call) == "x"
     head = "%0A".join(message.removeprefix("::error::").splitlines()[:2])
-    assert (len(calls), sleeps, capsys.readouterr()) == (2, [2], ("", f"::warning::{head}\n"))
+    assert (len(calls), sleeps, capsys.readouterr()) == (2, [2], ("", f"::notice::{head}\n"))
 
 
-def test_retried_warns_the_command_and_first_stderr_line_whole(sleeps, capsys):
+def test_retried_notes_the_command_and_first_stderr_line_whole(sleeps, capsys):
     """Mutations, each run: keep `::error::` -> a nested prefix; print every line -> `retry 50%25`
-    trails; skip `command_data` -> a raw newline."""
+    trails; skip `command_data` -> a raw newline; print `::warning::` -> the annotation differs."""
     retried(_failing(_BAD_GATEWAY)[1])
-    assert capsys.readouterr().err == (
-        "::warning::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
+    assert capsys.readouterr() == (
+        "",
+        "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n",
     )
 
 
@@ -373,8 +392,8 @@ def test_retried_gives_up_after_three_attempts_with_the_last_failure(sleeps, cap
         retried(call)
     assert (exc.value.code, len(calls), sleeps) == (messages[2], 3, [2, 5])
     assert capsys.readouterr().err == (
-        "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 500)\n"
-        "::warning::command failed (1): gh api x%0Agh: Server Error (HTTP 502)\n"
+        "::notice::command failed (1): gh api x%0Agh: Server Error (HTTP 500)\n"
+        "::notice::command failed (1): gh api x%0Agh: Server Error (HTTP 502)\n"
     )
 
 
@@ -399,6 +418,96 @@ def test_check_runs_retries_a_transient_failure_through_the_injected_run(sleeps)
         ".check_runs[]",
     ]
     assert (calls, sleeps) == ([argv, argv], [2])
+
+
+def _answering(answer, *messages):
+    """A `run` double raising each of `messages` in turn, then returning `answer`; and its argv
+    list."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if len(calls) <= len(messages):
+            raise SystemExit(messages[len(calls) - 1])
+        return answer
+
+    return calls, run
+
+
+_GH_JSON_ARGV = ["gh", "api", "repos/o/r"]
+
+
+def test_gh_json_retries_a_transient_failure_through_the_injected_run(sleeps):
+    """Mutation: `json.loads(fetch())` without `retried` -> the 502 raises."""
+    calls, run = _answering('{"a": 1}', _BAD_GATEWAY)
+    assert (gh_json("repos/o/r", run), calls, sleeps) == (
+        {"a": 1},
+        [_GH_JSON_ARGV, _GH_JSON_ARGV],
+        [2],
+    )
+
+
+def test_gh_json_retries_a_transient_failure_through_the_default_run(monkeypatch, sleeps):
+    """Mutation: retry only when `run` is given (`retried(fetch) if retry and run else fetch()`)
+    -> the 502 raises."""
+    calls, run = _answering('{"a": 1}', _BAD_GATEWAY)
+    monkeypatch.setattr("_shipmate._run", run)
+    assert (gh_json("repos/o/r"), calls, sleeps) == ({"a": 1}, [_GH_JSON_ARGV, _GH_JSON_ARGV], [2])
+
+
+def test_gh_json_gives_up_after_three_attempts_with_the_last_failure(sleeps):
+    """Mutation: `retried(lambda: retried(fetch))` -> nine calls."""
+    messages = [f"::error::command failed (1): gh api x\ngh: Error (HTTP 50{i})" for i in (0, 2, 3)]
+    calls, run = _answering("{}", *messages, *messages, *messages)
+    with pytest.raises(SystemExit) as exc:
+        gh_json("repos/o/r", run)
+    assert (exc.value.code, calls, sleeps) == (messages[2], [_GH_JSON_ARGV] * 3, [2, 5])
+
+
+def test_gh_json_without_retry_reads_once(sleeps):
+    """Mutation: ignore `retry` (always `retried(fetch)`) -> a second call returns `{}`."""
+    calls, run = _answering("{}", _BAD_GATEWAY)
+    with pytest.raises(SystemExit) as exc:
+        gh_json("repos/o/r", run, retry=False)
+    assert (exc.value.code, calls, sleeps) == (_BAD_GATEWAY, [_GH_JSON_ARGV], [])
+
+
+def test_gh_json_raises_a_404_at_once(sleeps):
+    """Mutation: retry any `SystemExit` (a loop around `fetch` catching every `SystemExit`) -> a
+    second call returns `{}`."""
+    message = "::error::command failed (1): gh api x\ngh: Not Found (HTTP 404)"
+    calls, run = _answering("{}", message)
+    with pytest.raises(SystemExit) as exc:
+        gh_json("repos/o/r", run)
+    assert (exc.value.code, calls, sleeps) == (message, [_GH_JSON_ARGV], [])
+
+
+_PULL_ARGV = ["gh", "api", "repos/o/r/pulls/7"]
+#: A failure through the unprefixed `run` that `pr_head` defaults to.
+_PULL_502 = "command failed (1): gh api repos/o/r/pulls/7\ngh: Bad Gateway (HTTP 502)"
+
+
+def test_pr_head_retries_a_transient_failure(sleeps):
+    """Mutation: read through `json.loads(run([...]))` directly -> the 502 raises."""
+    pull = {"head": {"sha": _SHA}, "draft": True, "state": "open"}
+    calls, run = _answering(json.dumps(pull), _PULL_502)
+    assert (pr_head("o/r", 7, run), calls, sleeps) == (
+        (_SHA, True, "open"),
+        [_PULL_ARGV, _PULL_ARGV],
+        [2],
+    )
+
+
+def test_pr_head_raises_one_unannotated_line_after_three_failures(sleeps):
+    """Mutation: read through `json.loads(run([...]))` directly -> one call, no sleep."""
+    calls, run = _answering("{}", _PULL_502, _PULL_502, _PULL_502)
+    with pytest.raises(SystemExit) as exc:
+        pr_head("o/r", 7, run)
+    assert (exc.value.code, calls, sleeps) == (
+        "command failed (1): gh api repos/o/r/pulls/7 | gh: Bad Gateway (HTTP 502)",
+        [_PULL_ARGV] * 3,
+        [2, 5],
+    )
 
 
 @pytest.mark.parametrize("sha", ["A" * 40, "a" * 39, "../x"])

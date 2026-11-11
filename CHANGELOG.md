@@ -8,6 +8,16 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed
+
+- **A retry is logged as a notice, not a warning**, so `shipmate doctor` no longer lists a recovered retry among a head's warnings.
+
+### Fixed
+
+- **The engine's Python scripts retry a transient GitHub API failure on most reads whose failure would fail the job.** A 5xx, a dropped connection or a truncated body is retried twice, 2 and 5 seconds later; the pull-request, cell-lock, merge-to-pull-request mapping, plan-comment listing and drift default-branch head reads are among them. Most of `scripts/onboard`'s reads retry the same way. A read that stays single-attempt shows no retry notice above its `command failed` annotation.
+
 ## [0.55.0] — 2026-11-09
 
 Tags `e2c1771`.
@@ -31,7 +41,7 @@ Tags `e2c1771`.
 - **`actions/setup` installs OpenTofu with its own curl download, verified against the signed `tofu_<v>_SHA256SUMS` like Terramate's**, so consumers may drop `opentofu/setup-opentofu@*` from their allowed actions. A failed install reads `OpenTofu install failed` (`docs/troubleshooting.md`).
 - **`actions/setup` caches each tool's release files per version, runner OS and architecture, and re-verifies every restored file**; a file that fails is downloaded again with the warning `Tool cache entry failed verification`, naming the entry's `gh cache delete` command. Plan and unlock runs only restore, through `setup`'s new `cache-save` input; entries come from apply, deploy and drift runs.
 - **`shipmate plan` and `shipmate apply` post no started reply**; the `🚀` reaction acknowledges them. `shipmate unlock` keeps its started reply. Nothing collapses a reply any more.
-- **Every plan run that writes the plan comment, except a quiet nothing-changed one, posts a new one and minimizes the App's earlier ones as outdated**, so each plan sits after the push or command it answers. A failed minimize warns `could not minimize an earlier plan comment of pull request #<n>; it stays visible: <error>`. A nothing-changed run with no doctor warning, unmanaged or lost pairs line or `shipmate plan` command posts none: it rewrites the newest visible plan comment in place and minimizes the others, and writes nothing when none is visible. `scripts/upsert-comment` gains `--new`, and `--update-only` now PATCHes the newest visible plan comment.
+- **Every plan run that writes the plan comment, except a quiet nothing-changed one, posts a new one and minimizes the App's earlier ones as outdated**, so each plan sits after the push or command it answers. A failed minimize warns `could not minimize an earlier shipmate comment of pull request #<n>; it stays visible: <error>`. A nothing-changed run with no doctor warning, unmanaged or lost pairs line or `shipmate plan` command posts none: it rewrites the newest visible plan comment in place and minimizes the others, and writes nothing when none is visible. `scripts/upsert-comment` gains `--new`, and `--update-only` now PATCHes the newest visible plan comment.
 - **The plan comment's log lines drop "sticky"**: the step `Upsert sticky comment` is `Write the plan comment`; `the pull request was a draft when this run started and was not planned; the plan comment was left as it is`; `::warning::the plan job was cancelled, so this run writes no final gate; the plan comment was left as it is`; `::warning::the plan comment does not say why the gate is held; the gate description says it`; `::error::could not list this pull request's comments, so no plan comment was written; re-plan this pull request (comment shipmate plan or push)`; `::error::could not read the head of pull request #<n>, so no plan comment was written; re-plan this pull request (comment shipmate plan or push)`; and `::error::could not write the comment: <error>`, which the doctor report's write shares.
 
 ### Fixed
