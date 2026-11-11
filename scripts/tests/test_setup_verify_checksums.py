@@ -1,16 +1,18 @@
 """actions/setup verifies each tool's release checksum file against a signer key in this repo.
 
-Each verify step's real `run:` body executes here with real `gpg`, `openssl` and `base64`. Only
+Each verify step's real `run:` body executes here with real `gpg`, `openssl` and `base64`; its
+signature logic is `verify_terramate` and `verify_tofu` in `actions/setup/release.sh`. Only
 `curl` is a stub: it appends its argv to a log and serves the raw upstream files under
-`fixtures/release-sums/` by URL basename. `gpg` and `openssl` wrappers log their argv and run the
-real tools. A cache hit is simulated by files placed in `$RUNNER_TEMP/<tool>-release` before the
-step runs, with `SHIPMATE_CACHE_KEY` set to the entry's key.
+`fixtures/release-sums/` by URL basename. `gpg`, `gpgconf` and `openssl` wrappers log their argv
+(`gpg` and `gpgconf` also their `GNUPGHOME`) and run the real tools. A cache hit is simulated by
+files placed in `$RUNNER_TEMP/<tool>-release` before the step runs, with `SHIPMATE_CACHE_KEY` set
+to the entry's key.
 
 Threat model: an accidental regression in a SHA-pinned, reviewed engine file -- a dropped
 signature check, an exit-code-only check, a fetched key, a lost guard. A hostile edit to the
 step is out of scope. Cases that need a correctly signed but edited checksum file sign it with
-a throwaway key made here, and run a copy of the body with the key path (and, for OpenTofu, the
-fingerprint constant) substituted.
+a throwaway key made here, and run the step against a copy of `release.sh` with the key path
+(and, for OpenTofu, the fingerprint constant) substituted.
 """
 
 import base64
@@ -22,7 +24,15 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import ENGINE, bash_only, run_step, setup_curl_argv, step_by, write_stub
+from _loader import (
+    ENGINE,
+    bash_only,
+    bash_symlink,
+    run_step,
+    setup_curl_argv,
+    step_by,
+    write_stub,
+)
 
 _ACTION = "setup"
 _FIXTURES = ENGINE / "scripts" / "tests" / "fixtures" / "release-sums"
@@ -152,19 +162,34 @@ def _genuine():
     return {p.name: p.read_bytes() for p in _FIXTURES.iterdir() if p.name != "README"}
 
 
-def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cached=None, key=None):
-    """Run step `sid`'s body (or `body`) with curl serving `served` (basename -> bytes; the
-    genuine fixtures by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`.
-    `cached` (basename -> bytes, or None for a directory) is placed in the step's release
-    directory first, and `key`, when given, is the `SHIPMATE_CACHE_KEY`.
+def _run(
+    tmp_path,
+    sid,
+    *,
+    served=None,
+    codes=None,
+    action=None,
+    curl_exit=0,
+    cached=None,
+    key=None,
+    env=None,
+    gpgconf_rc=None,
+):
+    """Run step `sid`'s body with curl serving `served` (basename -> bytes; the genuine fixtures
+    by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`. `cached` (basename ->
+    bytes, or None for a directory) is placed in the step's release directory first, and `key`,
+    when given, is the `SHIPMATE_CACHE_KEY`. `action` (default the engine's) is
+    `GITHUB_ACTION_PATH`; `env` is added last, over a host environment without `GNUPGHOME`. The
+    `gpgconf` wrapper exits `gpgconf_rc` instead of running the real one when that is given.
 
     Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP);
-    openssl's argv per call is in `tmp_path/logs/openssl`.
+    openssl's and gpgconf's argv per call are in `tmp_path/logs/`, and each gpg and gpgconf
+    call's `GNUPGHOME` in `logs/gpg.home` and `logs/gpgconf.home`.
     """
     tmp_path.mkdir(exist_ok=True)
     bin_dir, logs, serve, rt = (tmp_path / d for d in ("bin", "logs", "serve", "runner-temp"))
     for d in (bin_dir, logs, serve, rt):
-        d.mkdir()
+        d.mkdir(exist_ok=True)
     for name, data in (_genuine() if served is None else served).items():
         (serve / name).write_bytes(data)
     release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
@@ -195,7 +220,20 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
         bin_dir,
         "gpg",
         f"printf '%s\\x1f' \"$@\" >> '{log}/gpg'\necho >> '{log}/gpg'\n"
+        f"echo \"${{GNUPGHOME:-}}\" >> '{log}/gpg.home'\n"
         f'exec "{gpg and gpg.replace(os.sep, "/")}" "$@"',
+    )
+    gpgconf = shutil.which("gpgconf")
+    write_stub(
+        bin_dir,
+        "gpgconf",
+        f"printf '%s\\x1f' \"$@\" >> '{log}/gpgconf'\necho >> '{log}/gpgconf'\n"
+        f"echo \"${{GNUPGHOME:-}}\" >> '{log}/gpgconf.home'\n"
+        + (
+            f"exit {gpgconf_rc}"
+            if gpgconf_rc is not None
+            else f'exec "{gpgconf and gpgconf.replace(os.sep, "/")}" "$@"'
+        ),
     )
     openssl = shutil.which("openssl")
     write_stub(
@@ -208,17 +246,18 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
     out.write_text("", encoding="utf-8")
     r = run_step(
         tmp_path,
-        body if body is not None else step_by(_ACTION, id=sid)["run"],
+        step_by(_ACTION, id=sid)["run"],
         {
-            **os.environ,
+            **{k: v for k, v in os.environ.items() if k != "GNUPGHOME"},
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "RUNNER_TEMP": rt.as_posix(),
             "GITHUB_OUTPUT": str(out),
-            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+            "GITHUB_ACTION_PATH": action or (ENGINE / "actions" / "setup").as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
             "GITHUB_REPOSITORY": _REPO,
             **({} if key is None else {"SHIPMATE_CACHE_KEY": key}),
+            **(env or {}),
         },
         timeout=120,
     )
@@ -273,10 +312,20 @@ def _verifier(sid, rt):
     ]
 
 
-def _edit(body, old, new):
-    """`body` with its one `old` replaced: a renamed target must red, not no-op."""
-    assert body.count(old) == 1, f"{old!r} occurs {body.count(old)} times in the step body"
-    return body.replace(old, new)
+def _lib(tmp_path, *edits):
+    """A copy of `actions/setup` and `keys/` under `tmp_path/engine` with each (old, new) of
+    `edits` applied once to `release.sh`; return the copy's `GITHUB_ACTION_PATH`. A renamed
+    target reds the edit instead of leaving the copy unchanged."""
+    engine = tmp_path / "engine"
+    shutil.copytree(ENGINE / "keys", engine / "keys")
+    action = engine / "actions" / "setup"
+    shutil.copytree(ENGINE / "actions" / "setup", action)
+    lib = (action / "release.sh").read_text(encoding="utf-8")
+    for old, new in edits:
+        assert lib.count(old) == 1, f"{old!r} occurs {lib.count(old)} times in release.sh"
+        lib = lib.replace(old, new)
+    (action / "release.sh").write_text(lib, encoding="utf-8", newline="\n")
+    return action.as_posix()
 
 
 def _flip(data, needle):
@@ -366,8 +415,8 @@ def test_a_signature_by_another_key_fails_the_whole_fingerprint_compare(tmp_path
     Mutation: check gpg's exit code alone (drop the fingerprint compare).
     """
     other = _SIGNER[:-1] + "1"
-    body = _edit(step_by(_ACTION, id="tofu-sums")["run"], _SIGNER, other)
-    r, out, *_ = _run(tmp_path, "tofu-sums", body=body)
+    action = _lib(tmp_path / "lib", (_SIGNER, other))
+    r, out, *_ = _run(tmp_path, "tofu-sums", action=action)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
         f"{_TOFU_ERROR}{_TOFU_SUMS} is signed by {_SIGNER}, not the OpenTofu signer {other}.\n"
@@ -570,10 +619,9 @@ def test_signed_opentofu_sums_without_an_asset_line_fail_naming_it(
         sums,
         {**os.environ, "GNUPGHOME": gnupg_home},
     )
-    body = _edit(step_by(_ACTION, id="tofu-sums")["run"], _TOFU_KEY, pub)
-    body = _edit(body, _SIGNER, fpr)
+    action = _lib(tmp_path / "lib", (_TOFU_KEY, pub), (_SIGNER, fpr))
     served = {_TOFU_SUMS: sums, f"{_TOFU_SUMS}.gpgsig": sig}
-    r, out, *_ = _run(tmp_path / "run", "tofu-sums", served=served, body=body)
+    r, out, *_ = _run(tmp_path / "run", "tofu-sums", served=served, action=action)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TOFU_ERROR}{_TOFU_SUMS} has no line for {missing}.\n"
     assert out == _refusal(r.stdout)
@@ -604,9 +652,9 @@ def test_signed_terramate_sums_without_an_asset_line_fail_naming_it(
         sums,
         dict(os.environ),
     )
-    body = _edit(step_by(_ACTION, id="terramate-sums")["run"], _TM_KEY, pub)
+    action = _lib(tmp_path / "lib", (_TM_KEY, pub))
     served = {"checksums.txt": sums, "checksums.txt.sig": base64.b64encode(der)}
-    r, out, *_ = _run(tmp_path / "run", "terramate-sums", served=served, body=body)
+    r, out, *_ = _run(tmp_path / "run", "terramate-sums", served=served, action=action)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TM_ERROR}checksums.txt has no line for {missing}.\n"
     assert out == _refusal(r.stdout)
@@ -786,25 +834,16 @@ _RELEASE_FILES = {
 }
 
 
-@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
-@bash_only
-@needs_tools
-def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
-    """The cache saves the whole directory, so a derived file there would be saved and restored.
-
-    Mutation: write the DER signature into `terramate-release` (`$dir/checksums.txt.der`).
-    """
+def _install_after(tmp_path, sid, rt, archive):
+    """Run the install step that follows `sid` on `rt`, after `sid` passed, with curl serving
+    `archive` and the extract stubbed; return its result."""
     step, digest_var, asset, extract, extract_body = _INSTALLS[sid]
-    archive = b"release archive"
-    served = {**_genuine(), asset: archive}
-    r, _, _, _, rt = _run(tmp_path, sid, served=served)
-    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     bin_dir = tmp_path / "bin"
     write_stub(bin_dir, "uname", 'if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi')
     write_stub(bin_dir, extract, extract_body)
     path = tmp_path / "github_path"
     path.write_text("", encoding="utf-8")
-    r = run_step(
+    return run_step(
         tmp_path,
         step_by(_ACTION, name=step)["run"],
         {
@@ -819,6 +858,21 @@ def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
             digest_var: f"{hashlib.sha256(archive).hexdigest()}  {asset}",
         },
     )
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
+    """The cache saves the whole directory, so a derived file there would be saved and restored.
+
+    Mutation: write the DER signature into `terramate-release` (`$dir/checksums.txt.der`).
+    """
+    archive = b"release archive"
+    served = {**_genuine(), _INSTALLS[sid][2]: archive}
+    r, _, _, _, rt = _run(tmp_path, sid, served=served)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    r = _install_after(tmp_path, sid, rt, archive)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
     assert sorted(os.listdir(release)) == _RELEASE_FILES[sid]
@@ -826,15 +880,221 @@ def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
         assert (rt / "terramate-checksums.der").is_file()
 
 
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@pytest.mark.parametrize("root", ["symlink", "file"])
+@bash_only
+@needs_tools
+def test_a_restored_root_that_is_not_a_real_directory_is_replaced_and_installs(tmp_path, sid, root):
+    """The release root is a symlink to a directory holding the genuine files, or a regular
+    file. It is removed (a link's target stays as it was), the files download again, and the
+    install step that follows succeeds.
+
+    Mutations: `[ ! -d "$1" ]` alone in `release_dir` (the symlink is followed: no download);
+    drop `release_dir`'s removal (mkdir fails on the file root).
+    """
+    rt = tmp_path / "runner-temp"
+    rt.mkdir(parents=True)
+    release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    target = tmp_path / "elsewhere"
+    if root == "symlink":
+        target.mkdir()
+        for n in _SUMS_NAMES[sid]:
+            (target / n).write_bytes(_genuine()[n])
+        bash_symlink(tmp_path, target, release)
+    else:
+        release.write_bytes(b"not a directory")
+    archive = b"release archive"
+    served = {**_genuine(), _INSTALLS[sid][2]: archive}
+    r, out, curl, _, rt = _run(tmp_path, sid, served=served, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    reason = f"{release.as_posix()}/{_SUMS_NAMES[sid][0]} is not a regular file."
+    assert (r.stdout, out, curl) == (_warning(sid, reason), _OUTPUTS[sid], _downloads(sid, rt))
+    assert (release.is_symlink(), release.is_dir()) == (False, True)
+    if root == "symlink":
+        assert sorted(os.listdir(target)) == sorted(_SUMS_NAMES[sid])
+    r = _install_after(tmp_path, sid, rt, archive)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_a_restored_checksum_file_that_is_a_symlink_is_downloaded_again(tmp_path, sid):
+    """The link points at a genuine copy, so only the symlink test refuses it.
+
+    Mutation: drop `[ -L "$dir/$f" ]` from `_release_files` (the link verifies: no download).
+    """
+    name, sig = _SUMS_NAMES[sid]
+    target = tmp_path / "elsewhere"
+    target.write_bytes(_genuine()[name])
+    rt = tmp_path / "runner-temp"
+    release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    release.mkdir(parents=True)
+    (release / sig).write_bytes(_genuine()[sig])
+    bash_symlink(tmp_path, target, release / name)
+    r, out, curl, _, rt = _run(tmp_path, sid, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    reason = f"{release.as_posix()}/{name} is not a regular file."
+    assert (r.stdout, out, curl) == (_warning(sid, reason), _OUTPUTS[sid], _downloads(sid, rt))
+    assert ((release / name).is_symlink(), target.read_bytes()) == (False, _genuine()[name])
+
+
+@pytest.mark.parametrize(
+    ("sid", "function", "needle", "reason"),
+    [
+        ("tofu-sums", "verify_tofu", b"723bebb0", _POISONED[0][3]),
+        ("terramate-sums", "verify_terramate", b"303fd597", _POISONED[1][3]),
+    ],
+)
+@bash_only
+@needs_tools
+def test_a_verify_function_returns_its_reason_and_writes_nothing(
+    tmp_path, sid, function, needle, reason
+):
+    """The step and the pre-merge check decide what a failed verification costs, so the function
+    returns 1 with `reason` set; it neither exits nor writes an output. A genuine pair writes the
+    Linux digests whole (the genuine-sums tests above).
+
+    Mutation: `fail` in place of the signature `reason` in `verify_tofu` or `verify_terramate`.
+    """
+    d = tmp_path / "release"
+    d.mkdir()
+    for n in _SUMS_NAMES[sid]:
+        (d / n).write_bytes(_genuine()[n])
+    name = _SUMS_NAMES[sid][0]
+    (d / name).write_bytes(_flip(_genuine()[name], needle))
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    version = _TOFU if sid == "tofu-sums" else _TERRAMATE
+    r = run_step(
+        tmp_path,
+        "set -euo pipefail\n"
+        'source "$GITHUB_ACTION_PATH/release.sh"\n'
+        f'{function} {version} "{d.as_posix()}" || echo "returned $?: $reason"\n',
+        {
+            **{k: v for k, v in os.environ.items() if k != "GNUPGHOME"},
+            "RUNNER_TEMP": tmp_path.as_posix(),
+            "GITHUB_OUTPUT": str(out),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+        },
+        timeout=120,
+    )
+    assert (r.returncode, r.stdout, out.read_text(encoding="utf-8")) == (
+        0,
+        f"returned 1: {reason}\n",
+        "",
+    )
+
+
+def _agent_running(tmp_path, home):
+    """Whether a gpg-agent answers for keyring `home`, asked without starting one."""
+    r = run_step(
+        tmp_path,
+        "gpg-connect-agent --no-autostart 'GETINFO pid' /bye\n",
+        {**os.environ, "GNUPGHOME": home},
+    )
+    return any(line.startswith("D ") for line in r.stdout.splitlines())
+
+
+def _homes(tmp_path, tool):
+    path = tmp_path / "logs" / f"{tool}.home"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _kill_agents(tmp_path, homes):
+    for home in set(homes):
+        run_step(tmp_path, "gpgconf --kill gpg-agent\n", {**os.environ, "GNUPGHOME": home})
+
+
+@pytest.mark.parametrize("passing", [True, False], ids=["passing", "failing"])
+@bash_only
+@needs_tools
+def test_no_gpg_agent_outlives_the_opentofu_verify(tmp_path, passing):
+    """The EXIT handler stops the agent of the step's own keyring, on success and on failure.
+
+    Mutations: drop the kill from `_release_exit`; key it on `GNUPGHOME` (the step exports none).
+    """
+    served = _genuine()
+    if not passing:
+        served[_TOFU_SUMS] = _flip(served[_TOFU_SUMS], b"723bebb0")
+    r, out, _, gpg, rt = _run(tmp_path, "tofu-sums", served=served)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        assert r.returncode == (0 if passing else 1), f"stdout={r.stdout!r} stderr={r.stderr!r}"
+        assert out == (_TOFU_OUTPUT if passing else _refusal(r.stdout))
+        assert gpg == _verifier("tofu-sums", rt)
+        assert len(homes) == 2 and len(set(homes)) == 1 and homes[0], homes
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert _homes(tmp_path, "gpgconf") == homes[:1]
+        assert not _agent_running(tmp_path, homes[0])
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_restored_entry_verified_twice_uses_one_keyring(tmp_path):
+    """A failed restored entry runs `verify_tofu` twice; the key is imported once, into the one
+    keyring whose agent the EXIT handler stops.
+
+    Mutation: drop the `[ -z "$_release_gnupghome" ]` guard in `verify_tofu` (a second keyring,
+    whose agent nothing stops).
+    """
+    cached = {n: _genuine()[n] for n in _SUMS_NAMES["tofu-sums"]}
+    cached[_TOFU_SUMS] = _poison(_TOFU_SUMS, b"723bebb0")
+    r, out, _, gpg, rt = _run(tmp_path, "tofu-sums", cached=cached, key=_TOFU_CACHE_KEY)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+        assert out == _TOFU_OUTPUT
+        import_, verify = _verifier("tofu-sums", rt)
+        assert gpg == [import_, verify, verify]
+        assert len(homes) == 3 and len(set(homes)) == 1, homes
+        assert not _agent_running(tmp_path, homes[0])
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_failing_gpgconf_leaves_a_passing_step_green(tmp_path):
+    """Mutation: drop the `|| true` after the kill in `_release_exit`."""
+    r, out, *_ = _run(tmp_path, "tofu-sums", gpgconf_rc=1)
+    try:
+        assert (r.returncode, r.stdout, out) == (0, "", _TOFU_OUTPUT), r.stderr
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+    finally:
+        _kill_agents(tmp_path, _homes(tmp_path, "gpg"))
+
+
+@bash_only
+@needs_tools
+def test_a_runner_gnupghome_is_untouched_by_a_terramate_only_step(tmp_path, gnupg_home):
+    """The runner's own agent, under the `GNUPGHOME` it exported, still runs after the step.
+
+    Mutation: key the kill on `GNUPGHOME` instead of `_release_gnupghome`.
+    """
+    r = run_step(tmp_path, "gpg-connect-agent /bye\n", {**os.environ, "GNUPGHOME": gnupg_home})
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert _agent_running(tmp_path, gnupg_home)
+    r, out, *_ = _run(tmp_path / "run", "terramate-sums", env={"GNUPGHOME": gnupg_home})
+    assert (r.returncode, r.stdout, out) == (0, "", _TM_OUTPUT), r.stderr
+    assert _calls(tmp_path / "run" / "logs" / "gpgconf") == []
+    assert _agent_running(tmp_path, gnupg_home)
+
+
 @bash_only
 def test_a_failed_rm_in_drop_writes_the_generic_refusal(tmp_path):
-    """`set -e` ends the step inside `drop()`, where no `fail` runs.
+    """`set -e` ends the step inside `drop()`, where no `fail` runs. The release root exists, so
+    `release_dir` runs no `rm`; a curl that ran would refuse with its own reason.
 
     Mutation: drop `trap _release_exit EXIT` from release.sh (no refusal is written).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_stub(bin_dir, "rm", "exit 1")
+    write_stub(bin_dir, "curl", "exit 99")
+    (tmp_path / "runner-temp" / "terramate-release").mkdir(parents=True)
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
     r = run_step(

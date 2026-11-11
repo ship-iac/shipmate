@@ -196,12 +196,19 @@ def test_fail_leaves_exactly_its_own_refusal(tmp_path):
 
 @bash_only
 def test_a_fail_in_a_subshell_still_leaves_exactly_one_refusal(tmp_path):
-    """The subshell's variables die with it; its write to $GITHUB_OUTPUT does not.
+    """The subshell's variables die with it; its write to $GITHUB_OUTPUT does not, and its
+    annotation reaches the runner on stderr instead of the command substitution.
 
-    Mutation: replace the handler's file check with a variable `fail` sets (a second line).
+    Mutations: replace the handler's file check with a variable `fail` sets (a second line);
+    print the annotation to stdout in a subshell too (it is captured: stderr is empty).
     """
     r, out, _ = _run(tmp_path, 'x="$(fail \'from a subshell.\')"\necho "$x"')
-    assert (r.returncode, out) == (1, "refusal=Tool 1.0.0: from a subshell.\n")
+    assert (r.returncode, r.stdout, r.stderr, out) == (
+        1,
+        "",
+        "::error title=Release step failed::Tool 1.0.0: from a subshell.\n",
+        "refusal=Tool 1.0.0: from a subshell.\n",
+    )
 
 
 @bash_only

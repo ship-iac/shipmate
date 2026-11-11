@@ -519,6 +519,19 @@ def setup_curl_argv(url, out):
     ]
 
 
+def bash_symlink(tmp_path, target, link):
+    """Make ``link`` a symlink to ``target`` with bash's ``ln -s``, which the steps' ``[ -L ]``
+    sees. Python's ``os.symlink`` needs a privilege Windows withholds; MSYS bash makes a native
+    link without it under ``MSYS=winsymlinks:native``, and plain ``ln -s`` there copies."""
+    r = run_step(
+        tmp_path,
+        f"set -e\nln -s '{pathlib.Path(target).as_posix()}' '{pathlib.Path(link).as_posix()}'\n"
+        f"[ -L '{pathlib.Path(link).as_posix()}' ]\n",
+        {**os.environ, "MSYS": "winsymlinks:native"},
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+
+
 def github_outputs(path):
     """The ``key=value`` lines a helper or step wrote to its ``GITHUB_OUTPUT`` file, as a dict.
 

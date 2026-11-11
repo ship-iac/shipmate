@@ -9,7 +9,15 @@ reds it.
 import os
 
 import pytest
-from _loader import ENGINE, bash_only, run_step, setup_curl_argv, step_by, write_stub
+from _loader import (
+    ENGINE,
+    bash_only,
+    bash_symlink,
+    run_step,
+    setup_curl_argv,
+    step_by,
+    write_stub,
+)
 
 _ACTION = "setup"
 _STEP = "Install Terramate"
@@ -61,6 +69,7 @@ def _install(
     for d in (bin_dir, logs, runner_temp):
         d.mkdir(exist_ok=True)
     log = logs.as_posix()
+    restored = digest if cached_digest is None else cached_digest
     write_stub(
         bin_dir,
         "curl",
@@ -81,7 +90,7 @@ def _install(
         bin_dir,
         "sha256sum",
         f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" >> '{log}/sha256sum'\n"
-        f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={cached_digest or digest}; fi\n"
+        f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={restored}; fi\n"
         'if [ -n "$d" ]; then echo "$d  $1"; fi',
     )
     write_stub(
@@ -383,3 +392,38 @@ def test_a_curl_older_than_7_71_is_told_its_floor_by_the_install_step(tmp_path):
     )
     assert _argv(logs, "tar") is None
     _refusal(tmp_path, r.stdout)
+
+
+@bash_only
+def test_a_restored_archive_sha256sum_cannot_read_is_downloaded_again(tmp_path):
+    """An unreadable restored file: the sha256sum stub prints no digest for it, as sha256sum does
+    on a read error. A fresh archive that yields none still fails (the test above).
+
+    Mutation: `fail` in place of the empty-digest `reason` in `check` (the step exits 1).
+    """
+    r, runner_temp, logs = _install_cached(tmp_path, cached_digest="")
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    archive = f"{runner_temp}/terramate-release/{_ASSET}"
+    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive, archive])
+    assert r.stdout == _warning(f"sha256sum printed no digest for {archive}.") + _VERIFIED
+    assert (tmp_path / "github_path").read_text(encoding="utf-8") == f"{runner_temp}/terramate\n"
+
+
+@bash_only
+def test_a_restored_archive_that_is_a_symlink_is_downloaded_again(tmp_path):
+    """The link is removed, not followed: its target stays as it was.
+
+    Mutation: drop `[ -L "$archive" ]` from `check` (the link's digest matches; curl is not
+    called).
+    """
+    release = tmp_path / "runner-temp" / "terramate-release"
+    release.mkdir(parents=True)
+    target = tmp_path / "elsewhere"
+    target.write_bytes(b"cached")
+    bash_symlink(tmp_path, target, release / _ASSET)
+    r, runner_temp, logs = _install(tmp_path, "200", 0, key=_CACHE_KEY)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    archive = f"{runner_temp}/terramate-release/{_ASSET}"
+    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive])
+    assert r.stdout == _warning(f"{archive} is not a regular file.") + _VERIFIED
+    assert (target.read_bytes(), (release / _ASSET).is_symlink()) == (b"cached", False)

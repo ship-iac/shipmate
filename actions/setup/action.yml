@@ -56,40 +56,17 @@ runs:
         key="${SHIPMATE_CACHE_KEY:-}"
         base="https://github.com/terramate-io/terramate/releases/download/v${v}"
         dir="$RUNNER_TEMP/terramate-release"
-        # Outside $dir, which the cache saves whole.
-        der="$RUNNER_TEMP/terramate-checksums.der"
         files=(checksums.txt checksums.txt.sig)
         drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
-        mkdir -p "$dir"
         download() { for f in "${files[@]}"; do fetch "$base/$f" "$dir/$f" "" ""; done; }
-        # Runs as a condition, where set -e is off, so each check returns its own reason.
-        check() {
-          for f in "${files[@]}"; do [ -f "$dir/$f" ] || { reason="$dir/$f is not a regular file."; return 1; }; done
-          # cosign writes the signature base64-encoded; openssl reads it as DER.
-          base64 -d "$dir/checksums.txt.sig" > "$der" || { reason="${base}/checksums.txt.sig is not base64."; return 1; }
-          rc=0
-          openssl dgst -sha256 -verify "$GITHUB_ACTION_PATH/../../keys/terramate-cosign.pub" \
-            -signature "$der" "$dir/checksums.txt" >/dev/null || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            reason="the signature on checksums.txt did not verify against the committed Terramate key (openssl exit ${rc})."
-            return 1
-          fi
-          lines=""
-          for arch in x86_64 arm64; do
-            asset="terramate_${v}_linux_${arch}.tar.gz"
-            line="$(awk -v a="$asset" '$2 == a {print $1 "  " $2}' "$dir/checksums.txt")"
-            [ -n "$line" ] || { reason="checksums.txt has no line for ${asset}."; return 1; }
-            lines+="${line}"$'\n'
-          done
-        }
+        release_dir "$dir"
         # Without a restored entry, nothing explains a file already here.
-        if [ -z "$key" ] || ! check; then
+        if [ -z "$key" ] || ! verify_terramate "$v" "$dir"; then
           [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading checksums.txt and checksums.txt.sig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           drop
           download
-          check || fail "$reason"
+          verify_terramate "$v" "$dir" || fail "$reason"
         fi
-        printf 'terramate_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
     - name: Verify OpenTofu checksums
       id: tofu-sums
       if: ${{ inputs.tofu != 'false' }}
@@ -104,46 +81,21 @@ runs:
         v="$SHIPMATE_TOFU_VERSION"
         release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
         require gpg gpgconf
-        # The primary key fingerprint of OpenTofu's release signer, compared whole.
-        signer=E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
         key="${SHIPMATE_CACHE_KEY:-}"
         sums="tofu_${v}_SHA256SUMS"
         base="https://github.com/opentofu/opentofu/releases/download/v${v}"
         dir="$RUNNER_TEMP/tofu-release"
         files=("$sums" "$sums.gpgsig")
         drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
-        mkdir -p "$dir"
         download() { for f in "${files[@]}"; do fetch "$base/$f" "$dir/$f" "" ""; done; }
-        # Runs as a condition, where set -e is off, so each check returns its own reason.
-        check() {
-          for f in "${files[@]}"; do [ -f "$dir/$f" ] || { reason="$dir/$f is not a regular file."; return 1; }; done
-          rc=0
-          status="$(gpg --batch --status-fd 1 --verify "$dir/$sums.gpgsig" "$dir/$sums")" || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            reason="the signature on ${sums} did not verify against the committed OpenTofu key (gpg exit ${rc})."
-            return 1
-          fi
-          got="$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print $NF}' <<<"$status")"
-          [ "$got" = "$signer" ] || { reason="${sums} is signed by ${got:-no key}, not the OpenTofu signer ${signer}."; return 1; }
-          lines=""
-          for arch in amd64 arm64; do
-            asset="tofu_${v}_linux_${arch}.zip"
-            line="$(awk -v a="$asset" '$2 == a {print $1 "  " $2}' "$dir/$sums")"
-            [ -n "$line" ] || { reason="${sums} has no line for ${asset}."; return 1; }
-            lines+="${line}"$'\n'
-          done
-        }
-        GNUPGHOME="$(mktemp -d)"
-        export GNUPGHOME
-        gpg --batch --import "$GITHUB_ACTION_PATH/../../keys/opentofu.asc" || fail "gpg could not import the committed OpenTofu key."
+        release_dir "$dir"
         # Without a restored entry, nothing explains a file already here.
-        if [ -z "$key" ] || ! check; then
+        if [ -z "$key" ] || ! verify_tofu "$v" "$dir"; then
           [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${sums} and ${sums}.gpgsig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           drop
           download
-          check || fail "$reason"
+          verify_tofu "$v" "$dir" || fail "$reason"
         fi
-        printf 'tofu_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
     - name: Install OpenTofu
       id: tofu-install
       if: ${{ inputs.tofu != 'false' }}
@@ -177,9 +129,10 @@ runs:
         bin="$RUNNER_TEMP/tofu"
         mkdir -p "$release" "$bin"
         check() {
-          [ -f "$archive" ] || { reason="${archive} is not a regular file."; return 1; }
+          if [ ! -f "$archive" ] || [ -L "$archive" ]; then reason="${archive} is not a regular file."; return 1; fi
           sum="$(sha256sum "$archive" | awk '{print $1}')"
-          [ -n "$sum" ] || fail "sha256sum printed no digest for ${archive}."
+          # A restored archive sha256sum cannot read is replaced; a fresh one fails after the download.
+          [ -n "$sum" ] || { reason="sha256sum printed no digest for ${archive}."; return 1; }
           [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed ${sums} names; the release asset differs from the signed one."; return 1; }
         }
         # Without a restored entry, nothing explains an archive already here.
@@ -230,9 +183,10 @@ runs:
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$release" "$dir"
         check() {
-          [ -f "$archive" ] || { reason="${archive} is not a regular file."; return 1; }
+          if [ ! -f "$archive" ] || [ -L "$archive" ]; then reason="${archive} is not a regular file."; return 1; fi
           sum="$(sha256sum "$archive" | awk '{print $1}')"
-          [ -n "$sum" ] || fail "sha256sum printed no digest for ${archive}."
+          # A restored archive sha256sum cannot read is replaced; a fresh one fails after the download.
+          [ -n "$sum" ] || { reason="sha256sum printed no digest for ${archive}."; return 1; }
           [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed checksums.txt names; the release asset differs from the signed one."; return 1; }
         }
         # Without a restored entry, nothing explains an archive already here.

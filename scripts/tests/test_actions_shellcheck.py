@@ -57,9 +57,10 @@ def test_run_blocks_shellcheck_clean(action, tmp_path):
 @pytest.mark.skipif(shutil.which("shellcheck") is None, reason="shellcheck not installed")
 def test_the_sourced_release_lib_is_shellcheck_clean():
     """The setup steps source `actions/setup/release.sh` past `source=/dev/null`, so it is linted
-    on its own, with no ignore.
+    on its own, with no command-line ignore.
 
-    Mutation: unquote `"$dest"` in `fetch`'s curl call (SC2086).
+    Mutations: unquote `"$dest"` in `fetch`'s curl call; unquote `"$dir"` in `verify_terramate`'s
+    `_release_files` call (SC2086).
     """
     r = subprocess.run(
         ["shellcheck", "-s", "bash", str(ACTIONS / "setup" / "release.sh")],

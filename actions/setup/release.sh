@@ -3,6 +3,7 @@
 
 _release_title="shipmate setup failed"
 _release_prefix=""
+_release_gnupghome=""
 
 # Set the `::error::` title and the message prefix that `fail` and the EXIT handler print.
 release_init() {
@@ -11,10 +12,15 @@ release_init() {
 }
 
 # Print one `::error::`, write it as the step's `refusal` output and exit 1. The output is cut
-# at `REASON_CAP` (scripts/_shipmate.py), like run_annotated's.
+# at `REASON_CAP` (scripts/_shipmate.py), like run_annotated's. In a subshell the annotation goes
+# to stderr, which the runner also reads, so a command substitution cannot capture it.
 fail() {
   local msg="${_release_prefix}$1"
-  echo "::error title=${_release_title}::${msg}"
+  if [ "$BASHPID" = "$$" ]; then
+    echo "::error title=${_release_title}::${msg}"
+  else
+    echo "::error title=${_release_title}::${msg}" >&2
+  fi
   printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
   exit 1
 }
@@ -39,6 +45,10 @@ _release_exit() {
     echo "::error title=${_release_title}::${msg}"
     printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
   fi
+  # Only verify_tofu's own keyring: never an operator's GNUPGHOME, and never the exit status.
+  if [ -n "$_release_gnupghome" ]; then
+    GNUPGHOME="$_release_gnupghome" gpgconf --kill gpg-agent || true
+  fi
   exit "$rc"
 }
 trap _release_exit EXIT
@@ -52,10 +62,9 @@ require() {
   done
 }
 
-# fetch <url> <dest> <404 remedy> <other remedy>: download <url> to <dest>, else refuse naming
-# the status, curl's exit and the URL that answered last (query stripped). curl retries network
-# errors, 408/429/5xx and stalls (<1 KiB/s for 30 s), and starts no retry after 120 s; each
-# attempt stops at 600 s, an 80 MB archive at 133 KB/s. --retry-all-errors needs curl 7.71+.
+# fetch <url> <dest> <404 remedy> <other remedy>: download, else refuse naming the status, curl's
+# exit and the answering URL (query stripped). No retry starts after 120 s; an attempt stops at
+# 600 s, an 80 MB archive at 133 KB/s. --retry-all-errors needs curl 7.71+.
 fetch() {
   local url="$1" dest="$2" rc=0 out code eff remedy
   out="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 \
@@ -71,4 +80,81 @@ fetch() {
   fi
   if [ "$code" = 404 ]; then remedy="$3"; else remedy="$4"; fi
   fail "${url} answered HTTP ${code} from ${eff%%\?*} (curl exit ${rc})${remedy:+; ${remedy}}."
+}
+
+# A restored root that is a symlink or not a directory is removed, so its files download again.
+release_dir() {
+  if [ -L "$1" ] || [ ! -d "$1" ]; then rm -rf "${1:?}"; fi
+  mkdir -p "$1"
+}
+
+# Return 1 with `reason` set unless each named file in <dir> is a regular file, not a symlink.
+# shellcheck disable=SC2034 # The calling step reads `reason`.
+_release_files() {
+  local dir="$1" f
+  shift
+  for f in "$@"; do
+    if [ ! -f "$dir/$f" ] || [ -L "$dir/$f" ]; then
+      reason="$dir/$f is not a regular file."
+      return 1
+    fi
+  done
+}
+
+# verify_terramate <version> <dir> and verify_tofu <version> <dir> check the release's checksum
+# file and signature already in <dir> against the committed key. On success they write the Linux
+# digests to the step's output; otherwise they return 1 with `reason` set. Callers download.
+# shellcheck disable=SC2034 # The calling step reads `reason`.
+verify_terramate() {
+  local v="$1" dir="$2" rc=0 arch asset line lines=""
+  local base="https://github.com/terramate-io/terramate/releases/download/v${v}"
+  # Outside <dir>, which the cache saves whole.
+  local der="$RUNNER_TEMP/terramate-checksums.der"
+  release_init "Terramate checksum verification failed" "Terramate ${v}: "
+  _release_files "$dir" checksums.txt checksums.txt.sig || return 1
+  # cosign writes the signature base64-encoded; openssl reads it as DER.
+  base64 -d "$dir/checksums.txt.sig" > "$der" || { reason="${base}/checksums.txt.sig is not base64."; return 1; }
+  openssl dgst -sha256 -verify "$GITHUB_ACTION_PATH/../../keys/terramate-cosign.pub" \
+    -signature "$der" "$dir/checksums.txt" >/dev/null || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    reason="the signature on checksums.txt did not verify against the committed Terramate key (openssl exit ${rc})."
+    return 1
+  fi
+  for arch in x86_64 arm64; do
+    asset="terramate_${v}_linux_${arch}.tar.gz"
+    line="$(awk -v a="$asset" '$2 == a {print $1 "  " $2}' "$dir/checksums.txt")"
+    [ -n "$line" ] || { reason="checksums.txt has no line for ${asset}."; return 1; }
+    lines+="${line}"$'\n'
+  done
+  printf 'terramate_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
+}
+
+# shellcheck disable=SC2034 # The calling step reads `reason`.
+verify_tofu() {
+  local v="$1" dir="$2" rc=0 status got arch asset line lines=""
+  local sums="tofu_${v}_SHA256SUMS"
+  # The primary key fingerprint of OpenTofu's release signer, compared whole.
+  local signer=E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
+  release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
+  # One keyring per step: a second call must not start a second agent the EXIT handler misses.
+  if [ -z "$_release_gnupghome" ]; then
+    _release_gnupghome="$(mktemp -d)" || fail "mktemp could not create a gpg keyring directory."
+    GNUPGHOME="$_release_gnupghome" gpg --batch --import "$GITHUB_ACTION_PATH/../../keys/opentofu.asc" \
+      || fail "gpg could not import the committed OpenTofu key."
+  fi
+  _release_files "$dir" "$sums" "$sums.gpgsig" || return 1
+  status="$(GNUPGHOME="$_release_gnupghome" gpg --batch --status-fd 1 --verify "$dir/$sums.gpgsig" "$dir/$sums")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    reason="the signature on ${sums} did not verify against the committed OpenTofu key (gpg exit ${rc})."
+    return 1
+  fi
+  got="$(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" {print $NF}' <<<"$status")"
+  [ "$got" = "$signer" ] || { reason="${sums} is signed by ${got:-no key}, not the OpenTofu signer ${signer}."; return 1; }
+  for arch in amd64 arm64; do
+    asset="tofu_${v}_linux_${arch}.zip"
+    line="$(awk -v a="$asset" '$2 == a {print $1 "  " $2}' "$dir/$sums")"
+    [ -n "$line" ] || { reason="${sums} has no line for ${asset}."; return 1; }
+    lines+="${line}"$'\n'
+  done
+  printf 'tofu_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
 }
