@@ -121,9 +121,6 @@ _KEY_RUN = (
 )
 
 
-#: The whole step list, `uses:` refs cut. No step carries `continue-on-error` or a status
-#: function, so a refused decrypt fails the action, cell-init's `restore-outcome` is not
-#: `success` and apply-cell never saves over the entry; a refused encrypt skips `Save state`.
 def _retry(n, prev, seconds):
     """The sleep and lookup that run only when lookup `prev` ran and missed."""
     return [
@@ -147,6 +144,9 @@ def _retry(n, prev, seconds):
     ]
 
 
+#: The whole step list, `uses:` refs cut. No step carries `continue-on-error` or a status
+#: function, so a refused decrypt fails the action, cell-init's `restore-outcome` is not
+#: `success` and apply-cell never saves over the entry; a refused encrypt skips `Save state`.
 _STATE_STEPS = [
     {
         "name": "Validate mode",
