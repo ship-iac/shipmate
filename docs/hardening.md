@@ -1354,6 +1354,9 @@ access, as for the App key (row 14); `CONTRACT.md` §Plan artifact encryption,
   though, so a crafted tool or provider entry can write files outside its cache
   directory, which nothing verifies; writing one takes a job that
   saves in the default branch's scope: an apply, deploy or drift run.
+  `setup` replaces a restored release directory or file that is a symlink,
+  unreadable or not a regular file; that handles a corrupt or stale entry and is
+  no defence here, because the extraction has already run.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval

@@ -707,8 +707,10 @@ it.
 
 Every row below but the `workloads lists` warning refuses at `detect`, before
 any cell starts, and every one of them is reported against the **default
-branch's** copy of the file — that is the only copy execution reads. `setup`'s
-`Resolve versions` step reads the same file in every job before it installs
+branch's** copy of the file — that is the only copy execution reads. Plan `detect`
+also checks the pull request head's `tools` before merge, under its own prefix
+(§`the pull request head's .github/shipmate-config.yml:` refusals). `setup`'s
+`Resolve versions` step reads the same file in every detect job before it installs
 anything, so the read and parse refusals also fail it there with the same text:
 among them an unreadable file, invalid YAML, a missing Python 3.12 or PyYAML, a
 variable reference in a key that accepts none, and every `tools` row. A merged
@@ -1419,6 +1421,18 @@ The file is the engine's, not the repository's, so this happens only on an engin
 commit that broke it. Pin a released engine commit. The step's `tools` refusals are
 the ones listed under §`.github/shipmate-config.yml` is rejected.
 
+Only a detect job reads `VERSIONS` and the table: it calls `setup` with
+`resolve: "true"` and outputs the pair as `tools`, and each of its cells passes
+that output as `versions` and installs it. The step refuses its inputs before
+any download with one of these:
+
+- "setup was given both resolve: "true" and versions; …"
+- "setup was given neither resolve: "true" nor versions. …": a cell's detect
+  job wrote no `tools` output.
+- "setup's versions input is <value>; it must be the detect job's tools output, a JSON object of terramate and tofu to X.Y.Z versions."
+
+Each is an engine wiring fault. Pin a released engine commit.
+
 ### `Terramate checksum verification failed` or `OpenTofu checksum verification failed`
 
 The `Verify Terramate checksums` or `Verify OpenTofu checksums` step in
@@ -1426,19 +1440,27 @@ The `Verify Terramate checksums` or `Verify OpenTofu checksums` step in
 release's checksum file against a signer key committed in the engine
 ([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites). Every annotation
 starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause.
-`<base>` is the release's download URL, `<sums>` OpenTofu's `tofu_<version>_SHA256SUMS`.
+`<base>` is the release's download URL, `<sums>` OpenTofu's `tofu_<version>_SHA256SUMS`,
+and `<answering-url>` the URL that answered after redirects, its query removed.
+The verify and install steps also write the annotation, its lines joined into
+one, as `setup`'s `refusal` output. Only the `detect` jobs of `plan.yml` and
+`apply.yml` read it: plan's into the gate description, apply's into the apply
+result comment. A failure in any other job, a cell included, shows only in that
+job's log.
 
 | Annotation ends with | Cause and remedy |
 |---|---|
-| "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum` (the Terramate step, which runs first in every job and checks them for both) or `gpg` (the OpenTofu step). Install it on the runner image. |
+| "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum`, which every verify and install step checks, or `gpg` or `gpgconf`, which the OpenTofu step also checks. Install it on the runner image. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<base>/<file> answered HTTP <code> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
 | "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
+| "mktemp could not create a gpg keyring directory." | The runner could not create a temporary directory. Re-run the failed job. |
 | "gpg could not import the committed OpenTofu key." | `keys/opentofu.asc` in the pinned engine commit is not a key `gpg` reads. Pin a released engine commit. |
 | "the signature on <sums> did not verify against the committed OpenTofu key (gpg exit <rc>)." | The checksum file is not the one OpenTofu signed, the signature download is not a signature, or a key other than the committed one signed it. The step log carries `gpg`'s own reason. |
 | "<sums> is signed by <fingerprint>, not the OpenTofu signer E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80." | The signature verified, but its primary key fingerprint is not the pinned one (`no key` when `gpg` reported none). Only the committed key is imported, so `keys/opentofu.asc` in the pinned engine commit holds another key. Pin a released engine commit. |
 | "checksums.txt has no line for <asset>." or "<sums> has no line for <asset>." | The signed file lists no Linux `x86_64`/`amd64` or `arm64` asset for that release. Choose another version. |
+| "a command exited <rc> under "<title>"; the step log names it." | A command the step runs failed without a cause of its own, such as `mkdir` or `rm` on a full or read-only disk. The step log shows the command's error. Re-run the failed job. |
 
 A signature that does not verify on a genuine release, every time, means upstream
 changed its signer. Every install of a release the new key signs fails until an
@@ -1446,19 +1468,63 @@ engine release ships that key (`docs/releasing.md` §Rotate a signer key). Pin a
 older version in `tools` until then, one the committed key signed. Do not install
 the tool by hand.
 
+### `the pull request head's .github/shipmate-config.yml:` refusals
+
+Plan `detect` checks the pull request's own `.github/shipmate-config.yml`
+before merge, in the `build-matrix` action: it applies every check `setup`
+applies to the default branch's copy, then checks `tools`. The head resolves each tool as `setup` would after the
+merge: its `tools` entry, else the engine's `VERSIONS` pin. Every tool whose
+version differs from the default branch's has its release's checksum file and
+signature downloaded and verified. Nothing is installed or run. Each refusal
+of the head's file starts "the pull request head's .github/shipmate-config.yml: ",
+so it never reads like the default branch's refusal from `setup`. Fix the file on
+the pull request's branch and push.
+
+| Annotation continues with | Cause and remedy |
+|---|---|
+| a `tools` refusal, such as "tools.<tool> is …, below <floor>, …" | The head's `tools` is invalid; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. Nothing was downloaded. |
+| "the path is a directory, or it or a parent directory is a symlink. Make it a regular file in the checkout, or remove it." | The head has a directory at that path, or the path resolves through a symlink, at the file or at `.github`. A symlink refuses even when it points at a file, so the read never leaves the checkout. A head with no file resolves to the pins. |
+| "could not be read: <error>" | The file exists but the runner could not read it, or it is not UTF-8. `<error>` is the system's or the decoder's message. |
+| "is not valid YAML: <problem> (line <L>, column <C>)" or "must hold a mapping at the top level, got <type>" | The head's file does not parse. |
+| any other refusal of the file, such as "layout must be a string, got list." | The head's file fails a check the default branch's copy must pass; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. |
+| "Terramate <version>: " or "OpenTofu <version>: " then a reason from §`Terramate checksum verification failed` or `OpenTofu checksum verification failed` | The head's version's release did not verify. A 404 ends "no <tool> <version> release publishes <file>; set tools.<key> to a released version.": that version was never released. |
+
+A failure inside one tool's turn of `Verify changed tools` carries the head
+prefix and that tool's label, such as "OpenTofu <version>: gpg is not installed
+on the runner.", and the row above applies. A command that fails before the turn
+has read its version gives "OpenTofu: " or "Terramate: " with no version, then
+"a command exited <rc> under "<title>"; the step log names it.".
+
+These carry no head prefix and are engine wiring or runner faults:
+
+- `build-matrix's tools input is …`: the plan workflow did not pass `setup`'s
+  `tools` output to `build-matrix`. Pin a released engine commit.
+- `<tool> is not installed on the runner.`: the runner lacks `curl`, `openssl`,
+  `base64`, `sha256sum` or `jq`. Install it on the runner image.
+- `build-matrix wrote verify=<value>, which does not map terramate or tofu, or both,
+  to an X.Y.Z version.`: the `Verify changed tools` step got no tool, or a
+  version that is not X.Y.Z, from `Compute plan matrix`. Pin a released engine
+  commit.
+- `a command exited <rc> under "<title>"; the step log names it.`: a command
+  the step runs before either tool's turn failed without a cause of its own. The
+  step log shows the command's error. Re-run the failed job.
+
 ### `Terramate install failed` or `OpenTofu install failed`
 
 The `Install Terramate` or `Install OpenTofu` step in `actions/setup` failed.
 Every annotation starts "Terramate <version> did not install:" or "OpenTofu
 <version> did not install:" and ends with the cause. `<sums>` is the signed
-checksum file: Terramate's `checksums.txt`, OpenTofu's `tofu_<version>_SHA256SUMS`.
+checksum file: Terramate's `checksums.txt`, OpenTofu's `tofu_<version>_SHA256SUMS`,
+and `<answering-url>` the URL that answered after redirects, its query removed.
+The step also writes the annotation as `setup`'s `refusal` output.
 
 | Annotation ends with | Cause and remedy |
 |---|---|
+| "<tool> is not installed on the runner.", "curl exited 2 on an option it does not know; …" or "a command exited <rc> under "<title>"; the step log names it." | As in §`Terramate checksum verification failed` or `OpenTofu checksum verification failed`. |
 | "the signed <sums> yields no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no digest in the signed file, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
-| "<url> answered HTTP 404 (curl exit <rc>); check the signed <sums> and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
-| "<url> answered HTTP <code> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
-| "sha256sum printed no digest for <archive>." | `sha256sum` could not read the downloaded archive (a disk or permission fault on the runner). Re-run the job. If it repeats and the step restored a tool cache entry, delete that entry (`gh cache delete <key> --repo <repo>`, the key `shipmate-tools-<os>-<arch>-<tool>-<version>`) so the next job downloads the archive. |
+| "<url> answered HTTP 404 from <answering-url> (curl exit <rc>); check the signed <sums> and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
+| "<url> answered HTTP <code> from <answering-url> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
+| "sha256sum printed no digest for <archive>." | `sha256sum` could not read the archive the step just downloaded (a disk or permission fault on the runner). A restored archive it cannot read is downloaded again instead (§`Tool cache entry failed verification`). Re-run the job. |
 | "<url> has sha256 <got>, not the <want> the signed <sums> names; the release asset differs from the signed one." | The downloaded archive is not the one upstream signed. A re-run downloads the same asset: report it, and do not install it by hand. |
 | "tar could not extract terramate from <url>." or "python3 could not extract OpenTofu from <url>." | The downloaded archive did not unpack. |
 | "could not make the OpenTofu binary executable." | `chmod` failed on the unpacked binary under `RUNNER_TEMP`. |
@@ -1471,14 +1537,18 @@ curl retries
 each after a network error, a 408, 429 or 5xx response, or a transfer below 1 KiB/s
 for 30 seconds, with waits that double from 1 second or follow the server's
 `Retry-After`, and gives up at once when a `Retry-After` wait would pass the limit.
-It decides on no new retry once 120 seconds have passed, so one file can take about
-3 minutes before the step fails. A 403 or 404 is not retried. A step that still
-fails after retries met a longer outage: re-run the job.
+It starts no new retry once 120 seconds have passed. Each attempt stops after 600
+seconds, the time the largest archive, about 80 MB, takes at 133 KB/s, so one file
+can take about 12 minutes before the step fails. A 403 or 404 is not retried. A
+step that still fails after retries met a longer outage: re-run the job. The
+failure line names both the requested URL and the URL that answered: GitHub
+redirects a release download to another host, and an outage or a proxy there
+shows as that host.
 
 ### `Tool cache entry failed verification`
 
 A release file `setup` restored from the tool cache failed the check a download
-gets, or is missing or not a regular file: the checksum file or its signature in
+gets, or is missing, unreadable, a symlink or not a regular file: the checksum file or its signature in
 a `Verify Terramate checksums` or `Verify OpenTofu checksums` step, the archive
 in an `Install Terramate` or `Install OpenTofu` step. The step deletes its
 files, downloads them again and verifies them; the job goes on when that fresh
@@ -1486,7 +1556,9 @@ copy passes, and fails with the step's own annotation when it does not. The warn
 gives the reason the restored files failed, then `Downloading <files> again.
 Every job repeats this download until the entry is deleted: gh cache delete
 <key> --repo <owner>/<repo>`, where `<files>` names the checksum file and its
-signature, or the archive. The entry is corrupt or was altered
+signature, or the archive. A restored release directory that is a symlink or not
+a directory is removed before the step reads it, so its files download again and
+the warning names the first of them. The entry is corrupt, stale or was altered
 ([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites).
 
 1. Run the `gh cache delete` command the warning prints. The key starts

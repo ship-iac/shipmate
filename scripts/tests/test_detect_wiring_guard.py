@@ -110,6 +110,24 @@ _APPLY_DETECT_OUTPUTS = {
     "base_sha": "${{ steps.d.outputs.base_sha }}",
     "bare_envs": "${{ steps.d.outputs.bare_envs }}",
     "refusal": "${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}",
+    "tools": "${{ steps.setup.outputs.tools }}",
+}
+
+#: The whole `outputs:` of `deploy.yml`'s `detect`. `tools` is the version pair every env-level's
+#: cells install; dropped, each cell's `versions` reads '' and refuses.
+_DEPLOY_DETECT_OUTPUTS = {
+    "envlevel0_waves": "${{ steps.d.outputs.envlevel0_waves }}",
+    "envlevel1_waves": "${{ steps.d.outputs.envlevel1_waves }}",
+    "envlevel2_waves": "${{ steps.d.outputs.envlevel2_waves }}",
+    "envlevel3_waves": "${{ steps.d.outputs.envlevel3_waves }}",
+    "envlevel0_empty": "${{ steps.d.outputs.envlevel0_empty }}",
+    "envlevel1_empty": "${{ steps.d.outputs.envlevel1_empty }}",
+    "envlevel2_empty": "${{ steps.d.outputs.envlevel2_empty }}",
+    "envlevel3_empty": "${{ steps.d.outputs.envlevel3_empty }}",
+    "head_sha": "${{ steps.d.outputs.head_sha }}",
+    "pr_number": "${{ steps.d.outputs.pr_number }}",
+    "refused_locked": "${{ steps.d.outputs.refused_locked }}",
+    "tools": "${{ steps.setup.outputs.tools }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
@@ -219,8 +237,13 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     orders environments by name; delete `held_cells`; delete `provenance_run`; delete
     `base_sha`; delete `skipped_after`; delete `bare_envs`; delete `pusher`; drop
     `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal reaches the comment
-    and the gate as the generic text."""
+    and the gate as the generic text; delete `tools`, so every wave cell refuses."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
+
+
+def test_the_deploy_detect_job_outputs_exactly_these_expressions():
+    """Mutations: delete `tools`, so every wave cell refuses; read it from `steps.d`."""
+    assert workflow_yaml("deploy.yml")["jobs"]["detect"]["outputs"] == _DEPLOY_DETECT_OUTPUTS
 
 
 def test_only_the_listed_steps_carry_the_variables():

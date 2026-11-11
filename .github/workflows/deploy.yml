@@ -28,13 +28,15 @@ jobs:
       head_sha: ${{ steps.d.outputs.head_sha }}
       pr_number: ${{ steps.d.outputs.pr_number }}
       refused_locked: ${{ steps.d.outputs.refused_locked }}
+      tools: ${{ steps.setup.outputs.tools }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
         # only when a diff or read needs them, so the history costs commits and trees, not blobs.
         with: { fetch-depth: 0, filter: "blob:none" }
-      - uses: $/actions/setup
-        with: { tofu: "false" }
+      - id: setup
+        uses: $/actions/setup
+        with: { tofu: "false", resolve: "true" }
       - id: d
         uses: $/actions/deploy-detect
         with:
@@ -56,6 +58,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ needs.detect.outputs.pr_number }}
       deploy: true
     # Named, never inherit: see the envlevel0 job in apply.yml.
@@ -75,6 +78,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ needs.detect.outputs.pr_number }}
       deploy: true
     secrets: *envlevel-secrets
@@ -89,6 +93,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ needs.detect.outputs.pr_number }}
       deploy: true
     secrets: *envlevel-secrets
@@ -103,6 +108,7 @@ jobs:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
       runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
       pr_number: ${{ needs.detect.outputs.pr_number }}
       deploy: true
     secrets: *envlevel-secrets

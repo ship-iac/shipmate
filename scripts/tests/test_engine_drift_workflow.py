@@ -82,14 +82,15 @@ def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
 
 
 def test_the_detect_job_outputs_exactly_these_expressions():
-    """Mutation: drop `cells` from detect's `outputs:`, and the issues job receives an empty
-    string."""
+    """Mutations: drop `cells` from detect's `outputs:`, and the issues job receives an empty
+    string; drop `tools`, and every drift cell refuses."""
     assert workflow_jobs(WF)["detect"]["outputs"] == {
         "matrix": "${{ steps.m.outputs.matrix }}",
         "cells": "${{ steps.m.outputs.cells }}",
         "empty": "${{ steps.m.outputs.empty }}",
         "max_parallel": "${{ steps.m.outputs.max_parallel }}",
         "default_branch": "${{ steps.default_branch.outputs.default_branch }}",
+        "tools": "${{ steps.setup.outputs.tools }}",
     }
 
 

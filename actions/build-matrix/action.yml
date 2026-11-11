@@ -1,5 +1,5 @@
 name: shipmate build-matrix
-description: Compute the changed stack x environment plan matrix (fails above 256 cells).
+description: Compute the changed stack x environment plan matrix (fails above 256 cells), and verify the signed checksum file of each tool version a pull request's `tools` changes.
 inputs:
   base-sha:
     description: >-
@@ -45,6 +45,15 @@ inputs:
       environment table holds a variable reference; empty when unwired.
     required: false
     default: ""
+  tools:
+    description: >-
+      The `tools` output of the job's `setup` step: the default branch's Terramate and OpenTofu
+      versions, a JSON object of terramate and tofu to X.Y.Z versions. Each tool the pull request
+      head's `.github/shipmate-config.yml` resolves to another version has that release's
+      checksum file and signature verified before merge. Empty or invalid refuses outside a sweep;
+      a sweep checks no head and passes none.
+    required: false
+    default: ""
 outputs:
   matrix:
     description: 'JSON {"include":[{stack,environment,workload,role_arn,cred_region,tf_vars,config_path,env_binding},...]} for the plan matrix.'
@@ -77,8 +86,8 @@ outputs:
     description: 'JSON {"count": N, "pairs": [...]}: how many `<stack> / <env>` pairs this pull request untagged on stacks that keep another `env/*` tag, and the first ten, sorted; a stack that lost its last tag is in `unmanaged` instead, unless it carries `shipmate/local`. Empty on a drift sweep or with no pull-request base. Read by the plan summary for its comment line.'
     value: ${{ steps.build.outputs.lost }}
   refusal:
-    description: The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
-    value: ${{ steps.build.outputs.refusal }}
+    description: The first error of the `::error::` message that failed `Compute plan matrix` or `Verify changed tools` (a refusal, a failed tool or API call, or a tool release that did not verify), without the prefix, its lines joined into one; empty when neither raised one. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
+    value: ${{ steps.build.outputs.refusal || steps.tools-verify.outputs.refusal }}
   env_order:
     description: 'JSON [env, ...]: every environment the matrix''s cells name, in apply order (the env-levels of the table''s `needs`, ties by name). Read by the plan summary to order the comment''s environment headings.'
     value: ${{ steps.build.outputs.env_order }}
@@ -99,4 +108,40 @@ runs:
         SHIPMATE_SWEEP: ${{ inputs.sweep }}
         SHIPMATE_TAGS: ${{ inputs.tags }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_TOOLS: ${{ inputs.tools }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"
+    # Verify only: detect runs no program a pull request chooses. Each release is the head's
+    # version, which `Compute plan matrix` validated before writing `verify`.
+    - name: Verify changed tools
+      id: tools-verify
+      if: ${{ steps.build.outputs.verify != '{}' }}
+      shell: bash
+      env:
+        SHIPMATE_VERIFY: ${{ steps.build.outputs.verify }}
+      run: |
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "$GITHUB_ACTION_PATH/../setup/release.sh"
+        title="Pull request tools verification failed"
+        head="the pull request head's .github/shipmate-config.yml: "
+        release_init "$title" ""
+        require jq
+        named='type == "object" and length > 0 and all(keys[]; . == "terramate" or . == "tofu")
+          and all(.[]; type == "string" and test("\\A[0-9]+\\.[0-9]+\\.[0-9]+\\z"))'
+        jq -e "$named" <<<"$SHIPMATE_VERIFY" >/dev/null \
+          || fail "build-matrix wrote verify=${SHIPMATE_VERIFY}, which does not map terramate or tofu, or both, to an X.Y.Z version."
+        # One read per tool, not a pipeline: a `while read` subshell would lose verify_tofu's
+        # keyring, and with it the EXIT handler's gpgconf kill.
+        for tool in terramate tofu; do
+          if [ "$tool" = tofu ]; then name=OpenTofu; else name=Terramate; fi
+          # First, so no failure in this tool's turn carries the previous tool's prefix.
+          release_init "$title" "${head}${name}: "
+          v="$(jq -r --arg t "$tool" '.[$t] // ""' <<<"$SHIPMATE_VERIFY")"
+          [ -n "$v" ] || continue
+          release_init "$title" "${head}${name} ${v}: "
+          [ "$tool" = terramate ] || require gpg gpgconf
+          # Not setup's release directory, whose verified files this would overwrite.
+          dir="$RUNNER_TEMP/head-${tool}-release"
+          mkdir -p "$dir"
+          release_verify "$tool" "$v" "$dir" "no ${name} ${v} release publishes {file}; set tools.${tool} to a released version" "re-run the failed job"
+        done

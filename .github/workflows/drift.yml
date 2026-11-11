@@ -26,6 +26,7 @@ jobs:
       empty: ${{ steps.m.outputs.empty }}
       max_parallel: ${{ steps.m.outputs.max_parallel }}
       default_branch: ${{ steps.default_branch.outputs.default_branch }}
+      tools: ${{ steps.setup.outputs.tools }}
     steps:
       - id: default_branch
         shell: bash
@@ -44,8 +45,9 @@ jobs:
           fi
           echo "default_branch=$branch" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: $/actions/setup
-        with: { tofu: "false" }
+      - id: setup
+        uses: $/actions/setup
+        with: { tofu: "false", resolve: "true" }
       - id: m
         uses: $/actions/build-matrix
         with:
@@ -69,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: $/actions/setup
+        with: { versions: "${{ needs.detect.outputs.tools }}" }
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0

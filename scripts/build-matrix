@@ -18,7 +18,15 @@ import shutil
 import subprocess
 import tempfile
 
-from _shipmate import _load, _run, command_data, named, run, run_annotated, write_outputs
+from _shipmate import (
+    _load,
+    _run,
+    command_data,
+    named,
+    run,
+    run_annotated,
+    write_outputs,
+)
 
 ag = _load("apply-gate")
 ec = _load("env-config")
@@ -918,6 +926,73 @@ def tag_filter_error(tags, sweep: bool):
     )
 
 
+#: Starts every refusal of the pull request head's own config file, so none reads like `setup`'s
+#: refusal of the default branch's copy.
+HEAD_PREFIX = f"the pull request head's {ec.CONFIG_PATH}: "
+
+
+def _at_head(refusal):
+    """`refusal`, an `env-config` `::error::` line, under `HEAD_PREFIX` in place of the path."""
+    return refusal.replace(f"::error::{ec.CONFIG_PATH} ", "::error::", 1).replace(
+        "::error::", f"::error::{HEAD_PREFIX}", 1
+    )
+
+
+def _head_table():
+    """The head's config file parsed by `env-config.load_config`; `{}` when the head has none.
+    A path that resolves anywhere but itself in the checkout refuses, so a symlink at it or at a
+    parent directory cannot point the read at a file outside the tree."""
+    path = ec.CONFIG_PATH
+    if not os.path.lexists(path):
+        return {}
+    inside = os.path.normpath(os.path.join(os.path.realpath(os.getcwd()), path))
+    if os.path.realpath(path) != inside or not os.path.isfile(path):
+        raise SystemExit(
+            f"::error::{HEAD_PREFIX}the path is a directory, or it or a parent directory is a "
+            "symlink. Make it a regular file in the checkout, or remove it."
+        )
+    # Unprefixed and first: a runner refusal is about the runner, not the head's file.
+    refusal = ec.runner_refusal()
+    if refusal:
+        raise SystemExit(refusal)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise SystemExit(f"::error::{HEAD_PREFIX}could not be read: {e}") from None
+    try:
+        return ec.load_config(text)
+    except SystemExit as e:
+        raise SystemExit(_at_head(str(e.code))) from None
+
+
+def changed_tools(raw, sweep: bool):
+    """`{tool: version}` for each tool whose version the pull request head resolves to
+    differently from `raw`, the `tools` input (the default branch's resolution); `{}` when none,
+    and in a sweep, which reads neither.
+
+    The head resolves as `tool-versions` does: its `tools` entry, else the `VERSIONS` pin, so a
+    head that removes `tools` or the file is checked against the pin. Its `tools` passes
+    `tool_version_errors` first, so no head string reaches a release URL unvalidated. The
+    action's `Verify changed tools` step downloads and verifies each returned release's checksum
+    file and signature; nothing is installed or run."""
+    if sweep is True:
+        return {}
+    given = ec.parse_tools(
+        raw,
+        f"::error::build-matrix's tools input is {raw!r}; outside a sweep it must be the setup "
+        "step's tools output, a JSON object of terramate and tofu to X.Y.Z versions. Wire "
+        "`tools: ${{ steps.setup.outputs.tools }}` into the build-matrix step.",
+    )
+    head = _head_table()
+    engine = ec.engine_versions(ec.VERSIONS_PATH)
+    errors = ec.tool_version_errors(head, engine)
+    if errors:
+        raise SystemExit("\n".join(_at_head(e) for e in errors))
+    resolved = ec.tool_versions(head, engine)
+    return {tool: v for tool, (v, _) in resolved.items() if v != given[tool]}
+
+
 def main():
     sweep = os.environ.get("SHIPMATE_SWEEP", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
@@ -937,6 +1012,7 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
+    verify = changed_tools(os.environ.get("SHIPMATE_TOOLS", ""), sweep)
     if not sweep and base and base != _ZERO_SHA:
         base = merge_base(base)
     errors = []
@@ -976,6 +1052,7 @@ def main():
         unmanaged=json.dumps(named),
         lost=lost,
         env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
+        verify=json.dumps(verify, separators=(",", ":")),
     )
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")

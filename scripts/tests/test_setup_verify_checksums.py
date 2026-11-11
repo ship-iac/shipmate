@@ -1,16 +1,19 @@
 """actions/setup verifies each tool's release checksum file against a signer key in this repo.
 
-Each verify step's real `run:` body executes here with real `gpg`, `openssl` and `base64`. Only
+Each verify step's real `run:` body executes here with real `gpg`, `openssl` and `base64`; its
+signature logic is `verify_terramate` and `verify_tofu` in `actions/setup/release.sh`. Only
 `curl` is a stub: it appends its argv to a log and serves the raw upstream files under
-`fixtures/release-sums/` by URL basename. `gpg` and `openssl` wrappers log their argv and run the
-real tools. A cache hit is simulated by files placed in `$RUNNER_TEMP/<tool>-release` before the
-step runs, with `SHIPMATE_CACHE_KEY` set to the entry's key.
+`fixtures/release-sums/` by URL basename. `gpg`, `gpgconf` and `openssl` wrappers log their argv
+(`gpg` and `gpgconf` also their `GNUPGHOME`) and run the real tools. A cache hit is simulated by
+files placed in `$RUNNER_TEMP/<tool>-release` before the step runs, with `SHIPMATE_CACHE_KEY` set
+to the entry's key. `build-matrix`'s `Verify changed tools` step runs the same way, with the
+pull request head's versions in `SHIPMATE_VERIFY`.
 
 Threat model: an accidental regression in a SHA-pinned, reviewed engine file -- a dropped
 signature check, an exit-code-only check, a fetched key, a lost guard. A hostile edit to the
 step is out of scope. Cases that need a correctly signed but edited checksum file sign it with
-a throwaway key made here, and run a copy of the body with the key path (and, for OpenTofu, the
-fingerprint constant) substituted.
+a throwaway key made here, and run the step against a copy of `release.sh` with the key path
+(and, for OpenTofu, the fingerprint constant) substituted.
 """
 
 import base64
@@ -22,7 +25,15 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import ENGINE, bash_only, run_step, step_by, write_stub
+from _loader import (
+    ENGINE,
+    bash_only,
+    bash_symlink,
+    run_step,
+    setup_curl_argv,
+    step_by,
+    write_stub,
+)
 
 _ACTION = "setup"
 _FIXTURES = ENGINE / "scripts" / "tests" / "fixtures" / "release-sums"
@@ -152,19 +163,40 @@ def _genuine():
     return {p.name: p.read_bytes() for p in _FIXTURES.iterdir() if p.name != "README"}
 
 
-def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cached=None, key=None):
-    """Run step `sid`'s body (or `body`) with curl serving `served` (basename -> bytes; the
-    genuine fixtures by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`.
-    `cached` (basename -> bytes, or None for a directory) is placed in the step's release
-    directory first, and `key`, when given, is the `SHIPMATE_CACHE_KEY`.
+def _run(
+    tmp_path,
+    sid,
+    *,
+    served=None,
+    codes=None,
+    action=None,
+    curl_exit=0,
+    cached=None,
+    key=None,
+    env=None,
+    gpgconf_rc=None,
+    of=_ACTION,
+    path=None,
+    gpg_stub=True,
+):
+    """Run step `sid`'s body with curl serving `served` (basename -> bytes; the genuine fixtures
+    by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`. `cached` (basename ->
+    bytes, or None for a directory) is placed in the step's release directory first, and `key`,
+    when given, is the `SHIPMATE_CACHE_KEY`. `of` is the action whose step runs, and `action`
+    (default the engine's copy of it) is `GITHUB_ACTION_PATH`; `env` is added last, over a host
+    environment without `GNUPGHOME`. The `gpgconf` wrapper exits `gpgconf_rc` instead of running
+    the real one when that is given, and logs whether its `GNUPGHOME` is a directory. `path`,
+    when given, replaces the host PATH behind the stubs; `gpg_stub=False` writes no `gpg` stub.
 
     Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP);
-    openssl's argv per call is in `tmp_path/logs/openssl`.
+    openssl's and gpgconf's argv per call are in `tmp_path/logs/`, and each gpg and gpgconf
+    call's `GNUPGHOME` in `logs/gpg.home` and `logs/gpgconf.home`; `present` or `absent` per
+    gpgconf call in `logs/gpgconf.dir`.
     """
     tmp_path.mkdir(exist_ok=True)
     bin_dir, logs, serve, rt = (tmp_path / d for d in ("bin", "logs", "serve", "runner-temp"))
     for d in (bin_dir, logs, serve, rt):
-        d.mkdir()
+        d.mkdir(exist_ok=True)
     for name, data in (_genuine() if served is None else served).items():
         (serve / name).write_bytes(data)
     release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
@@ -186,15 +218,31 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
         'name="${!#}"; name="${name##*/}"\n'
         f"serve='{serve.as_posix()}'\n"
         'if [ -f "$serve/$name" ]; then cp "$serve/$name" "$out"; fi\n'
-        'if [ -f "$serve/$name.code" ]; then cat "$serve/$name.code"; else printf 200; fi\n'
+        'code=200; if [ -f "$serve/$name.code" ]; then code="$(cat "$serve/$name.code")"; fi\n'
+        'printf \'%s %s\' "$code" "${!#}"\n'
         f"exit {curl_exit}",
     )
     gpg = shutil.which("gpg")
     write_stub(
         bin_dir,
-        "gpg",
+        "gpg" if gpg_stub else "unused-gpg",
         f"printf '%s\\x1f' \"$@\" >> '{log}/gpg'\necho >> '{log}/gpg'\n"
+        f"echo \"${{GNUPGHOME:-}}\" >> '{log}/gpg.home'\n"
         f'exec "{gpg and gpg.replace(os.sep, "/")}" "$@"',
+    )
+    gpgconf = shutil.which("gpgconf")
+    write_stub(
+        bin_dir,
+        "gpgconf",
+        f"printf '%s\\x1f' \"$@\" >> '{log}/gpgconf'\necho >> '{log}/gpgconf'\n"
+        f"echo \"${{GNUPGHOME:-}}\" >> '{log}/gpgconf.home'\n"
+        'if [ -d "${GNUPGHOME:-}" ]; then echo present; else echo absent; fi'
+        f" >> '{log}/gpgconf.dir'\n"
+        + (
+            f"exit {gpgconf_rc}"
+            if gpgconf_rc is not None
+            else f'exec "{gpgconf and gpgconf.replace(os.sep, "/")}" "$@"'
+        ),
     )
     openssl = shutil.which("openssl")
     write_stub(
@@ -207,17 +255,18 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
     out.write_text("", encoding="utf-8")
     r = run_step(
         tmp_path,
-        body if body is not None else step_by(_ACTION, id=sid)["run"],
+        step_by(of, id=sid)["run"],
         {
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            **{k: v for k, v in os.environ.items() if k != "GNUPGHOME"},
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '') if path is None else path}",
             "RUNNER_TEMP": rt.as_posix(),
             "GITHUB_OUTPUT": str(out),
-            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+            "GITHUB_ACTION_PATH": action or (ENGINE / "actions" / of).as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
             "GITHUB_REPOSITORY": _REPO,
             **({} if key is None else {"SHIPMATE_CACHE_KEY": key}),
+            **(env or {}),
         },
         timeout=120,
     )
@@ -231,26 +280,7 @@ def _calls(path):
 
 
 def _curl(url, out):
-    """curl's whole argv for one download, hand-written."""
-    return [
-        "--retry-all-errors",
-        "-sSL",
-        "--retry",
-        "10",
-        "--retry-max-time",
-        "120",
-        "--connect-timeout",
-        "10",
-        "--speed-limit",
-        "1024",
-        "--speed-time",
-        "30",
-        "-o",
-        out,
-        "-w",
-        "%{http_code}",
-        url,
-    ]
+    return setup_curl_argv(url, out)
 
 
 def _downloads(sid, rt):
@@ -291,10 +321,20 @@ def _verifier(sid, rt):
     ]
 
 
-def _edit(body, old, new):
-    """`body` with its one `old` replaced: a renamed target must red, not no-op."""
-    assert body.count(old) == 1, f"{old!r} occurs {body.count(old)} times in the step body"
-    return body.replace(old, new)
+def _lib(tmp_path, *edits):
+    """A copy of `actions/setup` and `keys/` under `tmp_path/engine` with each (old, new) of
+    `edits` applied once to `release.sh`; return the copy's `GITHUB_ACTION_PATH`. A renamed
+    target reds the edit instead of leaving the copy unchanged."""
+    engine = tmp_path / "engine"
+    shutil.copytree(ENGINE / "keys", engine / "keys")
+    action = engine / "actions" / "setup"
+    shutil.copytree(ENGINE / "actions" / "setup", action)
+    lib = (action / "release.sh").read_text(encoding="utf-8")
+    for old, new in edits:
+        assert lib.count(old) == 1, f"{old!r} occurs {lib.count(old)} times in release.sh"
+        lib = lib.replace(old, new)
+    (action / "release.sh").write_text(lib, encoding="utf-8", newline="\n")
+    return action.as_posix()
 
 
 def _flip(data, needle):
@@ -384,8 +424,8 @@ def test_a_signature_by_another_key_fails_the_whole_fingerprint_compare(tmp_path
     Mutation: check gpg's exit code alone (drop the fingerprint compare).
     """
     other = _SIGNER[:-1] + "1"
-    body = _edit(step_by(_ACTION, id="tofu-sums")["run"], _SIGNER, other)
-    r, out, *_ = _run(tmp_path, "tofu-sums", body=body)
+    action = _lib(tmp_path / "lib", (_SIGNER, other))
+    r, out, *_ = _run(tmp_path, "tofu-sums", action=action)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
         f"{_TOFU_ERROR}{_TOFU_SUMS} is signed by {_SIGNER}, not the OpenTofu signer {other}.\n"
@@ -439,17 +479,17 @@ def test_an_html_signature_at_200_fails_with_one_annotation(tmp_path, sid, name,
 @bash_only
 @needs_tools
 def test_a_404_fails_naming_the_url(tmp_path, sid, url):
-    """Mutations: drop the `!= 200` status check; drop the `refusal=` write from either
-    step's `fail()`."""
+    """Mutations: in `fetch`, return on curl exit 0 alone; drop the `refusal=` write from
+    `_release_refuse`."""
     name = url.rsplit("/", 1)[1]
     served = _genuine()
     served[name] = b"Not Found"
     r, out, *_ = _run(tmp_path, sid, served=served, codes={name: "404"})
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     prefix = _TOFU_ERROR if sid == "tofu-sums" else _TM_ERROR
-    assert r.stdout == f"{prefix}{url} answered HTTP 404 (curl exit 0).\n"
+    assert r.stdout == f"{prefix}{url} answered HTTP 404 from {url} (curl exit 0).\n"
     tool = f"OpenTofu {_TOFU}" if sid == "tofu-sums" else f"Terramate {_TERRAMATE}"
-    assert out == f"refusal={tool}: {url} answered HTTP 404 (curl exit 0).\n"
+    assert out == f"refusal={tool}: {url} answered HTTP 404 from {url} (curl exit 0).\n"
 
 
 @bash_only
@@ -475,19 +515,19 @@ def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
         ("terramate-sums", "openssl", ("curl", "base64", "sha256sum")),
         ("terramate-sums", "base64", ("curl", "openssl", "sha256sum")),
         ("terramate-sums", "sha256sum", ("curl", "openssl", "base64")),
-        ("tofu-sums", "gpg", ()),
+        ("tofu-sums", "gpg", ("curl", "openssl", "base64", "sha256sum", "gpgconf")),
+        ("tofu-sums", "gpgconf", ("curl", "openssl", "base64", "sha256sum", "gpg")),
     ],
 )
 @bash_only
 def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
     tmp_path, sid, missing, present
 ):
-    """PATH holds only never-run stubs for `present`. The Terramate step runs first and checks
-    the tools it and the installers need; the OpenTofu step checks gpg alone.
+    """PATH holds only never-run stubs for `present`. Every step checks the four base tools;
+    the OpenTofu step also checks gpg and gpgconf.
 
-    Mutations: drop `curl`, `openssl`, `base64` or `sha256sum` from the Terramate step's
-    `command -v` loop;
-    delete the OpenTofu step's `command -v gpg` line.
+    Mutations: drop `curl`, `openssl`, `base64` or `sha256sum` from `require`'s base list;
+    drop `gpg` or `gpgconf` from the OpenTofu step's `require`.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -502,6 +542,7 @@ def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
             "PATH": str(bin_dir),
             "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
             "GITHUB_OUTPUT": str(out),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
         },
@@ -523,7 +564,7 @@ def gnupg_home():
     yield home
     gpgconf = shutil.which("gpgconf")
     if gpgconf:
-        subprocess.run([gpgconf, "--homedir", home, "--kill", "gpg-agent"], check=False)
+        subprocess.run([gpgconf, "--homedir", home, "--kill", "all"], check=False)
     shutil.rmtree(path, ignore_errors=True)
 
 
@@ -587,10 +628,9 @@ def test_signed_opentofu_sums_without_an_asset_line_fail_naming_it(
         sums,
         {**os.environ, "GNUPGHOME": gnupg_home},
     )
-    body = _edit(step_by(_ACTION, id="tofu-sums")["run"], _TOFU_KEY, pub)
-    body = _edit(body, _SIGNER, fpr)
+    action = _lib(tmp_path / "lib", (_TOFU_KEY, pub), (_SIGNER, fpr))
     served = {_TOFU_SUMS: sums, f"{_TOFU_SUMS}.gpgsig": sig}
-    r, out, *_ = _run(tmp_path / "run", "tofu-sums", served=served, body=body)
+    r, out, *_ = _run(tmp_path / "run", "tofu-sums", served=served, action=action)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TOFU_ERROR}{_TOFU_SUMS} has no line for {missing}.\n"
     assert out == _refusal(r.stdout)
@@ -621,9 +661,9 @@ def test_signed_terramate_sums_without_an_asset_line_fail_naming_it(
         sums,
         dict(os.environ),
     )
-    body = _edit(step_by(_ACTION, id="terramate-sums")["run"], _TM_KEY, pub)
+    action = _lib(tmp_path / "lib", (_TM_KEY, pub))
     served = {"checksums.txt": sums, "checksums.txt.sig": base64.b64encode(der)}
-    r, out, *_ = _run(tmp_path / "run", "terramate-sums", served=served, body=body)
+    r, out, *_ = _run(tmp_path / "run", "terramate-sums", served=served, action=action)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_TM_ERROR}checksums.txt has no line for {missing}.\n"
     assert out == _refusal(r.stdout)
@@ -646,7 +686,7 @@ def _signature_log(sid, tmp_path, gpg):
 @bash_only
 @needs_tools
 def test_a_genuine_cache_hit_downloads_nothing_and_verifies_the_same_way(tmp_path, sid):
-    """Mutation: run `download` before the restored-entry `if` (curl is called twice)."""
+    """Mutation: call `release_verify` before the restored-entry `if` (curl is called)."""
     r, out, curl, gpg, rt = _run(
         tmp_path, sid, cached={n: _genuine()[n] for n in _SUMS_NAMES[sid]}, key=_CACHE_KEYS[sid]
     )
@@ -724,7 +764,8 @@ def test_a_cached_file_that_fails_is_downloaded_again_with_one_warning(
 def test_a_restored_checksum_path_that_is_a_directory_is_downloaded_again(tmp_path, sid):
     """A restored path that is not a regular file costs a download, not the job.
 
-    Mutation: `rm -f` in place of `rm -rf` in `drop` (the step exits 1 on the directory).
+    Mutation: `rm -f` in place of `rm -rf` in `release_verify` (the step exits 1 on the
+    directory).
     """
     name, sig = _SUMS_NAMES[sid]
     cached = {name: None, sig: _genuine()[sig]}
@@ -803,6 +844,32 @@ _RELEASE_FILES = {
 }
 
 
+def _install_after(tmp_path, sid, rt, archive):
+    """Run the install step that follows `sid` on `rt`, after `sid` passed, with curl serving
+    `archive` and the extract stubbed; return its result."""
+    step, digest_var, asset, extract, extract_body = _INSTALLS[sid]
+    bin_dir = tmp_path / "bin"
+    write_stub(bin_dir, "uname", 'if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi')
+    write_stub(bin_dir, extract, extract_body)
+    path = tmp_path / "github_path"
+    path.write_text("", encoding="utf-8")
+    return run_step(
+        tmp_path,
+        step_by(_ACTION, name=step)["run"],
+        {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "RUNNER_TEMP": rt.as_posix(),
+            "GITHUB_PATH": str(path),
+            "GITHUB_OUTPUT": str(tmp_path / "github_output"),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+            "SHIPMATE_TOFU_VERSION": _TOFU,
+            "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
+            digest_var: f"{hashlib.sha256(archive).hexdigest()}  {asset}",
+        },
+    )
+
+
 @pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
 @bash_only
 @needs_tools
@@ -811,31 +878,494 @@ def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
 
     Mutation: write the DER signature into `terramate-release` (`$dir/checksums.txt.der`).
     """
-    step, digest_var, asset, extract, extract_body = _INSTALLS[sid]
     archive = b"release archive"
-    served = {**_genuine(), asset: archive}
+    served = {**_genuine(), _INSTALLS[sid][2]: archive}
     r, _, _, _, rt = _run(tmp_path, sid, served=served)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    bin_dir = tmp_path / "bin"
-    write_stub(bin_dir, "uname", 'if [ "$1" = -s ]; then echo Linux; else echo x86_64; fi')
-    write_stub(bin_dir, extract, extract_body)
-    path = tmp_path / "github_path"
-    path.write_text("", encoding="utf-8")
-    r = run_step(
-        tmp_path,
-        step_by(_ACTION, name=step)["run"],
-        {
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-            "RUNNER_TEMP": rt.as_posix(),
-            "GITHUB_PATH": str(path),
-            "SHIPMATE_TOFU_VERSION": _TOFU,
-            "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
-            digest_var: f"{hashlib.sha256(archive).hexdigest()}  {asset}",
-        },
-    )
+    r = _install_after(tmp_path, sid, rt, archive)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
     assert sorted(os.listdir(release)) == _RELEASE_FILES[sid]
     if sid == "terramate-sums":
         assert (rt / "terramate-checksums.der").is_file()
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@pytest.mark.parametrize("root", ["symlink", "file"])
+@bash_only
+@needs_tools
+def test_a_restored_root_that_is_not_a_real_directory_is_replaced_and_installs(tmp_path, sid, root):
+    """The release root is a symlink to a directory holding the genuine files, or a regular
+    file. It is removed (a link's target stays as it was), the files download again, and the
+    install step that follows succeeds.
+
+    Mutations: `[ ! -d "$1" ]` alone in `release_dir` (the symlink is followed: no download);
+    drop `release_dir`'s removal (mkdir fails on the file root).
+    """
+    rt = tmp_path / "runner-temp"
+    rt.mkdir(parents=True)
+    release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    target = tmp_path / "elsewhere"
+    if root == "symlink":
+        target.mkdir()
+        for n in _SUMS_NAMES[sid]:
+            (target / n).write_bytes(_genuine()[n])
+        bash_symlink(tmp_path, target, release)
+    else:
+        release.write_bytes(b"not a directory")
+    archive = b"release archive"
+    served = {**_genuine(), _INSTALLS[sid][2]: archive}
+    r, out, curl, _, rt = _run(tmp_path, sid, served=served, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    reason = f"{release.as_posix()}/{_SUMS_NAMES[sid][0]} is not a regular file."
+    assert (r.stdout, out, curl) == (_warning(sid, reason), _OUTPUTS[sid], _downloads(sid, rt))
+    assert (release.is_symlink(), release.is_dir()) == (False, True)
+    if root == "symlink":
+        assert sorted(os.listdir(target)) == sorted(_SUMS_NAMES[sid])
+    r = _install_after(tmp_path, sid, rt, archive)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+
+
+@pytest.mark.parametrize("sid", ["tofu-sums", "terramate-sums"])
+@bash_only
+@needs_tools
+def test_a_restored_checksum_file_that_is_a_symlink_is_downloaded_again(tmp_path, sid):
+    """The link points at a genuine copy, so only the symlink test refuses it.
+
+    Mutation: drop `[ -L "$dir/$f" ]` from `_release_files` (the link verifies: no download).
+    """
+    name, sig = _SUMS_NAMES[sid]
+    target = tmp_path / "elsewhere"
+    target.write_bytes(_genuine()[name])
+    rt = tmp_path / "runner-temp"
+    release = rt / ("tofu-release" if sid == "tofu-sums" else "terramate-release")
+    release.mkdir(parents=True)
+    (release / sig).write_bytes(_genuine()[sig])
+    bash_symlink(tmp_path, target, release / name)
+    r, out, curl, _, rt = _run(tmp_path, sid, key=_CACHE_KEYS[sid])
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    reason = f"{release.as_posix()}/{name} is not a regular file."
+    assert (r.stdout, out, curl) == (_warning(sid, reason), _OUTPUTS[sid], _downloads(sid, rt))
+    assert ((release / name).is_symlink(), target.read_bytes()) == (False, _genuine()[name])
+
+
+@pytest.mark.parametrize(
+    ("sid", "function", "needle", "reason"),
+    [
+        ("tofu-sums", "verify_tofu", b"723bebb0", _POISONED[0][3]),
+        ("terramate-sums", "verify_terramate", b"303fd597", _POISONED[1][3]),
+    ],
+)
+@bash_only
+@needs_tools
+def test_a_verify_function_returns_its_reason_and_writes_nothing(
+    tmp_path, sid, function, needle, reason
+):
+    """The step and the pre-merge check decide what a failed verification costs, so the function
+    returns 1 with `reason` set; it neither exits nor writes an output. A genuine pair writes the
+    Linux digests whole (the genuine-sums tests above).
+
+    Mutation: `fail` in place of the signature `reason` in `verify_tofu` or `verify_terramate`.
+    """
+    d = tmp_path / "release"
+    d.mkdir()
+    for n in _SUMS_NAMES[sid]:
+        (d / n).write_bytes(_genuine()[n])
+    name = _SUMS_NAMES[sid][0]
+    (d / name).write_bytes(_flip(_genuine()[name], needle))
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    version = _TOFU if sid == "tofu-sums" else _TERRAMATE
+    r = run_step(
+        tmp_path,
+        "set -euo pipefail\n"
+        'source "$GITHUB_ACTION_PATH/release.sh"\n'
+        f'{function} {version} "{d.as_posix()}" || echo "returned $?: $reason"\n',
+        {
+            **{k: v for k, v in os.environ.items() if k != "GNUPGHOME"},
+            "RUNNER_TEMP": tmp_path.as_posix(),
+            "GITHUB_OUTPUT": str(out),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+        },
+        timeout=120,
+    )
+    assert (r.returncode, r.stdout, out.read_text(encoding="utf-8")) == (
+        0,
+        f"returned 1: {reason}\n",
+        "",
+    )
+
+
+def _agent_running(tmp_path, home):
+    """Whether a gpg-agent answers for keyring `home`, asked without starting one."""
+    r = run_step(
+        tmp_path,
+        "gpg-connect-agent --no-autostart 'GETINFO pid' /bye\n",
+        {**os.environ, "GNUPGHOME": home},
+    )
+    return any(line.startswith("D ") for line in r.stdout.splitlines())
+
+
+def _homes(tmp_path, tool):
+    path = tmp_path / "logs" / f"{tool}.home"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _exists(tmp_path, home):
+    """Whether bash sees `home`, an MSYS path such as `/tmp/tmp.X`."""
+    return run_step(tmp_path, f"[ -e '{home}' ]\n", dict(os.environ)).returncode == 0
+
+
+def _kill_agents(tmp_path, homes):
+    for home in set(homes):
+        run_step(tmp_path, "gpgconf --kill all\n", {**os.environ, "GNUPGHOME": home})
+
+
+@pytest.mark.parametrize("passing", [True, False], ids=["passing", "failing"])
+@bash_only
+@needs_tools
+def test_the_opentofu_verify_kills_its_agent_then_removes_its_keyring(tmp_path, passing):
+    """The EXIT handler tells gpgconf to stop the agent of the step's own keyring while the
+    keyring exists, then removes the keyring, on success and on failure. Whether an agent
+    survives is not asked: an agent cannot be asked about a removed keyring.
+
+    Mutations: drop the kill from `_release_exit`; key it on `GNUPGHOME` (the step exports none);
+    drop the `rm -rf` (the keyring stays); remove the keyring before the kill (gpgconf runs with
+    no keyring).
+    """
+    served = _genuine()
+    if not passing:
+        served[_TOFU_SUMS] = _flip(served[_TOFU_SUMS], b"723bebb0")
+    r, out, _, gpg, rt = _run(tmp_path, "tofu-sums", served=served)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        assert r.returncode == (0 if passing else 1), f"stdout={r.stdout!r} stderr={r.stderr!r}"
+        assert out == (_TOFU_OUTPUT if passing else _refusal(r.stdout))
+        assert gpg == _verifier("tofu-sums", rt)
+        assert len(homes) == 2 and len(set(homes)) == 1 and homes[0], homes
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
+        assert _homes(tmp_path, "gpgconf") == homes[:1]
+        assert (tmp_path / "logs" / "gpgconf.dir").read_text(encoding="utf-8") == "present\n"
+        assert not _exists(tmp_path, homes[0])
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_keyring_that_cannot_be_removed_leaves_a_passing_step_green(tmp_path):
+    """A genuine cache hit runs no other `rm`, so the stub fails only the keyring's removal.
+
+    Mutation: drop the `|| true` after the `rm -rf` in `_release_exit`."""
+    (tmp_path / "rm-bin").mkdir()
+    write_stub(tmp_path / "rm-bin", "rm", "exit 1")
+    r, out, _, _, _ = _run(
+        tmp_path / "run",
+        "tofu-sums",
+        cached={n: _genuine()[n] for n in _SUMS_NAMES["tofu-sums"]},
+        key=_TOFU_CACHE_KEY,
+        path=f"{tmp_path / 'rm-bin'}{os.pathsep}{os.environ.get('PATH', '')}",
+    )
+    try:
+        assert (r.returncode, r.stdout, out) == (0, "", _TOFU_OUTPUT), r.stderr
+    finally:
+        _kill_agents(tmp_path, _homes(tmp_path / "run", "gpg"))
+
+
+@bash_only
+@needs_tools
+def test_a_restored_entry_verified_twice_uses_one_keyring(tmp_path):
+    """A failed restored entry runs `verify_tofu` twice; the key is imported once, into the one
+    keyring whose agent the EXIT handler stops.
+
+    Mutation: drop the `[ -z "$_release_gnupghome" ]` guard in `verify_tofu` (a second keyring,
+    whose agent nothing stops).
+    """
+    cached = {n: _genuine()[n] for n in _SUMS_NAMES["tofu-sums"]}
+    cached[_TOFU_SUMS] = _poison(_TOFU_SUMS, b"723bebb0")
+    r, out, _, gpg, rt = _run(tmp_path, "tofu-sums", cached=cached, key=_TOFU_CACHE_KEY)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+        assert out == _TOFU_OUTPUT
+        import_, verify = _verifier("tofu-sums", rt)
+        assert gpg == [import_, verify, verify]
+        assert len(homes) == 3 and len(set(homes)) == 1, homes
+        assert _homes(tmp_path, "gpgconf") == homes[:1]
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_failing_gpgconf_leaves_a_passing_step_green(tmp_path):
+    """Mutation: drop the `|| true` after the kill in `_release_exit`."""
+    r, out, *_ = _run(tmp_path, "tofu-sums", gpgconf_rc=1)
+    try:
+        assert (r.returncode, r.stdout, out) == (0, "", _TOFU_OUTPUT), r.stderr
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
+    finally:
+        _kill_agents(tmp_path, _homes(tmp_path, "gpg"))
+
+
+@bash_only
+@needs_tools
+def test_a_runner_gnupghome_is_untouched_by_a_terramate_only_step(tmp_path, gnupg_home):
+    """The runner's own agent, under the `GNUPGHOME` it exported, still runs after the step.
+
+    Mutation: key the kill on `GNUPGHOME` instead of `_release_gnupghome`.
+    """
+    r = run_step(tmp_path, "gpg-connect-agent /bye\n", {**os.environ, "GNUPGHOME": gnupg_home})
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert _agent_running(tmp_path, gnupg_home)
+    r, out, *_ = _run(tmp_path / "run", "terramate-sums", env={"GNUPGHOME": gnupg_home})
+    assert (r.returncode, r.stdout, out) == (0, "", _TM_OUTPUT), r.stderr
+    assert _calls(tmp_path / "run" / "logs" / "gpgconf") == []
+    assert _agent_running(tmp_path, gnupg_home)
+
+
+@bash_only
+def test_a_failed_rm_in_release_verify_writes_the_generic_refusal(tmp_path):
+    """`set -e` ends the step inside `release_verify`, where no `fail` runs. The release root
+    exists, so `release_dir` runs no `rm`; a curl that ran would refuse with its own reason.
+
+    Mutation: drop `trap _release_exit EXIT` from release.sh (no refusal is written).
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_stub(bin_dir, "rm", "exit 1")
+    write_stub(bin_dir, "curl", "exit 99")
+    (tmp_path / "runner-temp" / "terramate-release").mkdir(parents=True)
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, id="terramate-sums")["run"],
+        {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
+            "GITHUB_OUTPUT": str(out),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+            "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
+        },
+    )
+    reason = (
+        f'Terramate {_TERRAMATE}: a command exited 1 under "Terramate checksum verification '
+        'failed"; the step log names it.'
+    )
+    assert (r.returncode, r.stdout, out.read_text(encoding="utf-8")) == (
+        1,
+        f"::error title=Terramate checksum verification failed::{reason}\n",
+        f"refusal={reason}\n",
+    )
+
+
+_HEAD = "the pull request head's .github/shipmate-config.yml: "
+_HEAD_ERROR = "::error title=Pull request tools verification failed::" + _HEAD
+
+
+def _head_verify(tmp_path, verify, **kwargs):
+    """`build-matrix`'s `Verify changed tools` step, given `verify` as build-matrix wrote it."""
+    return _run(
+        tmp_path, "tools-verify", of="build-matrix", env={"SHIPMATE_VERIFY": verify}, **kwargs
+    )
+
+
+def _head_downloads(rt, tools):
+    """curl's whole argv for each download of the head's `tools`, in the step's order."""
+    calls = []
+    if "terramate" in tools:
+        d = f"{rt.as_posix()}/head-terramate-release"
+        calls += [_curl(f"{_TM_BASE}/{n}", f"{d}/{n}") for n in _SUMS_NAMES["terramate-sums"]]
+    if "tofu" in tools:
+        d = f"{rt.as_posix()}/head-tofu-release"
+        calls += [_curl(f"{_TOFU_BASE}/{n}", f"{d}/{n}") for n in _SUMS_NAMES["tofu-sums"]]
+    return calls
+
+
+def test_the_tools_verify_step_runs_only_when_a_tool_changed():
+    """The step's whole definition but `run:`. No `continue-on-error`: plan detect's `refusal`
+    and its failure are the gate's evidence.
+
+    Mutations: drop the `if:`; read `verify` from `steps.tools-verify`; add
+    `continue-on-error: true`."""
+    step = dict(step_by("build-matrix", id="tools-verify"))
+    assert step.pop("run")
+    assert step == {
+        "name": "Verify changed tools",
+        "id": "tools-verify",
+        "if": "${{ steps.build.outputs.verify != '{}' }}",
+        "shell": "bash",
+        "env": {"SHIPMATE_VERIFY": "${{ steps.build.outputs.verify }}"},
+    }
+
+
+@bash_only
+@needs_tools
+def test_the_head_versions_releases_are_fetched_and_verified(tmp_path):
+    """Both tools changed: each head release's checksum file and signature only, at the head's
+    version, verified with the committed keys; no archive, and one agent kill for the keyring.
+
+    Mutation: drop `release_verify` from the loop (no download, no digests)."""
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, curl, gpg, rt = _head_verify(tmp_path, verify)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        assert (r.returncode, r.stdout) == (0, ""), r.stderr
+        assert out == _TM_OUTPUT + _TOFU_OUTPUT
+        assert curl == _head_downloads(rt, ("terramate", "tofu"))
+        assert len(gpg) == 2 and len(set(homes)) == 1, (gpg, homes)
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
+        assert _homes(tmp_path, "gpgconf") == homes[:1]
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_second_tool_that_fails_leaves_one_refusal_and_kills_the_agent(tmp_path):
+    """Terramate verifies, then OpenTofu's signature fails: one `refusal=` line under the head's
+    prefix and OpenTofu's, after Terramate's digests, and gpgconf is told to stop the keyring's
+    agent. Whether an agent survives is not asked: the keyring is removed after the kill, and an
+    agent cannot be asked about a removed keyring.
+
+    Mutations: drop the kill from `_release_exit` (no gpgconf call); loop with
+    `jq -r 'keys[]' ... | tr -d '\\r' | while read -r tool` (`fail` runs in the subshell, so its
+    annotation leaves stdout)."""
+    served = _genuine()
+    served[_TOFU_SUMS] = _flip(served[_TOFU_SUMS], b"723bebb0")
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, curl, _, rt = _head_verify(tmp_path, verify, served=served)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        reason = (
+            f"OpenTofu {_TOFU}: the signature on {_TOFU_SUMS} did not verify against the "
+            "committed OpenTofu key (gpg exit 1)."
+        )
+        assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+        assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
+        assert curl == _head_downloads(rt, ("terramate", "tofu"))
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
+        assert homes and _homes(tmp_path, "gpgconf") == homes[:1]
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_missing_gpg_in_opentofus_turn_refuses_under_the_opentofu_label(tmp_path):
+    """Both tools changed and the runner has no gpg: Terramate verifies, then OpenTofu's
+    `require` refuses under OpenTofu's prefix, not Terramate's.
+
+    Mutations: move the version `release_init` below `require gpg gpgconf` (the refusal reads
+    `OpenTofu: `, no version); also delete the top-of-loop one (Terramate's prefix)."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    # A link, not a stub: each stub's `#!/usr/bin/env bash` finds bash on this PATH.
+    exe = ".exe" if os.name == "nt" else ""
+    bash = run_step(tmp_path, "command -v bash\n", dict(os.environ)).stdout.strip()
+    bash_symlink(tmp_path, f"{bash}{exe}", tools / f"bash{exe}")
+    for name in ("jq", "base64", "sha256sum", "awk", "mkdir", "rm", "cp", "cat"):
+        real = shutil.which(name)
+        assert real, name
+        write_stub(tools, name, f'exec "{real.replace(os.sep, "/")}" "$@"')
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, curl, gpg, rt = _head_verify(tmp_path / "run", verify, path=str(tools), gpg_stub=False)
+    reason = f"OpenTofu {_TOFU}: gpg is not installed on the runner."
+    assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
+    assert (curl, gpg) == (_head_downloads(rt, ("terramate",)), [])
+
+
+@bash_only
+@needs_tools
+def test_a_failed_version_read_in_opentofus_turn_names_opentofu(tmp_path):
+    """jq fails reading OpenTofu's version, before that turn knows it: the generic refusal
+    carries the tool's label alone.
+
+    Mutation: delete the top-of-loop `release_init` (Terramate's prefix, with its version)."""
+    real = shutil.which("jq")
+    assert real
+    tools = tmp_path / "jq"
+    tools.mkdir()
+    write_stub(
+        tools,
+        "jq",
+        f'if [ "${{4:-}}" = tofu ]; then exit 5; fi\nexec "{real.replace(os.sep, "/")}" "$@"',
+    )
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, *_ = _head_verify(
+        tmp_path / "run", verify, path=f"{tools}{os.pathsep}{os.environ.get('PATH', '')}"
+    )
+    reason = (
+        'OpenTofu: a command exited 5 under "Pull request tools verification failed"; the step '
+        "log names it."
+    )
+    assert (r.returncode, r.stdout) == (5, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
+
+
+@bash_only
+@needs_tools
+def test_a_changed_terramate_whose_signature_fails_refuses_whole(tmp_path):
+    """Mutation: `|| true` for `|| fail "$reason"` after `verify_$1` in `release_verify` (the
+    step passes)."""
+    served = _genuine()
+    served["checksums.txt"] = _flip(served["checksums.txt"], b"303fd597")
+    r, out, curl, gpg, rt = _head_verify(tmp_path, f'{{"terramate":"{_TERRAMATE}"}}', served=served)
+    reason = (
+        f"Terramate {_TERRAMATE}: the signature on checksums.txt did not verify against the "
+        "committed Terramate key (openssl exit 1)."
+    )
+    assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"refusal={_HEAD}{reason}\n"
+    assert curl == _head_downloads(rt, ("terramate",))
+    assert gpg == []
+
+
+@bash_only
+def test_a_head_version_with_no_release_refuses_naming_the_tools_entry(tmp_path):
+    """Mutation: pass "" as fetch's 404 remedy (the remedy drops out)."""
+    r, out, _, _, rt = _head_verify(
+        tmp_path, f'{{"tofu":"{_TOFU}"}}', codes={_TOFU_SUMS: "404"}, served={}
+    )
+    url = f"{_TOFU_BASE}/{_TOFU_SUMS}"
+    reason = (
+        f"OpenTofu {_TOFU}: {url} answered HTTP 404 from {url} (curl exit 0); no OpenTofu "
+        f"{_TOFU} release publishes {_TOFU_SUMS}; set tools.tofu to a released version."
+    )
+    assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"refusal={_HEAD}{reason}\n"
+
+
+@pytest.mark.parametrize(
+    "verify",
+    [
+        "",
+        "{}",
+        '{"terraform":"1.0.0"}',
+        '{"tofu":""}',
+        '{"tofu":null}',
+        '{"tofu":"1.13"}',
+        '{"tofu":"1.13.2\\n"}',
+    ],
+)
+@bash_only
+def test_a_verify_that_is_not_tools_to_versions_refuses(tmp_path, verify):
+    """The step runs only when `verify` is not `{}`, so one that maps no tool to an X.Y.Z version
+    is a broken handoff from build-matrix, not a head refusal, and fails rather than passing with
+    nothing verified.
+
+    Mutations: drop the `jq -e` check (each case passes with no download); drop the value clause
+    from it (`{"tofu":""}` and `{"tofu":null}` pass, the other two value rows reach curl);
+    `^...$` for `\\A...\\z` (the trailing-newline row reaches curl)."""
+    r, out, curl, *_ = _head_verify(tmp_path, verify)
+    reason = (
+        f"build-matrix wrote verify={verify}, which does not map terramate or tofu, or both, to an "
+        "X.Y.Z version."
+    )
+    title = "::error title=Pull request tools verification failed::"
+    assert (r.returncode, r.stdout) == (1, f"{title}{reason}\n"), r.stderr
+    assert out == f"refusal={reason}\n"
+    assert curl == []

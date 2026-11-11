@@ -51,6 +51,7 @@ EXPECTED_ENVLEVEL_WITH = {
         "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",
         "head_sha": "${{ needs.detect.outputs.head_sha }}",
         "runs_on": "${{ inputs.runs_on }}",
+        "tools": "${{ needs.detect.outputs.tools }}",
         **extra,
     }
     for workflow, extra in (
@@ -104,7 +105,8 @@ def test_every_matrix_job_carries_exactly_this_strategy():
 
 
 def test_apply_env_level_takes_no_cap():
-    """Mutation: declare a `max_parallel` input on `apply-env-level.yml`."""
+    """Mutations: declare a `max_parallel` input on `apply-env-level.yml`; make `tools`
+    optional."""
     inputs = workflow_yaml("apply-env-level.yml")["on"]["workflow_call"]["inputs"]
     assert inputs == {
         "waves_json": {"required": True, "type": "string"},
@@ -115,13 +117,14 @@ def test_apply_env_level_takes_no_cap():
         "provenance_run": {"required": False, "type": "string", "default": ""},
         "base_sha": {"required": False, "type": "string", "default": ""},
         "deploy": {"required": False, "type": "boolean", "default": False},
+        "tools": {"required": True, "type": "string"},
     }
 
 
 def test_no_env_level_call_passes_a_cap():
     """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
     or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply.yml`'s
-    `envlevel0` call."""
+    `envlevel0` call; drop `tools` from `apply.yml`'s `envlevel3` call."""
     found = {
         (workflow, job_id): job["with"]
         for workflow in ("apply.yml", "deploy.yml")

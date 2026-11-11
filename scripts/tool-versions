@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-"""Resolve the Terramate and OpenTofu versions `actions/setup` installs.
+"""Resolve the Terramate and OpenTofu versions `actions/setup` installs, once per run.
 
-Each version is the `tools` entry of `.github/shipmate-config.yml` on the default branch, else
-the release's `VERSIONS` pin. References stay unresolved, because setup receives no GitHub
-variables. Besides every `tools` refusal, the table read and `env-config.load_config` refuse
-here, in every job: an unreadable file, invalid YAML, a top level that is not a mapping, a
-`layout` that is not a string, a reference in `split`, `review`, `apply_mode`, `max_parallel` or
-`command_hints`, and a runner without Python 3.12 or PyYAML. The rest of the table is `detect`'s
-to refuse.
+`SHIPMATE_RESOLVE` (the `resolve` input) set to `true`, in a detect job: each version is the
+`tools` entry of `.github/shipmate-config.yml` on the default branch, else the release's
+`VERSIONS` pin. References stay unresolved, because setup receives no GitHub variables. Besides
+every `tools` refusal, the table read and `env-config.load_config` refuse here: an unreadable
+file, invalid YAML, a top level that is not a mapping, a `layout` that is not a string, a
+reference in `split`, `review`, `apply_mode`, `max_parallel` or `command_hints`, and a runner
+without Python 3.12 or PyYAML. The rest of the table is `detect`'s to refuse.
 
-Writes `terramate` and `tofu`. Every failure refuses and writes neither, only the `refusal`
-output: a failed table read must not install the default in place of the consumer's version.
+`SHIPMATE_VERSIONS` (the `versions` input), in a cell: the detect job's `tools` output, a JSON
+object of exactly `terramate` and `tofu` to `X.Y.Z` versions. Nothing is read, so a `tools`
+merge mid-run cannot give one run two versions. Exactly one of the two inputs must be set.
+
+Writes `terramate`, `tofu` and `tools` (the pair as compact JSON). Every failure refuses and
+writes none of them, only the `refusal` output: a failed table read must not install the default
+in place of the consumer's version, and a cell whose `versions` did not arrive must not resolve
+its own.
 """
 
+import json
 import os
 
 from _shipmate import _load, run_annotated
@@ -20,7 +27,7 @@ from _shipmate import _load, run_annotated
 ec = _load("env-config")
 
 
-def main():
+def _resolved():
     engine = ec.engine_versions(ec.VERSIONS_PATH)
     table = ec.load_config(ec.default_branch_text())
     errors = ec.tool_version_errors(table, engine)
@@ -29,8 +36,36 @@ def main():
     resolved = ec.tool_versions(table, engine)
     for tool, (version, source) in resolved.items():
         print(f"{tool} {version} from {source}")
+    return {tool: version for tool, (version, _) in resolved.items()}
+
+
+def main():
+    resolve = os.environ.get("SHIPMATE_RESOLVE") == "true"
+    raw = os.environ.get("SHIPMATE_VERSIONS", "")
+    if resolve and raw:
+        raise SystemExit(
+            '::error::setup was given both resolve: "true" and versions; a detect job sets '
+            "resolve, a cell passes versions."
+        )
+    if not resolve and not raw:
+        raise SystemExit(
+            '::error::setup was given neither resolve: "true" nor versions. A detect job sets '
+            "resolve; a cell passes its detect job's tools output as versions, and an empty one "
+            "means that job wrote none."
+        )
+    if resolve:
+        versions = _resolved()
+    else:
+        versions = ec.parse_tools(
+            raw,
+            f"::error::setup's versions input is {raw!r}; it must be the detect job's tools "
+            "output, a JSON object of terramate and tofu to X.Y.Z versions.",
+        )
+        for tool in ec.TOOLS:
+            print(f"{tool} {versions[tool]} from the detect job")
+    tools = json.dumps({tool: versions[tool] for tool in ec.TOOLS}, separators=(",", ":"))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
-        fh.write(f"terramate={resolved['terramate'][0]}\ntofu={resolved['tofu'][0]}\n")
+        fh.write(f"terramate={versions['terramate']}\ntofu={versions['tofu']}\ntools={tools}\n")
 
 
 if __name__ == "__main__":

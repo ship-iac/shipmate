@@ -561,9 +561,15 @@ component, so `1.13.10` is above `1.13.9`. A floor rises only in an engine relea
 that starts relying on a newer feature of the tool or ships a new upstream signer
 key, never with a routine default bump. An engine release is tested at its
 `VERSIONS` defaults only, so any other value is untested by that release. `tools`
-accepts no variable reference. `setup` reads it from the default branch in every
-job that installs a tool (§Runner prerequisites), so a pull request that changes
-it plans with the default branch's versions until it merges. A merged
+accepts no variable reference. Each run's detect job reads it from the default
+branch once, and its cells install that pair (§Runner prerequisites), so a pull
+request that changes it plans with the default branch's versions until it merges.
+Plan `detect` checks the pull request's own `tools` before merge: it refuses any
+value this section refuses, and for each tool whose version differs from the
+default branch's it downloads that release's checksum file and signature and
+verifies them as `setup` does, installing and running nothing. A version that was
+never released therefore fails the pull request's plan, not the plans after the
+merge. A merged
 `tools.tofu` change invalidates every plan awaiting apply (§Apply-match
 fingerprint). Change `tools.tofu` in a pull request that changes no stack, since
 that pull request's plans ran on the old version. `shipmate doctor` lists each
@@ -730,8 +736,8 @@ environments:
   `scripts/onboard` gives a repository variable precedence over an organization
   variable of the same name, as GitHub does. The variables of a cell's
   `<env>-plan`, `<env>-apply` or shared `<env>` Environment are never read: the
-  jobs that bind one read the file only for `tools`, through `setup`, and `tools`
-  accepts no reference, so no reference resolves there. Of the jobs that resolve
+  jobs that bind one do not read the file: their `setup` installs the `tools`
+  versions their detect job resolved, so no reference resolves there. Of the jobs that resolve
   references, comment-ops and the plan `summary` job are the two that bind
   `shipmate-engine`, so a variable of the same name on that Environment shadows
   the repository value in those two jobs, and nowhere else.
@@ -807,7 +813,7 @@ variable rows depend on the run as well as the file, so they are not structural.
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
 | `max_parallel` that is not a whole number from 1 to 256, or holds a variable reference | GitHub runs a matrix with `max-parallel: 0` unbounded and fails the run on an empty or non-numeric value; the cap is written into the file, like the flags |
 | `command_hints` that is not `true` or `false`, or holds a variable reference | anything else reads as set to a person and would resolve as unset; the setting is written into the file, like the flags |
-| `tools` that is not a mapping, names a key other than `terramate` or `tofu`, holds a value not written `X.Y.Z` or a version below that tool's floor in `VERSIONS`, or holds a variable reference | a version becomes a download URL, so only a release version is accepted; a version below the floor lacks a feature the engine relies on; the versions are written into the file, like the flags. `setup` refuses the same `tools` in every job before it installs anything |
+| `tools` that is not a mapping, names a key other than `terramate` or `tofu`, holds a value not written `X.Y.Z` or a version below that tool's floor in `VERSIONS`, or holds a variable reference | a version becomes a download URL, so only a release version is accepted; a version below the floor lacks a feature the engine relies on; the versions are written into the file, like the flags. `setup` refuses the same `tools` in every detect job before it installs anything, and plan `detect` refuses a pull request head's `tools` that breaks any of these before merge |
 | A top-level key other than `layout`, `identities`, `environments`, `max_parallel`, `command_hints`, `tools` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
@@ -2683,14 +2689,15 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and several `ubuntu-slim` jobs on the plan, apply and deploy paths
   call `gh api`. Self-hosted runners must preinstall these tools.
-- A runner that runs `setup` must also provide `gpg` and a coreutils `base64`,
-  GNU or uutils, which only `setup` calls, and only in the jobs that take
-  `runs_on`: no `ubuntu-slim` job runs it. The included-software lists of the
+- A runner that runs `setup` must also provide `gpg`, `gpgconf` and a coreutils
+  `base64`, GNU or uutils, which only `setup` and plan `detect`'s `tools` check
+  call, and only in the jobs that take `runs_on`: no `ubuntu-slim` job runs
+  either. `gpgconf` stops the daemons, such as `gpg-agent`, that verifying OpenTofu starts. The included-software lists of the
   [`ubuntu-24.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2404-Readme.md),
   [`ubuntu-26.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Readme.md) and
   [`ubuntu-26.04-arm`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Arm64-Readme.md) images name `gnupg2`
-  (read 2026-10-31); `gpg` and `base64` on those runners are unmeasured.
-  Self-hosted runners must preinstall both.
+  (read 2026-10-31); `gpg`, `gpgconf` and `base64` on those runners are unmeasured.
+  Self-hosted runners must preinstall these.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml`,
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
@@ -2724,10 +2731,15 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   action installs them in every job that runs them, at the versions `tools` in
   the default branch's `.github/shipmate-config.yml` names, else at the defaults
   in the engine's root-level `VERSIONS` file, read at the commit the consumer
-  pins (§Environment table). To read the table, `setup` makes one contents-API
+  pins (§Environment table). Each detect job resolves the pair once, calling
+  `setup` with `resolve: "true"`, and outputs it as `tools`; each of its cells
+  passes that output as `setup`'s `versions` and reads neither the table nor
+  `VERSIONS`, so one run installs one version pair. A `versions` that is empty or
+  not exactly the two tools at `X.Y.Z` refuses before any download. To read the
+  table, a detect job's `setup` makes one contents-API
   read with the job's `GITHUB_TOKEN`, retried on a transient failure, and parses
   it with `python3` and PyYAML, so it needs both as above. Every refusal of that
-  read and parse (§Environment table) fails the step in every job, as do an
+  read and parse (§Environment table) fails the step in every detect job, as do an
   invalid `tools` and a missing or malformed `VERSIONS` line, rather than
   installing a default.
 - `setup` verifies each download against its release's signed checksum file
@@ -2741,10 +2753,18 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   Linux `x86_64`/`amd64` and `arm64` digests then bind each tool's archive,
   which `setup` fetches with the same `curl` call as the checksum files: the
   Terramate `.tar.gz`, extracted with `tar`, and the OpenTofu `.zip`, extracted
-  with `python3`. Any failure of a fresh download fails the step with one
-  `::error::`: a missing tool, a failed fetch, a signature that does not
-  verify, a file with no line for the asset, an archive whose digest differs.
-  Nothing installs unverified and nothing falls back.
+  with `python3`. The call sends no `Authorization` header, starts no retry after
+  120 seconds and stops each attempt after 600 seconds. Any failure of a fresh
+  download fails the step with one `::error::`: a missing tool, a failed fetch, a
+  signature that does not verify, a file with no line for the asset, an archive
+  whose digest differs. A failed fetch names the requested URL, the HTTP status,
+  the URL that answered after redirects (its query removed) and curl's exit code.
+  The verify and install steps write that error as `setup`'s `refusal` output, as
+  they do for any other command that fails them; the cache restore and save steps
+  and `Provider plugin cache` write none. Nothing installs unverified and nothing
+  falls back. The OpenTofu verify imports the key into a temporary keyring and
+  stops every daemon of that keyring, such as `gpg-agent`, then removes the keyring, when the step ends, whether
+  it passes or fails.
   Neither key carries an expiry, so the keys change only when upstream changes
   its signer: from then on, every install of a release the new signer signs
   fails until an engine release ships the new key.
@@ -2754,7 +2774,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   exact match. Every job restores the entry and verifies every restored file as
   it would a download: the checksum file against its signature and the
   committed key, the archive against the verified digest. When a restored file
-  fails, is missing or is not a regular file, the step deletes its files (the
+  fails, is missing, is a symlink, cannot be read or is not a regular file, or the
+  restored release directory is a symlink or not a directory, the step deletes its files (the
   checksum file and signature, or the archive), downloads them once more and
   warns `Tool cache entry failed verification`, naming those files, the
   entry's key and its `gh cache delete` command; the entry stays, so every later job downloads
@@ -2767,7 +2788,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   that a pull request's plan reads, so a repository that has run none of them
   downloads the release files in every plan job. An entry is keyed on its path, which
   lives under `RUNNER_TEMP`: a job on a runner image whose `RUNNER_TEMP`
-  differs from the saving runner's misses and downloads.
+  differs from the saving runner's misses and downloads. This replacement handles
+  a corrupt or stale entry; it does not defend against a crafted one, which
+  `actions/cache` extracts with `tar -P` before any engine step runs
+  (`docs/hardening.md`, "A cache entry planted by an unreviewed apply").
 
 ## Fan-out
 
@@ -3806,7 +3830,8 @@ detect; the remedy is a re-plan. `tofu show` of a stored plan renders the
 same bytes on any runner at one tofu version and one `run.env` (§Engine-owned
 tofu invocation says what the wrapper adds); both `show` and `apply` refuse a
 plan file from another version, so the record carries no version field.
-`setup` resolves the OpenTofu version in every job (§Runner prerequisites), so a
+Each run's detect job resolves the OpenTofu version once and its cells install
+it (§Runner prerequisites), so a
 merged `tools.tofu` change, like an engine re-pin that moves the `VERSIONS`
 default, invalidates every plan awaiting apply. Its render fails before `tofu
 apply`. OpenTofu's `plan files cannot be transferred between different

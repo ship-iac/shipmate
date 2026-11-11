@@ -84,6 +84,7 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
         "github-vars": "${{ toJSON(vars) }}",
+        "tools": "${{ steps.setup.outputs.tools }}",
     }
 
 
