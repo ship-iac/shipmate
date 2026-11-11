@@ -1269,8 +1269,9 @@ it and says what applying after eviction may overwrite, unless a stacked holder
 holds a changed cell in the same environment. Evicting a stacked holder and
 then applying this pull request would overwrite what the holder applied, so any
 stacked holder refuses the whole command and nothing is released. A chained
-holder is a known limit: it is evicted, and applying this pull request after
-that can overwrite what it applied, as the commands section's line says. The reply
+holder is a known limit: when no stacked holder holds a cell in the same
+environment, it is evicted, and applying this pull request after that can
+overwrite what it applied, as the commands section's line says. The reply
 is ``🔴 refused: no cell lock in `<env>` was released.`` with the refusal
 fenced, one sentence pair per stacked holder, lowest first:
 `#<h> is stacked on this pull request and holds <n> of its cell(s) in <env>; applying this pull request after
