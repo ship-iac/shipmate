@@ -120,6 +120,30 @@ _KEY_RUN = (
     'echo "key=state/$SLUG/$ENV_NAME/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"\n'
 )
 
+
+def _retry(n, prev, seconds):
+    """The sleep and lookup that run only when lookup `prev` ran and missed."""
+    return [
+        {
+            "name": f"Wait before lookup {n}",
+            "id": f"wait{n}",
+            "if": (
+                f"${{{{ steps.{prev}.outputs.cache-hit != 'true' "
+                f"&& steps.{prev}.outcome == 'success' }}}}"
+            ),
+            "shell": "bash",
+            "run": f"sleep {seconds}",
+        },
+        {
+            "name": f"Look up the saved entry, try {n}",
+            "id": f"verify{n}",
+            "if": f"${{{{ steps.wait{n}.outcome == 'success' }}}}",
+            "uses": "actions/cache/restore",
+            "with": {"path": "${{ inputs.path }}", "key": _KEY, "lookup-only": "true"},
+        },
+    ]
+
+
 #: The whole step list, `uses:` refs cut. No step carries `continue-on-error` or a status
 #: function, so a refused decrypt fails the action, cell-init's `restore-outcome` is not
 #: `success` and apply-cell never saves over the entry; a refused encrypt skips `Save state`.
@@ -187,6 +211,10 @@ _STATE_STEPS = [
         "uses": "actions/cache/restore",
         "with": {"path": "${{ inputs.path }}", "key": _KEY, "lookup-only": "true"},
     },
+    *_retry(2, "verify", "3"),
+    *_retry(3, "verify2", "7"),
+    *_retry(4, "verify3", "10"),
+    *_retry(5, "verify4", "10"),
 ]
 
 
@@ -195,7 +223,10 @@ def test_the_state_action_is_exactly_these_steps():
     `!=` to `==`; move `Encrypt state` after `Save state`; add `continue-on-error: true` to
     `Decrypt state`, and a refused decrypt hands tofu the ciphertext and lets apply-cell save it;
     drop the skip clause from `Save state`'s `if:`, and a 0-byte file is saved; move
-    `Look up the saved entry` above `Save state`, and it finds nothing this run saved."""
+    `Look up the saved entry` above `Save state`, and it finds nothing this run saved; delete
+    `Look up the saved entry, try 3`; drop `&& steps.verify2.outcome == 'success'` from
+    `Wait before lookup 3`, and it runs after a hit in `verify`, whose skipped successor
+    `verify2` reads as a miss."""
     steps = [
         {**s, "uses": s["uses"].split("@")[0]} if "uses" in s else s for s in action_steps("state")
     ]

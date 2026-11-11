@@ -30,9 +30,10 @@ call.
 - Save: the file is encrypted in place, then saved. An absent or 0-byte file is
   not saved; the step prints a notice instead. `actions/cache/save` warns and
   succeeds when the cache stores nothing, so a lookup of the exact save key, with
-  no `restore-keys`, verifies the save: the `saved` output is `true` only when it
-  finds the entry, and empty or `false` otherwise. The action does not fail on a
-  miss; `apply-cell` reads `saved` and fails the cell when an apply ran.
+  no `restore-keys`, verifies the save; after a miss it looks again up to four
+  times over about 30 s. The `saved` output is `true` only when a lookup finds
+  the entry, and `false` otherwise. The action does not fail on a miss;
+  `apply-cell` reads `saved` and fails the cell when an apply ran.
 - Restore: a matched entry is authenticated, then decrypted in place, before
   tofu reads it. A cache miss restores nothing and runs no decrypt. An entry
   that fails authentication (another encryption key, a corrupt, truncated or altered
