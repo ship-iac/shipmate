@@ -14,8 +14,8 @@ on:
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted.
 permissions: {}
-# An autoplan or commanded plan holds the default branch's cache scope while it runs the pull request's HCL,
-# and nothing in this file saves an Actions-cache entry.
+# An autoplan or commanded plan holds the default branch's cache scope while it runs the pull
+# request's HCL, and nothing in this file saves an Actions-cache entry.
 cache-mode: read
 jobs:
   # One producer for every pull-request fact below, and its own job rather than `detect`'s first
