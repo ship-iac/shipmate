@@ -46,13 +46,13 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}
 
-  # Saves the OpenTofu cache entry even when no cell runs. A degrade job: no job needs it and
-  # nothing reads its result, so `continue-on-error` keeps its failure off the run's conclusion.
+  # Saves the OpenTofu cache entry on a deploy with no cells; cells save it themselves. A degrade
+  # job: no job needs it, so `continue-on-error` keeps its failure off the run's conclusion.
   warm:
     needs: [detect]
-    if: ${{ !cancelled() && needs.detect.outputs.tools != '' }}
+    if: ${{ needs.detect.outputs.tools != '' && needs.detect.outputs.envlevel0_empty == 'true' && needs.detect.outputs.envlevel1_empty == 'true' && needs.detect.outputs.envlevel2_empty == 'true' && needs.detect.outputs.envlevel3_empty == 'true' }}
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions: {}
     continue-on-error: true
     steps:
