@@ -148,14 +148,15 @@ Neither key carries an expiry: the OpenTofu primary key
 `cosign.pub` is byte-identical in its releases from v0.10.0 on. A rotation starts only when
 upstream changes its signer. From that release on, `setup` refuses every install the new key
 signs (`docs/troubleshooting.md` §`Terramate checksum verification failed` or `OpenTofu checksum
-verification failed`), and only an
+verification failed`), plan `detect` refuses every pull request that moves `tools` to such a
+release, and only an
 engine release carrying the new key clears it. Each verify step accepts one signer, so a
 release the old key signed stops verifying once its key is replaced.
 
 - OpenTofu: replace `keys/opentofu.asc` with `https://get.opentofu.org/opentofu.asc`, check
   its primary key fingerprint against one OpenTofu publishes from another host, and write
-  that fingerprint into the `signer` constant of `Verify OpenTofu checksums` in
-  `actions/setup/action.yml` and `_SIGNER` in `scripts/tests/test_setup_verify_checksums.py`.
+  that fingerprint into the `signer` constant of `verify_tofu` in
+  `actions/setup/release.sh` and `_SIGNER` in `scripts/tests/test_setup_verify_checksums.py`.
 - Terramate: replace `keys/terramate-cosign.pub` with the `cosign.pub` asset of a release the
   new key signs. It has no source outside Terramate's GitHub releases: Terramate's repository
   writes it from a secret at release time, and its documentation does not publish it. The

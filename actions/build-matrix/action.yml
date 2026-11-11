@@ -1,5 +1,5 @@
 name: shipmate build-matrix
-description: Compute the changed stack x environment plan matrix (fails above 256 cells).
+description: Compute the changed stack x environment plan matrix (fails above 256 cells), and verify the signed checksum file of each tool version a pull request's `tools` changes.
 inputs:
   base-sha:
     description: >-
@@ -86,7 +86,7 @@ outputs:
     description: 'JSON {"count": N, "pairs": [...]}: how many `<stack> / <env>` pairs this pull request untagged on stacks that keep another `env/*` tag, and the first ten, sorted; a stack that lost its last tag is in `unmanaged` instead, unless it carries `shipmate/local`. Empty on a drift sweep or with no pull-request base. Read by the plan summary for its comment line.'
     value: ${{ steps.build.outputs.lost }}
   refusal:
-    description: The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
+    description: The first error of the `::error::` message that failed `Compute plan matrix` or `Verify changed tools` (a refusal, a failed tool or API call, or a tool release that did not verify), without the prefix, its lines joined into one; empty when neither raised one. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
     value: ${{ steps.build.outputs.refusal || steps.tools-verify.outputs.refusal }}
   env_order:
     description: 'JSON [env, ...]: every environment the matrix''s cells name, in apply order (the env-levels of the table''s `needs`, ties by name). Read by the plan summary to order the comment''s environment headings.'

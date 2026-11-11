@@ -22,7 +22,7 @@ outputs:
     description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table, of `tools` or of the `resolve` and `versions` inputs, or a failed read) or a verify or install step (a download, signature, digest or install failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
     value: ${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal || steps.tofu-sums.outputs.refusal || steps.tofu-install.outputs.refusal || steps.terramate-install.outputs.refusal }}
   tools:
-    description: 'The installed pair as compact JSON, `{"terramate":"X.Y.Z","tofu":"X.Y.Z"}`. A detect job outputs it for its cells to pass as `versions`.'
+    description: 'The resolved pair as compact JSON, `{"terramate":"X.Y.Z","tofu":"X.Y.Z"}`. A detect job outputs it for its cells to pass as `versions`.'
     value: ${{ steps.versions.outputs.tools }}
 runs:
   using: composite
