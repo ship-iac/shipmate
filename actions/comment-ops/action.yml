@@ -377,8 +377,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
-        echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+        gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '"head_sha=\(.head.sha)", "head_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
 
     - name: "Evict: release the other pull requests' cell locks"
       id: evict
@@ -389,6 +388,8 @@ runs:
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_HEAD_SHA: ${{ steps.evicthead.outputs.head_sha }}
+        SHIPMATE_HEAD_REF: ${{ steps.evicthead.outputs.head_ref }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" evict
 
@@ -406,10 +407,25 @@ runs:
         SHIPMATE_REFUSED: ${{ steps.evict.outputs.refused }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"
 
+    - name: "Evict: refused"
+      # A holder stacked on this pull request blocks the eviction; commenting again cannot pass.
+      if: ${{ failure() && steps.evict.outputs.blocked == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.evicttoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_EVICT_REFUSAL: ${{ steps.evict.outputs.refusal }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply" --refused
+        exit 1
+
     - name: "Evict: failed"
       # A failed step skips every later `success()`-gated step, so without `failure()` the
-      # commenter would get no answer. An evict step that wrote `evicted` is answered above.
-      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || (steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) }}
+      # commenter would get no answer. An evict step that wrote `evicted` or `blocked` is
+      # answered above.
+      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || (steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) && steps.evict.outputs.blocked != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.evicttoken.outputs.token }}

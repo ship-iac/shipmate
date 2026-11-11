@@ -34,6 +34,7 @@ from _shipmate import (
     cell_summaries,
     command_data,
     current_run_url,
+    lock_wait_remedy,
     lock_who,
     named,
     run_annotated,
@@ -590,10 +591,9 @@ def _lock_holder(holder):
 
 def _lock_remedy(holder, env):
     """What releases a cell lock in `env` held by pull request `holder` (None: unknown)."""
-    evict = f"comment `shipmate unlock {env} --evict`"
     if holder is None:
-        return evict
-    return f"wait for #{holder} to merge or close, then re-plan, or {evict}"
+        return f"comment `shipmate unlock {env} --evict`"
+    return lock_wait_remedy(lock_who(holder), env)
 
 
 _OVERLAP_REMEDY = "update the branch from the base and push"

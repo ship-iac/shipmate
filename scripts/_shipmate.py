@@ -314,6 +314,15 @@ def lock_who(holder: int | None) -> str:
     return f"#{holder}" if holder is not None else "an unknown holder"
 
 
+def lock_wait_remedy(who: str, env: str) -> str:
+    """What frees a cell lock `who` (`lock_who`'s text) holds in `env`, with no final period: a
+    holder that merged or closed and kept its lock, as a refused deploy does, is evicted."""
+    return (
+        f"wait for {who} to merge or close, then re-plan. If {who} has already merged or closed, "
+        f"comment `shipmate unlock {env} --evict`"
+    )
+
+
 def event_payload(path):
     """The event payload at `path`, or {} when `path` is empty or the file cannot be read as a
     JSON object."""
