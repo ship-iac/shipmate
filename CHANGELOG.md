@@ -18,6 +18,10 @@ section below names the SHA the release tags.
 
 - **The engine's Python scripts retry a transient GitHub API failure on most reads whose failure would fail the job.** A 5xx, a dropped connection or a truncated body is retried twice, 2 and 5 seconds later; the pull-request, cell-lock, merge-to-pull-request mapping, plan-comment listing and drift default-branch head reads are among them. Most of `scripts/onboard`'s reads retry the same way. A read that stays single-attempt shows no retry notice above its `command failed` annotation.
 
+### Security
+
+- **The engine judges only the `shipmate / gate` statuses the shipmate App's bot user created.** A status of that name posted with another token, such as a workflow `GITHUB_TOKEN` granted `statuses: write` or a personal access token, cannot hide a hold from a gate refresh or stop a plan run as a newer run's hold. Each `scripts/gate-status` invocation that lists the gate statuses (`newest`, `refuse-newer`, a `refresh` that reaches its hold check, a `post` whose write retries) first reads the bot user, `users/<slug>[bot]`: one more API read. No consumer action.
+
 ## [0.55.0] — 2026-11-09
 
 Tags `e2c1771`.

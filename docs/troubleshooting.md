@@ -1533,8 +1533,10 @@ the head of pull request #<n> (<why>); this run publishes on <sha>"), and the
 run publishes as if the head had not moved. What a summary job that fails part
 way leaves on the comment is in
 [`CONTRACT.md`](../CONTRACT.md) §Plan comment. The
-summary job also holds the gate when it cannot read the head's gate statuses or
-apply checks, or cannot build the checks to publish (a cell summary missing a key),
+summary job also holds the gate when it cannot read the head's gate statuses, the
+shipmate App's bot user their creators are compared with (§`could not read the
+shipmate App's bot user <slug>[bot]: <cause>`) or the apply checks, or cannot
+build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
 planned cells. That hold reads "re-plan this pull request (comment shipmate plan
 or push): its plan run ended before writing a final gate". Its apply-check
@@ -1577,6 +1579,39 @@ run fails with "shipmate / gate is held", pointing at this status description.
 right name authored by any other identity leaves the pull request blocked — as
 does a pin to the wrong App id. See `branch-protection.md` §Reproducible
 ruleset.
+
+### `SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the shipmate App created and cannot tell which those are`
+
+`scripts/gate-status` counts only the `shipmate / gate` statuses the shipmate
+App's bot user created, and finds that user from the App's slug. Each engine
+step that reads the gate passes the slug from its own App token mint, so no
+consumer setting produces this error; report it, with the run link, through the
+bug report template
+([`.github/ISSUE_TEMPLATE/bug.yml`](../.github/ISSUE_TEMPLATE/bug.yml)).
+
+The step that refuses judges no gate status, and nothing greens the gate:
+
+- the plan run's publish hold step holds the gate ("re-plan this pull request
+  (comment shipmate plan or push): its plan run ended before writing a final
+  gate") and fails;
+- the plan run's apply-check publish publishes nothing and fails;
+- the plan run's final gate write writes nothing and fails; a draft run's gate
+  read and the refresh after a `pending` write do not fail the step;
+- an apply run's gate refresh fails and leaves the gate as it was.
+
+### `could not read the shipmate App's bot user <slug>[bot]: <cause>`
+
+GitHub did not answer the read of the shipmate App's bot user
+(`users/<slug>[bot]`, where `<slug>` is the slug the step's App token mint
+reported); a transient failure was retried first. `<cause>` is gh's error.
+`its id is <value>` in place of the cause means GitHub answered without an
+integer id. The step judged no gate status and did what the list under
+§`SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the
+shipmate App created and cannot tell which those are` states. A gate the run
+held says to re-plan, and a re-plan reads the same bot user, so it repeats this
+error while the read fails. Re-run the failed jobs once GitHub answers it; on a
+plan run, only when that run is the newest plan run of the head
+(§`shipmate / gate` never goes green).
 
 ### An environment was held for review, or the apply was refused
 

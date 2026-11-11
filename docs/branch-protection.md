@@ -176,7 +176,11 @@ status of the same name posted by `GITHUB_TOKEN` (the `github-actions`
 identity) or by any other GitHub App does not satisfy the rule and the PR
 stays blocked. Without this pin, the ruleset only matches on `context` and
 any identity that can post a commit status with that exact context string
-can satisfy the required check.
+can satisfy the required check. The pin binds the merge only. The engine makes
+a separate check with the same effect when it reads the gate:
+`scripts/gate-status` counts only the `shipmate / gate` statuses whose creator
+is the shipmate App's bot user, compared by user id, so a status of that name
+from another identity neither holds the gate nor hides a hold.
 
 `shipmate doctor`'s report and its authorization are in `troubleshooting.md`.
 

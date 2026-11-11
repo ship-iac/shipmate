@@ -65,8 +65,10 @@ accordingly.
 
 The knock-on is already handled: the bot identity is derived from the App name,
 so a renamed App comments as `shipmate-<your-org>[bot]` rather than
-`shipmate[bot]`. The plan and doctor comments are looked up by their
-marker plus a `Bot` comment author, never by a hardcoded login.
+`shipmate[bot]`, and no lookup names a hardcoded login. Among them: the plan
+and doctor comments are looked up by their marker plus a `Bot` comment author,
+and the gate read takes the App's slug from its token mint, reads the bot user
+`<slug>[bot]`, and counts only the `shipmate / gate` statuses that user created.
 
 The manifest's `redirect_url` (`http://127.0.0.1:8723/callback`) is a working
 default for anyone hand-building the form instead; `register-app` overrides it
