@@ -3096,6 +3096,8 @@ UNSCOPED = ["`repos/o/r/actions/policies/12890` names no workflow path to includ
         (_paths([".github/workflows/shipmate.yml"], [".github/workflows/shipmate.ym?"]), PATTERN),
         (_paths([".github/workflows/shipmate.yml"], [".github/workflows/[s]hipmate.yml"]), PATTERN),
         (_paths([".github/workflows/shipmate.yml"], ["!.github/workflows/shipmate.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate+x.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate.yml"], [r".github\workflows\shipmate.yml"]), PATTERN),
         (_paths([]), UNSCOPED),
         ({"workflow_path": {"exclude": []}}, UNSCOPED),
     ],
@@ -3108,6 +3110,8 @@ UNSCOPED = ["`repos/o/r/actions/policies/12890` names no workflow path to includ
         "exclude-question",
         "exclude-bracket",
         "exclude-negation",
+        "include-plus",
+        "exclude-backslash",
         "empty-include",
         "missing-include",
     ],
@@ -3116,7 +3120,9 @@ def test_a_policy_whose_scope_is_unprobed_cannot_be_checked(monkeypatch, conditi
     """GitHub's pattern matching and an unscoped policy's reach are unprobed.
 
     Mutations, each proven: test for `*` alone, so each `?`, `[` and `!` case reads as a
-    literal path; drop the pattern test on `include`, reading the include patterns as paths;
+    literal path; the denylist (a leading `!`, or `*`, `?` or `[`) for the allowlist, so the `+`
+    and backslash cases read as literal; drop the pattern test on `include`, reading the include
+    patterns as paths;
     test `include` alone, so every exclude pattern is `ok`; drop the empty-`include` test, so
     both unscoped policies are `todo`.
     """
@@ -3127,9 +3133,9 @@ def test_a_policy_whose_scope_is_unprobed_cannot_be_checked(monkeypatch, conditi
     )
 
 
-def test_a_policy_path_with_a_bang_inside_is_a_literal_path(monkeypatch):
-    """Only a leading `!` negates. Mutation: `"!" in p` for `p.startswith("!")` -- red."""
-    paths = _paths([".github/workflows/shipmate.yml", ".github/workflows/a!b.yml"])
+def test_a_policy_path_of_allowlisted_characters_is_literal(monkeypatch):
+    """Mutation: drop `-` or `_` from `_LITERAL_PATH` -- `cannot check`."""
+    paths = _paths([".github/workflows/shipmate.yml", ".github/workflows/my_other-flow.v2.yml"])
     assert _event_row(monkeypatch, _policy(conditions=paths))[0][0] == "ok"
 
 

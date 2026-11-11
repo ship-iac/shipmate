@@ -860,18 +860,22 @@ EVENT_POLICY_TODO = [
 ]
 
 
+# GitHub's workflow path pattern syntax is unprobed, so only these characters read as literal.
+_LITERAL_PATH = re.compile(r"[A-Za-z0-9._/-]+")
+
+
 def _policy_gap(policy):
     """The events of `SHIPMATE_EVENTS` an active policy restricting events for `shipmate.yml`
     does not allow; `None` for any other policy. For an active restricting policy whose
-    reach is unprobed, the reason as a string: a pattern in `include` or `exclude` (a `*`, `?`
-    or `[` anywhere, or a leading `!`), or no `include` entry.
+    reach is unprobed, the reason as a string: a pattern in `include` or `exclude` (any path
+    holding a character outside `_LITERAL_PATH`), or no `include` entry.
     """
     rules = [r for r in policy.get("rules") or [] if r.get("type") == "restrict_action_events"]
     if policy.get("enforcement") != "active" or not rules:
         return None
     paths = (policy.get("conditions") or {}).get("workflow_path") or {}
     include, exclude = paths.get("include") or [], paths.get("exclude") or []
-    if any(p.startswith("!") or any(c in p for c in "*?[") for p in [*include, *exclude]):
+    if not all(_LITERAL_PATH.fullmatch(p) for p in [*include, *exclude]):
         return "names a workflow path pattern"
     if not include:
         return "names no workflow path to include"

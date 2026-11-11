@@ -368,8 +368,8 @@ its workflow path `include` names `.github/workflows/shipmate.yml` and its
   [`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository);
 - `cannot check` when a read fails, when the list's `total_count` differs from
   the number of policies it returned (onboard reads one page of 100), or when a
-  considered policy has a pattern in `include` or `exclude` (a `*`, `?` or `[`
-  anywhere, or a leading `!`) or no `include` entry,
+  considered policy has a pattern in `include` or `exclude` (a path holding any
+  character but letters, digits, `.`, `_`, `/` and `-`) or no `include` entry,
   because which workflows such a policy reaches is unprobed.
 
 `ok` covers the repository's own policies only: onboard does not read an
