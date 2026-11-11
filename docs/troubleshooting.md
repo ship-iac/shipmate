@@ -2474,10 +2474,10 @@ reads whose failure would fail the job and for the writes of the gate, a
 dispatch and an apply check; each retry is logged as a notice naming the command
 and gh's first stderr line. A retry notice naming the same command above a
 `command failed` annotation in the step log means that call was retried; none
-means it was a single attempt. For a `command failed` annotation only, re-run the deploy once,
-and if it fails the same way, that stderr is the cause. When no annotation but
-`Process completed with exit code` names the cause, read the failed step's log:
-a traceback or a failed checkout or setup step shows there.
+means it was a single attempt. For a `command failed` annotation only, re-run
+the deploy once, and if it fails the same way, that stderr is the cause. When no
+annotation but `Process completed with exit code` names the cause, read the
+failed step's log: a traceback or a failed checkout or setup step shows there.
 
 A gate reading `deploy gate got no detect result; see the run` means the deploy
 workflow passed no `detect` result to its `summary`; the engine's `deploy.yml`

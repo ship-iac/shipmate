@@ -16,7 +16,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **The engine's Python scripts retry a transient GitHub API failure on most reads whose failure would fail the job.** A 5xx, a dropped connection or a truncated body is retried twice, 2 and 5 seconds later; the pull-request, cell-lock, merge-to-pull-request mapping, plan-comment listing and drift default-branch head reads are among them. `scripts/onboard`'s `gh api` reads retry the same way. A read that stays single-attempt shows no retry notice above its `command failed` annotation.
+- **The engine's Python scripts retry a transient GitHub API failure on most reads whose failure would fail the job.** A 5xx, a dropped connection or a truncated body is retried twice, 2 and 5 seconds later; the pull-request, cell-lock, merge-to-pull-request mapping, plan-comment listing and drift default-branch head reads are among them. Most of `scripts/onboard`'s reads retry the same way. A read that stays single-attempt shows no retry notice above its `command failed` annotation.
 
 ## [0.55.0] — 2026-11-09
 
