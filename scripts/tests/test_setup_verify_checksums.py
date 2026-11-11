@@ -564,7 +564,7 @@ def gnupg_home():
     yield home
     gpgconf = shutil.which("gpgconf")
     if gpgconf:
-        subprocess.run([gpgconf, "--homedir", home, "--kill", "gpg-agent"], check=False)
+        subprocess.run([gpgconf, "--homedir", home, "--kill", "all"], check=False)
     shutil.rmtree(path, ignore_errors=True)
 
 
@@ -1018,7 +1018,7 @@ def _exists(tmp_path, home):
 
 def _kill_agents(tmp_path, homes):
     for home in set(homes):
-        run_step(tmp_path, "gpgconf --kill gpg-agent\n", {**os.environ, "GNUPGHOME": home})
+        run_step(tmp_path, "gpgconf --kill all\n", {**os.environ, "GNUPGHOME": home})
 
 
 @pytest.mark.parametrize("passing", [True, False], ids=["passing", "failing"])
@@ -1043,7 +1043,7 @@ def test_the_opentofu_verify_kills_its_agent_then_removes_its_keyring(tmp_path, 
         assert out == (_TOFU_OUTPUT if passing else _refusal(r.stdout))
         assert gpg == _verifier("tofu-sums", rt)
         assert len(homes) == 2 and len(set(homes)) == 1 and homes[0], homes
-        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
         assert _homes(tmp_path, "gpgconf") == homes[:1]
         assert (tmp_path / "logs" / "gpgconf.dir").read_text(encoding="utf-8") == "present\n"
         assert not _exists(tmp_path, homes[0])
@@ -1103,7 +1103,7 @@ def test_a_failing_gpgconf_leaves_a_passing_step_green(tmp_path):
     r, out, *_ = _run(tmp_path, "tofu-sums", gpgconf_rc=1)
     try:
         assert (r.returncode, r.stdout, out) == (0, "", _TOFU_OUTPUT), r.stderr
-        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
     finally:
         _kill_agents(tmp_path, _homes(tmp_path, "gpg"))
 
@@ -1216,7 +1216,7 @@ def test_the_head_versions_releases_are_fetched_and_verified(tmp_path):
         assert out == _TM_OUTPUT + _TOFU_OUTPUT
         assert curl == _head_downloads(rt, ("terramate", "tofu"))
         assert len(gpg) == 2 and len(set(homes)) == 1, (gpg, homes)
-        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
         assert _homes(tmp_path, "gpgconf") == homes[:1]
     finally:
         _kill_agents(tmp_path, homes)
@@ -1246,7 +1246,7 @@ def test_a_second_tool_that_fails_leaves_one_refusal_and_kills_the_agent(tmp_pat
         assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
         assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
         assert curl == _head_downloads(rt, ("terramate", "tofu"))
-        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "all"]]
         assert homes and _homes(tmp_path, "gpgconf") == homes[:1]
     finally:
         _kill_agents(tmp_path, homes)

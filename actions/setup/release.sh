@@ -52,7 +52,7 @@ _release_exit() {
   # Only verify_tofu's own keyring: never an operator's GNUPGHOME, and never the exit status.
   # Kill before removing the keyring the kill is keyed on.
   if [ -n "$_release_gnupghome" ]; then
-    GNUPGHOME="$_release_gnupghome" gpgconf --kill gpg-agent || true
+    GNUPGHOME="$_release_gnupghome" gpgconf --kill all || true
     rm -rf "$_release_gnupghome" || true
   fi
   exit "$rc"

@@ -2692,7 +2692,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - A runner that runs `setup` must also provide `gpg`, `gpgconf` and a coreutils
   `base64`, GNU or uutils, which only `setup` and plan `detect`'s `tools` check
   call, and only in the jobs that take `runs_on`: no `ubuntu-slim` job runs
-  either. `gpgconf` stops the `gpg-agent` that verifying OpenTofu starts. The included-software lists of the
+  either. `gpgconf` stops the daemons, such as `gpg-agent`, that verifying OpenTofu starts. The included-software lists of the
   [`ubuntu-24.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2404-Readme.md),
   [`ubuntu-26.04`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Readme.md) and
   [`ubuntu-26.04-arm`](https://github.com/actions/runner-images/blob/4da2307112a0fad2fd2ecaca8ba7d08683b8c581/images/ubuntu/Ubuntu2604-Arm64-Readme.md) images name `gnupg2`
@@ -2763,7 +2763,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   they do for any other command that fails them; the cache restore and save steps
   and `Provider plugin cache` write none. Nothing installs unverified and nothing
   falls back. The OpenTofu verify imports the key into a temporary keyring and
-  stops that keyring's `gpg-agent`, then removes the keyring, when the step ends, whether
+  stops every daemon of that keyring, such as `gpg-agent`, then removes the keyring, when the step ends, whether
   it passes or fails.
   Neither key carries an expiry, so the keys change only when upstream changes
   its signer: from then on, every install of a release the new signer signs

@@ -131,7 +131,7 @@ runs:
         jq -e "$named" <<<"$SHIPMATE_VERIFY" >/dev/null \
           || fail "build-matrix wrote verify=${SHIPMATE_VERIFY}, which does not map terramate or tofu, or both, to an X.Y.Z version."
         # One read per tool, not a pipeline: a `while read` subshell would lose verify_tofu's
-        # keyring, and with it the EXIT handler's gpg-agent kill.
+        # keyring, and with it the EXIT handler's gpgconf kill.
         for tool in terramate tofu; do
           if [ "$tool" = tofu ]; then name=OpenTofu; else name=Terramate; fi
           # First, so no failure in this tool's turn carries the previous tool's prefix.
