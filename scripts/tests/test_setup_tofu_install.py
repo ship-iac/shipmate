@@ -407,7 +407,7 @@ def test_a_restored_archive_sha256sum_cannot_read_is_downloaded_again(tmp_path):
     """An unreadable restored file: the sha256sum stub prints no digest for it, as sha256sum does
     on a read error. A fresh archive that yields none still fails (the test above).
 
-    Mutation: `fail` in place of the empty-digest `reason` in `check` (the step exits 1).
+    Mutation: `fail` in place of the empty-digest `reason` in `_release_check` (the step exits 1).
     """
     r, runner_temp, logs = _install_cached(tmp_path, cached_digest="")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -421,7 +421,7 @@ def test_a_restored_archive_sha256sum_cannot_read_is_downloaded_again(tmp_path):
 def test_a_restored_archive_that_is_a_symlink_is_downloaded_again(tmp_path):
     """The link is removed, not followed: its target stays as it was.
 
-    Mutation: drop `[ -L "$archive" ]` from `check` (the link's digest matches; curl is not
+    Mutation: drop `[ -L "$archive" ]` from `_release_check` (the link's digest matches; curl is not
     called).
     """
     release = tmp_path / "runner-temp" / "tofu-release"

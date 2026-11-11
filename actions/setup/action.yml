@@ -66,7 +66,6 @@ runs:
         v="$SHIPMATE_TERRAMATE_VERSION"
         release_init "Terramate checksum verification failed" "Terramate ${v}: "
         require
-        key="${SHIPMATE_CACHE_KEY:-}"
         dir="$RUNNER_TEMP/terramate-release"
         release_sums terramate "$v"
         release_dir "$dir"
@@ -89,7 +88,6 @@ runs:
         v="$SHIPMATE_TOFU_VERSION"
         release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
         require gpg gpgconf
-        key="${SHIPMATE_CACHE_KEY:-}"
         dir="$RUNNER_TEMP/tofu-release"
         release_sums tofu "$v"
         release_dir "$dir"
@@ -126,26 +124,11 @@ runs:
         want="$(awk -v a="$asset" '$2 == a {print $1}' <<<"$SHIPMATE_TOFU_SHA256")"
         [ -n "$want" ] || fail "the signed ${sums} yields no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
         url="${release_base}/${asset}"
-        key="${SHIPMATE_CACHE_KEY:-}"
         release="$RUNNER_TEMP/tofu-release"
         archive="$release/$asset"
         bin="$RUNNER_TEMP/tofu"
         mkdir -p "$release" "$bin"
-        check() {
-          if [ ! -f "$archive" ] || [ -L "$archive" ]; then reason="${archive} is not a regular file."; return 1; fi
-          sum="$(sha256sum "$archive" | awk '{print $1}')"
-          # A restored archive sha256sum cannot read is replaced; a fresh one fails after the download.
-          [ -n "$sum" ] || { reason="sha256sum printed no digest for ${archive}."; return 1; }
-          [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed ${sums} names; the release asset differs from the signed one."; return 1; }
-        }
-        # Without a restored entry, nothing explains an archive already here.
-        if [ -z "$key" ] || ! check; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
-          rm -rf "${archive:?}"
-          fetch "$url" "$archive" "check the signed ${sums} and the runner's OS and architecture" "re-run the failed job"
-          check || fail "$reason"
-        fi
-        echo "Verified ${asset} sha256 ${sum}."
+        release_archive "$url" "$archive" "$want" "OpenTofu ${v}"
         python3 -m zipfile -e "$archive" "$bin" || fail "python3 could not extract OpenTofu from ${url}."
         # zipfile drops the archive's exec bit.
         chmod +x "$bin/tofu" || fail "could not make the OpenTofu binary executable."
@@ -181,26 +164,11 @@ runs:
         want="$(awk -v a="$asset" '$2 == a {print $1}' <<<"$SHIPMATE_TERRAMATE_SHA256")"
         [ -n "$want" ] || fail "the signed checksums.txt yields no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
         url="${release_base}/${asset}"
-        key="${SHIPMATE_CACHE_KEY:-}"
         release="$RUNNER_TEMP/terramate-release"
         archive="$release/$asset"
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$release" "$dir"
-        check() {
-          if [ ! -f "$archive" ] || [ -L "$archive" ]; then reason="${archive} is not a regular file."; return 1; fi
-          sum="$(sha256sum "$archive" | awk '{print $1}')"
-          # A restored archive sha256sum cannot read is replaced; a fresh one fails after the download.
-          [ -n "$sum" ] || { reason="sha256sum printed no digest for ${archive}."; return 1; }
-          [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed checksums.txt names; the release asset differs from the signed one."; return 1; }
-        }
-        # Without a restored entry, nothing explains an archive already here.
-        if [ -z "$key" ] || ! check; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
-          rm -rf "${archive:?}"
-          fetch "$url" "$archive" "check the signed checksums.txt and the runner's OS and architecture" "re-run the failed job"
-          check || fail "$reason"
-        fi
-        echo "Verified ${asset} sha256 ${sum}."
+        release_archive "$url" "$archive" "$want" "Terramate ${v}"
         tar -xzf "$archive" -C "$dir" terramate || fail "tar could not extract terramate from ${url}."
         got="$("$dir/terramate" --version)" || fail "the binary from ${url} failed to run terramate --version."
         if [ "$got" != "$v" ]; then

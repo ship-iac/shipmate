@@ -106,10 +106,9 @@ release_sums() {
   fi
 }
 
-# release_verify <tool> <version> <dir> <404 remedy> <other remedy>: replace the release's
-# checksum file and signature in <dir> with fresh downloads and verify them, else refuse through
-# `fail`. `{file}` in a remedy names the file. Call it as a statement: left of `||` or in an `if`
-# condition, `set -e` would not stop it at a failed `rm`.
+# release_verify <tool> <version> <dir> <404 remedy> <other remedy>: download the checksum file
+# and signature into <dir> afresh and verify them, else `fail`; `{file}` in a remedy names the file.
+# Call it as a statement: left of `||` or in an `if`, `set -e` would not stop a failed `rm`.
 release_verify() {
   local f
   release_sums "$1" "$2"
@@ -118,6 +117,34 @@ release_verify() {
     fetch "$release_base/$f" "$3/$f" "${4//\{file\}/$f}" "${5//\{file\}/$f}"
   done
   "verify_$1" "$2" "$3" || fail "$reason"
+}
+
+# Return 1 with `reason` set unless <archive> is a regular file whose sha256, left in `sum`, is
+# <want>. <url> and <sums> name the asset and the signed checksum file in the reason.
+# shellcheck disable=SC2034 # release_archive reads `reason` and `sum`.
+_release_check() {
+  local archive="$1" want="$2" url="$3" sums="$4"
+  if [ ! -f "$archive" ] || [ -L "$archive" ]; then reason="${archive} is not a regular file."; return 1; fi
+  sum="$(sha256sum "$archive" | awk '{print $1}')"
+  # A restored archive sha256sum cannot read is replaced; a fresh one fails after the download.
+  [ -n "$sum" ] || { reason="sha256sum printed no digest for ${archive}."; return 1; }
+  [ "$sum" = "$want" ] || { reason="${url} has sha256 ${sum}, not the ${want} the signed ${sums} names; the release asset differs from the signed one."; return 1; }
+}
+
+# release_archive <url> <archive> <want> <name>: keep the restored <archive> when its sha256 is
+# <want>, else download it and check again or `fail`. Needs release_sums first; <name> leads the
+# cache warning. Call it as a statement, as release_verify.
+release_archive() {
+  local url="$1" archive="$2" want="$3" name="$4" sums="${release_files[0]}"
+  local key="${SHIPMATE_CACHE_KEY:-}" asset="${2##*/}"
+  # Without a restored entry, nothing explains an archive already here.
+  if [ -z "$key" ] || ! _release_check "$archive" "$want" "$url" "$sums"; then
+    [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::${name}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+    rm -rf "${archive:?}"
+    fetch "$url" "$archive" "check the signed ${sums} and the runner's OS and architecture" "re-run the failed job"
+    _release_check "$archive" "$want" "$url" "$sums" || fail "$reason"
+  fi
+  echo "Verified ${asset} sha256 ${sum}."
 }
 
 # Return 1 with `reason` set unless each named file in <dir> is a regular file, not a symlink.
@@ -133,10 +160,9 @@ _release_files() {
   done
 }
 
-# verify_terramate <version> <dir> and verify_tofu <version> <dir> check the release's checksum
-# file and signature already in <dir> against the committed key. On success they write the Linux
-# digests to the step's output; otherwise they return 1 with `reason` set. The caller sets the
-# title and prefix of a refusal with `release_init`; release_verify downloads.
+# verify_terramate <version> <dir> and verify_tofu <version> <dir> check the checksum file and
+# signature in <dir> against the committed key, then write the Linux digests to the step's
+# output; otherwise they return 1 with `reason` set.
 # shellcheck disable=SC2034 # The calling step reads `reason`.
 verify_terramate() {
   local v="$1" dir="$2" rc=0 arch asset line lines=""
