@@ -4410,7 +4410,8 @@ stack-wave by stack-wave exactly as described above (see Fan-out).
 
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
-`apply-env-level.yml` → gate completion + cell lock release), the
+`apply-env-level.yml` → gate completion + cell lock release; beside the
+env-levels, `warm` saves the OpenTofu cache entry and nothing waits on it), the
 apply path as `.github/workflows/apply.yml` (detect → cell lock acquisition →
 env-levels 0..3 via `apply-env-level.yml` → gate refresh + result comment; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one
