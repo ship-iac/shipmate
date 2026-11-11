@@ -16,7 +16,7 @@
 
 import pytest
 import yaml
-from _loader import WORKFLOWS, action_yaml, workflow_yaml
+from _loader import WORKFLOWS, action_yaml, checkouts, workflow_yaml
 
 #: The whole `env:` of the step that runs each detect script.
 _SCRIPT_ENV = {
@@ -190,12 +190,8 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
     Mutation: delete `fetch-depth` from `deploy.yml`'s detect checkout.
     Mutation: delete `filter` from `deploy.yml`'s detect checkout.
     """
-    checkouts = [
-        s.get("with")
-        for s in workflow_yaml("deploy.yml")["jobs"]["detect"]["steps"]
-        if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
-    ]
-    assert checkouts == [{"fetch-depth": 0, "filter": "blob:none"}]
+    got = [s.get("with") for s in checkouts(workflow_yaml("deploy.yml")["jobs"]["detect"]["steps"])]
+    assert got == [{"fetch-depth": 0, "filter": "blob:none"}]
 
 
 def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
@@ -207,12 +203,11 @@ def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
     Mutation: drop the `!` from the first checkout's `if:`, so an auto run checks out twice and
     a bare one not at all.
     Mutation: delete the auto checkout's `if:`."""
-    checkouts = [
+    got = [
         {k: v for k, v in s.items() if k != "uses"}
-        for s in workflow_yaml("apply.yml")["jobs"]["detect"]["steps"]
-        if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
+        for s in checkouts(workflow_yaml("apply.yml")["jobs"]["detect"]["steps"])
     ]
-    assert checkouts == [
+    assert got == [
         {"if": "${{ !inputs.auto }}", "with": {"ref": "${{ inputs.ref }}"}},
         {"if": "${{ inputs.auto }}", "with": {"ref": "${{ inputs.ref }}", "fetch-depth": 0}},
     ]

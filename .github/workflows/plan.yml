@@ -14,8 +14,8 @@ on:
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted.
 permissions: {}
-# A dispatched run holds the default branch's cache scope while it runs the pull request's HCL,
-# and nothing in this file saves an Actions-cache entry.
+# An autoplan or commanded plan holds the default branch's cache scope while it runs the pull
+# request's HCL, and nothing in this file saves an Actions-cache entry.
 cache-mode: read
 jobs:
   # One producer for every pull-request fact below, and its own job rather than `detect`'s first
@@ -102,6 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
+          persist-credentials: false
       - uses: $/actions/setup
         with: { cache-save: "false" }
       - name: Configure cloud credentials (AWS OIDC)

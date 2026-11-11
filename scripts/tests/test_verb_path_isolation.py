@@ -43,7 +43,8 @@ wrong output, a step re-aimed at the apply family -- not a hostile edit to files
 reviews.
 """
 
-from _loader import local_action, workflow_jobs, workflow_yaml
+import pytest
+from _loader import checkouts, local_action, secrets_refs, workflow_jobs, workflow_yaml
 
 APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
@@ -305,6 +306,36 @@ def test_the_unlock_detect_passes_exactly_these_inputs():
     )
     got = step.get("with")
     assert got == DETECT_WITH, f"unlock's unlock-detect inputs are {got!r}, not {DETECT_WITH!r}"
+
+
+def test_the_unlock_checkouts_take_the_ref_and_only_unlock_drops_the_token():
+    """`unlock` runs the pull request's HCL through `tofu init`, so its checkout keeps the job
+    token out of git config; `detect` runs none of it. Mutations: delete `persist-credentials`
+    from `unlock`'s checkout; add `persist-credentials: false` to `detect`'s."""
+    got = {
+        job_id: [s.get("with") for s in checkouts(_job(UNLOCK, job_id)["steps"])]
+        for job_id in ("detect", "unlock")
+    }
+    assert got == {
+        "detect": [{"ref": "${{ inputs.ref }}"}],
+        "unlock": [{"ref": "${{ inputs.ref }}", "persist-credentials": False}],
+    }
+
+
+def test_the_unlock_job_references_exactly_these_secrets():
+    """`unlock` runs the pull request's HCL, so every secret it references reaches that code;
+    it holds no encryption key. Mutation: add
+    `encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}` to the unlock-cell step's `with:`."""
+    assert secrets_refs(_job(UNLOCK, "unlock")) == ["secrets.SHIPMATE_SECRETS"]
+
+
+@pytest.mark.parametrize("workflow", ["plan.yml", "apply-env-level.yml", UNLOCK])
+def test_no_workflow_level_value_hands_a_secret_to_every_job(workflow):
+    """A workflow-level `env:` reaches every job, the cells that run the pull request's HCL
+    included, so the per-job secret pins would not see it. Mutation: add a top-level
+    `env: { K: "${{ secrets.SHIPMATE_VARS }}" }` to `apply-env-level.yml`."""
+    wf = workflow_yaml(workflow)
+    assert secrets_refs({k: v for k, v in wf.items() if k not in ("on", True, "jobs")}) == []
 
 
 def test_the_unlock_detect_refuses_an_unlock_into_a_missing_environment():

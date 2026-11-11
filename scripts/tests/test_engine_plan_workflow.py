@@ -11,7 +11,15 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 
 import re
 
-from _loader import WORKFLOWS, step_using, strings, workflow_jobs, workflow_yaml
+from _loader import (
+    WORKFLOWS,
+    checkouts,
+    secrets_refs,
+    step_using,
+    strings,
+    workflow_jobs,
+    workflow_yaml,
+)
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -95,24 +103,23 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     load-bearing in `detect` only: without the full history `terramate list --changed` and
     `lost_env_tags`' `git diff` find nothing and report it as no change. `plan` diffs nothing.
     `filter: blob:none` keeps that history and fetches file contents on demand.
+    `persist-credentials: false` keeps the job token out of the git config of a checkout whose
+    pull request code `plan` then runs; `detect` runs none of it.
 
     Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
-    from `detect`, `filter` deleted from `detect`, `fetch-depth: 0` added to `plan`, and
-    `expected-head: ${{ github.sha }}` on the cell.
+    from `detect`, `filter` deleted from `detect`, `fetch-depth: 0` added to `plan`,
+    `persist-credentials` deleted from `plan`, `persist-credentials: false` added to `detect`,
+    and `expected-head: ${{ github.sha }}` on the cell.
     """
     head = "${{ needs.facts.outputs.head-sha }}"
     # PyYAML gives the int 0, not "0".
     expected = {
         "detect": {"ref": head, "fetch-depth": 0, "filter": "blob:none"},
-        "plan": {"ref": head},
+        "plan": {"ref": head, "persist-credentials": False},
     }
     for job_id, with_block in expected.items():
-        checkouts = [
-            s.get("with")
-            for s in workflow_jobs(WF)[job_id]["steps"]
-            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
-        ]
-        assert checkouts == [with_block], job_id
+        got = [s.get("with") for s in checkouts(workflow_jobs(WF)[job_id]["steps"])]
+        assert got == [with_block], job_id
     cell = step_using(WF, "plan", "actions/plan-cell")
     assert cell["with"]["expected-head"] == head
 
@@ -149,6 +156,20 @@ def test_the_cell_passes_this_whole_with_block():
         "expected-head": "${{ needs.facts.outputs.head-sha }}",
         "encryption-key": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
     }
+
+
+def test_the_cell_job_references_exactly_these_secrets():
+    """The plan job runs pull request code, so every secret it references reaches that code.
+    Every string of the whole job is walked, and within each only its `${{ }}` expressions; the
+    App key's absence is `test_cells_hold_no_app_key.py`'s.
+
+    Mutations: a job-level `env: { K: ${{ secrets.SHIPMATE_VARS }} }`; a plan-cell input
+    `${{ toJSON(secrets) }}`; a plan-cell input `${{ secrets['SHIPMATE_VARS'] }}`.
+    """
+    assert secrets_refs(workflow_jobs(WF)["plan"]) == [
+        "secrets.SHIPMATE_ENCRYPTION_KEY",
+        "secrets.SHIPMATE_SECRETS",
+    ]
 
 
 def test_the_workflow_reads_the_event_payload_nowhere():

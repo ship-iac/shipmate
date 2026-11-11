@@ -61,12 +61,13 @@ what lets the plan run's trusted `summary` job mint an App token and write the
 the trigger: it executes no *consumer* repository content. It is a call to the
 engine's own reusable workflow, and it checks out nothing. A consumer cannot add
 a checkout, because they do not own that job's steps. The two jobs that *do*
-check out the pull request's head — `detect` and `plan` — reach no credentialed
-environment: `detect` binds none, and `plan` binds only the *plan* environment
-for the cell it is planning, which by design holds no App key and no
-apply-capable secret (controls 8, 6 and 17). What a plan environment does hold
-is still executed against by branch content — the standing residual this page
-opens with, unchanged by this trigger.
+check out the pull request's head — `detect` and `plan` — reach no App key:
+`detect` binds no environment, and `plan` binds only the environment of the
+cell it is planning, `<env>-plan`, or the bare `<env>` under `split: false`,
+which then holds the apply role (§7–9). Whatever that environment holds is
+executed against by branch content — the standing residual this page opens
+with, unchanged by this trigger. "What pull-request code holds" lists it, and
+what the apply and unlock cells hold.
 
 The dangerous shape is the same trigger without that separation: a workflow
 that checks out or otherwise acts on the pull request's own content inside a job
@@ -1218,6 +1219,78 @@ Whether that is safe is the shape question stated at the top of this page; in
 the shape a labeler usually takes it trades the property this section rests on
 for exactly the exposure control 1 exists to limit.
 
+## What pull-request code holds
+
+Three engine jobs run code from a branch: `plan.yml`'s `plan` and the wave jobs
+of `apply-env-level.yml`, on every apply path including the post-merge deploy,
+check out the pull request's head; `unlock.yml`'s `unlock` checks out the ref it
+was dispatched with, a pull request's head when commented. Each is a matrix of
+cells, and each cell binds one GitHub Environment, the bound environment:
+`<env>-plan` for a plan cell, `<env>-apply` for an apply or unlock cell, or the
+bare `<env>` on both paths when the environment's entry holds `split: false`.
+The bound environment's required reviewers, secrets, variables and OIDC subject
+apply to the cell. None of the three binds `shipmate-engine`, so none holds the
+App key (§16).
+
+| Job | Runs without anyone's approval when | Holds |
+|---|---|---|
+| `plan` | the bound environment has no required reviewers: always for `<env>-plan`, which must have none (row 8); under `split: false` the bare `<env>`'s reviewers hold the plan cells too (§6) | the job token (`contents: read`); an OIDC token for the bound environment's role, under `split: false` the apply role (§7–9); `SHIPMATE_SECRETS` and `SHIPMATE_ENCRYPTION_KEY`; the variables the cell is handed ("What the engine receives from your repository"); a local backend's decrypted state; a cache token that cannot save |
+| apply waves | both: the pull-request condition below admits the apply, and the bound environment has no required reviewers | the job token (`contents`, `actions`, `checks` and `pull-requests: read`; `actions: read` lists and downloads other runs' artifacts); an OIDC token for the bound environment's role; `SHIPMATE_SECRETS` and `SHIPMATE_ENCRYPTION_KEY`; the variables; a local backend's decrypted state and the decrypted reviewed plan; a cache token that can save |
+| `unlock` | the bound environment has no required reviewers; unlock reads no review decision | the job token (`contents: read`, and `actions: read`, which lists and downloads other runs' artifacts); an OIDC token for the bound environment's role; `SHIPMATE_SECRETS`; the variables; a cache token that cannot save. No encryption key |
+
+The pull-request condition is the review decision GitHub reports for the pull
+request. `scripts/authorize` reads it when `shipmate apply` is commented and
+refuses there any decision the list below does not admit; `apply.yml`'s
+`review` job reads it again in the apply run, and `scripts/apply-detect`
+decides on that value: a targeted apply refuses, and a bare apply holds every
+environment the decision does not admit. The decision admits an apply to an
+environment when it is:
+
+- `APPROVED`. The engine checks no freshness of its own: whether a push after
+  the approval resets the decision is up to the ruleset's freshness settings
+  (§3–5).
+- `NONE`, which the engine reads when GitHub returns a null decision because no
+  review rule applies — for example a rule requiring no approval with
+  code-owner review off, a base branch no `pull_request` rule covers (row 21),
+  or a code-owner rule owning none of the changed files.
+- `REVIEW_REQUIRED`, on an environment whose entry holds `review: false`.
+
+Any other decision refuses, `CHANGES_REQUESTED` included. An `apply_mode: auto`
+environment, which must hold `review: false`, applies from the push's autoplan
+with no command (§1). The post-merge deploy reads no review decision: once the
+pull request merges, every cell whose apply check is still pending applies, so
+there the merge stands in for the pull-request condition; the bound
+environment's required reviewers still gate each cell.
+
+Three properties of these jobs bound what that code reaches:
+
+- **The checkout keeps no copy of the job token on disk; the job still holds
+  it.** Each of the three checkouts sets `persist-credentials: false`, which
+  removes only the token's copy in the checkout's git configuration. Treat the
+  job token in the table as held by the pull request's code.
+- **Plan and unlock cells cannot write the Actions cache.** Their workflows
+  declare `cache-mode: read`, and the cache service enforces it on the job's
+  token: a save that got past `actions/cache` was refused (measured). Apply
+  cells save state and providers, so their code can write the default branch's
+  cache ("A cache entry planted by an unreviewed apply", below).
+- **A repository-wide encryption key spans environments.** Set as a repository
+  or organization secret (`CONTRACT.md` §Plan artifact encryption),
+  `SHIPMATE_ENCRYPTION_KEY` is one value, and `scripts/plan-crypt` derives
+  nothing per environment, so it seals every environment's plan artifacts and
+  cached state. Code in a plan or apply cell can decrypt every one of them it
+  can fetch, and code in an apply cell can seal a state entry that any
+  environment's cells restore and accept. An environment holding its own value
+  on its plan and apply environments is outside that set.
+
+A plan cell holds the key, and on a local backend its environment's decrypted
+state, whatever the repository layout. Put environments whose apply or unlock
+cells run without approval in a repository of their own, with its own
+`SHIPMATE_ENCRYPTION_KEY` value. The Actions cache and the job token are per
+repository, so that code then reaches only that repository's cache, token and
+key. Replace the key when someone who could push such code loses that
+access, as for the App key (row 14); `CONTRACT.md` §Plan artifact encryption,
+"Rotation", states what a new key leaves undecryptable.
+
 ## What none of this fixes
 
 - **A fabricated planned-cell count.** The gate holds unless the number of
@@ -1249,12 +1322,21 @@ for exactly the exposure control 1 exists to limit.
   consumer's control, not the engine's: point the calling job's `runs_on:` at a
   self-hosted runner behind an egress allowlist, or at GitHub-hosted runners
   attached to a private network you filter.
+- **Pull-request code in a cell that runs without approval.** A split
+  environment's plan cells always run so, and apply and unlock cells do
+  whenever the conditions in "What pull-request code holds" are met. That code
+  holds what its cell holds: the job token, and in a plan or apply cell the
+  encryption key; `persist-credentials: false` keeps neither out of its reach.
+  Required reviewers on the bound environment (row 6) bound apply and unlock
+  cells, and a repository of their own bounds the environments whose apply or
+  unlock cells go without them. A split environment's plan cells have no bound
+  in the repository beyond who can push a branch (§1–2).
 - **A cache entry planted by an unreviewed apply.** An apply cell runs the pull
   request's configuration in a job that can write the default branch's Actions
   cache, because it saves state (`CONTRACT.md` §State backend) and providers
-  (§Terramate safeguards). Where an environment applies without an approving
-  review (`review: false`, or an environment under review under a ruleset that
-  requires none), code in that apply can save a provider or state entry that other plan,
+  (§Terramate safeguards). Where an environment applies without anyone's
+  approval ("What pull-request code holds" lists when), code in that apply can
+  save a provider or state entry that other plan,
   drift and apply cells restore, in every environment and on every later pull
   request. Nothing verifies a restored provider archive: the lock file verifies
   provider packages, not the archive around them. A restored state entry
@@ -1276,8 +1358,9 @@ for exactly the exposure control 1 exists to limit.
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval
   count (see "The gate is an assertion, not a proof"). The cache is per
-  repository: put a review-exempt tier in its own repository to keep it from
-  reaching the cells of your environments under review. Reading an entry is not this
+  repository: put the environments that apply without approval in their own
+  repository to keep it from reaching the cells of your other environments.
+  Reading an entry is not this
   exposure: any workflow run, a fork's pull request included, can restore a
   `state/` entry, anyone who can read the repository's Actions runs can download
   a plan artifact, and both are ciphertext under
