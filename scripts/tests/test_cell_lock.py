@@ -929,8 +929,8 @@ def test_marks_writes_the_holders_stacked_on_this_pull_requests_head(monkeypatch
 @pytest.mark.parametrize("state", ["closed", None])
 def test_marks_leaves_out_a_holder_that_is_not_open(monkeypatch, tmp_path, state):
     """A closed or merged holder will not merge after this pull request, so it is not stacked
-    even when its base branch is this head; a read naming no state is not open either.
-    Mutation: drop the `state == "open"` check -- `[12]`, red."""
+    even when its base branch is this head; a null state is malformed, warned and left out.
+    Mutation: drop the `state == "open"` check -- `[12]` for `closed`, red."""
     gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(pull_read(12), pull("feat-a", state))
@@ -1339,6 +1339,32 @@ def test_evict_cli_refuses_a_holder_it_cannot_judge_without_blocked(monkeypatch,
         "::error::could not tell whether #9 is stacked on this pull request: KeyError('base')\n"
         "could not tell whether #12 is stacked on this pull request: command failed (1): gh api "
         "| gh: Not Found (HTTP 404)"
+    )
+    assert github_outputs(out) == {}
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("answer", "cause"),
+    [
+        pytest.param(
+            {"state": None, "base": {"ref": "feat-a"}}, "base.ref 'feat-a', state None", id="state"
+        ),
+        pytest.param(
+            {"state": "open", "base": {"ref": None}}, "base.ref None, state 'open'", id="base"
+        ),
+    ],
+)
+def test_evict_cli_refuses_a_holder_answer_with_a_null_field(monkeypatch, tmp_path, answer, cause):
+    """A null field is malformed, not "not stacked". Mutation: check keys only (drop the
+    `isinstance` check) -- #9 reads as not stacked and its delete is an unexpected call."""
+    gh = _evict_three(*_THREE_PENDING)
+    gh.on(pull_read(12), pull("main")).on(pull_read(9), json.dumps(answer))
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
+    assert exc.value.code == (
+        f"::error::could not tell whether #9 is stacked on this pull request: ValueError({cause!r})"
     )
     assert github_outputs(out) == {}
     assert gh.drained()

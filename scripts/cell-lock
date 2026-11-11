@@ -603,9 +603,11 @@ def _stacked(repo, holders, head_ref, run):
 
 def _is_stacked(pull, head_ref) -> bool:
     """Whether the pull request read as `pull` is open with `head_ref` as its base branch. A
-    closed or merged one is not: it will not merge after this one. Raises on an answer without
-    `base.ref` or `state`."""
+    closed or merged one is not: it will not merge after this one. Raises unless `base.ref` and
+    `state` are strings."""
     base, state = pull["base"]["ref"], pull["state"]
+    if not (isinstance(base, str) and isinstance(state, str)):
+        raise ValueError(f"base.ref {base!r}, state {state!r}")
     return base == head_ref and state == "open"
 
 

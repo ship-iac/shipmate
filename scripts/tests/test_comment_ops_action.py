@@ -1715,9 +1715,11 @@ def test_the_evict_route_reads_the_head_while_authorized_stays_false(tmp_path):
     """The head comes from its own step, since `authz` (the only other head producer) runs for
     apply and unlock alone; the `authorized` verdict has no evict arm, so nothing dispatches.
 
-    The stub answers as `--jq` renders the two strings it is asked for.
+    The stub answers as `--jq` renders the two strings it is asked for. A null head branch
+    renders empty (`// ""`), which `cell-lock evict` refuses, never as `null`.
 
-    Mutations: write the output as `head=`; drop `head_ref` from the `--jq` filter; add
+    Mutations: write the output as `head=`; drop `head_ref` from the `--jq` filter; drop
+    `// ""`; add
     `steps.evict.outcome == 'success' ||` to the `authorized` output."""
     (tmp_path / "gh").write_text(
         "#!/bin/bash\nprintf '%s\n' \"$*\" >> argv.txt\n"
@@ -1739,6 +1741,7 @@ def test_the_evict_route_reads_the_head_while_authorized_stays_false(tmp_path):
     assert result.returncode == 0, result.stderr
     assert out.read_text(encoding="utf-8") == f"head_sha={_HEAD}\nhead_ref=feat-a\n"
     assert (tmp_path / "argv.txt").read_text(encoding="utf-8") == (
-        'api repos/org/repo/pulls/42 --jq "head_sha=\\(.head.sha)", "head_ref=\\(.head.ref)"\n'
+        "api repos/org/repo/pulls/42 --jq "
+        '"head_sha=\\(.head.sha)", "head_ref=\\(.head.ref // "")"\n'
     )
     assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == _AUTHORIZED

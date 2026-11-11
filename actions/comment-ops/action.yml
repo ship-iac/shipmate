@@ -377,7 +377,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '"head_sha=\(.head.sha)", "head_ref=\(.head.ref)"' >> "$GITHUB_OUTPUT"
+        gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '"head_sha=\(.head.sha)", "head_ref=\(.head.ref // "")"' >> "$GITHUB_OUTPUT"
 
     - name: "Evict: release the other pull requests' cell locks"
       id: evict
