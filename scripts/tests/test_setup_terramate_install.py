@@ -301,7 +301,7 @@ def _install_cached(tmp_path, **kwargs):
 
 @bash_only
 def test_a_restored_archive_whose_digest_matches_is_not_downloaded(tmp_path):
-    """Mutation: run `download` before the restored-entry `if` (curl is called)."""
+    """Mutation: run the `fetch` before the restored-entry `if` (curl is called)."""
     r, runner_temp, logs = _install_cached(tmp_path)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"

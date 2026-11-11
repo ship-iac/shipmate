@@ -1,4 +1,5 @@
-# Sourced by the setup steps that download or verify a release file. A step sources it after
+# Sourced by the setup steps that download or verify a release file, and by build-matrix's
+# `Verify changed tools`. A step sources it after
 # `set -euo pipefail`, then calls `release_init <error title> <message prefix>`.
 
 _release_title="shipmate setup failed"
@@ -11,17 +12,22 @@ release_init() {
   _release_prefix="$2"
 }
 
-# Print one `::error::`, write it as the step's `refusal` output and exit 1. The output is cut
-# at `REASON_CAP` (scripts/_shipmate.py), like run_annotated's. In a subshell the annotation goes
-# to stderr, which the runner also reads, so a command substitution cannot capture it.
-fail() {
-  local msg="${_release_prefix}$1"
+# Print <message> as one `::error::` and write it as the step's `refusal` output, its lines joined
+# into one, cut at `REASON_CAP` (scripts/_shipmate.py) like run_annotated's. In a subshell the
+# annotation goes to stderr, which the runner also reads, so a command substitution cannot capture it.
+_release_refuse() {
+  local msg="${1//$'\n'/ }"
   if [ "$BASHPID" = "$$" ]; then
     echo "::error title=${_release_title}::${msg}"
   else
     echo "::error title=${_release_title}::${msg}" >&2
   fi
   printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
+}
+
+# Refuse with the prefix and <reason>, then exit 1.
+fail() {
+  _release_refuse "${_release_prefix}$1"
   exit 1
 }
 
@@ -41,13 +47,13 @@ _release_has_refusal() {
 _release_exit() {
   local rc=$?
   if [ "$rc" -ne 0 ] && ! _release_has_refusal; then
-    local msg="${_release_prefix}a command exited ${rc} under \"${_release_title}\"; the step log names it."
-    echo "::error title=${_release_title}::${msg}"
-    printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
+    _release_refuse "${_release_prefix}a command exited ${rc} under \"${_release_title}\"; the step log names it."
   fi
   # Only verify_tofu's own keyring: never an operator's GNUPGHOME, and never the exit status.
+  # Kill before removing the keyring the kill is keyed on.
   if [ -n "$_release_gnupghome" ]; then
     GNUPGHOME="$_release_gnupghome" gpgconf --kill gpg-agent || true
+    rm -rf "$_release_gnupghome" || true
   fi
   exit "$rc"
 }
@@ -88,6 +94,32 @@ release_dir() {
   mkdir -p "$1"
 }
 
+# release_sums <tool> <version>, <tool> terramate or tofu: set `release_base` to the release's
+# download URL and `release_files` to its checksum file and that file's signature.
+release_sums() {
+  if [ "$1" = terramate ]; then
+    release_base="https://github.com/terramate-io/terramate/releases/download/v$2"
+    release_files=(checksums.txt checksums.txt.sig)
+  else
+    release_base="https://github.com/opentofu/opentofu/releases/download/v$2"
+    release_files=("tofu_$2_SHA256SUMS" "tofu_$2_SHA256SUMS.gpgsig")
+  fi
+}
+
+# release_verify <tool> <version> <dir> <404 remedy> <other remedy>: replace the release's
+# checksum file and signature in <dir> with fresh downloads and verify them, else refuse through
+# `fail`. `{file}` in a remedy names the file. Call it as a statement: left of `||` or in an `if`
+# condition, `set -e` would not stop it at a failed `rm`.
+release_verify() {
+  local f
+  release_sums "$1" "$2"
+  for f in "${release_files[@]}"; do
+    rm -rf "${3:?}/${f:?}"
+    fetch "$release_base/$f" "$3/$f" "${4//\{file\}/$f}" "${5//\{file\}/$f}"
+  done
+  "verify_$1" "$2" "$3" || fail "$reason"
+}
+
 # Return 1 with `reason` set unless each named file in <dir> is a regular file, not a symlink.
 # shellcheck disable=SC2034 # The calling step reads `reason`.
 _release_files() {
@@ -103,17 +135,17 @@ _release_files() {
 
 # verify_terramate <version> <dir> and verify_tofu <version> <dir> check the release's checksum
 # file and signature already in <dir> against the committed key. On success they write the Linux
-# digests to the step's output; otherwise they return 1 with `reason` set. Callers download.
+# digests to the step's output; otherwise they return 1 with `reason` set. The caller sets the
+# title and prefix of a refusal with `release_init`; release_verify downloads.
 # shellcheck disable=SC2034 # The calling step reads `reason`.
 verify_terramate() {
   local v="$1" dir="$2" rc=0 arch asset line lines=""
-  local base="https://github.com/terramate-io/terramate/releases/download/v${v}"
   # Outside <dir>, which the cache saves whole.
   local der="$RUNNER_TEMP/terramate-checksums.der"
-  release_init "Terramate checksum verification failed" "Terramate ${v}: "
-  _release_files "$dir" checksums.txt checksums.txt.sig || return 1
+  release_sums terramate "$v"
+  _release_files "$dir" "${release_files[@]}" || return 1
   # cosign writes the signature base64-encoded; openssl reads it as DER.
-  base64 -d "$dir/checksums.txt.sig" > "$der" || { reason="${base}/checksums.txt.sig is not base64."; return 1; }
+  base64 -d "$dir/checksums.txt.sig" > "$der" || { reason="${release_base}/checksums.txt.sig is not base64."; return 1; }
   openssl dgst -sha256 -verify "$GITHUB_ACTION_PATH/../../keys/terramate-cosign.pub" \
     -signature "$der" "$dir/checksums.txt" >/dev/null || rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -131,18 +163,18 @@ verify_terramate() {
 
 # shellcheck disable=SC2034 # The calling step reads `reason`.
 verify_tofu() {
-  local v="$1" dir="$2" rc=0 status got arch asset line lines=""
-  local sums="tofu_${v}_SHA256SUMS"
+  local v="$1" dir="$2" rc=0 status got arch asset line lines="" sums
   # The primary key fingerprint of OpenTofu's release signer, compared whole.
   local signer=E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
-  release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
+  release_sums tofu "$v"
+  sums="${release_files[0]}"
   # One keyring per step: a second call must not start a second agent the EXIT handler misses.
   if [ -z "$_release_gnupghome" ]; then
     _release_gnupghome="$(mktemp -d)" || fail "mktemp could not create a gpg keyring directory."
     GNUPGHOME="$_release_gnupghome" gpg --batch --import "$GITHUB_ACTION_PATH/../../keys/opentofu.asc" \
       || fail "gpg could not import the committed OpenTofu key."
   fi
-  _release_files "$dir" "$sums" "$sums.gpgsig" || return 1
+  _release_files "$dir" "${release_files[@]}" || return 1
   status="$(GNUPGHOME="$_release_gnupghome" gpg --batch --status-fd 1 --verify "$dir/$sums.gpgsig" "$dir/$sums")" || rc=$?
   if [ "$rc" -ne 0 ]; then
     reason="the signature on ${sums} did not verify against the committed OpenTofu key (gpg exit ${rc})."

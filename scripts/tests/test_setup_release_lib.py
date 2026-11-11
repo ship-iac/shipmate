@@ -22,6 +22,7 @@ from _loader import (
     setup_curl_argv,
     write_stub,
 )
+from _shipmate import REASON_CAP
 
 _LIB = (ACTIONS / "setup").as_posix()
 _URL = "https://github.com/o/r/releases/download/v1.0.0/asset.tar.gz"
@@ -209,6 +210,49 @@ def test_a_fail_in_a_subshell_still_leaves_exactly_one_refusal(tmp_path):
         "::error title=Release step failed::Tool 1.0.0: from a subshell.\n",
         "refusal=Tool 1.0.0: from a subshell.\n",
     )
+
+
+_TWO_LINES = "the first line. the second line."
+
+
+@bash_only
+def test_fail_joins_a_multi_line_reason_into_one_line(tmp_path):
+    """Mutation: drop the newline join from `_release_refuse` (a second line in both)."""
+    r, out, _ = _run(tmp_path, "fail $'the first line.\\nthe second line.'")
+    assert (r.returncode, r.stdout, out) == (
+        1,
+        f"::error title=Release step failed::Tool 1.0.0: {_TWO_LINES}\n",
+        f"refusal=Tool 1.0.0: {_TWO_LINES}\n",
+    )
+
+
+@bash_only
+def test_the_generic_refusal_joins_a_multi_line_prefix_into_one_line(tmp_path):
+    """Mutation: move the newline join from `_release_refuse` into `fail` (the fallback writes a
+    second line)."""
+    r, out, _ = _run(tmp_path, "release_init 'Release step failed' $'Tool\\n1.0.0: '\nfalse")
+    reason = 'Tool 1.0.0: a command exited 1 under "Release step failed"; the step log names it.'
+    assert (r.returncode, r.stdout, out) == (
+        1,
+        f"::error title=Release step failed::{reason}\n",
+        f"refusal={reason}\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [f"fail {'x' * 5000}", f"release_init 'Release step failed' {'x' * 5000}\nfalse"],
+    ids=["fail", "generic"],
+)
+@bash_only
+def test_a_refusal_is_cut_at_reason_cap(tmp_path, snippet):
+    """The cut matches `run_annotated`'s, read from `_shipmate.REASON_CAP`, not restated.
+
+    Mutation: cut at 3999 in `_release_refuse` (each row is one character short)."""
+    r, out, _ = _run(tmp_path, snippet)
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert out == f"refusal={(r.stdout.split('::', 2)[2].rstrip(chr(10)))[:REASON_CAP]}\n"
+    assert len(out) == len("refusal=\n") + REASON_CAP
 
 
 @bash_only

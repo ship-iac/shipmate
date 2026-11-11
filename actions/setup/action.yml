@@ -67,18 +67,13 @@ runs:
         release_init "Terramate checksum verification failed" "Terramate ${v}: "
         require
         key="${SHIPMATE_CACHE_KEY:-}"
-        base="https://github.com/terramate-io/terramate/releases/download/v${v}"
         dir="$RUNNER_TEMP/terramate-release"
-        files=(checksums.txt checksums.txt.sig)
-        drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
-        download() { for f in "${files[@]}"; do fetch "$base/$f" "$dir/$f" "" ""; done; }
+        release_sums terramate "$v"
         release_dir "$dir"
         # Without a restored entry, nothing explains a file already here.
         if [ -z "$key" ] || ! verify_terramate "$v" "$dir"; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading checksums.txt and checksums.txt.sig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
-          drop
-          download
-          verify_terramate "$v" "$dir" || fail "$reason"
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading ${release_files[0]} and ${release_files[1]} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          release_verify terramate "$v" "$dir" "" ""
         fi
     - name: Verify OpenTofu checksums
       id: tofu-sums
@@ -95,19 +90,13 @@ runs:
         release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
         require gpg gpgconf
         key="${SHIPMATE_CACHE_KEY:-}"
-        sums="tofu_${v}_SHA256SUMS"
-        base="https://github.com/opentofu/opentofu/releases/download/v${v}"
         dir="$RUNNER_TEMP/tofu-release"
-        files=("$sums" "$sums.gpgsig")
-        drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
-        download() { for f in "${files[@]}"; do fetch "$base/$f" "$dir/$f" "" ""; done; }
+        release_sums tofu "$v"
         release_dir "$dir"
         # Without a restored entry, nothing explains a file already here.
         if [ -z "$key" ] || ! verify_tofu "$v" "$dir"; then
-          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${sums} and ${sums}.gpgsig again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
-          drop
-          download
-          verify_tofu "$v" "$dir" || fail "$reason"
+          [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${release_files[0]} and ${release_files[1]} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
+          release_verify tofu "$v" "$dir" "" ""
         fi
     - name: Install OpenTofu
       id: tofu-install
@@ -122,7 +111,8 @@ runs:
         # shellcheck source=/dev/null
         source "$GITHUB_ACTION_PATH/release.sh"
         v="$SHIPMATE_TOFU_VERSION"
-        sums="tofu_${v}_SHA256SUMS"
+        release_sums tofu "$v"
+        sums="${release_files[0]}"
         # Fail-closed: every cell runs tofu.
         release_init "OpenTofu install failed" "OpenTofu ${v} did not install: "
         require
@@ -135,7 +125,7 @@ runs:
         asset="tofu_${v}_${system}_${arch}.zip"
         want="$(awk -v a="$asset" '$2 == a {print $1}' <<<"$SHIPMATE_TOFU_SHA256")"
         [ -n "$want" ] || fail "the signed ${sums} yields no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
-        url="https://github.com/opentofu/opentofu/releases/download/v${v}/${asset}"
+        url="${release_base}/${asset}"
         key="${SHIPMATE_CACHE_KEY:-}"
         release="$RUNNER_TEMP/tofu-release"
         archive="$release/$asset"
@@ -179,6 +169,7 @@ runs:
         v="$SHIPMATE_TERRAMATE_VERSION"
         # Fail-closed: every later step runs terramate.
         release_init "Terramate install failed" "Terramate ${v} did not install: "
+        release_sums terramate "$v"
         require
         system="$(uname -s | tr '[:upper:]' '[:lower:]')"
         case "$(uname -m)" in
@@ -189,7 +180,7 @@ runs:
         asset="terramate_${v}_${system}_${arch}.tar.gz"
         want="$(awk -v a="$asset" '$2 == a {print $1}' <<<"$SHIPMATE_TERRAMATE_SHA256")"
         [ -n "$want" ] || fail "the signed checksums.txt yields no sha256 for ${asset}; shipmate installs on Linux x86_64 and arm64."
-        url="https://github.com/terramate-io/terramate/releases/download/v${v}/${asset}"
+        url="${release_base}/${asset}"
         key="${SHIPMATE_CACHE_KEY:-}"
         release="$RUNNER_TEMP/terramate-release"
         archive="$release/$asset"

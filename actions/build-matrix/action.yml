@@ -126,31 +126,22 @@ runs:
         head="the pull request head's .github/shipmate-config.yml: "
         release_init "$title" ""
         require jq
-        named='type == "object" and length > 0 and all(keys[]; . == "terramate" or . == "tofu")'
+        named='type == "object" and length > 0 and all(keys[]; . == "terramate" or . == "tofu")
+          and all(.[]; type == "string" and test("\\A[0-9]+\\.[0-9]+\\.[0-9]+\\z"))'
         jq -e "$named" <<<"$SHIPMATE_VERIFY" >/dev/null \
-          || fail "build-matrix wrote verify=${SHIPMATE_VERIFY}, which names no tool to verify."
+          || fail "build-matrix wrote verify=${SHIPMATE_VERIFY}, which does not map terramate or tofu, or both, to an X.Y.Z version."
         # One read per tool, not a pipeline: a `while read` subshell would lose verify_tofu's
         # keyring, and with it the EXIT handler's gpg-agent kill.
         for tool in terramate tofu; do
+          if [ "$tool" = tofu ]; then name=OpenTofu; else name=Terramate; fi
+          # First, so no failure in this tool's turn carries the previous tool's prefix.
+          release_init "$title" "${head}${name}: "
           v="$(jq -r --arg t "$tool" '.[$t] // ""' <<<"$SHIPMATE_VERIFY")"
           [ -n "$v" ] || continue
-          if [ "$tool" = tofu ]; then
-            name=OpenTofu
-            require gpg gpgconf
-            base="https://github.com/opentofu/opentofu/releases/download/v${v}"
-            files=("tofu_${v}_SHA256SUMS" "tofu_${v}_SHA256SUMS.gpgsig")
-          else
-            name=Terramate
-            base="https://github.com/terramate-io/terramate/releases/download/v${v}"
-            files=(checksums.txt checksums.txt.sig)
-          fi
+          release_init "$title" "${head}${name} ${v}: "
+          [ "$tool" = terramate ] || require gpg gpgconf
           # Not setup's release directory, whose verified files this would overwrite.
           dir="$RUNNER_TEMP/head-${tool}-release"
           mkdir -p "$dir"
-          release_init "$title" "${head}${name} ${v}: "
-          for f in "${files[@]}"; do
-            fetch "$base/$f" "$dir/$f" "no ${name} ${v} release publishes ${f}; set tools.${tool} to a released version" "re-run the failed job"
-          done
-          # verify_x sets its own prefix; the refusal keeps the head's in front of it.
-          "verify_${tool}" "$v" "$dir" || { release_init "$title" "${head}${name} ${v}: "; fail "$reason"; }
+          release_verify "$tool" "$v" "$dir" "no ${name} ${v} release publishes {file}; set tools.${tool} to a released version" "re-run the failed job"
         done

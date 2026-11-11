@@ -176,6 +176,8 @@ def _run(
     env=None,
     gpgconf_rc=None,
     of=_ACTION,
+    path=None,
+    gpg_stub=True,
 ):
     """Run step `sid`'s body with curl serving `served` (basename -> bytes; the genuine fixtures
     by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`. `cached` (basename ->
@@ -183,11 +185,13 @@ def _run(
     when given, is the `SHIPMATE_CACHE_KEY`. `of` is the action whose step runs, and `action`
     (default the engine's copy of it) is `GITHUB_ACTION_PATH`; `env` is added last, over a host
     environment without `GNUPGHOME`. The `gpgconf` wrapper exits `gpgconf_rc` instead of running
-    the real one when that is given.
+    the real one when that is given, and logs whether its `GNUPGHOME` is a directory. `path`,
+    when given, replaces the host PATH behind the stubs; `gpg_stub=False` writes no `gpg` stub.
 
     Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP);
     openssl's and gpgconf's argv per call are in `tmp_path/logs/`, and each gpg and gpgconf
-    call's `GNUPGHOME` in `logs/gpg.home` and `logs/gpgconf.home`.
+    call's `GNUPGHOME` in `logs/gpg.home` and `logs/gpgconf.home`; `present` or `absent` per
+    gpgconf call in `logs/gpgconf.dir`.
     """
     tmp_path.mkdir(exist_ok=True)
     bin_dir, logs, serve, rt = (tmp_path / d for d in ("bin", "logs", "serve", "runner-temp"))
@@ -221,7 +225,7 @@ def _run(
     gpg = shutil.which("gpg")
     write_stub(
         bin_dir,
-        "gpg",
+        "gpg" if gpg_stub else "unused-gpg",
         f"printf '%s\\x1f' \"$@\" >> '{log}/gpg'\necho >> '{log}/gpg'\n"
         f"echo \"${{GNUPGHOME:-}}\" >> '{log}/gpg.home'\n"
         f'exec "{gpg and gpg.replace(os.sep, "/")}" "$@"',
@@ -232,6 +236,8 @@ def _run(
         "gpgconf",
         f"printf '%s\\x1f' \"$@\" >> '{log}/gpgconf'\necho >> '{log}/gpgconf'\n"
         f"echo \"${{GNUPGHOME:-}}\" >> '{log}/gpgconf.home'\n"
+        'if [ -d "${GNUPGHOME:-}" ]; then echo present; else echo absent; fi'
+        f" >> '{log}/gpgconf.dir'\n"
         + (
             f"exit {gpgconf_rc}"
             if gpgconf_rc is not None
@@ -252,7 +258,7 @@ def _run(
         step_by(of, id=sid)["run"],
         {
             **{k: v for k, v in os.environ.items() if k != "GNUPGHOME"},
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '') if path is None else path}",
             "RUNNER_TEMP": rt.as_posix(),
             "GITHUB_OUTPUT": str(out),
             "GITHUB_ACTION_PATH": action or (ENGINE / "actions" / of).as_posix(),
@@ -474,7 +480,7 @@ def test_an_html_signature_at_200_fails_with_one_annotation(tmp_path, sid, name,
 @needs_tools
 def test_a_404_fails_naming_the_url(tmp_path, sid, url):
     """Mutations: in `fetch`, return on curl exit 0 alone; drop the `refusal=` write from
-    `fail`."""
+    `_release_refuse`."""
     name = url.rsplit("/", 1)[1]
     served = _genuine()
     served[name] = b"Not Found"
@@ -680,7 +686,7 @@ def _signature_log(sid, tmp_path, gpg):
 @bash_only
 @needs_tools
 def test_a_genuine_cache_hit_downloads_nothing_and_verifies_the_same_way(tmp_path, sid):
-    """Mutation: run `download` before the restored-entry `if` (curl is called twice)."""
+    """Mutation: call `release_verify` before the restored-entry `if` (curl is called)."""
     r, out, curl, gpg, rt = _run(
         tmp_path, sid, cached={n: _genuine()[n] for n in _SUMS_NAMES[sid]}, key=_CACHE_KEYS[sid]
     )
@@ -758,7 +764,8 @@ def test_a_cached_file_that_fails_is_downloaded_again_with_one_warning(
 def test_a_restored_checksum_path_that_is_a_directory_is_downloaded_again(tmp_path, sid):
     """A restored path that is not a regular file costs a download, not the job.
 
-    Mutation: `rm -f` in place of `rm -rf` in `drop` (the step exits 1 on the directory).
+    Mutation: `rm -f` in place of `rm -rf` in `release_verify` (the step exits 1 on the
+    directory).
     """
     name, sig = _SUMS_NAMES[sid]
     cached = {name: None, sig: _genuine()[sig]}
@@ -1004,6 +1011,11 @@ def _homes(tmp_path, tool):
     return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
+def _exists(tmp_path, home):
+    """Whether bash sees `home`, an MSYS path such as `/tmp/tmp.X`."""
+    return run_step(tmp_path, f"[ -e '{home}' ]\n", dict(os.environ)).returncode == 0
+
+
 def _kill_agents(tmp_path, homes):
     for home in set(homes):
         run_step(tmp_path, "gpgconf --kill gpg-agent\n", {**os.environ, "GNUPGHOME": home})
@@ -1012,10 +1024,14 @@ def _kill_agents(tmp_path, homes):
 @pytest.mark.parametrize("passing", [True, False], ids=["passing", "failing"])
 @bash_only
 @needs_tools
-def test_no_gpg_agent_outlives_the_opentofu_verify(tmp_path, passing):
-    """The EXIT handler stops the agent of the step's own keyring, on success and on failure.
+def test_the_opentofu_verify_kills_its_agent_then_removes_its_keyring(tmp_path, passing):
+    """The EXIT handler tells gpgconf to stop the agent of the step's own keyring while the
+    keyring exists, then removes the keyring, on success and on failure. Whether an agent
+    survives is not asked: an agent cannot be asked about a removed keyring.
 
-    Mutations: drop the kill from `_release_exit`; key it on `GNUPGHOME` (the step exports none).
+    Mutations: drop the kill from `_release_exit`; key it on `GNUPGHOME` (the step exports none);
+    drop the `rm -rf` (the keyring stays); remove the keyring before the kill (gpgconf runs with
+    no keyring).
     """
     served = _genuine()
     if not passing:
@@ -1029,9 +1045,31 @@ def test_no_gpg_agent_outlives_the_opentofu_verify(tmp_path, passing):
         assert len(homes) == 2 and len(set(homes)) == 1 and homes[0], homes
         assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
         assert _homes(tmp_path, "gpgconf") == homes[:1]
-        assert not _agent_running(tmp_path, homes[0])
+        assert (tmp_path / "logs" / "gpgconf.dir").read_text(encoding="utf-8") == "present\n"
+        assert not _exists(tmp_path, homes[0])
     finally:
         _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_keyring_that_cannot_be_removed_leaves_a_passing_step_green(tmp_path):
+    """A genuine cache hit runs no other `rm`, so the stub fails only the keyring's removal.
+
+    Mutation: drop the `|| true` after the `rm -rf` in `_release_exit`."""
+    (tmp_path / "rm-bin").mkdir()
+    write_stub(tmp_path / "rm-bin", "rm", "exit 1")
+    r, out, _, _, _ = _run(
+        tmp_path / "run",
+        "tofu-sums",
+        cached={n: _genuine()[n] for n in _SUMS_NAMES["tofu-sums"]},
+        key=_TOFU_CACHE_KEY,
+        path=f"{tmp_path / 'rm-bin'}{os.pathsep}{os.environ.get('PATH', '')}",
+    )
+    try:
+        assert (r.returncode, r.stdout, out) == (0, "", _TOFU_OUTPUT), r.stderr
+    finally:
+        _kill_agents(tmp_path, _homes(tmp_path / "run", "gpg"))
 
 
 @bash_only
@@ -1053,7 +1091,7 @@ def test_a_restored_entry_verified_twice_uses_one_keyring(tmp_path):
         import_, verify = _verifier("tofu-sums", rt)
         assert gpg == [import_, verify, verify]
         assert len(homes) == 3 and len(set(homes)) == 1, homes
-        assert not _agent_running(tmp_path, homes[0])
+        assert _homes(tmp_path, "gpgconf") == homes[:1]
     finally:
         _kill_agents(tmp_path, homes)
 
@@ -1087,9 +1125,9 @@ def test_a_runner_gnupghome_is_untouched_by_a_terramate_only_step(tmp_path, gnup
 
 
 @bash_only
-def test_a_failed_rm_in_drop_writes_the_generic_refusal(tmp_path):
-    """`set -e` ends the step inside `drop()`, where no `fail` runs. The release root exists, so
-    `release_dir` runs no `rm`; a curl that ran would refuse with its own reason.
+def test_a_failed_rm_in_release_verify_writes_the_generic_refusal(tmp_path):
+    """`set -e` ends the step inside `release_verify`, where no `fail` runs. The release root
+    exists, so `release_dir` runs no `rm`; a curl that ran would refuse with its own reason.
 
     Mutation: drop `trap _release_exit EXIT` from release.sh (no refusal is written).
     """
@@ -1167,9 +1205,9 @@ def test_the_tools_verify_step_runs_only_when_a_tool_changed():
 @needs_tools
 def test_the_head_versions_releases_are_fetched_and_verified(tmp_path):
     """Both tools changed: each head release's checksum file and signature only, at the head's
-    version, verified with the committed keys; no archive and no agent left.
+    version, verified with the committed keys; no archive, and one agent kill for the keyring.
 
-    Mutation: drop `verify_${tool}` from the loop (no digests are written)."""
+    Mutation: drop `release_verify` from the loop (no download, no digests)."""
     verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
     r, out, curl, gpg, rt = _head_verify(tmp_path, verify)
     homes = _homes(tmp_path, "gpg")
@@ -1178,19 +1216,23 @@ def test_the_head_versions_releases_are_fetched_and_verified(tmp_path):
         assert out == _TM_OUTPUT + _TOFU_OUTPUT
         assert curl == _head_downloads(rt, ("terramate", "tofu"))
         assert len(gpg) == 2 and len(set(homes)) == 1, (gpg, homes)
-        assert not _agent_running(tmp_path, homes[0])
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert _homes(tmp_path, "gpgconf") == homes[:1]
     finally:
         _kill_agents(tmp_path, homes)
 
 
 @bash_only
 @needs_tools
-def test_a_second_tool_that_fails_leaves_one_refusal_and_no_agent(tmp_path):
+def test_a_second_tool_that_fails_leaves_one_refusal_and_kills_the_agent(tmp_path):
     """Terramate verifies, then OpenTofu's signature fails: one `refusal=` line under the head's
-    prefix and OpenTofu's, after Terramate's digests, and the keyring's agent is stopped.
+    prefix and OpenTofu's, after Terramate's digests, and gpgconf is told to stop the keyring's
+    agent. Whether an agent survives is not asked: the keyring is removed after the kill, and an
+    agent cannot be asked about a removed keyring.
 
-    Mutation: loop with `jq ... | tr -d '\\r' | while read -r tool v` (`fail` runs in the
-    subshell, so its annotation leaves stdout)."""
+    Mutations: drop the kill from `_release_exit` (no gpgconf call); loop with
+    `jq -r 'keys[]' ... | tr -d '\\r' | while read -r tool` (`fail` runs in the subshell, so its
+    annotation leaves stdout)."""
     served = _genuine()
     served[_TOFU_SUMS] = _flip(served[_TOFU_SUMS], b"723bebb0")
     verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
@@ -1205,15 +1247,70 @@ def test_a_second_tool_that_fails_leaves_one_refusal_and_no_agent(tmp_path):
         assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
         assert curl == _head_downloads(rt, ("terramate", "tofu"))
         assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
-        assert homes and not _agent_running(tmp_path, homes[0])
+        assert homes and _homes(tmp_path, "gpgconf") == homes[:1]
     finally:
         _kill_agents(tmp_path, homes)
 
 
 @bash_only
 @needs_tools
+def test_a_missing_gpg_in_opentofus_turn_refuses_under_the_opentofu_label(tmp_path):
+    """Both tools changed and the runner has no gpg: Terramate verifies, then OpenTofu's
+    `require` refuses under OpenTofu's prefix, not Terramate's.
+
+    Mutations: move the version `release_init` below `require gpg gpgconf` (the refusal reads
+    `OpenTofu: `, no version); also delete the top-of-loop one (Terramate's prefix)."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    # A link, not a stub: each stub's `#!/usr/bin/env bash` finds bash on this PATH.
+    exe = ".exe" if os.name == "nt" else ""
+    bash = run_step(tmp_path, "command -v bash\n", dict(os.environ)).stdout.strip()
+    bash_symlink(tmp_path, f"{bash}{exe}", tools / f"bash{exe}")
+    for name in ("jq", "base64", "sha256sum", "awk", "mkdir", "rm", "cp", "cat"):
+        real = shutil.which(name)
+        assert real, name
+        write_stub(tools, name, f'exec "{real.replace(os.sep, "/")}" "$@"')
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, curl, gpg, rt = _head_verify(tmp_path / "run", verify, path=str(tools), gpg_stub=False)
+    reason = f"OpenTofu {_TOFU}: gpg is not installed on the runner."
+    assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
+    assert (curl, gpg) == (_head_downloads(rt, ("terramate",)), [])
+
+
+@bash_only
+@needs_tools
+def test_a_failed_version_read_in_opentofus_turn_names_opentofu(tmp_path):
+    """jq fails reading OpenTofu's version, before that turn knows it: the generic refusal
+    carries the tool's label alone.
+
+    Mutation: delete the top-of-loop `release_init` (Terramate's prefix, with its version)."""
+    real = shutil.which("jq")
+    assert real
+    tools = tmp_path / "jq"
+    tools.mkdir()
+    write_stub(
+        tools,
+        "jq",
+        f'if [ "${{4:-}}" = tofu ]; then exit 5; fi\nexec "{real.replace(os.sep, "/")}" "$@"',
+    )
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, *_ = _head_verify(
+        tmp_path / "run", verify, path=f"{tools}{os.pathsep}{os.environ.get('PATH', '')}"
+    )
+    reason = (
+        'OpenTofu: a command exited 5 under "Pull request tools verification failed"; the step '
+        "log names it."
+    )
+    assert (r.returncode, r.stdout) == (5, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
+
+
+@bash_only
+@needs_tools
 def test_a_changed_terramate_whose_signature_fails_refuses_whole(tmp_path):
-    """Mutation: `"verify_${tool}" "$v" "$dir" || true` (the step passes)."""
+    """Mutation: `|| true` for `|| fail "$reason"` after `verify_$1` in `release_verify` (the
+    step passes)."""
     served = _genuine()
     served["checksums.txt"] = _flip(served["checksums.txt"], b"303fd597")
     r, out, curl, gpg, rt = _head_verify(tmp_path, f'{{"terramate":"{_TERRAMATE}"}}', served=served)
@@ -1242,16 +1339,32 @@ def test_a_head_version_with_no_release_refuses_naming_the_tools_entry(tmp_path)
     assert out == f"refusal={_HEAD}{reason}\n"
 
 
-@pytest.mark.parametrize("verify", ["", "{}", '{"terraform":"1.0.0"}'])
+@pytest.mark.parametrize(
+    "verify",
+    [
+        "",
+        "{}",
+        '{"terraform":"1.0.0"}',
+        '{"tofu":""}',
+        '{"tofu":null}',
+        '{"tofu":"1.13"}',
+        '{"tofu":"1.13.2\\n"}',
+    ],
+)
 @bash_only
-def test_a_verify_that_names_no_tool_refuses(tmp_path, verify):
-    """The step runs only when `verify` is not `{}`, so one that names no tool is a broken
-    handoff from build-matrix, not a head refusal, and fails rather than passing with nothing
-    verified.
+def test_a_verify_that_is_not_tools_to_versions_refuses(tmp_path, verify):
+    """The step runs only when `verify` is not `{}`, so one that maps no tool to an X.Y.Z version
+    is a broken handoff from build-matrix, not a head refusal, and fails rather than passing with
+    nothing verified.
 
-    Mutation: drop the `jq -e` check (each case passes with no download)."""
+    Mutations: drop the `jq -e` check (each case passes with no download); drop the value clause
+    from it (`{"tofu":""}` and `{"tofu":null}` pass, the other two value rows reach curl);
+    `^...$` for `\\A...\\z` (the trailing-newline row reaches curl)."""
     r, out, curl, *_ = _head_verify(tmp_path, verify)
-    reason = f"build-matrix wrote verify={verify}, which names no tool to verify."
+    reason = (
+        f"build-matrix wrote verify={verify}, which does not map terramate or tofu, or both, to an "
+        "X.Y.Z version."
+    )
     title = "::error title=Pull request tools verification failed::"
     assert (r.returncode, r.stdout) == (1, f"{title}{reason}\n"), r.stderr
     assert out == f"refusal={reason}\n"
