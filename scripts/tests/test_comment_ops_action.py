@@ -1012,6 +1012,7 @@ _NON_REPLY_POSTERS = {
     "Post help",
     "Doctor: render and post the report comment",
     "Evict: tell the holders and reply",
+    "Evict: refused",
     "Evict: failed",
 }
 
@@ -1383,6 +1384,7 @@ _STEP_NAMES = [
     "Evict: read the pull request head",
     "Evict: release the other pull requests' cell locks",
     "Evict: tell the holders and reply",
+    "Evict: refused",
     "Evict: failed",
     "Mint App token (checks:read)",
     "App token unavailable (App not installed?)",
@@ -1614,6 +1616,8 @@ _EVICT_ENVS = {
         "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_HEAD_SHA": "${{ steps.evicthead.outputs.head_sha }}",
+        "SHIPMATE_HEAD_REF": "${{ steps.evicthead.outputs.head_ref }}",
+        "SHIPMATE_DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     },
     "Evict: tell the holders and reply": {
@@ -1623,6 +1627,12 @@ _EVICT_ENVS = {
         "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
         "SHIPMATE_EVICTED": "${{ steps.evict.outputs.evicted }}",
         "SHIPMATE_REFUSED": "${{ steps.evict.outputs.refused }}",
+    },
+    "Evict: refused": {
+        "GH_TOKEN": "${{ steps.evicttoken.outputs.token }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+        "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
+        "SHIPMATE_EVICT_REFUSAL": "${{ steps.evict.outputs.refusal }}",
     },
     "Evict: failed": {
         "GH_TOKEN": "${{ steps.evicttoken.outputs.token }}",
@@ -1635,12 +1645,13 @@ _EVICT_ENVS = {
 
 def test_the_evict_steps_bind_exactly_this_env():
     """Mutations: bind the evict step's `SHIPMATE_HEAD_SHA` to `steps.authz.outputs.head_sha`
-    (empty on this route); bind the reply's `GH_TOKEN` to `github.token`."""
+    (empty on this route); bind the reply's `GH_TOKEN` to `github.token`; drop the evict step's
+    `SHIPMATE_HEAD_REF`; drop the refused reply's `SHIPMATE_EVICT_REFUSAL`."""
     got = {
         "evict": step_by("comment-ops", id="evict")["env"],
         **{
             n: step_by("comment-ops", name=n)["env"]
-            for n in ("Evict: tell the holders and reply", "Evict: failed")
+            for n in ("Evict: tell the holders and reply", "Evict: refused", "Evict: failed")
         },
     }
     assert got == _EVICT_ENVS
@@ -1648,15 +1659,21 @@ def test_the_evict_steps_bind_exactly_this_env():
 
 def test_the_evict_steps_run_these_bodies():
     """Mutations: drop `exit 1` from `Evict: failed` (a failed eviction reads green); run
-    `cell-lock release` in the evict step."""
+    `cell-lock release` in the evict step; run `--failed` in `Evict: refused`."""
     bodies = {
         "evict": step_by("comment-ops", id="evict")["run"],
         "reply": step_by("comment-ops", name="Evict: tell the holders and reply")["run"],
+        "refused": step_by("comment-ops", name="Evict: refused")["run"],
         "failed": step_by("comment-ops", name="Evict: failed")["run"],
     }
     assert bodies == {
         "evict": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" evict',
         "reply": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"',
+        "refused": (
+            "set -euo pipefail\n"
+            'python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply" --refused\n'
+            "exit 1\n"
+        ),
         "failed": (
             "set -euo pipefail\n"
             'python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply" --failed\n'
@@ -1672,13 +1689,21 @@ def test_an_errored_eviction_is_answered_once():
 
     Mutations: key the reply step on `success()` (`!cancelled()` dropped: a partial eviction's
     holders are never told); drop `failure() &&` from `Evict: failed`; drop its
-    `evicted == ''` arm (a partial eviction gets two replies)."""
+    `evicted == ''` arm (a partial eviction gets two replies).
+
+    A blocked eviction writes `blocked=true` and no `evicted`, and only `Evict: refused`
+    answers it. Mutations: drop `blocked != 'true'` from `Evict: failed` (two replies); run
+    `Evict: refused` on `failure()` alone (it answers every failure)."""
     assert step_by("comment-ops", name="Evict: tell the holders and reply")["if"] == (
         "${{ !cancelled() && steps.evict.outputs.evicted != '' }}"
     )
+    assert step_by("comment-ops", name="Evict: refused")["if"] == (
+        "${{ failure() && steps.evict.outputs.blocked == 'true' }}"
+    )
     assert step_by("comment-ops", name="Evict: failed")["if"] == (
         "${{ failure() && (steps.evicthead.outcome == 'failure' || "
-        "(steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) }}"
+        "(steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) && "
+        "steps.evict.outputs.blocked != 'true' }}"
     )
 
 
@@ -1690,10 +1715,15 @@ def test_the_evict_route_reads_the_head_while_authorized_stays_false(tmp_path):
     """The head comes from its own step, since `authz` (the only other head producer) runs for
     apply and unlock alone; the `authorized` verdict has no evict arm, so nothing dispatches.
 
-    Mutations: write the output as `head=`; add `steps.evict.outcome == 'success' ||` to the
-    `authorized` output."""
+    The stub answers as `--jq` renders the two strings it is asked for. A null head branch
+    renders empty (`// ""`), which `cell-lock evict` refuses, never as `null`.
+
+    Mutations: write the output as `head=`; drop `head_ref` from the `--jq` filter; drop
+    `// ""`; add
+    `steps.evict.outcome == 'success' ||` to the `authorized` output."""
     (tmp_path / "gh").write_text(
-        f"#!/bin/bash\nprintf '%s\n' \"$*\" >> argv.txt\necho {_HEAD}\n",
+        "#!/bin/bash\nprintf '%s\n' \"$*\" >> argv.txt\n"
+        f"echo head_sha={_HEAD}\necho head_ref=feat-a\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -1709,8 +1739,9 @@ def test_the_evict_route_reads_the_head_while_authorized_stays_false(tmp_path):
     }
     result = run_step(tmp_path, step_by("comment-ops", id="evicthead")["run"], env)
     assert result.returncode == 0, result.stderr
-    assert out.read_text(encoding="utf-8") == f"head_sha={_HEAD}\n"
+    assert out.read_text(encoding="utf-8") == f"head_sha={_HEAD}\nhead_ref=feat-a\n"
     assert (tmp_path / "argv.txt").read_text(encoding="utf-8") == (
-        "api repos/org/repo/pulls/42 --jq .head.sha\n"
+        "api repos/org/repo/pulls/42 --jq "
+        '"head_sha=\\(.head.sha)", "head_ref=\\(.head.ref // "")"\n'
     )
     assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == _AUTHORIZED

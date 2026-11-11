@@ -97,8 +97,8 @@ def test_nothing_evicted_says_so(monkeypatch, posts):
             "9",
             _body(
                 "notice",
-                "no lock held by another pull request on a cell this pull request changes in "
-                "`dev-eu`",
+                "no lock held by another pull request on a cell this pull request still applies "
+                "in `dev-eu`",
             ),
         )
     ]
@@ -178,6 +178,23 @@ def test_a_failed_eviction_fences_the_refusal(monkeypatch, posts):
                 "failed",
                 "could not evict the cell locks in `dev-eu`. This run's log has the error; "
                 "comment again.\n\n```\ncould not release `x`\n```",
+            ),
+        )
+    ]
+
+
+def test_a_blocked_eviction_is_refused_with_the_refusal_fenced(monkeypatch, posts):
+    """Mutations: post outcome `failed`; post the refusal unfenced; route `--refused` to the
+    failure reply (it says "comment again")."""
+    got, _ = posts
+    monkeypatch.setenv("SHIPMATE_EVICT_REFUSAL", "#4 is stacked on this pull request")
+    _main(monkeypatch, [], argv=("evict-reply", "--refused"))
+    assert got == [
+        (
+            "9",
+            (
+                "### shipmate unlock dev-eu\n\n🔴 refused: no cell lock in `dev-eu` was "
+                f"released.\n\n```\n#4 is stacked on this pull request\n```\n\n{_HINT_FOOT}"
             ),
         )
     ]

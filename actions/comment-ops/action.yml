@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. `shipmate unlock <env> --evict` (route `evict`) is carried out here; it deletes the cell locks other pull requests hold on stacks with an App-authored apply check on this pull request's head in `<env>`, tells each holder, and replies. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
+description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. `shipmate unlock <env> --evict` (route `evict`) is carried out here; it deletes the cell locks other pull requests hold on stacks whose App-authored apply check on this pull request's head in `<env>` is pending, tells each holder, and replies; it releases nothing and replies `refused` when a holder is stacked on this pull request, and `failed` when a holder cannot be read. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -377,8 +377,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)
-        echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+        gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '"head_sha=\(.head.sha)", "head_ref=\(.head.ref // "")"' >> "$GITHUB_OUTPUT"
 
     - name: "Evict: release the other pull requests' cell locks"
       id: evict
@@ -389,6 +388,8 @@ runs:
         SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_HEAD_SHA: ${{ steps.evicthead.outputs.head_sha }}
+        SHIPMATE_HEAD_REF: ${{ steps.evicthead.outputs.head_ref }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" evict
 
@@ -406,10 +407,25 @@ runs:
         SHIPMATE_REFUSED: ${{ steps.evict.outputs.refused }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"
 
+    - name: "Evict: refused"
+      # A holder stacked on this pull request blocks the eviction; commenting again cannot pass.
+      if: ${{ failure() && steps.evict.outputs.blocked == 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.evicttoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_EVICT_REFUSAL: ${{ steps.evict.outputs.refusal }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply" --refused
+        exit 1
+
     - name: "Evict: failed"
       # A failed step skips every later `success()`-gated step, so without `failure()` the
-      # commenter would get no answer. An evict step that wrote `evicted` is answered above.
-      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || (steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) }}
+      # commenter would get no answer. An evict step that wrote `evicted` or `blocked` is
+      # answered above.
+      if: ${{ failure() && (steps.evicthead.outcome == 'failure' || (steps.evict.outcome == 'failure' && steps.evict.outputs.evicted == '')) && steps.evict.outputs.blocked != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.evicttoken.outputs.token }}

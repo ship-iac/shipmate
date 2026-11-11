@@ -46,27 +46,33 @@ def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
     Edge cases handled: (1) `commits/{sha}/pulls` can transiently return [] for a
     few seconds after the push (association indexing lag) — retry before falling
     back; (2) a commit may be associated with more than one PR — pick the one
-    this commit actually merged (merge_commit_sha == merge_sha); (3) if none of
-    the returned pulls match exactly, only *merged* PRs (`merged_at` set) are
-    eligible fallback candidates — an OPEN PR that merely contains the pushed
-    commit must never be selected, since deploying its plans would apply more
-    than main actually contains. If no pull qualifies, head = merge_sha and the
-    number is empty, same as a direct push to the branch.
+    this commit actually merged (merge_commit_sha == merge_sha), which GitHub sets
+    to the commit the branch moved to for a merge commit, a squash and a rebase;
+    (3) a non-empty answer with no such PR maps to no PR (a listed PR's plans
+    would apply more or other than the branch holds): head = merge_sha and the
+    number is empty, at once, with a warning naming the listed PRs.
 
     When every attempt returns [], one page of the 100 most recently updated closed pull
     requests into `branch` is read, and only a pull request with `merge_commit_sha ==
     merge_sha` and `merged_at` set is taken: GitHub fills `merge_commit_sha` with the
     test-merge commit on a closed unmerged pull request. A merge older than that page is not
     found. Each poll and the listing are reads of their own through `gh_json`, which retries a
-    transient failure; any other failure raises. With no match it writes a warning to stderr,
-    flushed so it precedes a refusal in the log, and returns `(merge_sha, "")`.
+    transient failure; any other failure raises. With no match it returns `(merge_sha, "")`.
+    Each warning goes to stderr, flushed so it precedes a refusal in the log.
     """
     for attempt in range(_attempts):
         pulls = _gh_json(f"repos/{repo}/commits/{merge_sha}/pulls")
         if pulls:
-            exact = next((p for p in pulls if p.get("merge_commit_sha") == merge_sha), None)
-            pull = exact or next((p for p in pulls if p.get("merged_at")), None)
-            return (pull["head"]["sha"], str(pull["number"])) if pull else (merge_sha, "")
+            pull = next((p for p in pulls if p.get("merge_commit_sha") == merge_sha), None)
+            if pull:
+                return pull["head"]["sha"], str(pull["number"])
+            listed = ", ".join(f"#{p['number']}" for p in pulls)
+            verb = "contains" if len(pulls) == 1 else "contain"
+            return _push(
+                f"could not map {merge_sha} to the pull request that merged it: {listed} {verb} "
+                f"it but none records it as its merge commit; deploying it as a push to {branch}",
+                merge_sha,
+            )
         if attempt < _attempts - 1:
             time.sleep(_sleep)
     path = (
@@ -77,11 +83,16 @@ def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
     for p in closed:
         if p.get("merge_commit_sha") == merge_sha and p.get("merged_at"):
             return p["head"]["sha"], str(p["number"])
-    warning = (
+    return _push(
         f"could not map {merge_sha} to a merged pull request (commits/{merge_sha}/pulls stayed "
         "empty and no recently closed pull request records it as its merge commit); deploying "
-        f"it as a push to {branch}"
+        f"it as a push to {branch}",
+        merge_sha,
     )
+
+
+def _push(warning, merge_sha):
+    """Write `warning` to stderr and return `merge_sha` as a push with no pull request."""
     sys.stderr.write(f"::warning::{command_data(warning)}\n")
     sys.stderr.flush()
     return merge_sha, ""

@@ -7,6 +7,7 @@ consumed, so a write a test expects cannot silently go missing.
 
 import json
 
+import _shipmate
 import pytest
 from _detect_fixtures import autoplans_read, listed_autoplan
 from _loader import github_outputs, jsonl, load_script
@@ -254,7 +255,8 @@ def test_our_pull_request_at_another_sha_is_replaced_with_force():
 
 
 def test_another_pull_request_refuses_naming_it_and_rolls_back_this_calls_creates():
-    """Mutation: skip the rollback (DNS_REF's conditional delete is never sent)."""
+    """The refusal is pinned whole. Mutations: skip the rollback (DNS_REF's conditional delete
+    is never sent); drop the merged-or-closed sentence from `lock_wait_remedy`."""
     gh = gh_acquire_start(DNS).on(ref_write(DNS_REF, NEW), "{}")
     msg = message(PR, "dev", "stacks/auth")
     gh.on(commit_write(AUTH), commit(OTHER, msg, LATE)).on(ref_write(AUTH_REF, OTHER), FAIL)
@@ -265,7 +267,7 @@ def test_another_pull_request_refuses_naming_it_and_rolls_back_this_calls_create
         cl.acquire(REPO, [DNS, AUTH], PR, ACQ, run=gh)
     assert exc.value.code == (
         "::error::`dev` / `stacks/auth` is locked by #12; wait for #12 to merge or close, then "
-        "re-plan, or comment `shipmate unlock dev --evict`"
+        "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict`"
     )
     assert gh.drained()
 
@@ -473,7 +475,7 @@ def test_the_fence_passes_an_open_pull_request_with_no_later_close(state):
 HELD = "d" * 40
 DNS_REFUSAL = (
     "::error::`dev` / `stacks/dns` is locked by #12; wait for #12 to merge or close, then "
-    "re-plan, or comment `shipmate unlock dev --evict`"
+    "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict`"
 )
 
 
@@ -592,10 +594,10 @@ def test_evict_removes_another_holder_and_an_unknown_one_in_stacks_only():
     gh.on(commit_read(OTHER), commit(OTHER, "garbage"))
     gh.on(commit_read(NEW), commit(NEW, message(PR, "dev", "stacks/own")))
     gh.on(commit_read(TREE), commit(TREE, message(12, "dev", "stacks/out")))
-    gh.on(REPO_ID_READ, REPO_ID)
+    gh.on(pull_read(12), pull("main")).on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, OLD, ZERO, False), "{}").on(update(DNS_REF, OTHER, ZERO, False), "{}")
     stacks = {"stacks/auth", "stacks/dns", "stacks/own"}
-    assert cl.evict(REPO, "dev", PR, stacks, run=gh) == (
+    assert cl.evict(REPO, "dev", PR, stacks, "feat-a", "main", run=gh) == (
         [lock(AUTH_REF, OLD, pr=12), unknown(DNS_REF, OTHER)],
         [],
     )
@@ -607,6 +609,7 @@ def _two_foreign_locks_first_refused():
     gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(commit_read(OTHER), commit(OTHER, message(12, "dev", "stacks/dns")))
+    gh.on(pull_read(12), pull("main"))
     gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), FAIL)
     gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
     gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
@@ -624,7 +627,7 @@ def test_evict_continues_past_a_refused_delete():
 
     Mutation: re-raise the refusal in `evict` (the second lock is never deleted)."""
     gh = _two_foreign_locks_first_refused()
-    assert cl.evict(REPO, "dev", PR, {"stacks/auth", "stacks/dns"}, run=gh) == (
+    assert cl.evict(REPO, "dev", PR, {"stacks/auth", "stacks/dns"}, "feat-a", "main", run=gh) == (
         [lock(DNS_REF, OTHER, pr=12, stack="stacks/dns")],
         [(lock(AUTH_REF, OLD, pr=12), _AUTH_REFUSAL)],
     )
@@ -637,15 +640,15 @@ def test_evict_cli_writes_both_sets_then_refuses(monkeypatch, tmp_path):
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            _check("apply / stacks/auth / dev", "completed", "success"),
-            _check("apply / stacks/dns / dev", "completed", "success", run_id=2),
+            _check("apply / stacks/auth / dev", "queued", None),
+            _check("apply / stacks/dns / dev", "queued", None, run_id=2),
         ),
     )
     for argv, answers in _two_foreign_locks_first_refused().calls.items():
         gh.on(list(argv), *answers)
     out = tmp_path / "out"
     with pytest.raises(SystemExit) as exc:
-        _main(monkeypatch, tmp_path, "evict", gh, {"SHIPMATE_ENV": "dev"})
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
     assert exc.value.code == _AUTH_REFUSAL
     assert github_outputs(out) == {
         "evicted": json.dumps([{"stack": "stacks/dns", "environment": "dev", "holder": 12}]),
@@ -926,8 +929,8 @@ def test_marks_writes_the_holders_stacked_on_this_pull_requests_head(monkeypatch
 @pytest.mark.parametrize("state", ["closed", None])
 def test_marks_leaves_out_a_holder_that_is_not_open(monkeypatch, tmp_path, state):
     """A closed or merged holder will not merge after this pull request, so it is not stacked
-    even when its base branch is this head; a read naming no state is not open either.
-    Mutation: drop the `state == "open"` check -- `[12]`, red."""
+    even when its base branch is this head; a null state is malformed, warned and left out.
+    Mutation: drop the `state == "open"` check -- `[12]` for `closed`, red."""
     gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(pull_read(12), pull("feat-a", state))
@@ -1006,6 +1009,13 @@ CHECK_RUNS_READ = [
     "--jq",
     ".check_runs[]",
 ]
+
+
+EVICT_ENV = {
+    "SHIPMATE_ENV": "dev",
+    "SHIPMATE_HEAD_REF": "feat-a",
+    "SHIPMATE_DEFAULT_BRANCH": "main",
+}
 
 
 def _main(monkeypatch, tmp_path, command, gh, env):
@@ -1253,25 +1263,180 @@ def test_release_cli_refuses_a_bad_mode_before_any_call(monkeypatch, tmp_path, e
 
 
 def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
-    """Mutation: `parse_jsonl` for `app_runs` in `_evict_cmd` (the foreign check on stacks/dns
-    evicts its lock)."""
+    """Mutation: `parse_jsonl` for `app_runs` in `pending_names` (the foreign check on
+    stacks/dns evicts its lock)."""
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            _check("apply / stacks/auth / dev", "completed", "success"),
+            _check("apply / stacks/auth / dev", "queued", None),
             _check("apply / stacks/dns / dev", "queued", None, run_id=2, app=15368),
         ),
     )
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(commit_read(OTHER), commit(OTHER, message(12, "dev", "stacks/dns")))
+    gh.on(pull_read(12), pull("main"))
     gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
-    out = _main(monkeypatch, tmp_path, "evict", gh, {"SHIPMATE_ENV": "dev"})
+    out = _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
     assert out == {
         "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}]),
         "refused": "[]",
     }
     assert gh.drained()
+
+
+def _stacked_line(holder, count):
+    return (
+        f"#{holder} is stacked on this pull request and holds {count} of its cell(s) in dev; "
+        "applying this pull request after evicting it would overwrite what it applied. Retarget "
+        f"#{holder} to main and merge it first, or close it, which releases its locks."
+    )
+
+
+def _evict_three(*checks):
+    """A double reading `checks` and the locks of #12 on auth and app and of #9 on dns."""
+    gh = Gh().on(CHECK_RUNS_READ, jsonl(*checks))
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER), (APP_REF, NEW)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
+    return gh.on(commit_read(NEW), commit(NEW, message(12, "dev", "stacks/app")))
+
+
+_THREE_PENDING = (
+    _check("apply / stacks/auth / dev", "queued", None),
+    _check("apply / stacks/dns / dev", "queued", None, run_id=2),
+    _check("apply / stacks/app / dev", "queued", None, run_id=3),
+)
+
+
+def test_evict_cli_refuses_stacked_holders_in_one_error_and_deletes_nothing(monkeypatch, tmp_path):
+    """The double queues no delete, so any one is an unexpected call. Mutations: skip the
+    stacked check; run it after `_delete_each` (both: unexpected call); raise one `::error::`
+    per holder; write `evicted=[]` beside `blocked` -- each red."""
+    gh = _evict_three(*_THREE_PENDING)
+    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("feat-a"))
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
+    assert exc.value.code == f"::error::{_stacked_line(9, 1)}\n{_stacked_line(12, 2)}"
+    assert github_outputs(out) == {"blocked": "true"}
+    assert gh.drained()
+
+
+def test_evict_cli_refuses_a_holder_it_cannot_judge_without_blocked(monkeypatch, tmp_path):
+    """#12's read fails and #9's answer has no `base`: each gets its `could not tell` line,
+    cause on one line, and nothing is deleted or written. Mutations: treat a failed read as not
+    stacked (`except: continue`) -- unexpected delete call; drop `_why` -- the cause splits."""
+    gh = _evict_three(*_THREE_PENDING)
+    gh.on(
+        pull_read(12), SystemExit("::error::command failed (1): gh api\ngh: Not Found (HTTP 404)")
+    )
+    gh.on(pull_read(9), json.dumps({"state": "open"}))
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
+    assert exc.value.code == (
+        "::error::could not tell whether #9 is stacked on this pull request: KeyError('base')\n"
+        "could not tell whether #12 is stacked on this pull request: command failed (1): gh api "
+        "| gh: Not Found (HTTP 404)"
+    )
+    assert github_outputs(out) == {}
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("answer", "cause"),
+    [
+        pytest.param(
+            {"state": None, "base": {"ref": "feat-a"}}, "base.ref 'feat-a', state None", id="state"
+        ),
+        pytest.param(
+            {"state": "open", "base": {"ref": None}}, "base.ref None, state 'open'", id="base"
+        ),
+    ],
+)
+def test_evict_cli_refuses_a_holder_answer_with_a_null_field(monkeypatch, tmp_path, answer, cause):
+    """A null field is malformed, not "not stacked". Mutation: check keys only (drop the
+    `isinstance` check) -- #9 reads as not stacked and its delete is an unexpected call."""
+    gh = _evict_three(*_THREE_PENDING)
+    gh.on(pull_read(12), pull("main")).on(pull_read(9), json.dumps(answer))
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
+    assert exc.value.code == (
+        f"::error::could not tell whether #9 is stacked on this pull request: ValueError({cause!r})"
+    )
+    assert github_outputs(out) == {}
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    "key", ["SHIPMATE_HEAD_REF", "SHIPMATE_DEFAULT_BRANCH"], ids=["head-ref", "default"]
+)
+def test_evict_cli_refuses_an_empty_branch_before_any_read(monkeypatch, tmp_path, key):
+    """The empty double refuses every call. Mutation: default each to empty and skip the
+    check -- the check-run read is an unexpected call."""
+    env = {**EVICT_ENV, key: ""}
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", Gh(), env)
+    assert exc.value.code == (
+        "::error::SHIPMATE_HEAD_REF and SHIPMATE_DEFAULT_BRANCH must name branches (got: "
+        f"{env['SHIPMATE_HEAD_REF']!r}, {env['SHIPMATE_DEFAULT_BRANCH']!r})"
+    )
+
+
+def test_evict_cli_targets_only_pending_cells_failed_included(monkeypatch, tmp_path):
+    """auth's check failed and #12 is not stacked: evicted. app's check succeeded, so stacked
+    #9's lock there is not a target and #9 is never read (the double refuses the read).
+    Mutations: evict over every apply check (`latest_by_name`) -- #9's read is unexpected;
+    target only checks with `status != completed` -- auth's lock stays."""
+    gh = Gh().on(
+        CHECK_RUNS_READ,
+        jsonl(
+            _check("apply / stacks/auth / dev", "completed", "failure"),
+            _check("apply / stacks/app / dev", "completed", "success", run_id=2),
+        ),
+    )
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, NEW)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(NEW), commit(NEW, message(9, "dev", "stacks/app")))
+    gh.on(pull_read(12), pull("main"))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    assert _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV) == {
+        "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}]),
+        "refused": "[]",
+    }
+    assert gh.drained()
+
+
+def test_evict_releases_an_unknown_holder_and_a_closed_one_based_on_this_branch():
+    """An unknown holder is never read; a closed holder will not merge after this one.
+    Mutation: drop `state == "open"` from `_is_stacked` -- #12 refuses as stacked."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(OTHER), commit(OTHER, "garbage"))
+    gh.on(pull_read(12), pull("feat-a", "closed")).on(REPO_ID_READ, REPO_ID)
+    gh.on(update(AUTH_REF, OLD, ZERO, False), "{}").on(update(DNS_REF, OTHER, ZERO, False), "{}")
+    stacks = {"stacks/auth", "stacks/dns"}
+    assert cl.evict(REPO, "dev", PR, stacks, "feat-a", "main", run=gh) == (
+        [lock(AUTH_REF, OLD, pr=12), unknown(DNS_REF, OTHER)],
+        [],
+    )
+    assert gh.drained()
+
+
+def test_evict_retries_a_transient_holder_read(sleeps):
+    """The evict check fails closed, so a transient failure is retried before it refuses.
+    Mutation: read with `retry=False` -- a `could not tell` refusal."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), BAD_GATEWAY, pull("main")).on(REPO_ID_READ, REPO_ID)
+    gh.on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    assert cl.evict(REPO, "dev", PR, {"stacks/auth"}, "feat-a", "main", run=gh) == (
+        [lock(AUTH_REF, OLD, pr=12)],
+        [],
+    )
+    assert (gh.drained(), sleeps) == (True, [2])
 
 
 # --- verify --------------------------------------------------------------------------------------
@@ -1768,6 +1933,26 @@ def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch
         gh = Gh().on(ref_read(AUTH_REF), "[]")
     assert _verify(monkeypatch, tmp_path, gh, DEPLOY) == {}
     assert gh.drained()
+
+
+def test_verify_deploy_names_the_cells_environment(monkeypatch, tmp_path):
+    """Mutation: hard-code `dev` in `_verify_deploy`'s refusal -- red."""
+    ref = cl.ref_name("prod", "stacks/auth")
+    gh = Gh().on(ref_read(ref), refs((ref, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(9, "prod", "stacks/auth")))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, {**DEPLOY, "SHIPMATE_ENV": "prod"}) == (
+        "::error::apply aborted for `prod` / `stacks/auth`: its cell lock is held by #9, not by "
+        "this deploy's pull request. Open a pull request that changes this stack, comment "
+        "`shipmate unlock prod --evict` on it, then apply it"
+    )
+
+
+def test_lock_wait_remedy_names_the_evict_for_a_merged_or_closed_holder():
+    """Mutation: drop the merged-or-closed sentence -- red."""
+    assert _shipmate.lock_wait_remedy("#12", "dev&lt;1") == (
+        "wait for #12 to merge or close, then re-plan. If #12 has already merged or closed, "
+        "comment `shipmate unlock dev&lt;1 --evict`"
+    )
 
 
 def test_verify_deploy_checks_a_push_with_pull_request_zero(monkeypatch, tmp_path):

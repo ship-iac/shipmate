@@ -389,13 +389,30 @@ def stacked_hold(cells, locks, stacked, default_branch):
     )
 
 
-def commands(locked, targeted=(), changed=()):
+def _evict_line(env, holders):
+    """`shipmate unlock <env> --evict` naming `holders` (known ascending, then an unknown one)
+    and that applying after it may overwrite what they applied."""
+    names = [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
+    if None in holders:
+        names.append(lock_who(None))
+    who = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    hold, applied = ("holds", who) if len(names) == 1 else ("hold", "they")
+    return (
+        f"Comment `shipmate unlock {env} --evict` to release the locks {who} {hold}; applying "
+        f"this pull request after that may overwrite what {applied} applied to {_md_name(env)}."
+        "\n\n"
+    )
+
+
+def commands(locked, targeted=(), changed=(), stacked=()):
     """The folded command section: per environment of `changed` (the changed cells'
     environments in apply order), its `shipmate apply <env>` when it is in `targeted`, and at the
     first one that is not, `shipmate apply` once, worded `to apply the other environments` when
     a targeted line renders, else `to apply this plan`; with `changed` empty, only the bare
-    line. Then per environment of `locked`, sorted, its `shipmate unlock <env> --evict`, then
-    `shipmate help`. No line starts with `shipmate`, so the section is not itself a command."""
+    line. Then per environment of `locked` (environment to the holders of its changed locked
+    cells), sorted, its `_evict_line`, unless a holder is in `stacked` (`_stacked_held`), where
+    evict refuses; then `shipmate help`. No line starts with `shipmate`, so the section is not
+    itself a command."""
     what = "the other environments" if set(changed) & set(targeted) else "this plan"
     bare = f"Comment `shipmate apply` to apply {what}.\n\n"
     lines = [] if changed else [bare]
@@ -405,8 +422,7 @@ def commands(locked, targeted=(), changed=()):
         elif bare not in lines:
             lines.append(bare)
     evict = "".join(
-        f"Comment `shipmate unlock {e} --evict` to take a cell another pull request holds.\n\n"
-        for e in sorted(locked)
+        _evict_line(e, hs) for e, hs in sorted(locked.items()) if not any(h in stacked for h in hs)
     )
     return (
         "<details><summary>shipmate commands</summary>\n\n"
@@ -751,7 +767,12 @@ def build_comment(
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
     envs = {c["environment"] for c in meta if c["changed"]}
     changed = [e for e in dict.fromkeys(order) if e in envs] + sorted(envs - set(order))
-    section = commands({c["environment"] for c in meta if _lock_key(c, locks)}, targeted, changed)
+    locked = {}
+    for c in meta:
+        if key := _lock_key(c, locks):
+            locked.setdefault(c["environment"], []).append(locks[key])
+    held = _stacked_held(meta, locks, stacked, default_branch)
+    section = commands(locked, targeted, changed, held)
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.

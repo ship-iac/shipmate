@@ -67,8 +67,8 @@ def test_merged_head_exact_match_wins(monkeypatch):
 def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch, capsys):
     """The sole candidate is an open, unmerged pull request that merely contains the pushed
     commit. Its plans must not deploy, so the result is the merge SHA; the list was not empty,
-    so no closed listing is read and no warning prints. Mutation: run the fallback on any
-    `(merge_sha, "")` outcome -- the closed listing is read and the warning prints."""
+    so no closed listing is read, and the warning names #6. Mutations: run the closed listing
+    on any `(merge_sha, "")` outcome -- the listing is read, red; drop the warning -- red."""
     pulls = [
         {
             "number": 6,
@@ -81,12 +81,41 @@ def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch, capsys):
     monkeypatch.setattr(dd, "_gh_json", _answering({PULLS_PATH: pulls}, paths))
     assert dd._merged_head("o/r", "merge123", "main") == ("merge123", "")
     assert paths == [PULLS_PATH]
-    assert capsys.readouterr().err == ""
+    assert capsys.readouterr().err == (
+        "::warning::could not map merge123 to the pull request that merged it: #6 contains it but "
+        "none records it as its merge commit; deploying it as a push to main\n"
+    )
 
 
-def test_merged_head_mix_of_merged_and_open_picks_merged(monkeypatch):
-    # No pull matches merge_commit_sha exactly, as after a squash merge, but one candidate is
-    # merged and one is still open, so the merged one is picked.
+def test_merged_head_one_merged_pull_with_another_merge_commit_is_a_push(monkeypatch, capsys):
+    """A direct push of a commit an earlier merged pull request contains: #8 is merged, but its
+    merge commit is another one, so its plans must not deploy. One read, no polling, no closed
+    listing, the warning whole. Mutation: restore the `merged_at` fallback (`exact or next(p
+    for p in pulls if p.get("merged_at"))`) -- `("merged-pr-head", "8")`, red."""
+    pulls = [
+        {
+            "number": 8,
+            "merge_commit_sha": "unrelated",
+            "merged_at": "2024-01-01T00:00:00Z",
+            "head": {"sha": "merged-pr-head"},
+        },
+    ]
+    paths = []
+    monkeypatch.setattr(dd, "_gh_json", _answering({PULLS_PATH: pulls}, paths))
+    assert dd._merged_head("o/r", "merge123", "main") == ("merge123", "")
+    assert paths == [PULLS_PATH]
+    assert capsys.readouterr().err == (
+        "::warning::could not map merge123 to the pull request that merged it: #8 contains it but "
+        "none records it as its merge commit; deploying it as a push to main\n"
+    )
+
+
+def test_merged_head_mix_of_merged_and_open_with_no_merge_commit_is_a_push(monkeypatch, capsys):
+    """No listed pull records `merge123` as its merge commit. GitHub sets `merge_commit_sha` to
+    the commit the base branch moved to for a merge commit, a squash and a rebase alike, so a
+    pull-request merge always matches and this is a direct push: the merged #8 is not picked,
+    and the warning names both pulls in listed order. Mutations: restore the `merged_at`
+    fallback -- `("merged-pr-head", "8")`, red; name only the first pull -- red."""
     pulls = [
         {
             "number": 6,
@@ -102,7 +131,11 @@ def test_merged_head_mix_of_merged_and_open_picks_merged(monkeypatch):
         },
     ]
     monkeypatch.setattr(dd, "_gh_json", lambda path: pulls)
-    assert dd._merged_head("o/r", "merge123", "main") == ("merged-pr-head", "8")
+    assert dd._merged_head("o/r", "merge123", "main") == ("merge123", "")
+    assert capsys.readouterr().err == (
+        "::warning::could not map merge123 to the pull request that merged it: #6, #8 contain it "
+        "but none records it as its merge commit; deploying it as a push to main\n"
+    )
 
 
 def test_merged_head_falls_back_to_the_closed_pull_that_merged_it(monkeypatch):

@@ -34,6 +34,7 @@ from _shipmate import (
     cell_summaries,
     command_data,
     current_run_url,
+    lock_wait_remedy,
     lock_who,
     named,
     run_annotated,
@@ -590,10 +591,9 @@ def _lock_holder(holder):
 
 def _lock_remedy(holder, env):
     """What releases a cell lock in `env` held by pull request `holder` (None: unknown)."""
-    evict = f"comment `shipmate unlock {env} --evict`"
     if holder is None:
-        return evict
-    return f"wait for #{holder} to merge or close, then re-plan, or {evict}"
+        return f"comment `shipmate unlock {env} --evict`"
+    return lock_wait_remedy(lock_who(holder), env)
 
 
 _OVERLAP_REMEDY = "update the branch from the base and push"
@@ -602,8 +602,8 @@ _OVERLAP_REMEDY = "update the branch from the base and push"
 def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, overlap=False):
     """What clears a waiting cell's blocker in `env`. A `locked` blocker needs its lock gone
     first, whatever else holds its environment; an `overlap` blocker, which the base also
-    changed, needs the branch updated; a blocker under both causes names both remedies, the
-    lock's first. A targeted apply ignores `needs`, so a
+    changed, needs the branch updated; a blocker under both causes names both remedies as
+    separate sentences, the lock's first. A targeted apply ignores `needs`, so a
     blocker in a `needs`-skipped environment never gets its `shipmate apply` command; a
     predecessor it waits on may itself be held, so that remedy names both causes. A held
     targeted blocker needs the approval and then its command. The targeted form passes
@@ -612,7 +612,7 @@ def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, ove
     lock = f"it is locked by {lock_who(holder)}; {_lock_remedy(holder, env)}"
     base = f"the base also changed it; {_OVERLAP_REMEDY}"
     if locked and overlap:
-        return f"{lock}; {base}"
+        return f"{lock}. {base[0].upper()}{base[1:]}"
     if locked:
         return lock
     if overlap:
@@ -677,7 +677,7 @@ def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_af
     `waiting` and `held_cells` come from both forms: each waiting cell becomes an escaped
     `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`, its remedy
     the lock's when its blocker is a `locked` cell, the branch update when it is an `overlap`
-    cell, and both joined by "; ", the lock's first, when it is both; the locked cells become
+    cell, and both as separate sentences, the lock's first, when it is both; the locked cells become
     their rendered lines, and the overlap cells, only the auto form's, their line. A held env
     that is also targeted is listed under `held` only, and under `held_targeted` for its
     command. Each skipped env becomes `(env, waits)`, `waits` naming every predecessor

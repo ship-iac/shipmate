@@ -2264,15 +2264,15 @@ _LOCKS = [
 _LOCK_LINES = [
     (
         "🔒 locked by #12: stacks/app / dev, stacks/db / dev. Wait for #12 to merge or close, then "
-        "re-plan, or comment `shipmate unlock dev --evict`."
+        "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict`."
     ),
     (
-        "🔒 locked by #12: stacks/app / prod. Wait for #12 to merge or close, then re-plan, or "
-        "comment `shipmate unlock prod --evict`."
+        "🔒 locked by #12: stacks/app / prod. Wait for #12 to merge or close, then re-plan. If "
+        "#12 has already merged or closed, comment `shipmate unlock prod --evict`."
     ),
     (
-        "🔒 locked by #7: stacks/dns / dev. Wait for #7 to merge or close, then re-plan, or "
-        "comment `shipmate unlock dev --evict`."
+        "🔒 locked by #7: stacks/dns / dev. Wait for #7 to merge or close, then re-plan. If #7 "
+        "has already merged or closed, comment `shipmate unlock dev --evict`."
     ),
     (
         "🔒 locked by an unknown holder: stacks/net / dev, stacks/edge / dev. Comment "
@@ -2289,7 +2289,8 @@ def test_each_lock_holder_and_environment_gets_one_line_in_both_forms(compact):
     Mutation: group the lines by holder alone -- `prod` joins the `dev` line, red.
     Mutation: return `holder` unconditionally from `_lock_holder` -- `#12` for the string, red.
     Mutation: drop `d["locked"]` from `_per_env_lines` -- the per-environment case, red.
-    Mutation: drop `d["locked"]` from `_grouped_lines` -- the compact case, red."""
+    Mutation: drop `d["locked"]` from `_grouped_lines` -- the compact case, red.
+    Mutation: drop the merged-or-closed sentence from `lock_wait_remedy` -- red."""
     assert ac._footer_parts([], [], held_cells=_LOCKS, compact=compact) == _LOCK_LINES
 
 
@@ -2299,7 +2300,8 @@ def test_the_lock_lines_escape_every_name():
     assert ac._footer_parts([], [], held_cells=[_locked("s@org/team<1", "e<2", 3)]) == [
         (
             "🔒 locked by #3: s@<!-- -->org/team&lt;1 / e&lt;2. Wait for #3 to merge or close, "
-            "then re-plan, or comment `shipmate unlock e&lt;2 --evict`."
+            "then re-plan. If #3 has already merged or closed, comment "
+            "`shipmate unlock e&lt;2 --evict`."
         )
     ]
 
@@ -2311,8 +2313,8 @@ def test_a_run_where_every_cell_is_locked_is_never_green():
     hint, red."""
     assert _comment([], held_cells=[_locked("stacks/app", "dev-eu", 12)]) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {AT}\n\n"
-        "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, or "
-        "comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
+        "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
+        "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
     )
 
 
@@ -2338,7 +2340,8 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
     Mutation: drop the `locked` branch from `_waiting_remedy` -- the held-and-targeted remedy,
     red.
     Mutation: key the blocker's lock on its environment alone -- `stacks/c` names the lock,
-    red."""
+    red.
+    Mutation: drop the merged-or-closed sentence from `lock_wait_remedy` -- red."""
     waiting = [
         _waits("stacks/a", "qa", "stacks/dns", "ops"),
         _waits("stacks/b", "qa", "stacks/net", "ops"),
@@ -2354,12 +2357,13 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
         "`shipmate apply ops`\n"
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
         "The run log's apply-all-detect notice names the decision seen.\n"
-        "🔒 locked by #12: stacks/dns / ops. Wait for #12 to merge or close, then re-plan, or "
-        "comment `shipmate unlock ops --evict`.\n"
+        "🔒 locked by #12: stacks/dns / ops. Wait for #12 to merge or close, then re-plan. If #12 "
+        "has already merged or closed, comment `shipmate unlock ops --evict`.\n"
         "🔒 locked by an unknown holder: stacks/net / ops. Comment "
         "`shipmate unlock ops --evict`.\n"
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #12; wait "
-        "for #12 to merge or close, then re-plan, or comment `shipmate unlock ops --evict`\n"
+        "for #12 to merge or close, then re-plan. If #12 has already merged or closed, comment "
+        "`shipmate unlock ops --evict`\n"
         "⚪ stacks/b / qa: waits on stacks/net / ops, not applied yet; it is locked by an "
         "unknown holder; comment `shipmate unlock ops --evict`\n"
         "⚪ stacks/c / qa: waits on stacks/vault / ops, not applied yet; it is held until the pull "
@@ -2376,14 +2380,14 @@ def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp
     monkeypatch.setenv("SHIPMATE_HELD_CELLS", json.dumps([_locked("stacks/app", "dev-eu", 12)]))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
-        "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, or "
-        "comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
+        "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
+        "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict`.\n\n" + HINT
     )
 
 
 _LOCK_REFUSAL = (
-    "stacks/app in dev-eu is locked by #12; wait for #12 to merge or close, then re-plan, or "
-    "comment `shipmate unlock dev-eu --evict`"
+    "stacks/app in dev-eu is locked by #12; wait for #12 to merge or close, then re-plan. If #12 "
+    "has already merged or closed, comment `shipmate unlock dev-eu --evict`"
 )
 
 
@@ -2497,13 +2501,15 @@ def test_a_cell_waiting_on_a_locked_overlap_cell_names_both_remedies():
     """detect lists a cell once per cause, so a blocker both locked and overlapping the base
     needs the lock released and the branch updated.
 
-    Mutation: return the lock remedy alone when the blocker is locked -- red."""
+    Mutation: return the lock remedy alone when the blocker is locked -- red.
+    Mutation: join the two remedies with "; " instead of a sentence break -- red."""
     held_cells = [_locked("stacks/dns", "ops", 7), _overlap("stacks/dns", "ops")]
     waiting = [_waits("stacks/a", "qa", "stacks/dns", "ops")]
     assert ac._footer_parts([], [], [], waiting, held_cells=held_cells)[-1] == (
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #7; wait "
-        "for #7 to merge or close, then re-plan, or comment `shipmate unlock ops --evict`; the "
-        "base also changed it; update the branch from the base and push"
+        "for #7 to merge or close, then re-plan. If #7 has already merged or closed, comment "
+        "`shipmate unlock ops --evict`. The base also changed it; update the branch from the base "
+        "and push"
     )
 
 
@@ -2518,8 +2524,8 @@ def test_a_run_whose_only_cell_is_locked_and_overlaps_the_base_names_both_causes
     held_cells = [_locked("stacks/app", "dev-eu", 12), _overlap("stacks/app", "dev-eu")]
     assert _comment([], env="", held_cells=held_cells) == (
         _BOTH_VERDICT
-        + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, "
-        "or comment `shipmate unlock dev-eu --evict`.\n"
+        + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
+        "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict`.\n"
         "⚪ held, the base changed these stacks after this branch left it, so their plans would "
         "revert that change: stacks/app / dev-eu. Update the branch from the base and push.\n\n"
         + HINT
@@ -2534,8 +2540,8 @@ def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes()
     held_cells = [_locked("stacks/app", "dev-eu", 12), _overlap("stacks/db", "dev-eu")]
     assert _comment([], env="", held_cells=held_cells) == (
         _BOTH_VERDICT
-        + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan, "
-        "or comment `shipmate unlock dev-eu --evict`.\n"
+        + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
+        "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict`.\n"
         "⚪ held, the base changed these stacks after this branch left it, so their plans would "
         "revert that change: stacks/db / dev-eu. Update the branch from the base and push.\n\n"
         + HINT
@@ -2605,8 +2611,8 @@ _HELD_REMEDY_LINE = (
     "The run log's apply-all-detect notice names the decision seen."
 )
 _LCK = (
-    "🔒 locked by #7: stacks/app / lck. Wait for #7 to merge or close, then re-plan, or comment "
-    "`shipmate unlock lck --evict`."
+    "🔒 locked by #7: stacks/app / lck. Wait for #7 to merge or close, then re-plan. If #7 has "
+    "already merged or closed, comment `shipmate unlock lck --evict`."
 )
 
 
@@ -2678,8 +2684,8 @@ def test_a_cell_blocked_predecessor_gets_the_cell_remedy_even_when_held_and_targ
         ),
         _HELD_REMEDY_LINE,
         (
-            "🔒 locked by #7: stacks/a / ops. Wait for #7 to merge or close, then re-plan, or "
-            "comment `shipmate unlock ops --evict`."
+            "🔒 locked by #7: stacks/a / ops. Wait for #7 to merge or close, then re-plan. If #7 "
+            "has already merged or closed, comment `shipmate unlock ops --evict`."
         ),
     ]
 

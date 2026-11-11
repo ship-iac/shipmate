@@ -366,7 +366,8 @@ request that is not a draft, with a folded section naming, in apply order,
 `shipmate apply <env>` for each `apply_mode: targeted` environment holding a
 changed cell and `shipmate apply` once, at the first changed environment that is
 not targeted, then `shipmate unlock <env> --evict` for an environment holding a
-locked changed cell, and `shipmate help`; it is off when absent. `tools` names the Terramate and
+locked changed cell, unless a holder there is stacked on the pull request, and
+`shipmate help`; it is off when absent. `tools` names the Terramate and
 OpenTofu versions every job installs, each the pinned engine's default when
 absent.
 
@@ -737,7 +738,10 @@ a draft — the six apply requirements in
 names which requirement failed. Each cell an apply runs is locked to the pull
 request until it merges or closes; another pull request's apply leaves that
 cell pending and names the holder, and `shipmate unlock <env> --evict` releases
-the lock ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
+the lock on a cell the commenting pull request still applies. Any holder stacked
+on the commenting pull request refuses the whole command and releases nothing; a
+holder whose pull request cannot be read refuses too, and the reply says to
+comment again ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
 
 **The two are coupled.** If you require `shipmate / gate` as a
 branch-protection check — tier 3 — then applies have to happen pre-merge, because
@@ -1074,8 +1078,9 @@ Properties that fall out of the existing gate semantics:
   applied pre-merge.
 - **Any merge method works.** Squash merges are fine: `deploy-detect` maps the
   merge commit back to the PR head SHA through GitHub's API, not the commit
-  graph. It reads the commit→PR association (`commits/<sha>/pulls`); while that
-  stays empty, it takes the merged pull request (`merged_at` set) whose
+  graph. It reads the commit→PR association (`commits/<sha>/pulls`) and takes
+  only the pull request whose `merge_commit_sha` is the pushed commit; while the
+  association stays empty, it takes the merged pull request (`merged_at` set) whose
   `merge_commit_sha` is the merge commit, from one page of the 100 most
   recently updated closed pull requests into the branch.
 
