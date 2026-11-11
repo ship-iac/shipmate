@@ -101,10 +101,38 @@ ACTIONS_OK_ROUTES = {
         ],
     },
 }
+POLICIES = "repos/o/r/actions/policies"
+#: The samples' policy, as `GET repos/{owner}/{repo}/actions/policies/{id}` returns it.
+SAMPLE_POLICY = {
+    "id": 12890,
+    "name": "Allow shipmate events",
+    "enforcement": "active",
+    "conditions": {"workflow_path": {"include": [".github/workflows/shipmate.yml"], "exclude": []}},
+    "rules": [
+        {
+            "type": "restrict_action_events",
+            "parameters": {
+                "allowed_events": [
+                    "pull_request_target",
+                    "issue_comment",
+                    "push",
+                    "workflow_dispatch",
+                ]
+            },
+        }
+    ],
+}
+ACTIONS_OK_ROUTES[POLICIES] = {
+    "total_count": 1,
+    "policies": [{"id": 12890, "enforcement": "active"}],
+}
+ACTIONS_OK_ROUTES[f"{POLICIES}/12890"] = SAMPLE_POLICY
 ACTIONS_READS = [
     ["gh", "api", ACTIONS],
     ["gh", "api", ACTIONS_WORKFLOW],
     ["gh", "api", SELECTED_ACTIONS],
+    ["gh", "api", POLICIES],
+    ["gh", "api", f"{POLICIES}/12890"],
 ]
 WORKFLOW_PERMS_PUT = (
     "gh api -X PUT repos/o/r/actions/permissions/workflow "
@@ -1199,6 +1227,7 @@ FRESH_ROUTES = {
         "default_workflow_permissions": "write",
         "can_approve_pull_request_reviews": True,
     },
+    POLICIES: {"total_count": 0, "policies": []},
 }
 
 
@@ -2195,6 +2224,13 @@ todo          actions pinned to a full-length commit SHA (hardening.md row 20)
     with the exemptions in docs/hardening.md row 20.
     {SHA_PIN_PUT}
 
+todo          a repository Actions event policy allows shipmate's events (public repository)
+    No active policy restricts the events of `.github/workflows/shipmate.yml`.
+    From 2026-12-02 GitHub blocks `pull_request_target` in a public repository unless an
+    Actions event policy allows it. Create one in Settings > Actions > Policies
+    (docs/getting-started.md#allow-shipmates-events-on-a-public-repository).
+    Organization and enterprise policies are not read.
+
 todo          approving review before apply
     Required reviewers and `Prevent self-review` on dev-eu-apply
     (docs/getting-started.md §Environment setup).
@@ -2243,6 +2279,9 @@ cannot check  o/r in the App installation's repository selection
 ok            GITHUB_TOKEN read-only, Actions may not approve pull requests (hardening.md row 10)
 ok            allowed actions (hardening.md row 12)
 ok            actions pinned to a full-length commit SHA (hardening.md row 20)
+ok            a repository Actions event policy allows shipmate's events (public repository)
+    Organization and enterprise policies are not read.
+
 ok            approving review before apply
 cannot check  CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS
     `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
@@ -2935,6 +2974,165 @@ def test_the_checklist_skips_an_environment_the_reconciler_left_alone(
             "(docs/getting-started.md §Environment setup).",
         ],
     )
+
+
+EVENT_ROW = "a repository Actions event policy allows shipmate's events (public repository)"
+UNREAD = "Organization and enterprise policies are not read."
+EVENT_POLICY_TODO = [
+    "From 2026-12-02 GitHub blocks `pull_request_target` in a public repository unless an",
+    "Actions event policy allows it. Create one in Settings > Actions > Policies",
+    "(docs/getting-started.md#allow-shipmates-events-on-a-public-repository).",
+    UNREAD,
+]
+NO_MATCH = ["No active policy restricts the events of `.github/workflows/shipmate.yml`."]
+THREE_EVENTS = {"allowed_events": ["pull_request_target", "push", "workflow_dispatch"]}
+
+
+def _policy(**over):
+    return {**SAMPLE_POLICY, **over}
+
+
+def _paths(include, exclude=()):
+    return {"workflow_path": {"include": include, "exclude": list(exclude)}}
+
+
+def _event_row(monkeypatch, *policies, **over):
+    """`_event_policy_item` over `policies`, each listed and readable at its own id."""
+    routes = {
+        POLICIES: {"total_count": len(policies), "policies": [{"id": p["id"]} for p in policies]}
+    }
+    routes |= {f"{POLICIES}/{p['id']}": p for p in policies}
+    fake = make_gh(routes)
+    monkeypatch.setattr(onboard, "_run", fake)
+    return onboard._event_policy_item(ctx(**over)), fake
+
+
+def test_a_private_repository_needs_no_event_policy_and_reads_none(monkeypatch):
+    """Mutation: drop the `is_private` return, reading an unrouted list."""
+    row, fake = _event_row(monkeypatch, is_private=True)
+    assert (row, fake.calls) == (("ok", EVENT_ROW, []), [])
+
+
+def test_the_samples_policy_is_ok(monkeypatch):
+    """Mutation: drop `push` from `SHIPMATE_EVENTS` and add `pull_request` in its place."""
+    assert _event_row(monkeypatch, SAMPLE_POLICY)[0] == ("ok", EVENT_ROW, [UNREAD])
+
+
+@pytest.mark.parametrize(
+    ("policies", "lines"),
+    [
+        ([], NO_MATCH),
+        ([_policy(enforcement="disabled")], NO_MATCH),
+        (
+            [
+                _policy(
+                    conditions=_paths(
+                        [".github/workflows/shipmate.yml"], [".github/workflows/shipmate.yml"]
+                    )
+                )
+            ],
+            NO_MATCH,
+        ),
+        (
+            [_policy(rules=[{"type": "restrict_action_events", "parameters": THREE_EVENTS}])],
+            ["Policy Allow shipmate events does not allow issue_comment."],
+        ),
+    ],
+    ids=["none", "disabled", "excluded", "missing-event"],
+)
+def test_no_matching_policy_or_a_missing_event_is_todo(monkeypatch, policies, lines):
+    """Mutations, each proven: ignore `enforcement`; ignore `exclude`; accept a policy
+    allowing any one of the events."""
+    assert _event_row(monkeypatch, *policies)[0] == (
+        "todo",
+        EVENT_ROW,
+        [*lines, *EVENT_POLICY_TODO],
+    )
+
+
+def test_a_pattern_include_cannot_be_checked(monkeypatch):
+    """Mutation: drop the `*` test, reading the pattern policy as one for other paths."""
+    policy = _policy(conditions=_paths([".github/workflows/*.yml"]))
+    assert _event_row(monkeypatch, policy)[0] == (
+        "cannot check",
+        EVENT_ROW,
+        ["`repos/o/r/actions/policies/12890` includes a workflow path pattern."],
+    )
+
+
+def test_a_forbidden_policy_read_cannot_be_checked(monkeypatch):
+    """Mutation: return `todo` instead of `_unread` when the list read fails."""
+    denied = SystemExit(f"command failed (1): gh api {POLICIES}\n{GH_403}")
+    monkeypatch.setattr(onboard, "_run", make_gh({POLICIES: denied}))
+    assert onboard._event_policy_item(ctx()) == (
+        "cannot check",
+        EVENT_ROW,
+        [f"`{POLICIES}` could not be read: {GH_403}"],
+    )
+
+
+def test_a_policy_for_another_workflow_is_ignored(monkeypatch):
+    """A `ci.yml` policy allowing nothing shipmate needs leaves the row `ok`.
+
+    Mutation: replace `SHIPMATE_WORKFLOW not in include` in `_policy_gap` with `not include`.
+    """
+    ci = _policy(
+        id=7,
+        name="ci",
+        conditions=_paths([".github/workflows/ci.yml"]),
+        rules=[{"type": "restrict_action_events", "parameters": {"allowed_events": ["push"]}}],
+    )
+    assert _event_row(monkeypatch, SAMPLE_POLICY, ci)[0] == ("ok", EVENT_ROW, [UNREAD])
+
+
+def test_every_matching_policy_must_allow_every_event(monkeypatch):
+    """Mutation: `break` after the first matching policy."""
+    second = _policy(
+        id=8, name="narrow", rules=[{"type": "restrict_action_events", "parameters": THREE_EVENTS}]
+    )
+    assert _event_row(monkeypatch, SAMPLE_POLICY, second)[0] == (
+        "todo",
+        EVENT_ROW,
+        ["Policy narrow does not allow issue_comment.", *EVENT_POLICY_TODO],
+    )
+
+
+def test_a_policy_naming_shipmate_beside_another_path_must_allow_every_event(monkeypatch):
+    """Mutation: match on `include != [SHIPMATE_WORKFLOW]`, ignoring a policy that names a
+    second path."""
+    wide = _policy(
+        id=9,
+        name="wide",
+        conditions=_paths([".github/workflows/shipmate.yml", ".github/workflows/ci.yml"]),
+        rules=[{"type": "restrict_action_events", "parameters": THREE_EVENTS}],
+    )
+    assert _event_row(monkeypatch, SAMPLE_POLICY, wide)[0] == (
+        "todo",
+        EVENT_ROW,
+        ["Policy wide does not allow issue_comment.", *EVENT_POLICY_TODO],
+    )
+
+
+def test_a_failed_policy_read_cannot_be_checked(monkeypatch):
+    """Mutation: `continue` instead of returning `_unread` when a policy's read fails."""
+    detail = f"{POLICIES}/12890"
+    denied = SystemExit(f"command failed (1): gh api {detail}\n{GH_403}")
+    routes = {POLICIES: {"total_count": 1, "policies": [{"id": 12890}]}, detail: denied}
+    monkeypatch.setattr(onboard, "_run", make_gh(routes))
+    assert onboard._event_policy_item(ctx()) == (
+        "cannot check",
+        EVENT_ROW,
+        [f"`{detail}` could not be read: {GH_403}"],
+    )
+
+
+def test_the_required_events_are_the_fences_on_events():
+    """`SHIPMATE_EVENTS` is hand-written; the published `shipmate` fence is the source.
+
+    Mutation: drop `issue_comment` from `SHIPMATE_EVENTS`.
+    """
+    fence = load_workflow_text(onboard._fence(PAGE, "shipmate"))
+    assert sorted(onboard.SHIPMATE_EVENTS) == sorted(fence["on"])
 
 
 def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
