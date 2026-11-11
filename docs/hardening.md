@@ -1255,7 +1255,8 @@ Any other decision refuses, `CHANGES_REQUESTED` included. An `apply_mode: auto`
 environment, which must hold `review: false`, applies from the push's autoplan
 with no command (§1). The post-merge deploy reads no review decision: once the
 pull request merges, every cell whose apply check is still pending applies, so
-there the merge is the whole condition.
+there the merge stands in for the pull-request condition; the bound
+environment's required reviewers still gate each cell.
 
 Three properties of these jobs bound what that code reaches:
 
@@ -1320,8 +1321,8 @@ leaves undecryptable.
 - **Pull-request code in a cell that runs without approval.** A split
   environment's plan cells always run so, and apply and unlock cells do
   whenever the conditions in "What pull-request code holds" are met. That code
-  holds what its cell holds, the job token and the encryption key included;
-  `persist-credentials: false` keeps neither out of its reach. Required
+  holds what its cell holds: the job token, and in a plan or apply cell the
+  encryption key; `persist-credentials: false` keeps neither out of its reach. Required
   reviewers on the bound environment (row 6) and a repository of their own for
   the environments that go without them are what bound it.
 - **A cache entry planted by an unreviewed apply.** An apply cell runs the pull
