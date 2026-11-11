@@ -737,8 +737,10 @@ unless a repository Actions event policy allows it; its announced brownout on
 repository needs no policy. Without one, every autoplan ends `startup_failure`
 with no job and creates no new `plan / ` check, plan comment or `shipmate / gate`
 status. The `release` run of a closed pull request is blocked the same way, so
-its cell locks stay ([`troubleshooting.md`](troubleshooting.md) §A public
-repository's pull request gets no plan, comment or gate status).
+a pull request closed without merging keeps its cell locks; a merged one's are
+still released by the merge deploy's `summary`, which runs on `push`
+([`troubleshooting.md`](troubleshooting.md) §A public repository's pull request
+gets no plan, comment or gate status).
 
 Once `shipmate.yml` is committed, create the policy in Settings → Actions →
 Policies:
@@ -747,6 +749,10 @@ Policies:
 - set enforcement to active;
 - allow exactly the events under `on:` in the `shipmate.yml` fence above:
   `pull_request_target`, `issue_comment`, `push` and `workflow_dispatch`.
+
+GitHub's documentation says such a policy allows the events. shipmate has not
+yet observed a run under the block with the policy in place; the 2026-11-16
+brownout is the first chance.
 
 `scripts/onboard` reports whether the repository's own policies allow these
 events; it does not create the policy, and it does not read an organization or

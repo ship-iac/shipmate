@@ -355,8 +355,8 @@ then has a code owner, so that review holds no pull request.
 
 `a repository Actions event policy allows shipmate's events (public repository)`
 is `ok` on a private or internal repository without a read. On a public one it
-reads `repos/OWNER/REPO/actions/policies`, then each policy, and considers the
-active policies carrying a `restrict_action_events` rule. A policy matches when
+reads `repos/OWNER/REPO/actions/policies`, then each policy the list shows as
+active, and considers the active policies carrying a `restrict_action_events` rule. A policy matches when
 its workflow path `include` names `.github/workflows/shipmate.yml` and its
 `exclude` does not. The item is:
 
@@ -366,7 +366,7 @@ its workflow path `include` names `.github/workflows/shipmate.yml` and its
   events, with a link to
   [`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository);
 - `cannot check` when a read fails, when the list's `total_count` differs from
-  the number of policies it returned (onboard reads one page), or when a
+  the number of policies it returned (onboard reads one page of 100), or when a
   considered policy has a `*` in `include` or `exclude` or no `include` entry,
   because which workflows such a policy reaches is unprobed.
 
@@ -1002,12 +1002,16 @@ merged or closed.
   the close.** The release keeps a lock taken after the close while #<n> is
   open again. An apply that took the lock after the close refuses and deletes
   it itself; one that remains is evicted with `shipmate unlock <env> --evict`.
-- **On a public repository, GitHub blocked the closing run.** Its `shipmate.yml`
-  run ended `startup_failure` with no job, because no repository Actions event
-  policy allows `pull_request_target` (§A public repository's pull request gets
-  no plan, comment or gate status). Create the policy
-  ([`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository))
-  so later closes release their locks; evict the lock already left, as below.
+- **On a public repository, GitHub blocked the closing run of #<n>, closed
+  without merging.** Its `shipmate.yml` run ended `startup_failure` with no job,
+  because no repository Actions event policy allows `pull_request_target`
+  (§A public repository's pull request gets no plan, comment or gate status). A
+  merge is still released by the merge deploy's `summary` when the deploy
+  mapped the merge to its pull request; a close without merge is not. Create
+  the policy
+  ([`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository)),
+  which GitHub documents as allowing the event, and evict the lock already
+  left, as below.
 
 For the second and third causes, re-pin the fence
 (`python <engine>/scripts/repin <consumer> <tag> --write-fence`) where it
@@ -2425,14 +2429,20 @@ a public repository unless a repository Actions event policy allows it, and its
 announced brownout on 2026-11-16, 16:00-18:00 UTC, gives the same symptom. A
 private or internal repository is unaffected.
 
-The `release` run of a closed pull request is blocked the same way, so its cell
-locks stay (§A cell stays locked after its pull request closed). A drift sweep
-is unaffected: it runs on `schedule` and `workflow_dispatch`.
+The `release` run of a closed pull request is blocked the same way, so a pull
+request closed without merging keeps its cell locks (§A cell stays locked after
+its pull request closed). A merged one's locks are still released by the merge
+deploy's `summary` when the deploy mapped the merge to its pull request: the
+deploy runs on `push`, which the block does not touch. A drift sweep is
+unaffected: it runs on `schedule` and `workflow_dispatch`.
 
 Create the policy
 ([`getting-started.md`](getting-started.md#allow-shipmates-events-on-a-public-repository)).
 `scripts/onboard --app-id <id> --dry-run` reports whether the repository's own
-policies allow shipmate's events (§What `scripts/onboard` reports).
+policies allow shipmate's events (§What `scripts/onboard` reports). GitHub's
+documentation says such a policy allows the events; shipmate has not yet
+observed a run under the block with the policy in place, and the 2026-11-16
+brownout is the first chance.
 
 ### A pull request planned zero cells
 
