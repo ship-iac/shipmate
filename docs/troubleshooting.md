@@ -1446,6 +1446,27 @@ engine release ships that key (`docs/releasing.md` §Rotate a signer key). Pin a
 older version in `tools` until then, one the committed key signed. Do not install
 the tool by hand.
 
+### `the pull request head's .github/shipmate-config.yml:` refusals
+
+Plan `detect` checks the pull request's own `tools` before merge, in the
+`build-matrix` action. The head resolves each tool as `setup` would after the
+merge: its `tools` entry, else the engine's `VERSIONS` pin. Every tool whose
+version differs from the default branch's has its release's checksum file and
+signature downloaded and verified. Nothing is installed or run. Every refusal
+starts "the pull request head's .github/shipmate-config.yml: ", so it never
+reads like the default branch's refusal from `setup`. Fix the file on the pull
+request's branch and push.
+
+| Annotation continues with | Cause and remedy |
+|---|---|
+| a `tools` refusal, such as "tools.<tool> is …, below <floor>, …" | The head's `tools` is invalid; the table under §`.github/shipmate-config.yml` is rejected gives each one's remedy. Nothing was downloaded. |
+| "the path is a directory or a dangling symlink, not a file. Make it the config file, or remove it." | The head has something other than a file at that path. A head with no file resolves to the pins. |
+| "is not valid YAML: <problem> (line <L>, column <C>)" or "must hold a mapping at the top level, got <type>" | The head's file does not parse. |
+| "Terramate <version>: " or "OpenTofu <version>: " then a reason from §`Terramate checksum verification failed` or `OpenTofu checksum verification failed` | The head's version's release did not verify. A 404 ends "no <tool> <version> release publishes <file>; set tools.<key> to a released version.": that version was never released. |
+
+`build-matrix's tools input is …` is not a head refusal: the plan workflow did
+not pass `setup`'s `tools` output to `build-matrix`. Pin a released engine commit.
+
 ### `Terramate install failed` or `OpenTofu install failed`
 
 The `Install Terramate` or `Install OpenTofu` step in `actions/setup` failed.

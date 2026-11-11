@@ -45,6 +45,15 @@ inputs:
       environment table holds a variable reference; empty when unwired.
     required: false
     default: ""
+  tools:
+    description: >-
+      The `tools` output of the job's `setup` step: the default branch's Terramate and OpenTofu
+      versions, a JSON object of terramate and tofu to X.Y.Z versions. Each tool the pull request
+      head's `.github/shipmate-config.yml` resolves to another version has that release's
+      checksum file and signature verified before merge. Empty or invalid refuses outside a sweep;
+      a sweep checks no head and passes none.
+    required: false
+    default: ""
 outputs:
   matrix:
     description: 'JSON {"include":[{stack,environment,workload,role_arn,cred_region,tf_vars,config_path,env_binding},...]} for the plan matrix.'
@@ -78,7 +87,7 @@ outputs:
     value: ${{ steps.build.outputs.lost }}
   refusal:
     description: The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
-    value: ${{ steps.build.outputs.refusal }}
+    value: ${{ steps.build.outputs.refusal || steps.tools-verify.outputs.refusal }}
   env_order:
     description: 'JSON [env, ...]: every environment the matrix''s cells name, in apply order (the env-levels of the table''s `needs`, ties by name). Read by the plan summary to order the comment''s environment headings.'
     value: ${{ steps.build.outputs.env_order }}
@@ -99,4 +108,49 @@ runs:
         SHIPMATE_SWEEP: ${{ inputs.sweep }}
         SHIPMATE_TAGS: ${{ inputs.tags }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_TOOLS: ${{ inputs.tools }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"
+    # Verify only: detect runs no program a pull request chooses. Each release is the head's
+    # version, which `Compute plan matrix` validated before writing `verify`.
+    - name: Verify changed tools
+      id: tools-verify
+      if: ${{ steps.build.outputs.verify != '{}' }}
+      shell: bash
+      env:
+        SHIPMATE_VERIFY: ${{ steps.build.outputs.verify }}
+      run: |
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "$GITHUB_ACTION_PATH/../setup/release.sh"
+        title="Pull request tools verification failed"
+        head="the pull request head's .github/shipmate-config.yml: "
+        release_init "$title" ""
+        require jq
+        named='type == "object" and length > 0 and all(keys[]; . == "terramate" or . == "tofu")'
+        jq -e "$named" <<<"$SHIPMATE_VERIFY" >/dev/null \
+          || fail "build-matrix wrote verify=${SHIPMATE_VERIFY}, which names no tool to verify."
+        # One read per tool, not a pipeline: a `while read` subshell would lose verify_tofu's
+        # keyring, and with it the EXIT handler's gpg-agent kill.
+        for tool in terramate tofu; do
+          v="$(jq -r --arg t "$tool" '.[$t] // ""' <<<"$SHIPMATE_VERIFY")"
+          [ -n "$v" ] || continue
+          if [ "$tool" = tofu ]; then
+            name=OpenTofu
+            require gpg gpgconf
+            base="https://github.com/opentofu/opentofu/releases/download/v${v}"
+            files=("tofu_${v}_SHA256SUMS" "tofu_${v}_SHA256SUMS.gpgsig")
+          else
+            name=Terramate
+            base="https://github.com/terramate-io/terramate/releases/download/v${v}"
+            files=(checksums.txt checksums.txt.sig)
+          fi
+          # Not setup's release directory, whose verified files this would overwrite.
+          dir="$RUNNER_TEMP/head-${tool}-release"
+          mkdir -p "$dir"
+          release_init "$title" "${head}${name} ${v}: "
+          for f in "${files[@]}"; do
+            fetch "$base/$f" "$dir/$f" "no ${name} ${v} release publishes ${f}; set tools.${tool} to a released version" "re-run the failed job"
+          done
+          # verify_x sets its own prefix; the refusal keeps the head's in front of it.
+          "verify_${tool}" "$v" "$dir" || { release_init "$title" "${head}${name} ${v}: "; fail "$reason"; }
+        done

@@ -81,6 +81,7 @@ jobs:
           head-repo: ${{ needs.facts.outputs.head-repo }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
           github-vars: ${{ toJSON(vars) }}
+          tools: ${{ steps.setup.outputs.tools }}
       - id: checks
         uses: $/actions/hcl-check
 

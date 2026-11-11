@@ -5,7 +5,14 @@ import sys
 
 import pytest
 from _detect_fixtures import answering_run_graph, run_graph_capture, spy_env_config
-from _loader import action_yaml, github_outputs, load_script, record_calls
+from _loader import (
+    action_yaml,
+    bash_only,
+    bash_symlink,
+    github_outputs,
+    load_script,
+    record_calls,
+)
 from _shipmate import run_annotated
 
 bm = load_script("build-matrix")
@@ -654,6 +661,11 @@ def _answer_stack_list(monkeypatch, stacks, list_calls):
     monkeypatch.setattr(bm, "_run", list_run)
 
 
+def _pinned_tools():
+    pins = bm.ec.engine_versions()
+    return json.dumps({tool: pins[tool] for tool in bm.ec.TOOLS})
+
+
 def _run_main(
     monkeypatch,
     tmp_path,
@@ -723,8 +735,12 @@ def _run_main(
         "SHIPMATE_SWEEP",
         "SHIPMATE_TAGS",
         "SHIPMATE_BASE_SHA",
+        "SHIPMATE_TOOLS",
     ):
         monkeypatch.delenv(k, raising=False)
+    # The default branch's resolution equal to the pins, which a head without the file resolves
+    # to: nothing to verify unless a test writes the head's file or sets its own `tools`.
+    monkeypatch.setenv("SHIPMATE_TOOLS", _pinned_tools())
     if head_sha is not None:
         monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
         monkeypatch.setattr(
@@ -1279,15 +1295,18 @@ def test_main_parses_the_opt_out_once_for_all_three_guards(monkeypatch, tmp_path
 
     Mutations: `.lower()` on main's read -- the capitalised row reddens; `.strip()` -- the
     padded row reddens; parse with `bool(...)` -- every non-empty `False` row reddens; pass
-    the raw variable to `tag_filter_error` -- every row reddens."""
+    the raw variable to `tag_filter_error` -- every row reddens; pass it to `changed_tools` --
+    every row reddens."""
     seen = []
     for name in ("fork_pr_error", "head_checkout_error", "tag_filter_error"):
         monkeypatch.setattr(bm, name, lambda *args, _n=name: seen.append((_n, args[-1])) or "")
+    monkeypatch.setattr(bm, "changed_tools", lambda raw, sweep: seen.append(("tools", sweep)) or {})
     _run_main(monkeypatch, tmp_path, {"SHIPMATE_SWEEP": value})
     assert seen == [
         ("fork_pr_error", opted_out),
         ("head_checkout_error", opted_out),
         ("tag_filter_error", opted_out),
+        ("tools", opted_out),
     ]
 
 
@@ -1452,9 +1471,9 @@ def test_build_matrix_action_declares_its_inputs():
     """`sweep: "true"` is the one input that skips a refusal: it skips the head-repository and
     head-commit refusals, and only engine `drift.yml` sets it, in engine-owned YAML a
     pull-request author cannot edit. No other input turns a refusal off: `head-repo` and
-    `head-sha` are what those two refusals key on and an empty value refuses either, and `tags`
-    is refused outside a sweep. The direction is chosen so a forgotten input refuses (plan
-    wrapper) or reddens the sweep (drift), never plans a fork.
+    `head-sha` are what those two refusals key on and an empty value refuses either, `tags`
+    is refused outside a sweep, and so is an empty `tools`. The direction is chosen so a
+    forgotten input refuses (plan wrapper) or reddens the sweep (drift), never plans a fork.
 
     Hand-written, name -> default; descriptions are prose and not pinned. Mutation: restore
     `no-pull-request` as a second input."""
@@ -1468,6 +1487,7 @@ def test_build_matrix_action_declares_its_inputs():
         "head-sha": "",
         "tags": "",
         "github-vars": "",
+        "tools": "",
     }
 
 
@@ -1485,12 +1505,15 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_SWEEP": "${{ inputs.sweep }}",
         "SHIPMATE_TAGS": "${{ inputs.tags }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+        "SHIPMATE_TOOLS": "${{ inputs.tools }}",
         "GH_TOKEN": "${{ github.token }}",
     }
 
 
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     """Mutation: delete the `refusal` output -- the gate never names a detect error.
+    Mutation: drop `steps.tools-verify.outputs.refusal` from `refusal` -- the gate never names
+    a pull request's unverifiable `tools`.
     Mutation: delete the `env_order` output -- the plan comment orders environments by name.
     Mutation: delete the `command_hints` output -- the plan comment never shows its commands.
     Mutation: delete or rename the `auto_envs` output -- no auto apply is ever dispatched.
@@ -1511,7 +1534,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
         "lost": "${{ steps.build.outputs.lost }}",
-        "refusal": "${{ steps.build.outputs.refusal }}",
+        "refusal": "${{ steps.build.outputs.refusal || steps.tools-verify.outputs.refusal }}",
         "env_order": "${{ steps.build.outputs.env_order }}",
     }
 
@@ -2584,6 +2607,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
         "lost": "",
         "env_order": '["dev-eu"]',
+        "verify": "{}",
     }
 
 
@@ -3955,3 +3979,170 @@ def test_base_changed_stacks_names_the_update_remedy_when_the_merge_base_fails(m
         "head: fatal: bad object. Update the branch from the base and push; if it fails again, "
         "the base commit is not reachable from this checkout."
     )
+
+
+#: The engine pins every pre-merge `tools` case is judged against, whatever `VERSIONS` holds.
+_ENGINE_PINS = {
+    "terramate": "0.17.1",
+    "terramate_min": "0.17.1",
+    "tofu": "1.13.1",
+    "tofu_min": "1.13.1",
+}
+_DEFAULT_TOOLS = '{"terramate": "0.17.1", "tofu": "1.13.1"}'
+_HEAD = "::error::the pull request head's .github/shipmate-config.yml: "
+
+
+def _head_check(monkeypatch, tmp_path, head=None, tools=_DEFAULT_TOOLS, sweep=False, called=None):
+    """Plan detect, or a sweep, with the head's config file holding `head` (no file when None),
+    the `tools` input `tools` and the engine pins `_ENGINE_PINS`; return the
+    outputs."""
+    monkeypatch.setattr(bm.ec, "engine_versions", lambda path=None: dict(_ENGINE_PINS))
+    if head is not None:
+        path = tmp_path / ".github" / "shipmate-config.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(head, encoding="utf-8")
+    env = {"GITHUB_REPOSITORY": "acme/iac", "SHIPMATE_HEAD_REPO": "acme/iac"}
+    if sweep:
+        env["SHIPMATE_SWEEP"] = "true"
+    env["SHIPMATE_TOOLS"] = tools
+    outputs, _ = _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234", called=called)
+    return outputs
+
+
+def _head_refusal(monkeypatch, tmp_path, head=None, tools=_DEFAULT_TOOLS):
+    """The refusal of a plan detect whose head check refuses, after asserting that it refused
+    before the stack enumeration and wrote no output, so no `verify` reaches the next step."""
+    called = []
+    with pytest.raises(SystemExit) as exc:
+        _head_check(monkeypatch, tmp_path, head, tools, called=called)
+    assert called == []
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
+    return exc.value.code
+
+
+def test_a_head_with_the_default_branchs_versions_verifies_nothing(monkeypatch, tmp_path):
+    """Mutation: `verify` every resolved tool, changed or not -- `verify` names both."""
+    head = "tools:\n  terramate: 0.17.1\n  tofu: 1.13.1\n"
+    assert _head_check(monkeypatch, tmp_path, head)["verify"] == "{}"
+
+
+def test_a_head_that_changes_a_version_verifies_the_heads_release(monkeypatch, tmp_path):
+    """`verify` carries the head's version, so the step fetches the head's release.
+
+    Mutations: return `{}` from `changed_tools` (never verify); map each changed tool to the
+    `tools` input's version -- each red."""
+    head = "tools:\n  tofu: 1.13.2\n"
+    assert _head_check(monkeypatch, tmp_path, head)["verify"] == '{"tofu":"1.13.2"}'
+
+
+@pytest.mark.parametrize("head", [None, "layout: folder\n"], ids=["missing-file", "removed-tools"])
+def test_a_head_without_tools_verifies_the_pin_when_it_differs(monkeypatch, tmp_path, head):
+    """A head that removes `tools`, or the file, resolves to the `VERSIONS` pin, as setup would
+    after the merge. Mutation: return `{}` when the head has no file -- the missing-file row
+    reddens."""
+    tools = '{"terramate": "0.17.1", "tofu": "1.13.2"}'
+    assert _head_check(monkeypatch, tmp_path, head, tools)["verify"] == '{"tofu":"1.13.1"}'
+
+
+@pytest.mark.parametrize(
+    ("head", "refusal"),
+    [
+        pytest.param(
+            "tools:\n  terraform: 1.0.0\n",
+            "tools.terraform is '1.0.0'; terraform is not a tool this engine installs. tools "
+            "holds terramate, tofu.",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "tools:\n  tofu: 1.13.0\n",
+            "tools.tofu is '1.13.0', below 1.13.1, the oldest tofu this engine supports.",
+            id="below-floor",
+        ),
+        pytest.param(
+            "tools: 1.13.2\n",
+            "tools is '1.13.2'; it must be a mapping of terramate and tofu to versions, got str.",
+            id="malformed",
+        ),
+        pytest.param(
+            "tools:\n  tofu: v1.13.2\n",
+            "tools.tofu is 'v1.13.2'; a version is written X.Y.Z in ASCII digits, such as "
+            "1.13.2, with no v, pre-release or range.",
+            id="grammar",
+        ),
+    ],
+)
+def test_a_heads_invalid_tools_refuses_before_any_download(monkeypatch, tmp_path, head, refusal):
+    """`tool_version_errors` runs on the head's table before any comparison, so no head string
+    reaches a release URL. Mutation: skip `tool_version_errors` in `changed_tools` -- every row
+    reddens."""
+    assert _head_refusal(monkeypatch, tmp_path, head) == f"{_HEAD}{refusal}"
+
+
+def test_every_invalid_head_tools_entry_is_named_under_the_head_prefix(monkeypatch, tmp_path):
+    """Mutation: prefix only the first error -- the second line reddens."""
+    head = "tools:\n  terraform: 1.0.0\n  tofu: 1.13.0\n"
+    assert _head_refusal(monkeypatch, tmp_path, head) == (
+        f"{_HEAD}tools.terraform is '1.0.0'; terraform is not a tool this engine installs. "
+        "tools holds terramate, tofu.\n"
+        f"{_HEAD}tools.tofu is '1.13.0', below 1.13.1, the oldest tofu this engine supports."
+    )
+
+
+_NOT_A_FILE = (
+    f"{_HEAD}the path is a directory or a dangling symlink, not a file. Make it the config "
+    "file, or remove it."
+)
+
+
+def test_a_directory_at_the_heads_config_path_refuses(monkeypatch, tmp_path):
+    """Mutation: drop the `os.path.isfile` check (the directory fails to open instead)."""
+    (tmp_path / ".github" / "shipmate-config.yml").mkdir(parents=True)
+    assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
+
+
+@bash_only
+def test_a_dangling_symlink_at_the_heads_config_path_refuses(monkeypatch, tmp_path):
+    """Mutation: `os.path.exists` in place of `os.path.lexists` (the link reads as a missing
+    file and the head resolves to the pins)."""
+    (tmp_path / ".github").mkdir()
+    bash_symlink(tmp_path, tmp_path / "gone.yml", tmp_path / ".github" / "shipmate-config.yml")
+    assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
+
+
+@pytest.mark.parametrize(
+    ("head", "refusal"),
+    [
+        pytest.param(
+            "tools: [\n",
+            "is not valid YAML: expected the node content, but found '<stream end>' "
+            "(line 2, column 1)",
+            id="invalid-yaml",
+        ),
+        pytest.param(
+            "- tools\n", "must hold a mapping at the top level, got list", id="not-a-mapping"
+        ),
+    ],
+)
+def test_a_head_config_that_does_not_parse_refuses(monkeypatch, tmp_path, head, refusal):
+    """Mutations: drop the `yaml.YAMLError` handler; drop the mapping check -- each row's
+    refusal is lost."""
+    assert _head_refusal(monkeypatch, tmp_path, head) == f"{_HEAD}{refusal}"
+
+
+@pytest.mark.parametrize("tools", ["", "{}", '{"terramate": "0.17.1"}', "not json"])
+def test_a_plan_with_an_empty_or_invalid_tools_input_refuses(monkeypatch, tmp_path, tools):
+    """A plan wrapper that forgets `tools` fails loud rather than checking nothing. Mutation:
+    return `{}` from `changed_tools` for an empty input -- the empty row plans."""
+    assert _head_refusal(monkeypatch, tmp_path, "tools:\n  tofu: 1.13.2\n", tools) == (
+        f"::error::build-matrix's tools input is {tools!r}; outside a sweep it must be the setup "
+        "step's tools output, a JSON object of terramate and tofu to X.Y.Z versions. Wire "
+        "`tools: ${{ steps.setup.outputs.tools }}` into the build-matrix step."
+    )
+
+
+def test_a_sweep_reads_no_head_and_passes_no_tools(monkeypatch, tmp_path):
+    """A directory at the head's path refuses any plan; a sweep never reads it. Mutation: drop
+    the `sweep is True` return from `changed_tools` -- the sweep refuses its missing input."""
+    (tmp_path / ".github" / "shipmate-config.yml").mkdir(parents=True)
+    # "" is the input's default, which is what a sweep's step receives.
+    assert _head_check(monkeypatch, tmp_path, tools="", sweep=True)["verify"] == "{}"

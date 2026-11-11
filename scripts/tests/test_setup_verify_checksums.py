@@ -6,7 +6,8 @@ signature logic is `verify_terramate` and `verify_tofu` in `actions/setup/releas
 `fixtures/release-sums/` by URL basename. `gpg`, `gpgconf` and `openssl` wrappers log their argv
 (`gpg` and `gpgconf` also their `GNUPGHOME`) and run the real tools. A cache hit is simulated by
 files placed in `$RUNNER_TEMP/<tool>-release` before the step runs, with `SHIPMATE_CACHE_KEY` set
-to the entry's key.
+to the entry's key. `build-matrix`'s `Verify changed tools` step runs the same way, with the
+pull request head's versions in `SHIPMATE_VERIFY`.
 
 Threat model: an accidental regression in a SHA-pinned, reviewed engine file -- a dropped
 signature check, an exit-code-only check, a fetched key, a lost guard. A hostile edit to the
@@ -174,13 +175,15 @@ def _run(
     key=None,
     env=None,
     gpgconf_rc=None,
+    of=_ACTION,
 ):
     """Run step `sid`'s body with curl serving `served` (basename -> bytes; the genuine fixtures
     by default) at HTTP 200, or `codes[basename]`, and exiting `curl_exit`. `cached` (basename ->
     bytes, or None for a directory) is placed in the step's release directory first, and `key`,
-    when given, is the `SHIPMATE_CACHE_KEY`. `action` (default the engine's) is
-    `GITHUB_ACTION_PATH`; `env` is added last, over a host environment without `GNUPGHOME`. The
-    `gpgconf` wrapper exits `gpgconf_rc` instead of running the real one when that is given.
+    when given, is the `SHIPMATE_CACHE_KEY`. `of` is the action whose step runs, and `action`
+    (default the engine's copy of it) is `GITHUB_ACTION_PATH`; `env` is added last, over a host
+    environment without `GNUPGHOME`. The `gpgconf` wrapper exits `gpgconf_rc` instead of running
+    the real one when that is given.
 
     Return (result, $GITHUB_OUTPUT text, curl argv per call, gpg argv per call, RUNNER_TEMP);
     openssl's and gpgconf's argv per call are in `tmp_path/logs/`, and each gpg and gpgconf
@@ -246,13 +249,13 @@ def _run(
     out.write_text("", encoding="utf-8")
     r = run_step(
         tmp_path,
-        step_by(_ACTION, id=sid)["run"],
+        step_by(of, id=sid)["run"],
         {
             **{k: v for k, v in os.environ.items() if k != "GNUPGHOME"},
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "RUNNER_TEMP": rt.as_posix(),
             "GITHUB_OUTPUT": str(out),
-            "GITHUB_ACTION_PATH": action or (ENGINE / "actions" / "setup").as_posix(),
+            "GITHUB_ACTION_PATH": action or (ENGINE / "actions" / of).as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
             "GITHUB_REPOSITORY": _REPO,
@@ -1118,3 +1121,138 @@ def test_a_failed_rm_in_drop_writes_the_generic_refusal(tmp_path):
         f"::error title=Terramate checksum verification failed::{reason}\n",
         f"refusal={reason}\n",
     )
+
+
+_HEAD = "the pull request head's .github/shipmate-config.yml: "
+_HEAD_ERROR = "::error title=Pull request tools verification failed::" + _HEAD
+
+
+def _head_verify(tmp_path, verify, **kwargs):
+    """`build-matrix`'s `Verify changed tools` step, given `verify` as build-matrix wrote it."""
+    return _run(
+        tmp_path, "tools-verify", of="build-matrix", env={"SHIPMATE_VERIFY": verify}, **kwargs
+    )
+
+
+def _head_downloads(rt, tools):
+    """curl's whole argv for each download of the head's `tools`, in the step's order."""
+    calls = []
+    if "terramate" in tools:
+        d = f"{rt.as_posix()}/head-terramate-release"
+        calls += [_curl(f"{_TM_BASE}/{n}", f"{d}/{n}") for n in _SUMS_NAMES["terramate-sums"]]
+    if "tofu" in tools:
+        d = f"{rt.as_posix()}/head-tofu-release"
+        calls += [_curl(f"{_TOFU_BASE}/{n}", f"{d}/{n}") for n in _SUMS_NAMES["tofu-sums"]]
+    return calls
+
+
+def test_the_tools_verify_step_runs_only_when_a_tool_changed():
+    """The step's whole definition but `run:`. No `continue-on-error`: plan detect's `refusal`
+    and its failure are the gate's evidence.
+
+    Mutations: drop the `if:`; read `verify` from `steps.tools-verify`; add
+    `continue-on-error: true`."""
+    step = dict(step_by("build-matrix", id="tools-verify"))
+    assert step.pop("run")
+    assert step == {
+        "name": "Verify changed tools",
+        "id": "tools-verify",
+        "if": "${{ steps.build.outputs.verify != '{}' }}",
+        "shell": "bash",
+        "env": {"SHIPMATE_VERIFY": "${{ steps.build.outputs.verify }}"},
+    }
+
+
+@bash_only
+@needs_tools
+def test_the_head_versions_releases_are_fetched_and_verified(tmp_path):
+    """Both tools changed: each head release's checksum file and signature only, at the head's
+    version, verified with the committed keys; no archive and no agent left.
+
+    Mutation: drop `verify_${tool}` from the loop (no digests are written)."""
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, curl, gpg, rt = _head_verify(tmp_path, verify)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        assert (r.returncode, r.stdout) == (0, ""), r.stderr
+        assert out == _TM_OUTPUT + _TOFU_OUTPUT
+        assert curl == _head_downloads(rt, ("terramate", "tofu"))
+        assert len(gpg) == 2 and len(set(homes)) == 1, (gpg, homes)
+        assert not _agent_running(tmp_path, homes[0])
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_second_tool_that_fails_leaves_one_refusal_and_no_agent(tmp_path):
+    """Terramate verifies, then OpenTofu's signature fails: one `refusal=` line under the head's
+    prefix and OpenTofu's, after Terramate's digests, and the keyring's agent is stopped.
+
+    Mutation: loop with `jq ... | tr -d '\\r' | while read -r tool v` (`fail` runs in the
+    subshell, so its annotation leaves stdout)."""
+    served = _genuine()
+    served[_TOFU_SUMS] = _flip(served[_TOFU_SUMS], b"723bebb0")
+    verify = f'{{"terramate":"{_TERRAMATE}","tofu":"{_TOFU}"}}'
+    r, out, curl, _, rt = _head_verify(tmp_path, verify, served=served)
+    homes = _homes(tmp_path, "gpg")
+    try:
+        reason = (
+            f"OpenTofu {_TOFU}: the signature on {_TOFU_SUMS} did not verify against the "
+            "committed OpenTofu key (gpg exit 1)."
+        )
+        assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+        assert out == f"{_TM_OUTPUT}refusal={_HEAD}{reason}\n"
+        assert curl == _head_downloads(rt, ("terramate", "tofu"))
+        assert _calls(tmp_path / "logs" / "gpgconf") == [["--kill", "gpg-agent"]]
+        assert homes and not _agent_running(tmp_path, homes[0])
+    finally:
+        _kill_agents(tmp_path, homes)
+
+
+@bash_only
+@needs_tools
+def test_a_changed_terramate_whose_signature_fails_refuses_whole(tmp_path):
+    """Mutation: `"verify_${tool}" "$v" "$dir" || true` (the step passes)."""
+    served = _genuine()
+    served["checksums.txt"] = _flip(served["checksums.txt"], b"303fd597")
+    r, out, curl, gpg, rt = _head_verify(tmp_path, f'{{"terramate":"{_TERRAMATE}"}}', served=served)
+    reason = (
+        f"Terramate {_TERRAMATE}: the signature on checksums.txt did not verify against the "
+        "committed Terramate key (openssl exit 1)."
+    )
+    assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"refusal={_HEAD}{reason}\n"
+    assert curl == _head_downloads(rt, ("terramate",))
+    assert gpg == []
+
+
+@bash_only
+def test_a_head_version_with_no_release_refuses_naming_the_tools_entry(tmp_path):
+    """Mutation: pass "" as fetch's 404 remedy (the remedy drops out)."""
+    r, out, _, _, rt = _head_verify(
+        tmp_path, f'{{"tofu":"{_TOFU}"}}', codes={_TOFU_SUMS: "404"}, served={}
+    )
+    url = f"{_TOFU_BASE}/{_TOFU_SUMS}"
+    reason = (
+        f"OpenTofu {_TOFU}: {url} answered HTTP 404 from {url} (curl exit 0); no OpenTofu "
+        f"{_TOFU} release publishes {_TOFU_SUMS}; set tools.tofu to a released version."
+    )
+    assert (r.returncode, r.stdout) == (1, f"{_HEAD_ERROR}{reason}\n"), r.stderr
+    assert out == f"refusal={_HEAD}{reason}\n"
+
+
+@pytest.mark.parametrize("verify", ["", "{}", '{"terraform":"1.0.0"}'])
+@bash_only
+def test_a_verify_that_names_no_tool_refuses(tmp_path, verify):
+    """The step runs only when `verify` is not `{}`, so one that names no tool is a broken
+    handoff from build-matrix, not a head refusal, and fails rather than passing with nothing
+    verified.
+
+    Mutation: drop the `jq -e` check (each case passes with no download)."""
+    r, out, curl, *_ = _head_verify(tmp_path, verify)
+    reason = f"build-matrix wrote verify={verify}, which names no tool to verify."
+    title = "::error title=Pull request tools verification failed::"
+    assert (r.returncode, r.stdout) == (1, f"{title}{reason}\n"), r.stderr
+    assert out == f"refusal={reason}\n"
+    assert curl == []
