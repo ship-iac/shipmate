@@ -4185,7 +4185,7 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
 - `drift-cell` and `apply-cell` save it; `plan-cell` never does, because a plan
-  cell runs unreviewed pull-request HCL without the apply role. `plan.yml` and
+  cell runs unreviewed pull-request HCL. `plan.yml` and
   `unlock.yml` declare `cache-mode: read`, so the token in those runs cannot
   save an entry whatever the cell's HCL runs. Apply cells still save with a
   cache write while running the pull request's HCL, and the key carries no
