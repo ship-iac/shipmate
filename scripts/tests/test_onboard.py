@@ -3123,7 +3123,7 @@ def test_a_policy_list_longer_than_its_page_cannot_be_checked(monkeypatch):
     assert onboard._event_policy_item(ctx()) == (
         "cannot check",
         EVENT_ROW,
-        [f"`{POLICY_LIST}` lists 1 of 2 policies; onboard reads one page."],
+        [f"`{POLICY_LIST}` lists 1 of 2 policies; onboard reads one page of 100."],
     )
 
 

@@ -738,7 +738,8 @@ repository needs no policy. Without one, every autoplan ends `startup_failure`
 with no job and creates no new `plan / ` check, plan comment or `shipmate / gate`
 status. The `release` run of a closed pull request is blocked the same way, so
 a pull request closed without merging keeps its cell locks; a merged one's are
-still released by the merge deploy's `summary`, which runs on `push`
+still released by the merge deploy's `summary`, which runs on `push`, when
+the deploy mapped the merge to its pull request
 ([`troubleshooting.md`](troubleshooting.md) §A public repository's pull request
 gets no plan, comment or gate status).
 

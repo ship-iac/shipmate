@@ -355,8 +355,9 @@ then has a code owner, so that review holds no pull request.
 
 `a repository Actions event policy allows shipmate's events (public repository)`
 is `ok` on a private or internal repository without a read. On a public one it
-reads `repos/OWNER/REPO/actions/policies`, then each policy the list shows as
-active, and considers the active policies carrying a `restrict_action_events` rule. A policy matches when
+reads `repos/OWNER/REPO/actions/policies`, then each policy the list does not
+show as disabled, and considers the active policies carrying a
+`restrict_action_events` rule. A policy matches when
 its workflow path `include` names `.github/workflows/shipmate.yml` and its
 `exclude` does not. The item is:
 

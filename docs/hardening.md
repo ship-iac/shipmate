@@ -1303,7 +1303,9 @@ access, as for the App key (row 14); `CONTRACT.md` §Plan artifact encryption,
 unless a repository Actions event policy allows it; a private or internal
 repository is unaffected. A private repository needs no policy, but below Pro
 or Team it cannot hold the environments shipmate needs ("Plan prerequisites"),
-so on Free a public repository with the policy is the only option. The policy
+so on Free a public repository with the policy is the only option (a
+repository-level policy on Free was observed in an organization-owned
+repository only). The policy
 targets the workflow path `.github/workflows/shipmate.yml`, so the events are
 allowed for that file and never repository-wide. GitHub's documentation says
 the policy allows the events; shipmate has not yet observed a run under the

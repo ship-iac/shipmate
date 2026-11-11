@@ -919,7 +919,7 @@ def _event_policy_item(ctx):
     entries = listed.get("policies") or []
     total = listed.get("total_count")
     if total != len(entries):
-        line = f"`{path}` lists {len(entries)} of {total} policies; onboard reads one page."
+        line = f"`{path}` lists {len(entries)} of {total} policies; onboard reads one page of 100."
         return "cannot check", item, [line]
     gaps = _policy_gaps(item, base, entries)
     if isinstance(gaps, tuple):
