@@ -1196,8 +1196,11 @@ the refusal. What to do depends on the step that refused:
 
 An apply cell on a local backend ran its `Apply the stored plan` step (status
 `success`, `failure` or `cancelled`), and `Save state` did not store the state
-that step left: the save failed or was cancelled, the exact-key lookup after it
-found no entry, or there was no state file to save. The warning step fails the
+that step left: the save failed or was cancelled, the exact-key lookups after it
+found no entry, or there was no state file to save. When the first exact-key
+lookup finds no entry, the action looks up the same key up to four more times
+over about 30 s before it reports the state not saved; a failed, cancelled or
+skipped save runs no lookup and reports at once. The warning step fails the
 cell's job, so its apply check stays pending. An apply run that was not
 cancelled posts an apply comment; its row reads not recorded when its apply
 succeeded, otherwise failed, and its `state not saved:` note names up to 5
@@ -1220,7 +1223,7 @@ other case, re-plan and reconcile against the provider:
 1. Check whether the save stored the entry after all:
    `gh cache list --key <key> --json key --jq '.[] | select(.key == "<key>")' --repo <owner>/<repo>`,
    with the exact `key` the `Save state` step log shows (`--key` alone matches
-   by prefix). When it is printed, the save worked and only the lookup failed:
+   by prefix). When it is printed, the save worked and only the lookups missed it:
    re-plan (step 4) and never re-run the job; the re-plan reads the saved
    state. After a successful apply it shows no changes. After a failed or
    cancelled apply, OpenTofu may not have recorded, and the step log may not

@@ -21,10 +21,11 @@ inputs:
 outputs:
   saved:
     description: >-
-      `true` only when the save mode's lookup found the entry this run saved under its exact key.
-      Anything else, empty included, means the state was not saved: the save failed, was cancelled
-      or skipped, or the cache stored nothing.
-    value: ${{ steps.verify.outputs.cache-hit }}
+      `true` only when a save-mode lookup found the entry this run saved under its exact key: the
+      first lookup, or one of up to four more that follow a miss after 3, 7, 10 and 10 s. Anything
+      else means the state was not saved: the save failed, was cancelled or skipped, or no lookup
+      found the entry.
+    value: ${{ steps.verify.outputs.cache-hit == 'true' || steps.verify2.outputs.cache-hit == 'true' || steps.verify3.outputs.cache-hit == 'true' || steps.verify4.outputs.cache-hit == 'true' || steps.verify5.outputs.cache-hit == 'true' }}
 runs:
   using: composite
   steps:
@@ -100,10 +101,64 @@ runs:
         key: ${{ steps.key.outputs.key }}
     - name: Look up the saved entry
       id: verify
-      # actions/cache/save warns and succeeds when it stores nothing, so only this exact-key lookup
-      # proves the entry. It needs one save per key (a second stores nothing, yet this finds the
-      # first): the key carries run_id-run_attempt, and an attempt runs one cell per stack x env.
+      # actions/cache/save warns and succeeds when it stores nothing, so only exact-key lookups prove
+      # the entry; a miss is looked up 4 more times, as an entry can lag its save. One save per key
+      # (a second stores nothing, yet is found): run_id-run_attempt, one cell per stack x env.
       if: ${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.key.outputs.key }}
+        lookup-only: 'true'
+    # Each step reads only the one before it: a skipped step's outcome is `skipped`, so the chain
+    # stops at the first hit and never runs after a failed, cancelled or skipped save.
+    - name: Wait before lookup 2
+      id: wait2
+      if: ${{ steps.verify.outputs.cache-hit != 'true' && steps.verify.outcome == 'success' }}
+      shell: bash
+      run: sleep 3
+    - name: Look up the saved entry, try 2
+      id: verify2
+      if: ${{ steps.wait2.outcome == 'success' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.key.outputs.key }}
+        lookup-only: 'true'
+    - name: Wait before lookup 3
+      id: wait3
+      if: ${{ steps.verify2.outputs.cache-hit != 'true' && steps.verify2.outcome == 'success' }}
+      shell: bash
+      run: sleep 7
+    - name: Look up the saved entry, try 3
+      id: verify3
+      if: ${{ steps.wait3.outcome == 'success' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.key.outputs.key }}
+        lookup-only: 'true'
+    - name: Wait before lookup 4
+      id: wait4
+      if: ${{ steps.verify3.outputs.cache-hit != 'true' && steps.verify3.outcome == 'success' }}
+      shell: bash
+      run: sleep 10
+    - name: Look up the saved entry, try 4
+      id: verify4
+      if: ${{ steps.wait4.outcome == 'success' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.key.outputs.key }}
+        lookup-only: 'true'
+    - name: Wait before lookup 5
+      id: wait5
+      if: ${{ steps.verify4.outputs.cache-hit != 'true' && steps.verify4.outcome == 'success' }}
+      shell: bash
+      run: sleep 10
+    - name: Look up the saved entry, try 5
+      id: verify5
+      if: ${{ steps.wait5.outcome == 'success' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.path }}

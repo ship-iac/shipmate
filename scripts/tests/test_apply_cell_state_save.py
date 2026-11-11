@@ -14,7 +14,7 @@ state which was never restored is never saved. Mutation: regress that guard to `
 
 import re
 
-from _loader import action_steps, action_yaml, step_by
+from _loader import ENGINE, action_steps, action_yaml, step_by
 
 
 def _save_state_step():
@@ -107,28 +107,53 @@ def test_the_state_save_is_verified_by_an_exact_key_lookup():
     """`actions/cache/save` warns and succeeds on a cache-service error, so only a lookup of the
     exact key proves the entry exists; a `restore-keys` would let an older entry answer for it.
 
+    Every lookup uses the same pinned `actions/cache/restore`; `test_optional_state_guard.py`
+    pins the rest of each retry.
+
     Mutations: add `restore-keys` to the lookup; change the lookup's key; give the lookup an
-    `if:` other than the save's.
+    `if:` other than the save's; change the SHA of `verify4`.
     """
     lookup = step_by("state", id="verify")
     assert lookup == _LOOKUP_STEP
     save = step_by("state", name="Save state")
     assert save["with"]["key"] == _STATE_KEY
     assert save["if"] == _LOOKUP_STEP["if"]
+    for step_id in ("verify2", "verify3", "verify4", "verify5"):
+        assert step_by("state", id=step_id)["uses"] == _LOOKUP_STEP["uses"], step_id
 
 
 def test_saved_is_true_only_on_the_lookups_exact_hit():
-    """Mutations: `value: 'true'`; `value: ${{ steps.encrypt.outputs.skip }}`."""
+    """Mutations: `value: 'true'`; `value: ${{ steps.encrypt.outputs.skip }}`; read `saved` from
+    `verify5` only."""
     assert action_yaml("state")["outputs"] == {
         "saved": {
             "description": (
-                "`true` only when the save mode's lookup found the entry this run saved under its "
-                "exact key. Anything else, empty included, means the state was not saved: the "
-                "save failed, was cancelled or skipped, or the cache stored nothing."
+                "`true` only when a save-mode lookup found the entry this run saved under its "
+                "exact key: the first lookup, or one of up to four more that follow a miss after "
+                "3, 7, 10 and 10 s. Anything else means the state was not saved: the save failed, "
+                "was cancelled or skipped, or no lookup found the entry."
             ),
-            "value": "${{ steps.verify.outputs.cache-hit }}",
+            "value": (
+                "${{ steps.verify.outputs.cache-hit == 'true' "
+                "|| steps.verify2.outputs.cache-hit == 'true' "
+                "|| steps.verify3.outputs.cache-hit == 'true' "
+                "|| steps.verify4.outputs.cache-hit == 'true' "
+                "|| steps.verify5.outputs.cache-hit == 'true' }}"
+            ),
         }
     }
+
+
+def test_the_troubleshooting_entry_states_the_re_lookup():
+    """Mutation: change `four` to `three` in the sentence."""
+    text = (ENGINE / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
+    heading = "### `The apply step ran and its state was not saved`\n"
+    entry = " ".join(text[text.index(heading) :].split("\n### ", 1)[0].split())
+    assert (
+        "When the first exact-key lookup finds no entry, the action looks up the same key up to "
+        "four more times over about 30 s before it reports the state not saved; a failed, "
+        "cancelled or skipped save runs no lookup and reports at once."
+    ) in entry
 
 
 def test_the_cell_summary_reads_the_lost_save_warnings_outcome():
