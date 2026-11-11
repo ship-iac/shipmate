@@ -488,17 +488,22 @@ def jsonl(*rows):
     return "".join(json.dumps(r) + "\n" for r in rows)
 
 
-#: A bash ``gh`` for ``run_with_gate_gh``, keyed on the whole argv of the three listings and the
-#: write ``scripts/gate-status`` makes; any other call prints to stderr and exits 1. It records
-#: each call's argv as ``run_with_gh_recorder``'s stub does. The statuses listing answers
-#: ``$FAKE_PAGE1$FAKE_PAGE2`` when paginated and ``$FAKE_PAGE1`` alone when not, as GitHub would.
-#: The check-runs listing also prints ``$FAKE_CHECKS_STDERR`` (empty when unset) to stderr.
+#: A bash ``gh`` for ``run_with_gate_gh``, keyed on the whole argv of the three listings, the
+#: App bot user lookup and the write ``scripts/gate-status`` makes; any other call prints to
+#: stderr and exits 1. It records each call's argv as ``run_with_gh_recorder``'s stub does. The
+#: statuses listing answers ``$FAKE_PAGE1$FAKE_PAGE2`` when paginated and ``$FAKE_PAGE1`` alone
+#: when not, as GitHub would. The check-runs listing also prints ``$FAKE_CHECKS_STDERR`` (empty
+#: when unset) to stderr. The lookup answers ``$FAKE_USER`` and ``$FAKE_USER_STDERR``.
 _GATE_GH = """\
 printf '%s\n' "$@" -- >> "$CALLS"
 head="repos/acme/demo/commits/$FAKE_SHA"
 checks="$head/check-runs?filter=all&per_page=100 --jq $FAKE_CHECKS_JQ"
 statuses="$head/statuses?per_page=100 --jq $FAKE_STATUSES_JQ"
-if [ "$*" = "api --paginate $checks" ]; then
+if [ "$*" = "api users/shipmate-test%5Bbot%5D" ]; then
+  printf '%s' "$FAKE_USER"
+  printf '%s' "$FAKE_USER_STDERR" >&2
+  exit "$FAKE_USER_RC"
+elif [ "$*" = "api --paginate $checks" ]; then
   printf '%s' "$FAKE_CHECKS"
   printf '%s' "${FAKE_CHECKS_STDERR:-}" >&2
   exit "${FAKE_CHECKS_RC:-0}"
@@ -518,7 +523,13 @@ fi
 #: The `--jq` projections `scripts/gate-status` sends, hand-written so a changed projection is an
 #: unexpected call rather than one the stub follows.
 GATE_CHECKS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
-GATE_STATUSES_JQ = ".[] | {context, state, target_url}"
+GATE_STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
+#: The `SHIPMATE_APP_SLUG` every gate harness sets, the id its bot user lookup answers (unlike
+#: any fixture's `SHIPMATE_APP_ID`, so an App-id comparison reddens), and the lookup's argv.
+GATE_APP_SLUG = "shipmate-test"
+GATE_BOT_ID = 306306466
+GATE_USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
+GATE_USER = '{"id": 306306466, "login": "shipmate-test[bot]"}'
 
 
 def run_with_gate_gh(
@@ -533,6 +544,9 @@ def run_with_gate_gh(
     page1="",
     page2="",
     statuses_rc=0,
+    user=GATE_USER,
+    user_rc=0,
+    user_stderr="",
     text=True,
 ):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and ``_GATE_GH`` first on
@@ -540,7 +554,8 @@ def run_with_gate_gh(
 
     ``sha`` is the head the stub answers for; ``checks`` the check-runs listing for the
     ``checks_jq`` projection (exit ``checks_rc``); ``page1``/``page2`` the statuses listing's two
-    pages, JSON Lines each (paginated exit ``statuses_rc``). ``text`` goes to ``run_step``.
+    pages, JSON Lines each (paginated exit ``statuses_rc``); ``user`` and ``user_stderr`` the
+    bot user lookup's answer (exit ``user_rc``). ``text`` goes to ``run_step``.
     """
     fake = {
         "FAKE_SHA": sha,
@@ -551,6 +566,9 @@ def run_with_gate_gh(
         "FAKE_PAGE1": page1,
         "FAKE_PAGE2": page2,
         "FAKE_STATUSES_RC": str(statuses_rc),
+        "FAKE_USER": user,
+        "FAKE_USER_RC": str(user_rc),
+        "FAKE_USER_STDERR": user_stderr,
     }
     return _run_with_gh(tmp_path, body, env, _GATE_GH, fake, text)
 

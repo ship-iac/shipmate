@@ -65,7 +65,7 @@ PUBLISH_HOLD = (
     "Plan run 42 holds this while it publishes; "
     "if that run has ended, re-plan (comment shipmate plan or push)"
 )
-STATUSES_JQ = ".[] | {context, state, target_url}"
+STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
 APPLY_CHECKS_JQ = (
     ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}"
 )
@@ -77,6 +77,8 @@ STATUSES_LIST = [
     "--jq",
     STATUSES_JQ,
 ]
+#: `gate-status`'s App bot user lookup, once per process before its first statuses read.
+USER_READ = ["api", "users/shipmate-test%5Bbot%5D"]
 APPLY_LIST = [
     "api",
     "--paginate",
@@ -125,7 +127,9 @@ printf '%s\\n' "$@" >> "$CALLS"
 if [ "${*: -1}" = "-" ]; then cat >> "$CALLS"; printf '\\n' >> "$CALLS"; fi
 printf -- '--\\n' >> "$CALLS"
 head="repos/acme/demo/commits/$FAKE_SHA"
-if [ "$*" = "api --paginate $head/statuses?per_page=100 --jq $FAKE_STATUSES_JQ" ]; then
+if [ "$*" = "api users/shipmate-test%5Bbot%5D" ]; then
+  echo '{"id": 306306466, "login": "shipmate-test[bot]"}'
+elif [ "$*" = "api --paginate $head/statuses?per_page=100 --jq $FAKE_STATUSES_JQ" ]; then
   printf '%s' "$FAKE_STATUSES"
   exit "$FAKE_STATUSES_RC"
 elif [ "$*" = "api --paginate $head/check-runs?filter=all&per_page=100 --jq $FAKE_APPLY_JQ" ]; then
@@ -159,6 +163,7 @@ def _gate(state, run):
             "context": "shipmate / gate",
             "state": state,
             "target_url": f"https://github.com/acme/demo/actions/runs/{run}",
+            "creator": 306306466,
         }
     )
 
@@ -260,6 +265,7 @@ def _run(
         "SHIPMATE_HEAD_SHA": head,
         "SHIPMATE_PR_NUMBER": "7",
         "SHIPMATE_APP_ID": APP_ID,
+        "SHIPMATE_APP_SLUG": "shipmate-test",
         "SHIPMATE_PLAN_RESULT": plan_result,
         "SHIPMATE_PLANNED_CELLS": planned_cells,
         "HEAD_SHA": HEAD_SHA,
@@ -320,9 +326,11 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
     assert not (tmp_path / "github_output").exists()
     assert calls == [
         PULL_READ,
+        USER_READ,
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
+        USER_READ,
         STATUSES_LIST,
         _check_post("a", 2),
         _check_post("b", 2),
@@ -353,7 +361,7 @@ def test_a_failed_plan_job_holds_and_publishes_no_check(tmp_path):
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path, plan_result="failure")
     assert codes == [0, 0]
-    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -364,9 +372,11 @@ def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
     assert codes == [0, 1]
     assert calls == [
         PULL_READ,
+        USER_READ,
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
+        USER_READ,
         STATUSES_LIST,
         _check_post("a", 3),
         _check_post("b", 3),
@@ -401,7 +411,7 @@ def test_no_planned_cell_writes_no_hold(tmp_path):
     """Mutation: replace the cells test with `true` -> the hold is written."""
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
-    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST]
+    assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST]
 
 
 @bash_only
@@ -413,7 +423,7 @@ def test_a_re_run_that_publishes_nothing_still_holds(tmp_path):
     checks = _lines(_record(1, "a", RUN_ID), _record(2, "b", RUN_ID, status="queued"))
     codes, calls, _, _ = _run(tmp_path, apply_checks=checks)
     assert codes == [0, 0]
-    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -423,7 +433,7 @@ def test_a_failed_hold_write_publishes_no_check(tmp_path):
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path, status_post_rc=1)
     assert codes == [1]
-    assert calls == [PULL_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -440,11 +450,14 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
     assert codes == [0, 0, 0]
     assert calls == [
         PULL_READ,
+        USER_READ,
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
+        USER_READ,
         STATUSES_LIST,
         _check_post("a", 1),
+        USER_READ,
         STATUSES_LIST,
         _status_post("pending", "waiting"),
     ]
@@ -456,7 +469,7 @@ def test_a_newer_runs_hold_refuses_the_final_write(tmp_path):
     evicted). Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST buries the
     hold."""
     codes, calls, stderr, _ = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(GATE,))
-    assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
+    assert (codes, calls, stderr) == ([1], [USER_READ, STATUSES_LIST], REFUSED)
 
 
 def _write_bodies(tmp_path, text):
@@ -469,7 +482,7 @@ def test_a_newer_runs_hold_refuses_the_apply_checks(tmp_path):
     Mutation: delete the `refuse-newer` line in `Create apply checks` -- the check POST follows."""
     _write_bodies(tmp_path, '{"name": "apply / stacks/a / dev"}\n')
     codes, calls, stderr, _ = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(CREATE,))
-    assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
+    assert (codes, calls, stderr) == ([1], [USER_READ, STATUSES_LIST], REFUSED)
 
 
 @bash_only
@@ -496,6 +509,7 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
         [0, 1],
         [
             PULL_READ,
+            USER_READ,
             STATUSES_LIST,
             APPLY_LIST,
             PUBLISH_HOLD_POST,
@@ -517,7 +531,7 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
 def test_a_failed_read_before_the_final_write_writes_nothing(tmp_path):
     """Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST."""
     codes, calls, _, _ = _run(tmp_path, statuses_rc=1, steps=(GATE,))
-    assert (codes, calls) == ([1], [STATUSES_LIST])
+    assert (codes, calls) == ([1], [USER_READ, STATUSES_LIST])
 
 
 NEWER_CHECK = (
@@ -544,7 +558,7 @@ def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
     )
     assert (codes, calls, stderr) == (
         [0],
-        [PULL_READ, STATUSES_LIST, APPLY_LIST],
+        [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST],
         _notice(NEWER_CHECK),
     )
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == "superseded=true\n"
@@ -567,7 +581,7 @@ def test_a_newer_runs_hold_refuses_before_any_write(tmp_path, statuses):
     `exit 1` -> `[1]`."""
     _write_cells(tmp_path, "a")
     codes, calls, stderr, _ = _run(tmp_path, statuses=statuses, steps=(HOLD,))
-    assert (codes, calls, stderr) == ([0], [PULL_READ, STATUSES_LIST], _notice(REFUSED))
+    assert (codes, calls, stderr) == ([0], [PULL_READ, USER_READ, STATUSES_LIST], _notice(REFUSED))
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == "superseded=true\n"
 
 
@@ -652,7 +666,7 @@ def test_a_pending_checks_failure_with_cells_holds(tmp_path):
     cell = {"stack": "stacks/a", "environment": "dev", "changed": True}
     (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
     codes, calls, _, _ = _run(tmp_path)
-    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
 
 
 @bash_only
@@ -661,7 +675,7 @@ def test_a_failed_statuses_read_holds(tmp_path):
     POST; pass that hold the publish text -> red."""
     _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(tmp_path, statuses_rc=1)
-    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, USER_READ, STATUSES_LIST, HOLD_POST])
 
 
 @bash_only
@@ -676,7 +690,7 @@ def test_a_failed_check_listing_holds(tmp_path, slugs, status_post_rc):
     on stdout reddens, `hold-failed` for the move."""
     _write_cells(tmp_path, *slugs)
     codes, calls, _, stdout = _run(tmp_path, apply_rc=1, status_post_rc=status_post_rc)
-    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
     assert stdout == f"{LISTING_FAILED}\n"
 
 
@@ -686,7 +700,7 @@ def test_a_pending_checks_failure_without_cells_holds(tmp_path):
     Mutations: guard that hold with `[ -n "$cells" ]` -> no POST; pass that hold the publish
     text -> red."""
     codes, calls, _, _ = _run(tmp_path, apply_checks="not json\n")
-    assert (codes, calls) == ([1], [PULL_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
+    assert (codes, calls) == ([1], [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])
 
 
 @bash_only
@@ -725,11 +739,14 @@ def test_a_moved_head_writes_nothing(tmp_path):
 #: Today's whole call sequence of a one-cell run, after the one pull request read.
 ONE_CELL_RUN = [
     PULL_READ,
+    USER_READ,
     STATUSES_LIST,
     APPLY_LIST,
     PUBLISH_HOLD_POST,
+    USER_READ,
     STATUSES_LIST,
     _check_post("a", 1),
+    USER_READ,
     STATUSES_LIST,
     _status_post("pending", "waiting"),
 ]
@@ -774,7 +791,7 @@ def test_a_retried_failed_head_read_warns_on_its_last_line(tmp_path):
     codes, calls, stderr, stdout = _run(
         tmp_path, steps=(HOLD,), moved=(1, RETRY_NOTICES + PULL_FAILED, "")
     )
-    assert (codes, calls, stderr) == ([0], ONE_CELL_RUN[1:4], RETRY_NOTICES)
+    assert (codes, calls, stderr) == ([0], ONE_CELL_RUN[1:5], RETRY_NOTICES)
     assert stdout == (
         f"::warning::could not read the head of pull request #7 ({PULL_FAILED}); "
         f"this run publishes on {HEAD_SHA}\n"
@@ -788,7 +805,7 @@ def test_a_recovered_head_read_passes_its_retry_notices_through(tmp_path):
     codes, calls, stderr, stdout = _run(
         tmp_path, steps=(HOLD,), moved=(0, RETRY_NOTICES.rstrip("\n"), "")
     )
-    assert (codes, calls, stderr, stdout) == ([0], ONE_CELL_RUN[1:4], RETRY_NOTICES, "")
+    assert (codes, calls, stderr, stdout) == ([0], ONE_CELL_RUN[1:5], RETRY_NOTICES, "")
 
 
 @bash_only

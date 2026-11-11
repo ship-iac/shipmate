@@ -32,8 +32,10 @@ READ_ARGV = [
     "--paginate",
     f"repos/acme/demo/commits/{HEAD_SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url}",
+    ".[] | {context, state, target_url, creator: .creator.id}",
 ]
+#: `gate-status`'s App bot user lookup, once per process before its first statuses read.
+USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
 CHECKS_ARGV = [
     "api",
     "--paginate",
@@ -68,7 +70,13 @@ def _write_argv(state, description):
 
 
 def _gate(state):
-    return json.dumps({"context": "shipmate / gate", "state": state, "target_url": RUN_URL}) + "\n"
+    status = {
+        "context": "shipmate / gate",
+        "state": state,
+        "target_url": RUN_URL,
+        "creator": 306306466,
+    }
+    return json.dumps(status) + "\n"
 
 
 #: A no-changes body, as `pending-checks` writes it: completed, so the refresh still runs.
@@ -100,6 +108,7 @@ def _run_gate(
         "MODE": mode,
         "PLAN_RESULT": "skipped",
         "SHIPMATE_APP_ID": "7",
+        "SHIPMATE_APP_SLUG": "shipmate-test",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://example.invalid",
         "GITHUB_RUN_ID": "999",
@@ -123,7 +132,7 @@ def test_a_draft_run_keeps_an_existing_gate(tmp_path, head_state):
     """Mutation: delete the read -> the draft status overwrites the `failure` hold."""
     proc, calls = _run_gate(tmp_path, "draft", head_state)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV]
+    assert calls == [USER_ARGV, READ_ARGV]
     assert proc.stdout == (
         f"{HEAD_SHA} keeps its {head_state} gate status; the draft gate status was not written\n"
     )
@@ -136,7 +145,13 @@ def test_a_draft_run_writes_the_gate_on_a_head_with_none_and_does_not_refresh(tm
     proc, calls = _run_gate(tmp_path, "draft", "")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     # The `newest` read, then the `refuse-newer` read before the write.
-    assert calls == [READ_ARGV, READ_ARGV, _write_argv("pending", "the reason")]
+    assert calls == [
+        USER_ARGV,
+        READ_ARGV,
+        USER_ARGV,
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+    ]
 
 
 @bash_only
@@ -147,7 +162,7 @@ def test_a_held_run_writes_its_failure_gate_without_a_read_or_a_refresh(tmp_path
     -- a check-runs listing follows."""
     proc, calls = _run_gate(tmp_path, "held", "", state="failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("failure", "the reason")]
+    assert calls == [USER_ARGV, READ_ARGV, _write_argv("failure", "the reason")]
 
 
 @bash_only
@@ -155,7 +170,7 @@ def test_a_failed_read_writes_nothing_and_warns(tmp_path):
     """Mutation: drop the `if !` around the read -> `set -e` fails the step."""
     proc, calls = _run_gate(tmp_path, "draft", "", read_fails=True)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV]
+    assert calls == [USER_ARGV, READ_ARGV]
     assert proc.stdout == (
         f"::warning::could not read the gate status of {HEAD_SHA}; the draft gate status was "
         "not written\n"
@@ -168,7 +183,7 @@ def test_a_post_run_writes_over_this_runs_own_hold(tmp_path):
     Mutation: key the `newest` read on `post` instead of `draft` -> it keeps the hold, no write."""
     proc, calls = _run_gate(tmp_path, "post", "failure", state="success")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("success", "the reason")]
+    assert calls == [USER_ARGV, READ_ARGV, _write_argv("success", "the reason")]
 
 
 @bash_only
@@ -179,9 +194,11 @@ def test_a_pending_post_run_refreshes_the_gate_it_wrote(tmp_path):
     proc, calls = _run_gate(tmp_path, "post", "pending")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [
+        USER_ARGV,
         READ_ARGV,
         _write_argv("pending", "the reason"),
         CHECKS_ARGV,
+        USER_ARGV,
         READ_ARGV,
         _write_argv("success", "all applies complete, nothing left to apply"),
     ]
@@ -194,7 +211,7 @@ def test_no_bodies_file_skips_the_refresh(tmp_path):
     file, its negation passes, and the refresh greens the gate."""
     proc, calls = _run_gate(tmp_path, "post", "pending", bodies=None)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("pending", "the reason")]
+    assert calls == [USER_ARGV, READ_ARGV, _write_argv("pending", "the reason")]
 
 
 @bash_only
@@ -204,7 +221,12 @@ def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
     the `sed` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "pending", checks_rc=1)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV]
+    assert calls == [
+        USER_ARGV,
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+        CHECKS_ARGV,
+    ]
     assert (proc.stdout, proc.stderr) == (
         (
             f"::warning::command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
@@ -245,7 +267,14 @@ def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
     prefix the hold text with `::error::` in `gate-status` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV, READ_ARGV]
+    assert calls == [
+        USER_ARGV,
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+        CHECKS_ARGV,
+        USER_ARGV,
+        READ_ARGV,
+    ]
     assert (proc.stdout, proc.stderr) == (
         (
             f"shipmate / gate is held for {HEAD_SHA}; its status description on the pull request "
