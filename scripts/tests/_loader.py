@@ -23,6 +23,7 @@ import functools
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -185,6 +186,28 @@ def strings(node):
             yield from strings(item)
     elif isinstance(node, str):
         yield node
+
+
+def checkouts(steps):
+    """The ``actions/checkout`` steps of ``steps``, matched on the action name before ``@``."""
+    return [s for s in steps if str(s.get("uses", "")).split("@")[0] == "actions/checkout"]
+
+
+#: A `secrets` context reference inside an expression: a property, an index, or the whole
+#: context, but not a longer identifier such as `consumer-secrets` or `inputs.secrets`.
+_SECRETS_REF = re.compile(r"(?<![\w.-])secrets(?:\.[\w-]+|\[[^\]]*\]|(?![\w-]))", re.IGNORECASE)
+
+
+def secrets_refs(node):
+    """Every `secrets` context reference in the ``${{ }}`` expressions of a parsed subtree's
+    strings, sorted. Text outside an expression is not read, so a mapping key such as
+    ``consumer-secrets`` adds nothing."""
+    return sorted(
+        ref
+        for s in strings(node)
+        for expr in re.findall(r"\$\{\{(.*?)\}\}", s, re.S)
+        for ref in _SECRETS_REF.findall(expr)
+    )
 
 
 def run_lines(step):

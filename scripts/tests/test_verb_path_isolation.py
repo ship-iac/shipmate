@@ -43,7 +43,7 @@ wrong output, a step re-aimed at the apply family -- not a hostile edit to files
 reviews.
 """
 
-from _loader import local_action, workflow_jobs, workflow_yaml
+from _loader import checkouts, local_action, secrets_refs, workflow_jobs, workflow_yaml
 
 APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
@@ -312,17 +312,20 @@ def test_the_unlock_checkouts_take_the_ref_and_only_unlock_drops_the_token():
     token out of git config; `detect` runs none of it. Mutations: delete `persist-credentials`
     from `unlock`'s checkout; add `persist-credentials: false` to `detect`'s."""
     got = {
-        job_id: [
-            s.get("with")
-            for s in _job(UNLOCK, job_id)["steps"]
-            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
-        ]
+        job_id: [s.get("with") for s in checkouts(_job(UNLOCK, job_id)["steps"])]
         for job_id in ("detect", "unlock")
     }
     assert got == {
         "detect": [{"ref": "${{ inputs.ref }}"}],
         "unlock": [{"ref": "${{ inputs.ref }}", "persist-credentials": False}],
     }
+
+
+def test_the_unlock_job_references_exactly_these_secrets():
+    """`unlock` runs the pull request's HCL, so every secret it references reaches that code;
+    it holds no encryption key. Mutation: add
+    `encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}` to the unlock-cell step's `with:`."""
+    assert secrets_refs(_job(UNLOCK, "unlock")) == ["secrets.SHIPMATE_SECRETS"]
 
 
 def test_the_unlock_detect_refuses_an_unlock_into_a_missing_environment():

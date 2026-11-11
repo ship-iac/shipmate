@@ -13,7 +13,7 @@ its outcome, the wave jobs' permissions, apply-cell's refusing step and the call
 permissions.
 """
 
-from _loader import action_yaml, step_by, workflow_jobs
+from _loader import action_yaml, checkouts, secrets_refs, step_by, workflow_jobs
 
 WAVES = [f"wave{n}" for n in range(8)]
 LEVELS = [f"envlevel{n}" for n in range(4)]
@@ -108,16 +108,20 @@ def test_every_wave_checks_out_the_head_without_persisting_the_token():
     is written out in full stops aliasing it. Mutation: delete `persist-credentials` from the
     anchor's checkout (all eight redden)."""
     jobs = workflow_jobs("apply-env-level.yml")
-    found = {
-        wave: [
-            s.get("with")
-            for s in jobs[wave]["steps"]
-            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
-        ]
-        for wave in WAVES
-    }
+    found = {wave: [s.get("with") for s in checkouts(jobs[wave]["steps"])] for wave in WAVES}
     assert found == dict.fromkeys(
         WAVES, [{"ref": "${{ inputs.head_sha }}", "persist-credentials": False}]
+    )
+
+
+def test_every_wave_references_exactly_these_secrets():
+    """A wave job runs pull request code, so every secret it references reaches that code. The
+    parsed jobs, for the reason the checkout test gives; the App key's absence is
+    `test_cells_hold_no_app_key.py`'s. Mutation: an `env: { K: ${{ secrets.SHIPMATE_VARS }} }`
+    on the anchor's apply-cell step (all eight redden)."""
+    jobs = workflow_jobs("apply-env-level.yml")
+    assert {wave: secrets_refs(jobs[wave]) for wave in WAVES} == dict.fromkeys(
+        WAVES, ["secrets.SHIPMATE_ENCRYPTION_KEY", "secrets.SHIPMATE_SECRETS"]
     )
 
 

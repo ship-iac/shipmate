@@ -16,6 +16,7 @@ from _loader import (
     ENGINE_ENVIRONMENT,
     WORKFLOWS,
     bash_only,
+    checkouts,
     github_outputs,
     local_action,
     run_step,
@@ -175,12 +176,8 @@ def test_every_checkout_takes_no_with_block():
     Mutations: add `ref: ${{ github.sha }}` to each checkout, and add `fetch-depth: 0` to each.
     """
     for job_id in ("detect", "drift"):
-        checkouts = [
-            s.get("with")
-            for s in workflow_jobs(WF)[job_id]["steps"]
-            if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
-        ]
-        assert checkouts == [None], job_id
+        got = [s.get("with") for s in checkouts(workflow_jobs(WF)[job_id]["steps"])]
+        assert got == [None], job_id
 
 
 def test_the_cell_passes_this_whole_with_block():

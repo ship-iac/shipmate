@@ -1239,16 +1239,18 @@ App key (§16).
 | `unlock` | the bound environment has no required reviewers; unlock reads no review decision | the job token (`contents: read`, and `actions: read`, which lists and downloads other runs' artifacts); an OIDC token for the bound environment's role; `SHIPMATE_SECRETS`; the variables; a cache token that cannot save. No encryption key |
 
 The pull-request condition is the review decision GitHub reports for the pull
-request, read by `scripts/authorize` when the apply is dispatched. It admits an
+request. `apply.yml`'s `review` job re-reads it in the apply run, and
+`scripts/apply-detect` decides on that value: a targeted apply refuses, and a
+bare apply holds every environment the decision does not admit. It admits an
 apply to an environment when the decision is:
 
 - `APPROVED`. The engine checks no freshness of its own: whether a push after
   the approval resets the decision is up to the ruleset's freshness settings
   (§3–5).
-- `NONE`, which GitHub reports when no review rule applies — for example a rule
-  requiring no approval with code-owner review off, a base branch no
-  `pull_request` rule covers (row 21), or a code-owner rule owning none of the
-  changed files.
+- `NONE`, which the engine reads when GitHub returns a null decision because no
+  review rule applies — for example a rule requiring no approval with
+  code-owner review off, a base branch no `pull_request` rule covers (row 21),
+  or a code-owner rule owning none of the changed files.
 - `REVIEW_REQUIRED`, on an environment whose entry holds `review: false`.
 
 Any other decision refuses, `CHANGES_REQUESTED` included. An `apply_mode: auto`
@@ -1261,10 +1263,8 @@ environment's required reviewers still gate each cell.
 Three properties of these jobs bound what that code reaches:
 
 - **The checkout keeps no copy of the job token on disk; the job still holds
-  it.** Each of the three checkouts sets `persist-credentials: false`, so the
-  repository's git configuration holds no token. Code a step starts can still
-  read the environment of every later step in the same job (measured),
-  including the job token `actions/checkout`'s post step receives. Treat the
+  it.** Each of the three checkouts sets `persist-credentials: false`, which
+  removes only the token's copy in the checkout's git configuration. Treat the
   job token in the table as held by the pull request's code.
 - **Plan and unlock cells cannot write the Actions cache.** Their workflows
   declare `cache-mode: read`, and the cache service enforces it on the job's
@@ -1280,10 +1280,12 @@ Three properties of these jobs bound what that code reaches:
   environment's cells restore and accept. An environment holding its own value
   on its plan and apply environments is outside that set.
 
-Put environments whose code runs without approval in a repository of their own,
-with its own `SHIPMATE_ENCRYPTION_KEY` value. The Actions cache and the job
-token are per repository, so that code then reaches only that repository's
-cache, token and key. Where code that ran without approval held the key, replace it;
+A plan cell holds the key, and on a local backend its environment's decrypted
+state, whatever the repository layout. Put environments whose apply or unlock
+cells run without approval in a repository of their own, with its own
+`SHIPMATE_ENCRYPTION_KEY` value. The Actions cache and the job token are per
+repository, so that code then reaches only that repository's cache, token and
+key. Where code that ran without approval held the key, replace it;
 `CONTRACT.md` §Plan artifact encryption, "Rotation", states what a new key
 leaves undecryptable.
 
@@ -1322,9 +1324,11 @@ leaves undecryptable.
   environment's plan cells always run so, and apply and unlock cells do
   whenever the conditions in "What pull-request code holds" are met. That code
   holds what its cell holds: the job token, and in a plan or apply cell the
-  encryption key; `persist-credentials: false` keeps neither out of its reach. Required
-  reviewers on the bound environment (row 6) and a repository of their own for
-  the environments that go without them are what bound it.
+  encryption key; `persist-credentials: false` keeps neither out of its reach.
+  Required reviewers on the bound environment (row 6) bound apply and unlock
+  cells, and a repository of their own bounds the environments whose apply or
+  unlock cells go without them. A split environment's plan cells have no bound
+  in the repository beyond who can push a branch (§1–2).
 - **A cache entry planted by an unreviewed apply.** An apply cell runs the pull
   request's configuration in a job that can write the default branch's Actions
   cache, because it saves state (`CONTRACT.md` §State backend) and providers

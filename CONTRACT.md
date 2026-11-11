@@ -4184,12 +4184,12 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   are not in the key: stacks whose locks name the same providers at the same
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
-- `drift-cell` and `apply-cell` save it; `plan-cell` never does, because a plan
-  cell runs unreviewed pull-request HCL. `plan.yml` and
-  `unlock.yml` declare `cache-mode: read`, so the token in those runs cannot
-  save an entry whatever the cell's HCL runs. Apply cells still save with a
-  cache write while running the pull request's HCL, and the key carries no
-  environment, so an entry one environment's apply saves is restored by any
+- `drift-cell` and `apply-cell` save it; `plan-cell` never does. A dispatched
+  plan or unlock run holds the default branch's cache scope while it runs the
+  pull request's HCL, so `plan.yml` and `unlock.yml` declare `cache-mode: read`
+  and the token in those runs cannot save an entry whatever the cell's HCL
+  runs. Apply cells still save with a cache write while running the pull
+  request's HCL, and the key carries no environment, so an entry one environment's apply saves is restored by any
   environment's cells. Each saves after a restore that missed, and only when
   `init` left a file in the cache; `apply-cell` saves only after a successful
   apply, and a failed save does not fail the cell.
