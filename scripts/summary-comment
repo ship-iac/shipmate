@@ -42,8 +42,9 @@ that is not a draft ends with the `commands` section, when the body has room for
 SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments in apply order:
 each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
 `shipmate apply` once (`to apply the other environments` when a targeted line renders), then
-`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked, and
-`shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
+`shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked,
+unless one of that environment's holders is stacked on this pull request, where evict refuses,
+and `shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
 section degrades to the bare `shipmate apply` even when every changed environment is targeted;
 the unreadable one warns.
 
