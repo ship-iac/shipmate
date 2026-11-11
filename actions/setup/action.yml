@@ -10,7 +10,7 @@ inputs:
     required: false
     default: ""
   tofu:
-    description: Whether to install OpenTofu. "false" for jobs that never run it.
+    description: Whether to install OpenTofu. "false" for jobs that need no OpenTofu.
     required: false
     default: "true"
   cache-save:

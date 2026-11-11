@@ -46,6 +46,19 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}
 
+  # Saves the OpenTofu cache entry on a deploy with no cells; a cell that reaches setup saves it. A degrade
+  # job: no job needs it, so `continue-on-error` keeps its failure off the run's conclusion.
+  warm:
+    needs: [detect]
+    if: ${{ needs.detect.outputs.tools != '' && needs.detect.outputs.envlevel0_empty == 'true' && needs.detect.outputs.envlevel1_empty == 'true' && needs.detect.outputs.envlevel2_empty == 'true' && needs.detect.outputs.envlevel3_empty == 'true' }}
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 15
+    permissions: {}
+    continue-on-error: true
+    steps:
+      - uses: $/actions/setup
+        with: { versions: "${{ needs.detect.outputs.tools }}" }
+
   envlevel0:
     # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name
     # is load-bearing: renaming it strands apply checks pending. apply.yml repeats it.
