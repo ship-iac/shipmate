@@ -101,7 +101,8 @@ inputs:
       the plan comment with a folded section naming `shipmate apply <env>` for each
       `targeted-envs` environment holding a changed cell, `shipmate apply` when a changed cell
       sits outside all of them, `shipmate unlock <env> --evict` for each environment holding a
-      changed cell another pull request holds, and `shipmate help`, when a cell changed and the
+      changed cell another pull request holds, unless a holder there is stacked on this pull
+      request, and `shipmate help`, when a cell changed and the
       pull request is not a draft. Anything else (empty when detect is skipped) leaves it out.
     required: false
     default: ""

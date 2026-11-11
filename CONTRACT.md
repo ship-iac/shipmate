@@ -548,7 +548,8 @@ with a folded `shipmate commands` section naming, in apply order,
 changed cell and `shipmate apply` once, at the first changed environment that is
 not targeted, then `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
-and `shipmate help` (§Plan comment). It changes no plan or apply.
+unless one of those holders is stacked on this pull request, and `shipmate help`
+(§Plan comment). It changes no plan or apply.
 
 **`tools` chooses the Terramate and OpenTofu versions every job installs.** It
 maps `terramate`, `tofu` or both to a release version written `X.Y.Z` in ASCII
@@ -1247,16 +1248,34 @@ body contains `shipmate` in any case; every other comment starts no runner.
 
 `shipmate unlock <env> --evict` is its own route, `evict`, answered inside the
 comment-handling run and never dispatched. It deletes each cell lock in `<env>`
-that another pull request (or an unknown holder) holds on a stack with an
-App-authored `apply / <stack> / <env>` check on this pull request's head,
-comments once on each holder's pull request, `` 🔓 <cells> released by
+that another pull request (or an unknown holder) holds on a stack whose
+App-authored `apply / <stack> / <env>` check on this pull request's head is
+pending: its newest run is not completed `success` or `neutral` (no change), so
+a failed or cancelled cell counts and an applied one does not. It comments once
+on each holder's pull request, `` 🔓 <cells> released by
 @`<login>` from #<pr>; re-plan before applying them. `` (each cell as
 `` `<env>` / `<stack>` ``), and replies naming the evicted cells, or that there
 was none. A lock whose delete is refused does not stop the others: the
 holders of the deleted ones are still told. A refused delete or a notice that
 cannot be posted turns the reply into `🔴 failed:`, naming the cells not
-released and the holders not told, and fails the run. §Cell locks has the
-store and the rest of the lock's lifecycle.
+released and the holders not told, and fails the run.
+
+Before any delete, it reads each holder's pull request once. A holder that is
+open with this pull request's head branch as its base is stacked on this pull
+request; an unknown holder never is. Evicting a stacked holder and then
+applying this pull request would overwrite what the holder applied, so any
+stacked holder refuses the whole command and nothing is released. The reply
+is ``🔴 refused: no cell lock in `<env>` was released.`` with the refusal
+fenced, one sentence pair per stacked holder, lowest first: `#<h> is stacked on this pull
+request and holds <n> of its cell(s) in <env>; applying this pull request after
+evicting it would overwrite what it applied. Retarget #<h> to <default branch>
+and merge it first, or close it, which releases its locks.` With no stacked
+holder, a holder whose read fails or answers malformed refuses too, releasing
+nothing, with `could not tell whether #<h> is stacked on this pull request:
+<cause>` fenced in the ``🔴 failed: could not evict the cell locks in `<env>`.
+This run's log has the error; comment again.`` reply. An empty head
+branch or default branch refuses the same way before any read. §Cell locks has
+the store and the rest of the lock's lifecycle.
 
 `plan`, `doctor`, `apply`, `unlock` and `unlock --evict` require the commenter's
 write access (the "write access" apply requirement below defines it), read and decided once
@@ -1960,7 +1979,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
-| `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` (§Comment-ops) |
+| `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head; refuses, deleting none, when a holder is stacked on this pull request or cannot be read (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first` (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
@@ -1980,7 +1999,8 @@ deleting it on an unconfirmed close would free a cell it may still hold.
 `lock` takes them in a later job. A cell another pull request acquires in
 between refuses the whole run in `lock`, naming the holder
 (`` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
-re-plan, or comment `shipmate unlock <env> --evict` ``), and no cell applies.
+re-plan. If #<n> has already merged or closed, comment `shipmate unlock <env>
+--evict` ``), and no cell applies.
 This is the one case in which a locked cell stops the pull request's other
 cells. Commenting `shipmate apply` again, or "Re-run all jobs", recomputes: its
 `detect` leaves that cell pending and the rest apply. "Re-run failed jobs" does
@@ -2080,8 +2100,9 @@ re-run still releases.
 **Failure.** A lock read or write that fails refuses, in `apply.yml`'s and
 `deploy.yml`'s `detect`, `lock`, each apply cell (a merge deploy's included),
 the `release` job, the deploy's release step (whose failure fails the deploy's
-`summary`) and `--evict`. A release and an eviction continue past a delete that
-refuses, then fail naming each lock left held. A failed release stays owed until
+`summary`) and `--evict`. A holder's pull request read that fails refuses
+`--evict` before any delete. A release and an eviction continue past a delete
+that refuses, then fail naming each lock left held. A failed release stays owed until
 a re-run of that job succeeds. The plan comment's marker alone degrades: a lock
 read that fails there warns, and the comment marks no cell; a holder's pull
 request read that fails warns, and that holder's lines do not say it is stacked.
@@ -2089,7 +2110,8 @@ request read that fails warns, and that holder's lines do not say it is stacked.
 **Permissions.** `apply.yml`'s and `deploy.yml`'s `detect` and each apply cell
 read locks with their `GITHUB_TOKEN` at `contents: read`. `plan.yml`'s `summary`
 reads them, and each holder's pull request (`pulls/<holder>`, once per distinct
-holder), with the App token it already mints. Every lock write mints an App token with `contents: write`
+holder), with the App token it already mints; `--evict` reads each holder's pull
+request the same way with its own App token. Every lock write mints an App token with `contents: write`
 in a job bound to `shipmate-engine`: `apply.yml`'s `lock`, `release.yml`'s
 `release`, `deploy.yml`'s `summary` and `comment-ops.yml`'s `ops`. An
 installation that has not accepted `contents: write` fails each of those
@@ -3045,8 +3067,21 @@ even when every changed environment is targeted; the unreadable one warns.
 
 When the comment marks a changed cell `🔒 locked by`, the section adds, after
 the apply paragraphs and before the `shipmate help` paragraph, one paragraph per
-such environment, sorted: ``Comment `shipmate unlock <env> --evict` to take a
-cell another pull request holds.``
+such environment, sorted: ``Comment `shipmate unlock <env> --evict` to release
+the locks #<a> and #<b> hold; applying this pull request after that may
+overwrite what they applied to <env>.`` It names the holders of the
+environment's changed locked cells, known ones ascending, then `an unknown
+holder`, joined by `, ` with ` and ` before the last; one holder reads ``…
+to release the locks #<a> holds; applying this pull request after that may
+overwrite what #<a> applied to <env>.`` A lock does not prove its holder
+applied anything (`lock` takes every env-level's cells up front), so the line
+says only "may". An environment where any such holder is stacked on this pull
+request (§Cell line) gets no paragraph, because the eviction would refuse
+(§Comment-ops). A holder the cell line does not mark stacked, as after a failed
+read of it or with an empty default branch, leaves the paragraph in place. A
+summary re-run after a partial apply still counts an applied cell as changed,
+so the paragraph can name a lock whose cell already applied; the eviction then
+leaves that lock in place.
 
 The held body and a body with no changed cell never carry it. The held body
 above ends with the hint. `doctor` records its decision once, as its `warned`
@@ -3439,7 +3474,8 @@ actionable warning cannot be lost on either path. In the order they render:
   own apply-all-detect notice carries which one, since the decision never
   reaches this renderer.
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
-  then re-plan, or comment `shipmate unlock <env> --evict`.``, one per pull
+  then re-plan. If #<n> has already merged or closed, comment `shipmate unlock
+  <env> --evict`.``, one per pull
   request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
   with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
   unknown renders ``🔒 locked by an unknown holder: <cells>. Comment
@@ -3454,8 +3490,9 @@ actionable warning cannot be lost on either path. In the order they render:
   (§Fan-out) is pending and not applying this run; the second pair is that
   blocker. Every form renders these lines. The blocker is a cell that waits on
   nothing itself when there is one, so it can apply now. `<remedy>` is
-  `` it is locked by #<n>; wait for #<n> to merge or close, then re-plan, or
-  comment `shipmate unlock <env> --evict` `` when another pull request locks
+  `` it is locked by #<n>; wait for #<n> to merge or close, then re-plan. If
+  #<n> has already merged or closed, comment `shipmate unlock <env> --evict` ``
+  when another pull request locks
   the blocker cell (`` it is locked by an unknown holder; comment
   `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
   else holds its environment, followed by `; the base also changed it; update

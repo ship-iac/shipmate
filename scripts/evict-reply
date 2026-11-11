@@ -63,7 +63,8 @@ def reply(evicted, refused, env, untold):
     whose lock could not be released, and the holders `untold` whose notice failed."""
     if not evicted and not refused:
         return "notice", (
-            f"no lock held by another pull request on a cell this pull request changes in `{env}`"
+            f"no lock held by another pull request on a cell this pull request still applies in "
+            f"`{env}`"
         )
     clauses = [f"released {_named(evicted)}"] if evicted else []
     if refused:

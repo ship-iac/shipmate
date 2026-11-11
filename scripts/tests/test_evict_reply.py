@@ -97,8 +97,8 @@ def test_nothing_evicted_says_so(monkeypatch, posts):
             "9",
             _body(
                 "notice",
-                "no lock held by another pull request on a cell this pull request changes in "
-                "`dev-eu`",
+                "no lock held by another pull request on a cell this pull request still applies "
+                "in `dev-eu`",
             ),
         )
     ]
