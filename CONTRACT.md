@@ -1264,10 +1264,13 @@ Before any delete, it reads each holder's pull request once. A holder is
 stacked on a pull request when it is an open pull request whose base branch is
 that pull request's head branch; an unknown holder never is. A holder further
 down a chain, based on the head branch of a pull request that is itself
-stacked, is not treated as stacked: the plan comment's commands section still
-names it and says what applying after eviction may overwrite. Evicting a stacked holder and then
-applying this pull request would overwrite what the holder applied, so any
-stacked holder refuses the whole command and nothing is released. The reply
+stacked, is not treated as stacked: the plan comment's commands section names
+it and says what applying after eviction may overwrite, unless a stacked holder
+holds a changed cell in the same environment. Evicting a stacked holder and
+then applying this pull request would overwrite what the holder applied, so any
+stacked holder refuses the whole command and nothing is released. A chained
+holder is a known limit: it is evicted, and applying this pull request after
+that can overwrite what it applied, as the commands section's line says. The reply
 is ``🔴 refused: no cell lock in `<env>` was released.`` with the refusal
 fenced, one sentence pair per stacked holder, lowest first:
 `#<h> is stacked on this pull request and holds <n> of its cell(s) in <env>; applying this pull request after

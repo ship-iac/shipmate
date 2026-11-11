@@ -612,7 +612,7 @@ def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, ove
     lock = f"it is locked by {lock_who(holder)}; {_lock_remedy(holder, env)}"
     base = f"the base also changed it; {_OVERLAP_REMEDY}"
     if locked and overlap:
-        return f"{lock}. {base.capitalize()}"
+        return f"{lock}. {base[0].upper()}{base[1:]}"
     if locked:
         return lock
     if overlap:

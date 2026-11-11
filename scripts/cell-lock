@@ -599,7 +599,8 @@ def _stacked(repo, holders, head_ref, run):
 
 
 def _read_stacked(repo, holders, head_ref, run, *, retry=True):
-    """Each of `holders` read once, in sorted order: (the holders `_is_stacked` on `head_ref`,
+    """Each of `holders` read once, in sorted order, through `gh_json`'s retry when `retry` is
+    set: (the holders `_is_stacked` on `head_ref`,
     [(holder, `_why` reason)] for each whose read fails or answers malformed)."""
     stacked, unread = [], []
     for holder in sorted(holders):

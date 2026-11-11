@@ -738,7 +738,7 @@ a draft — the six apply requirements in
 names which requirement failed. Each cell an apply runs is locked to the pull
 request until it merges or closes; another pull request's apply leaves that
 cell pending and names the holder, and `shipmate unlock <env> --evict` releases
-the lock on a cell the commenting pull request still applies. One holder stacked
+the lock on a cell the commenting pull request still applies. Any holder stacked
 on the commenting pull request refuses the whole command and releases nothing; a
 holder whose pull request cannot be read refuses too, and the reply says to
 comment again ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).

@@ -1861,7 +1861,8 @@ stays pending and the rest of the run applied. Follow the remedy:
 - `the base also changed it; update the branch from the base and push`: an
   `auto` apply held the blocker (§`⚪ held, the base changed these stacks after
   this branch left it`). A blocker that is also locked names the lock's remedy
-  first, then this one; clear both.
+  first, then this one as its own sentence, `The base also changed it; update
+  the branch from the base and push`; clear both.
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
 - ``it is held until the pull request is approved, then comment
@@ -2164,8 +2165,9 @@ not pair the rename; a base delete of that file, or a base rename of it to
 another path, is a merge conflict and refuses. Each
 plan was made on the branch's tree, so applying it would revert the base's
 change. The held cells stay pending, a cell that runs after one waits with the
-remedy `the base also changed it; update the branch from the base and push`, and
-the environments ordered after their environment by `needs` are skipped (next
+remedy `the base also changed it; update the branch from the base and push`
+(after a locked cell's remedy, the sentence `The base also changed it; update the
+branch from the base and push`), and the environments ordered after their environment by `needs` are skipped (next
 entry). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
