@@ -1239,10 +1239,11 @@ App key (§16).
 | `unlock` | the bound environment has no required reviewers; unlock reads no review decision | the job token (`contents: read`, and `actions: read`, which lists and downloads other runs' artifacts); an OIDC token for the bound environment's role; `SHIPMATE_SECRETS`; the variables; a cache token that cannot save. No encryption key |
 
 The pull-request condition is the review decision GitHub reports for the pull
-request. `apply.yml`'s `review` job re-reads it in the apply run, and
-`scripts/apply-detect` decides on that value: a targeted apply refuses, and a
-bare apply holds every environment the decision does not admit. It admits an
-apply to an environment when the decision is:
+request. `scripts/authorize` reads it when `shipmate apply` is commented and
+refuses `CHANGES_REQUESTED` there; `apply.yml`'s `review` job reads it again in
+the apply run, and `scripts/apply-detect` decides on that value: a targeted
+apply refuses, and a bare apply holds every environment the decision does not
+admit. The decision admits an apply to an environment when it is:
 
 - `APPROVED`. The engine checks no freshness of its own: whether a push after
   the approval resets the decision is up to the ruleset's freshness settings
@@ -1285,9 +1286,9 @@ state, whatever the repository layout. Put environments whose apply or unlock
 cells run without approval in a repository of their own, with its own
 `SHIPMATE_ENCRYPTION_KEY` value. The Actions cache and the job token are per
 repository, so that code then reaches only that repository's cache, token and
-key. Where code that ran without approval held the key, replace it;
-`CONTRACT.md` §Plan artifact encryption, "Rotation", states what a new key
-leaves undecryptable.
+key. Replace the key when someone who could push such code loses that
+access, as for the App key (row 14); `CONTRACT.md` §Plan artifact encryption,
+"Rotation", states what a new key leaves undecryptable.
 
 ## What none of this fixes
 

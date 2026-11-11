@@ -21,7 +21,7 @@ section below names the SHA the release tags.
 ### Security
 
 - **The engine judges only the `shipmate / gate` statuses the shipmate App's bot user created.** A status of that name posted with another token, such as a workflow `GITHUB_TOKEN` granted `statuses: write` or a personal access token, cannot hide a hold from a gate refresh or stop a plan run as a newer run's hold. Each `scripts/gate-status` invocation that lists the gate statuses (`newest`, `refuse-newer`, a `refresh` that reaches its hold check, a `post` whose write retries) first reads the bot user, `users/<slug>[bot]`: one more API read. No consumer action.
-- **The plan, apply and unlock cells leave no copy of the job's git token in their checkout.** Treat the job token as held by the pull request's code all the same; `docs/hardening.md` §What pull-request code holds states what pull-request code holds in each job that runs it and when each runs without anyone's approval. Consumer code in one of those cells, such as an `external` data source or a wrapper script, that ran authenticated `git` against `origin` through the persisted token fails on a private repository.
+- **The plan, apply and unlock cells leave no copy of the job's git token in their checkout.** Treat the job token as held by the pull request's code all the same; `docs/hardening.md` §What pull-request code holds states what pull-request code holds in each job that runs it and when each runs without anyone's approval. Consumer code in one of those cells, such as an `external` data source or a wrapper script, that ran authenticated `git` against `origin` through the persisted token fails on a private repository: give that code a credential of its own through `SHIPMATE_SECRETS`.
 
 ## [0.55.0] — 2026-11-09
 
