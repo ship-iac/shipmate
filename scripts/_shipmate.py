@@ -323,20 +323,37 @@ def lock_wait_remedy(who: str, env: str) -> str:
     )
 
 
+def evict_release(holders, env_name: str, subject: str) -> str:
+    """`release the locks <who> hold(s); applying <subject> after that may overwrite what <who>
+    applied to <env_name>`, naming `holders` known ascending, then an unknown one (None)."""
+    names = [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
+    if None in holders:
+        names.append(lock_who(None))
+    who = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    hold, applied = ("holds", who) if len(names) == 1 else ("hold", "they")
+    return (
+        f"release the locks {who} {hold}; applying {subject} after that may overwrite what "
+        f"{applied} applied to {env_name}"
+    )
+
+
+# Threat model: the refusal never offers eviction without its consequence. Eviction is
+# environment-wide and the holder's state is unread, so no sentence branches on it; the order
+# of recovery steps lives in docs/troubleshooting.md.
 def deploy_lock_remedy(holders, stacks: str) -> str:
-    """What frees the cell locks `holders`, `(holder, env)` pairs (holder None: unknown), keep
-    from a merge deploy, with no final period: a new pull request changing `stacks` applies
-    them, after `lock_wait_remedy` for each known holder, or an eviction for an unknown one."""
-    steps = []
-    for holder, env in sorted(set(holders), key=lambda p: (p[1], p[0] is None, p[0] or 0)):
-        who = lock_who(holder)
-        free = (
-            f"comment `shipmate unlock {env} --evict`"
-            if holder is None
-            else lock_wait_remedy(who, env)
-        )
-        steps.append(f"For {who} in {env}: {free} on the new pull request.")
-    return f"Open a pull request that changes {stacks}. {' '.join(steps)} Then apply it"
+    """What frees the cell locks `holders`, `(holder, env)` pairs (holder None: unknown), that
+    refuse a merge deploy, with no final period: a new pull request changing `stacks`, one
+    eviction sentence per environment (`evict_release`), then its apply."""
+    by_env = {}
+    for holder, env in holders:
+        by_env.setdefault(env, []).append(holder)
+    steps = " ".join(
+        f"Comment `shipmate unlock {env} --evict` on it to {evict_release(hs, env, 'it')}. The "
+        f"eviction also releases any other pull request's lock on its cells in {env}, so wait "
+        "for any holder still open to merge or close first."
+        for env, hs in sorted(by_env.items())
+    )
+    return f"Open a pull request that changes {stacks}. {steps} Then apply it"
 
 
 def event_payload(path):

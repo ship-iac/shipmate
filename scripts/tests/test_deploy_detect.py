@@ -1227,14 +1227,18 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
     ]
 
 
-def _wait_for(n):
+def _evict(who, hold, applied):
     return (
-        f"For #{n} in dev-eu: wait for #{n} to merge or close, then re-plan. If #{n} has already "
-        f"merged or closed, comment `shipmate unlock dev-eu --evict` on the new pull request."
+        f"Comment `shipmate unlock dev-eu --evict` on it to release the locks {who} {hold}; "
+        f"applying it after that may overwrite what {applied} applied to dev-eu. The eviction "
+        "also releases any other pull request's lock on its cells in dev-eu, so wait for any "
+        "holder still open to merge or close first."
     )
 
 
-LOCK_REMEDY = f"Open a pull request that changes these stacks. {_wait_for(7)} Then apply it."
+LOCK_REMEDY = (
+    f"Open a pull request that changes these stacks. {_evict('#7', 'holds', '#7')} Then apply it."
+)
 
 
 def _locked_run(tmp_path, monkeypatch, locks, pr_number="12"):
@@ -1290,8 +1294,7 @@ def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monk
     """Both cells held, one by an unknown holder: listed sorted, each with its holder.
 
     Mutation: render `#None` for an unknown holder -- the text changes.
-    Mutation: change `lock_who`'s text in `_shipmate` -- the text changes.
-    Mutation: give an unknown holder `lock_wait_remedy` (`if False` for `if holder is None`)."""
+    Mutation: change `lock_who`'s text in `_shipmate` -- the text changes."""
     with pytest.raises(SystemExit) as exc:
         _locked_run(
             tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 9, ("stacks/app", "dev-eu"): None}
@@ -1301,29 +1304,43 @@ def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monk
         "stacks/app / dev-eu (locked by an unknown holder), stacks/dns / dev-eu (locked by #9). "
         "None of this deploy's 2 pending cell(s) were applied: "
         "stacks/app / dev-eu, stacks/dns / dev-eu. Open a pull request that changes these "
-        f"stacks. {_wait_for(9)} For an unknown holder in dev-eu: comment `shipmate unlock dev-eu "
-        "--evict` on the new pull request. Then apply it."
+        f"stacks. {_evict('#9 and an unknown holder', 'hold', 'they')} Then apply it."
     )
 
 
 @pytest.mark.parametrize(
-    ("app", "dns", "steps"),
+    ("app", "dns", "step"),
     [
-        pytest.param(7, 7, _wait_for(7), id="one-holder-two-cells"),
-        pytest.param(9, 7, f"{_wait_for(7)} {_wait_for(9)}", id="two-holders"),
+        pytest.param(7, 7, _evict("#7", "holds", "#7"), id="one-holder-two-cells"),
+        pytest.param(9, 7, _evict("#7 and #9", "hold", "they"), id="two-holders"),
     ],
 )
-def test_the_lock_remedy_names_each_holder_once_in_order(tmp_path, monkeypatch, app, dns, steps):
-    """Mutation: drop `set(...)` in `deploy_lock_remedy` -- one-holder-two-cells repeats #7.
-    Mutation: `dict.fromkeys(holders)` for the `sorted(set(...))` -- two-holders names #9 first.
-    Mutation: restore the unconditional `comment shipmate unlock <env> --evict` -- red."""
+def test_the_lock_remedy_names_each_holder_once_in_order(tmp_path, monkeypatch, app, dns, step):
+    """Mutation: drop `set(...)` in `evict_release` -- one-holder-two-cells names #7 twice.
+    Mutation: `dict.fromkeys` for the `sorted(...)` in `evict_release` -- two-holders names #9
+    first.
+    Mutation: drop the overwrite clause from `evict_release` -- red."""
     with pytest.raises(SystemExit) as exc:
         _locked_run(
             tmp_path, monkeypatch, {("stacks/app", "dev-eu"): app, ("stacks/dns", "dev-eu"): dns}
         )
     assert str(exc.value).endswith(
         "were applied: stacks/app / dev-eu, stacks/dns / dev-eu. Open a pull request that "
-        f"changes these stacks. {steps} Then apply it."
+        f"changes these stacks. {step} Then apply it."
+    )
+
+
+def test_the_lock_remedy_has_one_eviction_sentence_per_environment_in_order():
+    """Mutation: iterate `by_env.items()` unsorted -- prod comes first. Mutation: drop the
+    wait-for-open-holders sentence -- red."""
+    assert dd.deploy_lock_remedy([(9, "prod"), (7, "dev")], "these stacks") == (
+        "Open a pull request that changes these stacks. Comment `shipmate unlock dev --evict` on "
+        "it to release the locks #7 holds; applying it after that may overwrite what #7 applied "
+        "to dev. The eviction also releases any other pull request's lock on its cells in dev, so "
+        "wait for any holder still open to merge or close first. Comment `shipmate unlock prod "
+        "--evict` on it to release the locks #9 holds; applying it after that may overwrite what "
+        "#9 applied to prod. The eviction also releases any other pull request's lock on its "
+        "cells in prod, so wait for any holder still open to merge or close first. Then apply it"
     )
 
 
