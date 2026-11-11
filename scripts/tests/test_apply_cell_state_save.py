@@ -129,9 +129,9 @@ def test_saved_is_true_only_on_the_lookups_exact_hit():
         "saved": {
             "description": (
                 "`true` only when a save-mode lookup found the entry this run saved under its "
-                "exact key: the first lookup, or one of up to four more that follow a miss after "
-                "3, 7, 10 and 10 s. Anything else means the state was not saved: the save failed, "
-                "was cancelled or skipped, or no lookup found the entry."
+                "exact key: the first lookup, or one of up to four more about 3, 10, 20 and 30 s "
+                "after a miss. Anything else means the state was not saved: the save failed, was "
+                "cancelled or skipped, or no lookup found the entry."
             ),
             "value": (
                 "${{ steps.verify.outputs.cache-hit == 'true' "
@@ -152,7 +152,8 @@ def test_the_troubleshooting_entry_states_the_re_lookup():
     assert (
         "When the first exact-key lookup finds no entry, the action looks up the same key up to "
         "four more times over about 30 s before it reports the state not saved; a failed, "
-        "cancelled or skipped save runs no lookup and reports at once."
+        "cancelled or skipped save runs no lookup and reports at once, and a run cancelled "
+        "during those lookups reports the state not saved although the entry may exist."
     ) in entry
 
 

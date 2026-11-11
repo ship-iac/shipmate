@@ -22,7 +22,7 @@ outputs:
   saved:
     description: >-
       `true` only when a save-mode lookup found the entry this run saved under its exact key: the
-      first lookup, or one of up to four more that follow a miss after 3, 7, 10 and 10 s. Anything
+      first lookup, or one of up to four more about 3, 10, 20 and 30 s after a miss. Anything
       else means the state was not saved: the save failed, was cancelled or skipped, or no lookup
       found the entry.
     value: ${{ steps.verify.outputs.cache-hit == 'true' || steps.verify2.outputs.cache-hit == 'true' || steps.verify3.outputs.cache-hit == 'true' || steps.verify4.outputs.cache-hit == 'true' || steps.verify5.outputs.cache-hit == 'true' }}
@@ -102,8 +102,9 @@ runs:
     - name: Look up the saved entry
       id: verify
       # actions/cache/save warns and succeeds when it stores nothing, so only exact-key lookups prove
-      # the entry; a miss is looked up 4 more times, as an entry can lag its save. One save per key
-      # (a second stores nothing, yet is found): run_id-run_attempt, one cell per stack x env.
+      # the entry. One lookup once missed an entry 300 ms after its save that existed minutes later,
+      # so a miss is looked up again. The key carries run_id-run_attempt and an attempt runs one cell
+      # per stack and environment, so a lookup can find no other save's entry.
       if: ${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
