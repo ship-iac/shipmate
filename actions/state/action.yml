@@ -101,10 +101,9 @@ runs:
         key: ${{ steps.key.outputs.key }}
     - name: Look up the saved entry
       id: verify
-      # actions/cache/save warns and succeeds when it stores nothing, so only exact-key lookups prove
-      # the entry. One lookup once missed an entry 300 ms after its save that existed minutes later,
-      # so a miss is looked up again. The key carries run_id-run_attempt and an attempt runs one cell
-      # per stack and environment, so a lookup can find no other save's entry.
+      # actions/cache/save succeeds when it stores nothing, so only exact-key lookups prove the entry;
+      # one lookup 300 ms after a save missed an entry found minutes later. The key is per run attempt
+      # and an attempt runs one cell per stack and environment, so no other save's entry can match.
       if: ${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:

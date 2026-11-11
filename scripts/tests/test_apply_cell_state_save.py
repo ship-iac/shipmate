@@ -153,7 +153,7 @@ def test_the_troubleshooting_entry_states_the_re_lookup():
         "When the first exact-key lookup finds no entry, the action looks up the same key up to "
         "four more times over about 30 s before it reports the state not saved; a failed, "
         "cancelled or skipped save runs no lookup and reports at once, and a run cancelled "
-        "during those lookups reports the state not saved although the entry may exist."
+        "after the save reports the state not saved although the entry may exist."
     ) in entry
 
 

@@ -1200,9 +1200,9 @@ that step left: the save failed or was cancelled, the exact-key lookups after it
 found no entry, or there was no state file to save. When the first exact-key
 lookup finds no entry, the action looks up the same key up to four more times
 over about 30 s before it reports the state not saved; a failed, cancelled or
-skipped save runs no lookup and reports at once, and a run cancelled during those
-lookups reports the state not saved although the entry may exist. The warning step fails the
-cell's job, so its apply check stays pending. An apply run that was not
+skipped save runs no lookup and reports at once, and a run cancelled after the
+save reports the state not saved although the entry may exist. The warning
+step fails the cell's job, so its apply check stays pending. An apply run that was not
 cancelled posts an apply comment; its row reads not recorded when its apply
 succeeded, otherwise failed, and its `state not saved:` note names up to 5
 lost cells whose summary artifact uploaded and counts the rest. Without that

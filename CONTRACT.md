@@ -947,7 +947,8 @@ the repository root, or none:
   §`state cache entry ... failed authentication` tells them apart.
   The save is verified: `actions/state` looks its entry up by the exact save
   key, with no `restore-keys`, and after a miss up to four more times over
-  about 30 s; its `saved` output is `true` only when a lookup finds it, because `actions/cache/save` warns and succeeds when the cache stores
+  about 30 s; its `saved` output is `true` only when a lookup finds it,
+  because `actions/cache/save` warns and succeeds when the cache stores
   nothing. `Save state` does not fail on a miss. `apply-cell`'s
   `Warn that the applied state was not saved` step fails the cell's job, so its
   apply check stays pending, whenever an apply step that ran over a restored
