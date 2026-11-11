@@ -884,9 +884,11 @@ def _policy_gap(policy):
 def _policy_gaps(item, path, entries):
     """`(name, _policy_gap)` for each matching listed policy, or the `cannot check` row for
     `item` when a policy cannot be read or judged. A list, because two policies may share a
-    name."""
+    name. An entry listed with an `enforcement` other than `active` is not read."""
     gaps = []
     for entry in entries:
+        if entry.get("enforcement", "active") != "active":
+            continue
         detail_path = f"{path}/{entry.get('id')}"
         policy, reason = _read_or_reason(detail_path)
         if policy is None:
@@ -903,13 +905,14 @@ def _event_policy_item(ctx):
     """`ok` on a private or internal repository without a read. On a public one, `ok` when
     at least one repository policy matches (`_policy_gap`) and every match allows every
     event in `SHIPMATE_EVENTS`; `cannot check` on a failed read, a list whose `total_count`
-    is not the number of policies it returned (one page is read), or a policy whose reach
+    is not the number of policies it returned (one page of 100 is read), or a policy whose reach
     `_policy_gap` cannot judge.
     """
     item = "a repository Actions event policy allows shipmate's events (public repository)"
     if ctx["is_private"]:
         return "ok", item, []
-    path = f"repos/{ctx['repo']}/actions/policies"
+    base = f"repos/{ctx['repo']}/actions/policies"
+    path = f"{base}?per_page=100"
     listed, reason = _read_or_reason(path)
     if listed is None:
         return _unread(item, path, reason)
@@ -918,7 +921,7 @@ def _event_policy_item(ctx):
     if total != len(entries):
         line = f"`{path}` lists {len(entries)} of {total} policies; onboard reads one page."
         return "cannot check", item, [line]
-    gaps = _policy_gaps(item, path, entries)
+    gaps = _policy_gaps(item, base, entries)
     if isinstance(gaps, tuple):
         return gaps
     lines = [f"Policy {name} does not allow {', '.join(m)}." for name, m in gaps if m]

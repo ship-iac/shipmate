@@ -102,6 +102,7 @@ ACTIONS_OK_ROUTES = {
     },
 }
 POLICIES = "repos/o/r/actions/policies"
+POLICY_LIST = f"{POLICIES}?per_page=100"
 #: The samples' policy, as `GET repos/{owner}/{repo}/actions/policies/{id}` returns it.
 SAMPLE_POLICY = {
     "id": 12890,
@@ -122,16 +123,16 @@ SAMPLE_POLICY = {
         }
     ],
 }
-ACTIONS_OK_ROUTES[POLICIES] = {
+ACTIONS_OK_ROUTES[POLICY_LIST] = {
     "total_count": 1,
-    "policies": [{"id": 12890, "enforcement": "active"}],
+    "policies": [{"id": 12890, "name": "Allow shipmate events", "enforcement": "active"}],
 }
 ACTIONS_OK_ROUTES[f"{POLICIES}/12890"] = SAMPLE_POLICY
 ACTIONS_READS = [
     ["gh", "api", ACTIONS],
     ["gh", "api", ACTIONS_WORKFLOW],
     ["gh", "api", SELECTED_ACTIONS],
-    ["gh", "api", POLICIES],
+    ["gh", "api", POLICY_LIST],
     ["gh", "api", f"{POLICIES}/12890"],
 ]
 WORKFLOW_PERMS_PUT = (
@@ -1227,7 +1228,7 @@ FRESH_ROUTES = {
         "default_workflow_permissions": "write",
         "can_approve_pull_request_reviews": True,
     },
-    POLICIES: {"total_count": 0, "policies": []},
+    POLICY_LIST: {"total_count": 0, "policies": []},
 }
 
 
@@ -2996,10 +2997,15 @@ def _paths(include, exclude=()):
     return {"workflow_path": {"include": include, "exclude": list(exclude)}}
 
 
+def _listed(policy):
+    """A policy as `GET repos/{owner}/{repo}/actions/policies` lists it."""
+    return {k: policy[k] for k in ("id", "name", "enforcement")}
+
+
 def _event_row(monkeypatch, *policies, **over):
     """`_event_policy_item` over `policies`, each listed and readable at its own id."""
     routes = {
-        POLICIES: {"total_count": len(policies), "policies": [{"id": p["id"]} for p in policies]}
+        POLICY_LIST: {"total_count": len(policies), "policies": [_listed(p) for p in policies]}
     }
     routes |= {f"{POLICIES}/{p['id']}": p for p in policies}
     fake = make_gh(routes)
@@ -3050,6 +3056,31 @@ def test_no_matching_policy_or_a_missing_event_is_todo(monkeypatch, policies, li
     )
 
 
+def test_a_policy_listed_as_disabled_is_not_read(monkeypatch):
+    """Mutation: drop the list-level `enforcement` skip in `_policy_gaps`, reading the
+    disabled policy's detail anyway."""
+    row, fake = _event_row(monkeypatch, _policy(enforcement="disabled"))
+    assert (row, fake.calls) == (
+        ("todo", EVENT_ROW, [*NO_MATCH, *EVENT_POLICY_TODO]),
+        [["gh", "api", POLICY_LIST]],
+    )
+
+
+def test_a_disabled_policy_listed_without_enforcement_is_judged_on_its_detail(monkeypatch):
+    """Mutation: drop the `enforcement` test in `_policy_gap`."""
+    disabled = _policy(enforcement="disabled")
+    routes = {
+        POLICY_LIST: {"total_count": 1, "policies": [{"id": 12890}]},
+        f"{POLICIES}/12890": disabled,
+    }
+    monkeypatch.setattr(onboard, "_run", make_gh(routes))
+    assert onboard._event_policy_item(ctx()) == (
+        "todo",
+        EVENT_ROW,
+        [*NO_MATCH, *EVENT_POLICY_TODO],
+    )
+
+
 PATTERN = ["`repos/o/r/actions/policies/12890` names a workflow path pattern."]
 UNSCOPED = ["`repos/o/r/actions/policies/12890` names no workflow path to include."]
 
@@ -3085,25 +3116,25 @@ def test_a_policy_list_longer_than_its_page_cannot_be_checked(monkeypatch):
     Mutation: drop the `total_count` comparison, so the one listed policy reads `ok`.
     """
     routes = {
-        POLICIES: {"total_count": 2, "policies": [{"id": 12890}]},
+        POLICY_LIST: {"total_count": 2, "policies": [_listed(SAMPLE_POLICY)]},
         f"{POLICIES}/12890": SAMPLE_POLICY,
     }
     monkeypatch.setattr(onboard, "_run", make_gh(routes))
     assert onboard._event_policy_item(ctx()) == (
         "cannot check",
         EVENT_ROW,
-        [f"`{POLICIES}` lists 1 of 2 policies; onboard reads one page."],
+        [f"`{POLICY_LIST}` lists 1 of 2 policies; onboard reads one page."],
     )
 
 
 def test_a_forbidden_policy_read_cannot_be_checked(monkeypatch):
     """Mutation: return `todo` instead of `_unread` when the list read fails."""
-    denied = SystemExit(f"command failed (1): gh api {POLICIES}\n{GH_403}")
-    monkeypatch.setattr(onboard, "_run", make_gh({POLICIES: denied}))
+    denied = SystemExit(f"command failed (1): gh api {POLICY_LIST}\n{GH_403}")
+    monkeypatch.setattr(onboard, "_run", make_gh({POLICY_LIST: denied}))
     assert onboard._event_policy_item(ctx()) == (
         "cannot check",
         EVENT_ROW,
-        [f"`{POLICIES}` could not be read: {GH_403}"],
+        [f"`{POLICY_LIST}` could not be read: {GH_403}"],
     )
 
 
@@ -3169,7 +3200,7 @@ def test_a_failed_policy_read_cannot_be_checked(monkeypatch):
     """Mutation: `continue` instead of returning `_unread` when a policy's read fails."""
     detail = f"{POLICIES}/12890"
     denied = SystemExit(f"command failed (1): gh api {detail}\n{GH_403}")
-    routes = {POLICIES: {"total_count": 1, "policies": [{"id": 12890}]}, detail: denied}
+    routes = {POLICY_LIST: {"total_count": 1, "policies": [_listed(SAMPLE_POLICY)]}, detail: denied}
     monkeypatch.setattr(onboard, "_run", make_gh(routes))
     assert onboard._event_policy_item(ctx()) == (
         "cannot check",
