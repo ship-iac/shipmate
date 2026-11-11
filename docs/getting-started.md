@@ -732,9 +732,10 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 #### Allow shipmate's events on a public repository
 
 From 2026-12-02 GitHub blocks `pull_request_target` in a public repository
-unless a repository Actions event policy allows it. A private or internal
+unless a repository Actions event policy allows it; its announced brownout on
+2026-11-16, 16:00-18:00 UTC, blocks it the same way. A private or internal
 repository needs no policy. Without one, every autoplan ends `startup_failure`
-with no job: no `plan / ` check, no plan comment and no `shipmate / gate`
+with no job and creates no new `plan / ` check, plan comment or `shipmate / gate`
 status. The `release` run of a closed pull request is blocked the same way, so
 its cell locks stay ([`troubleshooting.md`](troubleshooting.md) §A public
 repository's pull request gets no plan, comment or gate status).
