@@ -16,7 +16,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **A transient GitHub API failure on these reads is retried twice, 2 and 5 seconds later, before it fails the job or degrades its step**: a pull-request read (`facts`, apply `detect`, the plan comment's head check), a cell-lock read, the merge-to-pull-request mapping, the plan-comment listing, an apply's autoplan run listing, a drift sweep's default-branch head read, an `auto` apply's pusher-permission and base-branch reads, and the plan run's check-suite read. `shipmate doctor`'s reads other than its check-run listing, and `gh api` calls a workflow step makes directly (the commenter's permission read among them), are single-attempt unless the step has its own retry.
+- **The engine's Python scripts retry a transient GitHub API failure on most reads whose failure would fail the job.** A 5xx, a dropped connection or a truncated body is retried twice, 2 and 5 seconds later; the pull-request, cell-lock, merge-to-pull-request mapping, plan-comment listing and drift default-branch head reads are among them. `scripts/onboard`'s `gh api` reads retry the same way. A read that stays single-attempt shows no retry notice above its `command failed` annotation.
 
 ## [0.55.0] — 2026-11-09
 

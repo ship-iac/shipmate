@@ -423,7 +423,7 @@ def test_an_unread_head_closes_no_removed_cells_issue_and_fails_the_run(
 
 class _Proc:
     def __init__(self, returncode, stdout, stderr=""):
-        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+        self.returncode, self.stdout, self.stderr = returncode, stdout.encode(), stderr.encode()
 
 
 _HEAD_READ = ["gh", "api", "repos/acme/demo/branches/main", "--jq", ".commit.sha"]
@@ -447,8 +447,7 @@ def _head_reads(monkeypatch, *procs):
 
 
 def test_default_branch_head_retries_a_transient_failure(monkeypatch):
-    """Mutations, each run: call the read without `retried` -- None after one call; put gh's
-    stderr on the argv line of the read's `SystemExit` -- `is_transient` misses it, one call."""
+    """Mutation: call the read without `retried` -- None after one call."""
     seen, slept = _head_reads(monkeypatch, _502, _Proc(0, _SHA + "\n"))
     assert di.default_branch_head("main") == _SHA
     assert (seen, slept) == ([(_HEAD_READ, "workflow-token")] * 2, [2])
@@ -462,7 +461,7 @@ def test_default_branch_head_is_none_after_three_transient_failures(monkeypatch)
 
 
 def test_default_branch_head_is_none_after_one_404(monkeypatch):
-    """Mutation: retry any `SystemExit` (a loop around `read`) -- a second call."""
+    """Mutation: retry any `SystemExit` (a loop around `run`) -- a second call."""
     seen, slept = _head_reads(monkeypatch, _Proc(1, "", "gh: Not Found (HTTP 404)\n"))
     assert di.default_branch_head("main") is None
     assert (seen, slept) == ([(_HEAD_READ, "workflow-token")], [])

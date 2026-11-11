@@ -762,7 +762,7 @@ RETRY_NOTICES = (
     "::notice::command failed (1): gh api repos/acme/demo/pulls/7%0Agh: HTTP 502\n"
     "::notice::command failed (1): gh api repos/acme/demo/pulls/7%0Agh: HTTP 503\n"
 )
-PULL_FAILED = "command failed (1): gh api repos/acme/demo/pulls/7"
+PULL_FAILED = "command failed (1): gh api repos/acme/demo/pulls/7 | gh: HTTP 503"
 
 
 @bash_only

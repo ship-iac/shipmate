@@ -49,6 +49,7 @@ from _shipmate import (
     current_run_url,
     is_head_sha,
     retried,
+    run,
     run_annotated,
 )
 
@@ -180,16 +181,8 @@ def default_branch_head(branch):
         return None
     args = ["gh", "api", f"repos/{repo}/branches/{quote(branch)}", "--jq", ".commit.sha"]
     env = {**os.environ, "GH_TOKEN": os.environ.get("SHIPMATE_READ_TOKEN", "")}
-
-    def read():
-        p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
-        if p.returncode != 0:
-            # `is_transient` reads gh's stderr under the first line, the argv.
-            raise SystemExit(f"command failed ({p.returncode}): {' '.join(args)}\n{p.stderr}")
-        return p.stdout
-
     try:
-        head = retried(read).strip()
+        head = retried(lambda: run(args, env=env)).strip()
     except SystemExit:
         return None
     return head if is_head_sha(head) else None

@@ -331,6 +331,7 @@ def fail_script(bin_dir, name, rc, stderr="", *, subcommand=None, stdout=""):
     ``name``, or only for its ``subcommand`` when given, after printing ``stdout`` to stdout and
     ``stderr`` to stderr, each when it is not empty, and run every other script or subcommand."""
     real = bin_dir / "python3-real"
+    assert not real.exists(), "one fail_script per bin_dir: a second one would replace the first"
     (bin_dir / "python3").rename(real)
     say = f"printf '%s' '{stdout}'\n" if stdout else ""
     say += f"cat >&2 <<'STDERR'\n{stderr}\nSTDERR\n" if stderr else ""

@@ -25,6 +25,7 @@ from _shipmate import (
     pr_head,
     retried,
     review_count,
+    run,
     run_annotated,
     utf8_output,
     validate_head_sha,
@@ -156,7 +157,7 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
     nothing itself: the stderr rides in the message. Reddens on returning `run(args)` with no
     `except` (the prefix is gone), and on writing stderr before raising."""
 
-    def fake_subprocess_run(args, capture_output=False, input=None):
+    def fake_subprocess_run(args, capture_output=False, input=None, env=None):
         return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"gh: boom\n")
 
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
@@ -164,6 +165,20 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
         _run(["gh", "api", "repos/an-org/a-repo"])
     assert str(exc.value) == "::error::command failed (1): gh api repos/an-org/a-repo\ngh: boom"
     assert capsys.readouterr().err == ""
+
+
+def test_run_hands_env_to_the_child(monkeypatch):
+    """Mutation: drop the `env=` pass-through from `run`'s `subprocess.run` call -- the child
+    gets no `env` and `seen` reads `[None]`."""
+    seen = []
+
+    def fake_subprocess_run(args, **kwargs):
+        seen.append(kwargs.get("env"))
+        return types.SimpleNamespace(returncode=0, stdout=b"out", stderr=b"")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    assert run(["gh", "api", "x"], env={"GH_TOKEN": "t"}) == "out"
+    assert seen == [{"GH_TOKEN": "t"}]
 
 
 def test_named_lists_cap_items_whole_and_counts_the_rest():

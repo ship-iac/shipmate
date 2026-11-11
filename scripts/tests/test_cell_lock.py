@@ -400,6 +400,29 @@ def test_repo_id_reads_again_after_a_failure(sleeps):
     assert (cl._repo_id(REPO, gh), cl._repo_id(REPO, gh), gh.drained()) == (REPO_ID, REPO_ID, True)
 
 
+TWO_LOCKS = [lock(AUTH_REF, OLD), lock(DNS_REF, OTHER, stack="stacks/dns")]
+
+
+def test_delete_each_reads_the_repository_id_once_for_every_lock(sleeps):
+    """A persistent 502 costs one retried read, not one per lock. Mutation: drop the pre-loop
+    `_repo_id` call -- the second lock's delete reads again and the double refuses it."""
+    gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, BAD_GATEWAY, BAD_GATEWAY)
+    with pytest.raises(SystemExit) as exc:
+        cl._delete_each(REPO, TWO_LOCKS, gh)
+    assert (exc.value.code, sleeps, gh.drained()) == (BAD_GATEWAY.code, [2, 5], True)
+
+
+def test_rollback_reads_the_repository_id_once_for_every_lock(sleeps):
+    """The read's failure joins `reason` and no delete is sent. Mutation: drop the pre-loop
+    `_repo_id` read -- the second lock's delete reads again and the double refuses it."""
+    gh = Gh().on(REPO_ID_READ, BAD_GATEWAY, BAD_GATEWAY, BAD_GATEWAY)
+    assert (cl._rollback(REPO, TWO_LOCKS, "::error::why", gh), sleeps, gh.drained()) == (
+        f"::error::why\n{BAD_GATEWAY.code}",
+        [2, 5],
+        True,
+    )
+
+
 def test_pr_state_retries_a_transient_failure(sleeps):
     """Mutation: call `run([...])` without `retried` -- the read refuses."""
     gh = Gh().on(PR_STATE_READ, BAD_GATEWAY, OPEN)

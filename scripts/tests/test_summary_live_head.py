@@ -312,7 +312,7 @@ def test_a_retried_failed_decision_warns_on_its_last_line(tmp_path):
         "::notice::command failed (1): gh api repos/acme/demo/pulls/42%0Agh: HTTP 502\n"
         "::notice::command failed (1): gh api repos/acme/demo/pulls/42%0Agh: HTTP 503\n"
     )
-    failed = "command failed (1): gh api repos/acme/demo/pulls/42"
+    failed = "command failed (1): gh api repos/acme/demo/pulls/42 | gh: HTTP 503"
     stdout, stderr, calls, outputs = _run(tmp_path, replan_stderr=notices + failed)
     assert (calls, outputs, stderr, stdout) == ([], {}, notices, f"{_warning(failed)[0]}\n")
 

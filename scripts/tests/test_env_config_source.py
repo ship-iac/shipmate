@@ -248,7 +248,7 @@ def test_a_failing_gh_refuses(monkeypatch):
     _env(monkeypatch)
     stdout = json.dumps(_blob("layout: tf_vars\n")).encode()
 
-    def fake_subprocess_run(args, capture_output=False, input=None):
+    def fake_subprocess_run(args, capture_output=False, input=None, env=None):
         return types.SimpleNamespace(returncode=1, stdout=stdout, stderr=b"gh: boom\n")
 
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)

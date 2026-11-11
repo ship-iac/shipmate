@@ -224,8 +224,16 @@ def delete(repo: str, lock: Lock, *, run=_run) -> bool:
 
 
 def _rollback(repo, locks, reason, run):
-    """`reason`, after deleting each of `locks`, joined with any delete's own refusal."""
+    """`reason`, after deleting each of `locks`, joined with any delete's own refusal. Never
+    raises. The repository id is read once before the deletes; when that read fails, its
+    failure joins `reason` and no delete is sent."""
     reasons = [reason]
+    try:
+        if locks:
+            _repo_id(repo, run)
+    except SystemExit as exc:
+        reasons.append(exc.code)
+        locks = []
     for lock in locks:
         try:
             delete(repo, lock, run=run)
@@ -383,8 +391,8 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
     (`pending`): keep a lock whose apply check name is in `pending`. Unmerged (`closed_at`):
     read `pr`'s state after listing its locks; still closed, delete them all; merged since,
     apply the merge rule to the pending checks of the head it merged at; open again, delete
-    only a lock committed at or before the close. An unreadable state refuses before any
-    delete. An unknown holder is never released here."""
+    only a lock committed at or before the close. An unreadable state or repository id refuses
+    before any delete. An unknown holder is never released here."""
     if (pending is None) == (closed_at is None):
         raise ValueError("pass exactly one of pending and closed_at")
     mine = [lock for lock in _scan(repo, "shipmate/locks/", run).values() if lock.pr == pr]
@@ -402,7 +410,10 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
 
 def _delete_each(repo, locks, run):
     """Delete each of `locks`. Returns (deleted locks, [(lock, refusal)]): a refusal does not
-    stop the rest."""
+    stop the rest. The repository id is read once before the deletes; when that read fails, it
+    raises and no delete is sent."""
+    if locks:
+        _repo_id(repo, run)
     gone, refused = [], []
     for lock in locks:
         try:
@@ -416,7 +427,8 @@ def _delete_each(repo, locks, run):
 def evict(repo, env: str, pr: int, stacks: set[str], *, run=_run):
     """Delete each lock in `env` on a stack in `stacks` held by anyone but `pr`, an unknown
     holder included. Returns (deleted locks, [(lock, refusal)] for each delete refused): a
-    refusal does not stop the rest, so every lock deleted is reported and its holder told."""
+    refusal does not stop the rest, so every lock deleted is reported and its holder told. An
+    unreadable repository id refuses before any delete."""
     wanted = {ref_name(env, s) for s in stacks}
     locks = read_locks(repo, [env], run=run).values()
     return _delete_each(repo, [lock for lock in locks if lock.ref in wanted and lock.pr != pr], run)

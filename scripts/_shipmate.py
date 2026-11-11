@@ -116,7 +116,7 @@ def scrub(text, secrets):
     return text
 
 
-def run(args, secrets=(), stdin=None):
+def run(args, secrets=(), stdin=None, *, env=None):
     r"""Run a `gh`, `git` or `terramate` invocation, returning stdout; raise on a nonzero exit.
 
     `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
@@ -131,6 +131,8 @@ def run(args, secrets=(), stdin=None):
     so that `onboard`'s `_gh_json_or_none` can swallow a 404 without printing it.
     Nothing else prints, so a caller that discards the exception discards the
     noise too.
+
+    `env`, when given, is the child's whole environment; None inherits this process's.
     """
     # args is a code-controlled gh/git/terramate argv run with shell=False, so no value in
     # it is shell-parsed. Values bound into a path are validated where they enter the script.
@@ -138,6 +140,7 @@ def run(args, secrets=(), stdin=None):
         args,
         capture_output=True,
         input=None if stdin is None else stdin.encode("utf-8"),
+        env=env,
     )
     if p.returncode != 0:
         # gh's stderr is the only diagnosis a hand-run script gets.
@@ -283,8 +286,9 @@ def gh_json(path, run=None, *, retry=True):
     """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
     with the tool's stderr in the message, from a single definition, so no caller repeats the
     `json.loads(_run(...))` pair. A transient failure is retried (`retried`); `retry=False`
-    reads once, for reads that degrade rather than fail: `doctor`'s, each to a report row, and
-    `cell-lock._stacked`'s, to a warning.
+    reads once, for a read that degrades per item inside a loop that runs in every plan summary,
+    where retries would hold the summary for their sleeps: `doctor`'s reads, each to a report
+    row, and `cell-lock._stacked`'s, once per lock holder.
 
     Homed beside `_run` for the same reason.
     """

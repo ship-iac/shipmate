@@ -2472,9 +2472,9 @@ engine's Python scripts retry a transient failure (a 5xx, a dropped connection,
 a truncated body) of a `gh api` call twice, 2 and 5 seconds later, for most
 reads whose failure would fail the job and for the writes of the gate, a
 dispatch and an apply check; each retry is logged as a notice naming the command
-and gh's first stderr line. A `command failed` annotation with retry notices
-above it in the step log failed three times; one with no retry notice was a
-single attempt. For a `command failed` annotation only, re-run the deploy once,
+and gh's first stderr line. A retry notice naming the same command above a
+`command failed` annotation in the step log means that call was retried; none
+means it was a single attempt. For a `command failed` annotation only, re-run the deploy once,
 and if it fails the same way, that stderr is the cause. When no annotation but
 `Process completed with exit code` names the cause, read the failed step's log:
 a traceback or a failed checkout or setup step shows there.
