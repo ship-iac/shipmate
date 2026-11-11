@@ -25,6 +25,7 @@ from _shipmate import (
     StackCycle,
     _load,
     command_data,
+    deploy_lock_remedy,
     lock_who,
     run_annotated,
     validate_head_sha,
@@ -161,12 +162,11 @@ def refuse_locked(repo, pending, pr_number):
     write_outputs(refused_locked=True)
     held = sorted((f"{c['stack']} / {c['environment']}", lock_who(c["holder"])) for c in locked)
     cells = sorted(f"{c['stack']} / {c['environment']}" for c in pending)
+    remedy = deploy_lock_remedy([(c["holder"], c["environment"]) for c in locked], "these stacks")
     raise SystemExit(
         f"::error::deploy refused: {len(held)} pending cell(s) are locked by another pull "
         f"request: {', '.join(f'{k} (locked by {who})' for k, who in held)}. None of this "
-        f"deploy's {len(cells)} pending cell(s) were applied: {', '.join(cells)}. Open a pull "
-        "request that changes these stacks, comment `shipmate unlock <env> --evict` on it for "
-        "each environment above, then apply it."
+        f"deploy's {len(cells)} pending cell(s) were applied: {', '.join(cells)}. {remedy}."
     )
 
 

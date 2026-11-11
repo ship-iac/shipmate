@@ -323,6 +323,22 @@ def lock_wait_remedy(who: str, env: str) -> str:
     )
 
 
+def deploy_lock_remedy(holders, stacks: str) -> str:
+    """What frees the cell locks `holders`, `(holder, env)` pairs (holder None: unknown), keep
+    from a merge deploy, with no final period: a new pull request changing `stacks` applies
+    them, after `lock_wait_remedy` for each known holder, or an eviction for an unknown one."""
+    steps = []
+    for holder, env in sorted(set(holders), key=lambda p: (p[1], p[0] is None, p[0] or 0)):
+        who = lock_who(holder)
+        free = (
+            f"comment `shipmate unlock {env} --evict`"
+            if holder is None
+            else lock_wait_remedy(who, env)
+        )
+        steps.append(f"For {who} in {env}: {free} on the new pull request.")
+    return f"Open a pull request that changes {stacks}. {' '.join(steps)} Then apply it"
+
+
 def event_payload(path):
     """The event payload at `path`, or {} when `path` is empty or the file cannot be read as a
     JSON object."""

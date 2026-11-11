@@ -1227,10 +1227,14 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
     ]
 
 
-LOCK_REMEDY = (
-    "Open a pull request that changes these stacks, comment `shipmate unlock <env> --evict` on it "
-    "for each environment above, then apply it."
-)
+def _wait_for(n):
+    return (
+        f"For #{n} in dev-eu: wait for #{n} to merge or close, then re-plan. If #{n} has already "
+        f"merged or closed, comment `shipmate unlock dev-eu --evict` on the new pull request."
+    )
+
+
+LOCK_REMEDY = f"Open a pull request that changes these stacks. {_wait_for(7)} Then apply it."
 
 
 def _locked_run(tmp_path, monkeypatch, locks, pr_number="12"):
@@ -1286,7 +1290,8 @@ def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monk
     """Both cells held, one by an unknown holder: listed sorted, each with its holder.
 
     Mutation: render `#None` for an unknown holder -- the text changes.
-    Mutation: change `lock_who`'s text in `_shipmate` -- the text changes."""
+    Mutation: change `lock_who`'s text in `_shipmate` -- the text changes.
+    Mutation: give an unknown holder `lock_wait_remedy` (`if False` for `if holder is None`)."""
     with pytest.raises(SystemExit) as exc:
         _locked_run(
             tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 9, ("stacks/app", "dev-eu"): None}
@@ -1295,7 +1300,30 @@ def test_an_unknown_holder_on_a_pending_cell_refuses_and_names_it(tmp_path, monk
         "::error::deploy refused: 2 pending cell(s) are locked by another pull request: "
         "stacks/app / dev-eu (locked by an unknown holder), stacks/dns / dev-eu (locked by #9). "
         "None of this deploy's 2 pending cell(s) were applied: "
-        "stacks/app / dev-eu, stacks/dns / dev-eu. " + LOCK_REMEDY
+        "stacks/app / dev-eu, stacks/dns / dev-eu. Open a pull request that changes these "
+        f"stacks. {_wait_for(9)} For an unknown holder in dev-eu: comment `shipmate unlock dev-eu "
+        "--evict` on the new pull request. Then apply it."
+    )
+
+
+@pytest.mark.parametrize(
+    ("app", "dns", "steps"),
+    [
+        pytest.param(7, 7, _wait_for(7), id="one-holder-two-cells"),
+        pytest.param(9, 7, f"{_wait_for(7)} {_wait_for(9)}", id="two-holders"),
+    ],
+)
+def test_the_lock_remedy_names_each_holder_once_in_order(tmp_path, monkeypatch, app, dns, steps):
+    """Mutation: drop `set(...)` in `deploy_lock_remedy` -- one-holder-two-cells repeats #7.
+    Mutation: `dict.fromkeys(holders)` for the `sorted(set(...))` -- two-holders names #9 first.
+    Mutation: restore the unconditional `comment shipmate unlock <env> --evict` -- red."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(
+            tmp_path, monkeypatch, {("stacks/app", "dev-eu"): app, ("stacks/dns", "dev-eu"): dns}
+        )
+    assert str(exc.value).endswith(
+        "were applied: stacks/app / dev-eu, stacks/dns / dev-eu. Open a pull request that "
+        f"changes these stacks. {steps} Then apply it."
     )
 
 

@@ -1902,8 +1902,9 @@ MERGED = 4
 DEPLOY = {"SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": str(MERGED)}
 HELD_BY_9 = (
     "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by #9, not by "
-    "this deploy's pull request. Open a pull request that changes this stack, comment "
-    "`shipmate unlock dev --evict` on it, then apply it"
+    "this deploy's pull request. Open a pull request that changes this stack. For #9 in dev: "
+    "wait for #9 to merge or close, then re-plan. If #9 has already merged or closed, comment "
+    "`shipmate unlock dev --evict` on the new pull request. Then apply it"
 )
 
 
@@ -1914,7 +1915,8 @@ def _locked_by(msg):
 
 
 def test_verify_deploy_refuses_a_cell_another_pull_request_locks(monkeypatch, tmp_path):
-    """Mutation: drop the holder compare (pass any lock): the lock by #9 passes."""
+    """Mutation: drop the holder compare (pass any lock): the lock by #9 passes. Mutation:
+    restore the unconditional `comment shipmate unlock dev --evict` remedy -- red."""
     gh = _locked_by(message(9, "dev", "stacks/auth"))
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == HELD_BY_9
 
@@ -1942,8 +1944,9 @@ def test_verify_deploy_names_the_cells_environment(monkeypatch, tmp_path):
     gh.on(commit_read(OLD), commit(OLD, message(9, "prod", "stacks/auth")))
     assert _verify_refusal(monkeypatch, tmp_path, gh, {**DEPLOY, "SHIPMATE_ENV": "prod"}) == (
         "::error::apply aborted for `prod` / `stacks/auth`: its cell lock is held by #9, not by "
-        "this deploy's pull request. Open a pull request that changes this stack, comment "
-        "`shipmate unlock prod --evict` on it, then apply it"
+        "this deploy's pull request. Open a pull request that changes this stack. For #9 in "
+        "prod: wait for #9 to merge or close, then re-plan. If #9 has already merged or closed, "
+        "comment `shipmate unlock prod --evict` on the new pull request. Then apply it"
     )
 
 
@@ -1964,12 +1967,14 @@ def test_verify_deploy_checks_a_push_with_pull_request_zero(monkeypatch, tmp_pat
 
 
 def test_verify_deploy_refuses_an_unknown_holder(monkeypatch, tmp_path):
-    """Mutation: pass an unknown holder (`held.pr in (pr, None)`)."""
+    """Mutation: pass an unknown holder (`held.pr in (pr, None)`). Mutation: give an unknown
+    holder `lock_wait_remedy` (`if False` for `if holder is None` in `deploy_lock_remedy`)."""
     gh = _locked_by("garbage")
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
         "::error::apply aborted for `dev` / `stacks/auth`: its cell lock is held by an unknown "
-        "holder, not by this deploy's pull request. Open a pull request that changes this stack, "
-        "comment `shipmate unlock dev --evict` on it, then apply it"
+        "holder, not by this deploy's pull request. Open a pull request that changes this stack. "
+        "For an unknown holder in dev: comment `shipmate unlock dev --evict` on the new pull "
+        "request. Then apply it"
     )
 
 
