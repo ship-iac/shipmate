@@ -562,10 +562,10 @@ def test_a_mode_other_than_exactly_one_refuses_before_any_read(
     """Each refusal is whole, writes nothing and reads no table.
 
     Mutations: drop the both-inputs refusal (both resolves from the table); drop the
-    neither-input refusal (empty-versions gets the invalid-JSON text, neither resolves from the
-    table); drop the `JSONDecodeError` handler (not-json raises a traceback); drop the
-    mapping check (not-an-object raises `AttributeError`); accept extra keys with
-    `set(given) >= set(ec.TOOLS)` (extra-key installs); `_VERSION.match` for `fullmatch`
+    neither-input refusal (neither and empty-versions get the `versions input is ''` text).
+    In `env-config.parse_tools`: drop the `JSONDecodeError` handler (not-json raises a
+    traceback); drop the mapping check (not-an-object raises `AttributeError`); accept extra keys
+    with `set(given) >= set(TOOLS)` (extra-key installs); `_VERSION.match` for `fullmatch`
     (pre-release installs); drop the `isinstance(v, str)` check (not-a-string raises
     `TypeError`)."""
     code, out, err, calls, _ = _resolve(monkeypatch, capsys, tmp_path, resolve=resolve, given=given)

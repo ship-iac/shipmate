@@ -11,6 +11,7 @@ import base64
 import contextlib
 import graphlib
 import importlib.util
+import json
 import os
 import pathlib
 import re
@@ -541,6 +542,22 @@ TOOLS = ("terramate", "tofu")
 
 #: Whole-value release grammar. `[0-9]`, not `\d`, refuses non-ASCII digits `int()` would accept.
 _VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+
+
+def parse_tools(raw, invalid):
+    """`raw`, a resolved `tools` pair as JSON, as `{tool: version}`: exactly the `TOOLS` keys,
+    each an `X.Y.Z` string. Anything else raises `SystemExit(invalid)`."""
+    try:
+        given = json.loads(raw)
+    except json.JSONDecodeError:
+        raise SystemExit(invalid) from None
+    if not (
+        isinstance(given, dict)
+        and sorted(given) == sorted(TOOLS)
+        and all(isinstance(v, str) and _VERSION.fullmatch(v) for v in given.values())
+    ):
+        raise SystemExit(invalid)
+    return given
 
 
 def engine_versions(path=VERSIONS_PATH):

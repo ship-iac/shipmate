@@ -933,34 +933,15 @@ def tag_filter_error(tags, sweep: bool):
 HEAD_PREFIX = f"the pull request head's {ec.CONFIG_PATH}: "
 
 
-def _given_tools(raw):
-    """The `tools` input as `{tool: version}`, or a refusal naming the value."""
-    invalid = (
-        f"::error::build-matrix's tools input is {raw!r}; outside a sweep it must be the setup "
-        "step's tools output, a JSON object of terramate and tofu to X.Y.Z versions. Wire "
-        "`tools: ${{ steps.setup.outputs.tools }}` into the build-matrix step."
-    )
-    try:
-        given = json.loads(raw)
-    except json.JSONDecodeError:
-        raise SystemExit(invalid) from None
-    if not (
-        isinstance(given, dict)
-        and sorted(given) == sorted(ec.TOOLS)
-        and all(isinstance(v, str) and ec._VERSION.fullmatch(v) for v in given.values())
-    ):
-        raise SystemExit(invalid)
-    return given
-
-
 def _head_table():
-    """The head's config file parsed by the strings-only loader; `{}` when the head has none."""
+    """The head's config file parsed by the strings-only loader; `{}` when the head has none.
+    A symlink refuses, so the head cannot point the read at a file outside its tree."""
     path = ec.CONFIG_PATH
     if not os.path.lexists(path):
         return {}
-    if not os.path.isfile(path):
+    if os.path.islink(path) or not os.path.isfile(path):
         raise SystemExit(
-            f"::error::{HEAD_PREFIX}the path is a directory or a dangling symlink, not a file. "
+            f"::error::{HEAD_PREFIX}the path is a directory or a symlink, not a file. "
             "Make it the config file, or remove it."
         )
     refusal = ec.runner_refusal()
@@ -995,7 +976,12 @@ def changed_tools(raw, sweep: bool):
     file and signature; nothing is installed or run."""
     if sweep is True:
         return {}
-    given = _given_tools(raw)
+    given = ec.parse_tools(
+        raw,
+        f"::error::build-matrix's tools input is {raw!r}; outside a sweep it must be the setup "
+        "step's tools output, a JSON object of terramate and tofu to X.Y.Z versions. Wire "
+        "`tools: ${{ steps.setup.outputs.tools }}` into the build-matrix step.",
+    )
     head = _head_table()
     engine = ec.engine_versions(ec.VERSIONS_PATH)
     errors = ec.tool_version_errors(head, engine)

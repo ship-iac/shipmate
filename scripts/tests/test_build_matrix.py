@@ -1,4 +1,5 @@
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -4089,7 +4090,7 @@ def test_every_invalid_head_tools_entry_is_named_under_the_head_prefix(monkeypat
 
 
 _NOT_A_FILE = (
-    f"{_HEAD}the path is a directory or a dangling symlink, not a file. Make it the config "
+    f"{_HEAD}the path is a directory or a symlink, not a file. Make it the config "
     "file, or remove it."
 )
 
@@ -4106,6 +4107,41 @@ def test_a_dangling_symlink_at_the_heads_config_path_refuses(monkeypatch, tmp_pa
     file and the head resolves to the pins)."""
     (tmp_path / ".github").mkdir()
     bash_symlink(tmp_path, tmp_path / "gone.yml", tmp_path / ".github" / "shipmate-config.yml")
+    assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
+
+
+@bash_only
+def test_a_symlink_to_a_file_at_the_heads_config_path_refuses(monkeypatch, tmp_path):
+    """The target is a valid config whose `tools` would refuse differently, so following the link
+    cannot pass. Mutation: drop `os.path.islink(path) or` from `_head_table` (the target's
+    `tools` refusal replaces this one); not yet seen red, because the host it was written on
+    skips it."""
+    target = tmp_path / "elsewhere.yml"
+    target.write_text("tools:\n  tofu: 1.13.0\n", encoding="utf-8")
+    (tmp_path / ".github").mkdir()
+    link = tmp_path / ".github" / "shipmate-config.yml"
+    bash_symlink(tmp_path, target, link)
+    if not (os.path.islink(link) and os.path.isfile(link)):
+        # Without the symlink privilege, MSYS makes a link Python neither follows nor reports.
+        reason = "this host makes no symlink Python follows; Linux CI does"
+        if os.environ.get("CI") == "true":
+            pytest.fail(reason)
+        pytest.skip(reason)
+    assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
+
+
+def test_a_path_reported_as_a_symlink_refuses_though_it_reads_as_a_file(monkeypatch, tmp_path):
+    """The host-independent half of the symlink case above, which Windows without the symlink
+    privilege skips: a regular file that `os.path.islink` reports as a link. Mutation: drop
+    `os.path.islink(path) or` from `_head_table` (the file's `tools` refusal replaces this one)."""
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "tools:\n  tofu: 1.13.0\n", encoding="utf-8"
+    )
+    real = os.path.islink
+    monkeypatch.setattr(
+        os.path, "islink", lambda p: str(p).endswith("shipmate-config.yml") or real(p)
+    )
     assert _head_refusal(monkeypatch, tmp_path) == _NOT_A_FILE
 
 
@@ -4129,10 +4165,20 @@ def test_a_head_config_that_does_not_parse_refuses(monkeypatch, tmp_path, head, 
     assert _head_refusal(monkeypatch, tmp_path, head) == f"{_HEAD}{refusal}"
 
 
-@pytest.mark.parametrize("tools", ["", "{}", '{"terramate": "0.17.1"}', "not json"])
+@pytest.mark.parametrize(
+    "tools",
+    [
+        "",
+        "{}",
+        '{"terramate": "0.17.1"}',
+        "not json",
+        '{"terramate": "0.17.1", "tofu": "1.13.1", "terraform": "1.0.0"}',
+    ],
+)
 def test_a_plan_with_an_empty_or_invalid_tools_input_refuses(monkeypatch, tmp_path, tools):
-    """A plan wrapper that forgets `tools` fails loud rather than checking nothing. Mutation:
-    return `{}` from `changed_tools` for an empty input -- the empty row plans."""
+    """A plan wrapper that forgets `tools` fails loud rather than checking nothing. Mutations:
+    return `{}` from `changed_tools` for an empty input -- the empty row plans; accept extra keys
+    in `env-config.parse_tools` with `set(given) >= set(TOOLS)` -- the last row plans."""
     assert _head_refusal(monkeypatch, tmp_path, "tools:\n  tofu: 1.13.2\n", tools) == (
         f"::error::build-matrix's tools input is {tools!r}; outside a sweep it must be the setup "
         "step's tools output, a JSON object of terramate and tofu to X.Y.Z versions. Wire "

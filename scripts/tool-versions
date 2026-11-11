@@ -27,25 +27,6 @@ from _shipmate import _load, run_annotated
 ec = _load("env-config")
 
 
-def _given(raw):
-    """The `versions` input as `{tool: version}`, or a refusal naming the value."""
-    invalid = (
-        f"::error::setup's versions input is {raw!r}; it must be the detect job's tools output, "
-        "a JSON object of terramate and tofu to X.Y.Z versions."
-    )
-    try:
-        given = json.loads(raw)
-    except json.JSONDecodeError:
-        raise SystemExit(invalid) from None
-    if not (
-        isinstance(given, dict)
-        and sorted(given) == sorted(ec.TOOLS)
-        and all(isinstance(v, str) and ec._VERSION.fullmatch(v) for v in given.values())
-    ):
-        raise SystemExit(invalid)
-    return given
-
-
 def _resolved():
     engine = ec.engine_versions(ec.VERSIONS_PATH)
     table = ec.load_config(ec.default_branch_text())
@@ -75,7 +56,11 @@ def main():
     if resolve:
         versions = _resolved()
     else:
-        versions = _given(raw)
+        versions = ec.parse_tools(
+            raw,
+            f"::error::setup's versions input is {raw!r}; it must be the detect job's tools "
+            "output, a JSON object of terramate and tofu to X.Y.Z versions.",
+        )
         for tool in ec.TOOLS:
             print(f"{tool} {versions[tool]} from the detect job")
     tools = json.dumps({tool: versions[tool] for tool in ec.TOOLS}, separators=(",", ":"))
