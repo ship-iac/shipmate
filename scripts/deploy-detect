@@ -68,8 +68,9 @@ def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
             if pull:
                 return pull["head"]["sha"], str(pull["number"])
             listed = ", ".join(f"#{p['number']}" for p in pulls)
+            verb = "contains" if len(pulls) == 1 else "contain"
             return _push(
-                f"could not map {merge_sha} to the pull request that merged it: {listed} contain "
+                f"could not map {merge_sha} to the pull request that merged it: {listed} {verb} "
                 f"it but none records it as its merge commit; deploying it as a push to {branch}",
                 merge_sha,
             )

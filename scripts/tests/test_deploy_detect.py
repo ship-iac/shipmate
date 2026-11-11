@@ -82,7 +82,7 @@ def test_merged_head_only_open_pr_falls_back_to_merge_sha(monkeypatch, capsys):
     assert dd._merged_head("o/r", "merge123", "main") == ("merge123", "")
     assert paths == [PULLS_PATH]
     assert capsys.readouterr().err == (
-        "::warning::could not map merge123 to the pull request that merged it: #6 contain it but "
+        "::warning::could not map merge123 to the pull request that merged it: #6 contains it but "
         "none records it as its merge commit; deploying it as a push to main\n"
     )
 
@@ -105,7 +105,7 @@ def test_merged_head_one_merged_pull_with_another_merge_commit_is_a_push(monkeyp
     assert dd._merged_head("o/r", "merge123", "main") == ("merge123", "")
     assert paths == [PULLS_PATH]
     assert capsys.readouterr().err == (
-        "::warning::could not map merge123 to the pull request that merged it: #8 contain it but "
+        "::warning::could not map merge123 to the pull request that merged it: #8 contains it but "
         "none records it as its merge commit; deploying it as a push to main\n"
     )
 
