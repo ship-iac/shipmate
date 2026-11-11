@@ -372,7 +372,7 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     )
 
 
-#: The command section, hand-written: never `sc.commands(set())`, which would pass whatever the
+#: The command section, hand-written: never `sc.commands({})`, which would pass whatever the
 #: module says.
 COMMANDS = (
     "<details><summary>shipmate commands</summary>\n\n"
@@ -435,7 +435,7 @@ def test_the_command_section_never_shrinks_a_cut_plan():
     """A plan cut against SIZE_BUDGET keeps every character it has without hints, and the
     section yields to it.
 
-    Mutation: add `len(commands(set())) + 2` to `reserve` when `hints` -- the plan is cut
+    Mutation: add `len(commands({})) + 2` to `reserve` when `hints` -- the plan is cut
     shorter and the section shows, red."""
     cells = [(_cell(), "\n".join(f"  + r{i:04}{'x' * 20}" for i in range(3000)))]
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
@@ -445,44 +445,105 @@ def test_the_command_section_never_shrinks_a_cut_plan():
     assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True) == (without, False, False)
 
 
-def _evict(env):
-    return f"Comment `shipmate unlock {env} --evict` to take a cell another pull request holds.\n\n"
+def _with_evict(*lines):
+    """`COMMANDS` with the hand-written evict `lines` before the help line."""
+    return COMMANDS.replace(
+        "Comment `shipmate help`", "".join(f"{x}\n\n" for x in lines) + "Comment `shipmate help`"
+    )
 
 
-#: `COMMANDS` with one evict paragraph per environment, hand-written.
-_EVICT_DEV_EU = COMMANDS.replace(
-    "Comment `shipmate help`", _evict("dev-eu") + "Comment `shipmate help`"
+_EVICT_12 = (
+    "Comment `shipmate unlock dev-eu --evict` to release the locks #12 holds; applying this pull "
+    "request after that may overwrite what #12 applied to dev-eu."
+)
+_EVICT_12_UNKNOWN = (
+    "Comment `shipmate unlock dev-eu --evict` to release the locks #12 and an unknown holder "
+    "hold; applying this pull request after that may overwrite what they applied to dev-eu."
+)
+_EVICT_PROD_3 = (
+    "Comment `shipmate unlock prod --evict` to release the locks #3 holds; applying this pull "
+    "request after that may overwrite what #3 applied to prod."
 )
 
 
 def test_the_command_section_without_a_locked_cell_is_unchanged():
-    """Mutation: always add an evict line (`sorted(locked | {"dev-eu"})`) -- red."""
-    assert sc.commands(set()) == COMMANDS
+    """Mutation: always add an evict line (`sorted({**locked, "dev-eu": [1]}.items())`) --
+    red."""
+    assert sc.commands({}) == COMMANDS
 
 
 def test_the_command_section_names_the_evict_command_for_a_locked_environment():
-    """Mutation: drop the evict line from `commands` -- red."""
+    """Mutations: drop the evict line from `commands` -- red; drop the overwrite clause from
+    `_evict_line` -- red."""
     locks = {"stacks/app / dev-eu": 12}
     without = sc.build_comment(_LOCK_CELLS, CHECKS, RUN_URL, SHA, locks=locks)[0]
     assert sc.build_comment(_LOCK_CELLS, CHECKS, RUN_URL, SHA, hints=True, locks=locks) == (
-        without + "\n\n" + _EVICT_DEV_EU,
+        without + "\n\n" + _with_evict(_EVICT_12),
         False,
         False,
     )
 
 
 def test_the_command_section_names_each_locked_environment_once_sorted():
-    """Two locked cells in `dev-eu`, one in `prod`. Mutation: `sorted(locked, reverse=True)` --
-    red."""
+    """Two locked cells in `dev-eu` (#12 and an unknown holder), one in `prod`. Mutation:
+    `sorted(locked.items(), reverse=True)` -- red."""
     cells = [*_LOCK_CELLS, (_cell(environment="prod"), None)]
     locks = {"stacks/app / dev-eu": 12, "stacks/db / dev-eu": None, "stacks/app / prod": 3}
     body = sc.build_comment(cells, CHECKS, RUN_URL, SHA, hints=True, locks=locks)[0]
-    assert body.endswith(
-        "\n\n"
-        + COMMANDS.replace(
-            "Comment `shipmate help`", _evict("dev-eu") + _evict("prod") + "Comment `shipmate help`"
-        )
+    assert body.endswith("\n\n" + _with_evict(_EVICT_12_UNKNOWN, _EVICT_PROD_3))
+
+
+def test_the_evict_line_names_two_and_three_holders_ascending():
+    """Mutations: `sorted(..., reverse=True)` over the known holders -- red; join every name
+    with `, ` (no ` and `) -- red; `holds` and the holder's name for every count -- red."""
+    assert sc.commands({"dev-eu": [9, 5, 9]}) == _with_evict(
+        "Comment `shipmate unlock dev-eu --evict` to release the locks #5 and #9 hold; applying "
+        "this pull request after that may overwrite what they applied to dev-eu."
     )
+    assert sc.commands({"dev-eu": [9, 5, 12]}) == _with_evict(
+        "Comment `shipmate unlock dev-eu --evict` to release the locks #5, #9 and #12 hold; "
+        "applying this pull request after that may overwrite what they applied to dev-eu."
+    )
+
+
+def test_the_evict_line_names_an_unknown_holder_after_the_known_ones():
+    """`None` first in the holders, so a sort over every holder would raise. Mutations: put the
+    unknown holder first -- red; drop the unknown holder -- red."""
+    assert sc.commands({"dev-eu": [None, 12, None]}) == _with_evict(_EVICT_12_UNKNOWN)
+    assert sc.commands({"dev-eu": [None]}) == _with_evict(
+        "Comment `shipmate unlock dev-eu --evict` to release the locks an unknown holder holds; "
+        "applying this pull request after that may overwrite what an unknown holder applied to "
+        "dev-eu."
+    )
+
+
+def test_the_evict_line_renders_the_environment_through_md_name_outside_the_code_span():
+    """Mutation: render `{env}` instead of `{_md_name(env)}` after `applied to` -- the `@`
+    mentions, red."""
+    assert sc.commands({"dev@eu": [5]}) == _with_evict(
+        "Comment `shipmate unlock dev@eu --evict` to release the locks #5 holds; applying this "
+        "pull request after that may overwrite what #5 applied to dev@<!-- -->eu."
+    )
+
+
+def test_an_environment_with_a_stacked_holder_has_no_evict_line():
+    """Evict refuses there: a stacked holder alone, and beside a non-stacked one. `prod`'s
+    holder is not stacked and keeps its line. Mutations: ignore `stacked` in `commands` -- red;
+    `all` in place of `any` -- the mixed environment renders its line, red."""
+    cells = [*_LOCK_CELLS, (_cell(environment="prod"), None)]
+    kw = {"stacked": frozenset({7}), "default_branch": "main"}
+    only = {"stacks/app / dev-eu": 7, "stacks/app / prod": 3}
+    assert _section(cells, locks=only, **kw) == _with_evict(_EVICT_PROD_3)
+    mixed = {"stacks/app / dev-eu": 7, "stacks/db / dev-eu": 12, "stacks/app / prod": 3}
+    assert _section(cells, locks=mixed, **kw) == _with_evict(_EVICT_PROD_3)
+
+
+def test_a_stacked_holder_with_no_default_branch_keeps_the_evict_line():
+    """`_stacked_held` judges no holder stacked without a default branch. Mutation: pass
+    `stacked` to `commands` in place of `_stacked_held`'s holders -- the line goes, red."""
+    locks = {"stacks/app / dev-eu": 12}
+    section = _section(_LOCK_CELLS, locks=locks, stacked=frozenset({12}), default_branch="")
+    assert section == _with_evict(_EVICT_12)
 
 
 def test_a_lock_on_an_unchanged_cell_names_no_evict_command():
@@ -566,7 +627,7 @@ def test_the_bare_line_appears_once_among_several_bare_environments():
 def test_a_targeted_environment_name_renders_through_md_name_outside_the_code_span():
     """Mutation: render `{e}` instead of `{_md_name(e)}` after `to apply` -- the `@` mentions,
     red."""
-    assert sc.commands(set(), ["dev@eu"], ["dev@eu"]) == (
+    assert sc.commands({}, ["dev@eu"], ["dev@eu"]) == (
         "<details><summary>shipmate commands</summary>\n\n"
         "Comment `shipmate apply dev@eu` to apply dev@<!-- -->eu.\n\n"
         "Comment `shipmate help` for every command.\n\n"
@@ -608,7 +669,8 @@ def test_a_locked_cell_in_a_targeted_environment_gets_both_paragraphs():
     assert _section(_LOCK_CELLS, targeted=["dev-eu"], locks=locks) == (
         "<details><summary>shipmate commands</summary>\n\n"
         "Comment `shipmate apply dev-eu` to apply dev-eu.\n\n"
-        f"{_evict('dev-eu')}"
+        "Comment `shipmate unlock dev-eu --evict` to release the locks #3 and #12 hold; applying "
+        "this pull request after that may overwrite what they applied to dev-eu.\n\n"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
     )
@@ -1816,7 +1878,7 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
 def test_the_held_body_carries_no_command_section(tmp_path, monkeypatch):
     """The held body already ends with its hint, and a held gate has nothing to apply.
 
-    Mutation: `_held_main` appending `commands(set())` when `SHIPMATE_COMMAND_HINTS` is `true`
+    Mutation: `_held_main` appending `commands({})` when `SHIPMATE_COMMAND_HINTS` is `true`
     -- red."""
     monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
     _held_main(tmp_path, monkeypatch, "held")
