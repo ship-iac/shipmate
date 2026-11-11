@@ -3133,6 +3133,22 @@ def test_every_matching_policy_must_allow_every_event(monkeypatch):
     )
 
 
+def test_two_matching_policies_sharing_a_name_are_both_judged(monkeypatch):
+    """Mutation: collect the gaps in a dict keyed by policy name, so the second policy's
+    empty gap overwrites the first's."""
+    only_push = {"type": "restrict_action_events", "parameters": {"allowed_events": ["push"]}}
+    first = _policy(id=10, name="X", rules=[only_push])
+    second = _policy(id=11, name="X")
+    assert _event_row(monkeypatch, first, second)[0] == (
+        "todo",
+        EVENT_ROW,
+        [
+            "Policy X does not allow pull_request_target, issue_comment, workflow_dispatch.",
+            *EVENT_POLICY_TODO,
+        ],
+    )
+
+
 def test_a_policy_naming_shipmate_beside_another_path_must_allow_every_event(monkeypatch):
     """Mutation: match on `include != [SHIPMATE_WORKFLOW]`, ignoring a policy that names a
     second path."""

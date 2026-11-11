@@ -882,9 +882,10 @@ def _policy_gap(policy):
 
 
 def _policy_gaps(item, path, entries):
-    """The `_policy_gap` of each matching listed policy, keyed by its name, or the
-    `cannot check` row for `item` when a policy cannot be read or judged."""
-    gaps = {}
+    """`(name, _policy_gap)` for each matching listed policy, or the `cannot check` row for
+    `item` when a policy cannot be read or judged. A list, because two policies may share a
+    name."""
+    gaps = []
     for entry in entries:
         detail_path = f"{path}/{entry.get('id')}"
         policy, reason = _read_or_reason(detail_path)
@@ -894,7 +895,7 @@ def _policy_gaps(item, path, entries):
         if isinstance(gap, str):
             return "cannot check", item, [f"`{detail_path}` {gap}."]
         if gap is not None:
-            gaps[policy.get("name") or str(entry.get("id"))] = gap
+            gaps.append((policy.get("name") or str(entry.get("id")), gap))
     return gaps
 
 
@@ -920,7 +921,7 @@ def _event_policy_item(ctx):
     gaps = _policy_gaps(item, path, entries)
     if isinstance(gaps, tuple):
         return gaps
-    lines = [f"Policy {name} does not allow {', '.join(m)}." for name, m in gaps.items() if m]
+    lines = [f"Policy {name} does not allow {', '.join(m)}." for name, m in gaps if m]
     if not gaps:
         lines = [f"No active policy restricts the events of `{SHIPMATE_WORKFLOW}`."]
     return (
