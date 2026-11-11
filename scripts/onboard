@@ -862,26 +862,48 @@ EVENT_POLICY_TODO = [
 
 def _policy_gap(policy):
     """The events of `SHIPMATE_EVENTS` an active policy restricting events for `shipmate.yml`
-    does not allow; `None` for any other policy; `"pattern"` when an `include` entry of
-    an active restricting policy holds `*`, whose matching is unprobed.
+    does not allow; `None` for any other policy. For an active restricting policy whose
+    reach is unprobed, the reason as a string: a `*` in `include` or `exclude`, or no
+    `include` entry.
     """
     rules = [r for r in policy.get("rules") or [] if r.get("type") == "restrict_action_events"]
     if policy.get("enforcement") != "active" or not rules:
         return None
     paths = (policy.get("conditions") or {}).get("workflow_path") or {}
-    include = paths.get("include") or []
-    if any("*" in p for p in include):
-        return "pattern"
-    if SHIPMATE_WORKFLOW not in include or SHIPMATE_WORKFLOW in (paths.get("exclude") or []):
+    include, exclude = paths.get("include") or [], paths.get("exclude") or []
+    if any("*" in p for p in [*include, *exclude]):
+        return "names a workflow path pattern"
+    if not include:
+        return "names no workflow path to include"
+    if SHIPMATE_WORKFLOW not in include or SHIPMATE_WORKFLOW in exclude:
         return None
     allowed = [set((r.get("parameters") or {}).get("allowed_events") or []) for r in rules]
     return [e for e in SHIPMATE_EVENTS if not all(e in a for a in allowed)]
 
 
+def _policy_gaps(item, path, entries):
+    """The `_policy_gap` of each matching listed policy, keyed by its name, or the
+    `cannot check` row for `item` when a policy cannot be read or judged."""
+    gaps = {}
+    for entry in entries:
+        detail_path = f"{path}/{entry.get('id')}"
+        policy, reason = _read_or_reason(detail_path)
+        if policy is None:
+            return _unread(item, detail_path, reason)
+        gap = _policy_gap(policy)
+        if isinstance(gap, str):
+            return "cannot check", item, [f"`{detail_path}` {gap}."]
+        if gap is not None:
+            gaps[policy.get("name") or str(entry.get("id"))] = gap
+    return gaps
+
+
 def _event_policy_item(ctx):
     """`ok` on a private or internal repository without a read. On a public one, `ok` when
     at least one repository policy matches (`_policy_gap`) and every match allows every
-    event in `SHIPMATE_EVENTS`; `cannot check` on a failed read or a pattern `include`.
+    event in `SHIPMATE_EVENTS`; `cannot check` on a failed read, a list whose `total_count`
+    is not the number of policies it returned (one page is read), or a policy whose reach
+    `_policy_gap` cannot judge.
     """
     item = "a repository Actions event policy allows shipmate's events (public repository)"
     if ctx["is_private"]:
@@ -890,17 +912,14 @@ def _event_policy_item(ctx):
     listed, reason = _read_or_reason(path)
     if listed is None:
         return _unread(item, path, reason)
-    gaps = {}
-    for entry in listed.get("policies") or []:
-        detail_path = f"{path}/{entry.get('id')}"
-        policy, reason = _read_or_reason(detail_path)
-        if policy is None:
-            return _unread(item, detail_path, reason)
-        gap = _policy_gap(policy)
-        if gap == "pattern":
-            return "cannot check", item, [f"`{detail_path}` includes a workflow path pattern."]
-        if gap is not None:
-            gaps[policy.get("name") or str(entry.get("id"))] = gap
+    entries = listed.get("policies") or []
+    total = listed.get("total_count")
+    if total != len(entries):
+        line = f"`{path}` lists {len(entries)} of {total} policies; onboard reads one page."
+        return "cannot check", item, [line]
+    gaps = _policy_gaps(item, path, entries)
+    if isinstance(gaps, tuple):
+        return gaps
     lines = [f"Policy {name} does not allow {', '.join(m)}." for name, m in gaps.items() if m]
     if not gaps:
         lines = [f"No active policy restricts the events of `{SHIPMATE_WORKFLOW}`."]

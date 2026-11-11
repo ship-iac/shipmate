@@ -3050,13 +3050,49 @@ def test_no_matching_policy_or_a_missing_event_is_todo(monkeypatch, policies, li
     )
 
 
-def test_a_pattern_include_cannot_be_checked(monkeypatch):
-    """Mutation: drop the `*` test, reading the pattern policy as one for other paths."""
-    policy = _policy(conditions=_paths([".github/workflows/*.yml"]))
-    assert _event_row(monkeypatch, policy)[0] == (
+PATTERN = ["`repos/o/r/actions/policies/12890` names a workflow path pattern."]
+UNSCOPED = ["`repos/o/r/actions/policies/12890` names no workflow path to include."]
+
+
+@pytest.mark.parametrize(
+    ("conditions", "lines"),
+    [
+        (_paths([".github/workflows/*.yml"]), PATTERN),
+        (_paths([".github/workflows/shipmate.yml"], [".github/workflows/*"]), PATTERN),
+        (_paths([]), UNSCOPED),
+        ({"workflow_path": {"exclude": []}}, UNSCOPED),
+    ],
+    ids=["include-pattern", "exclude-pattern", "empty-include", "missing-include"],
+)
+def test_a_policy_whose_scope_is_unprobed_cannot_be_checked(monkeypatch, conditions, lines):
+    """GitHub's pattern matching and an unscoped policy's reach are unprobed.
+
+    Mutations, each proven: drop the `*` test on `include`, reading the pattern policy as
+    one for other paths; test `include` alone for `*`, so the excluding pattern is `ok`;
+    drop the empty-`include` test, so both unscoped policies are `todo`.
+    """
+    assert _event_row(monkeypatch, _policy(conditions=conditions))[0] == (
         "cannot check",
         EVENT_ROW,
-        ["`repos/o/r/actions/policies/12890` includes a workflow path pattern."],
+        lines,
+    )
+
+
+def test_a_policy_list_longer_than_its_page_cannot_be_checked(monkeypatch):
+    """The list is read as one page, so a `total_count` above what it returned leaves
+    policies unread.
+
+    Mutation: drop the `total_count` comparison, so the one listed policy reads `ok`.
+    """
+    routes = {
+        POLICIES: {"total_count": 2, "policies": [{"id": 12890}]},
+        f"{POLICIES}/12890": SAMPLE_POLICY,
+    }
+    monkeypatch.setattr(onboard, "_run", make_gh(routes))
+    assert onboard._event_policy_item(ctx()) == (
+        "cannot check",
+        EVENT_ROW,
+        [f"`{POLICIES}` lists 1 of 2 policies; onboard reads one page."],
     )
 
 
