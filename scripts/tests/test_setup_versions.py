@@ -402,13 +402,17 @@ def test_a_missing_key_refuses_and_writes_nothing(monkeypatch, capsys, tmp_path)
 
 
 def test_the_action_outputs_the_first_failed_steps_refusal():
-    """Mutations: delete the `outputs:` block; drop `steps.tofu-sums.outputs.refusal` from
-    `refusal`; swap its first two operands."""
+    """Every step that writes a refusal, in run order: `Resolve versions`, the two verify steps,
+    the two install steps.
+
+    Mutations: delete the `outputs:` block; drop `steps.tofu-sums.outputs.refusal` or
+    `steps.terramate-install.outputs.refusal` from `refusal`; swap its first two operands."""
     outputs = action_yaml(_ACTION)["outputs"]
     assert {name: spec["value"] for name, spec in outputs.items()} == {
         "refusal": (
             "${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal"
-            " || steps.tofu-sums.outputs.refusal }}"
+            " || steps.tofu-sums.outputs.refusal || steps.tofu-install.outputs.refusal"
+            " || steps.terramate-install.outputs.refusal }}"
         )
     }
 

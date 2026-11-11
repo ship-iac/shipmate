@@ -11,8 +11,8 @@ inputs:
     default: "true"
 outputs:
   refusal:
-    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table or of `tools`, or a failed read) or a verify step (a download or signature failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
-    value: ${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal || steps.tofu-sums.outputs.refusal }}
+    description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table or of `tools`, or a failed read) or a verify or install step (a download, signature, digest or install failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
+    value: ${{ steps.versions.outputs.refusal || steps.terramate-sums.outputs.refusal || steps.tofu-sums.outputs.refusal || steps.tofu-install.outputs.refusal || steps.terramate-install.outputs.refusal }}
 runs:
   using: composite
   steps:
@@ -48,18 +48,11 @@ runs:
         SHIPMATE_CACHE_KEY: ${{ steps.terramate-cache.outputs.cache-matched-key }}
       run: |
         set -euo pipefail
+        # shellcheck source=/dev/null
+        source "$GITHUB_ACTION_PATH/release.sh"
         v="$SHIPMATE_TERRAMATE_VERSION"
-        # The refusal output is cut at `REASON_CAP` (scripts/_shipmate.py), like run_annotated's.
-        fail() {
-          local msg="Terramate ${v}: $1"
-          echo "::error title=Terramate checksum verification failed::${msg}"
-          printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
-          exit 1
-        }
-        # The first verify step, so it checks the runner prerequisites for every later step.
-        for tool in curl openssl base64 sha256sum; do
-          command -v "$tool" >/dev/null || fail "${tool} is not installed on the runner."
-        done
+        release_init "Terramate checksum verification failed" "Terramate ${v}: "
+        require
         key="${SHIPMATE_CACHE_KEY:-}"
         base="https://github.com/terramate-io/terramate/releases/download/v${v}"
         dir="$RUNNER_TEMP/terramate-release"
@@ -68,21 +61,7 @@ runs:
         files=(checksums.txt checksums.txt.sig)
         drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
         mkdir -p "$dir"
-        download() {
-          for f in "${files[@]}"; do
-            # Each download retries network errors, 408/429/5xx and stalls (<1 KiB/s for 30 s), waiting 1 s doubling or the server's Retry-After;
-            # curl decides on no new retry after 120 s, so one file can take about 3 minutes. --retry-all-errors needs curl 7.71+; older exits 2.
-            rc=0
-            code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
-              -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
-            if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
-              if [ "$rc" -eq 2 ]; then
-                fail "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)."
-              fi
-              fail "${base}/${f} answered HTTP ${code:-000} (curl exit ${rc})."
-            fi
-          done
-        }
+        download() { for f in "${files[@]}"; do fetch "$base/$f" "$dir/$f" "" ""; done; }
         # Runs as a condition, where set -e is off, so each check returns its own reason.
         check() {
           for f in "${files[@]}"; do [ -f "$dir/$f" ] || { reason="$dir/$f is not a regular file."; return 1; }; done
@@ -120,16 +99,13 @@ runs:
         SHIPMATE_CACHE_KEY: ${{ steps.tofu-cache.outputs.cache-matched-key }}
       run: |
         set -euo pipefail
+        # shellcheck source=/dev/null
+        source "$GITHUB_ACTION_PATH/release.sh"
         v="$SHIPMATE_TOFU_VERSION"
+        release_init "OpenTofu checksum verification failed" "OpenTofu ${v}: "
+        require gpg gpgconf
         # The primary key fingerprint of OpenTofu's release signer, compared whole.
         signer=E3E6E43D84CB852EADB0051D0C0AF313E5FD9F80
-        fail() {
-          local msg="OpenTofu ${v}: $1"
-          echo "::error title=OpenTofu checksum verification failed::${msg}"
-          printf 'refusal=%s\n' "${msg:0:4000}" >> "$GITHUB_OUTPUT"
-          exit 1
-        }
-        command -v gpg >/dev/null || fail "gpg is not installed on the runner."
         key="${SHIPMATE_CACHE_KEY:-}"
         sums="tofu_${v}_SHA256SUMS"
         base="https://github.com/opentofu/opentofu/releases/download/v${v}"
@@ -137,16 +113,7 @@ runs:
         files=("$sums" "$sums.gpgsig")
         drop() { for f in "${files[@]}"; do rm -rf "${dir:?}/${f:?}"; done; }
         mkdir -p "$dir"
-        download() {
-          for f in "${files[@]}"; do
-            rc=0
-            code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
-              -o "$dir/$f" -w '%{http_code}' "$base/$f")" || rc=$?
-            if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
-              fail "${base}/${f} answered HTTP ${code:-000} (curl exit ${rc})."
-            fi
-          done
-        }
+        download() { for f in "${files[@]}"; do fetch "$base/$f" "$dir/$f" "" ""; done; }
         # Runs as a condition, where set -e is off, so each check returns its own reason.
         check() {
           for f in "${files[@]}"; do [ -f "$dir/$f" ] || { reason="$dir/$f is not a regular file."; return 1; }; done
@@ -178,6 +145,7 @@ runs:
         fi
         printf 'tofu_sha256<<SHIPMATE_EOF\n%sSHIPMATE_EOF\n' "$lines" >> "$GITHUB_OUTPUT"
     - name: Install OpenTofu
+      id: tofu-install
       if: ${{ inputs.tofu != 'false' }}
       shell: bash
       env:
@@ -186,10 +154,13 @@ runs:
         SHIPMATE_CACHE_KEY: ${{ steps.tofu-cache.outputs.cache-matched-key }}
       run: |
         set -euo pipefail
+        # shellcheck source=/dev/null
+        source "$GITHUB_ACTION_PATH/release.sh"
         v="$SHIPMATE_TOFU_VERSION"
         sums="tofu_${v}_SHA256SUMS"
         # Fail-closed: every cell runs tofu.
-        fail() { echo "::error title=OpenTofu install failed::OpenTofu ${v} did not install: $1"; exit 1; }
+        release_init "OpenTofu install failed" "OpenTofu ${v} did not install: "
+        require
         system="$(uname -s | tr '[:upper:]' '[:lower:]')"
         case "$(uname -m)" in
           x86_64|x64) arch=amd64 ;;
@@ -205,17 +176,6 @@ runs:
         archive="$release/$asset"
         bin="$RUNNER_TEMP/tofu"
         mkdir -p "$release" "$bin"
-        download() {
-          rc=0
-          code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
-            -o "$archive" -w '%{http_code}' "$url")" || rc=$?
-          if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
-            if [ "${code:-000}" = 404 ]; then
-              fail "${url} answered HTTP 404 (curl exit ${rc}); check the signed ${sums} and the runner's OS and architecture."
-            fi
-            fail "${url} answered HTTP ${code:-000} (curl exit ${rc}); re-run the failed job."
-          fi
-        }
         check() {
           [ -f "$archive" ] || { reason="${archive} is not a regular file."; return 1; }
           sum="$(sha256sum "$archive" | awk '{print $1}')"
@@ -226,7 +186,7 @@ runs:
         if [ -z "$key" ] || ! check; then
           [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::OpenTofu ${v}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           rm -rf "${archive:?}"
-          download
+          fetch "$url" "$archive" "check the signed ${sums} and the runner's OS and architecture" "re-run the failed job"
           check || fail "$reason"
         fi
         echo "Verified ${asset} sha256 ${sum}."
@@ -240,6 +200,7 @@ runs:
         fi
         echo "$bin" >> "$GITHUB_PATH"
     - name: Install Terramate
+      id: terramate-install
       shell: bash
       env:
         SHIPMATE_TERRAMATE_VERSION: ${{ steps.versions.outputs.terramate }}
@@ -247,9 +208,12 @@ runs:
         SHIPMATE_CACHE_KEY: ${{ steps.terramate-cache.outputs.cache-matched-key }}
       run: |
         set -euo pipefail
+        # shellcheck source=/dev/null
+        source "$GITHUB_ACTION_PATH/release.sh"
         v="$SHIPMATE_TERRAMATE_VERSION"
         # Fail-closed: every later step runs terramate.
-        fail() { echo "::error title=Terramate install failed::Terramate ${v} did not install: $1"; exit 1; }
+        release_init "Terramate install failed" "Terramate ${v} did not install: "
+        require
         system="$(uname -s | tr '[:upper:]' '[:lower:]')"
         case "$(uname -m)" in
           x86_64|x64) arch=x86_64 ;;
@@ -265,17 +229,6 @@ runs:
         archive="$release/$asset"
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$release" "$dir"
-        download() {
-          rc=0
-          code="$(curl --retry-all-errors -sSL --retry 10 --retry-max-time 120 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
-            -o "$archive" -w '%{http_code}' "$url")" || rc=$?
-          if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
-            if [ "${code:-000}" = 404 ]; then
-              fail "${url} answered HTTP 404 (curl exit ${rc}); check the signed checksums.txt and the runner's OS and architecture."
-            fi
-            fail "${url} answered HTTP ${code:-000} (curl exit ${rc}); re-run the failed job."
-          fi
-        }
         check() {
           [ -f "$archive" ] || { reason="${archive} is not a regular file."; return 1; }
           sum="$(sha256sum "$archive" | awk '{print $1}')"
@@ -286,7 +239,7 @@ runs:
         if [ -z "$key" ] || ! check; then
           [ -z "$key" ] || echo "::warning title=Tool cache entry failed verification::Terramate ${v}: ${reason} Downloading ${asset} again. Every job repeats this download until the entry is deleted: gh cache delete ${key} --repo ${GITHUB_REPOSITORY}"
           rm -rf "${archive:?}"
-          download
+          fetch "$url" "$archive" "check the signed checksums.txt and the runner's OS and architecture" "re-run the failed job"
           check || fail "$reason"
         fi
         echo "Verified ${asset} sha256 ${sum}."

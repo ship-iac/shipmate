@@ -9,7 +9,7 @@ reds it.
 import os
 
 import pytest
-from _loader import bash_only, run_step, step_by, write_stub
+from _loader import ENGINE, bash_only, run_step, setup_curl_argv, step_by, write_stub
 
 _ACTION = "setup"
 _STEP = "Install Terramate"
@@ -28,7 +28,9 @@ _VERIFIED = f"Verified {_ASSET} sha256 {_DIGEST}.\n"
 
 
 def _annotation(code, rc):
-    return f"{_PREFIX}{_URL} answered HTTP {code} (curl exit {rc}); re-run the failed job."
+    return (
+        f"{_PREFIX}{_URL} answered HTTP {code} from {_URL} (curl exit {rc}); re-run the failed job."
+    )
 
 
 def _install(
@@ -64,7 +66,7 @@ def _install(
         "curl",
         f"printf '%s\\n' \"$@\" >> '{log}/curl'\ntouch '{log}/downloaded'\n"
         'prev=""; for a in "$@"; do if [ "$prev" = -o ]; then : > "$a"; fi; prev="$a"; done\n'
-        f"printf '{curl_output}'\nexit {curl_rc}",
+        f"printf '{curl_output} %s' \"${{!#}}\"\nexit {curl_rc}",
     )
     write_stub(
         bin_dir,
@@ -89,6 +91,7 @@ def _install(
     )
     github_path = tmp_path / "github_path"
     github_path.write_text("", encoding="utf-8")
+    (tmp_path / "github_output").write_text("", encoding="utf-8")
     r = run_step(
         tmp_path,
         step_by(_ACTION, name=_STEP)["run"],
@@ -97,6 +100,8 @@ def _install(
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "RUNNER_TEMP": runner_temp.as_posix(),
             "GITHUB_PATH": str(github_path),
+            "GITHUB_OUTPUT": str(tmp_path / "github_output"),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
             "SHIPMATE_TERRAMATE_VERSION": _VERSION,
             "SHIPMATE_TERRAMATE_SHA256": _PINNED,
             "STUB_TERRAMATE_VERSION": binary_version,
@@ -105,6 +110,14 @@ def _install(
         },
     )
     return r, runner_temp.as_posix(), logs
+
+
+def _refusal(tmp_path, stdout):
+    """Assert the step wrote one `refusal=` line: its last annotation without the
+    `::error title=...::` prefix. Every caller pins `stdout` whole."""
+    last = stdout.splitlines()[-1]
+    out = (tmp_path / "github_output").read_text(encoding="utf-8")
+    assert out == "refusal=" + last.split("::", 2)[2] + "\n"
 
 
 def _argv(logs, name):
@@ -117,14 +130,7 @@ def test_the_install_step_is_fail_closed():
 
     Mutation: add `continue-on-error: true` to the step.
     """
-    assert set(step_by(_ACTION, name=_STEP)) == {"name", "shell", "env", "run"}
-
-
-#: curl's whole argv, hand-written; `{tarball}` stands for the download path.
-_CURL_ARGV = ["--retry-all-errors", "-sSL", "--retry", "10", "--retry-max-time", "120"]
-_CURL_ARGV += ["--connect-timeout", "10"]
-_CURL_ARGV += ["--speed-limit", "1024", "--speed-time", "30", "-o", "{tarball}"]
-_CURL_ARGV += ["-w", "%{http_code}", _URL]
+    assert set(step_by(_ACTION, name=_STEP)) == {"name", "shell", "env", "run", "id"}
 
 
 @bash_only
@@ -136,7 +142,7 @@ def test_a_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_pat
     r, runner_temp, logs = _install(tmp_path, "200", 0)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     tarball = f"{runner_temp}/terramate-release/{_ASSET}"
-    expected = [tarball if a == "{tarball}" else a for a in _CURL_ARGV]
+    expected = setup_curl_argv(_URL, tarball)
     assert _argv(logs, "curl") == expected
     assert _argv(logs, "sha256sum") == [tarball]
     assert _argv(logs, "order") == ["sha256sum", "tar"]
@@ -149,10 +155,10 @@ def test_a_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_pat
 @pytest.mark.parametrize(
     ("curl_output", "curl_rc", "code"),
     [
-        # Mutation: drop the `!= 200` status check.
+        # Mutation: in `fetch`, return on curl exit 0 alone.
         ("500", 0, "500"),
-        # Mutation: drop the `${code:-000}` default.
-        ("", 7, "000"),
+        # No response arrived: curl prints status 000.
+        ("000", 7, "000"),
         # A transfer cut mid-body. Mutation: replace `|| rc=$?` with `|| true`.
         ("200", 18, "200"),
     ],
@@ -164,22 +170,24 @@ def test_a_failed_download_fails_the_step_with_one_annotation(tmp_path, curl_out
     assert r.stdout == _annotation(code, curl_rc) + "\n"
     assert _argv(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+    _refusal(tmp_path, r.stdout)
 
 
 @bash_only
 def test_a_404_names_the_version_and_platform_as_the_remedy(tmp_path):
     """The URL has no asset, so a re-run cannot help.
 
-    Mutation: drop the 404 branch of the remedy.
+    Mutation: pass the other remedy on a 404 in `fetch`.
     """
     r, _, logs = _install(tmp_path, "404", 0)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
-        f"{_PREFIX}{_URL} answered HTTP 404 (curl exit 0); "
+        f"{_PREFIX}{_URL} answered HTTP 404 from {_URL} (curl exit 0); "
         "check the signed checksums.txt and the runner's OS and architecture.\n"
     )
     assert _argv(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+    _refusal(tmp_path, r.stdout)
 
 
 @pytest.mark.parametrize(
@@ -199,6 +207,7 @@ def test_a_failed_extract_or_binary_fails_the_step_with_one_annotation(
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_VERIFIED}{_PREFIX}{message}\n"
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+    _refusal(tmp_path, r.stdout)
 
 
 @bash_only
@@ -211,6 +220,7 @@ def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path
         "check the signed checksums.txt and the release asset.\n"
     )
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+    _refusal(tmp_path, r.stdout)
 
 
 @bash_only
@@ -227,6 +237,7 @@ def test_a_digest_mismatch_fails_the_step_before_tar_runs(tmp_path):
     )
     assert _argv(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+    _refusal(tmp_path, r.stdout)
 
 
 @bash_only
@@ -240,6 +251,7 @@ def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path):
     )
     assert _argv(logs, "curl") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+    _refusal(tmp_path, r.stdout)
 
 
 _CACHE_KEY = f"shipmate-tools-Linux-X64-terramate-{_VERSION}"
@@ -269,7 +281,7 @@ def _warning(reason):
 
 def _curl(archive):
     """curl's whole argv for one download of the archive to `archive`."""
-    return [archive if a == "{tarball}" else a for a in _CURL_ARGV]
+    return setup_curl_argv(_URL, archive)
 
 
 def _install_cached(tmp_path, **kwargs):
@@ -315,6 +327,7 @@ def test_a_restored_archive_whose_fresh_copy_differs_too_fails_after_one_downloa
         None,
         "",
     )
+    _refusal(tmp_path, r.stdout)
 
 
 @bash_only
@@ -356,3 +369,17 @@ def test_an_empty_sha256sum_output_fails_naming_the_tool_not_the_asset(tmp_path)
         None,
         "",
     )
+    _refusal(tmp_path, r.stdout)
+
+
+@bash_only
+def test_a_curl_older_than_7_71_is_told_its_floor_by_the_install_step(tmp_path):
+    """Mutation: drop the exit-2 branch of `fetch` (the re-run remedy appears)."""
+    r, _, logs = _install(tmp_path, "000", 2)
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == (
+        f"{_PREFIX}curl exited 2 on an option it does not know; shipmate needs curl 7.71 or "
+        "later (CONTRACT.md §Runner prerequisites).\n"
+    )
+    assert _argv(logs, "tar") is None
+    _refusal(tmp_path, r.stdout)

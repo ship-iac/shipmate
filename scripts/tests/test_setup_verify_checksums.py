@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from _loader import ENGINE, bash_only, run_step, step_by, write_stub
+from _loader import ENGINE, bash_only, run_step, setup_curl_argv, step_by, write_stub
 
 _ACTION = "setup"
 _FIXTURES = ENGINE / "scripts" / "tests" / "fixtures" / "release-sums"
@@ -186,7 +186,8 @@ def _run(tmp_path, sid, *, served=None, codes=None, body=None, curl_exit=0, cach
         'name="${!#}"; name="${name##*/}"\n'
         f"serve='{serve.as_posix()}'\n"
         'if [ -f "$serve/$name" ]; then cp "$serve/$name" "$out"; fi\n'
-        'if [ -f "$serve/$name.code" ]; then cat "$serve/$name.code"; else printf 200; fi\n'
+        'code=200; if [ -f "$serve/$name.code" ]; then code="$(cat "$serve/$name.code")"; fi\n'
+        'printf \'%s %s\' "$code" "${!#}"\n'
         f"exit {curl_exit}",
     )
     gpg = shutil.which("gpg")
@@ -231,26 +232,7 @@ def _calls(path):
 
 
 def _curl(url, out):
-    """curl's whole argv for one download, hand-written."""
-    return [
-        "--retry-all-errors",
-        "-sSL",
-        "--retry",
-        "10",
-        "--retry-max-time",
-        "120",
-        "--connect-timeout",
-        "10",
-        "--speed-limit",
-        "1024",
-        "--speed-time",
-        "30",
-        "-o",
-        out,
-        "-w",
-        "%{http_code}",
-        url,
-    ]
+    return setup_curl_argv(url, out)
 
 
 def _downloads(sid, rt):
@@ -439,17 +421,17 @@ def test_an_html_signature_at_200_fails_with_one_annotation(tmp_path, sid, name,
 @bash_only
 @needs_tools
 def test_a_404_fails_naming_the_url(tmp_path, sid, url):
-    """Mutations: drop the `!= 200` status check; drop the `refusal=` write from either
-    step's `fail()`."""
+    """Mutations: in `fetch`, return on curl exit 0 alone; drop the `refusal=` write from
+    `fail`."""
     name = url.rsplit("/", 1)[1]
     served = _genuine()
     served[name] = b"Not Found"
     r, out, *_ = _run(tmp_path, sid, served=served, codes={name: "404"})
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     prefix = _TOFU_ERROR if sid == "tofu-sums" else _TM_ERROR
-    assert r.stdout == f"{prefix}{url} answered HTTP 404 (curl exit 0).\n"
+    assert r.stdout == f"{prefix}{url} answered HTTP 404 from {url} (curl exit 0).\n"
     tool = f"OpenTofu {_TOFU}" if sid == "tofu-sums" else f"Terramate {_TERRAMATE}"
-    assert out == f"refusal={tool}: {url} answered HTTP 404 (curl exit 0).\n"
+    assert out == f"refusal={tool}: {url} answered HTTP 404 from {url} (curl exit 0).\n"
 
 
 @bash_only
@@ -475,19 +457,19 @@ def test_a_curl_older_than_7_71_is_told_its_floor_not_to_re_run(tmp_path):
         ("terramate-sums", "openssl", ("curl", "base64", "sha256sum")),
         ("terramate-sums", "base64", ("curl", "openssl", "sha256sum")),
         ("terramate-sums", "sha256sum", ("curl", "openssl", "base64")),
-        ("tofu-sums", "gpg", ()),
+        ("tofu-sums", "gpg", ("curl", "openssl", "base64", "sha256sum", "gpgconf")),
+        ("tofu-sums", "gpgconf", ("curl", "openssl", "base64", "sha256sum", "gpg")),
     ],
 )
 @bash_only
 def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
     tmp_path, sid, missing, present
 ):
-    """PATH holds only never-run stubs for `present`. The Terramate step runs first and checks
-    the tools it and the installers need; the OpenTofu step checks gpg alone.
+    """PATH holds only never-run stubs for `present`. Every step checks the four base tools;
+    the OpenTofu step also checks gpg and gpgconf.
 
-    Mutations: drop `curl`, `openssl`, `base64` or `sha256sum` from the Terramate step's
-    `command -v` loop;
-    delete the OpenTofu step's `command -v gpg` line.
+    Mutations: drop `curl`, `openssl`, `base64` or `sha256sum` from `require`'s base list;
+    drop `gpg` or `gpgconf` from the OpenTofu step's `require`.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -502,6 +484,7 @@ def test_a_missing_prerequisite_is_named_not_reported_as_a_signature_failure(
             "PATH": str(bin_dir),
             "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
             "GITHUB_OUTPUT": str(out),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
         },
@@ -829,6 +812,8 @@ def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
             "RUNNER_TEMP": rt.as_posix(),
             "GITHUB_PATH": str(path),
+            "GITHUB_OUTPUT": str(tmp_path / "github_output"),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
             "SHIPMATE_TOFU_VERSION": _TOFU,
             "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
             digest_var: f"{hashlib.sha256(archive).hexdigest()}  {asset}",
@@ -839,3 +824,37 @@ def test_the_release_dir_holds_exactly_the_release_files(tmp_path, sid):
     assert sorted(os.listdir(release)) == _RELEASE_FILES[sid]
     if sid == "terramate-sums":
         assert (rt / "terramate-checksums.der").is_file()
+
+
+@bash_only
+def test_a_failed_rm_in_drop_writes_the_generic_refusal(tmp_path):
+    """`set -e` ends the step inside `drop()`, where no `fail` runs.
+
+    Mutation: drop `trap _release_exit EXIT` from release.sh (no refusal is written).
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_stub(bin_dir, "rm", "exit 1")
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, id="terramate-sums")["run"],
+        {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
+            "GITHUB_OUTPUT": str(out),
+            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
+            "SHIPMATE_TERRAMATE_VERSION": _TERRAMATE,
+        },
+    )
+    reason = (
+        f'Terramate {_TERRAMATE}: a command exited 1 under "Terramate checksum verification '
+        'failed"; the step log names it.'
+    )
+    assert (r.returncode, r.stdout, out.read_text(encoding="utf-8")) == (
+        1,
+        f"::error title=Terramate checksum verification failed::{reason}\n",
+        f"refusal={reason}\n",
+    )

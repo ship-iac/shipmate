@@ -508,6 +508,17 @@ def run_step(tmp_path, body, env, *, cwd=None, timeout=30, text=True):
     )
 
 
+def setup_curl_argv(url, out):
+    """curl's whole argv for one `fetch` in `actions/setup/release.sh`, hand-written: a dropped
+    `-L`, timeout, `--max-time` or `--retry-all-errors`, or an added `--fail`, reds every test
+    that compares a logged argv to it."""
+    return [
+        *("--retry-all-errors", "-sSL", "--retry", "10", "--retry-max-time", "120"),
+        *("--connect-timeout", "10", "--max-time", "600", "--speed-limit", "1024"),
+        *("--speed-time", "30", "-o", out, "-w", "%{http_code} %{url_effective}", url),
+    ]
+
+
 def github_outputs(path):
     """The ``key=value`` lines a helper or step wrote to its ``GITHUB_OUTPUT`` file, as a dict.
 
