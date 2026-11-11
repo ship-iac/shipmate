@@ -523,10 +523,13 @@ runs:
         # a hold and greens `pending`, so a re-run draft run over a held head would open that
         # hold (scripts/tests/test_summary_draft_gate.py).
         if [ "$MODE" = "draft" ]; then
-          if ! held=$(python3 "$gate_status" newest "$HEAD_SHA"); then
+          if ! held=$(python3 "$gate_status" newest "$HEAD_SHA" 2>newest.err); then
+            # The step degrades, so the read's `::error::` is logged as a warning.
+            sed 's/^::error::/::warning::/' newest.err >&2
             echo "::warning::could not read the gate status of $HEAD_SHA; the draft gate status was not written"
             exit 0
           fi
+          cat newest.err >&2
           if [ -n "$held" ]; then
             echo "$HEAD_SHA keeps its ${held%% *} gate status; the draft gate status was not written"
             exit 0

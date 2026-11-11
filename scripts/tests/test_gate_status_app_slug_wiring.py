@@ -26,6 +26,19 @@ READING_STEPS = {
 SLUG = "${{ steps.token.outputs.app-slug }}"
 MINT = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
 SCRIPT = "$GITHUB_ACTION_PATH/../../scripts/gate-status"
+ASSIGNMENT = f"gate_status={SCRIPT}"
+#: Every `gate-status` subcommand, hand-written.
+SUBCOMMANDS = {
+    "newest",
+    "refuse-newer",
+    "post",
+    "hold",
+    "refresh",
+    "deploy",
+    "checks",
+    "moved",
+    "replan",
+}
 
 
 def _logical_lines(step):
@@ -42,19 +55,29 @@ def _logical_lines(step):
 
 
 def gate_status_invocations(label, step):
-    """The subcommand of every `gate-status` invocation in ``step``'s `run:`."""
+    """The subcommand of every `gate-status` invocation in ``step``'s `run:`.
+
+    Every logical line naming `gate-status` or `gate_status`, except the assignment of the script
+    path, must invoke it through `SCRIPT` or `$gate_status` with a known subcommand: a spelling
+    this does not recognise fails rather than going unchecked."""
     found = []
     for line in _logical_lines(step):
-        if "gate-status" not in line and "$gate_status" not in line:
+        if "gate-status" not in line and "gate_status" not in line:
             continue
+        where = f"{label}: {step.get('name')}: {line!r}"
         try:
             tokens = shlex.split(line)
         except ValueError as err:
-            raise AssertionError(f"{label}: {step.get('name')}: cannot tokenize {line!r}") from err
-        for i, token in enumerate(tokens):
-            if token in (SCRIPT, "$gate_status"):
-                assert i + 1 < len(tokens), f"{label}: {step.get('name')}: {line!r}"
-                found.append(tokens[i + 1])
+            raise AssertionError(f"{where}: cannot tokenize") from err
+        if tokens == [ASSIGNMENT]:
+            continue
+        subcommands = [
+            tokens[i + 1]
+            for i, token in enumerate(tokens[:-1])
+            if token in (SCRIPT, "$gate_status") and tokens[i + 1] in SUBCOMMANDS
+        ]
+        assert subcommands, f"{where}: no recognised gate-status invocation"
+        found += subcommands
     return found
 
 
@@ -63,7 +86,11 @@ def test_the_reading_steps_are_exactly_these():
     per-cell plan checks onto the head";
     `python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" refresh "$HEAD_SHA"` in apply-summary;
     `out=$(python3 "$gate_status" \\` / `refresh "$HEAD_SHA")` split over a continuation in
-    summary's "Build comment + gate state"."""
+    summary's "Build comment + gate state". The selector fails on a spelling it does not
+    recognise: `python3 "${gate_status}" newest "$HEAD_SHA"` in summary's "Mirror this run's
+    per-cell plan checks onto the head";
+    `python3 "${GITHUB_ACTION_PATH}/../../scripts/gate-status" refresh "$HEAD_SHA"` in
+    apply-summary. A `hold` through `"$gate_status"` in an unlisted step stays green."""
     reading = {
         (label, step.get("name"))
         for label, step in engine_steps()
@@ -72,19 +99,11 @@ def test_the_reading_steps_are_exactly_these():
     assert reading == READING_STEPS
 
 
-@pytest.mark.parametrize(
-    "name", ["Create apply checks (pending / no-changes)", "Create/refresh gate"]
-)
-def test_summary_reading_steps_pass_the_minted_slug(name):
-    """Mutations, on each step: drop `SHIPMATE_APP_SLUG`; read it from
-    `steps.plantoken.outputs.app-slug`."""
-    assert step_by("summary", name=name)["env"].get("SHIPMATE_APP_SLUG") == SLUG
-
-
-@pytest.mark.parametrize("action", ["summary", "gate-refresh"])
-def test_the_slug_comes_from_an_unconditional_app_mint(action):
-    """Mutations, in each action: `if:` on the token step; `id: token` on another step; a
-    different pinned SHA."""
-    step = step_by(action, id="token")
-    assert step["uses"] == MINT
-    assert "if" not in step
+@pytest.mark.parametrize(("action", "name"), sorted(READING_STEPS))
+def test_each_reading_step_passes_the_slug_of_an_unconditional_app_mint(action, name):
+    """Mutations: `${{ inputs.app-slug }}` as one step's slug; drop one step's slug env line; add
+    a step with no slug env to `READING_STEPS`; `if:` on the token step; a different pinned SHA."""
+    env = step_by(action, name=name).get("env") or {}
+    assert env.get("SHIPMATE_APP_SLUG") == SLUG
+    token = step_by(action, id="token")
+    assert (token["uses"], "if" in token) == (MINT, False)

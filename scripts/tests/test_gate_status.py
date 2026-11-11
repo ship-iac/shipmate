@@ -1005,8 +1005,13 @@ _OPEN = DONE + _lines(_check(3, "queued", name="apply / c / dev"))
     ids=["newest", "refuse-newer", "post", "refresh-done", "refresh-open"],
 )
 def test_a_gate_reader_without_the_slug_refuses_before_any_call(tmp_path, env, args, checks):
-    """Mutation: check the slug only inside `app_user` (drop the `_require_slug()` entry calls) ->
-    `refresh-open` exits 0 after listing the check runs, `post` writes, `refresh-done` lists."""
+    """`refresh` and `post` check the slug at entry, because an API call (the check-run listing,
+    the POST) comes before their first gate read. `newest` and `refuse-newer` make no call before
+    `app_user`, which checks it before its lookup.
+
+    Mutations: drop `_require_slug()` from `refresh` -> `refresh-open` exits 0 after listing the
+    check runs, `refresh-done` lists them; drop it from `_post` -> `post` writes; move
+    `app_user()` below the listing in `_gates` -> `newest` and `refuse-newer` list the statuses."""
     proc, calls = _run(tmp_path, *args, env=env, checks=checks)
     assert (proc.returncode, proc.stdout, proc.stderr, calls) == (1, "", _SLUG_ERROR, [])
 

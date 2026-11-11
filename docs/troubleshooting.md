@@ -1589,15 +1589,13 @@ consumer setting produces this error; report it, with the run link, through the
 bug report template
 ([`.github/ISSUE_TEMPLATE/bug.yml`](../.github/ISSUE_TEMPLATE/bug.yml)).
 
-The step that refuses judges no gate status, and nothing greens the gate:
+Within a run, the steps that read the gate share one mint, so the first of them
+refuses, judges no gate status, and nothing greens the gate:
 
-- the plan run's publish hold step holds the gate ("re-plan this pull request
-  (comment shipmate plan or push): its plan run ended before writing a final
-  gate") and fails;
-- the plan run's apply-check publish publishes nothing and fails;
-- the plan run's final gate write writes nothing and fails; a draft run's gate
-  read and the refresh after a `pending` write do not fail the step;
-- an apply run's gate refresh fails and leaves the gate as it was.
+- on a plan run, the publish hold step holds the gate ("re-plan this pull
+  request (comment shipmate plan or push): its plan run ended before writing a
+  final gate") and fails, and the later steps do not run;
+- on an apply run, the gate refresh fails and leaves the gate as it was.
 
 ### `could not read the shipmate App's bot user <slug>[bot]: <cause>`
 
@@ -1605,13 +1603,22 @@ The read of the shipmate App's bot user (`users/<slug>[bot]`, where `<slug>`
 is the slug the step's App token mint reported) failed; a transient failure was
 retried first. `<cause>` is gh's error, or the parse error when GitHub's answer
 was not JSON. `its id is <value>` in place of the cause means GitHub answered
-without an integer id. The step judged no gate status and did what the list under
-§`SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the
-shipmate App created and cannot tell which those are` states. A gate the run
-held says to re-plan, and a re-plan reads the same bot user, so it repeats this
-error while the read fails. Re-run the failed jobs once GitHub answers it; on a
-plan run, only when that run is the newest plan run of the head
-(§`shipmate / gate` never goes green).
+without an integer id. The read can fail at any step that reads the gate; the
+step judged no gate status, and nothing greens the gate:
+
+- the plan run's publish hold step holds the gate ("re-plan this pull request
+  (comment shipmate plan or push): its plan run ended before writing a final
+  gate") and fails;
+- the plan run's apply-check publish publishes nothing and fails;
+- the plan run's final gate write writes nothing and fails; a draft run's gate
+  read and the refresh after a `pending` write log this message as a warning
+  and do not fail the step;
+- an apply run's gate refresh fails and leaves the gate as it was.
+
+A gate the run held says to re-plan, and a re-plan reads the same bot user, so
+it repeats this error while the read fails. Re-run the failed jobs once GitHub
+answers it; on a plan run, only when that run is the newest plan run of the
+head (§`shipmate / gate` never goes green).
 
 ### An environment was held for review, or the apply was refused
 

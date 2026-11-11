@@ -116,7 +116,7 @@ def app_user():
     login = f"{_require_slug()}[bot]"
     lead = f"::error::could not read the shipmate App's bot user {login}"
     try:
-        user = gh_json(f"users/{quote(login, safe='')}", lambda args: _run(args))
+        user = gh_json(f"users/{quote(login, safe='')}", _run)
     except SystemExit as exc:
         raise SystemExit(f"{lead}: {one_line(str(exc.code).removeprefix('::error::'))}") from None
     except ValueError as exc:
@@ -155,7 +155,8 @@ def _gates(sha):
 
 
 def newest_gate(sha):
-    """(state, run id) of the newest gate status on `sha`, or None when it carries none."""
+    """(state, run id) of the newest gate status the shipmate App created on `sha`, or None when
+    it carries none. Statuses from other identities are not counted."""
     gates = _gates(sha)
     return gates[0] if gates else None
 
@@ -244,14 +245,12 @@ def refresh(sha):
 
 
 def _newest(sha):
-    _require_slug()
     newest = newest_gate(sha)
     if newest:
         print(*newest)
 
 
 def _refuse_newer(sha):
-    _require_slug()
     newer = newer_hold(sha)
     if newer is not None:
         print(

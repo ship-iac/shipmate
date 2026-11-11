@@ -79,6 +79,11 @@ def _gate(state):
     return json.dumps(status) + "\n"
 
 
+_DRAFT_NOT_WRITTEN = (
+    f"::warning::could not read the gate status of {HEAD_SHA}; the draft gate status was not "
+    "written\n"
+)
+
 #: A no-changes body, as `pending-checks` writes it: completed, so the refresh still runs.
 NO_CHANGES_BODY = json.dumps(
     {"name": "apply / b / dev", "status": "completed", "conclusion": "neutral"}
@@ -95,6 +100,8 @@ def _run_gate(
     checks_rc=0,
     checks_stderr="",
     bodies=NO_CHANGES_BODY + "\n",
+    user_rc=0,
+    user_stderr="",
 ):
     if bodies is not None:
         (tmp_path / "bodies.jsonl").write_text(bodies, encoding="utf-8")
@@ -123,6 +130,8 @@ def _run_gate(
         checks_rc=checks_rc,
         page1=_gate(head_state) if head_state else "",
         statuses_rc=1 if read_fails else 0,
+        user_rc=user_rc,
+        user_stderr=user_stderr,
     )
 
 
@@ -167,14 +176,32 @@ def test_a_held_run_writes_its_failure_gate_without_a_read_or_a_refresh(tmp_path
 
 @bash_only
 def test_a_failed_read_writes_nothing_and_warns(tmp_path):
-    """Mutation: drop the `if !` around the read -> `set -e` fails the step."""
+    """Mutations: drop the `if !` around the read -> `set -e` fails the step; print the read's
+    stderr unswapped (`cat newest.err >&2`) -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "draft", "", read_fails=True)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [USER_ARGV, READ_ARGV]
-    assert proc.stdout == (
-        f"::warning::could not read the gate status of {HEAD_SHA}; the draft gate status was "
-        "not written\n"
+    assert (proc.stdout, proc.stderr) == (
+        _DRAFT_NOT_WRITTEN,
+        f"::warning::command failed (1): gh {' '.join(READ_ARGV)}\n",
     )
+
+
+@bash_only
+def test_a_failed_bot_user_lookup_writes_nothing_and_warns(tmp_path):
+    """Mutation: print the read's stderr unswapped (`cat newest.err >&2`) -> the lookup's
+    `::error::` line."""
+    proc, calls = _run_gate(
+        tmp_path, "draft", "", user_rc=1, user_stderr="gh: Not Found (HTTP 404)"
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [USER_ARGV]
+    # `run_annotated` escapes `%` in the workflow command.
+    warning = (
+        "::warning::could not read the shipmate App's bot user shipmate-test[bot]: command failed "
+        "(1): gh api users/shipmate-test%255Bbot%255D | gh: Not Found (HTTP 404)\n"
+    )
+    assert (proc.stdout, proc.stderr) == (_DRAFT_NOT_WRITTEN, warning)
 
 
 @bash_only
