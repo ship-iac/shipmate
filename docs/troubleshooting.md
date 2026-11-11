@@ -1055,11 +1055,13 @@ The deploy's `detect` job warns this when `commits/<sha>/pulls` lists pull
 requests (`#<n>, #<m> contain it` for more than one) but none of them has
 `<sha>` as its `merge_commit_sha`.
 
-- Cause: `<sha>` reached `<branch>` by a direct push, such as one by an actor
-  the branch ruleset lets bypass it, of a commit an open or an earlier merged
-  pull request contains. Deploying a listed pull request's plans would apply
-  more than, or other than, what the branch holds, so the deploy maps none of
-  them.
+- Cause: The deploy maps the pull request whose recorded merge commit
+  (`merge_commit_sha`) is the pushed commit, and only that one. None of the
+  listed pull requests records `<sha>`, as when `<sha>` reached `<branch>` by a
+  direct push, such as one by an actor the branch ruleset lets bypass it, of a
+  commit an open or an earlier merged pull request contains. Deploying a listed
+  pull request's plans would apply more than, or other than, what the branch
+  holds, so the deploy maps none of them.
 - Effect: As for `could not map <sha> to a merged pull request (...)` above:
   the deploy runs as a push to `<branch>`, maps no pull request and releases no
   cell lock.

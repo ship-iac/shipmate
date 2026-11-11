@@ -548,7 +548,7 @@ with a folded `shipmate commands` section naming, in apply order,
 changed cell and `shipmate apply` once, at the first changed environment that is
 not targeted, then `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
-unless one of those holders is stacked on this pull request, and `shipmate help`
+unless one of those holders is stacked on this pull request (§Comment-ops), and `shipmate help`
 (§Plan comment). It changes no plan or apply.
 
 **`tools` chooses the Terramate and OpenTofu versions every job installs.** It
@@ -1260,9 +1260,12 @@ holders of the deleted ones are still told. A refused delete or a notice that
 cannot be posted turns the reply into `🔴 failed:`, naming the cells not
 released and the holders not told, and fails the run.
 
-Before any delete, it reads each holder's pull request once. A holder that is
-open with this pull request's head branch as its base is stacked on this pull
-request; an unknown holder never is. Evicting a stacked holder and then
+Before any delete, it reads each holder's pull request once. A holder is
+stacked on a pull request when it is an open pull request whose base branch is
+that pull request's head branch; an unknown holder never is. A holder further
+down a chain, based on the head branch of a pull request that is itself
+stacked, is not treated as stacked: the plan comment's commands section still
+names it and says what applying after eviction may overwrite. Evicting a stacked holder and then
 applying this pull request would overwrite what the holder applied, so any
 stacked holder refuses the whole command and nothing is released. The reply
 is ``🔴 refused: no cell lock in `<env>` was released.`` with the refusal
@@ -3166,9 +3169,9 @@ and `lost` outputs, which the same rule reads.
   bold cell names and the doctor report's check headers do the same.
   A changed cell another pull request holds a cell lock on ends its line with
   ` 🔒 locked by #<n>`, or ` 🔒 locked by an unknown holder` for an unknown
-  holder (§Cell locks). When #<n> is open and its base branch is this pull
-  request's head branch (`facts`' `head-ref`), #<n> is stacked on this pull
-  request, the marker reads ` 🔒 locked by #<n>, stacked on this pull request`,
+  holder (§Cell locks). When #<n> is stacked on this pull request (§Comment-ops
+  defines it; this pull request's head branch is `facts`' `head-ref`), the
+  marker reads ` 🔒 locked by #<n>, stacked on this pull request`,
   and a stacked holder line under the verdict explains it. A
   pending gate then reads `stacked #<n> holds <k> cell(s); retarget it to
   <default branch> and merge it first` in place of its generic description,
@@ -3495,7 +3498,7 @@ actionable warning cannot be lost on either path. In the order they render:
   when another pull request locks
   the blocker cell (`` it is locked by an unknown holder; comment
   `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
-  else holds its environment, followed by `; the base also changed it; update
+  else holds its environment, followed by `. The base also changed it; update
   the branch from the base and push` when the blocker is also an overlap cell,
   else `the base also changed it; update the branch from the base and push`
   when the blocker is an overlap cell, else

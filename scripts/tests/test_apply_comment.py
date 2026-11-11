@@ -2501,13 +2501,14 @@ def test_a_cell_waiting_on_a_locked_overlap_cell_names_both_remedies():
     """detect lists a cell once per cause, so a blocker both locked and overlapping the base
     needs the lock released and the branch updated.
 
-    Mutation: return the lock remedy alone when the blocker is locked -- red."""
+    Mutation: return the lock remedy alone when the blocker is locked -- red.
+    Mutation: join the two remedies with "; " instead of a sentence break -- red."""
     held_cells = [_locked("stacks/dns", "ops", 7), _overlap("stacks/dns", "ops")]
     waiting = [_waits("stacks/a", "qa", "stacks/dns", "ops")]
     assert ac._footer_parts([], [], [], waiting, held_cells=held_cells)[-1] == (
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #7; wait "
         "for #7 to merge or close, then re-plan. If #7 has already merged or closed, comment "
-        "`shipmate unlock ops --evict`; the base also changed it; update the branch from the base "
+        "`shipmate unlock ops --evict`. The base also changed it; update the branch from the base "
         "and push"
     )
 

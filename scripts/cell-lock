@@ -445,24 +445,26 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     locks = read_locks(repo, [env], run=run).values()
     locks = [lock for lock in locks if lock.ref in wanted and lock.pr != pr]
     held = collections.Counter(lock.pr for lock in locks if lock.pr is not None)
-    stacked, unread = [], []
-    for holder in sorted(held):
-        try:
-            if _is_stacked(gh_json(f"repos/{repo}/pulls/{holder}", run), head_ref):
-                stacked.append(
-                    f"#{holder} is stacked on this pull request and holds {held[holder]} of its "
-                    f"cell(s) in {env}; applying this pull request after evicting it would "
-                    f"overwrite what it applied. Retarget #{holder} to {default_branch} and merge "
-                    "it first, or close it, which releases its locks."
-                )
-        except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
-            unread.append(
-                f"could not tell whether #{holder} is stacked on this pull request: {_why(exc)}"
-            )
+    stacked, unread = _read_stacked(repo, held, head_ref, run)
     if stacked:
-        raise Stacked("::error::" + "\n".join(stacked))
+        raise Stacked(
+            "::error::"
+            + "\n".join(
+                f"#{holder} is stacked on this pull request and holds {held[holder]} of its "
+                f"cell(s) in {env}; applying this pull request after evicting it would "
+                f"overwrite what it applied. Retarget #{holder} to {default_branch} and merge "
+                "it first, or close it, which releases its locks."
+                for holder in stacked
+            )
+        )
     if unread:
-        raise SystemExit("::error::" + "\n".join(unread))
+        raise SystemExit(
+            "::error::"
+            + "\n".join(
+                f"could not tell whether #{holder} is stacked on this pull request: {why}"
+                for holder, why in unread
+            )
+        )
     return _delete_each(repo, locks, run)
 
 
@@ -585,20 +587,29 @@ def _stacked(repo, holders, head_ref, run):
     Reviewer-facing, so a failed read warns and leaves that holder out."""
     if not head_ref:
         return []
-    stacked = []
+    # Reviewer-facing and read once per holder in every plan summary: a failure
+    # warns at once rather than holding the summary for the retries.
+    stacked, unread = _read_stacked(repo, holders, head_ref, run, retry=False)
+    for holder, why in unread:
+        print(
+            f"::warning::could not read pull request #{holder} ({command_data(why)}), "
+            "so the plan comment does not say whether it is stacked on this pull request"
+        )
+    return stacked
+
+
+def _read_stacked(repo, holders, head_ref, run, *, retry=True):
+    """Each of `holders` read once, in sorted order: (the holders `_is_stacked` on `head_ref`,
+    [(holder, `_why` reason)] for each whose read fails or answers malformed)."""
+    stacked, unread = [], []
     for holder in sorted(holders):
         try:
-            # Reviewer-facing and read once per holder in every plan summary: a failure
-            # warns at once rather than holding the summary for the retries.
-            pull = gh_json(f"repos/{repo}/pulls/{holder}", run, retry=False)
+            pull = gh_json(f"repos/{repo}/pulls/{holder}", run, retry=retry)
             if _is_stacked(pull, head_ref):
                 stacked.append(holder)
         except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
-            print(
-                f"::warning::could not read pull request #{holder} ({command_data(_why(exc))}), "
-                "so the plan comment does not say whether it is stacked on this pull request"
-            )
-    return stacked
+            unread.append((holder, _why(exc)))
+    return stacked, unread
 
 
 def _is_stacked(pull, head_ref) -> bool:
