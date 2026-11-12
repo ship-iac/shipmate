@@ -3423,7 +3423,8 @@ def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkey
     clone = tmp_path / "clone"
     _git("clone", "-q", "--no-local", "--single-branch", "-b", "pr", str(git_repo), str(clone))
     monkeypatch.chdir(clone)
-    assert subprocess.run(["git", "cat-file", "-e", tip], capture_output=True).returncode
+    absent = subprocess.run(["git", "cat-file", "-e", tip], capture_output=True).returncode
+    assert absent
     real = bm._run
     monkeypatch.setattr(
         bm, "_run", lambda args: "stacks/app\n" if args[0] == "terramate" else real(args)
