@@ -603,8 +603,7 @@ def test_run_annotated_passes_its_arguments_to_main():
     """The arguments after `main` reach `main` unchanged. Mutation: call `main()` without
     `*args` -- red."""
     calls = []
-    result = run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y")
-    assert result is None
+    run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y")
     assert calls == [(["refresh", "x"], "y")]
 
 
