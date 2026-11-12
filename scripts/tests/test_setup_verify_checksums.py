@@ -1191,7 +1191,8 @@ def test_the_tools_verify_step_runs_only_when_a_tool_changed():
     Mutations: drop the `if:`; read `verify` from `steps.tools-verify`; add
     `continue-on-error: true`."""
     step = dict(step_by("build-matrix", id="tools-verify"))
-    assert step.pop("run")
+    run = step.pop("run")
+    assert run
     assert step == {
         "name": "Verify changed tools",
         "id": "tools-verify",

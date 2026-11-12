@@ -26,7 +26,6 @@ from _shipmate import REASON_CAP
 
 _LIB = (ACTIONS / "setup").as_posix()
 _URL = "https://github.com/o/r/releases/download/v1.0.0/asset.tar.gz"
-_ERROR = "::error title=Release step failed::Tool 1.0.0: "
 _CURL_STUB = (
     'printf \'%s\\x1f\' "$@" >> "$STUB_LOG"; echo >> "$STUB_LOG"\n'
     'prev=""; for a in "$@"; do if [ "$prev" = -o ]; then printf %s "$STUB_BODY" > "$a"; fi; '
