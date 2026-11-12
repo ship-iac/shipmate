@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.55.1] — 2026-11-12
 
+Tags `b20df00`.
+
 ### Added
 
 - **A public repository needs a repository Actions event policy allowing shipmate's events.** From 2026-12-02 GitHub blocks `pull_request_target` in a public repository without one, so no autoplan or `release` run starts: the run ends `startup_failure` with no job and creates no new plan check, comment or gate status (earlier results on the head may remain). A private or internal repository is unaffected. GitHub's documentation says the policy allows the events; a run under the block with the policy in place is not yet observed. `docs/getting-started.md` §Allow shipmate's events on a public repository gives the settings and a read-back command; `docs/hardening.md` row 22 and `docs/troubleshooting.md` cover the symptom and the trade-off. Consumer action on a public repository: create the policy for `.github/workflows/shipmate.yml`, enforcement active, allowing `pull_request_target`, `issue_comment`, `push` and `workflow_dispatch`.
