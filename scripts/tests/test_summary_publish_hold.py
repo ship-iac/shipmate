@@ -465,9 +465,9 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
 
 @bash_only
 def test_a_newer_runs_hold_refuses_the_final_write(tmp_path):
-    """A newer same-head run held the gate after this run's publish hold (its summary arrived at
-    a full gate-writer queue). Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending`
-    POST buries the hold."""
+    """A newer same-head run held the gate after this run's publish hold (its summary ended
+    `cancelled`, for example at a full gate-writer queue for the head). Mutation:
+    `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST buries the hold."""
     codes, calls, stderr, _ = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(GATE,))
     assert (codes, calls, stderr) == ([1], [USER_READ, STATUSES_LIST], REFUSED)
 

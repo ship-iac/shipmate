@@ -178,9 +178,10 @@ jobs:
           auto-envs: ${{ needs.detect.outputs.auto_envs }}
           targeted-envs: ${{ needs.detect.outputs.targeted_envs }}
 
-  # Holds the gate when `summary` arrives at a full per-head queue or reaches its job timeout; it
-  # writes outside the group, since a hold only closes the gate. A `summary` whose fork `if:` refused the head is `skipped`,
-  # not `cancelled`, so this job never holds the App key for a head `summary` refused.
+  # Holds the gate when `summary` ended `cancelled`, for example at a full gate-writer queue for
+  # the head; it writes outside the group, since a hold only closes the gate. A `summary` whose
+  # fork `if:` refused the head is `skipped`, not `cancelled`, so this job never holds the App key
+  # for a head `summary` refused.
   gate-hold:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
