@@ -536,8 +536,8 @@ runs:
             exit 0
           fi
         fi
-        # A newer same-head run's hold (an evicted summary's) must not be buried by this write. A
-        # failed read writes nothing; the publish hold, if any, stands.
+        # A newer same-head run's hold (its summary arrived at a full gate-writer queue) must not
+        # be buried by this write. A failed read writes nothing; the publish hold, if any, stands.
         python3 "$gate_status" refuse-newer "$HEAD_SHA" || exit 1
         python3 "$gate_status" post "$HEAD_SHA" "$STATE" "$DESCRIPTION"
         # Degrades: the `pending` above is the fail-closed write, and the refresh only upgrades it

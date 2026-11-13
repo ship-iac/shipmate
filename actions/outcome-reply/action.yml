@@ -16,7 +16,7 @@ inputs:
     required: false
     default: ""
   summary-result:
-    description: The run's `needs.summary.result`; `cancelled` without a run cancel means a newer gate writer of the head evicted the summary.
+    description: "The run's `needs.summary.result`; `cancelled` while `run-cancelled` is `false` means the summary was cancelled before it posted: the head's gate-writer queue was full when it arrived, or a cancel while it waited or ran."
     required: true
   run-cancelled:
     description: "`true` when the run itself was cancelled. Computed by the caller from its `needs.*.result`: in a job that starts after a run cancel, a step-level `cancelled()` is false."
@@ -62,7 +62,7 @@ runs:
         elif [ "$RUN_CANCELLED" = true ]; then
           outcome=failed text="$run was cancelled before it posted a result."
         elif [ "$SUMMARY_RESULT" = cancelled ]; then
-          outcome=failed text="$run posted no result: a newer run for this head replaced its summary."
+          outcome=failed text="$run posted no result: its summary was cancelled before it posted a result."
           if [ "$SHIPMATE_REPLY_VERB" = apply ]; then text+=" Its cells' results are on their apply checks."; fi
         else
           outcome=failed text="$run ended before it posted a result; the reason is in that run's log."
