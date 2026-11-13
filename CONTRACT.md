@@ -161,8 +161,8 @@ they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
 `summary` action, or held by `plan.yml`'s `gate-hold` when `summary` ended
-`cancelled`, for example at a full gate-writer queue for the head, and is
-completed to success by whichever of these happens first, each through
+`cancelled` and the run was not cancelled, for example at a full gate-writer
+queue for the head, and is completed to success by whichever of these happens first, each through
 `scripts/gate-status` and one at a time per head (§Comment-ops, "The aggregate
 gate"):
 
@@ -1869,11 +1869,13 @@ check/status/comment/issue that crosses a workflow-run boundary:
   writer does not cancel a pending one. A `summary` can end `cancelled`, for
   example at a full gate-writer queue for the head. What a cancelled `summary`
   costs:
-  - a plan `summary`: its run publishes nothing more, and `gate-hold` writes a
-    hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the
-    group, since a hold only closes the gate, and is not ordered against the
-    head's other writers: its hold can land after one of them greened the head,
-    a closed gate over applied work that `shipmate plan` reopens;
+  - a plan `summary` cancelled while its run was not: its run publishes nothing
+    more, and `gate-hold` writes a hold naming the recovery, `shipmate plan`.
+    `gate-hold` writes outside the group, since a hold only closes the gate,
+    and is not ordered against the head's other writers: its hold can land
+    after one of them greened the head, a closed gate over applied work that
+    `shipmate plan` reopens. A plan run cancelled as a whole writes no hold:
+    the head keeps its last gate, or this run's publish hold if it wrote one;
   - an apply `summary`: the run posts no apply comment, so its results and its
     waiting cells show only in the run itself. The head's gate keeps its last
     write until its next writer: a plan `summary` writes the gate from its plan;
@@ -2549,8 +2551,9 @@ The six jobs:
   compare against `head-ref` (§Plan comment); both reads only decide what a
   reviewer sees, and degrade (§Cell locks).
 - **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
-  runs only when `summary` ended `cancelled`, for example at a full gate-writer
-  queue for the head (§Comment-ops, "The aggregate gate"). It
+  runs only when `summary` ended `cancelled` and the run was not cancelled, for
+  example at a full gate-writer queue for the head (§Comment-ops, "The
+  aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
   (comment shipmate plan or push): its plan summary was cancelled before it
   published". A `summary` refused by its fork `if:` is `skipped`, not
@@ -3382,8 +3385,8 @@ successful ones included, because the artifact names carry no attempt and the
 upload does not overwrite. The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` ended
-`cancelled`, for example at a full gate-writer queue for the head, and
-`gate-hold` writes outside the job's concurrency group); a failed
+`cancelled` and the run was not cancelled, for example at a full gate-writer
+queue for the head, and `gate-hold` writes outside the job's concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final write that fails
 transiently is retried, and the newer-run check runs again before each retry; a
 first attempt that landed although it reported a failure stays written. A final `pending` gate is followed
@@ -3781,8 +3784,9 @@ on-demand run, under `summary`'s fork clause, when `summary` did not output
 `moved`. A superseded run and one whose pull request moved past its head post
 nothing. The reply is:
 
-- summary cancelled when `summary` ended `cancelled`, for example at a full
-  gate-writer queue for the head, and `gate-hold` holds the gate;
+- summary cancelled when `summary` ended `cancelled` and the run was not
+  cancelled, for example at a full gate-writer queue for the head, and
+  `gate-hold` holds the gate;
 - otherwise ended before a result. That covers a `summary` that failed before
   or at its comment write, and a plan cell that ended `cancelled` without a run
   cancel (a job timeout): its `summary` holds the gate and writes no comment.

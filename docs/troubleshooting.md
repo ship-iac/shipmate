@@ -1748,11 +1748,12 @@ whether or not it downloaded a cell summary: a failed download leaves none over
 planned cells. That hold reads "re-plan this pull request (comment shipmate plan
 or push): its plan run ended before writing a final gate". Its apply-check
 publish and its final write each refuse, writing nothing and keeping the gate
-as it stands, when a newer plan run of the same head holds the gate by then. A plan run whose `summary` job was
-cancelled, for example at a full gate-writer queue for the head
-(`CONTRACT.md` §Comment-ops, "The aggregate gate") holds the gate
-from its `gate-hold` job, reading "its plan summary was cancelled before it
-published". That hold can land after another run's summary greened the head,
+as it stands, when a newer plan run of the same head holds the gate by then. A plan run whose `summary` job ended
+`cancelled` and the run was not cancelled, for example at a full gate-writer
+queue for the head (`CONTRACT.md` §Comment-ops, "The aggregate gate"), holds
+the gate from its `gate-hold` job, reading "its plan summary was cancelled
+before it published". A plan run cancelled as a whole writes no such hold; the
+head keeps its last gate. That hold can land after another run's summary greened the head,
 closing a gate over work already applied. Every one of these holds clears the
 same way: comment `shipmate plan` or push.
 A run held for its plan job or its cell count also publishes no apply check.
