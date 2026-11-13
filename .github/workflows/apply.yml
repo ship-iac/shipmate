@@ -302,6 +302,7 @@ jobs:
     concurrency:
       group: shipmate-gate-${{ inputs.ref || github.run_id }}
       cancel-in-progress: false
+      queue: max
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
     # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
@@ -366,8 +367,8 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           review-result: ${{ needs.review.result }}
           summary-result: ${{ needs.summary.result }}
-          # `guard` is left out because the `if:` requires its success; `summary` because its
-          # `cancelled` alone is an eviction by the gate-writer group.
+          # `guard` is left out because the `if:` requires its success; `summary` because it can
+          # end `cancelled` with no run cancel, for example at a full gate-writer queue.
           run-cancelled: ${{ needs.review.result == 'cancelled' || needs.detect.result == 'cancelled' || needs.lock.result == 'cancelled' || needs.envlevel0.result == 'cancelled' || needs.envlevel1.result == 'cancelled' || needs.envlevel2.result == 'cancelled' || needs.envlevel3.result == 'cancelled' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

@@ -16,6 +16,7 @@ EXPECTED_SUMMARY = {
     "concurrency": {
         "group": "shipmate-gate-${{ needs.detect.outputs.head_sha || github.run_id }}",
         "cancel-in-progress": False,
+        "queue": "max",
     },
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
@@ -50,5 +51,5 @@ EXPECTED_SUMMARY = {
 
 def test_the_deploy_gate_step_hands_gate_refresh_every_result():
     """Mutations: drop `deploy-results` or `detect-result`; add back a mint step;
-    `head_sha` -> `head-sha`."""
+    `head_sha` -> `head-sha`; drop `queue: max`."""
     assert workflow_jobs("deploy.yml")["summary"] == EXPECTED_SUMMARY

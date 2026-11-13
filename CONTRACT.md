@@ -160,10 +160,11 @@ commit-scoped and immune. (The per-unit `plan`/`apply` checks stay check-runs;
 they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
-`summary` action, or held by `plan.yml`'s `gate-hold` when the per-head group
-evicts a pending `summary`, and is completed to success by whichever of these happens
-first, each through `scripts/gate-status` and one at a time per head
-(§Comment-ops, "The aggregate gate"):
+`summary` action, or held by `plan.yml`'s `gate-hold` when `summary` ended
+`cancelled` and the run was not cancelled, for example at a full gate-writer
+queue for the head, and is completed to success by whichever of these happens first, each through
+`scripts/gate-status` and one at a time per head (§Comment-ops, "The aggregate
+gate"):
 
 - the plan run's own `summary`, right after it writes `pending`, when it
   published no queued apply check and every `apply / <stack> / <env>` check on
@@ -1856,38 +1857,53 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `integration_id` pin keeps it from satisfying the required check
   (`docs/branch-protection.md`). The three `summary` jobs run in one job-level
   concurrency group,
-  `shipmate-gate-<head sha>` with `cancel-in-progress: false`, shared across
-  runs and called workflows, so one of them at a time reads and writes a head's
-  gate. An empty head SHA (a failed plan `facts`, or a deploy `detect` that
-  failed before it validated the merged head) keys the group on the run id
-  instead, so that job shares no group. A deploy `detect` writes the head before
-  any refusal past head validation, so a refused deploy's `summary` writes
-  `failure` on the merged head. GitHub keeps one pending job per
-  group, so a third arrival cancels the pending one. What each eviction costs:
-  - a pending plan `summary`: its run publishes nothing, and `gate-hold` writes
-    a hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the
-    group, since a hold only closes the gate, and is not ordered against the
-    `summary` that evicted its own: its hold can land after that `summary`
-    greened the head, a closed gate over applied work that `shipmate plan`
-    reopens;
-  - a pending apply `summary`: the evicted run posts no apply comment, so its
-    results and its waiting cells show only in the run itself. The writer that
-    evicted it runs next: a plan `summary` writes the gate from its plan; an
-    apply `summary` refreshes it, which greens it once every apply check is done
-    and otherwise leaves it as it is, and fails the run over a hold; a deploy `summary` writes
-    its deploy verdict. Its waiting cells keep their apply checks pending, so no
-    refresh greens the gate until they apply;
-  - a pending deploy `summary`: the merged head keeps its last gate and the
-    merged pull request keeps the cell locks that run owed; re-run that
-    deploy, as for any superseded deploy, unless a cell's job log shows
+  `shipmate-gate-<head sha>` with `cancel-in-progress: false` and `queue: max`,
+  shared across runs and called workflows, so one of them at a time reads and
+  writes a head's gate. An empty head SHA (a failed plan `facts`, or a deploy
+  `detect` that failed before it validated the merged head) keys the group on
+  the run id instead, so that job shares no group. A deploy `detect` writes the
+  head before any refusal past head validation, so a refused deploy's `summary`
+  writes `failure` on the merged head. The group holds one running writer and
+  up to 100 pending ones. GitHub starts pending writers first in, first out by
+  the time each began waiting, and does not guarantee that order. A later
+  writer does not cancel a pending one. A `summary` can end `cancelled`, for
+  example at a full gate-writer queue for the head. What a cancelled `summary`
+  costs:
+  - a plan `summary` cancelled while its run was not: its run publishes nothing
+    more, and `gate-hold` writes a hold naming the recovery, `shipmate plan`.
+    `gate-hold` writes outside the group, since a hold only closes the gate,
+    and is not ordered against the head's other writers: its hold can land
+    after one of them greened the head, a closed gate over applied work that
+    `shipmate plan` reopens;
+  - an apply `summary`: the run posts no apply comment, so its results and its
+    waiting cells show only in the run itself. The head's gate keeps its last
+    write until its next writer: a plan `summary` writes the gate from its plan;
+    an apply `summary` refreshes it, which greens it once every apply check is
+    done and otherwise leaves it as it is, and fails the run over a hold; a
+    deploy `summary` writes its deploy verdict. Its waiting cells keep their
+    apply checks pending, so no refresh greens the gate until they apply;
+  - a deploy `summary`: the merged head keeps its last gate and the merged pull
+    request keeps the cell locks that run owed; re-run that deploy, as for any
+    superseded deploy, unless a cell's job log shows
     `The apply step ran and its state was not saved` (`docs/troubleshooting.md`
     has the section of that name).
 
+  Plan runs of one head can write out of order. An older run's `summary` that
+  writes after a newer run of the head published apply checks or a hold writes
+  nothing: its hold step's `refuse-newer` and `pending-checks` refuse, whatever
+  its own cell count. An older run with cells that writes after a newer
+  zero-cell run, which left no apply checks or hold, publishes its queued apply
+  checks and writes `pending` over that run's `success`. A plan run that plans
+  zero cells writes `success` without counting the queued apply checks an
+  older run published on the head, so the gate is green over them; the merge
+  deploy applies only the cells its own diff plans, so such a check applies,
+  refuses the deploy, or stays queued.
+
   One race stays open. A refresh already past its status read and before its
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
-  needs three gate writers for one head within a minute (a running apply
-  `summary`, a pending same-head re-plan `summary`, a third arrival evicting it)
-  and the hold landing inside that round trip. Closing it needs a conditional
+  needs a plan `summary` cancelled while its run was not (for example at a full
+  gate-writer queue for the head) while another writer of the head is past its
+  status read, and the hold landing inside that round trip. Closing it needs a conditional
   write, which GitHub commit statuses lack.
 - **The plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
@@ -2534,8 +2550,9 @@ The six jobs:
   compare against `head-ref` (§Plan comment); both reads only decide what a
   reviewer sees, and degrade (§Cell locks).
 - **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
-  runs only when `summary` was cancelled, which the gate-writer concurrency
-  group does to a pending `summary` (§Comment-ops, "The aggregate gate"). It
+  runs only when `summary` ended `cancelled` and the run was not cancelled, for
+  example at a full gate-writer queue for the head (§Comment-ops, "The
+  aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
   (comment shipmate plan or push): its plan summary was cancelled before it
   published". A `summary` refused by its fork `if:` is `skipped`, not
@@ -3366,8 +3383,9 @@ checks only when none of them had already uploaded its plan; a full re-run
 successful ones included, because the artifact names carry no attempt and the
 upload does not overwrite. The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
-newer run of the same head holds the gate by then (that run's `summary` was
-evicted, and `gate-hold` writes outside the job's concurrency group); a failed
+newer run of the same head holds the gate by then (that run's `summary` ended
+`cancelled` and the run was not cancelled, for example at a full gate-writer
+queue for the head, and `gate-hold` writes outside the job's concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final write that fails
 transiently is retried, and the newer-run check runs again before each retry; a
 first attempt that landed although it reported a failure stays written. A final `pending` gate is followed
@@ -3731,7 +3749,7 @@ where `<url>` links the run that posts the reply. The verdict line is one of:
 
 - refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
 - cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
-- summary evicted: ``🔴 failed: [the <verb> run](<url>) posted no result: a newer run for this head replaced its summary.``,
+- summary cancelled: ``🔴 failed: [the <verb> run](<url>) posted no result: its summary was cancelled before it posted a result.``,
   followed for `apply` by `` Its cells' results are on their apply checks.``
 - ended before a result: ``🔴 failed: [the <verb> run](<url>) ended before it posted a result; the reason is in that run's log.``
 
@@ -3747,16 +3765,15 @@ refused text, and the reply still needs its own key check, mint and post. The re
 - refused when `review` failed;
 - otherwise cancelled when a job other than `summary` ended `cancelled`: the
   run was cancelled;
-- otherwise summary evicted when `summary` ended `cancelled`: the per-head
-  gate-writer group evicted it while the run was not cancelled;
+- otherwise summary cancelled when `summary` ended `cancelled` and no other job
+  did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.
 
 `summary` runs after a run cancel once `review` succeeded, and posts the
 result, so the cancelled text appears only when `review` was cancelled or
-`summary`'s post failed. Two known limits: a manual cancel landing while
-`summary` runs gets the summary-evicted text, and a wave job evicted by its
-cell's concurrency group, in a run whose `summary` post failed, gets the
-cancelled text.
+`summary`'s post failed. One known limit: a wave job evicted by its cell's
+concurrency group, in a run whose `summary` post failed, gets the cancelled
+text.
 
 **Plan.** `outcome` runs under `!cancelled()`, so a cancelled `shipmate plan`
 run posts nothing: a push cancels a dispatched plan through the fence's
@@ -3766,8 +3783,9 @@ on-demand run, under `summary`'s fork clause, when `summary` did not output
 `moved`. A superseded run and one whose pull request moved past its head post
 nothing. The reply is:
 
-- summary evicted when `summary` ended `cancelled`: the gate-writer group
-  evicted it while the run was not cancelled, and `gate-hold` holds the gate;
+- summary cancelled when `summary` ended `cancelled` and the run was not
+  cancelled, for example at a full gate-writer queue for the head, and
+  `gate-hold` holds the gate;
 - otherwise ended before a result. That covers a `summary` that failed before
   or at its comment write, and a plan cell that ended `cancelled` without a run
   cancel (a job timeout): its `summary` holds the gate and writes no comment.

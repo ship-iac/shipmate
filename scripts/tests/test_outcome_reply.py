@@ -30,7 +30,8 @@ URL = "https://example.invalid/acme/demo/actions/runs/999"
 HINT = "Comment `shipmate help` for the available commands."
 TOKEN = "minted-token"  # noqa: S105 - a stub token, never sent
 
-#: (inputs, whole body) for each precedence case: refused, run cancelled, evicted, ended.
+#: (inputs, whole body) for each precedence case: refused, run cancelled, summary
+#: cancelled, ended.
 SELECTIONS = {
     "refused": (
         {
@@ -62,7 +63,7 @@ SELECTIONS = {
             f"[comment run]({URL}). {HINT}"
         ),
     ),
-    "run cancelled over an evicted summary": (
+    "run cancelled over a cancelled summary": (
         {
             "verb": "apply",
             "environment": "dev-eu",
@@ -76,7 +77,7 @@ SELECTIONS = {
             f"[comment run]({URL}). {HINT}"
         ),
     ),
-    "apply summary evicted": (
+    "apply summary cancelled": (
         {
             "verb": "apply",
             "environment": "dev-eu",
@@ -86,17 +87,17 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) posted no result: a newer run for this head "
-            "replaced its summary. Its cells' results are on their apply checks.\n\n"
+            f"🔴 failed: [the apply run]({URL}) posted no result: its summary was cancelled "
+            "before it posted a result. Its cells' results are on their apply checks.\n\n"
             f"[comment run]({URL}). {HINT}"
         ),
     ),
-    "plan summary evicted": (
+    "plan summary cancelled": (
         {"verb": "plan", "summary-result": "cancelled", "run-cancelled": "false"},
         (
             "### shipmate plan\n\n"
-            f"🔴 failed: [the plan run]({URL}) posted no result: a newer run for this head "
-            "replaced its summary.\n\n"
+            f"🔴 failed: [the plan run]({URL}) posted no result: its summary was cancelled "
+            "before it posted a result.\n\n"
             f"[comment run]({URL}). {HINT}"
         ),
     ),
@@ -172,10 +173,10 @@ def _run(tmp_path, inputs, *, rc=0):
 @bash_only
 @pytest.mark.parametrize("case", list(SELECTIONS))
 def test_each_case_posts_its_whole_body(tmp_path, case):
-    """Mutations: swap the run-cancelled and summary-evicted texts in the `elif` chain; swap the
-    run-cancelled and summary-evicted conditions; drop the run-cancelled branch (a cancelled run
-    whose summary was cancelled reads as an eviction); drop the `verb` check from the evicted
-    text; post with `github.token` in place of the minted token."""
+    """Mutations: swap the run-cancelled and summary-cancelled texts in the `elif` chain; swap the
+    run-cancelled and summary-cancelled conditions; drop the run-cancelled branch (a cancelled run
+    whose summary was cancelled reads as a summary cancel); drop the `verb` check from the
+    summary-cancelled text; post with `github.token` in place of the minted token."""
     inputs, body = SELECTIONS[case]
     proc, calls = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -240,7 +241,8 @@ _APPLY_NEEDS += ["envlevel3"]
 
 def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel. `run-cancelled` ORs every needed job but
-    `guard`, whose success the `if:` requires, and `summary`, whose `cancelled` is an eviction.
+    `guard`, whose success the `if:` requires, and `summary`, whose `cancelled` alone is not a run
+    cancel.
 
     A failed `review` replies unless it found no open pull request, and never in an `auto` run.
 

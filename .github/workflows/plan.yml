@@ -135,11 +135,12 @@ jobs:
       ${{ !cancelled() && needs.facts.outputs.head-repo != '' &&
       needs.facts.outputs.head-repo == github.repository }}
     runs-on: ${{ inputs.runs_on }}
-    # One gate writer per head at a time, across the plan, apply and deploy runs. A later arrival
-    # evicts a pending one, and `gate-hold` then holds the gate.
+    # One gate writer per head at a time, across the plan, apply and deploy runs; up to 100 wait.
+    # An arrival at a full queue is cancelled, and `gate-hold` then holds the gate.
     concurrency:
       group: shipmate-gate-${{ needs.facts.outputs.head-sha || github.run_id }}
       cancel-in-progress: false
+      queue: max
     # The guard is on the job, not on a step: a skipped job never enters the environment,
     # whereas a first-step check would already hold the App key in scope.
     environment: { name: shipmate-engine, deployment: false }
@@ -177,9 +178,10 @@ jobs:
           auto-envs: ${{ needs.detect.outputs.auto_envs }}
           targeted-envs: ${{ needs.detect.outputs.targeted_envs }}
 
-  # Holds the gate when the per-head group evicts a pending `summary`; it writes outside the group,
-  # since a hold only closes the gate. A `summary` whose fork `if:` refused the head is `skipped`,
-  # not `cancelled`, so this job never holds the App key for a head `summary` refused.
+  # Holds the gate when `summary` ended `cancelled` and the run was not cancelled, for example at
+  # a full gate-writer queue for the head; it writes outside the group, since a hold only closes
+  # the gate. A `summary` whose fork `if:` refused the head is `skipped`, not `cancelled`, so this
+  # job never holds the App key for a head `summary` refused.
   gate-hold:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}

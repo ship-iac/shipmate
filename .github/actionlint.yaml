@@ -17,3 +17,6 @@ paths:
       # actionlint 1.7.12 has no `cache-mode` key (GitHub, 2026-09-10). Remove when a release
       # parses it.
       - 'unexpected key "cache-mode" for "workflow" section'
+      # actionlint 1.7.12 has no `queue` key for `concurrency` (GitHub documents `single`, `max`).
+      # Remove when a release parses it. The regex names the key: another unknown key still fails.
+      - 'unexpected key "queue" for "concurrency" section'
