@@ -1752,8 +1752,7 @@ as it stands, when a newer plan run of the same head holds the gate by then. A p
 `cancelled` and the run was not cancelled, for example at a full gate-writer
 queue for the head (`CONTRACT.md` §Comment-ops, "The aggregate gate"), holds
 the gate from its `gate-hold` job, reading "its plan summary was cancelled
-before it published". A plan run cancelled as a whole writes no such hold; the
-head keeps its last gate. That hold can land after another run's summary greened the head,
+before it published". That hold can land after another run's summary greened the head,
 closing a gate over work already applied. Every one of these holds clears the
 same way: comment `shipmate plan` or push.
 A run held for its plan job or its cell count also publishes no apply check.

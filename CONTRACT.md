@@ -1874,8 +1874,7 @@ check/status/comment/issue that crosses a workflow-run boundary:
     `gate-hold` writes outside the group, since a hold only closes the gate,
     and is not ordered against the head's other writers: its hold can land
     after one of them greened the head, a closed gate over applied work that
-    `shipmate plan` reopens. A plan run cancelled as a whole writes no hold:
-    the head keeps its last gate, or this run's publish hold if it wrote one;
+    `shipmate plan` reopens;
   - an apply `summary`: the run posts no apply comment, so its results and its
     waiting cells show only in the run itself. The head's gate keeps its last
     write until its next writer: a plan `summary` writes the gate from its plan;
@@ -1902,9 +1901,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
 
   One race stays open. A refresh already past its status read and before its
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
-  needs a plan `summary` cancelled (for example at a full gate-writer queue for
-  the head) while another writer of the head is past its status read, and the
-  hold landing inside that round trip. Closing it needs a conditional
+  needs a plan `summary` cancelled while its run was not (for example at a full
+  gate-writer queue for the head) while another writer of the head is past its
+  status read, and the hold landing inside that round trip. Closing it needs a conditional
   write, which GitHub commit statuses lack.
 - **The plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from

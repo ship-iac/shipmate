@@ -1146,7 +1146,7 @@ value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
 deployment is created and the environment is never entered. And that job has no
 checkout, so even admitted it would run nothing the fork wrote. The other two
 jobs holding the key check nothing out either. `gate-hold` runs only when
-`summary` was cancelled; a refused `summary` is skipped, not cancelled.
+`summary` was cancelled and the run was not; a refused `summary` is skipped, not cancelled.
 `outcome` carries `summary`'s head-repository clause in its own `if:`.
 Both the fact and
 the comparison live in engine-owned, SHA-pinned YAML (`CONTRACT.md` §Post-plan

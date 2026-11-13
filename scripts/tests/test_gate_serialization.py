@@ -8,8 +8,9 @@ arrivals wait in it, and an arrival at a full queue is cancelled. GitHub rejects
 beside `cancel-in-progress: true`. The `github.run_id` fallback keeps an empty head SHA (a failed
 `detect` or `facts`) in a group of its own instead of one every such run shares.
 
-A cancelled plan `summary` never publishes its cells, so plan.yml's `gate-hold` writes a hold
-naming the recovery. It runs outside the group: a hold only closes the gate.
+A plan `summary` cancelled while its run was not never publishes its cells, so plan.yml's
+`gate-hold` writes a hold naming the recovery. It runs outside the group: a hold only closes the
+gate.
 
 actionlint 1.7.12 rejects the `queue` key, so `.github/actionlint.yaml` ignores that one message.
 The ignore must not hide another unknown `concurrency` key.
