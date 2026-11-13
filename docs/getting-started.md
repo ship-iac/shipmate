@@ -490,12 +490,12 @@ arrives. [`aws.md`](aws.md) §Runner choice lists the jobs on each runner.
 ```yaml
 name: shipmate
 run-name: >-
-  shipmate · ${{ github.event_name == 'pull_request_target'
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('shipmate · {0} pr={1} ref={2} comment={3}', inputs.verb, inputs.pr_number, inputs.ref, inputs.comment_id)
+  || format('shipmate · {0}', github.event_name == 'pull_request_target'
   && github.event.action == 'closed' && 'release'
   || github.event_name == 'pull_request_target' && 'plan'
-  || github.event_name == 'issue_comment' && 'comment'
-  || github.event_name == 'push' && 'deploy'
-  || inputs.verb }}
+  || github.event_name == 'issue_comment' && 'comment' || 'deploy') }}
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, closed]
@@ -522,6 +522,10 @@ on:
         default: ''
       pr_number:
         description: Pull request number (plan, apply and auto)
+        required: false
+        default: ''
+      comment_id:
+        description: Command comment id (plan, apply and unlock)
         required: false
         default: ''
 # Deny by default: each job grants its own permissions, so a job that loses its block gets none.
@@ -620,7 +624,7 @@ jobs:
   unlock:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: { contents: read, checks: read, pull-requests: write, actions: read, id-token: write }
     secrets:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:

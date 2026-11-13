@@ -2147,9 +2147,10 @@ which. The gate is unchanged and nothing applied. Comment `shipmate apply`.
 Actions tab before commenting `shipmate apply` `` means the dispatch failed with
 a server or network error and an `auto` run may have started (`CONTRACT.md`
 §Comment-ops). It is a `⚪` notice when a `shipmate.yml` run started since the
-dispatch, and `🔴 failed:` when the engine cannot tell. Find a `shipmate · auto`
-run created at the plan run's time in the Actions tab: if one runs, wait for its
-apply result comment; if none does, comment `shipmate apply`.
+dispatch, and `🔴 failed:` when the engine cannot tell. Find a run whose title
+starts `shipmate · auto` (`CONTRACT.md` §Check names), created at the plan run's
+time, in the Actions tab: if one runs, wait for its apply result comment; if
+none does, comment `shipmate apply`.
 
 When the first recurs, check the App's `actions: write` permission and reconcile
 `shipmate.yml` against the fence in [`getting-started.md`](getting-started.md)
@@ -2512,9 +2513,9 @@ That run is this command's, or another command's dispatched in the same
 seconds (`CONTRACT.md` §Comment-ops).
 
 Open the Actions tab and filter the runs of `shipmate.yml` created at the
-comment's time. A run titled `shipmate · <verb>` for this command means it
-started: wait for its answer on the pull request. When none is this command's,
-comment it again.
+comment's time. A run whose title starts `shipmate · <verb>` for this command
+(`CONTRACT.md` §Check names) means it started: wait for its answer on the pull
+request. When none is this command's, comment it again.
 
 ### `dispatching its workflow failed with a server or network error, so a run may have started`
 
@@ -2557,7 +2558,8 @@ a result nor a 🔴 reply followed within a few minutes. The run ended before it
 failed at its key check or token mint, or green with a
 `could not post the no-result reply` warning.
 
-Open the Actions tab and filter the runs titled `shipmate · <verb>`. A failed
+Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
+(`CONTRACT.md` §Check names). A failed
 `guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
 `review` names it in its job log. A startup failure shows on the run page with
 no jobs started, with GitHub's error for the workflow file.

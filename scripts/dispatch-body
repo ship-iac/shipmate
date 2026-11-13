@@ -50,7 +50,7 @@ def body() -> dict:
     """The dispatch request body for `VERB`, from the env."""
     verb = os.environ["VERB"]
     if verb == "plan":
-        # `shipmate.yml` declares four inputs; a plan fills two. `ref` is not among them: the
+        # A plan fills two of the fence's inputs. `ref` is not among them: the
         # dispatched run resolves the head from the pull request itself, so nothing a
         # dispatcher states decides what is planned.
         inputs = {"verb": verb, "pr_number": os.environ["PR_NUMBER"]}

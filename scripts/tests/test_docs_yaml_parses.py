@@ -379,6 +379,7 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
         ]
     )
     assert found == [
+        ("docs/getting-started.md", "shipmate", "comment_id", False, "", None, ()),
         ("docs/getting-started.md", "shipmate", "environment", False, "", None, ()),
         ("docs/getting-started.md", "shipmate", "pr_number", False, "", None, ()),
         ("docs/getting-started.md", "shipmate", "ref", False, "", None, ()),

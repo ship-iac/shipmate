@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Changed
 
 - **The gate writers of one head wait in a queue of up to 100.** A plan, apply or deploy `summary` waits behind the head's running writer instead of a later writer cancelling it while it is pending. A `summary` that arrives at a full queue is cancelled, and on a plan run `gate-hold` holds the gate. GitHub starts queued writers in arrival order but does not guarantee it. The reply for a commanded run whose `summary` was cancelled reads `[the <verb> run](<url>) posted no result: its summary was cancelled before it posted a result.`
+- **The published `shipmate.yml` fence titles a dispatched run with its verb, pull request, head and command comment.** Its `run-name` reads `shipmate · <verb> pr=<pr_number> ref=<ref> comment=<comment_id>` on a `workflow_dispatch`, an input the dispatch omits rendering empty (`CONTRACT.md` §Check names); other events keep `shipmate · plan`, `release`, `comment` and `deploy`. The `comment=` slot holds the command comment's id from a new optional `comment_id` input, and stays empty until the engine sends one. The fence's `unlock` job grants `pull-requests: write`. Re-pin `shipmate.yml` with `python <engine>/scripts/repin <consumer> <tag> --write-fence` after reading the diff it prints.
 
 ## [0.55.1] — 2026-11-12
 
