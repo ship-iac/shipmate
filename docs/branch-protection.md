@@ -35,7 +35,7 @@ resolves to:
 | `detect` failed without an `::error::` line (a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan / <env> / <stack> has no plan summary; fix its plan or re-plan", "plan / <env> / <stack> and <N> more have no plan summary; fix their plans or re-plan", or, when no cell without a summary is known or the named text passes 140 characters, "plan incomplete (plan job: failure); fix the failing plan checks before merging" | blocked |
 | The plan job was cancelled, or the summary job failed while publishing | no final gate: the summary's publish hold (`failure` — "Plan run <id> holds this while it publishes; if that run has ended, re-plan (comment shipmate plan or push)") stays when it downloaded any cell summary; otherwise the head keeps its earlier gate | blocked by the hold; otherwise as the earlier gate allows (none: blocked, the required check never arrives) |
-| The plan summary arrived at a full gate-writer queue for the head and was cancelled | `failure` — "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled before it published" | blocked |
+| The plan summary was cancelled at a full gate-writer queue for the head or by its job timeout | `failure` — "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled before it published" | blocked |
 | Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |
 

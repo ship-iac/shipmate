@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **The gate writers of one head wait in a queue of up to 100.** A plan, apply or deploy `summary` waits behind the head's running writer instead of a later writer cancelling it while it is pending. A `summary` is cancelled only when it arrives at a full queue, which `gate-hold` answers on a plan run, or when its run is cancelled while it waits. GitHub starts queued writers in arrival order but does not guarantee it. The reply for a commanded run whose `summary` was cancelled reads `[the <verb> run](<url>) posted no result: its summary was cancelled before it posted a result.`
+- **The gate writers of one head wait in a queue of up to 100.** A plan, apply or deploy `summary` waits behind the head's running writer instead of a later writer cancelling it while it is pending. A `summary` that arrives at a full queue is cancelled, and on a plan run `gate-hold` holds the gate. GitHub starts queued writers in arrival order but does not guarantee it. The reply for a commanded run whose `summary` was cancelled reads `[the <verb> run](<url>) posted no result: its summary was cancelled before it posted a result.`
 
 ## [0.55.1] — 2026-11-12
 

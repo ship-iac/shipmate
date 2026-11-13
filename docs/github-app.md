@@ -396,7 +396,7 @@ actual work here:
   payload (`docs/hardening.md` §Contributors without push access).
 - **The plan-run jobs that hold the key run no consumer repository content.**
   The `summary` job, `gate-hold`, which runs only when `summary` arrived at a
-  full gate-writer queue for the head, and `outcome`, which carries
+  full gate-writer queue for the head or reached its job timeout, and `outcome`, which carries
   `summary`'s fork clause, check out nothing, and a consumer
   cannot add a checkout: they call the workflow, they do not own its steps.
   Reaching the key from a pull-request-side trigger is safe only in that shape —

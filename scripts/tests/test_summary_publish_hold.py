@@ -543,13 +543,15 @@ NEWER_CHECK = (
 
 
 @bash_only
+@pytest.mark.parametrize("cells", [("a",), ()], ids=["cells", "zero-cells"])
 @pytest.mark.parametrize("newest", ["pending", "success"])
-def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
+def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest, cells):
     """A newer run published a check but its gate reads `pending` or `success`, no hold. The step
-    ends green with the refusal as a notice and sets `superseded`.
+    ends green with the refusal as a notice and sets `superseded`, whatever this run's cell count.
     Mutations: write the publish hold before `pending-checks` -> a hold POST; exit pending-checks'
-    refusal 1 (`NEWER_RUN = 1`) -> a hold POST; `superseded pending.err` -> `exit 1` -> `[1]`."""
-    _write_cells(tmp_path, "a")
+    refusal 1 (`NEWER_RUN = 1`) -> a hold POST; `superseded pending.err` -> `exit 1` -> `[1]`;
+    run `pending-checks` only when `$cells` is non-empty -> the zero-cells cases lose the notice."""
+    _write_cells(tmp_path, *cells)
     codes, calls, stderr, _ = _run(
         tmp_path,
         statuses=_lines(_gate(newest, 50)),

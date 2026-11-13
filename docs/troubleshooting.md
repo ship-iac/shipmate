@@ -1749,7 +1749,7 @@ planned cells. That hold reads "re-plan this pull request (comment shipmate plan
 or push): its plan run ended before writing a final gate". Its apply-check
 publish and its final write each refuse, writing nothing and keeping the gate
 as it stands, when a newer plan run of the same head holds the gate by then. A plan run whose `summary` job was
-cancelled because the gate-writer queue for the head was full when it arrived
+cancelled at a full gate-writer queue for the head or by its job timeout
 (`CONTRACT.md` §Comment-ops, "The aggregate gate") holds the gate
 from its `gate-hold` job, reading "its plan summary was cancelled before it
 published". That hold can land after another run's summary greened the head,
@@ -2061,12 +2061,13 @@ the run: `its review check stopped [the apply run](<url>) before any cell
 applied` for a refusal, `[the apply run](<url>) was cancelled before it posted a
 result` for a cancel (`CONTRACT.md` §Outcome reply).
 
-An apply run whose `summary` job was cancelled before it posted, because the
-gate-writer queue for the head was full when it arrived or the run was cancelled
-while it waited, also posts no apply comment. It replies `[the apply
-run](<url>) posted no result: its summary was cancelled before it posted a
-result. Its cells' results are on their apply checks.` Its results and its
-waiting cells show only on that run's page.
+An apply run whose `summary` job was cancelled before it posted, for example
+at a full gate-writer queue for the head, also posts no apply comment. It
+replies `[the apply run](<url>) posted no result: its summary was cancelled
+before it posted a result. Its cells' results are on their apply checks.` Its
+results and its waiting cells show only on that run's page. The head's gate
+keeps its last write until the next plan, apply or deploy `summary` of that
+head writes it.
 
 The same step refuses, also before any wave:
 
@@ -2770,8 +2771,8 @@ deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
 
-A deploy whose `summary` job alone was cancelled, because the gate-writer queue
-for the merged head was full when it arrived, leaves that head's gate as it was.
+A deploy whose `summary` job alone was cancelled, for example at a full
+gate-writer queue for the merged head, leaves that head's gate as it was.
 Re-run that deploy the same way, unless one of its cells' job logs shows
 `The apply step ran and its state was not saved`: the re-run applies that cell
 again. Follow §`The apply step ran and its state was not saved` first.

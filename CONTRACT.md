@@ -1865,13 +1865,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
   writes `failure` on the merged head. The group holds one running writer and
   up to 100 pending ones. GitHub starts pending writers first in, first out by
   the time each began waiting, and does not guarantee that order. A later
-  writer does not cancel a pending one. A `summary` is cancelled when it
-  arrives at a full queue, or when its run is cancelled while it waits. What
-  that costs:
-  - a plan `summary`: its run publishes nothing. At a full queue `gate-hold`
-    writes a hold naming the recovery, `shipmate plan`; after a run cancel
-    `gate-hold` does not run and the head keeps its last gate. `gate-hold` writes
-    outside the group, since a hold only closes the gate, and is not ordered
+  writer does not cancel a pending one. A `summary` that arrives at a full
+  queue is cancelled, and so is one that reaches its job timeout. What a
+  cancelled `summary` costs:
+  - a plan `summary`: its run publishes nothing more, and `gate-hold` writes a
+    hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the group, since a hold only closes the gate, and is not ordered
     against the head's other writers: its hold can land after one of them
     greened the head, a closed gate over applied work that `shipmate plan`
     reopens;
@@ -1888,17 +1886,17 @@ check/status/comment/issue that crosses a workflow-run boundary:
     `The apply step ran and its state was not saved` (`docs/troubleshooting.md`
     has the section of that name).
 
-  An older plan run with cells whose `summary` runs after a newer same-head
-  run planned zero cells and wrote `success` still publishes its own `queued`
-  apply checks and writes `pending`: `refuse-newer` counts only newer `failure`
-  gates, and the newer run recorded no checks. This fails closed, and the
-  head's gate stays pending until a same-head `shipmate plan` writes it from
-  its own plan, those checks apply, or a push moves the head.
+  An older run's plan `summary` that writes after a newer run of the head
+  published apply checks or a hold writes nothing: its hold step's
+  `refuse-newer` and `pending-checks` refuse, whatever the older run's cell
+  count. A plan run that plans zero cells writes `success` without reading the
+  apply checks an older run published on the head, so those checks stay queued
+  under a green gate and the merge deploy applies them.
 
   One race stays open. A refresh already past its status read and before its
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
-  needs a plan `summary` cancelled at a full queue, the only path to a
-  `gate-hold` hold, while another writer of the head is past its status read,
+  needs a plan `summary` cancelled at a full queue or by its timeout while
+  another writer of the head is past its status read,
   and the hold landing inside that round trip. Closing it needs a conditional
   write, which GitHub commit statuses lack.
 - **The plan comment** — App-authored (marker + any Bot author for the
@@ -2546,7 +2544,8 @@ The six jobs:
   compare against `head-ref` (§Plan comment); both reads only decide what a
   reviewer sees, and degrade (§Cell locks).
 - **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
-  runs only when `summary` arrived at a full gate-writer queue for the head
+  runs only when `summary` was cancelled without a run cancel: it arrived at a
+  full gate-writer queue for the head, or it reached its job timeout
   (§Comment-ops, "The aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
   (comment shipmate plan or push): its plan summary was cancelled before it
@@ -3761,9 +3760,7 @@ refused text, and the reply still needs its own key check, mint and post. The re
 - otherwise cancelled when a job other than `summary` ended `cancelled`: the
   run was cancelled;
 - otherwise summary cancelled when `summary` ended `cancelled` and no other job
-  did: the gate-writer queue for the head was full when it arrived, or the run
-  was cancelled while it waited or ran (`run-cancelled` reads only the other
-  jobs);
+  did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.
 
 `summary` runs after a run cancel once `review` succeeded, and posts the
@@ -3780,8 +3777,9 @@ on-demand run, under `summary`'s fork clause, when `summary` did not output
 `moved`. A superseded run and one whose pull request moved past its head post
 nothing. The reply is:
 
-- summary cancelled when `summary` ended `cancelled`: `summary` arrived at a
-  full gate-writer queue for the head, and `gate-hold` holds the gate;
+- summary cancelled when `summary` ended `cancelled`: it arrived at a full
+  gate-writer queue for the head or reached its job timeout, and `gate-hold`
+  holds the gate;
 - otherwise ended before a result. That covers a `summary` that failed before
   or at its comment write, and a plan cell that ended `cancelled` without a run
   cancel (a job timeout): its `summary` holds the gate and writes no comment.
