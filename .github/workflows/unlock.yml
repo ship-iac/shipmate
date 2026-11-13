@@ -69,8 +69,8 @@ jobs:
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
     runs-on: ${{ inputs.runs_on }}
-    # No PR comment, deliberately -- do not "fix" it: it needs pull-requests: write, which the
-    # consumer's job does not grant. comment-ops' reaction acknowledges acceptance, step summaries
+    # No PR comment, deliberately -- do not "fix" it: this job runs the pull request's HCL, so it
+    # holds no pull-requests: write. comment-ops' reaction acknowledges acceptance, step summaries
     # carry per-cell detail, and a failure reds the run and notifies the actor.
     permissions: { contents: read, actions: read, id-token: write }
     strategy:

@@ -30,8 +30,12 @@ Pinned on the unlock side:
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
   unlock into a missing environment would retire the reviewer gate for every later apply of
   that env. The apply path gets this refusal from apply-env-level's `snapshot` job.
+- every job's `permissions`, whole, keyed by job id. The consumer's `unlock` job grants
+  `pull-requests: write`, and these blocks keep it from reaching `unlock`, which runs the pull
+  request's HCL.
 
-Not re-pinned here, to keep one selector per property: the bot-actor `guard` job
+Not re-pinned here, to keep one selector per property: the empty workflow-level `permissions`
+floor (`test_workflow_permissions_floor.py`), the bot-actor `guard` job
 (`test_apply_dispatch_actor_guard.py` covers both files), the `<env>-apply` environment binding
 (`test_apply_env_binding_guard.py`), the unlock job's whole `strategy`
 (`test_matrix_max_parallel_guard.py`), the concurrency group shared with the wave jobs
@@ -109,6 +113,12 @@ UNLOCK_STEP_ACTIONS = {
 #: because `apply.yml` legitimately runs shell, so a `tofu force-unlock` pasted there stays a
 #: blind spot rather than a second selector here.
 UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
+
+UNLOCK_PERMISSIONS = {
+    "guard": {},
+    "detect": {"contents": "read", "checks": "read", "actions": "read"},
+    "unlock": {"contents": "read", "actions": "read", "id-token": "write"},
+}
 
 #: The whole `outputs:` mapping of unlock's `detect`. `test_matrix_max_parallel_guard.py` pins
 #: the consumer end of this wire, and without this one the producer end can be re-aimed at
@@ -278,6 +288,17 @@ def test_the_unlock_workflow_applies_nothing():
     assert not callers, (
         f"{UNLOCK} calls the apply wave engine from {callers} -- that workflow applies "
         "every cell it is handed"
+    )
+
+
+def test_each_unlock_job_requests_exactly_these_permissions():
+    """Mutations: add `pull-requests: write` to the `unlock` job's `permissions`; delete
+    `guard`'s `permissions: {}`."""
+    got = {job_id: job.get("permissions") for job_id, job in workflow_jobs(UNLOCK).items()}
+    assert got == UNLOCK_PERMISSIONS, (
+        f"{UNLOCK}'s job permissions are {got!r}, not {UNLOCK_PERMISSIONS!r} -- the consumer "
+        "grants pull-requests: write, and only these blocks keep it from the job that runs "
+        "the pull request's HCL"
     )
 
 

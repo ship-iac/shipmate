@@ -143,12 +143,15 @@ free of lookalike characters. A required context that differs from the posted
 one by an invisible character is never satisfied, so every pull request is
 unmergeable while the status itself renders green.
 
-The middot is reserved for `shipmate.yml`'s `run-name` (`shipmate · plan`,
-`shipmate · comment`, `shipmate · deploy`, and the verb of a dispatched run) — a
-run title GitHub renders and nothing matches on, where it says which event or
-verb this run serves. That file's own `name:` is plain `shipmate`. The
-published drift fence sets no `run-name`, so a sweep's run is titled by the
-file's own `name:` (`shipmate drift` in the published fence).
+The middot is reserved for `shipmate.yml`'s `run-name`, a run title GitHub
+renders and nothing matches on. A dispatched run is titled
+`shipmate · <verb> pr=<pr_number> ref=<ref> comment=<comment_id>`, each slot
+holding the dispatch input of that name; an input the dispatch omits renders
+empty (`pr=`). A run of any other event is titled `shipmate · plan`,
+`shipmate · release`, `shipmate · comment` or `shipmate · deploy`. That file's
+own `name:` is plain `shipmate`. The published drift fence sets no `run-name`,
+so a sweep's run is titled by the file's own `name:` (`shipmate drift` in the
+published fence).
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
@@ -1796,8 +1799,8 @@ state lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that 
 one already requires, so a role that can apply an environment can already
 unlock it.
 
-The unlock run itself posts no comment — that would need
-`pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
+The unlock run itself posts no comment — its `unlock` job runs the pull
+request's HCL, so `unlock.yml` requests no `pull-requests: write`. The `rocket`
 reaction confirms acceptance. The comment-handling run, which holds that
 permission, is the one that may post the started-run reply; §Comment-ops says
 when it is posted and when it links the unlock run. Per-cell detail lands in
@@ -4462,8 +4465,9 @@ consuming repo reaches all three from `shipmate.yml`: the `deploy` job (on
 `apply`, with or without an `environment`), the `auto` job (dispatched `auto`
 by a plan run; passes `auto: true`, `ref` and `pr_number`) and the `unlock` job
 (dispatched `unlock`; a `secrets:` block naming
-`SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), and
-the `deploy`, `apply` and `auto` jobs grant `pull-requests: read`.
+`SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), the
+`deploy`, `apply` and `auto` jobs grant `pull-requests: read`, and the `unlock`
+job grants `pull-requests: write`.
 
 ## OpenTofu note
 
