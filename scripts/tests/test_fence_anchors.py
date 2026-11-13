@@ -117,3 +117,17 @@ def test_the_auto_job_is_the_apply_job_with_auto_set():
             "runs_on": RUNNER,
         },
     }
+
+
+def test_the_unlock_job_grants_pull_request_write():
+    """Granted ahead of `unlock.yml` requesting it, so a re-pin to an engine whose `unlock.yml`
+    requests it does not fail at load.
+
+    Mutation: `pull-requests: write` dropped from the published `unlock` job."""
+    assert _jobs("shipmate")["unlock"]["permissions"] == {
+        "contents": "read",
+        "checks": "read",
+        "pull-requests": "write",
+        "actions": "read",
+        "id-token": "write",
+    }

@@ -30,9 +30,9 @@ Pinned on the unlock side:
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
   unlock into a missing environment would retire the reviewer gate for every later apply of
   that env. The apply path gets this refusal from apply-env-level's `snapshot` job.
-- every job's `permissions`, whole, keyed by job id. The consumer's `unlock` job grants
-  `pull-requests: write`, and these blocks keep it from reaching `unlock`, which runs the pull
-  request's HCL.
+- `detect`'s and `unlock`'s `permissions`, whole, keyed by job id. The consumer's `unlock` job
+  grants `pull-requests: write`, and these blocks keep it from reaching `unlock`, which runs the
+  pull request's HCL.
 
 Not re-pinned here, to keep one selector per property: the empty workflow-level `permissions`
 floor (`test_workflow_permissions_floor.py`), the bot-actor `guard` job
@@ -115,7 +115,6 @@ UNLOCK_STEP_ACTIONS = {
 UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
 
 UNLOCK_PERMISSIONS = {
-    "guard": {},
     "detect": {"contents": "read", "checks": "read", "actions": "read"},
     "unlock": {"contents": "read", "actions": "read", "id-token": "write"},
 }
@@ -292,9 +291,9 @@ def test_the_unlock_workflow_applies_nothing():
 
 
 def test_each_unlock_job_requests_exactly_these_permissions():
-    """Mutations: add `pull-requests: write` to the `unlock` job's `permissions`; delete
-    `guard`'s `permissions: {}`."""
-    got = {job_id: job.get("permissions") for job_id, job in workflow_jobs(UNLOCK).items()}
+    """Mutations: add `pull-requests: write` to the `unlock` job's `permissions`; add
+    `pull-requests: read` to `detect`'s."""
+    got = {job_id: _job(UNLOCK, job_id).get("permissions") for job_id in UNLOCK_PERMISSIONS}
     assert got == UNLOCK_PERMISSIONS, (
         f"{UNLOCK}'s job permissions are {got!r}, not {UNLOCK_PERMISSIONS!r} -- the consumer "
         "grants pull-requests: write, and only these blocks keep it from the job that runs "

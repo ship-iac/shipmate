@@ -145,9 +145,12 @@ unmergeable while the status itself renders green.
 
 The middot is reserved for `shipmate.yml`'s `run-name`, a run title GitHub
 renders and nothing matches on. A dispatched run is titled
-`shipmate · <verb> pr=<pr_number> ref=<ref> comment=<comment_id>`, each slot
-holding the dispatch input of that name; an input the dispatch omits renders
-empty (`pr=`). A run of any other event is titled `shipmate · plan`,
+`shipmate · <verb> pr=<pr_number> ref=<ref> comment=<comment_id>`: `pr` and
+`comment` are the dispatch inputs as sent (the engine sends a decimal number or
+nothing), `ref` is the dispatched head (40 lowercase hex, or empty), and an input
+the dispatch omits renders empty (`pr=`). The title is built from dispatch
+inputs, so it identifies a run only when the App dispatched it: anyone who can
+dispatch the workflow chooses the inputs. A run of any other event is titled `shipmate · plan`,
 `shipmate · release`, `shipmate · comment` or `shipmate · deploy`. That file's
 own `name:` is plain `shipmate`. The published drift fence sets no `run-name`,
 so a sweep's run is titled by the file's own `name:` (`shipmate drift` in the
@@ -4467,7 +4470,9 @@ by a plan run; passes `auto: true`, `ref` and `pr_number`) and the `unlock` job
 (dispatched `unlock`; a `secrets:` block naming
 `SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), the
 `deploy`, `apply` and `auto` jobs grant `pull-requests: read`, and the `unlock`
-job grants `pull-requests: write`.
+job grants `pull-requests: write`. `unlock.yml` requests none yet; the grant is
+there so that a re-pin to an engine whose `unlock.yml` requests it does not fail
+at load.
 
 ## OpenTofu note
 

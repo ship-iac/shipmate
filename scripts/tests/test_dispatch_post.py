@@ -39,9 +39,11 @@ NOT_FOUND = "command failed (1): gh api x\ngh: Not Found (HTTP 404)"
 UNPROCESSABLE = "command failed (1): gh api x\ngh: Unexpected inputs provided (HTTP 422)"
 FORBIDDEN = "command failed (1): gh api x\ngh: Resource not accessible (HTTP 403)"
 ANSWER = '{"workflow_run_id":123}'
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+PLAN_TITLE = "shipmate · plan pr=42 ref= comment="
 
 
-def row(created_at, title="shipmate · apply"):
+def row(created_at, title=f"shipmate · apply pr=42 ref={HEAD} comment="):
     """One listed run as the fake listing answers it: `--jq` ignored, so the title rides along
     and a stop rule that reads it sees one."""
     return json.dumps({"created_at": created_at, "display_title": title})
@@ -140,7 +142,7 @@ def test_a_run_created_before_t0_does_not_stop(calls, monkeypatch, capsys):
 @pytest.mark.parametrize("title", ["shipmate", "custom"])
 def test_a_run_without_the_fence_title_stops_the_retry(calls, monkeypatch, capsys, title):
     """A consumer that dropped or edited the fence's `run-name` still lands runs. Mutation: stop
-    only on `display_title == f"shipmate · {verb}"` -> the run is missed, retried."""
+    only on a `display_title` starting `f"shipmate · {verb} "` -> the run is missed, retried."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [row(T0, title)])
     assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [SENT, SLEPT_2, LIST])
 
@@ -151,19 +153,27 @@ def test_a_run_titled_shipmate_stops_the_retry(calls, monkeypatch, capsys):
     assert post(capsys)[0] == db.MAY_HAVE_STARTED
 
 
-@pytest.mark.parametrize("title", ["shipmate · plan", "shipmate · unlock", "shipmate · auto"])
-def test_a_landed_run_with_another_verbs_fence_title_stops_the_retry(
+@pytest.mark.parametrize(
+    "title",
+    [
+        PLAN_TITLE,
+        f"shipmate · unlock pr= ref={HEAD} comment=",
+        f"shipmate · auto pr=42 ref={HEAD} comment=",
+    ],
+)
+def test_a_landed_run_with_another_verbs_dispatch_title_stops_the_retry(
     calls, monkeypatch, capsys, title
 ):
     """The title is consumer-authored, so another verb's title cannot prove a run is not this
-    dispatch's. Mutation: skip a run titled exactly another verb's fence title -> retried."""
+    dispatch's. Mutation: skip a run whose title is another verb's dispatched-run title ->
+    retried."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [row(T0, title)])
     assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [SENT, SLEPT_2, LIST])
 
 
 def test_a_landed_plan_titled_run_stops_an_apply_retry(calls, monkeypatch, capsys):
     """The literal case beside the parametrization. Mutation: as above."""
-    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [row(T0, "shipmate · plan")])
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [row(T0, PLAN_TITLE)])
     assert post(capsys)[0] == db.MAY_HAVE_STARTED
 
 
