@@ -2062,7 +2062,7 @@ applied` for a refusal, `[the apply run](<url>) was cancelled before it posted a
 result` for a cancel (`CONTRACT.md` §Outcome reply).
 
 An apply run whose `summary` job was cancelled before it posted, because the
-gate-writer queue for the head was full when it arrived or a cancel reached it
+gate-writer queue for the head was full when it arrived or the run was cancelled
 while it waited, also posts no apply comment. It replies `[the apply
 run](<url>) posted no result: its summary was cancelled before it posted a
 result. Its cells' results are on their apply checks.` Its results and its

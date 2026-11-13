@@ -160,9 +160,9 @@ commit-scoped and immune. (The per-unit `plan`/`apply` checks stay check-runs;
 they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
-`summary` action, or held by `plan.yml`'s `gate-hold` when the gate-writer
-queue for the head was full when `summary` arrived, and is completed to success by whichever of these happens
-first, each through `scripts/gate-status` and one at a time per head
+`summary` action, or held by `plan.yml`'s `gate-hold` when `summary` arrived
+at a full gate-writer queue for the head, and is completed to success by
+whichever of these happens first, each through `scripts/gate-status` and one at a time per head
 (§Comment-ops, "The aggregate gate"):
 
 - the plan run's own `summary`, right after it writes `pending`, when it
@@ -2546,9 +2546,8 @@ The six jobs:
   compare against `head-ref` (§Plan comment); both reads only decide what a
   reviewer sees, and degrade (§Cell locks).
 - **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
-  runs only when `summary` was cancelled without a run cancel, which means the
-  gate-writer queue for the head was full when `summary` arrived (§Comment-ops,
-  "The aggregate gate"). It
+  runs only when `summary` arrived at a full gate-writer queue for the head
+  (§Comment-ops, "The aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
   (comment shipmate plan or push): its plan summary was cancelled before it
   published". A `summary` refused by its fork `if:` is `skipped`, not
@@ -3379,9 +3378,9 @@ checks only when none of them had already uploaded its plan; a full re-run
 successful ones included, because the artifact names carry no attempt and the
 upload does not overwrite. The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
-newer run of the same head holds the gate by then (the gate-writer queue for
-the head was full when that run's `summary` arrived, and `gate-hold` writes
-outside the job's concurrency group); a failed
+newer run of the same head holds the gate by then (that run's `summary` arrived
+at a full gate-writer queue for the head, and `gate-hold` writes outside the
+job's concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final write that fails
 transiently is retried, and the newer-run check runs again before each retry; a
 first attempt that landed although it reported a failure stays written. A final `pending` gate is followed
@@ -3761,9 +3760,10 @@ refused text, and the reply still needs its own key check, mint and post. The re
 - refused when `review` failed;
 - otherwise cancelled when a job other than `summary` ended `cancelled`: the
   run was cancelled;
-- otherwise summary cancelled when `summary` ended `cancelled`: `summary` was
-  cancelled without a run cancel (a full gate-writer queue for the head, or a
-  cancel while it waited or ran);
+- otherwise summary cancelled when `summary` ended `cancelled` and no other job
+  did: the gate-writer queue for the head was full when it arrived, or the run
+  was cancelled while it waited or ran (`run-cancelled` reads only the other
+  jobs);
 - otherwise ended before a result.
 
 `summary` runs after a run cancel once `review` succeeded, and posts the
@@ -3780,8 +3780,8 @@ on-demand run, under `summary`'s fork clause, when `summary` did not output
 `moved`. A superseded run and one whose pull request moved past its head post
 nothing. The reply is:
 
-- summary cancelled when `summary` ended `cancelled`: the gate-writer queue for
-  the head was full when `summary` arrived, and `gate-hold` holds the gate;
+- summary cancelled when `summary` ended `cancelled`: `summary` arrived at a
+  full gate-writer queue for the head, and `gate-hold` holds the gate;
 - otherwise ended before a result. That covers a `summary` that failed before
   or at its comment write, and a plan cell that ended `cancelled` without a run
   cancel (a job timeout): its `summary` holds the gate and writes no comment.

@@ -16,7 +16,7 @@ inputs:
     required: false
     default: ""
   summary-result:
-    description: "The run's `needs.summary.result`; `cancelled` while `run-cancelled` is `false` means the summary was cancelled before it posted: the head's gate-writer queue was full when it arrived, or a cancel while it waited or ran."
+    description: "The run's `needs.summary.result`; `cancelled` while `run-cancelled` is `false` means the summary was cancelled before it posted: the head's gate-writer queue was full when it arrived, or the run was cancelled while it waited or ran."
     required: true
   run-cancelled:
     description: "`true` when the run itself was cancelled. Computed by the caller from its `needs.*.result`: in a job that starts after a run cancel, a step-level `cancelled()` is false."
