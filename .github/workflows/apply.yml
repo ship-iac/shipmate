@@ -65,10 +65,29 @@ jobs:
             exit 1
           fi
 
-  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time. `!cancelled()`
-  # keeps a run cancelled before it starts from queueing an apply.
-  run:
+  # Outside the group, before this run joins it: cancels this pull request's apply runs that wait
+  # at an older head and replies naming the run this one waits behind (scripts/apply-queue).
+  queue:
     needs: [guard]
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    # Its writes use the App token; a job-token `actions: write` would fail every caller that
+    # grants `actions: read`.
+    permissions: {}
+    steps:
+      - uses: $/actions/apply-queue
+        with:
+          pr-number: ${{ inputs.pr_number }}
+          environment: ${{ inputs.environment }}
+          auto: ${{ inputs.auto }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time. `!cancelled()`
+  # keeps a run cancelled before it starts from queueing an apply. The queue only reports and
+  # tidies, never gates, so a failed `queue` does not stop the apply.
+  run:
+    needs: [guard, queue]
     if: ${{ !cancelled() && needs.guard.result == 'success' }}
     uses: ./.github/workflows/apply-run.yml
     # The union of what `apply-run.yml`'s jobs request; a callee job asking for more fails the run.

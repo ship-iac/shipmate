@@ -89,6 +89,7 @@ _SITES = {
     ACTIONS / "lock-acquire" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "lock-release" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "outcome-reply" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "apply-queue" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     WORKFLOWS / "apply-run.yml": (("jobs", "review", "steps"), _WORKFLOW_WITH),
     ACTIONS / "comment-ops" / "action.yml": None,
 }

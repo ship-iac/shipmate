@@ -1,0 +1,49 @@
+name: shipmate apply-queue
+description: Cancel the pull request's apply runs that wait at an older head, then reply naming the run this one waits behind (scripts/apply-queue). Mints a shipmate App installation token with actions and pull-requests write; writes only when the run's actor and triggering actor are both the App's bot login. A cancel or reply that fails only warns.
+inputs:
+  pr-number:
+    description: Pull request whose apply runs are read.
+    required: true
+  environment:
+    description: The targeted apply's environment, shown in the reply header. Empty for a bare apply.
+    required: false
+    default: ""
+  auto:
+    description: "`true` for an auto apply, which posts no reply."
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-pull-requests: write
+    # A called workflow's `github` context is its caller's, so these name the dispatch itself.
+    - name: Cancel stale apply runs and say what this run waits behind
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_ENV: ${{ inputs.environment }}
+        SHIPMATE_AUTO: ${{ inputs.auto }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        SHIPMATE_ACTOR: ${{ github.actor }}
+        SHIPMATE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-queue"

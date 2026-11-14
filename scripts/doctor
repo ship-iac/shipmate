@@ -1748,6 +1748,53 @@ def _pr_target_types_finding(doc, name):
     ]
 
 
+#: The middle dot of a run title, built with `chr`: no shipped string carries one literally
+#: (test_no_em_dash_emitted).
+_DOT = chr(0xB7)
+#: The `run-name` `docs/getting-started.md` publishes, folded onto one line.
+RUN_NAME = (
+    "${{ github.event_name == 'workflow_dispatch' "
+    f"&& format('shipmate {_DOT} {{0}} pr={{1}} ref={{2}} comment={{3}}', inputs.verb, "
+    "inputs.pr_number, inputs.ref, inputs.comment_id) "
+    f"|| format('shipmate {_DOT} {{0}}', github.event_name == 'pull_request_target' "
+    "&& github.event.action == 'closed' && 'release' "
+    "|| github.event_name == 'pull_request_target' && 'plan' "
+    "|| github.event_name == 'issue_comment' && 'comment' || 'deploy') }}"
+)
+#: A single-quoted expression literal. An escaped quote (`''`) splits one literal into two
+#: adjacent ones, which leaves the same text outside them.
+_QUOTED = re.compile(r"('[^']*')")
+
+
+def _normalize_expr(value):
+    """`value` with each run of whitespace outside a single-quoted literal collapsed to one
+    space and both ends stripped. A literal is kept byte for byte: inside `format`'s string it
+    is part of the run title."""
+    parts = _QUOTED.split(value)
+    return "".join(p if i % 2 else re.sub(r"\s+", " ", p) for i, p in enumerate(parts)).strip()
+
+
+def _run_name_finding(doc, name):
+    """One finding when the file's `run-name` is missing or is not `RUN_NAME` once
+    `_normalize_expr`ed: `scripts/apply-queue` identifies a pull request's apply runs by the
+    title it renders."""
+    found = doc.get("run-name")
+    if isinstance(found, str) and _normalize_expr(found) == _normalize_expr(RUN_NAME):
+        return []
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `run-name` is not the published one, so shipmate cannot identify "
+                "this pull request's apply runs: an apply run cancels none of them waiting at an "
+                "older head, and replies that it may wait behind another without naming it. "
+                "Re-pin the file with the engine's `scripts/repin` and its `--write-fence` "
+                "flag, after reading the diff it prints (docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
     "the workflow file's job name, dispatch wiring, event routing and drift call",
@@ -1769,10 +1816,10 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing, `auto` `with:`, trigger-types and drift-call
-    findings over the consumer's `shipmate.yml` alone, in that order, from one read at the
-    commit under examination (`_contents_ref`): a pull request that fixes the file must not
-    still be reported for the old state.
+    """The job-name, dispatch-wiring, routing, `auto` `with:`, trigger-types, run-name and
+    drift-call findings over the consumer's `shipmate.yml` alone, in that order, from one read
+    at the commit under examination (`_contents_ref`): a pull request that fixes the file must
+    not still be reported for the old state.
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
@@ -1783,8 +1830,8 @@ def _shipmate_yml_warnings(ctx):
     finding and draws none here.
 
     Without the engine repository the four engine-anchored findings give way to one notice:
-    their selector would match no call, so each would report a healthy file. Dispatch wiring
-    and the trigger types read no engine slug and still run."""
+    their selector would match no call, so each would report a healthy file. Dispatch wiring,
+    the trigger types and the run name read no engine slug and still run."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
@@ -1799,6 +1846,7 @@ def _shipmate_yml_warnings(ctx):
         return [
             *_dispatch_wiring_finding(doc, name),
             *_pr_target_types_finding(doc, name),
+            *_run_name_finding(doc, name),
             SHIPMATE_YML_NO_ENGINE,
         ]
     return [
@@ -1807,6 +1855,7 @@ def _shipmate_yml_warnings(ctx):
         *_routing_finding(doc, name, engine),
         *_auto_with_finding(doc, name, engine),
         *_pr_target_types_finding(doc, name),
+        *_run_name_finding(doc, name),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]
 

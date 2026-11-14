@@ -77,7 +77,7 @@ UNLOCK_INPUTS = {
 #: in reds on the job list as well as on the action check below: a guard that only looks for a
 #: forbidden action name passes whenever the leaked job reaches for a different one.
 APPLY_JOBS = {
-    APPLY: {"guard", "run", "outcome"},
+    APPLY: {"guard", "queue", "run", "outcome"},
     APPLY_RUN: {
         "review",
         "detect",

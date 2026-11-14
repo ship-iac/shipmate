@@ -146,13 +146,18 @@ one by an invisible character is never satisfied, so every pull request is
 unmergeable while the status itself renders green.
 
 The middot is reserved for `shipmate.yml`'s `run-name`, a run title GitHub
-renders and nothing matches on. A dispatched run is titled
+renders and no check or ruleset matches on. A dispatched run is titled
 `shipmate · <verb> pr=<pr_number> ref=<ref> comment=<comment_id>`: `pr` and
 `comment` are the dispatch inputs as sent (the engine sends a decimal number or
 nothing), `ref` is the dispatched head (40 lowercase hex, or empty), and an input
 the dispatch omits renders empty (`pr=`). The title is built from dispatch
 inputs, so it identifies a run only when the App dispatched it: anyone who can
-dispatch the workflow chooses the inputs. A run of any other event is titled `shipmate · plan`,
+dispatch the workflow chooses the inputs. The engine reads a title only for a
+`workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
+`queue` lists a pull request's apply runs by it to cancel the stale ones and
+name the one a run waits behind (§Comment-ops, "One apply run per pull
+request"). `shipmate doctor` reports a `run-name` that differs from the
+published one outside its quoted literals. A run of any other event is titled `shipmate · plan`,
 `shipmate · release`, `shipmate · comment` or `shipmate · deploy`. That file's
 own `name:` is plain `shipmate`. The published drift fence sets no `run-name`,
 so a sweep's run is titled by the file's own `name:` (`shipmate drift` in the
@@ -1334,7 +1339,8 @@ later. Before each retry the engine lists `shipmate.yml`'s `workflow_dispatch`
 runs (one page of 100, newest first, on the dispatch's own App token, the read
 itself retried on a transient failure) and stops when any was created at or
 after `t0`, five seconds before the first attempt, whatever its title: a run's
-title is the consumer's `run-name`, which nothing checks. A concurrent dispatch
+title is the consumer's `run-name`, which only `shipmate doctor` checks, after
+the fact. A concurrent dispatch
 of another command landing in that window stops the retry too; a wrong stop
 costs a comment, a wrong retry a double start. A failed dispatch posts one of
 three replies:
@@ -1644,8 +1650,8 @@ detect refuses a cell it would apply whose apply check records another pull
 request, or none (§Apply-match fingerprint); the remedy is a re-plan on this pull
 request.
 
-**One apply run per pull request.** `apply.yml` holds three jobs: `guard`, `run`
-and `outcome`. `run` calls `apply-run.yml`, which holds every job that reviews,
+**One apply run per pull request.** `apply.yml` holds four jobs: `guard`, `queue`,
+`run` and `outcome`. `run` calls `apply-run.yml`, which holds every job that reviews,
 detects, locks, applies or summarizes: `review`, `detect`, `lock`, `envlevel0` …
 `envlevel3` (named `L0` … `L3`) and `summary`. `apply-run.yml` runs in the
 top-level concurrency group `shipmate-apply-<pr_number>` with
@@ -1673,6 +1679,75 @@ concurrency group, a job timeout, or a `summary` at a full gate-writer queue
 (§Outcome reply says which text each selects). A run cancelled while
 it waits in the queue runs no job of `apply-run.yml`: its apply checks and
 `shipmate / gate` stay as they were, and `outcome` posts the cancelled reply.
+
+`queue` cancels this pull request's stale apply runs and says which run this one
+waits behind. It runs after `guard` and before `run`, outside the group, binds
+`shipmate-engine` and holds no job-token permission: it writes with an App token
+granting `actions: write` and `pull-requests: write`. It lists the live
+`workflow_dispatch` runs (`queued`, `in_progress`, `waiting`, `pending`,
+`requested`) of the consumer's dispatching workflow whose title (§Check names) is an `apply` or `auto` of this
+pull request. A listed run is trusted when it is a `workflow_dispatch` whose
+`actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
+Then `queue` reads the pull request's live head, the jobs of each trusted run's
+latest attempt, and the head again. A trusted run whose title names another head
+is stale, and `queue` cancels it only when this run's own listed `ref` is the
+live head (a run whose own title is not listed at the live head cancels nothing;
+stale runs stay until a run at the live head cancels them or they reach `review`,
+which refuses the moved head), its jobs listing is complete, both head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
+cell is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments, so a
+caller job name containing ` / ` never matches and such a run is kept) either:
+
+- (a) waits for `shipmate-apply-<pr_number>`: its job named exactly
+  `<caller> / run / review` is `pending`, so no job of this attempt inside the
+  call has run (a full re-run's earlier attempt may have applied); or
+- (b) waits on environment approval: every unfinished job of the call is a wave
+  cell (`<caller> / run / L<n> / <env> / <stack>`) listed `waiting`.
+
+Anything else keeps the run, whatever its status. A run past `review` with a job
+`pending` on its own concurrency group is kept: the engine cancels only a run
+whose call has not started or whose only unfinished jobs are wave cells waiting
+on approval. `guard`, `queue` and `outcome` sit outside the group and are not
+counted. A runs listing with a failed or malformed page or a
+malformed run (an `id` that is not a number, a title or event that is not text),
+an App-dispatched run whose title does not parse, or a failed head read cancels
+nothing; after a failed first head read `queue` reads no run's jobs. An untrusted run is never cancelled. `queue` writes, a cancel or a
+reply, only when its own run's `actor` and `triggering_actor` are both
+`<slug>[bot]`, so a human re-run of an App-dispatched run writes nothing. The
+queue reports and tidies but never gates: a failed `queue` does not stop `run`.
+
+An `apply` run posts one ⚪ reply joining these sentences in this order, links
+built from run ids; an `auto` run posts none:
+
+- ``[the apply run](<url>) waits for [an earlier apply run](<url>) of this pull request to finish.``
+  It names the trusted run holding the group (an unfinished job of its `run`
+  call and a `review` that is not `pending`), else the oldest kept trusted run
+  older than this one with an unfinished job of its call, else nothing. A run
+  left only in `outcome` is not named.
+- ``[the apply run](<url>) may wait for [an apply run](<url>) of this pull request that shipmate did not dispatch.``
+  It names the untrusted run with the lowest run id.
+- ``[the apply run](<url>) cancelled [an apply run](<url>) of this pull request waiting at an older head (<short sha>).``
+  One per cancelled run.
+- ``[the apply run](<url>) may wait for an earlier apply run of this pull request; its apply runs could not all be listed.``
+  Alone, when the runs listing is incomplete.
+
+A cancelled stale run writes, by where it waited:
+
+- In the group, before its call started (a): no job of `apply-run.yml` ran, so its
+  apply checks and `shipmate / gate` stay as they were, and `outcome` posts the
+  cancelled reply.
+- On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
+  so its `waveN-complete`, which runs on `success` or `failure` only, is skipped,
+  and the level's `complete` completes only cells whose wave job succeeded, so
+  the cancelled cells' apply checks stay pending. `summary` runs after a
+  successful `review`, refreshes the old head's gate and posts the apply comment,
+  so `outcome` stays silent.
+
+Two limits are accepted. A stale run's job can start between `queue`'s jobs read
+and its cancel, and the cancel then stops it mid-run; only a cell whose `ref` is
+the live head passes `pre-apply`, so that window needs a force-push back to the
+stale head. A run that changes status between two of the per-status listings,
+or within one listing between its page reads, can be missed, and is then
+neither cancelled nor named.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -1860,7 +1935,9 @@ Beyond minting the `workflow_dispatch`
 token for comment-ops (a dispatch needs `actions: write`; the `ops` job in
 `comment-ops.yml` grants its `GITHUB_TOKEN` only `actions: read`, and
 `actions/dispatch` mints the App token with `actions: write` in a step that runs
-only once the command is authorized) and reading the apply checks that name the
+only once the command is authorized), cancelling a pull request's stale apply
+runs (`actions/apply-queue`, also `actions: write`; §Comment-ops, "One apply run
+per pull request") and reading the apply checks that name the
 reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
@@ -1963,6 +2040,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
 - **The outcome reply** — posted by `actions/outcome-reply` in the `outcome`
   job of `plan.yml` and `apply.yml`, both bound to `shipmate-engine`
   (§Outcome reply).
+- **The queue reply** — posted by `actions/apply-queue` in `apply.yml`'s `queue`
+  job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
+  request").
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
   artifact. A separate `issues` job, bound to `shipmate-engine`, calls
@@ -2629,11 +2709,12 @@ The six jobs:
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — whether each file parses as YAML, stale engine
 pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
-and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:` and `pull_request_target` types observe whether the plan comment's
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:`, `pull_request_target` types and `run-name` observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
 whether the job it reaches is the one that verb names, whether the autoplan's
-dispatch runs the auto form, and whether every pull
-request event the fence routes starts a run, and whose sixth
+dispatch runs the auto form, whether every pull
+request event the fence routes starts a run, and whether shipmate can identify a
+pull request's apply runs by their titles, and whose seventh
 check reports a drift job in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
@@ -2772,14 +2853,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but nineteen, which run on
+  every engine job but twenty, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts`, `gate-hold`
-  and `outcome`, `apply.yml`'s `guard` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
+  and `outcome`, `apply.yml`'s `guard`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-complete` … `wave7-complete` and
   `complete`, and `unlock.yml`'s
   `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the nineteen
+  for a runner. An account that cannot use `ubuntu-slim` leaves the twenty
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the

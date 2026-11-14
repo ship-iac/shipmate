@@ -29,6 +29,7 @@ EXPECTED = {
     **{("apply-env-level.yml", f"wave{n}-complete"): SLIM for n in range(8)},
     ("apply-env-level.yml", "complete"): SLIM,
     ("apply.yml", "guard"): SLIM,
+    ("apply.yml", "queue"): SLIM,
     ("apply-run.yml", "review"): SLIM,
     ("apply-run.yml", "detect"): INPUT,
     ("apply-run.yml", "lock"): INPUT,

@@ -148,6 +148,12 @@ combining fourteen live probes.
     no cell lock of a pull request closed without merging is released. The
     finding names what each missing type loses, and any extra type, which
     starts a plan the fence never routes.
+  - Whether its `run-name` is the fence's, compared with whitespace collapsed
+    outside quoted literals: inside `format`'s string a space is part of the
+    title. Without it shipmate cannot identify a pull request's apply runs, so
+    an apply run cancels no stale one and replies that it may wait behind
+    another without naming it. Re-pin the file with
+    `python <engine>/scripts/repin <consumer> <tag> --write-fence`.
   - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
     runs on that file's triggers. Move the drift job to a workflow file of its
     own, and drop the `schedule` trigger and the `drift` verb option from
@@ -2579,6 +2585,43 @@ Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 `review` names it in its job log. A startup failure shows on the run page with
 no jobs started, with GitHub's error for the workflow file.
 
+### `waits for an earlier apply run of this pull request to finish`
+
+Another apply run of this pull request holds its apply queue, and this run starts
+once that run and any run queued before this one end. The reply links the run
+it waits behind. That run may itself wait on an `<env>-apply` environment's
+approval: approve or reject it there, or cancel it from its run page, to let
+this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
+
+### `may wait for an apply run of this pull request that shipmate did not dispatch`
+
+A live run of `shipmate.yml` is titled as an apply of this pull request, but it
+was not dispatched by the shipmate App: its actor is not the App's bot login,
+so a person or another workflow sent it. shipmate never cancels such a run. If
+it holds the queue, this run waits behind it. Open the linked run, check who
+started it, and cancel it from its run page if it should not run.
+
+### `cancelled an apply run of this pull request waiting at an older head`
+
+A `shipmate apply` or `auto` run was dispatched for a head the pull request no
+longer has, and it was still waiting: in the apply queue, or on an
+`<env>-apply` environment's approval. This run cancelled it. A run cancelled in
+the queue changed nothing. A run cancelled at an approval leaves the apply
+checks of that wave's cells pending on the old head. The gate that counts is
+the current head's, which carries its own apply checks.
+
+### `may wait for an earlier apply run of this pull request; its apply runs could not all be listed`
+
+The list of this pull request's apply runs failed or came back malformed, or a
+run the shipmate App dispatched carries a title outside the grammar in
+`CONTRACT.md` §Check names, so this run cancelled nothing and cannot say what it
+waits behind; the `queue` job's log has the warning. When it happens on every
+apply, `shipmate.yml`'s `run-name` is not the published one: re-pin it with
+`python <engine>/scripts/repin <consumer> <tag> --write-fence`, after reading the
+diff it prints. The run still starts once the apply queue frees.
+Open the Actions tab and filter the runs whose title starts `shipmate · apply`
+or `shipmate · auto` (`CONTRACT.md` §Check names) to see the others.
+
 ### A cancelled autoplan left red checks on the pull request
 
 A newer plan run of the same pull request (a push, open or reopen, or a re-run
@@ -2664,8 +2707,8 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All twenty-one jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `outcome`,
+All twenty-two jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `queue` and `outcome`,
 `apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-complete` … `wave7-complete`
 and `complete`, `deploy.yml` `summary`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,

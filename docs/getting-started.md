@@ -461,7 +461,8 @@ through them, and doctor does not check them. Keep the job ids, though:
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
-the job name, dispatch wiring, event routing, trigger types and a drift job, on it. A
+the job name, dispatch wiring, event routing, trigger types, the `run-name` and a
+drift job, on it. A
 file under another name is reached by nothing. A drift file's name matters to
 nothing: nothing dispatches it, and doctor finds a drift file by its call of
 `drift.yml`.
@@ -479,7 +480,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except nineteen that run neither `terramate` nor `tofu` and stay on
+engine job except twenty that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross

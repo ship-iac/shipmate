@@ -1320,6 +1320,14 @@ _OTHER_SHA = "b" * 40
 #: import time, while the fixture's own body is evaluated only when a test calls it.
 _SHIPMATE_WF = (
     "name: shipmate\n"
+    "run-name: >-\n"
+    "  ${{ github.event_name == 'workflow_dispatch'\n"
+    "  && format('shipmate · {0} pr={1} ref={2} comment={3}', inputs.verb, inputs.pr_number, "
+    "inputs.ref, inputs.comment_id)\n"
+    "  || format('shipmate · {0}', github.event_name == 'pull_request_target'\n"
+    "  && github.event.action == 'closed' && 'release'\n"
+    "  || github.event_name == 'pull_request_target' && 'plan'\n"
+    "  || github.event_name == 'issue_comment' && 'comment' || 'deploy') }}\n"
     "on:\n"
     "  pull_request_target:\n"
     "    types: [opened, synchronize, reopened, ready_for_review, closed]\n"
@@ -3653,7 +3661,7 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
 _UNPARSEABLE_WF = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
 _UNPARSEABLE_TEXT = (
     "`shipmate.yml` could not be parsed as YAML (expected ',' or ']', but got ':' "
-    "(line 32, column 9)): doctor skipped its checks."
+    "(line 39, column 9)): doctor skipped its checks."
 )
 
 
@@ -7291,6 +7299,106 @@ def test_the_shipmate_yml_probe_runs_the_trigger_types_finder(monkeypatch):
     assert doctor._shipmate_yml_warnings(_ctx()) == [(doctor.WARNING, _NO_CLOSED_TEXT)]
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo="")) == [
         (doctor.WARNING, _NO_CLOSED_TEXT),
+        (
+            "notice",
+            (
+                "the workflow file's job name, event routing and drift call not verified: "
+                "the engine repository could not be determined."
+            ),
+        ),
+    ]
+
+
+# The run-name finding, hand-written and whole.
+_RUN_NAME_TEXT = (
+    "`shipmate.yml`'s `run-name` is not the published one, so shipmate cannot identify this "
+    "pull request's apply runs: an apply run cancels none of them waiting at an older head, and "
+    "replies that it may wait behind another without naming it. Re-pin the file with the "
+    "engine's `scripts/repin` and its `--write-fence` flag, after reading the diff it prints "
+    "(docs/getting-started.md)."
+)
+#: The `run-name` the published fence carried before dispatched runs were titled with their
+#: pull request, head and comment.
+_OLD_RUN_NAME = (
+    "run-name: >-\n"
+    "  shipmate · ${{ github.event_name == 'pull_request_target'\n"
+    "  && github.event.action == 'closed' && 'release'\n"
+    "  || github.event_name == 'pull_request_target' && 'plan'\n"
+    "  || github.event_name == 'issue_comment' && 'comment'\n"
+    "  || github.event_name == 'push' && 'deploy'\n"
+    "  || inputs.verb }}\n"
+)
+
+
+def _with_run_name(block):
+    start = _SHIPMATE_WF.index("run-name:")
+    end = _SHIPMATE_WF.index("on:\n")
+    return _SHIPMATE_WF[:start] + block + _SHIPMATE_WF[end:]
+
+
+def test_the_published_run_name_draws_no_finding():
+    """The fence consumers paste. Mutations: change `comment={3}` to `comment={2}` in
+    `RUN_NAME` -- red; collapse whitespace inside literals too (`_normalize_if`) -- green here,
+    red in the literal test."""
+    doc = load_workflow_text(_documented_workflow_file())
+    assert doctor._run_name_finding(doc, "shipmate.yml") == []
+
+
+def test_the_old_run_name_is_reported():
+    """Mutation: compare only that a `run-name` is present -- red."""
+    doc = _doc(_with_run_name(_OLD_RUN_NAME))
+    assert doctor._run_name_finding(doc, "shipmate.yml") == [(doctor.WARNING, _RUN_NAME_TEXT)]
+
+
+def test_a_missing_run_name_is_reported():
+    """Mutation: return `[]` when `run-name` is absent -- red."""
+    doc = _doc(_with_run_name(""))
+    assert doctor._run_name_finding(doc, "shipmate.yml") == [(doctor.WARNING, _RUN_NAME_TEXT)]
+
+
+def test_a_second_space_inside_the_title_literal_is_reported():
+    """Inside `format`'s string a space is part of the title. Mutation: normalise with
+    `_normalize_if` (collapses every whitespace run) -- red."""
+    text = _SHIPMATE_WF.replace("pr={1} ref={2}", "pr={1}  ref={2}", 1)
+    assert text != _SHIPMATE_WF
+    assert doctor._run_name_finding(_doc(text), "shipmate.yml") == [
+        (doctor.WARNING, _RUN_NAME_TEXT)
+    ]
+
+
+def test_a_refolded_run_name_draws_no_finding():
+    """The same expression on other lines, as a quoted scalar with extra spaces between
+    operators. Mutation: compare without normalising (`found == RUN_NAME`) -- red."""
+    block = (
+        "run-name: \"${{   github.event_name == 'workflow_dispatch' &&\n"
+        "  format('shipmate · {0} pr={1} ref={2} comment={3}',   inputs.verb, inputs.pr_number,"
+        " inputs.ref, inputs.comment_id)\n"
+        "  || format('shipmate · {0}', github.event_name == 'pull_request_target' &&\n"
+        "  github.event.action == 'closed' && 'release' || github.event_name ==\n"
+        "  'pull_request_target' && 'plan' || github.event_name == 'issue_comment' &&\n"
+        "  'comment' || 'deploy') }}\"\n"
+    )
+    doc = _doc(_with_run_name(block))
+    assert doctor._run_name_finding(doc, "shipmate.yml") == []
+
+
+def test_normalize_expr_keeps_whitespace_inside_a_literal_with_an_escaped_quote():
+    """Mutation: substitute whitespace in every part, literals included -- red."""
+    assert doctor._normalize_expr("a  'it''s  x'  b") == "a 'it''s  x' b"
+
+
+def test_the_shipmate_yml_probe_reports_the_run_name_with_and_without_the_engine_repo(
+    monkeypatch,
+):
+    """The run name reads no engine slug, so both branches report it.
+
+    Mutations: drop `_run_name_finding` from the engine branch -- red; from the no-engine
+    branch -- red."""
+    responses = _fork_responses({"shipmate.yml": _with_run_name(_OLD_RUN_NAME)})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == [(doctor.WARNING, _RUN_NAME_TEXT)]
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo="")) == [
+        (doctor.WARNING, _RUN_NAME_TEXT),
         (
             "notice",
             (

@@ -421,6 +421,129 @@ def is_head_sha(value):
     return isinstance(value, str) and _HEAD_SHA.fullmatch(value) is not None
 
 
+# The middle dot as an escape: a shipped string carries none literally (test_no_em_dash_emitted).
+_RUN_TITLE = re.compile(
+    r"shipmate \u00b7 (apply|auto|plan|unlock) pr=([^ ]*) ref=([^ ]*) comment=([^ ]*)"
+)
+_COMMENT_ID = re.compile(r"[1-9][0-9]{0,19}")
+
+
+def parse_run_title(title):
+    """`{verb, pr, ref, comment}` of a dispatched run's title, `shipmate · <verb> pr=<pr>
+    ref=<ref> comment=<comment>` (CONTRACT.md §Check names), or None when it is not one.
+
+    `apply` and `auto` need a pull request number and a head SHA, `plan` a number and no ref,
+    `unlock` a head SHA and no number. `comment` is empty or a comment id, and always empty for
+    `auto`. The title is unauthenticated: trust it only for a run the App dispatched."""
+    m = _RUN_TITLE.fullmatch(title) if isinstance(title, str) else None
+    if m is None:
+        return None
+    verb, pr, ref, comment = m.groups()
+    if verb in ("apply", "auto", "plan") and not is_pr_number(pr):
+        return None
+    if verb == "unlock" and pr:
+        return None
+    if verb == "plan" and ref:
+        return None
+    if verb != "plan" and not is_head_sha(ref):
+        return None
+    if comment and (verb == "auto" or _COMMENT_ID.fullmatch(comment) is None):
+        return None
+    return {"verb": verb, "pr": pr, "ref": ref, "comment": comment}
+
+
+#: The run statuses of a run that has not ended.
+LIVE_RUN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+#: GitHub's page size cap; a listing longer than `_MAX_PAGES` pages counts as incomplete.
+_PAGE = 100
+_MAX_PAGES = 10
+
+
+def _pages(path, field, run):
+    """Every item of `field` across the pages of listing `path`, or None when a page fails, is
+    malformed, or the listing runs past `_MAX_PAGES` pages; the cause prints as one warning."""
+    items = []
+    for page in range(1, _MAX_PAGES + 1):
+        sep = "&" if "?" in path else "?"
+        try:
+            body = gh_json(f"{path}{sep}per_page={_PAGE}&page={page}", run)
+        except (SystemExit, ValueError) as exc:
+            cause = exc.code if isinstance(exc, SystemExit) else repr(exc)
+            sys.stderr.write(f"::warning::{command_data(one_line(cause))}\n")
+            return None
+        got = body.get(field) if isinstance(body, dict) else None
+        if not isinstance(got, list) or not all(isinstance(i, dict) for i in got):
+            sys.stderr.write(f"::warning::page {page} of {command_data(path)} is malformed\n")
+            return None
+        items += got
+        if len(got) < _PAGE:
+            return items
+    sys.stderr.write(f"::warning::{command_data(path)} runs past {_MAX_PAGES} pages\n")
+    return None
+
+
+def _login(user):
+    return user.get("login") if isinstance(user, dict) else None
+
+
+def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
+    """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
+    `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, by_app}`.
+
+    One `workflow_dispatch` listing per `LIVE_RUN_STATUSES` value, every page: no other event
+    can be trusted. `by_app` is true when the run is a
+    `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a re-run changes only
+    `triggering_actor`); an empty slug trusts nothing. `complete` is false when a page fails or
+    is malformed, a run is malformed, or a trusted-shaped run's title does not parse: such a run
+    is unknown, never absent. A run that changes status between listings, or between the page
+    reads of one listing, can be missed."""
+    bot = f"{app_slug}[bot]" if app_slug else None
+    runs, complete = {}, True
+    for status in LIVE_RUN_STATUSES:
+        page = _pages(
+            f"repos/{repo}/actions/workflows/{workflow_file}/runs?event=workflow_dispatch&status={status}",
+            "workflow_runs",
+            run,
+        )
+        if page is None:
+            complete = False
+            continue
+        for r in page:
+            rid, title, event = r.get("id"), r.get("display_title"), r.get("event")
+            if not isinstance(rid, int) or not isinstance(title, str) or not isinstance(event, str):
+                complete = False
+                continue
+            by_app = (
+                bot is not None and event == "workflow_dispatch" and _login(r.get("actor")) == bot
+            )
+            parsed = parse_run_title(title)
+            if parsed is None:
+                complete = complete and not by_app
+                continue
+            if parsed["verb"] in ("apply", "auto") and parsed["pr"] == pr_number:
+                runs[rid] = {
+                    "id": rid,
+                    "ref": parsed["ref"],
+                    "verb": parsed["verb"],
+                    "status": r.get("status"),
+                    "by_app": by_app,
+                }
+    return [runs[k] for k in sorted(runs)], complete
+
+
+def run_jobs(repo, run_id, run=None):
+    """`(jobs, complete)`: every job of run `run_id`'s latest attempt, each as the API returns
+    it, or `([], False)` when a page fails or is malformed, a job has no string `status` or
+    `name`, or the listing is empty: a live run that lists no job is not read as idle, and no
+    caller sees a partial listing."""
+    jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest", "jobs", run)
+    if not jobs or not all(
+        isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs
+    ):
+        return [], False
+    return jobs, True
+
+
 def validate_head_sha(value, source="SHIPMATE_HEAD_SHA", *, annotate=True):
     """Refuse a head SHA that is not 40 lowercase hex characters, so a malformed value
     cannot retarget the gh api URLs built from it (e.g. `/`, `?`, `..`). `source` names
