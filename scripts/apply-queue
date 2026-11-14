@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Cancel this pull request's stale apply runs, then say which run this one waits behind.
+
+Runs in `apply.yml`'s `queue` job, before this run's call joins `shipmate-apply-<pr_number>`.
+Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` (in a called workflow, the
+consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's environment),
+`SHIPMATE_AUTO` (`true` posts no reply), `SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`,
+`SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with `actions: write` and
+`pull-requests: write`).
+
+Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
+run, read the head again. A trusted run whose title names another head is stale, and is
+cancelled only when its jobs listing is complete, at least one job is `waiting` or `pending`,
+every job not `completed` is `waiting` or `pending`, and both head reads agree. An incomplete
+runs listing or a failed head read cancels nothing. An untrusted run is never cancelled.
+
+Writes, a cancel or the reply, happen only when this run's `actor` and `triggering_actor` are
+both `<slug>[bot]`; the reply's sentences print to the log either way. The queue only reports
+and tidies, so a failed cancel or reply warns and exits 0; the replies are in CONTRACT.md
+§Comment-ops, "One apply run per pull request".
+"""
+
+import os
+import re
+import sys
+
+from _shipmate import (
+    REPO_RE,
+    _load,
+    _run,
+    apply_runs,
+    current_run_url,
+    is_pr_number,
+    is_run_id,
+    one_line,
+    pr_head,
+    retried,
+    run_annotated,
+    run_jobs,
+)
+
+rc = _load("reply-comment")
+
+_WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
+#: Job statuses of a run still waiting in the queue or on an environment's approval.
+_IDLE = ("waiting", "pending")
+#: Job statuses of a run that holds `shipmate-apply-<pr_number>`.
+_HOLDING = ("in_progress", "queued", "waiting")
+
+
+def workflow_file(repo, ref):
+    """The file name in `GITHUB_WORKFLOW_REF` (`<repo>/.github/workflows/<file>@<ref>`), refused
+    unless it lies in `repo` and is a plain YAML file name: it is bound into an API path."""
+    path = ref.partition("@")[0]
+    name = path.removeprefix(f"{repo}/.github/workflows/")
+    if name == path or _WORKFLOW_FILE.fullmatch(name) is None:
+        raise SystemExit(f"::error::GITHUB_WORKFLOW_REF is not a workflow of {repo}: {ref!r}")
+    return name
+
+
+def idle(jobs):
+    """Whether a run whose `jobs` listing is complete only waits: a job `waiting` or `pending`,
+    and every job not `completed` one of those."""
+    unfinished = [j["status"] for j in jobs if j["status"] != "completed"]
+    return bool(unfinished) and all(s in _IDLE for s in unfinished)
+
+
+def _link(run_id):
+    return current_run_url(str(run_id))
+
+
+def sentences(own, holder, untrusted, cancelled, complete):
+    """The reply's sentences: the run `holder` this one waits for, the untrusted run, then each
+    cancelled run; with an incomplete listing, only that this run may wait."""
+    me = f"[the apply run]({_link(own)})"
+    if not complete:
+        return [
+            (
+                f"{me} may wait for an earlier apply run of this pull request; its apply runs "
+                "could not all be listed."
+            )
+        ]
+    out = []
+    if holder:
+        out.append(
+            f"{me} waits for [an earlier apply run]({_link(holder['id'])}) of this pull request "
+            "to finish."
+        )
+    if untrusted:
+        out.append(
+            f"{me} may wait for [an apply run]({_link(untrusted['id'])}) of this pull request "
+            "that shipmate did not dispatch."
+        )
+    out += [
+        f"{me} cancelled [an apply run]({_link(r['id'])}) of this pull request waiting at an "
+        f"older head ({r['ref'][:7]})."
+        for r in cancelled
+    ]
+    return out
+
+
+def _head(repo, pr):
+    try:
+        return pr_head(repo, pr)[0]
+    except SystemExit as exc:
+        print(f"::warning::could not read pull request #{pr}; no run is cancelled: {exc.code}")
+        return None
+
+
+def cancel(repo, run_id):
+    """Cancel run `run_id`; False, with a warning, when the request fails."""
+    try:
+        retried(
+            lambda: _run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/cancel"])
+        )
+    except SystemExit as exc:
+        print(f"::warning::could not cancel run {run_id}: {one_line(exc.code)}")
+        return False
+    return True
+
+
+def queue(repo, wf, pr, own, slug, trusted_self):
+    """The reply's sentences, after cancelling each stale run when `trusted_self`."""
+    runs, complete = apply_runs(repo, wf, pr, slug)
+    others = [r for r in runs if r["id"] != own]
+    head = _head(repo, pr)
+    if not complete:
+        return sentences(own, None, None, [], False)
+    trusted = [r for r in others if r["trusted"]]
+    jobs = {r["id"]: run_jobs(repo, r["id"]) for r in trusted}
+    stale = [r for r in trusted if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])]
+    if head is None or _head(repo, pr) != head:
+        stale = []
+    cancelled = [r for r in stale if trusted_self and cancel(repo, r["id"])]
+    kept = [r for r in trusted if r not in cancelled]
+    holding = [r for r in kept if any(j["status"] in _HOLDING for j in jobs[r["id"]][0])]
+    earlier = holding or [r for r in kept if r["id"] < own]
+    untrusted = [r for r in others if not r["trusted"]]
+    return sentences(own, (earlier or [None])[0], (untrusted or [None])[0], cancelled, True)
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    if REPO_RE.fullmatch(repo) is None:
+        sys.exit(f"::error::GITHUB_REPOSITORY is not a repository slug: {repo!r}")
+    pr, own = os.environ.get("PR_NUMBER", ""), os.environ["GITHUB_RUN_ID"]
+    if not is_pr_number(pr):
+        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr!r})")
+    if not is_run_id(own):
+        sys.exit(f"::error::GITHUB_RUN_ID must be a run id (got: {own!r})")
+    wf = workflow_file(repo, os.environ["GITHUB_WORKFLOW_REF"])
+    slug = os.environ.get("SHIPMATE_APP_SLUG", "")
+    bot = f"{slug}[bot]" if slug else None
+    trusted_self = bot is not None and (
+        os.environ.get("SHIPMATE_ACTOR") == bot == os.environ.get("SHIPMATE_TRIGGERING_ACTOR")
+    )
+    if not trusted_self:
+        print("::notice::this run was not dispatched by the shipmate App; it writes nothing")
+    said = queue(repo, wf, pr, int(own), slug, trusted_self)
+    for line in said:
+        print(line)
+    if not said or not trusted_self or os.environ.get("SHIPMATE_AUTO") == "true":
+        return
+    body = rc.body(
+        "apply", os.environ.get("SHIPMATE_ENV", ""), "notice", " ".join(said), current_run_url()
+    )
+    try:
+        rc.post(pr, body)
+    except SystemExit as exc:
+        print(f"::warning::could not post the queue reply on #{pr}: {one_line(exc.code)}")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

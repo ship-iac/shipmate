@@ -8,7 +8,7 @@ compared whole against a hand-written constant.
 
 import re
 
-from _loader import ENGINE, workflow_jobs, workflow_yaml
+from _loader import ENGINE, action_yaml, workflow_jobs, workflow_yaml
 
 #: The whole top-level `concurrency:` of `apply-run.yml`. `guard` refuses a non-canonical
 #: `pr_number` before the call, so the key needs no fallback.
@@ -21,7 +21,7 @@ APPLY_RUN_CONCURRENCY = {
 #: The whole `run` job of `apply.yml`. `permissions` is the union `apply-run.yml`'s jobs request;
 #: `with` forwards every input; `secrets` names each one `apply-run.yml` declares.
 RUN_JOB = {
-    "needs": ["guard"],
+    "needs": ["guard", "queue"],
     "if": "${{ !cancelled() && needs.guard.result == 'success' }}",
     "uses": "./.github/workflows/apply-run.yml",
     "permissions": {
@@ -110,5 +110,59 @@ def test_actionlint_ignores_only_the_result_property_in_apply_run():
 
 def test_the_run_job_is_this_whole_job():
     """Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
-    `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red."""
+    `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; drop
+    `queue` from `needs` -- red."""
     assert workflow_jobs("apply.yml")["run"] == RUN_JOB
+
+
+#: The whole `queue` job of `apply.yml`. No job-token permission: its writes use the App token,
+#: and only under the trust rule `scripts/apply-queue` applies.
+QUEUE_JOB = {
+    "needs": ["guard"],
+    "runs-on": "ubuntu-slim",
+    "environment": {"name": "shipmate-engine", "deployment": False},
+    "permissions": {},
+    "steps": [
+        {
+            "uses": "$/actions/apply-queue",
+            "with": {
+                "pr-number": "${{ inputs.pr_number }}",
+                "environment": "${{ inputs.environment }}",
+                "auto": "${{ inputs.auto }}",
+                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+            },
+        }
+    ],
+}
+
+#: The step of `actions/apply-queue` that runs the script: the trust inputs come from the
+#: dispatch's own `github` context and the slug from the token mint.
+QUEUE_STEP_ENV = {
+    "GH_TOKEN": "${{ steps.token.outputs.token }}",
+    "PR_NUMBER": "${{ inputs.pr-number }}",
+    "SHIPMATE_ENV": "${{ inputs.environment }}",
+    "SHIPMATE_AUTO": "${{ inputs.auto }}",
+    "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
+    "SHIPMATE_ACTOR": "${{ github.actor }}",
+    "SHIPMATE_TRIGGERING_ACTOR": "${{ github.triggering_actor }}",
+}
+
+
+def test_the_queue_job_is_this_whole_job():
+    """Mutations: `permissions: { actions: write }` -- red; drop `auto` from `with` -- red; add
+    `continue-on-error: true` -- red."""
+    assert workflow_jobs("apply.yml")["queue"] == QUEUE_JOB
+
+
+def test_the_queue_action_mints_these_permissions_and_passes_both_actors():
+    """Mutations: drop `permission-actions` -- red; read `SHIPMATE_TRIGGERING_ACTOR` from
+    `github.actor` -- red."""
+    steps = action_yaml("apply-queue")["runs"]["steps"]
+    mint = steps[1]["with"]
+    assert {k: v for k, v in mint.items() if k.startswith("permission-")} == {
+        "permission-actions": "write",
+        "permission-pull-requests": "write",
+    }
+    assert steps[2]["env"] == QUEUE_STEP_ENV
+    assert steps[2]["run"] == 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-queue"'

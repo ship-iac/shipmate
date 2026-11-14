@@ -121,6 +121,7 @@ ENGINE_BOUND_JOBS = {
     ("apply-run.yml", "review"),
     ("apply-run.yml", "lock"),
     ("apply-run.yml", "summary"),
+    ("apply.yml", "queue"),
     ("apply.yml", "outcome"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),

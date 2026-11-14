@@ -421,8 +421,9 @@ def is_head_sha(value):
     return isinstance(value, str) and _HEAD_SHA.fullmatch(value) is not None
 
 
+# The middle dot as an escape: a shipped string carries none literally (test_no_em_dash_emitted).
 _RUN_TITLE = re.compile(
-    r"shipmate · (apply|auto|plan|unlock) pr=([^ ]*) ref=([^ ]*) comment=([^ ]*)"
+    r"shipmate \u00b7 (apply|auto|plan|unlock) pr=([^ ]*) ref=([^ ]*) comment=([^ ]*)"
 )
 _COMMENT_ID = re.compile(r"[1-9][0-9]{0,19}")
 

@@ -1,0 +1,288 @@
+"""`scripts/apply-queue`: which stale apply runs it cancels and the reply it posts, each compared
+whole against hand-written text."""
+
+import pytest
+from _loader import load_script
+
+aq = load_script("apply-queue")
+
+_HEAD = "a" * 40
+_OLD = "b" * 40
+_NEW = "c" * 40
+_URL = "https://github.com/o/r/actions/runs/"
+_ME = f"[the apply run]({_URL}50)"
+_WAITS = f"{_ME} waits for [an earlier apply run]({_URL}{{}}) of this pull request to finish."
+_CANCELLED = (
+    f"{_ME} cancelled [an apply run]({_URL}{{}}) of this pull request waiting at an older head "
+    "(bbbbbbb)."
+)
+_FOREIGN = (
+    f"{_ME} may wait for [an apply run]({_URL}{{}}) of this pull request that shipmate did not "
+    "dispatch."
+)
+_INCOMPLETE = (
+    f"{_ME} may wait for an earlier apply run of this pull request; its apply runs could not all "
+    "be listed."
+)
+_FOOT = f"[comment run]({_URL}50)"
+
+
+def _r(id_, ref=_OLD, trusted=True, status="pending"):
+    return {"id": id_, "ref": ref, "verb": "apply", "status": status, "trusted": trusted}
+
+
+def _j(*statuses):
+    return [{"name": f"j{i}", "status": s} for i, s in enumerate(statuses)]
+
+
+@pytest.fixture
+def gh(monkeypatch):
+    """Run `main` against recorded reads; returns the recorder. Set `runs`, `complete`, `jobs`
+    ({id: (jobs, complete)}) and `heads` (one per read) before calling `go`."""
+    for k, v in {
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_RUN_ID": "50",
+        "GITHUB_WORKFLOW_REF": "o/r/.github/workflows/shipmate.yml@refs/heads/main",
+        "PR_NUMBER": "7",
+        "SHIPMATE_ENV": "",
+        "SHIPMATE_AUTO": "false",
+        "SHIPMATE_APP_SLUG": "shipmate-iac",
+        "SHIPMATE_ACTOR": "shipmate-iac[bot]",
+        "SHIPMATE_TRIGGERING_ACTOR": "shipmate-iac[bot]",
+    }.items():
+        monkeypatch.setenv(k, v)
+
+    class Rec:
+        runs, complete, jobs, heads = [], True, {}, [_HEAD, _HEAD]
+        cancels, posts, job_reads = [], [], []
+
+    rec = Rec()
+
+    def apply_runs(repo, wf, pr, slug):
+        assert (repo, wf, pr, slug) == ("o/r", "shipmate.yml", "7", "shipmate-iac")
+        return [*rec.runs, _r(50, ref=_HEAD, status="in_progress")], rec.complete
+
+    def run_jobs(repo, run_id):
+        rec.job_reads.append(run_id)
+        return rec.jobs.get(run_id, ([], False))
+
+    def pr_head(repo, pr):
+        return rec.heads.pop(0), False, "open"
+
+    def run(argv):
+        assert argv[:4] == ["gh", "api", "-X", "POST"]
+        rec.cancels.append(argv[4])
+        return ""
+
+    monkeypatch.setattr(aq, "apply_runs", apply_runs)
+    monkeypatch.setattr(aq, "run_jobs", run_jobs)
+    monkeypatch.setattr(aq, "pr_head", pr_head)
+    monkeypatch.setattr(aq, "_run", run)
+    monkeypatch.setattr(aq.rc, "post", lambda pr, body: rec.posts.append((pr, body)))
+    rec.go = aq.main
+    return rec
+
+
+def _reply(*lines):
+    return [("7", f"### shipmate apply\n\n⚪ {' '.join(lines)}\n\n{_FOOT}")]
+
+
+def _cancel(id_):
+    return f"repos/o/r/actions/runs/{id_}/cancel"
+
+
+def test_a_stale_run_whose_unfinished_jobs_all_wait_is_cancelled(gh):
+    """Mutation: cancel nothing (`cancelled = []`) -- red."""
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("completed", "waiting", "waiting"), True)}
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))
+
+
+def test_a_stale_run_with_a_queued_job_is_kept_and_named(gh):
+    """Mutation: `idle` admits `queued` -- red (cancelled)."""
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("waiting", "queued"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_a_run_at_the_live_head_is_kept_and_named(gh):
+    """Mutation: drop `r["ref"] != head` -- red (cancelled)."""
+    gh.runs = [_r(40, ref=_HEAD)]
+    gh.jobs = {40: (_j("pending"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_an_incomplete_runs_listing_cancels_nothing_and_says_the_run_may_wait(gh):
+    """Mutation: drop the `not complete` return -- red (40 cancelled)."""
+    gh.runs, gh.complete = [_r(40)], False
+    gh.jobs = {40: (_j("waiting"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.job_reads == []
+    assert gh.posts == _reply(_INCOMPLETE)
+
+
+def test_an_untrusted_run_is_never_cancelled_and_is_named_as_not_dispatched_by_shipmate(gh):
+    """An untrusted run at an older head whose jobs only wait: no jobs read, no cancel.
+
+    Mutations: treat every listed run as trusted (`trusted = others`) -- red (jobs read and
+    cancelled); drop the untrusted sentence -- red."""
+    gh.runs = [_r(30, trusted=False), _r(40, trusted=False)]
+    gh.jobs = {30: (_j("waiting"), True), 40: (_j("waiting"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.job_reads == []
+    assert gh.posts == _reply(_FOREIGN.format(30))
+
+
+def test_an_incomplete_jobs_listing_keeps_its_run(gh):
+    """Mutation: drop `jobs[...][1]` from the stale test -- red (cancelled)."""
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("waiting"), False)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_a_run_with_no_unfinished_job_is_kept(gh):
+    """Mutation: `idle` returns `all(...)` without `bool(unfinished)` -- red (cancelled)."""
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("completed", "completed"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_a_head_that_moved_between_reads_cancels_nothing(gh):
+    """Mutation: drop the second head read -- red (cancelled)."""
+    gh.runs, gh.heads = [_r(40)], [_HEAD, _NEW]
+    gh.jobs = {40: (_j("waiting"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_a_failed_head_read_cancels_nothing(gh, monkeypatch):
+    """Mutation: return "" from `_head` on a failure -- red (cancelled)."""
+
+    def pr_head(repo, pr):
+        raise SystemExit("HTTP 502")
+
+    monkeypatch.setattr(aq, "pr_head", pr_head)
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("waiting"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_an_untrusted_own_run_writes_nothing(gh, monkeypatch, capsys):
+    """A human re-run keeps `actor` and changes `triggering_actor`. Mutations: read `actor`
+    only -- red (cancelled and posted); trust any actor ending `[bot]` -- red (the second
+    case)."""
+    monkeypatch.setenv("SHIPMATE_TRIGGERING_ACTOR", "kp")
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("waiting"), True)}
+    gh.go()
+    assert (gh.cancels, gh.posts) == ([], [])
+    monkeypatch.setenv("SHIPMATE_TRIGGERING_ACTOR", "shipmate-iac[bot]")
+    monkeypatch.setenv("SHIPMATE_ACTOR", "github-actions[bot]")
+    gh.heads = [_HEAD, _HEAD]
+    gh.go()
+    assert (gh.cancels, gh.posts) == ([], [])
+    assert _WAITS.format(40) in capsys.readouterr().out
+
+
+def test_the_holder_is_named_over_an_older_waiting_run_and_cancels_share_one_reply(gh):
+    """Run 45 holds the group (a job `in_progress`), 40 is stale and only waits, 30 waits at
+    the live head; a newer run 60 is listed too.
+
+    Mutations: name the oldest earlier kept run instead of the holder -- red (30 named); post
+    only the first sentence -- red."""
+    gh.runs = [_r(30, ref=_HEAD), _r(40), _r(45, ref=_HEAD), _r(60, ref=_HEAD)]
+    gh.jobs = {
+        30: (_j("pending"), True),
+        40: (_j("waiting"), True),
+        45: (_j("completed", "in_progress"), True),
+        60: (_j("pending"), True),
+    }
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_WAITS.format(45), _CANCELLED.format(40))
+
+
+def test_a_newer_run_that_holds_nothing_is_not_named(gh):
+    """Without a holder, only a kept run older than this one is named. Mutation: drop
+    `r["id"] < own` -- red (60 named)."""
+    gh.runs = [_r(60, ref=_HEAD)]
+    gh.jobs = {60: (_j("pending"), True)}
+    gh.go()
+    assert gh.posts == []
+
+
+def test_an_auto_run_cancels_but_posts_no_reply(gh, monkeypatch):
+    """Mutation: drop the `SHIPMATE_AUTO` check -- red (posted)."""
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("waiting"), True)}
+    monkeypatch.setenv("SHIPMATE_AUTO", "true")
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == []
+
+
+def test_a_failed_cancel_keeps_the_run(gh, monkeypatch):
+    """Mutation: count the run cancelled whatever `cancel` returns -- red."""
+
+    def run(argv):
+        raise SystemExit("::error::command failed (1): gh api\nHTTP 409")
+
+    monkeypatch.setattr(aq, "_run", run)
+    gh.runs = [_r(40)]
+    gh.jobs = {40: (_j("waiting"), True)}
+    gh.go()
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "o/r/.github/workflows/../x.yml@refs/heads/main",
+        "o/other/.github/workflows/shipmate.yml@refs/heads/main",
+        "o/r/.github/workflows/sub/shipmate.yml@refs/heads/main",
+        "o/r/.github/workflows/shipmate.yml?x=1@refs/heads/main",
+        "shipmate.yml@refs/heads/main",
+        "",
+    ],
+)
+def test_a_workflow_ref_outside_this_repository_is_refused(ref):
+    """Mutations: `_WORKFLOW_FILE.search` for `fullmatch` -- red; drop `name == path` -- red
+    (a bare file name with no repository)."""
+    with pytest.raises(SystemExit):
+        aq.workflow_file("o/r", ref)
+
+
+def test_the_workflow_file_is_read_from_the_ref():
+    assert aq.workflow_file("o/r", "o/r/.github/workflows/ship.yaml@refs/pull/1/merge") == (
+        "ship.yaml"
+    )
+
+
+def test_contract_states_each_reply_sentence_as_the_script_renders_it(monkeypatch):
+    """Mutations: reword the cancelled sentence in `sentences` -- red; drop the CONTRACT bullet
+    for the untrusted run -- red."""
+    from _loader import ENGINE
+
+    monkeypatch.setattr(aq, "_link", lambda run_id: "<url>")
+    run = {"id": 1, "ref": "0123456" + "a" * 33}
+    said = aq.sentences(9, run, run, [run], True) + aq.sentences(9, None, None, [], False)
+    contract = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
+    missing = [s for s in said if f"``{s.replace('0123456', '<short sha>')}``" not in contract]
+    assert len(said) == 4
+    assert missing == []
