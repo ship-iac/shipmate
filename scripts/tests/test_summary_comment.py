@@ -2582,7 +2582,7 @@ def test_an_unknown_holder_offers_the_eviction_only_where_nothing_blocks_it():
         ),
         (
             "🔒 could not tell whether #12 is stacked on this pull request (HTTP 404); re-plan "
-            "or try the eviction"
+            "or try the eviction once its apply, auto and deploy runs have ended"
         ),
     ]
 
@@ -2778,7 +2778,7 @@ def test_main_offers_eviction_past_a_failed_read(tmp_path, monkeypatch, capsys, 
     _run_main(tmp_path, monkeypatch, [_cell()])
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _UNKNOWN_LOCK_BODY.replace(
         "(gh: @<!-- -->x | HTTP 502); the eviction is blocked by #12",
-        "(HTTP 502); re-plan or try the eviction",
+        "(HTTP 502); re-plan or try the eviction once its apply, auto and deploy runs have ended",
     ).replace(
         "Comment `shipmate help`",
         "Once the apply, auto and deploy runs of #12 have ended, comment `shipmate unlock "

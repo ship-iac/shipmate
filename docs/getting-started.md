@@ -800,7 +800,8 @@ refuses and releases nothing, naming each holder and its cause, when a holder is
 stacked on the commenting pull request through a chain of pull requests at any
 depth, or when a holder's walk ran out of pages (commenting again refuses the
 same way: retarget the holder to the default branch, or wait until it merges or
-closes). A holder whose pull request cannot be read, or a holder's run that may
+closes); that reply also names any holder whose read failed. When no holder
+blocks, a holder whose pull request cannot be read, or a holder's run that may
 still apply, refuses too, and the reply says to comment again
 ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). Stacking pull requests that
 change the same cells is not recommended: while a holder is stacked, eviction

@@ -388,13 +388,14 @@ def blocked_envs(cells, locks, blocking):
 
 
 def _unknown_hint(cells, locks, holder, blocked):
-    """`; re-plan or try the eviction` when no environment where `holder` holds a changed cell
-    is in `blocked` (`blocked_envs`), else `; the eviction is blocked by #<a>, #<b>` naming
-    their blocking holders."""
+    """`; re-plan or try the eviction once its apply, auto and deploy runs have ended` (the
+    wait `_evict_line` names) when no environment where `holder` holds a changed cell is in
+    `blocked` (`blocked_envs`), else `; the eviction is blocked by #<a>, #<b>` naming their
+    blocking holders."""
     envs = {c["environment"] for c in cells if (k := _lock_key(c, locks)) and locks[k] == holder}
     by = sorted({h for e in envs for h in blocked.get(e, ())})
     if not by:
-        return "; re-plan or try the eviction"
+        return "; re-plan or try the eviction once its apply, auto and deploy runs have ended"
     return "; the eviction is blocked by " + ", ".join(f"#{h}" for h in by)
 
 

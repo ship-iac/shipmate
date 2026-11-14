@@ -945,9 +945,11 @@ nothing.
   Evicting an open #<n> works the same way, but applying this pull request
   afterwards may overwrite what #<n> applied. When #<n> is stacked on this pull
   request, eviction refuses (§`shipmate unlock <env> --evict` is refused: `#<h>
-  is stacked on this pull request`); while a run of #<n> may still apply, it
-  fails (§`shipmate unlock <env> --evict` failed: `a holder's run may still
-  apply`).
+  is stacked on this pull request`), and when #<n>'s walk ran out of pages it
+  refuses too (§`shipmate unlock <env> --evict` is refused: `its chain of base
+  branches needs more than 20 pages of pull requests`); while a run of #<n> may
+  still apply, it fails (§`shipmate unlock <env> --evict` failed: `a holder's
+  run may still apply`).
 - After the `lock` job form, comment `shipmate apply` again: the new run leaves
   the locked cell pending and applies the rest. "Re-run failed jobs" does not
   re-run `detect`, so its `lock` job tries the same cells again.
@@ -1124,7 +1126,9 @@ shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
 merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
 run is unknown` or `could not list the deploy runs of #<h>'s merge commit
-<sha>`.
+<sha>`. Past 4,000 characters the reply keeps the header and the lines that
+fit, then `and <n> more line(s); the run log names every one`; the run log has
+every line.
 
 - Cause: A run of the repository's `shipmate.yml` that may still apply a
   holder's cells has not ended: an `apply` or `auto` run of #<h>, by anyone and

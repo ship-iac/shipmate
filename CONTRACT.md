@@ -3615,7 +3615,7 @@ and `lost` outputs, which the same rule reads.
   under the cap. Then one line per such holder whose walk was cut short, lowest
   first: `🔒 could not tell whether #<n> is stacked on this pull request
   (<reason>)`, the reason on one line, followed by `; re-plan or try the
-  eviction` when no environment where #<n> holds a changed cell has a holder
+  eviction once its apply, auto and deploy runs have ended` when no environment where #<n> holds a changed cell has a holder
   that blocks the eviction (the commands section above), else by `; the eviction is blocked
   by #<a>, #<b>`, naming those blocking holders (#<n> itself when its walk ran
   out of pages); it never changes the gate. This hint does not depend on the
