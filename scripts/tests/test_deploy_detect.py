@@ -1440,15 +1440,25 @@ def test_warm_takes_one_managed_stack_per_distinct_lock(tmp_path, monkeypatch):
     ]
 
 
-def test_a_failed_warm_list_warns_and_warms_nothing(monkeypatch, capsys):
-    """A degrade: the deploy carries on. Mutation: re-raise in `warm_or_none`."""
+@pytest.mark.parametrize(
+    ("error", "said"),
+    [
+        (KeyError("environments"), "'environments'"),
+        (SystemExit("::error::refused"), "::error::refused"),
+    ],
+    ids=["exception", "refusal"],
+)
+def test_a_failed_warm_list_warns_and_warms_nothing(monkeypatch, capsys, error, said):
+    """A degrade: the deploy carries on, after an exception and after a `SystemExit` refusal,
+    which is no `Exception`. Mutations: re-raise in `warm_or_none`; catch `Exception` alone
+    (reds `refusal`)."""
 
     def broken(tag_map, table):
-        raise KeyError("environments")
+        raise error
 
     monkeypatch.setattr(dd, "warm_cells", broken)
     assert dd.warm_or_none({}, {}) == []
-    assert capsys.readouterr().err == ("::warning::no provider cache warm-up: 'environments'\n")
+    assert capsys.readouterr().err == f"::warning::no provider cache warm-up: {said}\n"
 
 
 def test_main_writes_the_warm_list(tmp_path, monkeypatch):

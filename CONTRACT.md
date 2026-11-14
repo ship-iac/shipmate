@@ -4538,9 +4538,12 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   `contents: read`, on the merged commit's code. A leg computes the key with
   the same script on its own runner and looks it up; on a miss it runs the
   cells' `init` through `actions/cell-init` under that stack's environment
-  variables with `-backend=false`, so it reads no state and needs no
-  credentials, plans nothing, and saves only when `init` left a file in the
-  cache. An exact-key lookup after the save decides the outcome: a hit, also
+  variables with `-backend=false`: it initializes no backend, reads no state,
+  assumes no cloud role and plans nothing, and saves only when `init` left a
+  file in the cache. It binds no GitHub Environment, so it gets the
+  `SHIPMATE_SECRETS` the caller passes and no environment's secrets; an
+  `init` that needs an environment's secret (a private module source, say)
+  fails that leg only. An exact-key lookup after the save decides the outcome: a hit, also
   when another job saved the entry first, is quiet; a miss, looked up twice,
   warns `Provider cache entry not saved`, naming the key. A leg runs per
   distinct lock on every merge deploy, including one with no cells; it is a

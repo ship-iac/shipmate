@@ -240,7 +240,7 @@ def warm_or_none(tag_map, table):
     provider cache, so a failure here must not refuse the deploy."""
     try:
         return warm_cells(tag_map, table)
-    except Exception as e:
+    except (Exception, SystemExit) as e:
         sys.stderr.write(f"::warning::{command_data(f'no provider cache warm-up: {e}')}\n")
         return []
 
