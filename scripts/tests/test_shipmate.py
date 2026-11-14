@@ -23,6 +23,7 @@ from _shipmate import (
     is_transient,
     named,
     pr_head,
+    rate_limited,
     retried,
     review_count,
     run,
@@ -418,6 +419,109 @@ def test_check_runs_retries_a_transient_failure_through_the_injected_run(sleeps)
         ".check_runs[]",
     ]
     assert (calls, sleeps) == ([argv, argv], [2])
+
+
+#: Not captured: gh's `gh: <message> (HTTP <code>)` form around the probed API message.
+_SECONDARY = (
+    "::error::command failed (1): gh api repos/o/r/statuses/x\n"
+    "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try "
+    "again. (HTTP 403)"
+)
+_TOO_MANY = (
+    "::error::command failed (1): gh api repos/o/r/statuses/x\ngh: Too Many Requests (HTTP 429)"
+)
+_WAIT_NOTICE = (
+    "::notice::waiting 60 s for GitHub's secondary rate limit, then retrying: "
+    "command failed (1): gh api repos/o/r/statuses/x\n"
+)
+
+
+@pytest.mark.parametrize("message", [_SECONDARY, _TOO_MANY], ids=["403-secondary", "429"])
+def test_rate_limited_waits_60_s_and_calls_again(message, sleeps, capsys):
+    """Mutations, each run: drop the `HTTP 429` test -> the 429 re-raises; drop the 403 test ->
+    the 403 re-raises; `RATE_LIMIT_WAIT = 30` -> the sleep differs; write the notice to stdout ->
+    the streams swap."""
+    calls, call = _failing(message)
+    assert rate_limited(call) == "x"
+    assert (len(calls), sleeps, capsys.readouterr()) == (2, [60], ("", _WAIT_NOTICE))
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "gh: Resource not accessible by integration (HTTP 403)",
+        "gh: API rate limit exceeded for installation ID 1. (HTTP 403)",
+    ],
+    ids=["permission", "primary-limit"],
+)
+def test_rate_limited_re_raises_any_other_403_at_once(stderr, sleeps, capsys):
+    """Mutation: treat any 403 as rate-limited (drop `and "secondary rate limit" in stderr`) ->
+    a second call and a 60 s sleep."""
+    message = f"::error::command failed (1): gh api x\n{stderr}"
+    calls, call = _failing(message)
+    with pytest.raises(SystemExit) as exc:
+        rate_limited(call)
+    assert (exc.value.code, len(calls), sleeps, capsys.readouterr()) == (message, 1, [], ("", ""))
+
+
+def test_rate_limited_ignores_limit_text_in_the_argv_line(sleeps):
+    """A gate description is consumer text on the argv line. Mutation: search the whole message
+    in `is_rate_limited` -> a second call."""
+    message = (
+        "::error::command failed (1): gh api x -f description=HTTP 429\ngh: Not Found (HTTP 404)"
+    )
+    calls, call = _failing(message)
+    with pytest.raises(SystemExit) as exc:
+        rate_limited(call)
+    assert (exc.value.code, len(calls), sleeps) == (message, 1, [])
+
+
+def test_rate_limited_runs_before_retry_after_each_wait(monkeypatch):
+    """Mutations, each run: skip `before_retry` -> no hook entries; run it before the sleep ->
+    the order differs."""
+    log = []
+
+    def call():
+        log.append("call")
+        if log.count("call") <= 2:
+            raise SystemExit(_SECONDARY)
+        return "x"
+
+    monkeypatch.setattr("_shipmate._sleep", lambda s: log.append(f"sleep {s}"))
+    assert rate_limited(call, before_retry=lambda: log.append("hook")) == "x"
+    assert log == ["call", "sleep 60", "hook", "call", "sleep 60", "hook", "call"]
+
+
+def test_rate_limited_stops_when_before_retry_raises(sleeps):
+    """`gate-status refuse-newer`'s `NEWER` exit carries an int code. Mutation: swallow a
+    `SystemExit` from `before_retry` -> a second call returns `x`."""
+    calls, call = _failing(_SECONDARY)
+
+    def refuse():
+        raise SystemExit(4)
+
+    with pytest.raises(SystemExit) as exc:
+        rate_limited(call, before_retry=refuse)
+    assert (exc.value.code, len(calls), sleeps) == (4, 1, [60])
+
+
+def test_rate_limited_budget_is_per_process_not_per_write(sleeps):
+    """Four writes each rate-limited once: three wait, the fourth re-raises. Mutation: a
+    per-write budget (a local counter in `rate_limited`) -> the fourth waits and returns `x`."""
+    results = [rate_limited(_failing(_SECONDARY)[1]) for _ in range(3)]
+    calls, call = _failing(_SECONDARY)
+    with pytest.raises(SystemExit) as exc:
+        rate_limited(call)
+    assert (results, exc.value.code, len(calls), sleeps) == (["x"] * 3, _SECONDARY, 1, [60] * 3)
+
+
+def test_retried_does_not_wait_out_a_rate_limit(sleeps):
+    """A read outside the listed writes keeps `retried` alone. Mutation: wire `is_rate_limited`
+    into `retried` (retry when `is_transient(e) or is_rate_limited(e)`) -> a second call."""
+    calls, call = _failing(_SECONDARY)
+    with pytest.raises(SystemExit) as exc:
+        retried(call)
+    assert (exc.value.code, len(calls), sleeps) == (_SECONDARY, 1, [])
 
 
 def _answering(answer, *messages):

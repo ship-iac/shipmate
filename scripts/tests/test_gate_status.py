@@ -1172,3 +1172,70 @@ def test_the_post_command_stops_when_the_bot_user_lookup_fails_before_its_retry(
         [_POST, _USER, _USER, _USER],
         [2, 2, 5],
     )
+
+
+#: Not captured: gh's `gh: <message> (HTTP <code>)` form around the probed API message.
+_SECONDARY = (
+    "command failed (1): gh api x\ngh: You have exceeded a secondary rate limit. (HTTP 403)"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["post", SHA, "pending", "the reason"],
+        ["hold", SHA, "the reason"],
+        ["deploy", SHA, "success", "success"],
+    ],
+    ids=["post", "hold", "deploy"],
+)
+def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, command):
+    """Mutation: `post` writes through `retried` alone (drop `rate_limited`) -> the 403 raises."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ:
+            return ""
+        if sum(a[:2] == ["gh", "api"] and "/statuses/" in a[2] for a in calls) == 1:
+            raise SystemExit(f"::error::{_SECONDARY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    gs.main(command)
+    writes = [a for a in calls if a[:2] == ["gh", "api"] and "/statuses/" in a[2]]
+    assert (len(writes), writes[0] == writes[1], in_process) == (2, True, [60])
+
+
+def test_refresh_stops_when_a_hold_lands_while_it_waits_out_a_rate_limit(
+    in_process, monkeypatch, capsys
+):
+    """Read pending, the green POST hits the secondary limit, the re-read after the wait finds a
+    hold. Mutation: drop `before_retry=` from `post`'s `rate_limited` -> the second POST greens
+    over the hold."""
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setattr(gs, "check_runs", lambda *_: DONE)
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ:
+            state = "pending" if calls.count(_READ) == 1 else "failure"
+            return _lines(_status("shipmate / gate", state, _run_url(42)))
+        if calls.count(args) == 1:
+            raise SystemExit(f"::error::{_SECONDARY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        gs.refresh(SHA)
+    assert (exc.value.code, calls, in_process) == (
+        gs.HELD,
+        [_USER, _READ, ["gh", *GREEN], _READ],
+        [60],
+    )
+    assert capsys.readouterr().out == HELD

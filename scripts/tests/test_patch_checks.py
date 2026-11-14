@@ -120,3 +120,23 @@ def test_stdout_holds_only_the_ids_acknowledged_before_a_failure(monkeypatch, ca
     with pytest.raises(SystemExit):
         _main(monkeypatch, ["1", "2", "3"])
     assert capsys.readouterr().out == "1\n"
+
+
+#: Not captured: gh's `gh: <message> (HTTP <code>)` form around the probed API message.
+_SECONDARY = "gh: You have exceeded a secondary rate limit. (HTTP 403)"
+
+
+def test_a_secondary_rate_limit_waits_60_s_and_completes(monkeypatch, capsys, calls):
+    """Mutation: PATCH through `retried` alone (drop `rate_limited`) -> the 403 fails the loop."""
+    recorded, fail = calls
+    slept = []
+    fail["1"] = _SECONDARY
+
+    def clear(_delay):
+        slept.append(_delay)
+        fail.pop("1")
+
+    monkeypatch.setattr(_shipmate, "_sleep", clear)
+    _main(monkeypatch, ["1", "2"])
+    assert ([a for a, _ in recorded], slept) == ([_argv("1"), _argv("1"), _argv("2")], [60])
+    assert capsys.readouterr().out == "1\n2\n"

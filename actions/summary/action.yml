@@ -495,10 +495,7 @@ runs:
         # `gate-hold` writes outside this job's concurrency group, after the publish hold's read. A
         # newer run's hold, or a failed read, publishes nothing, and the publish hold stands.
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" refuse-newer "$SHIPMATE_HEAD_SHA" || exit 1
-        while IFS= read -r body; do
-          [ -z "$body" ] && continue
-          printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null
-        done < bodies.jsonl
+        python3 "$GITHUB_ACTION_PATH/../../scripts/create-checks" "$SHIPMATE_HEAD_SHA" < bodies.jsonl
 
     - name: Create/refresh gate
       if: ${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}

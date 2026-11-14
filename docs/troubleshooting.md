@@ -2750,6 +2750,23 @@ check. Fix the policy per `github-app.md` §5, which reads each repository's own
 default branch rather than hardcoding one. `shipmate doctor` probes both that
 the environment exists and that its policy actually names the default branch.
 
+### `waiting 60 s for GitHub's secondary rate limit, then retrying: <command>`
+
+A notice in the log of a job that writes apply checks or the gate. GitHub
+refused the write with its secondary rate limit (`HTTP 429`, or `HTTP 403`
+naming the secondary rate limit), which it applies to bursts of writes. The
+step waits 60 seconds and sends the same write again; the pause is not a hang.
+
+- The writes that wait: completing an apply check, creating one in the plan
+  `summary`, and every gate write (`post`, `hold`, `refresh`, `deploy`). Other
+  API calls do not wait.
+- Each script process waits at most three times across all its writes. The next
+  rate-limited write fails the step like any failed write, and the gate stays
+  pending or held. Re-run the job.
+- Before retrying, the plan `summary`'s apply-check creation and final gate
+  write read the gate again and stop without writing when a newer plan run
+  holds it; a `refresh` stops when any hold stands.
+
 ### A deploy refused an apply check on a stack that lost its env tag
 
 The annotation reads:

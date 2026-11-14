@@ -21,7 +21,8 @@ API call, and looks up the id of the App's bot user `<slug>[bot]` once, before i
 statuses listing; an invocation that lists no statuses makes no lookup. A `<sha>` that is not 40
 lowercase hex characters is refused before any API call. A failed API call exits 1 with an
 `::error::` line, except in `checks`. A call that fails transiently retries twice, each retry
-noted on stderr.
+noted on stderr. A gate write (`post`, `hold`, `refresh`, `deploy`) that GitHub's secondary rate
+limit refuses also waits 60 s and retries, noted on stderr, up to three waits per invocation.
 `refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
 its write retries: each caller decides whether a hold fails its step. `refuse-newer` prints its
 refusal as an `::error::` line and exits `NEWER`, so a caller tells a newer run from a failed
@@ -58,6 +59,7 @@ from _shipmate import (
     is_run_id,
     one_line,
     pr_head,
+    rate_limited,
     retried,
     run,
     run_annotated,
@@ -191,8 +193,9 @@ def _refuse_held(sha):
 
 
 def post(sha, state, description, before_retry=None):
-    """Write the gate; a transient failure retries through `retried`, `before_retry` with it. A
-    repeated POST of a status that landed only adds an identical history entry.
+    """Write the gate; a transient failure retries through `retried` and a secondary rate limit
+    through `rate_limited`, `before_retry` with each. A repeated POST of a status that landed
+    only adds an identical history entry.
 
     Known ceiling: a retry re-posts over a hold its `before_retry` does not see, as a first POST
     already can over one written just before it (`gate-hold` writes outside the gate group). The
@@ -214,7 +217,7 @@ def post(sha, state, description, before_retry=None):
         "-f",
         f"target_url={current_run_url()}",
     ]
-    retried(lambda: _run(args), before_retry)
+    rate_limited(lambda: retried(lambda: _run(args), before_retry), before_retry=before_retry)
 
 
 def refresh(sha):
