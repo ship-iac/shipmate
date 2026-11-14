@@ -324,7 +324,8 @@ every plan run writing apply checks or a `shipmate / gate` status. An App or
 installation without `contents: write` still runs plans, but every mint that
 writes a cell lock fails: every `shipmate apply` refuses at its `lock` job, and
 the `release` job, the deploy's lock release and `shipmate unlock <env> --evict`
-fail.
+fail. `--evict`'s mint also requests `actions: read`, to list the lock holders'
+live runs; the manifest's `actions: write` covers it.
 
 ## Key-exposure boundary
 

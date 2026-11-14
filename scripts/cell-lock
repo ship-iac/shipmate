@@ -32,8 +32,10 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   included); writes outputs `evicted` and `refused` (the locks whose delete refused, each also
   an `::error::`) before refusing. Refuses before any delete, writing neither, naming every
   `blocking` holder and every holder whose read failed or answered malformed (`blocked=true`
-  when any is blocking); and before any read when `SHIPMATE_HEAD_REF` or
-  `SHIPMATE_DEFAULT_BRANCH` is empty. Reads no holder when the two are equal.
+  when any is blocking); then, when a known holder remains, while a run of `shipmate.yml` may
+  still apply that holder's cells, or the runs cannot all be read (`_refuse_live_runs`).
+  Refuses before any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is empty, and
+  reads no holder's pull request for stacking when the two are equal.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds; `stacked`,
   `{"<holder>": [chain]}` for those holders stacked on `SHIPMATE_HEAD_REF` (`_chain`);
@@ -65,17 +67,22 @@ import urllib.parse
 from collections.abc import Iterable
 
 from _shipmate import (
+    READ_ERRORS,
     REASON_CAP,
+    SHIPMATE_WORKFLOW,
     _load,
     _run,
     cell_names,
     check_runs,
     command_data,
+    current_run_url,
     deploy_lock_remedy,
     deploy_mode,
     gh_json,
+    holder_dispatch_runs,
     is_head_sha,
     is_run_id,
+    live_push_runs,
     lock_wait_remedy,
     lock_who,
     retried,
@@ -452,8 +459,8 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     evicting pull request's head branch). Any holder stacked on it, or whose walk is cut short,
     refuses in one message (`_refusal`) naming every such holder with its reason: stacked ones
     naming their chain and `default_branch`, then the other `blocking` ones, then those whose
-    read failed or answered malformed. It raises `Blocked` when any is `blocking`. Either way
-    nothing is deleted."""
+    read failed or answered malformed. It raises `Blocked` when any is `blocking`. Then, while a
+    known holder remains, `_refuse_live_runs` reads the runs. Either way nothing is deleted."""
     wanted = {ref_name(env, s) for s in stacks}
     locks = read_locks(repo, [env], run=run).values()
     locks = [lock for lock in locks if lock.ref in wanted and lock.pr != pr]
@@ -480,6 +487,8 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     ]
     if blocked or unread:
         raise (Blocked if blocked else SystemExit)(_refusal(blocked + unread))
+    if held:
+        _refuse_live_runs(repo, env, set(held), run)
     return _delete_each(repo, locks, run)
 
 
@@ -491,31 +500,78 @@ def blocking(stacked, unknown):
     return sorted(stacked.keys() | {h for h, walk in unknown.items() if walk.exhausted})
 
 
-def _refusal(sentences):
+def _refusal(sentences, what="holder(s)"):
     """`sentences` (at least one) as one `::error::`, one per line. When `run_annotated`'s
     `refusal` output (the lines joined by spaces) would pass `REASON_CAP`, that first error
-    keeps the leading whole sentences that fit and ends `and <n> more holder(s); the run log
-    names every one`, and a second error carries the rest, so the log still names every holder.
+    keeps the leading whole sentences that fit and ends `and <n> more <what>; the run log
+    names every one`, and a second error carries the rest, so the log still names every one.
     When not even the first sentence fits beside that tail, the first error keeps the first
     sentence cut to fit and ending `...`, then the tail (`the run log has it in full` for a lone
     sentence), and the second error carries every sentence whole."""
     for kept in range(len(sentences), 0, -1):
         rest = sentences[kept:]
-        first = [*sentences[:kept], *([_more(len(rest))] if rest else [])]
+        first = [*sentences[:kept], *([_more(len(rest), what)] if rest else [])]
         if len(" ".join(first)) <= REASON_CAP:
             return _errors(first, rest)
-    tail = _more(len(sentences) - 1) if len(sentences) > 1 else "the run log has it in full"
+    tail = _more(len(sentences) - 1, what) if len(sentences) > 1 else "the run log has it in full"
     cut = sentences[0][: REASON_CAP - len(tail) - 4]
     return _errors([f"{cut}...", tail], sentences)
 
 
-def _more(n):
-    return f"and {n} more holder(s); the run log names every one"
+def _more(n, what):
+    return f"and {n} more {what}; the run log names every one"
 
 
 def _errors(first, rest):
     errors = ["\n".join(first), "\n".join(rest)]
     return "\n".join(f"::error::{e}" for e in errors if e)
+
+
+def _refuse_live_runs(repo, env, holders, run):
+    """Refuse while a run of `SHIPMATE_WORKFLOW` may still apply a cell of one of `holders`: a live
+    `apply` or `auto` run titled for one, a live dispatch run whose title does not parse, or a
+    live deploy run of a merged holder's merge commit (`_deploy_runs`, after the dispatch
+    listings). A failed or incomplete read refuses too; every line found is kept, so the
+    refusal names them all, under one header (`_refusal`, which keeps the reply under
+    `REASON_CAP`). A point-in-time check: a run started after its read is not seen."""
+    found, complete = holder_dispatch_runs(repo, holders, run)
+    lines = [] if complete else [f"could not list the live runs of {SHIPMATE_WORKFLOW}"]
+    lines += [
+        f"#{r['holder']} has a live `{r['verb']}` run: {current_run_url(str(r['id']))}"
+        if r["holder"] is not None
+        else "a live run whose title is not a shipmate title may be a holder's: "
+        + current_run_url(str(r["id"]))
+        for r in found
+    ]
+    for holder in sorted(holders):
+        lines += _deploy_runs(repo, holder, run)
+    if lines:
+        header = (
+            f"no cell lock in {env} was released: a holder's run may still apply, or the check "
+            "could not tell. Wait for each run below to end, then comment again."
+        )
+        raise SystemExit(_refusal([header, *lines], "line(s)"))
+
+
+def _deploy_runs(repo, holder, run):
+    """The refusal lines for `holder`'s merge deploy, its pull request read fresh: one per live
+    deploy run of its merge commit, none while it is unmerged, and one when the read fails, the
+    merge commit is not a sha, or the listing is incomplete."""
+    try:
+        pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
+        merged, sha = pull["merged_at"] is not None, pull["merge_commit_sha"]
+    except READ_ERRORS as exc:
+        return [f"could not tell whether #{holder} has merged: {_why(exc)}"]
+    if not merged:
+        return []
+    if not is_head_sha(sha):
+        return [
+            f"#{holder} merged, but its merge commit reads {sha!r}, so its deploy run is unknown"
+        ]
+    ids, complete = live_push_runs(repo, sha, run)
+    if not complete:
+        return [f"could not list the deploy runs of #{holder}'s merge commit {sha}"]
+    return [f"#{holder}'s deploy run is live: {current_run_url(str(i))}" for i in ids]
 
 
 def evict_stacks(names, env):
@@ -796,14 +852,14 @@ def _read_stacked(repo, holders, head_ref, default_branch, run, *, retry=True):
     retry when `retry` is set: ({holder: chain} for each `OnChain`, {holder: `Unknown`} for
     each whose read fails or answers malformed, or whose walk is cut short). Nothing is stacked
     on the default branch, so a `head_ref` equal to `default_branch` reads no holder, and a
-    holder read that would fail cannot refuse an eviction or warn there."""
+    holder read that would fail cannot refuse an eviction as unread or warn there."""
     stacked, unknown, memo = {}, {}, {}
     if head_ref == default_branch:
         return stacked, unknown
     for holder in sorted(holders):
         try:
             pull = gh_json(f"repos/{repo}/pulls/{holder}", run, retry=retry)
-        except (SystemExit, ValueError) as exc:
+        except READ_ERRORS as exc:
             unknown[holder] = Unknown(_why(exc), exhausted=False)
             continue
         walk = _chain(repo, pull, head_ref, default_branch, run, memo, retry=retry)
