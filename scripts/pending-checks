@@ -15,10 +15,10 @@ payload names none, as a `shipmate plan` dispatch's does), which the auto apply 
 to be a push's, and `title`, the check's own output title, which a successful apply restores
 after a failed one retitled the check. GitHub caps `external_id` at `EXTERNAL_ID_CAP`
 characters and truncates a longer one, which no reader can decode, so a record over the cap
-refuses. That digest is computed here, over the whole
-plan.txt this job downloaded, never copied from the cell: it is what binds the
-reviewed text to the plan apply executes. The comment and the check embed capped prefixes of
-the same file, so the digest covers at least what a reviewer saw and often more.
+refuses. That digest is computed here, over the whole plan.txt this job downloaded, never
+copied from the cell: it is what binds the reviewed text to the plan apply executes.
+The comment and the check embed capped prefixes of the same file, so the digest covers at
+least what a reviewer saw and often more.
 The check name uses the stack PATH so deploy-detect (which only has the path)
 reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
 refuses over it, and deploy-detect's work queue comes up empty.

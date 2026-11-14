@@ -778,8 +778,9 @@ def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_pa
     )
 
 
-#: The largest record a plan can write: a 20-digit run id, a 6-digit pull request, 9999 cells,
-#: the longest event action an autoplan runs on, and a title with all five counts at 4 digits.
+#: A wide record: a 20-digit run id, a 6-digit pull request, 9999 cells, the longest event
+#: action an autoplan runs on, and all five counts at 4 digits. It is 225 characters, 30 under
+#: the cap.
 _WIDEST = {
     "plan_run": "9" * 20,
     "plan_sha256": "a" * 64,
