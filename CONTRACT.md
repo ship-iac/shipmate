@@ -1447,7 +1447,12 @@ owned the comment or was skipped, so a failed claim gates the run closed.
 
 Re-runs follow from the claim's recorded result and its one POST. "Re-run failed
 jobs" keeps a finished claim's result: an owned run stays owned and a taken one
-stays taken. "Re-run all jobs" posts again, reads 200 and does nothing.
+stays taken. "Re-run all jobs" posts again and reads 200, and GitHub deletes the
+earlier attempts' artifacts. For a plan run, the claim then reads each earlier
+attempt's jobs: when `facts` ran in one (any conclusion but skipped), this run
+owned the comment, so it owns it again and plans again; otherwise it lost the
+claim and does nothing. A listing that fails or is malformed fails the claim as
+above. For an apply run, "Re-run all jobs" does nothing.
 Re-running a run whose claim failed posts again; when the failed attempt wrote
 no reaction it reads 201 and the run starts, so comment the command again or
 re-run that run, not both. A re-run of an apply run applies no cell either way

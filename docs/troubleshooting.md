@@ -2623,7 +2623,9 @@ claim"):
   apply run per pull request").
 
 A run whose `claim` job summary says another run of this comment owns it did no
-work by design; the run that owns the comment answers.
+work by design; the run that owns the comment answers. "Re-run all jobs" of the
+plan run that owns the comment plans again, because GitHub deleted that run's
+plan artifacts; of a run that lost the claim it does nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
@@ -2636,7 +2638,8 @@ page with no jobs started, with GitHub's error for the workflow file.
 The pull request carries ``🔴 failed: could not claim this command for its run,
 so the command was not started. Comment it again.``. The dispatched run's `claim`
 job could not add the App's 🚀 to the command comment: GitHub answered other
-than 201 or 200, or the request failed. The run did nothing; the job log names
+than 201 or 200, or the request failed. On a "Re-run all jobs" of a plan run, the
+claim also fails when it cannot list an earlier attempt's jobs. The run did nothing; the job log names
 the answer. Comment the command again. Re-running a `shipmate plan` run
 instead can also start it, so do one or the other, not both; a re-run of an
 apply run applies no cell (`CONTRACT.md` §Comment-ops, "Reactions and the

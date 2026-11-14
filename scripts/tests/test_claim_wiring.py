@@ -34,10 +34,12 @@ def test_the_plan_claim_job_is_this_whole_job():
     skip it; a commented plan claims before `facts` reads anything. Mutations: drop the
     `comment_id` clause (the replan would fail its claim); `||` for `&&` (an autoplan would
     claim); drop the `outputs` line (every commented plan gates closed); `permissions:
-    { pull-requests: write }`; drop `environment`."""
+    { pull-requests: write }`; drop `environment`; drop `owner-job` (a full re-run of the
+    owning run would plan nothing while its plan artifacts are gone)."""
     assert workflow_jobs("plan.yml")["claim"] == _claim_job(
         {
             "verb": "plan",
+            "owner-job": "facts",
             "pr-number": "${{ github.event.inputs.pr_number }}",
             "comment-id": "${{ github.event.inputs.comment_id }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -75,10 +77,11 @@ def test_the_apply_claim_job_is_this_whole_job():
     )
 
 
-def test_the_claim_action_mints_pull_requests_write_alone_and_runs_the_script():
-    """Mutations: add `permission-actions: write` to the mint; read the slug from an input;
-    drop `COMMENT_ID`; read `GH_TOKEN` from `github.token` (the reaction would not be the
-    App's, and the trust rule's actor check reads the App's slug)."""
+def test_the_claim_action_mints_exactly_these_permissions_and_runs_the_script():
+    """`actions: read` lists a re-run plan's earlier attempts (`owner-job`). Mutations: raise
+    `permission-actions` to `write`; drop it; read the slug from an input; drop
+    `SHIPMATE_OWNER_JOB`; drop `COMMENT_ID`; read `GH_TOKEN` from `github.token` (the reaction
+    would not be the App's, and the actor check reads the App's slug)."""
     steps = action_yaml("claim")["runs"]["steps"]
     assert [s.get("name") for s in steps] == [
         "Verify the App key arrived",
@@ -87,7 +90,8 @@ def test_the_claim_action_mints_pull_requests_write_alone_and_runs_the_script():
     ]
     mint = steps[1]["with"]
     assert {k: v for k, v in mint.items() if k.startswith("permission-")} == {
-        "permission-pull-requests": "write"
+        "permission-pull-requests": "write",
+        "permission-actions": "read",
     }
     assert steps[2] == {
         "name": "Claim the command's comment",
@@ -98,6 +102,7 @@ def test_the_claim_action_mints_pull_requests_write_alone_and_runs_the_script():
             "COMMENT_ID": "${{ inputs.comment-id }}",
             "PR_NUMBER": "${{ inputs.pr-number }}",
             "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
+            "SHIPMATE_OWNER_JOB": "${{ inputs.owner-job }}",
             "SHIPMATE_REPLY_VERB": "${{ inputs.verb }}",
             "SHIPMATE_REPLY_ENV": "${{ inputs.environment }}",
         },

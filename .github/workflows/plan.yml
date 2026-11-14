@@ -33,6 +33,7 @@ jobs:
         uses: $/actions/claim
         with:
           verb: plan
+          owner-job: facts
           pr-number: ${{ github.event.inputs.pr_number }}
           comment-id: ${{ github.event.inputs.comment_id }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

@@ -3,15 +3,22 @@
 comment does its work.
 
 Runs in the `claim` job of `plan.yml` and `apply.yml`. Reads `GITHUB_REPOSITORY`,
-`GITHUB_ACTOR`, `COMMENT_ID`, `PR_NUMBER`, `SHIPMATE_APP_SLUG`, `SHIPMATE_REPLY_VERB`,
-`SHIPMATE_REPLY_ENV` and `GH_TOKEN` (an App token with `pull-requests: write`).
+`GITHUB_ACTOR`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `COMMENT_ID`, `PR_NUMBER`,
+`SHIPMATE_APP_SLUG`, `SHIPMATE_OWNER_JOB`, `SHIPMATE_REPLY_VERB`, `SHIPMATE_REPLY_ENV` and
+`GH_TOKEN` (an App token with `pull-requests: write` and `actions: read`).
 
 GitHub answers the first creation of a reaction 201 and every later one 200, naming the
 existing reaction, so exactly one run of a comment reads 201:
 
 - 201 writes the step output `state=owned`, and the run proceeds.
 - 200 writes `state=taken` and a job summary line. The run does no work and writes nothing on
-  the pull request.
+  the pull request. One exception: "re-run all jobs" deletes the earlier attempts' artifacts,
+  so a plan run that owned the comment must plan again. With `SHIPMATE_OWNER_JOB` set (`plan.yml`
+  passes `facts`, the job the claim gates) and `GITHUB_RUN_ATTEMPT` above 1, a 200 reads every
+  earlier attempt's jobs; a job named `<owner>` or `* / <owner>` that concluded other than
+  `skipped` means this run owned the comment, so it writes `state=owned`. A failed or malformed
+  read, or one past `_shipmate`'s page bound, fails as below. `apply.yml` passes no owner job:
+  its re-run is refused anyway.
 - A `COMMENT_ID` that is not a comment id, a `PR_NUMBER` that is not a pull request number, or
   an actor other than `<slug>[bot]` exits 1 before any POST and replies nothing: only the App
   dispatches a commented run, so another dispatcher is answered in the log alone.
@@ -33,6 +40,7 @@ import sys
 from _shipmate import (
     _COMMENT_ID,
     _load,
+    _pages,
     command_data,
     current_run_url,
     is_pr_number,
@@ -69,6 +77,32 @@ def react(repo, comment):
     )
     m = _STATUS.fullmatch(out.splitlines()[0] if out else "")
     return m[1] if m else None
+
+
+#: A job id as `plan.yml` names one; bound into nothing, compared with listed job names.
+_JOB_ID = re.compile(r"[a-z][a-z0-9-]*")
+
+
+def owned_earlier(repo, run_id, attempt, owner):
+    """Whether job `owner` ran (any conclusion but `skipped`) in an attempt of run `run_id` before
+    `attempt`. Raises `ValueError` when a listing fails, is malformed or runs past the page
+    bound."""
+    for n in range(1, attempt):
+        jobs = _pages(
+            f"repos/{repo}/actions/runs/{run_id}/attempts/{n}/jobs", "jobs", lambda args: run(args)
+        )
+        if jobs is None:
+            raise ValueError(f"could not list the jobs of attempt {n}")
+        for job in jobs:
+            name, conclusion = job.get("name"), job.get("conclusion")
+            if not isinstance(name, str) or not isinstance(conclusion, (str, type(None))):
+                raise ValueError(f"a job of attempt {n} is malformed")
+            if (name == owner or name.endswith(f" / {owner}")) and conclusion not in (
+                None,
+                "skipped",
+            ):
+                return True
+    return False
 
 
 def display(repo, comment):
@@ -115,11 +149,22 @@ def not_started(comment, pr, why):
 
 def claim(repo, comment):
     pr = os.environ.get("PR_NUMBER", "")
+    owner = os.environ.get("SHIPMATE_OWNER_JOB", "")
+    attempt, run_id = os.environ.get("GITHUB_RUN_ATTEMPT", ""), os.environ["GITHUB_RUN_ID"]
     refuse_unless_app(comment, pr)
+    if owner and _JOB_ID.fullmatch(owner) is None:
+        sys.exit(f"::error::claim refused: SHIPMATE_OWNER_JOB is not a job id (got: {owner!r})")
+    if not attempt.isdigit() or int(attempt) < 1 or not run_id.isdigit():
+        sys.exit(f"::error::claim refused: run {run_id!r} attempt {attempt!r} is malformed")
     try:
         status = react(repo, comment)
     except SystemExit as exc:
         not_started(comment, pr, one_line(exc.code))
+    if status == "200" and owner:
+        try:
+            status = "201" if owned_earlier(repo, run_id, int(attempt), owner) else status
+        except ValueError as exc:
+            not_started(comment, pr, str(exc))
     if status == "201":
         write_outputs(state="owned")
     elif status == "200":

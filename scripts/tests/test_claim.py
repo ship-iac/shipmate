@@ -2,6 +2,8 @@
 which runs never POST. Each outcome is compared whole: the step outputs, the summary, the POSTs
 sent and the reply posted."""
 
+import json
+
 import pytest
 from _loader import load_script
 
@@ -24,10 +26,46 @@ _REPLY = (
 )
 
 
+class _Rec:
+    """The recorder `env` returns: gh's answers in, the POSTs, reads and replies out."""
+
+    def __init__(self, out, summary):
+        self.answer, self.fail = "HTTP/2.0 201 Created\nContent-Type: x\r\n\r\n{}", None
+        self.posts, self.replies, self.reads, self.pages = [], [], [], {}
+        self._out, self._summary = out, summary
+
+    def outputs(self):
+        return self._out.read_text()
+
+    def summary(self):
+        return self._summary.read_text()
+
+    def go(self, *argv):
+        try:
+            cl.run_annotated(cl.main, argv)
+        except SystemExit as e:
+            return e.code
+        return 0
+
+    def run(self, args, secrets=(), stdin=None, *, env=None):
+        if args[2] != "--include":
+            self.reads.append(args[2])
+            page = self.pages.get(args[2], [])
+            if isinstance(page, str):
+                raise SystemExit(page)
+            return json.dumps({"jobs": page})
+        self.posts.append(args)
+        if self.fail:
+            raise SystemExit(self.fail)
+        return self.answer
+
+
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     """Run `main` against a recorded POST answer; returns the recorder. Set `answer` (gh's stdout)
-    or `fail` (the `SystemExit` text of a failed POST) before calling `go`."""
+    or `fail` (the `SystemExit` text of a failed POST) before calling `go`, and `pages`
+    ({path: jobs list, or a `SystemExit` text}) for the earlier attempts' job listings, whose
+    paths are recorded in `reads`."""
     out, summary = tmp_path / "out", tmp_path / "summary"
     out.write_text("")
     summary.write_text("")
@@ -35,6 +73,8 @@ def env(monkeypatch, tmp_path):
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_RUN_ID": "50",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHIPMATE_OWNER_JOB": "",
         "GITHUB_OUTPUT": str(out),
         "GITHUB_STEP_SUMMARY": str(summary),
         "GITHUB_ACTOR": "shipmate-iac[bot]",
@@ -46,32 +86,8 @@ def env(monkeypatch, tmp_path):
     }.items():
         monkeypatch.setenv(k, v)
 
-    class Rec:
-        answer, fail = "HTTP/2.0 201 Created\nContent-Type: x\r\n\r\n{}", None
-        posts, replies = [], []
-
-        def outputs(self):
-            return out.read_text()
-
-        def summary(self):
-            return summary.read_text()
-
-        def go(self, *argv):
-            try:
-                cl.run_annotated(cl.main, argv)
-            except SystemExit as e:
-                return e.code
-            return 0
-
-    rec = Rec()
-
-    def run(args, secrets=(), stdin=None, *, env=None):
-        rec.posts.append(args)
-        if rec.fail:
-            raise SystemExit(rec.fail)
-        return rec.answer
-
-    monkeypatch.setattr(cl, "run", run)
+    rec = _Rec(out, summary)
+    monkeypatch.setattr(cl, "run", rec.run)
     monkeypatch.setattr(cl.rc, "post", lambda pr, text: rec.replies.append((pr, text)))
     return rec
 
@@ -190,4 +206,121 @@ def test_display_only_warns_when_the_post_fails(env, capsys):
 def test_usage(env):
     """Mutation: accept any argument as display."""
     assert env.go("--other") == 1
+    assert env.posts == []
+
+
+#: A job listing's page path, as `_shipmate._pages` asks for it.
+def _page(attempt, page=1):
+    return f"repos/o/r/actions/runs/50/attempts/{attempt}/jobs?per_page=100&page={page}"
+
+
+_TAKEN = "HTTP/2.0 200 OK\n\r\n{}"
+
+
+@pytest.fixture
+def rerun(env, monkeypatch):
+    """A plan claim (`owner-job: facts`) on attempt 2 whose POST reads 200."""
+    monkeypatch.setenv("SHIPMATE_OWNER_JOB", "facts")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    env.answer = _TAKEN
+    return env
+
+
+@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled"])
+def test_a_full_rerun_of_the_owner_owns_again(rerun, conclusion):
+    """ "Re-run all jobs" deletes the earlier attempts' artifacts, so the run whose `facts` ran
+    must plan again; a `facts` that failed or was cancelled still ran under the claim.
+    Mutations: drop the earlier-attempt read; count only `success`; match the name exactly
+    (the called job is `plan / facts`)."""
+    rerun.pages = {_page(1): [{"name": "plan / facts", "conclusion": conclusion}]}
+    assert rerun.go() == 0
+    assert rerun.reads == [_page(1)]
+    assert rerun.outputs() == "state=owned\n"
+    assert rerun.replies == []
+
+
+def test_a_full_rerun_of_a_loser_stays_taken(rerun):
+    """Its `facts` was skipped: another run owns the comment. Mutation: treat `skipped` as ran."""
+    rerun.pages = {
+        _page(1): [
+            {"name": "plan / claim", "conclusion": "success"},
+            {"name": "plan / facts", "conclusion": "skipped"},
+            {"name": "plan / outcome", "conclusion": None},
+        ]
+    }
+    assert rerun.go() == 0
+    assert rerun.outputs() == "state=taken\n"
+    assert rerun.replies == []
+
+
+def test_a_job_merely_ending_in_the_owner_name_is_not_it(rerun):
+    """Mutation: match with `endswith(owner)` instead of `endswith(f" / {owner}")`."""
+    rerun.pages = {_page(1): [{"name": "plan / artifacts", "conclusion": "success"}]}
+    assert rerun.go() == 0
+    assert rerun.outputs() == "state=taken\n"
+
+
+def test_every_earlier_attempt_and_every_page_is_read(rerun, monkeypatch):
+    """Attempt 3 reads attempts 1 and 2; a full page asks for the next. Mutations: read only
+    attempt 1 (`range(1, 2)`); read only the first page."""
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "3")
+    filler = [{"name": f"plan / x{i}", "conclusion": "skipped"} for i in range(100)]
+    rerun.pages = {
+        _page(1): [{"name": "plan / facts", "conclusion": "skipped"}],
+        _page(2): filler,
+        _page(2, 2): [{"name": "plan / facts", "conclusion": "success"}],
+    }
+    assert rerun.go() == 0
+    assert rerun.reads == [_page(1), _page(2), _page(2, 2)]
+    assert rerun.outputs() == "state=owned\n"
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [
+        {_page(1): "command failed (1): gh api\nHTTP 404"},
+        {_page(1): [{"name": "plan / facts"}, {"conclusion": "success"}]},
+        {_page(1): [{"name": "plan / facts", "conclusion": 1}]},
+        {_page(1, p): [{"name": "x", "conclusion": None}] * 100 for p in range(1, 11)},
+    ],
+    ids=["read-failed", "no-name", "bad-conclusion", "past-the-page-bound"],
+)
+def test_an_unreadable_earlier_attempt_fails_and_replies(rerun, capsys, pages):
+    """Fail closed: a listing that cannot answer cannot say the run owned the comment.
+    Mutations: read a failed listing as taken; skip malformed jobs instead of failing; drop
+    the `None` check on `jobs` (the page bound)."""
+    rerun.pages = pages
+    assert rerun.go() == 1
+    assert rerun.outputs() == ""
+    assert rerun.replies == [("7", _REPLY)]
+
+
+def test_attempt_one_reads_no_earlier_attempt(env, monkeypatch):
+    """Only attempts before this one are read. Mutation: `range(1, attempt + 1)`."""
+    monkeypatch.setenv("SHIPMATE_OWNER_JOB", "facts")
+    env.answer = _TAKEN
+    assert env.go() == 0
+    assert env.reads == []
+    assert env.outputs() == "state=taken\n"
+
+
+def test_an_apply_claim_never_reads_earlier_attempts(env, monkeypatch):
+    """`apply.yml` passes no owner job; its re-run is refused anyway. Mutation: drop `owner and`
+    from the read condition (an empty owner then never matches, but the read happens)."""
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    env.answer = _TAKEN
+    env.pages = {_page(1): [{"name": "apply / queue", "conclusion": "success"}]}
+    assert env.go() == 0
+    assert env.reads == []
+    assert env.outputs() == "state=taken\n"
+
+
+@pytest.mark.parametrize(
+    ("var", "value"),
+    [("GITHUB_RUN_ATTEMPT", ""), ("GITHUB_RUN_ATTEMPT", "0"), ("SHIPMATE_OWNER_JOB", "Facts x")],
+)
+def test_a_malformed_attempt_or_owner_job_fails_without_a_post(env, monkeypatch, var, value):
+    """Mutations: drop the attempt check; drop the `_JOB_ID` check."""
+    monkeypatch.setenv(var, value)
+    assert env.go() == 1
     assert env.posts == []
