@@ -459,8 +459,8 @@ _PAGE = 100
 _MAX_PAGES = 10
 
 
-def _pages(path, key, run):
-    """Every item of `key` across the pages of listing `path`, or None when a page fails, is
+def _pages(path, field, run):
+    """Every item of `field` across the pages of listing `path`, or None when a page fails, is
     malformed, or the listing runs past `_MAX_PAGES` pages; the cause prints as one warning."""
     items = []
     for page in range(1, _MAX_PAGES + 1):
@@ -471,7 +471,7 @@ def _pages(path, key, run):
             cause = exc.code if isinstance(exc, SystemExit) else repr(exc)
             sys.stderr.write(f"::warning::{command_data(one_line(cause))}\n")
             return None
-        got = body.get(key) if isinstance(body, dict) else None
+        got = body.get(field) if isinstance(body, dict) else None
         if not isinstance(got, list) or not all(isinstance(i, dict) for i in got):
             sys.stderr.write(f"::warning::page {page} of {command_data(path)} is malformed\n")
             return None
