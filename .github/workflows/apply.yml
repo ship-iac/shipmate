@@ -105,6 +105,6 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           review-result: ${{ needs.run.outputs.review_result }}
           summary-result: ${{ needs.run.outputs.summary_result }}
-          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' || (needs.run.result != 'success' && needs.run.outputs.review_result == '') }}
+          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' || ((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && needs.run.outputs.review_result == '') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

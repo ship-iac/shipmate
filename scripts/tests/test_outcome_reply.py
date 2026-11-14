@@ -258,8 +258,9 @@ def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel, including one while the call waited in
     `apply-run.yml`'s queue. Every fact about the inner run arrives through `run`'s outputs, which
     read empty when they did not arrive; `guard` refuses an empty `pr_number`. `run-cancelled`
-    also reads a call that did not succeed and whose `review_result` is empty as a cancel: the
-    call was cancelled while queued, or skipped by a run cancel.
+    also reads a call that ended `cancelled` or `skipped` with an empty `review_result` as a
+    cancel: it was cancelled while queued, or skipped by a run cancel. A call that failed before
+    `review` reported keeps the ended text.
 
     A failed `review` replies unless it found no open pull request, and never in an `auto` run.
 
@@ -267,10 +268,11 @@ def test_the_apply_outcome_job_is_wired_exactly():
     `needs.run.outputs.unbound != 'true' &&`; flip its `!=` to `==`; drop `&& !inputs.auto`;
     drop `run` from `needs`; `permissions: { pull-requests: write }`; pass
     `needs.run.outputs.review_result` as `summary-result`; replace `always()` with
-    `!cancelled()`; drop `needs.run.result != 'success' &&` from `run-cancelled` (a queued
-    cancel and a success read alike); drop its `review_result == ''` clause (a failed review
-    reads as cancelled); drop its `run_cancelled == 'true' ||` clause (a mid-run cancel reads
-    as ended)."""
+    `!cancelled()`; widen the call-result clause to `needs.run.result != 'success'` (a call that
+    failed before `review` reported reads as cancelled); drop its `needs.run.result ==
+    'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a failed
+    review reads as cancelled); drop its `run_cancelled == 'true' ||` clause (a mid-run cancel
+    reads as ended). The constant pins each: the expression is never evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
         "needs": ["guard", "run"],
         "if": (
@@ -293,7 +295,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
                     "summary-result": "${{ needs.run.outputs.summary_result }}",
                     "run-cancelled": (
                         "${{ needs.run.outputs.run_cancelled == 'true' || "
-                        "(needs.run.result != 'success' && "
+                        "((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && "
                         "needs.run.outputs.review_result == '') }}"
                     ),
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",

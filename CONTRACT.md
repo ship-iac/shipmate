@@ -3813,10 +3813,10 @@ refused text, and the reply still needs its own key check, mint and post. The re
 
 - refused when `review` failed;
 - otherwise cancelled when `run-cancelled` is `true`: a job of
-  `apply-run.yml` other than `summary` ended `cancelled`, or the `run` job did
-  not succeed and `review_result` is empty (the call ended before its review
-  reported: cancelled while it waited in the queue, skipped by a run cancel,
-  or failed before `review` ran);
+  `apply-run.yml` other than `summary` ended `cancelled`, or the `run` job ended
+  `cancelled` or `skipped` and `review_result` is empty (the call was cancelled
+  while it waited in the queue, or skipped by a run cancel; a call that failed
+  before `review` reported gets the ended text);
 - otherwise summary cancelled when `summary` ended `cancelled` and no other job
   did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.
