@@ -1,4 +1,4 @@
-"""Unit tests for scripts/apply-complete."""
+"""Unit tests for scripts/apply-complete and its action."""
 
 import json
 import os
@@ -19,23 +19,64 @@ from _loader import (
 
 apply_complete = load_script("apply-complete")
 
-
-SNAP = {
-    "apply / stacks/dns / dev-eu": [1],
-    "apply / stacks/app / dev-eu": [2, 3],
+BY_WAVE = {
+    "wave0": {"apply / stacks/dns / dev-eu": [1]},
+    "wave1": {"apply / stacks/app / dev-eu": [2, 3]},
+    "wave2": {"apply / stacks/web / dev-eu": [4]},
 }
+#: Every wave's release succeeded.
+RELEASED = {"wave0": "success", "wave1": "success", "wave2": "success"}
+_IDS = iter(range(100, 10_000))
 
 
-def job(name, conclusion):
-    return {"name": name, "conclusion": conclusion, "status": "completed"}
+def job(name, conclusion, jid=None):
+    jid = next(_IDS) if jid is None else jid
+    return {
+        "id": jid,
+        "name": name,
+        "conclusion": conclusion,
+        "status": "completed",
+        "html_url": f"https://github.com/acme/demo/actions/runs/7/job/{jid}",
+    }
 
 
-def test_completes_only_cells_whose_wave_job_succeeded():
+def row(check, ids, j=None):
+    return {
+        "check": check,
+        "ids": ids,
+        "conclusion": None if j is None else j["conclusion"],
+        "job_id": None if j is None else j["id"],
+        "url": None if j is None else j["html_url"],
+    }
+
+
+def _by_check(rows):
+    return {r["check"]: r for r in rows}
+
+
+def _classify(jobs, by_wave=BY_WAVE, releases=RELEASED):
+    return apply_complete.classify(by_wave, releases, jobs)
+
+
+DNS = "apply / stacks/dns / dev-eu"
+APP = "apply / stacks/app / dev-eu"
+WEB = "apply / stacks/web / dev-eu"
+
+
+def test_each_cell_takes_its_matched_jobs_row():
+    """Mutation: drop the job id or URL from a row -> the rows differ."""
     jobs = [
         job("L0 / dev-eu / stacks/dns", "success"),
         job("L0 / dev-eu / stacks/app", "failure"),
+        job("L0 / dev-eu / stacks/web", "cancelled"),
     ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], [], ["stacks/app / dev-eu"])
+    rows, unresolved, floor = _classify(jobs)
+    assert (unresolved, floor) == ([], False)
+    assert _by_check(rows) == {
+        DNS: row(DNS, [1], jobs[0]),
+        APP: row(APP, [2, 3], jobs[1]),
+        WEB: row(WEB, [4], jobs[2]),
+    }
 
 
 @pytest.mark.parametrize(
@@ -43,52 +84,44 @@ def test_completes_only_cells_whose_wave_job_succeeded():
 )
 def test_matches_the_nested_reusable_workflow_job_name_suffix(prefix):
     """A called workflow's jobs display as `<caller job> / <called job> / <job>`, and the cell
-    job is named `<env> / <stack>`; the same stack in another env completes nothing.
+    job is named `<env> / <stack>`; the same stack in another env matches nothing.
     Mutation: `apply-gate.cell_job_name` builds `<stack> / <env>`."""
-    jobs = [job(prefix, "success")]
-    assert apply_complete.to_complete(SNAP, jobs) == ([2, 3], [], ["stacks/dns / dev-eu"], [])
-    jobs = [job(prefix.replace("dev-eu", "dev-us"), "success")]
-    assert apply_complete.to_complete(SNAP, jobs)[0] == []
+    j = job(prefix, "success")
+    assert _by_check(_classify([j])[0])[APP] == row(APP, [2, 3], j)
+    other = job(prefix.replace("dev-eu", "dev-us"), "success")
+    assert _by_check(_classify([other, j])[0])[APP] == row(APP, [2, 3], j)
+    assert _classify([other])[2] is True
 
 
 @pytest.mark.parametrize(
-    ("snap", "name"),
+    ("by_wave", "name"),
     [
-        ({"apply / detect / apply": [5]}, "apply / detect"),
-        (SNAP, "apply / verify / dev-eu / stacks/app"),
+        ({"wave0": {"apply / detect / apply": [5]}}, "apply / detect"),
+        (BY_WAVE, "apply / verify / dev-eu / stacks/app"),
     ],
     ids=["orchestration-job", "non-wave-cell-job"],
 )
-def test_only_a_wave_job_completes_a_cell(snap, name):
+def test_only_a_wave_job_completes_a_cell(by_wave, name):
     """A job outside an `L<n>` env-level can end in ` / <env> / <stack>`: the orchestration
     job `apply / detect` does for env `apply` and root stack `detect`, and it succeeds when
     that cell's wave failed. Mutation: `apply-gate.is_cell_job` drops the `L<n>` segment."""
-    assert apply_complete.to_complete(snap, [job(name, "success")])[0] == []
-
-
-def test_a_cancelled_or_missing_job_leaves_the_check_pending():
-    jobs = [
-        job("L0 / dev-eu / stacks/dns", "cancelled"),
-    ]
-    assert apply_complete.to_complete(SNAP, jobs) == (
-        [],
-        [],
-        ["stacks/app / dev-eu"],
-        ["stacks/dns / dev-eu"],
-    )
+    rows, _, floor = _classify([job(name, "success")], by_wave)
+    assert (rows, floor) == ([], True)
 
 
 def test_a_rerun_success_after_a_failure_completes_the_cell():
-    jobs = [
-        job("L0 / dev-eu / stacks/dns", "failure"),
-        job("L0 / dev-eu / stacks/dns", "success"),
-    ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
+    """Mutation: take the last matched job whatever its conclusion -> the failure row."""
+    ok = job("L0 / dev-eu / stacks/dns", "success")
+    rows, _, _ = _classify([ok, job("L0 / dev-eu / stacks/dns", "failure")])
+    assert _by_check(rows)[DNS] == row(DNS, [1], ok)
 
 
 def test_never_completes_a_cell_that_was_not_snapshotted():
-    jobs = [job("L0 / dev-eu / stacks/rogue", "success")]
-    assert apply_complete.to_complete(SNAP, jobs)[0] == []
+    rows, _, _ = _classify(
+        [job("L0 / dev-eu / stacks/rogue", "success"), job("L0 / dev-eu / stacks/dns", "failure")]
+    )
+    assert all(r["conclusion"] != "success" for r in rows)
+    assert sorted(_by_check(rows)) == [APP, DNS, WEB]
 
 
 def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
@@ -97,8 +130,8 @@ def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
     count. Same idiom as scripts/apply-comment's _job_url, pinned in
     test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
     Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
-    jobs = [job("L0 / dev-eu / stacks/dns", "success")]
-    assert apply_complete.to_complete({"apply / stacks/dns / eu": [1]}, jobs)[0] == []
+    by_wave = {"wave0": {"apply / stacks/dns / eu": [1]}}
+    assert _classify([job("L0 / dev-eu / stacks/dns", "success")], by_wave)[:2] == ([], [])
 
 
 def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
@@ -106,137 +139,301 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     substring with each without naming them: a different stack ("stacks/my-app") and a
     different env ("prod-dev-eu"). None of it may complete anything.
     Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
-    snap = {
-        "apply / stacks/app / dev-eu": [2, 3],
-        "apply / app / dev-eu": [99],
-    }
+    by_wave = {"wave0": {"apply / stacks/app / dev-eu": [2, 3], "apply / app / dev-eu": [99]}}
     jobs = [
         job("L0 / dev-eu / stacks/my-app", "success"),
         job("L0 / prod-dev-eu / stacks/app", "success"),
     ]
-    assert apply_complete.to_complete(snap, jobs)[0] == []
+    assert _classify(jobs, by_wave)[:2] == ([], [])
 
 
-def test_a_job_present_without_a_conclusion_is_unresolved_not_dropped():
-    # The listing lagging a finished job is the whole reason for the retry loop: a null
-    # conclusion must be reported, never read as "did not run".
-    jobs = [job("L0 / dev-eu / stacks/dns", None)]
-    ids, unresolved, _, _ = apply_complete.to_complete(SNAP, jobs)
-    assert (ids, unresolved) == ([], ["stacks/dns / dev-eu"])
+def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
+    """The listing lagging a finished job is the whole reason for the retry loop: a null
+    conclusion must be reported, never read as "did not run". Mutation: give it a `Not run`
+    row -> DNS has a row."""
+    rows, unresolved, floor = _classify(
+        [
+            job("L0 / dev-eu / stacks/dns", None),
+            job("L0 / dev-eu / stacks/app", "success"),
+            job("L0 / dev-eu / stacks/web", "success"),
+        ]
+    )
+    assert (sorted(_by_check(rows)), unresolved, floor) == (
+        [APP, WEB],
+        ["stacks/dns / dev-eu"],
+        False,
+    )
 
 
-def test_a_cell_with_no_matching_job_at_all_is_unmatched_not_unresolved():
-    # Skip-propagation: an earlier wave failing skips wave1..wave7, and GitHub never expands a
-    # skipped job's matrix, so those cells get no job row at all. Retrying cannot help, so they
-    # are named rather than retried. The skipped wave lists one row under its unexpanded name.
-    # Mutation: `to_complete` also counts every skipped job as the cell's.
+def test_a_cell_with_no_matching_job_gets_a_not_run_row():
+    """Skip-propagation: GitHub never expands a skipped job's matrix. Mutation: count every
+    skipped job as the cell's -> APP takes the skipped row."""
+    ok = job("L0 / dev-eu / stacks/dns", "success")
+    rows, _, floor = _classify(
+        [ok, job("deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped")]
+    )
+    assert floor is False
+    assert _by_check(rows)[APP] == row(APP, [2, 3])
+
+
+def test_a_stopped_release_marks_its_wave_and_every_later_one_not_run():
+    """wave1's release failed, so wave1 and wave2 never ran, whatever the listing holds.
+    Mutations: stop only the release's own wave -> WEB takes its listed success row; ignore a
+    `cancelled` release -> the same."""
     jobs = [
         job("L0 / dev-eu / stacks/dns", "success"),
-        job("deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped"),
+        job("L0 / dev-eu / stacks/web", "success"),
     ]
-    assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
+    for result in ("failure", "cancelled"):
+        releases = {**RELEASED, "wave1": result}
+        rows, _, floor = _classify(jobs, releases=releases)
+        assert floor is False
+        assert _by_check(rows) == {
+            DNS: row(DNS, [1], jobs[0]),
+            APP: row(APP, [2, 3]),
+            WEB: row(WEB, [4]),
+        }
 
 
-def test_skipped_and_failure_are_terminal_and_neither_completes_nor_blocks():
-    jobs = [
-        job("L0 / dev-eu / stacks/dns", "skipped"),
-        job("L0 / dev-eu / stacks/app", "failure"),
-    ]
-    ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(SNAP, jobs)
-    assert (ids, unresolved, unmatched) == ([], [], [])
-    assert unsuccessful == ["stacks/app / dev-eu", "stacks/dns / dev-eu"]
-
-
-LIVE_SNAP = {
-    f"apply / tenant-{n} / dev-{r}": [n * 10 + i]
-    for i, r in enumerate(("eu", "us"))
-    for n, _ in enumerate("abcd", 1)
-}
-
-
-def _live_jobs(stale):
-    return [
-        job(
-            f"L0 / dev-{r} / tenant-{n}",
-            None if f"apply / tenant-{n} / dev-{r}" == stale else "success",
-        )
-        for r in ("eu", "us")
-        for n, _ in enumerate("abcd", 1)
-    ]
-
-
-def test_the_live_shape_reports_exactly_the_unpropagated_cell():
-    ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(
-        LIVE_SNAP, _live_jobs("apply / tenant-2 / dev-us")
-    )
-    assert (unmatched, unsuccessful) == ([], [])
-    assert unresolved == ["tenant-2 / dev-us"]
-    assert ids == sorted(
-        i for k, v in LIVE_SNAP.items() if k != "apply / tenant-2 / dev-us" for i in v
+def test_stopped_cells_need_no_listing_and_never_trip_the_floor():
+    """A failed first release leaves no cell a job. Mutation: count stopped cells in the floor
+    -> it trips and the run retries for two minutes over nothing."""
+    rows, unresolved, floor = _classify([], releases={**RELEASED, "wave0": "failure"})
+    assert (rows, unresolved, floor) == (
+        [row(DNS, [1]), row(APP, [2, 3]), row(WEB, [4])],
+        [],
+        False,
     )
 
 
-def _run(snapshot, jobs):
+def test_a_skipped_release_stops_nothing():
+    """An empty wave skips its release. Mutation: add `skipped` to `STOPPED` -> wave2 reads not
+    run."""
+    ok = job("L0 / dev-eu / stacks/web", "success")
+    rows, _, _ = _classify([ok], releases={**RELEASED, "wave1": "skipped"})
+    assert _by_check(rows)[WEB] == row(WEB, [4], ok)
+
+
+def test_the_floor_keeps_only_the_stopped_rows():
+    """No cell outside a stopped wave matched: the listing is lost or truncated. Mutation: keep
+    the unmatched rows on the floor -> DNS gets a `Not run` row from a listing nobody trusts."""
+    rows, _, floor = _classify(
+        [job("L0 / dev-eu / stacks/rogue", "success")], releases={**RELEASED, "wave1": "failure"}
+    )
+    assert floor is True
+    assert rows == [row(APP, [2, 3]), row(WEB, [4])]
+
+
+def _write(conclusion, *, url="https://u/job/9", job_id=9, ids=(5,), repo="acme/demo"):
+    r = {"check": APP, "ids": list(ids), "conclusion": conclusion, "job_id": job_id, "url": url}
+    return apply_complete.writes(r, repo)
+
+
+@pytest.fixture
+def annotations(monkeypatch):
+    """`gh_json` for the annotation read: returns `notes["value"]`, raising it when it is an
+    exception; each path is appended to `notes["calls"]`."""
+    notes = {"value": [], "calls": []}
+
+    def gh_json(path, run=None, *, retry=True):
+        notes["calls"].append((path, retry))
+        if isinstance(notes["value"], BaseException):
+            raise notes["value"]
+        return notes["value"]
+
+    monkeypatch.setattr(apply_complete, "gh_json", gh_json)
+    return notes
+
+
+def test_success_completes_with_the_job_link_and_the_record_title():
+    """Mutations: drop `details_url`; send a title string -> `title` is not None."""
+    assert _write("success", ids=(5, 6)) == [
+        {
+            "id": 5,
+            "body": {
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": "https://u/job/9",
+            },
+            "title": None,
+        },
+        {
+            "id": 6,
+            "body": {
+                "status": "completed",
+                "conclusion": "success",
+                "details_url": "https://u/job/9",
+            },
+            "title": None,
+        },
+    ]
+
+
+def test_failure_returns_to_queued_with_the_error_and_the_job_link(annotations):
+    """Mutations: drop `details_url` from the failure body; read with retries -> `retry` True."""
+    annotations["value"] = [
+        {"annotation_level": "warning", "message": "deprecated"},
+        {"annotation_level": "failure", "message": "Error: boom\nsecond line"},
+    ]
+    assert _write("failure") == [
+        {
+            "id": 5,
+            "body": {"status": "queued", "details_url": "https://u/job/9"},
+            "title": "Failed: Error: boom",
+        }
+    ]
+    assert annotations["calls"] == [
+        ("repos/acme/demo/check-runs/9/annotations?per_page=100", False)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "title"),
+    [
+        ("cancelled", "Cancelled"),
+        ("skipped", "Not run"),
+        (None, "Not run"),
+        ("timed_out", "Not applied (timed_out)"),
+        ("action_required", "Not applied (action_required)"),
+        ("neutral", "Not applied (neutral)"),
+        ("stale", "Not applied (stale)"),
+        ("something-new", "Not applied (something-new)"),
+    ],
+)
+def test_every_other_outcome_returns_to_queued_with_its_title(conclusion, title):
+    """Never `success` and no job link. Mutations: map `cancelled` to `Not run`; map an unknown
+    conclusion to success; map `timed_out` to `Not run`; add the job link to every write."""
+    assert _write(conclusion) == [{"id": 5, "body": {"status": "queued"}, "title": title}]
+
+
+@pytest.mark.parametrize(
+    ("message", "title"),
+    [
+        ("Error: one\ntwo", "Failed: Error: one"),
+        ("a\x1b[31mred\x00\x07b", "Failed: a[31mredb"),
+        ("x" * 121, "Failed: " + "x" * 120),
+        ("x" * 120, "Failed: " + "x" * 120),
+        ("\n", "Failed"),
+    ],
+    ids=["newline", "control", "cap-121", "cap-120", "blank"],
+)
+def test_the_error_line_is_sanitised(annotations, message, title):
+    """Mutations: keep control characters; cap at 121; take the whole message."""
+    annotations["value"] = [{"annotation_level": "failure", "message": message}]
+    assert apply_complete.error_line(9, "acme/demo") == title
+
+
+def test_no_failure_annotation_titles_failed(annotations):
+    """Mutation: take the first annotation of any level -> `Failed: deprecated`."""
+    annotations["value"] = [{"annotation_level": "warning", "message": "deprecated"}]
+    assert apply_complete.error_line(9, "acme/demo") == "Failed"
+
+
+def test_a_failed_annotation_read_titles_failed(annotations, capsys):
+    """The title only names the error, so the read degrades. Mutation: let the read's exit
+    propagate -> SystemExit."""
+    annotations["value"] = SystemExit("::error::command failed (1): gh api x\nHTTP 403")
+    assert apply_complete.error_line(9, "acme/demo") == "Failed"
+    assert capsys.readouterr().err == (
+        "::warning::could not read the annotations of job 9: "
+        "command failed (1): gh api x%0AHTTP 403\n"
+    )
+
+
+def test_a_job_id_that_is_not_an_integer_reads_nothing(annotations):
+    """Mutation: drop the `isinstance` check -> a read with `None` in the path."""
+    assert apply_complete.error_line(None, "acme/demo") == "Failed"
+    assert annotations["calls"] == []
+
+
+def test_merge_keeps_a_success_any_attempt_saw_and_otherwise_the_last_attempt():
+    """Replicas differ: a later listing can lose a success an earlier one saw. Mutations: the
+    last attempt alone -> DNS reads `Not run`; every attempt, last row wins -> the same; take
+    WEB's failure from the first attempt -> WEB has a row."""
+    ok = job("L0 / dev-eu / stacks/dns", "success")
+    failed = job("L0 / dev-eu / stacks/app", "failure")
+    first = [row(DNS, [1], ok), row(APP, [2, 3], failed), row(WEB, [4], failed)]
+    last = [row(DNS, [1]), row(APP, [2, 3])]
+    assert apply_complete.merge(first + last, last) == [row(APP, [2, 3]), row(DNS, [1], ok)]
+
+
+def _run(by_wave, releases, jobs):
     return subprocess.run(
         [sys.executable, str(SCRIPTS / "apply-complete")],
         input="\n".join(json.dumps(j) for j in jobs),
-        env={**os.environ, "SHIPMATE_SNAPSHOT_JSON": json.dumps(snapshot)},
+        env={
+            **os.environ,
+            "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
+            "SHIPMATE_RELEASES_JSON": json.dumps(releases),
+        },
         capture_output=True,
         text=True,
     )
 
 
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
-    done = _run(LIVE_SNAP, _live_jobs("apply / tenant-2 / dev-us"))
+    done = _run(BY_WAVE, RELEASED, [job("L0 / dev-eu / stacks/web", None)])
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
-    assert apply_complete.RETRY_PREFIX in done.stderr
-    assert "tenant-2 / dev-us" in done.stderr
-
-
-def test_main_prints_the_ids_and_exits_zero_when_every_cell_resolved():
-    done = _run(
-        SNAP,
-        [job("L0 / dev-eu / stacks/dns", "success"), job("L0 / dev-eu / stacks/app", "success")],
+    assert done.stderr == (
+        apply_complete.RETRY_PREFIX
+        + "the jobs listing reported no conclusion for these cells: stacks/web / dev-eu\n"
     )
-    assert done.returncode == 0
-    assert done.stdout.split() == ["1", "2", "3"]
 
 
-def test_main_names_the_unmatched_cells_instead_of_dropping_them_silently():
-    done = _run(SNAP, [job("L0 / dev-eu / stacks/dns", "success")])
-    assert done.returncode == 0
-    assert done.stdout.split() == ["1"]
-    assert "::warning::" in done.stderr
-    assert "stacks/app / dev-eu" in done.stderr
+def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():
+    jobs = [
+        job("L0 / dev-eu / stacks/dns", "success"),
+        job("L0 / dev-eu / stacks/app", "failure"),
+    ]
+    done = _run(BY_WAVE, RELEASED, jobs)
+    assert (done.returncode, done.stderr) == (0, "")
+    assert [json.loads(line) for line in done.stdout.splitlines()] == [
+        row(DNS, [1], jobs[0]),
+        row(APP, [2, 3], jobs[1]),
+        row(WEB, [4]),
+    ]
 
 
-def test_main_names_the_cells_whose_apply_job_did_not_succeed():
-    # A failed, cancelled or skipped cell legitimately stays pending and no retry changes
-    # that, but exiting 0 while saying nothing about it is the silent drop this step exists to
-    # eliminate.
-    done = _run(
-        SNAP,
-        [
-            job("L0 / dev-eu / stacks/dns", "success"),
-            job("L0 / dev-eu / stacks/app", "failure"),
-        ],
-    )
-    assert done.returncode == 0
-    assert done.stdout.split() == ["1"]
-    assert "::warning::" in done.stderr
-    assert "stacks/app / dev-eu" in done.stderr
-
-
-def test_the_zero_match_floor_is_retryable_not_an_immediate_hard_failure():
-    """A run always lists its own wave jobs, so zero matches is never a real run state -- it is
-    a lost, truncated or lagging listing. Completing nothing off it strands every check, so it
-    must never exit 0, and the code it exits is the retryable one because the loop exists to
-    outlast exactly this lag."""
-    done = _run(SNAP, [job("L0 / dev-eu / stacks/rogue", "success")])
+def test_the_zero_match_floor_is_retryable_and_prints_no_row():
+    """A run always lists its own wave jobs, so zero matches is never a real run state. Mutation:
+    exit 0 on the floor -> returncode 0."""
+    done = _run(BY_WAVE, RELEASED, [job("L0 / dev-eu / stacks/rogue", "success")])
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
-    assert apply_complete.RETRY_PREFIX in done.stderr
-    assert "refusing to complete nothing" in done.stderr
-    assert done.stdout.strip() == ""
+    assert done.stderr.startswith(apply_complete.RETRY_PREFIX + "no cell matched")
+    assert done.stdout == ""
+
+
+def test_plan_mode_writes_the_merged_rows(tmp_path):
+    """The last attempt's fetch failed, so it decided nothing; only the earlier success is
+    written. Mutation: swap the two file arguments -> WEB's earlier `Cancelled` is written."""
+    ok = job("L0 / dev-eu / stacks/dns", "success", jid=11)
+    stopped = job("L0 / dev-eu / stacks/web", "cancelled", jid=12)
+    every = tmp_path / "all.jsonl"
+    last = tmp_path / "last.jsonl"
+    every.write_text(jsonl(row(DNS, [1], ok), row(WEB, [4], stopped)), encoding="utf-8")
+    last.write_text("", encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, str(SCRIPTS / "apply-complete"), "plan", str(every), str(last)],
+        env={**os.environ, "GITHUB_REPOSITORY": "acme/demo"},
+        capture_output=True,
+        text=True,
+    )
+    assert (done.returncode, done.stderr) == (0, "")
+    assert [json.loads(line) for line in done.stdout.splitlines()] == [
+        {
+            "id": 1,
+            "body": {"status": "completed", "conclusion": "success", "details_url": ok["html_url"]},
+            "title": None,
+        },
+    ]
+
+
+@pytest.mark.parametrize("argv", [["plan"], ["ids", "a", "b"], ["plan", "a", "b", "c"]])
+def test_a_wrong_argument_list_refuses(argv):
+    """Mutation: drop the length check -> `plan` with no files raises IndexError."""
+    with pytest.raises(SystemExit) as exc:
+        apply_complete.main(argv)
+    assert str(exc.value) == "::error::usage: apply-complete [plan <all rows> <last rows>]"
 
 
 def test_the_app_token_is_minted_after_the_listing_and_selection_step():
@@ -250,11 +447,11 @@ def test_the_app_token_is_minted_after_the_listing_and_selection_step():
     assert mint > listing
 
 
-def test_the_stranded_failure_is_reported_after_the_completion_patches():
-    """The point of deferring it: failing at selection time discards the completions this run
-    did earn. Mutation: move the fail-over before `Complete the apply checks`."""
+def test_the_stranded_failure_is_reported_after_the_writes():
+    """The point of deferring it: failing at selection time discards the writes this run did
+    decide. Mutation: move the fail-over before `Write the apply checks`."""
     steps = action_steps("apply-complete")
-    patch = next(i for i, s in enumerate(steps) if s.get("name") == "Complete the apply checks")
+    patch = next(i for i, s in enumerate(steps) if s.get("name") == "Write the apply checks")
     fail = next(i for i, s in enumerate(steps) if s.get("name", "").startswith("Fail over"))
     assert fail > patch
 
@@ -321,15 +518,16 @@ sleep() { echo "$1" >> "$SLEEPS"; }
 python3() { "$PYEXE" "$@"; }
 """
 
-HARNESS_SNAP = {
-    "apply / dns / dev-eu": [11],
-    "apply / app / dev-eu": [22],
-    "apply / web / dev-eu": [33],
+HARNESS_BY_WAVE = {
+    "wave0": {"apply / dns / dev-eu": [11], "apply / app / dev-eu": [22]},
+    "wave1": {"apply / web / dev-eu": [33]},
 }
+HARNESS_RELEASES = {"wave0": "success", "wave1": "success"}
 
 
-def _select(tmp_path, listings, snapshot=None):
-    """Execute the selection step with `listings[n]` served on attempt n.
+def _select(tmp_path, listings, releases=None):
+    """Execute the selection step with `listings[n]` served on attempt n; return the process,
+    the `{id: entry}` write plan, the attempt count and the env.
 
     A listing is a jsonl string, ``""`` for an empty one, or ``None`` for a
     fetch that writes one row and then fails. The last entry is served for
@@ -353,7 +551,8 @@ def _select(tmp_path, listings, snapshot=None):
         "GITHUB_RUN_ID": "999",
         "GITHUB_ACTION_PATH": str(ENGINE / "actions" / "apply-complete").replace("\\", "/"),
         "RUNNER_TEMP": str(runner_temp).replace("\\", "/"),
-        "SHIPMATE_SNAPSHOT_JSON": json.dumps(snapshot if snapshot is not None else HARNESS_SNAP),
+        "SHIPMATE_BY_WAVE_JSON": json.dumps(HARNESS_BY_WAVE),
+        "SHIPMATE_RELEASES_JSON": json.dumps(releases or HARNESS_RELEASES),
         "FIXTURES": str(fixtures).replace("\\", "/"),
         "LAST_FIXTURE": str(len(listings)),
         "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
@@ -361,13 +560,24 @@ def _select(tmp_path, listings, snapshot=None):
         "PYEXE": sys.executable.replace("\\", "/"),
     }
     proc = run_step(tmp_path, GH_STUB + _loop_body(), env, timeout=120)
-    ids = (runner_temp / "complete-ids.txt").read_text(encoding="utf-8").split()
+    writes_path = runner_temp / "writes.jsonl"
+    lines = writes_path.read_text(encoding="utf-8").splitlines() if writes_path.exists() else []
+    plan = {e["id"]: e for e in map(json.loads, lines)}
     attempts = int((tmp_path / "attempt").read_text(encoding="utf-8"))
-    return proc, ids, attempts, env
+    return proc, plan, attempts, env
 
 
 def _all_success(*cells):
     return jsonl(*(job(f"L0 / dev-eu / {c}", "success") for c in cells))
+
+
+def _outcomes(plan):
+    return {
+        cid: e["body"]["status"] if e["title"] is None else e["title"] for cid, e in plan.items()
+    }
+
+
+ALL_DONE = {11: "completed", 22: "completed", 33: "completed"}
 
 
 @bash_only
@@ -379,63 +589,76 @@ def test_the_listing_is_refetched_on_every_attempt(tmp_path):
         job("L0 / dev-eu / app", "success"),
         job("L0 / dev-eu / web", None),
     )
-    proc, ids, attempts, _ = _select(
+    proc, plan, attempts, _ = _select(
         tmp_path, [lagging, lagging, _all_success("dns", "app", "web")]
     )
     assert proc.returncode == 0, proc.stderr
     assert attempts == 3
-    assert sorted(ids) == ["11", "22", "33"]
+    assert _outcomes(plan) == ALL_DONE
 
 
 @bash_only
 def test_an_empty_listing_is_retried_rather_than_failed_on_the_first_attempt(tmp_path):
-    proc, ids, attempts, _ = _select(tmp_path, ["", "", _all_success("dns", "app", "web")])
+    proc, plan, attempts, _ = _select(tmp_path, ["", "", _all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
     assert attempts == 3
-    assert sorted(ids) == ["11", "22", "33"]
+    assert _outcomes(plan) == ALL_DONE
 
 
 @bash_only
 def test_a_failed_fetch_never_feeds_its_half_written_file_to_the_selection(tmp_path):
     # A truncated listing matches a subset of cells, so it slips past the all-cells-unmatched
-    # floor and completes only the rows that survived.
-    proc, ids, attempts, _ = _select(tmp_path, [None, _all_success("dns", "app", "web")])
+    # floor and writes `Not run` over the rows that did not survive.
+    proc, plan, attempts, _ = _select(tmp_path, [None, _all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
     assert attempts == 2
-    assert sorted(ids) == ["11", "22", "33"]
+    assert _outcomes(plan) == ALL_DONE
 
 
 @bash_only
-def test_a_listing_matching_no_cell_at_all_is_retried_and_completes_nothing_meanwhile(tmp_path):
+def test_a_listing_matching_no_cell_at_all_is_retried_and_writes_nothing_meanwhile(tmp_path):
     # The zero-match floor routed through the loop rather than around it.
-    proc, ids, attempts, _ = _select(
+    proc, plan, attempts, _ = _select(
         tmp_path, [_all_success("rogue"), _all_success("dns", "app", "web")]
     )
     assert proc.returncode == 0, proc.stderr
     assert attempts == 2
-    assert sorted(ids) == ["11", "22", "33"]
+    assert _outcomes(plan) == ALL_DONE
 
 
 @bash_only
-def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
-    # Replicas differ, so a later read can be missing a row an earlier one had. A later read
-    # may add a completion; it may never revoke one.
+def test_a_success_seen_by_one_attempt_survives_a_staler_later_listing(tmp_path):
+    """Replicas differ, so a later read can be missing a row an earlier one had. A later read
+    may add a completion; it may never revoke one. Mutation: feed `plan` the last attempt as
+    both files -> dns and app read `Not run`."""
     first = jsonl(
         job("L0 / dev-eu / dns", "success"),
         job("L0 / dev-eu / app", "success"),
         job("L0 / dev-eu / web", None),
     )
     staler = _all_success("web")  # dns and app have vanished from this replica.
-    proc, ids, _, _ = _select(tmp_path, [first, staler])
+    proc, plan, _, _ = _select(tmp_path, [first, staler])
     assert proc.returncode == 0, proc.stderr
-    assert sorted(ids) == ["11", "22", "33"]
+    assert _outcomes(plan) == ALL_DONE
 
 
 @bash_only
-def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_stranded(tmp_path):
-    """One cell resolves, one is unmatched by skip-propagation, one never resolves. The earned
-    id must still reach the PATCH step, the unmatched cell must be a warning rather than the
-    reason for the failure, and the stranded cell must be named in the `::error::`.
+def test_a_failed_release_writes_not_run_without_the_floors_retries(tmp_path):
+    """wave0's release failed, so no cell has a job. Mutation: count stopped cells in the floor
+    -> 14 attempts."""
+    skipped = jsonl(job("L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped"))
+    proc, plan, attempts, _ = _select(
+        tmp_path, [skipped], releases={"wave0": "failure", "wave1": "skipped"}
+    )
+    assert (proc.returncode, attempts) == (0, 1), proc.stderr
+    assert _outcomes(plan) == {11: "Not run", 22: "Not run", 33: "Not run"}
+
+
+@bash_only
+def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stranded(tmp_path):
+    """One cell resolves, one is unmatched by skip-propagation, one never resolves. The decided
+    writes must still reach the write step, the unmatched cell is written `Not run`, and the
+    stranded cell gets no write and is named in the `::error::`.
 
     The waits back off from 2 s to a 110 s total, and the last attempt does not sleep.
     Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
@@ -444,14 +667,12 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
         job("L0 / dev-eu / dns", "success"),
         job("L0 / dev-eu / web", None),
     )
-    proc, ids, attempts, env = _select(tmp_path, [lagging])
+    proc, plan, attempts, env = _select(tmp_path, [lagging])
     assert proc.returncode == 0, proc.stderr
     assert attempts == 14
     sleeps = (tmp_path / "sleeps").read_text(encoding="utf-8").splitlines()
     assert sleeps == ["2", "3", "5", "10", "10", "10", "10", "10", "10", "10", "10", "10", "10"]
-    assert ids == ["11"]
-    assert proc.stderr.count("::warning::") == 1
-    assert "app / dev-eu" in proc.stderr
+    assert _outcomes(plan) == {11: "completed", 22: "Not run"}
 
     fail = run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120)
     assert fail.returncode == 1
@@ -459,14 +680,13 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     assert len(errors) == 1
     assert "web / dev-eu" in errors[0]
     assert "app / dev-eu" not in errors[0]
-    assert "::warning::" not in errors[0]
 
 
 @bash_only
 def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tmp_path):
-    proc, ids, _, env = _select(tmp_path, [_all_success("dns", "app", "web")])
+    proc, plan, _, env = _select(tmp_path, [_all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
-    assert sorted(ids) == ["11", "22", "33"]
+    assert _outcomes(plan) == ALL_DONE
     assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0
 
 
@@ -478,9 +698,9 @@ def test_the_steps_are_exactly_these():
     """Mutation: restore the revert step -> the list gains it."""
     assert [s.get("name") for s in action_steps("apply-complete")] == [
         "Verify the App key arrived",
-        "List run jobs and select the checks earned by this run",
+        "List run jobs and decide each apply check's write",
         "Mint App installation token",
-        "Complete the apply checks",
+        "Write the apply checks",
         "Fail over any cell the jobs listing never resolved",
     ]
 
@@ -491,16 +711,39 @@ def test_no_step_carries_an_if():
     assert [s.get("if") for s in action_steps("apply-complete")] == [None] * 5
 
 
-def _run_action_step(tmp_path, name, *, files=(), **gh):
-    """Run step `name` with a recording gh; `files` maps a RUNNER_TEMP file name to its ids."""
+def test_the_write_token_can_read_the_pull_request_and_nothing_more():
+    """Mutations: drop `permission-pull-requests: read`; grant it `write`."""
+    assert _step("Mint App installation token")["with"] == {
+        "client-id": "${{ inputs.app-id }}",
+        "private-key": "${{ inputs.private-key }}",
+        "owner": "${{ github.repository_owner }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-checks": "write",
+        "permission-pull-requests": "read",
+    }
+
+
+def test_the_write_step_passes_the_deploy_flag_and_the_pull_request():
+    """Mutations: drop `SHIPMATE_DEPLOY`; drop `SHIPMATE_PR_NUMBER`; write with the job token."""
+    assert _step("Write the apply checks")["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "SHIPMATE_DEPLOY": "${{ inputs.deploy }}",
+        "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
+    }
+
+
+def _run_action_step(tmp_path, name, *, plan, **gh):
+    """Run step `name` with a recording gh; `plan` is the write plan in writes.jsonl."""
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
-    for fname, ids in dict(files).items():
-        (runner_temp / fname).write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
+    (runner_temp / "writes.jsonl").write_text(jsonl(*plan), encoding="utf-8")
     env = {
         **os.environ,
         "GH_TOKEN": "x",
         "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHIPMATE_DEPLOY": "true",
+        "SHIPMATE_PR_NUMBER": "",
         "GITHUB_ACTION_PATH": (ENGINE / "actions" / "apply-complete").as_posix(),
         "RUNNER_TEMP": runner_temp.as_posix(),
     }
@@ -508,17 +751,14 @@ def _run_action_step(tmp_path, name, *, files=(), **gh):
     return proc, [c[3] for c in calls], runner_temp
 
 
-def _patched(*ids):
-    return [f"repos/acme/demo/check-runs/{i}" for i in ids]
-
-
 @bash_only
-def test_the_completion_patches_exactly_the_deduplicated_ids(tmp_path):
-    """The body and its no-file property are pinned in-process by `test_patch_checks.py`; this
-    pins the step's input to the deduplicated complete-ids.txt. Mutation: feed
-    `earned-ids.txt` instead -> 1 is patched twice.
-    """
-    files = {"complete-ids.txt": [1, 2], "earned-ids.txt": [1, 1, 2]}
-    proc, patched, _ = _run_action_step(tmp_path, "Complete the apply checks", files=files)
+def test_the_write_step_writes_the_plan(tmp_path):
+    """The bodies are pinned in-process by `test_patch_checks.py`; this pins the step's input
+    to writes.jsonl. Mutation: feed `rows.jsonl` instead -> no write."""
+    plan = [
+        {"id": 1, "body": {"status": "completed", "conclusion": "success"}},
+        {"id": 2, "body": {"status": "queued"}},
+    ]
+    proc, patched, _ = _run_action_step(tmp_path, "Write the apply checks", plan=plan)
     assert proc.returncode == 0, proc.stderr
-    assert patched == _patched(1, 2)
+    assert patched == ["repos/acme/demo/check-runs/1", "repos/acme/demo/check-runs/2"]

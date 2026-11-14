@@ -1,0 +1,43 @@
+name: shipmate apply-release
+description: Flip one wave's apply checks to in_progress, linked to this run, before the wave runs. A pre-merge re-run writes nothing. A failed write fails the job, which skips the wave.
+inputs:
+  snapshot:
+    description: JSON object, the wave's slice of apply-snapshot's by_wave, mapping each cell to its apply-check ids.
+    required: true
+  deploy:
+    description: "`true` on the merge deploy, whose re-runs still write."
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-checks: write
+
+    - name: Flip the wave's apply checks to in progress
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
+        SHIPMATE_DEPLOY: ${{ inputs.deploy }}
+      run: |
+        set -euo pipefail
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-release"

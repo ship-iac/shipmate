@@ -231,11 +231,24 @@ def test_by_wave_slices_the_snapshot_per_wave():
 
 
 def test_a_wave_slice_reads_no_later_wave_as_unmatched():
-    """wave0's completion runs before wave1 has a job in the listing. Mutation: hand
-    `to_complete` the whole snapshot instead of wave0's slice -> wave1's cells read unmatched."""
-    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "status": "completed"}]
-    wave0 = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)["wave0"]
-    assert apply_complete.to_complete(wave0, jobs) == ([1], [], [], [])
+    """wave0's completion runs before wave1 has a job in the listing. Mutation: `classify` walks
+    every key of `by_wave` instead of those of `releases` -> wave1's cells get `Not run` rows."""
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
+    rows, unresolved, floor = apply_complete.classify(by_wave, {"wave0": "success"}, jobs)
+    assert (rows, unresolved, floor) == (
+        [
+            {
+                "check": "apply / dns / dev",
+                "ids": [1],
+                "conclusion": "success",
+                "job_id": 9,
+                "url": "u",
+            }
+        ],
+        [],
+        False,
+    )
 
 
 def test_main_writes_the_snapshot_and_its_slices(monkeypatch, tmp_path, capsys):

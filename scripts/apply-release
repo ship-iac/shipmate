@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Flip one wave's apply checks to `in_progress` before the wave runs: `apply-release`.
+
+`SHIPMATE_SNAPSHOT_JSON` is the wave's `apply-snapshot` slice, `{check name: [check id, ...]}`.
+Each id gets one PATCH, one at a time, of exactly `{"status": "in_progress", "details_url": <this
+run's page>}` through `patch-checks`, which also writes nothing on a pre-merge re-run. Never
+`output`: that would replace the check's plan text. A failed write fails the job, which skips the
+wave, and the level's `complete` returns every check of it to `queued`, titled `Not run`.
+"""
+
+import json
+import os
+import sys
+
+from _shipmate import _load, current_run_url, run_annotated
+
+pc = _load("patch-checks")
+
+
+def flips(snapshot, url):
+    """The `patch-checks` write plan flipping every id of `snapshot`, linking `url`."""
+    return [
+        {"id": cid, "body": {"status": "in_progress", "details_url": url}}
+        for name in sorted(snapshot)
+        for cid in snapshot[name]
+    ]
+
+
+def main(argv=()):
+    if argv:
+        raise SystemExit("::error::usage: apply-release")
+    pc.write(flips(json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"]), current_run_url()))
+
+
+if __name__ == "__main__":
+    run_annotated(main, sys.argv[1:])

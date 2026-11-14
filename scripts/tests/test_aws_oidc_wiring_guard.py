@@ -60,14 +60,16 @@ def test_every_wave_job_grants_id_token_write():
 
 
 def test_snapshot_and_completion_jobs_get_exactly_their_declared_permissions():
-    """Mutation: add `checks: write` to `wave5-complete`'s permissions."""
+    """Mutations: add `checks: write` to `wave5-complete`'s permissions; drop `checks: read` from
+    `complete`'s; add `checks: write` to `wave2-release`'s."""
     # Whole-mapping comparison, not `id-token is None`: the realistic break is the block being
     # deleted, and an absent block is not an absent scope. The job then inherits the caller's
     # grants, or, with the workflow-level floor, nothing.
     expected = {
         "snapshot": {"checks": "read", "actions": "read"},
-        **{f"wave{n}-complete": {"actions": "read"} for n in range(8)},
-        "complete": {"actions": "read"},
+        **{f"wave{n}-release": {"actions": "read"} for n in range(8)},
+        **{f"wave{n}-complete": {"actions": "read", "checks": "read"} for n in range(8)},
+        "complete": {"actions": "read", "checks": "read"},
     }
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     for name, perms in expected.items():
