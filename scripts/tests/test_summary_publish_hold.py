@@ -366,7 +366,8 @@ def test_a_failed_plan_job_holds_and_publishes_no_check(tmp_path):
 
 @bash_only
 def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
-    """Mutation: append `|| true` to the check-runs POST -> exit 0 and the third check posts."""
+    """Mutation: catch the failure in `create-checks`' loop and `continue` -> exit 0 and the
+    third check posts."""
     _write_cells(tmp_path, "a", "b", "c")
     codes, calls, _, _ = _run(tmp_path, fail_check=2)
     assert codes == [0, 1]

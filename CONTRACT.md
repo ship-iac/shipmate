@@ -3509,7 +3509,9 @@ newer run of the same head holds the gate by then (that run's `summary` ended
 queue for the head, and `gate-hold` writes outside the job's concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final write that fails
 transiently is retried, and the newer-run check runs again before each retry; a
-first attempt that landed although it reported a failure stays written. A final `pending` gate is followed
+first attempt that landed although it reported a failure stays written. An apply-check
+POST or final write that GitHub's secondary rate limit refuses waits 60 s and is retried
+the same way, at most three waits per script process (`docs/troubleshooting.md`). A final `pending` gate is followed
 by a refresh, unless this run published a queued apply check, which cannot be
 done yet: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh, or one

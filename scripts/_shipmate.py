@@ -221,6 +221,56 @@ def retried(call, before_retry=None):
     return call()
 
 
+#: The wait before a rate-limited retry: gh's stderr carries no `Retry-After` header, and GitHub
+#: sent `Retry-After: 60` on a probed secondary-limit 403.
+RATE_LIMIT_WAIT = 60
+#: The waits one process may spend across all its `create_retried` and `write_retried` writes.
+RATE_LIMIT_WAITS = 3
+_rate_limit_waits = 0
+
+
+def is_rate_limited(exc):
+    """True when `exc`, a `SystemExit`, carries `secondary rate limit` under its first line (that
+    line is the argv, which can carry a consumer's text), whatever the status. A bare `HTTP 429`
+    and a primary-limit `API rate limit exceeded` do not match."""
+    if not isinstance(exc.code, str):
+        return False
+    return "secondary rate limit" in "\n".join(exc.code.splitlines()[1:])
+
+
+def create_retried(fn, *, before_retry=None):
+    """`fn()`, a POST that creates, called again `RATE_LIMIT_WAIT` seconds after each failure that
+    GitHub's secondary rate limit caused (`is_rate_limited`), each wait noted as one `::notice::`
+    on stderr. A refused write created nothing, so the retry cannot duplicate; a transient
+    failure is never retried, because that write may have landed. `before_retry`, when given,
+    runs after each wait and may raise to stop. The waits draw on one budget of
+    `RATE_LIMIT_WAITS` per process, not per write; a failure once it is spent, and any other
+    `SystemExit`, re-raises unchanged."""
+    global _rate_limit_waits
+    while True:
+        try:
+            return fn()
+        except SystemExit as e:
+            if _rate_limit_waits >= RATE_LIMIT_WAITS or not is_rate_limited(e):
+                raise
+            _rate_limit_waits += 1
+            write = str(e.code).removeprefix("::error::").splitlines()[0]
+            note = f"waiting {RATE_LIMIT_WAIT} s for GitHub's secondary rate limit, then retrying: "
+            sys.stderr.write(f"::notice::{command_data(note + write)}\n")
+            sys.stderr.flush()
+        _sleep(RATE_LIMIT_WAIT)
+        if before_retry:
+            before_retry()
+
+
+def write_retried(fn, *, before_retry=None):
+    """`fn()`, a write that may be repeated, through `retried` for a transient failure, each
+    attempt through `create_retried` for the secondary rate limit, `before_retry` with both. The
+    rate-limit wait covers the write call only: a rate-limited read inside `before_retry` fails
+    the write instead of being waited out as it."""
+    return retried(lambda: create_retried(fn, before_retry=before_retry), before_retry)
+
+
 def command_data(s):
     """`s` escaped as workflow-command data (`%`, CR, LF): a raw newline in an author-controlled
     name would start a second workflow command."""

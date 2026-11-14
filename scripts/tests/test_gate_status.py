@@ -1172,3 +1172,106 @@ def test_the_post_command_stops_when_the_bot_user_lookup_fails_before_its_retry(
         [_POST, _USER, _USER, _USER],
         [2, 2, 5],
     )
+
+
+#: Not captured: gh's `gh: <message> (HTTP <code>)` form around the probed API message.
+_SECONDARY = (
+    "command failed (1): gh api x\ngh: You have exceeded a secondary rate limit. (HTTP 403)"
+)
+
+
+_DEPLOYED = [
+    "gh",
+    *_status_argv("success", "all env-levels applied (deploy env-level applies completed)"),
+]
+_HOLD = ["gh", *_status_argv("failure", "the reason")]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (["post", SHA, "pending", "the reason"], [_POST, _USER, _READ, _POST]),
+        (["hold", SHA, "the reason"], [_HOLD, _HOLD]),
+        (["deploy", SHA, "success", "success"], [_DEPLOYED, _DEPLOYED]),
+    ],
+    ids=["post", "hold", "deploy"],
+)
+def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, command, expected):
+    """The first write hits the secondary limit; `post` re-runs `refuse-newer` before its retry,
+    `hold` and `deploy` re-check nothing. Mutations, each run: `post` writes through `retried`
+    instead of `write_retried` -> the 403 raises; drop `before_retry=` from `post`'s
+    `write_retried` -> the `post` case loses its reads."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ:
+            return ""
+        if len(calls) == 1:
+            raise SystemExit(f"::error::{_SECONDARY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    gs.main(command)
+    assert (calls, in_process) == (expected, [60])
+
+
+def test_refresh_stops_when_a_hold_lands_while_it_waits_out_a_rate_limit(
+    in_process, monkeypatch, capsys
+):
+    """Read pending, the green POST hits the secondary limit, the re-read after the wait finds a
+    hold. Mutation: drop `before_retry=` from `post`'s `write_retried` -> the second POST greens
+    over the hold."""
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setattr(gs, "check_runs", lambda *_: DONE)
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ:
+            state = "pending" if calls.count(_READ) == 1 else "failure"
+            return _lines(_status("shipmate / gate", state, _run_url(42)))
+        if calls.count(args) == 1:
+            raise SystemExit(f"::error::{_SECONDARY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        gs.refresh(SHA)
+    assert (exc.value.code, calls, in_process) == (
+        gs.HELD,
+        [_USER, _READ, ["gh", *GREEN], _READ],
+        [60],
+    )
+    assert capsys.readouterr().out == HELD
+
+
+def test_a_rate_limited_refuse_newer_read_is_not_waited_out_as_the_write(in_process, monkeypatch):
+    """The gate POST fails transiently; the `refuse-newer` statuses read before its retry hits
+    the secondary limit. That read fails the write at once instead of a 60 s wait and a re-post.
+    Mutation: `write_retried` wraps `retried` inside the rate-limit wait
+    (`create_retried(lambda: retried(fn, before_retry), before_retry=before_retry)`) -> a 60 s
+    sleep and a second POST."""
+    calls = []
+    limited = (
+        f"::error::command failed (1): gh {' '.join(STATUSES_ARGV)}\n" + _SECONDARY.split("\n")[1]
+    )
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ and calls.count(_READ) == 1:
+            raise SystemExit(limited)
+        if calls.count(args) == 1:
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        gs.main(["post", SHA, "pending", "the reason"])
+    assert (exc.value.code, calls, in_process) == (limited, [_POST, _USER, _READ], [2])

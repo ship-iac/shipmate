@@ -2,15 +2,17 @@
 """Complete App-authored apply checks: `patch-checks`, no arguments.
 
 Reads check-run ids on stdin, one per line (blank lines skipped), and PATCHes each with `BODY`
-through `retried`, the body on gh's stdin. `GH_TOKEN` and `GITHUB_REPOSITORY` come from the
-environment. Stdout carries only the ids PATCHed, one per line as each is acknowledged, for the
-step log only: nothing reads them. Every diagnostic goes to stderr.
+through `write_retried`, the body on gh's stdin. `GH_TOKEN` and
+`GITHUB_REPOSITORY` come from the environment. Stdout carries only the ids PATCHed, one per line
+as each is acknowledged, for the step log only: nothing reads them. Every diagnostic goes to
+stderr.
 
 Fails closed, because the gate's work queue is the pending checks: the first id that still
-fails (a permanent failure at once, a transient one once its retries are exhausted) stops the
-loop with `::error::failed to complete apply check <id>`, then run's `command failed (1): gh
-api ...` line, then gh's own error line; exit 1. Stopping there means the slim runner's time cap
-is never spent once per id.
+fails (a permanent failure at once, a transient one once its retries are exhausted, a
+rate-limited one once the process's rate-limit waits are spent) stops the loop with
+`::error::failed to complete apply check <id>`, then run's `command failed (1): gh api ...`
+line, then gh's own error line; exit 1. Stopping there means the slim runner's time cap is never
+spent once per id.
 """
 
 import functools
@@ -18,7 +20,7 @@ import json
 import os
 import sys
 
-from _shipmate import retried, run, run_annotated
+from _shipmate import run, run_annotated, write_retried
 
 # Never `output`: a PATCH carrying it replaces the plan text on the check.
 BODY = {"status": "completed", "conclusion": "success"}
@@ -32,7 +34,7 @@ def main(argv=()):
     for cid in [line.strip() for line in sys.stdin if line.strip()]:
         args = ["gh", "api", "-X", "PATCH", f"repos/{repo}/check-runs/{cid}", "--input", "-"]
         try:
-            retried(functools.partial(run, args, stdin=body))
+            write_retried(functools.partial(run, args, stdin=body))
         except SystemExit as exc:
             raise SystemExit(f"::error::failed to complete apply check {cid}\n{exc.code}") from None
         print(cid, flush=True)
