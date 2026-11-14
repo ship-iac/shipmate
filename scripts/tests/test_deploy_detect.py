@@ -685,6 +685,25 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu"]
 
 
+def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
+    """A pre-merge release flips a check to `in_progress`; a run that died before completing it
+    leaves it there, and the merge deploy owns it. Mutation: `ag.done_names` counts any
+    non-`queued` status as done -> dev-us is dropped."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
+        checks=[
+            _apply_check("stacks/app", "dev-eu", plan_run="42", cells=2),
+            {
+                **_apply_check("stacks/app", "dev-us", plan_run="42", cells=2),
+                "status": "in_progress",
+            },
+        ],
+    )
+    assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
+
+
 def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
     # A no-op post-merge deploy is indistinguishable from a broken work set without these
     # counts, and acceptance reads them off this one line. Whole line against a hand-written

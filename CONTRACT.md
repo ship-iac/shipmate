@@ -70,8 +70,8 @@ A changed cell's apply check carries its plan: the title is the plan's counts
 rendered `plan.txt` in a `diff` fence, cut at a line boundary to 65,535 UTF-8
 bytes with a link to the plan run, whose plan job's raw log has the full plan
 until the repository's Actions log retention expires it; when no whole line
-fits, the summary is that link alone. Completing the check leaves both in
-place. A no-change cell's check is created completed and `neutral`, titled
+fits, the summary is that link alone. No later write changes the summary; a
+completion restores the title (§Apply check lifecycle). A no-change cell's check is created completed and `neutral`, titled
 `no changes`, with no plan text.
 
 The apply-env-level wave job is named like the plan cell job, `<env> / <stack>`,
@@ -93,15 +93,13 @@ observable would fail. A rename that leaves no wave job matching also fails
 `apply-complete`, which retries the listing and then fails the run.
 
 `scripts/apply-complete` is the second reader: given the pre-flight snapshot of
-check ids a run may complete, it reads each snapshotted `apply / <stack> / <env>`
+check ids a run may write, it reads each snapshotted `apply / <stack> / <env>`
 check name back to its stack and environment (`apply-gate.parse_check_name`; an
 environment name holds no ` / `) and matches that cell's wave job in the same
-run's job-name listing with the same matcher, to decide which cells the run's
-own job conclusions actually earned. When some cells still match, a rename of
-the apply-env-level job's `name:` would break this reader too with only a
-`::warning::` naming the unmatched cells (the job stays green) — not degrading to
-a fallback URL, but leaving the unmatched cells' snapshotted checks pending
-forever.
+run's job-name listing with the same matcher, to decide each check's write from
+the run's own job conclusions. A rename of the apply-env-level job's `name:`
+would leave every cell of a wave that ran unmatched, so the completion retries,
+writes none of them and fails the level (§Apply check lifecycle).
 
 Job display names in the apply/deploy path nest: a called reusable workflow's
 job displays as `<caller job> / <callee job>`, applied at every level, and GHA
@@ -189,30 +187,97 @@ gate"):
 - the post-merge deploy, which completes the gate on the merged PR's head
   SHA after its env-level applies finish.
 
-`apply-env-level.yml` completes an `apply / <stack> / <env>` check only through
-the check-run ids `actions/apply-snapshot` recorded for that name in the
-`snapshot` job, before the first wave. An apply check reads `queued` until its
-cell's wave ends; that wave's `waveN-complete` job then completes it when the
-cell's job succeeded. A failed, cancelled or skipped cell's check stays
-`queued`. A completion job runs only for a wave that ended `success` or
-`failure`; a cancelled wave's earned checks complete in `complete`.
+### Apply check lifecycle
 
-`complete` runs after every wave and every completion job and completes the
-whole snapshot again; a second completion of a completed check changes nothing.
-It keeps the all-unmatched floor, the retry and the fail-over. It repeats each
-completion job's selection over the whole level, so a failed cell is named
-twice per level by `these cells' apply jobs did not succeed`, and a completion
-job whose retry ran out (its `::error::… left pending` names the cells) may be
-followed by `complete` completing those same checks. A completion job's failure
-never fails the level (job-level `continue-on-error: true`): `complete` then
-handles every check of the level, those a completion job left pending
-included, as it handles any level's checks. "Re-run failed jobs" skips
-`snapshot` and reuses its outputs.
-A plan re-run can create a fresh duplicate apply check; a duplicate created
-*after the snapshot* is therefore left pending (its plan was not applied by this run),
-while duplicates that predate the apply are all completed so the gate never
-sticks. This keeps `shipmate / gate` from greening on a plan the apply
-never used.
+`apply-env-level.yml` writes an `apply / <stack> / <env>` check only through the
+check-run ids `actions/apply-snapshot` recorded for that name in the `snapshot`
+job, before the first wave, and only ids whose check was not yet `completed`: a
+completed same-head duplicate is never relinked or retitled. A cell with no such
+id refuses the run before wave0.
+
+1. Created `queued` by `actions/summary`, titled with the plan's counts, its
+   summary the plan. The `external_id` record also carries that title as
+   `title`.
+2. Flipped to `in_progress` by the wave's `waveN-release` job right before the
+   wave, its details link set to the apply run. The flip writes the status and
+   the link only, one check at a time. Each wave needs its release, and each
+   completion job needs its wave, so no flip lands after the completion that
+   answers it. A release runs only when every earlier wave and release succeeded
+   or was skipped, so a failed release skips its wave and every later one.
+3. Written once the cell's wave job has a result, by that wave's
+   `waveN-complete` job and again by `complete`, from the job's state in the run's
+   jobs listing. The summary is never rewritten; the error goes in the title.
+
+| Cell's wave job | Write |
+| --- | --- |
+| `success` | `completed` / `success`, linked to the cell's job, titled with the record's `title` (a check whose record has none keeps its title) |
+| `failure` | `queued`, titled `Failed: <first error line>`, linked to the cell's job |
+| `cancelled` | `queued`, titled `Cancelled` |
+| `skipped`, or no job in a wave that ended `skipped` or `cancelled` | `queued`, titled `Not run` |
+| any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
+| no conclusion yet, or no job in a wave that ran | retried for about two minutes, then no write; the job fails |
+
+The first error line is the message of the cell job's first `failure`
+annotation: its first line, control characters stripped, cut at 120 characters.
+`Failed` alone when there is none or the annotation read fails. The title only
+names the error; the outcome comes from the job's conclusion in the listing.
+
+A completion job runs only for a wave that ended `success` or `failure`;
+`complete` runs after every release, wave and completion job, rewrites the whole
+snapshot with the same writes, and is the only writer on a cancelled run. A
+completion job's failure never fails the level (job-level
+`continue-on-error: true`): `complete` handles every check of the level again.
+`complete` fails the level, and leaves a cell's check as it was (`in_progress`
+when it was flipped), when the jobs listing never shows that cell's job in a wave
+that ran; the gate stays pending, and the next run's `snapshot` writes it again.
+A success from any listing attempt is kept, so a later, staler listing never
+turns a completed check back to `queued`. "Re-run failed jobs" skips `snapshot`
+and reuses its outputs.
+
+Every flip and completion write retries a transient failure and waits out
+GitHub's secondary rate limit (three 60 s waits per process); the summary and
+record read before a write does too. At 256 checks a completion job stays inside
+`ubuntu-slim`'s 15-minute cap: about 2 minutes of listing retries, one read and
+one write per check at about 1.7 a second, one annotation read per failed cell,
+and the 3-minute rate budget. A job that still runs out fails, and `complete` or
+the next run's `snapshot` recovers.
+
+A pre-merge completion reads the pull request once before writing. A merged
+pull request gets only its `success` writes, since the merge deploy owns its
+pending checks; a closed or open one gets every write; a failed read writes
+nothing and fails the job.
+
+**Re-runs.** A pre-merge apply run whose `GITHUB_RUN_ATTEMPT` is above 1 writes
+nothing in its release and completion jobs, and each wave cell's pre-apply check
+refuses: ``an apply is never re-run (run attempt '<n>'): comment `shipmate apply` ``.
+A later run may have completed the same checks, and a `Not run` write would
+reopen them. A merge deploy's re-run is allowed: its retried cells apply under
+the first attempt's flip, and its `complete` writes them.
+
+**Dead runs.** `apply-snapshot`, `deploy-detect`, `apply-detect`,
+`unlock-detect` and the gate read any check that is not `completed` as pending,
+`in_progress` included. A run that dies after a flip (a lost runner, a second
+cancel that also stops `complete`) leaves its checks `in_progress`; the gate
+stays pending, and the next apply run's `snapshot`, or the merge deploy, takes
+them as pending and writes them again. Apply runs of one pull request run one at
+a time, so an `in_progress` check that a pre-merge `snapshot` sees belongs to a
+dead run.
+
+Accepted limits:
+
+- `in_progress` marks the wave's release, not the cell's start, and lands after
+  a runner delay: a cell waiting on an environment approval, or on a concurrency
+  group inside its wave, already reads `in_progress`.
+- The cell job rows and the `<env>-apply` deployments stay under the default
+  branch's commit, where the dispatched run is; the pull request shows only the
+  App apply checks.
+- A release flip or a completion write can race a merge that bypasses the gate:
+  one pull request read per completion job, none per release. The merge
+  deploy's `snapshot` reads such a check as pending and applies or rewrites it;
+  a cell lock the dead pre-merge run left is released with `shipmate unlock`.
+- A plan re-run can create a fresh duplicate apply check after the snapshot; it
+  is left pending (its plan was not applied by this run), which keeps
+  `shipmate / gate` from greening on a plan the apply never used.
 
 ## Env model
 
@@ -1737,8 +1802,9 @@ A cancelled stale run writes, by where it waited:
   cancelled reply.
 - On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
   so its `waveN-complete`, which runs on `success` or `failure` only, is skipped,
-  and the level's `complete` completes only cells whose wave job succeeded, so
-  the cancelled cells' apply checks stay pending. `summary` runs after a
+  and the level's `complete` returns the wave's flipped checks to `queued` titled
+  `Cancelled` and every later wave's to `Not run` (§Apply check lifecycle), so
+  they stay pending. `summary` runs after a
   successful `review`, refreshes the old head's gate and posts the apply comment,
   so `outcome` stays silent.
 
@@ -1947,8 +2013,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
   bound to `shipmate-engine`) — both mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
-  consistent). Completion sends no `output`, so the plan a changed cell's check
-  was created with stays on it after the apply (§Check names).
+  consistent). Release jobs flip them `in_progress` first. A completion sends
+  `output` only with the check's own summary, read back first, so the plan a
+  changed cell's check was created with stays on it (§Apply check lifecycle).
 - **The aggregate gate** (`shipmate / gate`) — read and written only by
   `scripts/gate-status`, under an App token, called by `actions/summary` in
   `plan.yml`'s `summary` job (the plan run's gate) and by `actions/gate-refresh`

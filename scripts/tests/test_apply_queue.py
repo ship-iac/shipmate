@@ -401,6 +401,21 @@ def test_a_run_whose_cell_waits_on_an_approval_is_cancelled(gh):
     assert gh.cancels == [_cancel(40)]
 
 
+def test_a_waiting_release_job_is_not_a_cell_and_keeps_the_run(gh):
+    """A wave's release job is named by its id, four segments under the caller. Mutation: count
+    any `<caller> / run / L<n> / ...` job as a cell (`len(segments) >= 4`) -- red (cancelled)."""
+    gh.runs, gh.jobs = _stale(
+        [
+            _rv("completed"),
+            _job("L0 / prod / app", "waiting"),
+            _job("L0 / wave1-release", "waiting"),
+        ]
+    )
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
 def test_a_run_with_one_cell_waiting_and_one_pending_is_kept(gh):
     """Mutation: `any` for `all` in `idle` -- red (cancelled)."""
     gh.runs, gh.jobs = _stale(

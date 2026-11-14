@@ -57,8 +57,9 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
 
 
 def test_a_completed_duplicate_is_dropped_and_the_open_one_kept():
-    """A later write would relink or retitle a completed check. Mutation: keep every id,
-    whatever its status -> dns maps to [1, 5]."""
+    """A later write would relink or retitle a completed check; an `in_progress` one, a dead
+    run's flip, is still pending. Mutations: keep every id, whatever its status -> dns maps to
+    [1, 5]; keep only `queued` ids -> app has none and the run refuses."""
     runs = [
         {**check("apply / stacks/dns / dev-eu", 1), "status": "queued"},
         {**check("apply / stacks/dns / dev-eu", 5), "status": "completed"},
