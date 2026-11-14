@@ -198,3 +198,50 @@ def test_a_blocked_eviction_is_refused_with_the_refusal_fenced(monkeypatch, post
             ),
         )
     ]
+
+
+_STACKED = (
+    "#12 is stacked on this pull request through #13 and holds 1 of its cell(s) in dev-eu; "
+    "applying this pull request after evicting it would overwrite what it applied. Retarget #12 "
+    "to main and merge it first, or close it, which releases its locks."
+)
+_EXHAUSTED = (
+    "could not tell whether #12 is stacked on this pull request: its chain of base branches "
+    "needs more than 20 pages of pull requests. Commenting again does not change that until "
+    "the chain of pull requests between them is shortened."
+)
+_UNREAD = "could not tell whether #12 is stacked on this pull request: command failed (1): gh api"
+
+
+@pytest.mark.parametrize(
+    ("refusal", "flag", "reply"),
+    [
+        (
+            _STACKED,
+            "--refused",
+            f"🔴 refused: no cell lock in `dev-eu` was released.\n\n```\n{_STACKED}\n```",
+        ),
+        (
+            _EXHAUSTED,
+            "--refused",
+            f"🔴 refused: no cell lock in `dev-eu` was released.\n\n```\n{_EXHAUSTED}\n```",
+        ),
+        (
+            _UNREAD,
+            "--failed",
+            (
+                "🔴 failed: could not evict the cell locks in `dev-eu`. This run's log has the "
+                f"error; comment again.\n\n```\n{_UNREAD}\n```"
+            ),
+        ),
+    ],
+    ids=["stacked", "out-of-pages", "unread"],
+)
+def test_each_stacked_refusal_gets_its_reply(monkeypatch, posts, refusal, flag, reply):
+    """`cell-lock evict` writes `blocked` for the first two (pinned in test_cell_lock), which
+    comment-ops routes to `--refused`: no "comment again". Mutation: route `--refused` to the
+    failure reply -- stacked and out-of-pages say "comment again", red."""
+    got, _ = posts
+    monkeypatch.setenv("SHIPMATE_EVICT_REFUSAL", refusal)
+    _main(monkeypatch, [], argv=("evict-reply", flag))
+    assert got == [("9", f"### shipmate unlock dev-eu\n\n{reply}\n\n{_HINT_FOOT}")]

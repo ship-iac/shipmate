@@ -7,9 +7,10 @@ cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
 artifacts). Writes comment.md, plus pending, count, unmanaged, lost, missing and stacked_hold
 to GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned cells with no
 cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
-`stacked_hold` is the pending gate text (`stacked_hold`) for a holder `SHIPMATE_STACKED` lists
+`stacked_hold` is the pending gate text (`stacked_hold`) for a holder `SHIPMATE_STACKED` names
 and `SHIPMATE_DEFAULT_BRANCH` to retarget it to; gate-state writes it, and empty keeps the
-generic text.
+generic text. A holder `SHIPMATE_STACKED_UNKNOWN` names gets a line saying the comment cannot
+tell whether it is stacked, and never touches the gate.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
 reads no cell summary, only the `cell-error.json` files under $CELL_ERRORS (default
@@ -43,10 +44,10 @@ SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments
 each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
 `shipmate apply` once (`to apply the other environments` when a targeted line renders), then
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked,
-unless one of that environment's holders is stacked on this pull request, where evict refuses,
-and `shipmate help`. An empty or unreadable `targeted-envs` names no targeted environment, so the
-section degrades to the bare `shipmate apply` even when every changed environment is targeted;
-the unreadable one warns.
+unless one of that environment's holders is stacked on this pull request, or cannot be told
+apart from one, where evict refuses, and `shipmate help`. An empty or unreadable
+`targeted-envs` names no targeted environment, so the section degrades to the bare
+`shipmate apply` even when every changed environment is targeted; the unreadable one warns.
 
 An autoplan of a pull request that is not a draft, not started by a push, that changed a cell of
 an `apply_mode: auto` environment no other pull request locks says so in a line under the verdict
@@ -67,6 +68,7 @@ import os
 import pathlib
 import re
 import sys
+import types
 
 from _shipmate import (
     CHECK_OUTPUT_CAP,
@@ -80,15 +82,20 @@ from _shipmate import (
     event_action,
     evict_release,
     is_head_sha,
+    is_pr_number,
     json_or_none,
     lock_who,
     one_line,
     run_annotated,
+    stacked_through,
     write_outputs,
 )
 
 ad = _load("auto-dispatch")
 ag = _load("apply-gate")
+
+#: An empty read-only mapping, the default of every `stacked` and `unknown` parameter.
+_NONE = types.MappingProxyType({})
 
 MARKER = "<!-- shipmate:summary -->"
 # Phrased so the line does not itself match the comment grammar (`^shipmate <verb>`), which
@@ -343,37 +350,44 @@ def _lock_key(cell, locks):
     return key if cell["changed"] and key in locks else None
 
 
-def _plan_line(cell, url, locks, stacked=frozenset(), default_branch=""):
+def _plan_line(cell, url, locks, stacked=_NONE, default_branch=""):
     """A cell's bare line; a changed cell another pull request holds ends with `🔒 locked by`
     and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys), then
-    `, stacked on this pull request` when that holder is in `stacked` and `default_branch` is
-    not empty. `stacked_lines` carries the explanation once per holder."""
+    `, stacked on this pull request` and `stacked_through` its chain when that holder is in
+    `stacked` (`stacked_marks`) and `default_branch` is not empty. `stacked_lines` carries the
+    explanation once per holder."""
     line = cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
     if key := _lock_key(cell, locks):
         line += f" 🔒 locked by {lock_who(locks[key])}"
         if locks[key] in stacked and default_branch:
-            line += ", stacked on this pull request"
+            line += f", stacked on this pull request{stacked_through(stacked[locks[key]])}"
     return line
 
 
 def _stacked_held(cells, locks, stacked, default_branch):
-    """The holder in `stacked` of each changed locked cell of `cells`; empty when
-    `default_branch` is empty."""
+    """The holder in `stacked` (any collection of holders) of each changed locked cell of
+    `cells`; empty when `default_branch` is empty."""
     if not default_branch:
         return []
     return [locks[k] for c in cells if (k := _lock_key(c, locks)) and locks[k] in stacked]
 
 
-def stacked_lines(cells, locks, stacked, default_branch):
-    """One line per holder in `stacked` of a changed cell of `cells`, lowest first, counting its
-    changed locked cells and saying to retarget it to `default_branch`; none when
-    `default_branch` is empty."""
+def stacked_lines(cells, locks, stacked, default_branch, unknown=_NONE):
+    """One line per holder in `stacked` of a changed cell of `cells`, lowest first, naming its
+    chain, counting its changed locked cells and saying to retarget it to `default_branch`;
+    then one per holder in `unknown` (`unknown_marks`) of such a cell, lowest first, naming the
+    reason it cannot tell. None when `default_branch` is empty."""
     held = _stacked_held(cells, locks, stacked, default_branch)
+    unknown_held = _stacked_held(cells, locks, unknown, default_branch)
     return [
-        f"🔒 #{h} is stacked on this pull request and holds {held.count(h)} of its changed "
-        "cell(s); merging this pull request first makes its deploy refuse. Retarget "
-        f"#{h} to {_md_name(default_branch)} and merge it first."
+        f"🔒 #{h} is stacked on this pull request{stacked_through(stacked[h])} and holds "
+        f"{held.count(h)} of its changed cell(s); merging this pull request first makes its "
+        f"deploy refuse. Retarget #{h} to {_md_name(default_branch)} and merge it first."
         for h in sorted(set(held))
+    ] + [
+        f"🔒 could not tell whether #{h} is stacked on this pull request "
+        f"({_md_name(one_line(unknown[h]))})"
+        for h in sorted(set(unknown_held))
     ]
 
 
@@ -404,9 +418,9 @@ def commands(locked, targeted=(), changed=(), stacked=()):
     first one that is not, `shipmate apply` once, worded `to apply the other environments` when
     a targeted line renders, else `to apply this plan`; with `changed` empty, only the bare
     line. Then per environment of `locked` (environment to the holders of its changed locked
-    cells), sorted, its `_evict_line`, unless a holder is in `stacked` (`_stacked_held`), where
-    evict refuses; then `shipmate help`. No line starts with `shipmate`, so the section is not
-    itself a command."""
+    cells), sorted, its `_evict_line`, unless a holder is in `stacked` (the `_stacked_held`
+    holders, stacked or unknown), where evict refuses; then `shipmate help`. No line starts
+    with `shipmate`, so the section is not itself a command."""
     what = "the other environments" if set(changed) & set(targeted) else "this plan"
     bare = f"Comment `shipmate apply` to apply {what}.\n\n"
     lines = [] if changed else [bare]
@@ -706,10 +720,11 @@ def build_comment(
     hints=False,
     locks=None,
     auto="",
-    stacked=frozenset(),
+    stacked=_NONE,
     default_branch="",
     targeted=(),
     superseded=(),
+    unknown=_NONE,
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
     `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block,
@@ -722,8 +737,9 @@ def build_comment(
     otherwise, after every cell is sized, so it never shrinks one. `locks` (`lock_marks`) marks the
     changed cells another pull request holds, and `commands` names their environments, and the
     changed environments of `targeted` in `order`; `stacked` and `default_branch` go to `_plan_line`
-    and `stacked_lines`. Every cell is guaranteed its bare line: the space all headings and bare
-    lines need is reserved up front, so an early giant plan cannot starve a later cell. The free
+    and `stacked_lines`, and `unknown` to `stacked_lines`. Every cell is guaranteed its bare
+    line: the space all headings and bare lines need is reserved up front, so an early giant
+    plan cannot starve a later cell. The free
     room left after the head and every bare line is shared equally among the changed environments'
     first changed cells with plan text, then what is left goes, in comment order, to every changed
     cell on its bare line or a truncated fold-out, until less than MIN_PLAN_CHARS is left. Each of
@@ -739,7 +755,10 @@ def build_comment(
     for line, what in (
         ("\n".join(superseded), "superseded autoplan checks"),
         (auto, "auto apply not started"),
-        ("\n".join(stacked_lines(meta, locks, stacked, default_branch)), "stacked lock holders"),
+        (
+            "\n".join(stacked_lines(meta, locks, stacked, default_branch, unknown)),
+            "stacked lock holders",
+        ),
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
         (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
         (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),
@@ -765,7 +784,7 @@ def build_comment(
     for c in meta:
         if key := _lock_key(c, locks):
             locked.setdefault(c["environment"], []).append(locks[key])
-    held = _stacked_held(meta, locks, stacked, default_branch)
+    held = _stacked_held(meta, locks, stacked.keys() | unknown.keys(), default_branch)
     section = commands(locked, targeted, changed, held)
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
@@ -959,19 +978,37 @@ def lock_marks(raw):
     return {}
 
 
-def stacked_marks(raw):
-    """`cell-lock marks`' `stacked` output `raw` as a frozenset of pull request numbers: empty
-    when `raw` is empty, and empty with one warning when it is not a JSON list of ints."""
+def _holder_map(raw, ok, what):
+    """`raw`, a JSON object keyed by pull request number, as `{int: value}`: `{}` when `raw` is
+    empty, and `{}` with one warning naming `what` when it is not an object, a key is not a
+    pull request number (JSON keys are strings) or a value fails `ok`."""
     if not raw:
-        return frozenset()
+        return {}
     value = json_or_none(raw)
-    if isinstance(value, list) and all(type(h) is int for h in value):
-        return frozenset(value)
+    if isinstance(value, dict) and all(is_pr_number(h) and ok(v) for h, v in value.items()):
+        return {int(h): v for h, v in value.items()}
     print(
-        "::warning::the stacked lock holders are not a JSON list of pull request numbers; the "
-        "plan comment names none as stacked"
+        f"::warning::the {what} are not a JSON map of pull request numbers; the plan comment "
+        "names none"
     )
-    return frozenset()
+    return {}
+
+
+def stacked_marks(raw):
+    """`cell-lock marks`' `stacked` output `raw`, `{"<holder>": [chain]}`, as `{holder: chain
+    tuple}` (`_holder_map`)."""
+    chains = _holder_map(
+        raw,
+        lambda v: isinstance(v, list) and all(type(n) is int for n in v),
+        "stacked lock holders",
+    )
+    return {h: tuple(chain) for h, chain in chains.items()}
+
+
+def unknown_marks(raw):
+    """`cell-lock marks`' `stacked_unknown` output `raw`, `{"<holder>": "<reason>"}`, as
+    `{holder: reason}` (`_holder_map`)."""
+    return _holder_map(raw, lambda v: isinstance(v, str), "lock holders of unknown stacking")
 
 
 CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
@@ -1085,6 +1122,7 @@ def main():
     )
     locks = lock_marks(os.environ.get("SHIPMATE_LOCKS", ""))
     stacked = stacked_marks(os.environ.get("SHIPMATE_STACKED", ""))
+    unknown = unknown_marks(os.environ.get("SHIPMATE_STACKED_UNKNOWN", ""))
     default_branch = os.environ.get("SHIPMATE_DEFAULT_BRANCH", "")
     body, named, lost_named = build_comment(
         cells,
@@ -1111,6 +1149,7 @@ def main():
         default_branch=default_branch,
         targeted=targeted,
         superseded=_superseded(rows),
+        unknown=unknown,
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

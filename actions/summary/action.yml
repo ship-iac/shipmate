@@ -9,9 +9,11 @@ inputs:
     required: true
   head-ref:
     description: >-
-      The pull request's head branch name (pr-facts' `head-ref`). A lock holder whose base branch
-      is this one is stacked on this pull request; the plan comment and a pending gate say to
-      retarget it to the default branch. Empty finds no holder stacked.
+      The pull request's head branch name (pr-facts' `head-ref`). A lock holder is stacked on this
+      pull request when a chain of open or merged pull requests leads from its base branch to
+      this one, at any depth; the plan comment and a pending gate say to retarget it to the
+      default branch, and a holder whose walk is cut short is named as one it cannot tell. Empty
+      finds no holder stacked.
     required: false
     default: ""
   detect-result:
@@ -102,7 +104,7 @@ inputs:
       `targeted-envs` environment holding a changed cell, `shipmate apply` when a changed cell
       sits outside all of them, `shipmate unlock <env> --evict` for each environment holding a
       changed cell another pull request holds, unless a holder there is stacked on this pull
-      request, and `shipmate help`, when a cell changed and the
+      request or cannot be told apart from one, and `shipmate help`, when a cell changed and the
       pull request is not a draft. Anything else (empty when detect is skipped) leaves it out.
     required: false
     default: ""
@@ -326,6 +328,7 @@ runs:
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_CELLS: ${{ inputs.planned-cell-names }}
         SHIPMATE_HEAD_REF: ${{ inputs.head-ref }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       run: |
         set -euo pipefail
         # Reviewer-facing only, so it degrades: no `locks` output renders no marker, and the gate
@@ -361,6 +364,7 @@ runs:
         SHIPMATE_DOCTOR_WARNINGS: ${{ steps.doctor.outputs.warnings }}
         SHIPMATE_LOCKS: ${{ steps.marks.outputs.locks }}
         SHIPMATE_STACKED: ${{ steps.marks.outputs.stacked }}
+        SHIPMATE_STACKED_UNKNOWN: ${{ steps.marks.outputs.stacked_unknown }}
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}

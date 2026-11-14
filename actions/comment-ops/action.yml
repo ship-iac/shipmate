@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. `shipmate unlock <env> --evict` (route `evict`) is carried out here; it deletes the cell locks other pull requests hold on stacks whose App-authored apply check on this pull request's head in `<env>` is pending, tells each holder, and replies; it releases nothing and replies `refused` when a holder is stacked on this pull request, and `failed` when a holder cannot be read. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
+description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. `shipmate unlock <env> --evict` (route `evict`) is carried out here; it deletes the cell locks other pull requests hold on stacks whose App-authored apply check on this pull request's head in `<env>` is pending, tells each holder, and replies; it releases nothing and replies `refused` when a holder is stacked on this pull request at any depth or its walk runs out of pages, and `failed` when a holder or a listing its walk needs cannot be read. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -408,7 +408,8 @@ runs:
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/evict-reply"
 
     - name: "Evict: refused"
-      # A holder stacked on this pull request blocks the eviction; commenting again cannot pass.
+      # A holder stacked on this pull request, or one whose walk ran out of pages, blocks the
+      # eviction; commenting again cannot pass.
       if: ${{ failure() && steps.evict.outputs.blocked == 'true' }}
       shell: bash
       env:
