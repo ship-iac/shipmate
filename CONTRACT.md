@@ -197,8 +197,14 @@ completed same-head duplicate is never relinked or retitled. A cell with no such
 id refuses the run before wave0.
 
 1. Created `queued` by `actions/summary`, titled with the plan's counts, its
-   summary the plan. The `external_id` record also carries that title as
-   `title`.
+   summary the plan. Its `external_id` is a compact JSON record of the id of
+   the plan run that produced the cell (`plan_run`), the number of the pull
+   request that run planned (`pr`), the digest of that cell's plan text
+   (`plan_sha256`), the number of cells that run planned (`cells`), the plan
+   run's event action (`action`, empty when its payload names none, as a
+   `shipmate plan` dispatch's does; §`apply_mode: auto` reads it) and the
+   check's title (`title`). GitHub keeps 255 characters of an `external_id`, so
+   a record over that refuses the plan summary.
 2. Flipped to `in_progress` by the wave's `waveN-release` job right before the
    wave, its details link set to the apply run. The flip writes the status and
    the link only, one check at a time. Each wave needs its release, and each
@@ -3600,8 +3606,8 @@ exactly like the plan artifact, never reverse-parsed). Consumers download it
 with the glob pattern `cell-summary.*`. It contains verbatim:
 
 - `cell.json` — keys `stack` (the Terramate stack path, displayed and fed to the
-  check-name construction), `environment`, `changed`
-  (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
+  check-name construction), `environment` and `changed`
+  (boolean); written by `plan-cell` at plan time. `changed`
   comes from `scripts/plan-classify`; the cell line's add, change, destroy,
   import and forget counts come from `plan.txt`'s single column-0 OpenTofu
   tally line (tofu omits a zero import or forget count), or are zero when the
@@ -4134,12 +4140,7 @@ run that already ended without its result.
 
 ## Apply-match fingerprint
 
-Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
-check, the `external_id` JSON record holds it alongside the id of the plan run
-that produced the cell, the number of the pull request that run planned, the
-digest of that cell's plan text, the number of cells that run planned, below,
-and `action`, the plan run's event action, empty when its payload names none, as
-a `shipmate plan` dispatch's does; §`apply_mode: auto` reads it):
+Each plan stores a fingerprint (`fingerprint.txt` in the artifact):
 `sha256` over the sorted JSON of every non-empty
 `TF_VAR_*` environment variable (name→value) plus `TF_WORKSPACE` when it is set.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty
@@ -4172,7 +4173,8 @@ to the plan-run binding the apply path already carries: each cell's plan run
 is read from an App-authored apply check on that same head, so no plan run from
 another head can be named. That binding bounds which plan run may be
 applied; this one binds each individual plan to the tree it was produced from.
-Two open pull requests can share one head commit, so the record's `pr` field
+Two open pull requests can share one head commit, so the apply check's
+`external_id` record (§Apply check lifecycle) carries a `pr` field that
 binds the plan to its pull request as well: the targeted and the bare apply
 refuse, at detect, a cell they would apply whose record names another pull
 request than the dispatch, or none, and the remedy is a re-plan on that pull
