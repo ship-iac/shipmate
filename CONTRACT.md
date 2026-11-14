@@ -1691,7 +1691,9 @@ pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 Then `queue` reads the pull request's live head, the jobs of each trusted run's
 latest attempt, and the head again. A trusted run whose title names another head
 is stale, and `queue` cancels it only when its jobs listing is complete, both
-head reads agree, and its `run` call (jobs listed `<caller> / run / ...`) either:
+head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
+cell is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments, so a
+caller job name containing ` / ` never matches and such a run is kept) either:
 
 - (a) waits for `shipmate-apply-<pr_number>`: its job named exactly
   `<caller> / run / review` is `pending`, so no job of this attempt inside the
@@ -1699,9 +1701,10 @@ head reads agree, and its `run` call (jobs listed `<caller> / run / ...`) either
 - (b) waits on environment approval: every unfinished job of the call is a wave
   cell (`<caller> / run / L<n> / <env> / <stack>`) listed `waiting`.
 
-Anything else keeps the run, whatever its status. A `pending` job past `review`
-keeps it because a cancelled `summary` drops the apply comment and the gate
-refresh; a stale run's later cells are refused by `pre-apply` either way. `guard`, `queue` and `outcome` sit outside the group and are not
+Anything else keeps the run, whatever its status. A run past `review` with a job
+`pending` on its own concurrency group is kept: the engine cancels only a run
+whose call has not started or whose only unfinished jobs are wave cells waiting
+on approval. `guard`, `queue` and `outcome` sit outside the group and are not
 counted. A runs listing with a failed or malformed page or a
 malformed run (an `id` that is not a number, a title or event that is not text),
 an App-dispatched run whose title does not parse, or a failed head read cancels

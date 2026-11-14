@@ -10,9 +10,9 @@ consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's en
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
 run, read the head again. A trusted run whose title names another head is stale, and is
-cancelled only when its jobs listing is complete, both head reads agree, and its call either
-waits for the group (its `review` is `pending`) or has every unfinished job `waiting` on an
-environment's approval. An incomplete runs listing or a failed head read cancels nothing, and
+cancelled only when its jobs listing is complete, both head reads agree, and its call's
+`review` waits for the group, or every unfinished job of the call is a wave cell `waiting` on
+an environment's approval. An incomplete runs listing or a failed head read cancels nothing, and
 a failed first head read skips the jobs reads. An untrusted run is never cancelled.
 
 Writes, a cancel or the reply, happen only when this run's `actor` and `triggering_actor` are
@@ -46,7 +46,8 @@ _WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
-#: A wave cell of the call, `<caller> / run / L<n> / <env> / <stack>` (`apply-gate.is_cell_job`).
+#: A wave cell of the call is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments;
+#: a caller job name containing ` / ` never matches, so such a run is kept.
 _LEVEL = re.compile(r"L[0-9]+")
 
 

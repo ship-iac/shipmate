@@ -363,7 +363,8 @@ def _stale(jobs):
 
 def test_a_run_whose_summary_waits_after_its_cells_applied_is_kept(gh):
     """`summary` `pending` on its gate-writer group: cancelling would drop the apply comment
-    and the gate refresh. Mutation: `idle` admits `pending` past `review` -- red."""
+    and the gate refresh. Mutation: a non-cell unfinished job no longer keeps the run
+    (`not _is_cell(j) or j["status"] == "waiting"` in `idle`) -- red."""
     gh.runs, gh.jobs = _stale(
         [_rv("completed"), _job("L0 / dev / app", "completed"), _job("summary", "pending")]
     )
