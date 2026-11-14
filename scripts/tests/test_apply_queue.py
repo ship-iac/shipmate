@@ -69,14 +69,15 @@ def gh(monkeypatch):
         monkeypatch.setenv(k, v)
 
     class Rec:
-        runs, complete, jobs, heads, own_ref = [], True, {}, [_HEAD, _HEAD], _HEAD
+        runs, complete, jobs, heads, own_ref, own_row = [], True, {}, [_HEAD, _HEAD], _HEAD, True
         cancels, posts, job_reads = [], [], []
 
     rec = Rec()
 
     def apply_runs(repo, wf, pr, slug):
         assert (repo, wf, pr, slug) == ("o/r", "shipmate.yml", "7", "shipmate-iac")
-        return [*rec.runs, _r(50, ref=rec.own_ref, status="in_progress")], rec.complete
+        own = [_r(50, ref=rec.own_ref, status="in_progress")] if rec.own_row else []
+        return [*rec.runs, *own], rec.complete
 
     def run_jobs(repo, run_id):
         rec.job_reads.append(run_id)
@@ -451,3 +452,22 @@ def test_a_run_not_at_the_live_head_cancels_nothing(gh):
     gh.go()
     assert gh.cancels == []
     assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_a_run_missing_from_its_own_listing_cancels_nothing(gh):
+    """Its own ref is unknown, so a stale peer waiting for the group stays. Mutation: default
+    `own_ref` to `head` (`(own_ref or head) != head`) -- red (40 cancelled)."""
+    gh.own_row = False
+    gh.runs, gh.jobs = _stale([_rv("pending")])
+    gh.go()
+    assert gh.cancels == []
+
+
+def test_a_run_at_an_older_head_cancels_no_peer_at_a_third_head(gh):
+    """This run at `_OLD`, its peer at `_NEW`, the live head `_HEAD`: the peer is not at this
+    run's ref, yet this run is not at the live head either. Mutation: replace the own-ref guard
+    with a filter dropping peers whose `ref` equals `own_ref` -- red (40 cancelled)."""
+    gh.own_ref = _OLD
+    gh.runs, gh.jobs = [_r(40, ref=_NEW)], {40: ([_rv("pending")], True)}
+    gh.go()
+    assert gh.cancels == []
