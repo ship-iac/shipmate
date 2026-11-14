@@ -34,15 +34,12 @@ def main(args=()):
         raise SystemExit(
             f"::error::plan-cell-summary takes no argument or --step-line, got {list(args)}"
         )
-    with open("fingerprint.txt", encoding="utf-8") as fh:
-        fingerprint = fh.read().strip()
     with open("cell.json", "w") as fh:
         json.dump(
             {
                 "stack": os.environ["STACK"],
                 "environment": os.environ["ENV"],
                 "changed": os.environ["CHANGED"] == "true",
-                "fingerprint": fingerprint,
             },
             fh,
         )

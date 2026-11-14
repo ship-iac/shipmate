@@ -77,7 +77,7 @@ UNLOCK_INPUTS = {
 #: in reds on the job list as well as on the action check below: a guard that only looks for a
 #: forbidden action name passes whenever the leaked job reaches for a different one.
 APPLY_JOBS = {
-    APPLY: {"guard", "queue", "run", "outcome"},
+    APPLY: {"guard", "claim", "queue", "run", "outcome"},
     APPLY_RUN: {
         "review",
         "detect",
@@ -95,7 +95,7 @@ UNLOCK_JOBS = {"guard", "detect", "unlock"}
 #: a reordered or added step must. This is the positive form of "calls nothing from the apply
 #: family" -- there is no room in the list for one. The one checkout is the consumer's tree.
 UNLOCK_STEP_ACTIONS = {
-    "guard": [],
+    "guard": [local_action("unlock-rocket")],
     "detect": [
         "actions/checkout",
         local_action("setup"),

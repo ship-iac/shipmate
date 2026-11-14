@@ -1,0 +1,61 @@
+name: shipmate claim
+description: Claim a commented plan or apply run's command with the shipmate App's rocket reaction on its comment (scripts/claim). Mints a shipmate App installation token with pull-requests write and actions read. Outputs `state` `owned` when this run created the reaction and `taken` when another run of the comment already had; the calling workflow runs its work only on `owned`. With `owner-job`, a re-run of every job of a run whose earlier attempt ran that job reads `owned` again, since the re-run deleted that attempt's artifacts. Fails, with no reaction written, when the comment id or pull request number is malformed or the run's actor is not the App; fails after replying on the pull request when the reaction write answers anything else.
+inputs:
+  verb:
+    description: The command the run answers, `plan` or `apply`; names the reply header.
+    required: true
+  environment:
+    description: The targeted apply's environment, shown in the reply header. Empty for a plan or a bare apply.
+    required: false
+    default: ""
+  pr-number:
+    description: Pull request number to reply on.
+    required: true
+  comment-id:
+    description: The command comment's id, the dispatch's `comment_id`.
+    required: true
+  owner-job:
+    description: The job id the claim gates (`plan.yml` passes `facts`). Empty, as `apply.yml` leaves it, never reads earlier attempts.
+    required: false
+    default: ""
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+outputs:
+  state:
+    description: "`owned` or `taken`; empty when the claim failed."
+    value: ${{ steps.claim.outputs.state }}
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-pull-requests: write
+        # Lists earlier attempts' jobs; a subset of the manifest's `actions: write`.
+        permission-actions: read
+    - name: Claim the command's comment
+      id: claim
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        COMMENT_ID: ${{ inputs.comment-id }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        SHIPMATE_OWNER_JOB: ${{ inputs.owner-job }}
+        SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/claim"

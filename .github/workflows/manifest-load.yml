@@ -43,6 +43,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/cell-init@main
       - if: false
+        uses: ship-iac/shipmate/actions/claim@main
+      - if: false
         uses: ship-iac/shipmate/actions/comment-ops@main
       - if: false
         uses: ship-iac/shipmate/actions/deploy-detect@main
@@ -80,6 +82,8 @@ jobs:
         uses: ship-iac/shipmate/actions/unlock-cell@main
       - if: false
         uses: ship-iac/shipmate/actions/unlock-detect@main
+      - if: false
+        uses: ship-iac/shipmate/actions/unlock-rocket@main
       - if: false
         uses: ship-iac/shipmate/actions/verify-app-key@main
       - if: false

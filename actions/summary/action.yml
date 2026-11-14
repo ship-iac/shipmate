@@ -672,15 +672,22 @@ runs:
           GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
             python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
         }
+        # not_started <what> [remedy]: a skew remedy replaces the advice to comment, which would
+        # meet the same skew.
         not_started() {
           echo "::warning::$1 for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
-          reply failed "auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          if [ -n "${2:-}" ]; then
+            reply failed "auto apply not started: the dispatch failed. $2"
+          else
+            reply failed "auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          fi
           exit 0
         }
         [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
         rc=0
-        # Exit codes are documented in scripts/dispatch-body.
-        python3 "$scripts/dispatch-body" >/dev/null || rc=$?
+        # Exit codes are documented in scripts/dispatch-body; on exit 1 stdout is the skew remedy
+        # or empty.
+        out=$(python3 "$scripts/dispatch-body") || rc=$?
         if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
           echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS answered with an error, and an auto run may have started; check the Actions tab before commenting shipmate apply"
           # Exit 3 saw a run start, so it is a notice, as in comment-ops; exit 4 cannot tell.
@@ -688,5 +695,5 @@ runs:
           reply "$outcome" "auto apply may have started: the dispatch answered with an error; check the Actions tab before commenting \`shipmate apply\`"
           exit 0
         fi
-        [ "$rc" -eq 0 ] || not_started "the auto apply dispatch"
+        [ "$rc" -eq 0 ] || not_started "the auto apply dispatch" "$out"
         echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"

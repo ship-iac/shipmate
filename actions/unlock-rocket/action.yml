@@ -1,0 +1,15 @@
+name: shipmate unlock-rocket
+description: Mark a dispatched unlock started with a rocket reaction on its command comment, written with the job token (scripts/claim --display). Display only, gating nothing; writes nothing when the comment id is malformed, and only warns when the write fails. The calling job needs pull-requests write.
+inputs:
+  comment-id:
+    description: The command comment's id, the dispatch's `comment_id`.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Mark the command started
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        COMMENT_ID: ${{ inputs.comment-id }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/claim" --display

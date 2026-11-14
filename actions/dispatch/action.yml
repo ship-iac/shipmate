@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. An unlock dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id; plan and apply runs answer on the pull request themselves. `scripts/dispatch-body` sends the dispatch and retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out. A failed dispatch of any verb posts a failure reply that says whether a run may have started; one followed by a shipmate.yml run posts a notice reply and passes. Every reply only warns when it cannot be posted.
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. An unlock dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id; plan and apply runs answer on the pull request themselves. `scripts/dispatch-body` sends the dispatch and retries a transient failure unless this command's run, dispatched by the App, is listed, or the listing cannot be read. A failed dispatch of any verb posts a failure reply that says whether a run may have started, and names the remedy when the answer shows a shipmate.yml older than the engine; one whose run is listed posts a notice reply and passes. Every reply only warns when it cannot be posted.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -18,7 +18,10 @@ inputs:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
     required: true
   pr-number:
-    description: PR number the dispatched run belongs to; the plan body carries it beside the verb alone, and the unlock body not at all.
+    description: PR number the dispatched run belongs to; the plan body carries it beside the verb and the comment id alone, and the unlock body not at all.
+    required: true
+  comment-id:
+    description: The command comment's id, sent as `comment_id` in every body. The dispatched plan or apply run claims the comment with it, so a second run of one comment does no work; the unlock run reacts on it.
     required: true
 runs:
   using: composite
@@ -43,6 +46,8 @@ runs:
       # a shell heredoc with interpolation, so injection-safe.
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        # The retry trusts a listed run's title only when this App dispatched it.
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
         # `ref` picks which branch's copy of shipmate.yml runs. The default branch's copy is the
         # reviewed one (a head ref runs the PR author's), and only it passes the shipmate-engine
         # environment's branch policy.
@@ -51,6 +56,7 @@ runs:
         VERB: ${{ inputs.verb }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        COMMENT_ID: ${{ inputs.comment-id }}
         # The App token above is minted `actions: write` and cannot comment; the calling job
         # already holds `pull-requests: write` for comment-ops' own refusals.
         COMMENT_TOKEN: ${{ github.token }}
@@ -65,13 +71,11 @@ runs:
         # so the pull request would show nothing. A reply that fails only warns: it cannot mask
         # the status.
 
-        # Measured skew answers: no file `HTTP 404`, no trigger `'workflow_dispatch' trigger`, fewer
-        # inputs `Unexpected inputs provided`. Anything else is not skew.
-        say_skew() {
-          if [[ "$err" == *"HTTP 404"* || "$err" == *"'workflow_dispatch' trigger"* || "$err" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
-        }
+        # say_no_run_started [remedy]: the remedy replaces the pointer to the log.
         say_no_run_started() {
-          reply failed "the command was authorized, but dispatching its workflow failed, so no run started. The error is in this run's log." \
+          local why="${1:-}"
+          [ -n "$why" ] || why="The error is in this run's log."
+          reply failed "the command was authorized, but dispatching its workflow failed, so no run started. $why" \
             || echo "::warning::could not post the dispatch failure reply"
         }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
@@ -89,18 +93,25 @@ runs:
           plan|apply|unlock) ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
+        # dispatch-body takes an empty id on a plan as the comment-less replan, which no comment sends.
+        if [ -z "${COMMENT_ID:-}" ]; then
+          echo "::error::The engine's comment-ops.yml passed no comment-id to shipmate/actions/dispatch, so the dispatched run could not claim its comment; nothing was dispatched. This is an engine defect: report it."
+          say_no_run_started
+          exit 1
+        fi
         errfile=$(mktemp) || { echo "::error::could not create a temporary file for the dispatch"; say_no_run_started; exit 1; }
         trap 'rm -f -- "$errfile"' EXIT
         rc=0
-        # stdout alone is the API's answer, parsed below; dispatch-body writes a failure to stderr.
-        # Exit codes are documented in scripts/dispatch-body.
+        # On success stdout is the API's answer, parsed below; on exit 1 it is the skew remedy or
+        # empty, which the reply carries. dispatch-body writes a failure to stderr. Exit codes are
+        # documented in scripts/dispatch-body.
         out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" 2>"$errfile") || rc=$?
         err=$(<"$errfile")
-        [ -z "$out" ] || printf '%s\n' "$out"
+        [ "$rc" -ne 0 ] || [ -z "$out" ] || printf '%s\n' "$out"
         [ -z "$err" ] || printf '%s\n' "$err"
         if [ "$rc" -eq 3 ]; then
-          echo "::warning::the dispatch answered with an error, but a shipmate.yml run started since it; not retried"
-          reply notice "the dispatch answered with an error, but a shipmate.yml run started since it; it may be this command's. Check the Actions tab before commenting again." \
+          echo "::warning::the dispatch answered with an error, but this command's run is listed; not retried"
+          reply notice "the dispatch answered with an error, but this command's run is listed in the Actions tab, so it was not dispatched again." \
             || echo "::warning::could not post the dispatch reply"
           exit 0
         fi
@@ -112,8 +123,7 @@ runs:
         fi
         if [ "$rc" -ne 0 ]; then
           echo "::error::dispatching shipmate.yml failed, so no run started"
-          say_skew
-          say_no_run_started
+          say_no_run_started "$out"
           exit "$rc"
         fi
         if [ "$VERB" = plan ]; then

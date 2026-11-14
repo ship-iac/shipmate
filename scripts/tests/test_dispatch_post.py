@@ -1,5 +1,6 @@
 """Tests for `dispatch-body`: one `workflow_dispatch` POST, retried on a transient failure
-unless a `shipmate.yml` run created since `t0` may be this dispatch's."""
+unless a listed `shipmate.yml` run may be this dispatch's: for a comment-less dispatch any
+`workflow_dispatch` run created since `t0`, for a commented one the App's run of this command."""
 
 import json
 from datetime import UTC, datetime, timedelta
@@ -29,7 +30,7 @@ LIST = (
 BODY = json.dumps(
     {
         "ref": "main",
-        "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"},
+        "inputs": {"verb": "auto", "ref": "abc123", "pr_number": "42"},
         "return_run_details": True,
     }
 )
@@ -52,16 +53,18 @@ def row(created_at, title=f"shipmate · apply pr=42 ref={HEAD} comment="):
 @pytest.fixture
 def calls(monkeypatch):
     """The ordered log of POSTs (`(argv, stdin)`), listings (`argv`) and sleeps (`("sleep", s)`)
-    of one `post`, its env set and its clock fixed at `NOW`."""
+    of one comment-less `auto` `post`, its env set and its clock fixed at `NOW`."""
     for name, value in {
         "GITHUB_REPOSITORY": "acme/demo",
-        "VERB": "apply",
+        "VERB": "auto",
         "REF": "abc123",
         "PR_NUMBER": "42",
         "ENVIRONMENT": "",
         "DISPATCH_REF": "main",
+        "SHIPMATE_APP_SLUG": "shipmate-app",
     }.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.delenv("COMMENT_ID", raising=False)
     monkeypatch.setattr(db, "_now", lambda: NOW)
     log = []
     monkeypatch.setattr(_shipmate, "_sleep", lambda s: log.append(("sleep", s)))
@@ -112,10 +115,10 @@ def test_a_2xx_posts_once_and_prints_the_answer(calls, monkeypatch, capsys):
 def test_a_4xx_on_the_first_attempt_posts_once_and_exits_1(calls, monkeypatch, capsys):
     """A 4xx cannot have landed, so it is neither listed for nor retried. Mutation: add
     `HTTP 4\\d\\d` to `_shipmate.TRANSIENT` -> a listing and a second POST follow."""
-    answering(monkeypatch, calls, [SystemExit(NOT_FOUND), ANSWER], [""])
+    answering(monkeypatch, calls, [SystemExit(FORBIDDEN), ANSWER], [""])
     code, out, err = post(capsys)
     assert (code, out, calls) == (1, "", [SENT])
-    assert err == NOT_FOUND + "\n"
+    assert err == FORBIDDEN + "\n"
 
 
 def test_a_transient_failure_lists_then_retries(calls, monkeypatch, capsys):
@@ -269,3 +272,292 @@ def test_an_argument_refuses_before_any_call(calls, monkeypatch, argv):
         db.main(argv)
     assert exc.value.code == "::error::usage: dispatch-body"
     assert calls == []
+
+
+def test_a_skew_answer_after_a_transient_failure_prints_no_hint(calls, monkeypatch, capsys):
+    """A later 422 does not show that no run started, so exit 4 carries no remedy. Mutation:
+    print `skew_hint` before the `UNDETERMINED` exit -> stdout carries it."""
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), SystemExit(UNPROCESSABLE)], [""])
+    assert post(capsys)[:2] == (db.UNDETERMINED, "")
+
+
+# The skew remedy (exit 1): stdout carries it for the reply, stderr annotates it.
+
+#: Hand-written whole remedies.
+INPUTS_HINT = (
+    "This repository's .github/workflows/shipmate.yml does not declare every input this "
+    "engine's dispatch sends, so it is older than the engine pin. Write the published file over "
+    "it with `python <engine>/scripts/repin <consumer> <tag> --write-fence`."
+)
+LAYOUT_HINT = (
+    "This repository has no .github/workflows/shipmate.yml, or that file declares no "
+    "workflow_dispatch trigger. docs/getting-started.md publishes it; re-pinning cannot create it."
+)
+NO_TRIGGER = (
+    "command failed (1): gh api x\n"
+    "gh: Workflow does not have 'workflow_dispatch' trigger (HTTP 422)"
+)
+
+
+def test_an_auto_dispatch_to_a_fence_without_its_inputs_names_repin(calls, monkeypatch, capsys):
+    """The auto dispatch prints the remedy too, since the classifier lives here. Mutations: return
+    the layout hint for `Unexpected inputs provided`; drop the `::error::` print -> stderr ends at
+    gh's message; drop the stdout write -> the reply cannot carry it."""
+    answering(monkeypatch, calls, [SystemExit(UNPROCESSABLE)])
+    assert (post(capsys), calls) == (
+        (1, INPUTS_HINT, f"{UNPROCESSABLE}\n::error::{INPUTS_HINT}\n"),
+        [SENT],
+    )
+
+
+@pytest.mark.parametrize("answer", [NOT_FOUND, NO_TRIGGER])
+def test_a_missing_file_or_trigger_prints_the_layout_hint(calls, monkeypatch, capsys, answer):
+    """Mutations: drop either `_LAYOUT_ANSWERS` entry -> its shape prints no hint."""
+    answering(monkeypatch, calls, [SystemExit(answer)])
+    assert post(capsys) == (1, LAYOUT_HINT, f"{answer}\n::error::{LAYOUT_HINT}\n")
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "command failed (1): gh api x\ngh: Required input 'plan_run_id' not provided (HTTP 422)",
+        "command failed (1): gh api Unexpected inputs provided HTTP 404\ngh: Forbidden (HTTP 403)",
+    ],
+)
+def test_another_failure_has_no_skew_hint(message):
+    """A 422 about another input is not skew, and the argv line is not gh's answer. Mutations:
+    match any `HTTP 422`; read the whole message, argv line included."""
+    assert db.skew_hint(message) == ""
+
+
+# A commented dispatch: the retry stops on this command's run, dispatched by the App.
+
+SLUG = "shipmate-app"
+#: Hand-written whole listing argv values.
+JQ = ".workflow_runs[] | {created_at, event, display_title, actor: .actor.login} | tojson"
+PAGE_1 = ("gh", "api", "repos/acme/demo/actions/workflows/shipmate.yml/runs?per_page=100&page=1")
+PAGE_1 += ("--jq", JQ)
+PAGE_2 = ("gh", "api", "repos/acme/demo/actions/workflows/shipmate.yml/runs?per_page=100&page=2")
+PAGE_2 += ("--jq", JQ)
+SLEPT_1 = ("sleep", 1)
+#: Per verb: the env the dispatch action sets, the body it sends and its run's title.
+COMMANDS = {
+    "plan": (
+        # `REF` set, as a caller may pass one: the plan body and title still carry none.
+        {"VERB": "plan", "PR_NUMBER": "42", "REF": HEAD, "ENVIRONMENT": ""},
+        {"verb": "plan", "pr_number": "42", "comment_id": "99"},
+        "shipmate · plan pr=42 ref= comment=99",
+    ),
+    "apply": (
+        {"VERB": "apply", "PR_NUMBER": "42", "REF": HEAD, "ENVIRONMENT": "dev-eu"},
+        {
+            "verb": "apply",
+            "ref": HEAD,
+            "pr_number": "42",
+            "environment": "dev-eu",
+            "comment_id": "99",
+        },
+        f"shipmate · apply pr=42 ref={HEAD} comment=99",
+    ),
+    "unlock": (
+        {"VERB": "unlock", "PR_NUMBER": "42", "REF": HEAD, "ENVIRONMENT": "dev-eu"},
+        {"verb": "unlock", "ref": HEAD, "environment": "dev-eu", "comment_id": "99"},
+        f"shipmate · unlock pr= ref={HEAD} comment=99",
+    ),
+}
+UNLOCK_TITLE = COMMANDS["unlock"][2]
+
+
+def command(monkeypatch, log, verb, slug=SLUG):
+    """Set the env of a commented `verb` dispatch and a clock that each sleep advances; return
+    the POST as `answering` logs it."""
+    env, inputs, _ = COMMANDS[verb]
+    for name, value in {**env, "COMMENT_ID": "99", "SHIPMATE_APP_SLUG": slug}.items():
+        monkeypatch.setenv(name, value)
+    clock = [NOW]
+
+    def sleep(s):
+        log.append(("sleep", s))
+        clock[0] += timedelta(seconds=s)
+
+    monkeypatch.setattr(db, "_now", lambda: clock[0])
+    monkeypatch.setattr(_shipmate, "_sleep", sleep)
+    return (POST, json.dumps({"ref": "main", "inputs": inputs, "return_run_details": True}))
+
+
+def run_row(title, actor=f"{SLUG}[bot]", event="workflow_dispatch", created_at=T0):
+    return json.dumps(
+        {"created_at": created_at, "event": event, "display_title": title, "actor": actor}
+    )
+
+
+#: The listings and sleeps of a window in which nothing matches: the first read 2 s after the
+#: failed attempt, then one each second until 10 s after it.
+WINDOW = [SLEPT_2, PAGE_1] + [SLEPT_1, PAGE_1] * 8
+
+
+def test_a_lost_unlock_response_followed_by_its_listed_run_posts_once(calls, monkeypatch, capsys):
+    """An unlock's title carries no pull request and its ref. Mutation: `_command_title` puts
+    `PR_NUMBER` in the pr slot for unlock too -> its run is missed and the dispatch is sent
+    again."""
+    sent = command(monkeypatch, calls, "unlock")
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [run_row(UNLOCK_TITLE)])
+    assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1])
+
+
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_a_lost_response_followed_by_its_listed_run_posts_once(calls, monkeypatch, capsys, verb):
+    """Mutations: `_command_title` puts `REF` in the ref slot for plan too -> the plan run is
+    missed; drop the `comment` key from `_command_title` -> no title matches."""
+    sent = command(monkeypatch, calls, verb)
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [run_row(COMMANDS[verb][2])])
+    assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1])
+
+
+def test_a_run_listed_on_a_later_read_stops_the_retry(calls, monkeypatch, capsys):
+    """The listing lags the POST, so it is read again each second. Mutation: read it once ->
+    the run listed on the third read is missed and the dispatch is sent again."""
+    sent = command(monkeypatch, calls, "apply")
+    answering(
+        monkeypatch,
+        calls,
+        [SystemExit(BAD_GATEWAY), ANSWER],
+        ["", "", run_row(COMMANDS["apply"][2])],
+    )
+    assert (post(capsys)[0], calls) == (
+        db.MAY_HAVE_STARTED,
+        [sent, SLEPT_2, PAGE_1, SLEPT_1, PAGE_1, SLEPT_1, PAGE_1],
+    )
+
+
+def test_a_foreign_actors_run_with_this_title_does_not_stop_the_retry(calls, monkeypatch, capsys):
+    """The title is consumer-authored; only the App's run counts. The whole call log also pins
+    the window. Mutations: drop the actor check -> the retry stops; `_LIST_WINDOW` of 5 s ->
+    fewer reads."""
+    sent = command(monkeypatch, calls, "apply")
+    title = COMMANDS["apply"][2]
+    answering(
+        monkeypatch,
+        calls,
+        [SystemExit(BAD_GATEWAY), ANSWER],
+        [run_row(title, actor="someone[bot]")] * 9,
+    )
+    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        run_row(f"shipmate · apply pr=42 ref={HEAD} comment=98"),
+        run_row(f"shipmate · apply pr=43 ref={HEAD} comment=99"),
+        run_row("shipmate · plan pr=42 ref= comment=99"),
+        run_row("shipmate · apply pr=42 ref=" + "1" * 40 + " comment=99"),
+        run_row(f"shipmate · apply pr=42 ref={HEAD} comment=99", event="repository_dispatch"),
+        run_row(f"shipmate · apply pr=42 ref={HEAD} comment=99", actor=None),
+    ],
+)
+def test_a_run_of_another_command_does_not_stop_the_retry(calls, monkeypatch, capsys, listed):
+    """Each row differs from this apply's run in one field: comment, pull request, verb, ref,
+    event, actor. Mutations: compare only the verb and comment of the title; drop the event
+    check."""
+    sent = command(monkeypatch, calls, "apply")
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [listed] * 9)
+    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
+
+
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_a_commented_dispatch_without_the_slug_is_refused_before_any_post(
+    calls, monkeypatch, capsys, verb
+):
+    """Without the App's slug the run a lost answer started could not be found among the
+    listed runs, so the dispatch is refused at startup, as a wiring defect, and sends nothing.
+    Mutation: drop the startup refusal in `main` -> the dispatch is sent."""
+    command(monkeypatch, calls, verb, slug="")
+    answering(monkeypatch, calls, [ANSWER])
+    refusal = (
+        "::error::SHIPMATE_APP_SLUG is empty on a commented dispatch, so a run it started could "
+        "not be found after a lost answer; nothing was dispatched. This is an engine wiring "
+        "defect: actions/dispatch passes the slug of the App token it minted."
+    )
+    assert post(capsys) == (refusal, "", "")
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"VERB": "plan", "PR_NUMBER": "42"},
+        {"VERB": "auto", "PR_NUMBER": "42", "REF": HEAD},
+    ],
+    ids=["replan", "auto"],
+)
+def test_a_comment_less_dispatch_needs_no_slug(calls, monkeypatch, capsys, env):
+    """The replan and `auto` read no title. Mutation: refuse an empty slug on every dispatch;
+    refuse it when `VERB` is `auto` (the auto row reddens)."""
+    for name, value in {**env, "COMMENT_ID": "", "SHIPMATE_APP_SLUG": ""}.items():
+        monkeypatch.setenv(name, value)
+    answering(monkeypatch, calls, [ANSWER])
+    assert post(capsys)[0] == 0
+
+
+def test_every_page_back_to_t0_is_read(calls, monkeypatch, capsys):
+    """Mutation: read page 1 alone -> the run on page 2 is missed."""
+    sent = command(monkeypatch, calls, "apply")
+    full = "\n".join([run_row("shipmate · comment")] * 100)
+    answering(
+        monkeypatch,
+        calls,
+        [SystemExit(BAD_GATEWAY), ANSWER],
+        [full, run_row(COMMANDS["apply"][2])],
+    )
+    assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1, PAGE_2])
+
+
+def test_a_page_reaching_before_t0_is_the_last(calls, monkeypatch, capsys):
+    """Mutation: drop the `created_at < t0` stop -> page 2 is read."""
+    sent = command(monkeypatch, calls, "apply")
+    older = run_row("shipmate · comment", created_at="2026-11-07T11:59:54Z")
+    full = "\n".join([run_row("shipmate · comment")] * 99 + [older])
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [full] * 9)
+    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
+
+
+def test_a_listing_past_ten_pages_is_undetermined(calls, monkeypatch, capsys):
+    """Mutation: end the page loop with `return False` -> the dispatch is sent again."""
+    sent = command(monkeypatch, calls, "apply")
+    full = "\n".join([run_row("shipmate · comment")] * 100)
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [full] * 10)
+    code, _, err = post(capsys)
+    assert (code, calls[:3], len(calls)) == (db.UNDETERMINED, [sent, SLEPT_2, PAGE_1], 12)
+    assert err.endswith(
+        "\nlisting shipmate.yml runs failed: ValueError: shipmate.yml runs since "
+        "2026-11-07T11:59:55+00:00 run past 10 pages\n"
+    )
+
+
+def test_a_failed_command_listing_is_undetermined(calls, monkeypatch, capsys):
+    """Mutation: `return` in `before_retry`'s handler in place of the `UNDETERMINED` exit ->
+    the dispatch is sent again."""
+    sent = command(monkeypatch, calls, "unlock")
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit(FORBIDDEN)])
+    assert (post(capsys)[0], calls) == (db.UNDETERMINED, [sent, SLEPT_2, PAGE_1])
+
+
+def test_the_replan_keeps_the_comment_less_rule(calls, monkeypatch, capsys):
+    """A plan without a comment is the replan. Mutation: route every plan through the title
+    rule (`if not want["comment"]` -> `if want["verb"] == "auto"`) -> the per-workflow pages
+    are read."""
+    monkeypatch.setenv("VERB", "plan")
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [""])
+    replan = json.dumps(
+        {"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, "return_run_details": True}
+    )
+    assert (post(capsys)[0], calls) == (0, [(POST, replan), SLEPT_2, LIST, (POST, replan)])
+
+
+def test_an_empty_slug_raises_before_any_listing():
+    """Mutation: drop the empty-slug `ValueError` in `command_run_listed` -> it lists."""
+    read = []
+    with pytest.raises(ValueError, match="SHIPMATE_APP_SLUG is empty"):
+        db.command_run_listed("acme/demo", NOW, {}, "", run=lambda args: read.append(args))
+    assert read == []
