@@ -2265,17 +2265,17 @@ _LOCK_LINES = [
     (
         "🔒 locked by #12: stacks/app / dev, stacks/db / dev. Wait for #12 to merge or close, then "
         "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict` once "
-        "its runs have ended."
+        "#12's apply and deploy runs have ended."
     ),
     (
         "🔒 locked by #12: stacks/app / prod. Wait for #12 to merge or close, then re-plan. If "
-        "#12 has already merged or closed, comment `shipmate unlock prod --evict` once its runs "
-        "have ended."
+        "#12 has already merged or closed, comment `shipmate unlock prod --evict` once #12's apply "
+        "and deploy runs have ended."
     ),
     (
         "🔒 locked by #7: stacks/dns / dev. Wait for #7 to merge or close, then re-plan. If #7 "
-        "has already merged or closed, comment `shipmate unlock dev --evict` once its runs have "
-        "ended."
+        "has already merged or closed, comment `shipmate unlock dev --evict` once #7's apply and "
+        "deploy runs have ended."
     ),
     (
         "🔒 locked by an unknown holder: stacks/net / dev, stacks/edge / dev. Comment "
@@ -2304,7 +2304,7 @@ def test_the_lock_lines_escape_every_name():
         (
             "🔒 locked by #3: s@<!-- -->org/team&lt;1 / e&lt;2. Wait for #3 to merge or close, "
             "then re-plan. If #3 has already merged or closed, comment "
-            "`shipmate unlock e&lt;2 --evict` once its runs have ended."
+            "`shipmate unlock e&lt;2 --evict` once #3's apply and deploy runs have ended."
         )
     ]
 
@@ -2317,8 +2317,8 @@ def test_a_run_where_every_cell_is_locked_is_never_green():
     assert _comment([], held_cells=[_locked("stacks/app", "dev-eu", 12)]) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
-        "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once its runs "
-        "have ended.\n\n" + HINT
+        "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
+        "apply and deploy runs have ended.\n\n" + HINT
     )
 
 
@@ -2362,13 +2362,13 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
         "The run log's apply-all-detect notice names the decision seen.\n"
         "🔒 locked by #12: stacks/dns / ops. Wait for #12 to merge or close, then re-plan. If #12 "
-        "has already merged or closed, comment `shipmate unlock ops --evict` once its runs have "
-        "ended.\n"
+        "has already merged or closed, comment `shipmate unlock ops --evict` once #12's apply and "
+        "deploy runs have ended.\n"
         "🔒 locked by an unknown holder: stacks/net / ops. Comment "
         "`shipmate unlock ops --evict`.\n"
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #12; wait "
         "for #12 to merge or close, then re-plan. If #12 has already merged or closed, comment "
-        "`shipmate unlock ops --evict` once its runs have ended\n"
+        "`shipmate unlock ops --evict` once #12's apply and deploy runs have ended\n"
         "⚪ stacks/b / qa: waits on stacks/net / ops, not applied yet; it is locked by an "
         "unknown holder; comment `shipmate unlock ops --evict`\n"
         "⚪ stacks/c / qa: waits on stacks/vault / ops, not applied yet; it is held until the pull "
@@ -2386,15 +2386,15 @@ def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
-        "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once its runs "
-        "have ended.\n\n" + HINT
+        "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
+        "apply and deploy runs have ended.\n\n" + HINT
     )
 
 
 _LOCK_REFUSAL = (
     "stacks/app in dev-eu is locked by #12; wait for #12 to merge or close, then re-plan. If #12 "
-    "has already merged or closed, comment `shipmate unlock dev-eu --evict` once its runs have "
-    "ended"
+    "has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's apply and "
+    "deploy runs have ended"
 )
 
 
@@ -2515,8 +2515,8 @@ def test_a_cell_waiting_on_a_locked_overlap_cell_names_both_remedies():
     assert ac._footer_parts([], [], [], waiting, held_cells=held_cells)[-1] == (
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #7; wait "
         "for #7 to merge or close, then re-plan. If #7 has already merged or closed, comment "
-        "`shipmate unlock ops --evict` once its runs have ended. The base also changed it; update "
-        "the branch from the base "
+        "`shipmate unlock ops --evict` once #7's apply and deploy runs have ended. The base also "
+        "changed it; update the branch from the base "
         "and push"
     )
 
@@ -2533,8 +2533,8 @@ def test_a_run_whose_only_cell_is_locked_and_overlaps_the_base_names_both_causes
     assert _comment([], env="", held_cells=held_cells) == (
         _BOTH_VERDICT
         + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
-        "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once its "
-        "runs have ended.\n"
+        "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
+        "apply and deploy runs have ended.\n"
         "⚪ held, the base changed these stacks after this branch left it, so their plans would "
         "revert that change: stacks/app / dev-eu. Update the branch from the base and push.\n\n"
         + HINT
@@ -2550,8 +2550,8 @@ def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes()
     assert _comment([], env="", held_cells=held_cells) == (
         _BOTH_VERDICT
         + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
-        "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once its "
-        "runs have ended.\n"
+        "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
+        "apply and deploy runs have ended.\n"
         "⚪ held, the base changed these stacks after this branch left it, so their plans would "
         "revert that change: stacks/db / dev-eu. Update the branch from the base and push.\n\n"
         + HINT
@@ -2622,7 +2622,8 @@ _HELD_REMEDY_LINE = (
 )
 _LCK = (
     "🔒 locked by #7: stacks/app / lck. Wait for #7 to merge or close, then re-plan. If #7 has "
-    "already merged or closed, comment `shipmate unlock lck --evict` once its runs have ended."
+    "already merged or closed, comment `shipmate unlock lck --evict` once #7's apply and deploy "
+    "runs have ended."
 )
 
 
@@ -2695,8 +2696,8 @@ def test_a_cell_blocked_predecessor_gets_the_cell_remedy_even_when_held_and_targ
         _HELD_REMEDY_LINE,
         (
             "🔒 locked by #7: stacks/a / ops. Wait for #7 to merge or close, then re-plan. If #7 "
-            "has already merged or closed, comment `shipmate unlock ops --evict` once its runs "
-            "have ended."
+            "has already merged or closed, comment `shipmate unlock ops --evict` once #7's apply "
+            "and deploy runs have ended."
         ),
     ]
 

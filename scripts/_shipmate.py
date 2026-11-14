@@ -384,13 +384,24 @@ def lock_who(holder: int | None) -> str:
 
 
 def lock_wait_remedy(who: str, env: str) -> str:
-    """What frees a cell lock `who` (`lock_who`'s text) holds in `env`, with no final period: a
-    holder that merged or closed and kept its lock, as a refused deploy does, is evicted once its
-    runs have ended (the eviction refuses while one may still apply)."""
+    """What frees a cell lock `who` (`lock_who`'s text for a known holder) holds in `env`, with no
+    final period: a holder that merged or closed and kept its lock, as a refused deploy does, is
+    evicted once its apply and deploy runs have ended (the eviction refuses while one is live)."""
     return (
         f"wait for {who} to merge or close, then re-plan. If {who} has already merged or closed, "
-        f"comment `shipmate unlock {env} --evict` once its runs have ended"
+        f"comment `shipmate unlock {env} --evict` once {who}'s apply and deploy runs have ended"
     )
+
+
+def _joined(names):
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def known_holders(holders):
+    """`holders`' pull requests as `#<a>, #<b> and #<c>`, ascending, or None when none is known:
+    only a known holder's runs are checked before an eviction."""
+    known = sorted(h for h in set(holders) if h is not None)
+    return _joined([lock_who(h) for h in known]) if known else None
 
 
 def evict_release(holders, env_name: str, subject: str) -> str:
@@ -399,7 +410,7 @@ def evict_release(holders, env_name: str, subject: str) -> str:
     names = [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
     if None in holders:
         names.append(lock_who(None))
-    who = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+    who = _joined(names)
     hold, applied = ("holds", who) if len(names) == 1 else ("hold", "they")
     return (
         f"release the locks {who} {hold}; applying {subject} after that may overwrite what "
@@ -413,15 +424,20 @@ def evict_release(holders, env_name: str, subject: str) -> str:
 def deploy_lock_remedy(holders, stacks: str) -> str:
     """What frees the cell locks `holders`, `(holder, env)` pairs (holder None: unknown), that
     refuse a merge deploy, with no final period: a new pull request changing `stacks`, one
-    eviction sentence per environment (`evict_release`), then its apply."""
+    eviction sentence per environment (`evict_release`), each naming the wait for its known
+    holders' apply and deploy runs (`known_holders`), then its apply."""
     by_env = {}
     for holder, env in holders:
         by_env.setdefault(env, []).append(holder)
+
+    def wait(hs):
+        known = known_holders(hs)
+        return f", and for the apply and deploy runs of {known} to end," if known else ""
+
     steps = " ".join(
         f"Comment `shipmate unlock {env} --evict` on it to {evict_release(hs, env, 'it')}. The "
         f"eviction releases only locks on the new pull request's pending cells in {env}, any "
-        "holder's, so wait for any holder still open to merge or close, and for every holder's "
-        "runs to end, first."
+        f"holder's, so wait for any holder still open to merge or close{wait(hs)} first."
         for env, hs in sorted(by_env.items())
     )
     return f"Open a pull request that changes {stacks}. {steps} Then apply it"
@@ -523,18 +539,11 @@ def parse_run_title(title):
     return {"verb": verb, "pr": pr, "ref": ref, "comment": comment}
 
 
-_WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
-
-
-def workflow_file(repo, ref):
-    """The file name in `GITHUB_WORKFLOW_REF` (`<repo>/.github/workflows/<file>@<ref>`), refused
-    unless it lies in `repo` and is a plain YAML file name: it is bound into an API path. In a
-    called workflow it names the caller, the consumer's file."""
-    path = ref.partition("@")[0]
-    name = path.removeprefix(f"{repo}/.github/workflows/")
-    if name == path or _WORKFLOW_FILE.fullmatch(name) is None:
-        raise SystemExit(f"::error::GITHUB_WORKFLOW_REF is not a workflow of {repo}: {ref!r}")
-    return name
+#: The consumer's workflow every comment dispatch targets and every merge deploy runs in.
+FENCE_WORKFLOW = "shipmate.yml"
+#: What a failed or malformed API read raises: `gh_json`'s refusal, then a missing or mistyped
+#: field of its answer.
+READ_ERRORS = (SystemExit, LookupError, TypeError, ValueError, AttributeError)
 
 
 #: The run statuses of a run that has not ended.
@@ -567,6 +576,17 @@ def _pages(path, field, run):
     return None
 
 
+def _listed_run(r, *text_fields):
+    """Whether listed run `r` has an id fit for a link (an int, not a bool, that `is_run_id`
+    accepts) and a string in each of `text_fields`."""
+    rid = r.get("id")
+    return (
+        type(rid) is int
+        and is_run_id(str(rid))
+        and all(isinstance(r.get(f), str) for f in text_fields)
+    )
+
+
 def _login(user):
     return user.get("login") if isinstance(user, dict) else None
 
@@ -574,9 +594,10 @@ def _login(user):
 def _live_dispatch_runs(repo, workflow_file, run=None):
     """`(runs, complete)`: every run one `workflow_dispatch` listing of workflow
     `workflow_file` per `LIVE_RUN_STATUSES` value returns, every page, each as listed, once per
-    id, ascending. `complete` is false when a page fails or is malformed, or a run has no int
-    `id`, string `display_title` and string `event` (that run is left out). A run that changes
-    status between listings, or between the page reads of one listing, can be missed."""
+    id, ascending. `complete` is false when a page fails or is malformed, or a run fails
+    `_listed_run` with `display_title` and `event` (that run is left out). A run that changes
+    status between listings can be missed, and so can one skipped by a page shift: another run
+    leaving the listed status between two page reads moves it to an earlier page."""
     runs, complete = {}, True
     for status in LIVE_RUN_STATUSES:
         page = _pages(
@@ -588,11 +609,10 @@ def _live_dispatch_runs(repo, workflow_file, run=None):
             complete = False
             continue
         for r in page:
-            rid, title, event = r.get("id"), r.get("display_title"), r.get("event")
-            if not isinstance(rid, int) or not isinstance(title, str) or not isinstance(event, str):
+            if not _listed_run(r, "display_title", "event"):
                 complete = False
                 continue
-            runs[rid] = r
+            runs[r["id"]] = r
     return [runs[k] for k in sorted(runs)], complete
 
 
@@ -628,14 +648,14 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
     return runs, complete
 
 
-def holder_dispatch_runs(repo, workflow_file, holders, run=None):
-    """`(runs, complete)`: each live `workflow_dispatch` run of workflow `workflow_file` that
+def holder_dispatch_runs(repo, holders, run=None):
+    """`(runs, complete)`: each live `workflow_dispatch` run of `FENCE_WORKFLOW` that
     may apply a cell of one of `holders` (pull request numbers), any actor: an `apply` or `auto`
     run titled for one, as `{id, verb, holder}`, and a run whose title does not parse, as
     `{id, verb: None, holder: None}`, since it may be one. A run listed `completed` has ended;
     any other status, a non-string one included, is live. `complete` is
     `_live_dispatch_runs`'."""
-    listed, complete = _live_dispatch_runs(repo, workflow_file, run)
+    listed, complete = _live_dispatch_runs(repo, FENCE_WORKFLOW, run)
     runs = []
     for r in listed:
         if r.get("status") == "completed":
@@ -648,16 +668,17 @@ def holder_dispatch_runs(repo, workflow_file, holders, run=None):
     return runs, complete
 
 
-def live_push_runs(repo, workflow_file, sha, run=None):
-    """`(ids, complete)`: the ids of the `push` runs of workflow `workflow_file` on commit
-    `sha` not listed `completed`, ascending, every page. `complete` is false, and `ids` empty,
-    when a page fails or is malformed or a run has no int `id`."""
+def live_push_runs(repo, sha, run=None):
+    """`(ids, complete)`: the ids of the `push` runs of `FENCE_WORKFLOW` on commit `sha` not
+    listed `completed`, ascending, every page. `complete` is false, and `ids` empty, when a page
+    fails or is malformed or a run fails `_listed_run`. A page shift can skip a run, as in
+    `_live_dispatch_runs`."""
     listed = _pages(
-        f"repos/{repo}/actions/workflows/{workflow_file}/runs?event=push&head_sha={sha}",
+        f"repos/{repo}/actions/workflows/{FENCE_WORKFLOW}/runs?event=push&head_sha={sha}",
         "workflow_runs",
         run,
     )
-    if listed is None or not all(isinstance(r.get("id"), int) for r in listed):
+    if listed is None or not all(map(_listed_run, listed)):
         return [], False
     return sorted({r["id"] for r in listed if r.get("status") != "completed"}), True
 

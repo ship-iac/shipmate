@@ -454,18 +454,18 @@ def _with_evict(*lines):
 
 
 _EVICT_12 = (
-    "Once their runs have ended, comment `shipmate unlock dev-eu --evict` to release the locks #12 "
-    "holds; applying this pull "
+    "Once the apply and deploy runs of #12 have ended, comment `shipmate unlock dev-eu --evict` to "
+    "release the locks #12 holds; applying this pull "
     "request after that may overwrite what #12 applied to dev-eu."
 )
 _EVICT_12_UNKNOWN = (
-    "Once their runs have ended, comment `shipmate unlock dev-eu --evict` to release the locks #12 "
-    "and an unknown holder "
+    "Once the apply and deploy runs of #12 have ended, comment `shipmate unlock dev-eu --evict` to "
+    "release the locks #12 and an unknown holder "
     "hold; applying this pull request after that may overwrite what they applied to dev-eu."
 )
 _EVICT_PROD_3 = (
-    "Once their runs have ended, comment `shipmate unlock prod --evict` to release the locks #3 "
-    "holds; applying this pull "
+    "Once the apply and deploy runs of #3 have ended, comment `shipmate unlock prod --evict` to "
+    "release the locks #3 holds; applying this pull "
     "request after that may overwrite what #3 applied to prod."
 )
 
@@ -501,13 +501,13 @@ def test_the_evict_line_names_two_and_three_holders_ascending():
     """Mutations: `sorted(..., reverse=True)` over the known holders -- red; join every name
     with `, ` (no ` and `) -- red; `holds` and the holder's name for every count -- red."""
     assert sc.commands({"dev-eu": [9, 5, 9]}) == _with_evict(
-        "Once their runs have ended, comment `shipmate unlock dev-eu --evict` to release the locks "
-        "#5 and #9 hold; applying "
+        "Once the apply and deploy runs of #5 and #9 have ended, comment `shipmate unlock dev-eu "
+        "--evict` to release the locks #5 and #9 hold; applying "
         "this pull request after that may overwrite what they applied to dev-eu."
     )
     assert sc.commands({"dev-eu": [9, 5, 12]}) == _with_evict(
-        "Once their runs have ended, comment `shipmate unlock dev-eu --evict` to release the locks "
-        "#5, #9 and #12 hold; "
+        "Once the apply and deploy runs of #5, #9 and #12 have ended, comment `shipmate unlock "
+        "dev-eu --evict` to release the locks #5, #9 and #12 hold; "
         "applying this pull request after that may overwrite what they applied to dev-eu."
     )
 
@@ -517,8 +517,7 @@ def test_the_evict_line_names_an_unknown_holder_after_the_known_ones():
     unknown holder first -- red; drop the unknown holder -- red."""
     assert sc.commands({"dev-eu": [None, 12, None]}) == _with_evict(_EVICT_12_UNKNOWN)
     assert sc.commands({"dev-eu": [None]}) == _with_evict(
-        "Once their runs have ended, comment `shipmate unlock dev-eu --evict` to release the locks "
-        "an unknown holder holds; "
+        "Comment `shipmate unlock dev-eu --evict` to release the locks an unknown holder holds; "
         "applying this pull request after that may overwrite what an unknown holder applied to "
         "dev-eu."
     )
@@ -528,8 +527,8 @@ def test_the_evict_line_renders_the_environment_through_md_name_outside_the_code
     """Mutation: render `{env}` instead of `{_md_name(env)}` after `applied to` -- the `@`
     mentions, red."""
     assert sc.commands({"dev@eu": [5]}) == _with_evict(
-        "Once their runs have ended, comment `shipmate unlock dev@eu --evict` to release the locks "
-        "#5 holds; applying this "
+        "Once the apply and deploy runs of #5 have ended, comment `shipmate unlock dev@eu --evict` "
+        "to release the locks #5 holds; applying this "
         "pull request after that may overwrite what #5 applied to dev@<!-- -->eu."
     )
 
@@ -677,8 +676,8 @@ def test_a_locked_cell_in_a_targeted_environment_gets_both_paragraphs():
     assert _section(_LOCK_CELLS, targeted=["dev-eu"], locks=locks) == (
         "<details><summary>shipmate commands</summary>\n\n"
         "Comment `shipmate apply dev-eu` to apply dev-eu.\n\n"
-        "Once their runs have ended, comment `shipmate unlock dev-eu --evict` to release the locks "
-        "#3 and #12 hold; applying "
+        "Once the apply and deploy runs of #3 and #12 have ended, comment `shipmate unlock dev-eu "
+        "--evict` to release the locks #3 and #12 hold; applying "
         "this pull request after that may overwrite what they applied to dev-eu.\n\n"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"

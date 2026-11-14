@@ -1398,31 +1398,35 @@ This run's log has the error; comment again.`` reply. An empty head
 branch or default branch refuses the same way before any read.
 
 With no stacked holder and every holder read, while any known holder remains,
-it then refuses, releasing nothing, while a run of the consumer's workflow (the
-`shipmate.yml` the comment ran in, from `GITHUB_WORKFLOW_REF`) may still apply
-a holder's cells: a live `apply` or `auto` run titled for the holder, whoever
-dispatched it; a live `workflow_dispatch` run whose title does not parse, since
-it may be the holder's; or, when the holder has merged, a live `push` run of its
-merge commit (its deploy). The refusal lists each run by its link under
-``no cell lock in <env> was released: a holder's run may still apply. Wait for
-each run below to end, then comment again.``, as ``#<h> has a live `<verb>` run:
-<url>``, `a live run whose title is not a shipmate title may be a holder's:
-<url>` or `#<h>'s deploy run is live: <url>`, fenced in the `🔴 failed:` reply
-above. A run title carries no environment, so a holder's live apply run in any
-environment refuses the eviction in every environment. The order is: the
-locks, the holders' stacked reads, one `workflow_dispatch` listing per live
-status (`queued`, `in_progress`, `waiting`, `pending`, `requested`), a fresh
-read of each holder's pull request, then the `push` listing of each merged
-holder's merge commit. A listing that fails, answers malformed or runs past ten
-pages refuses with ``could not list the live runs of <file>, so no cell lock in
-<env> was released: a holder's run may still apply. Comment again.`` (or the
-same for a merged holder's deploy runs); a holder read that fails, or a merged
-holder whose merge commit is not a commit sha, refuses too. A listed run whose
-status is not `completed` counts as live.
+it then refuses, releasing nothing, while a run of `shipmate.yml` (the file
+every comment dispatch targets and every merge deploy runs in, whatever workflow
+the comment ran in) may still apply a holder's cells: a live `apply` or `auto`
+run titled for the holder, whoever dispatched it; a live `workflow_dispatch` run
+whose title does not parse, since it may be the holder's; or, when the holder
+has merged, a live `push` run of its merge commit (its deploy). A listing that
+fails, answers malformed, holds a run whose id is not a run id, or runs past ten
+pages, a holder read that fails, and a merged holder whose merge commit is not
+a commit sha refuse too. The refusal collects every line found under ``no cell
+lock in <env> was released: a holder's run may still apply, or the check could
+not tell. Wait for any run below to end, then comment again.``, one per cause:
+``#<h> has a live `<verb>` run: <url>``, `a live run whose title is not a
+shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
+`could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
+merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
+run is unknown` or `could not list the deploy runs of #<h>'s merge commit
+<sha>`, fenced in the `🔴 failed:` reply above. A run title carries no
+environment, so a holder's live apply run in any environment refuses the
+eviction in every environment. The order is: the locks, the holders' stacked
+reads, one `workflow_dispatch` listing per live status (`queued`,
+`in_progress`, `waiting`, `pending`, `requested`), a fresh read of each
+holder's pull request, then the `push` listing of each merged holder's merge
+commit. A listed run whose status is not `completed` counts as live.
 
 The check is a point in time, not a hold. A run dispatched in the last few
 seconds may not be listed yet, a run that changes status between the
-per-status listings can be missed (a re-run reads `queued` again), a holder
+per-status listings can be missed (a re-run reads `queued` again), a run can be
+skipped when another run leaves the listed status between two page reads of
+one listing (the rest shift to an earlier page), a holder
 that merges after its read starts its deploy after the check, and a holder can
 start a run right after it. A run dispatched after the lock read re-enters its
 lock under a new commit, so that lock's delete misses and it stays held. Locks
@@ -2362,7 +2366,8 @@ deleting it on an unconfirmed close would free a cell it may still hold.
 between refuses the whole run in `lock`, naming the holder
 (`` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to merge or close, then
 re-plan. If #<n> has already merged or closed, comment `shipmate unlock <env>
---evict` once its runs have ended ``), and no cell applies.
+--evict` once #<n>'s apply and deploy runs have ended ``), and no cell
+applies.
 This is the one case in which a locked cell stops the pull request's other
 cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
 cell pending and the rest apply. "Re-run all jobs" of a commented apply does
@@ -2420,7 +2425,9 @@ these stacks. Comment `shipmate unlock <env> --evict` on it to release the
 locks <who> hold(s); applying it after that may overwrite what <who> applied to
 <env>. The eviction releases only locks on the new pull request's pending cells
 in <env>, any holder's, so wait for any holder still open to merge or close,
-and for every holder's runs to end, first. ... Then apply it. ``
+and for the apply and deploy runs of <known holders> to end, first. ... Then
+apply it. ``, the run wait naming that environment's known holders and left out
+when its only holder is unknown
 
 `<who>` is `#<n>`, or `an unknown holder`; both lists are sorted. The remedy has
 one `Comment` sentence pair per environment, sorted, naming that environment's
@@ -2455,8 +2462,9 @@ this deploy's pull request. Open a pull request that changes this stack.
 Comment `shipmate unlock <env> --evict` on it to release the locks <who> holds;
 applying it after that may overwrite what <who> applied to <env>. The eviction
 releases only locks on the new pull request's pending cells in <env>, any
-holder's, so wait for any holder still open to merge or close, and for every
-holder's runs to end, first. Then apply it ``. An unlocked cell, or one the merged pull request holds, passes. A failed read refuses with
+holder's, so wait for any holder still open to merge or close, and for the
+apply and deploy runs of <who> to end, first. Then apply it ``, the run wait
+left out when <who> is an unknown holder. An unlocked cell, or one the merged pull request holds, passes. A failed read refuses with
 `` could not confirm which pull request holds its cell lock (<why>); re-run the
 failed deploy jobs ``. The whole-run refusal holds only at `detect`: a refused
 wave cell assumes no cloud role and keeps its apply check pending, and the waves
@@ -3490,11 +3498,13 @@ even when every changed environment is targeted; the unreadable one warns.
 
 When the comment marks a changed cell `🔒 locked by`, the section adds, after
 the apply paragraphs and before the `shipmate help` paragraph, one paragraph per
-such environment, sorted: ``Once their runs have ended, comment `shipmate
-unlock <env> --evict` to release the locks #<a> and #<b> hold; applying this
-pull request after that may overwrite what they applied to <env>.`` The
-eviction refuses while a holder's run that may still apply is live
-(§Comment-ops). It names the holders of the
+such environment, sorted: ``Once the apply and deploy runs of #<a> and #<b>
+have ended, comment `shipmate unlock <env> --evict` to release the locks #<a>
+and #<b> hold; applying this pull request after that may overwrite what they
+applied to <env>.`` The run wait names the known holders only, since the
+eviction refuses while a known holder's run that may still apply is live
+(§Comment-ops); with only an unknown holder the paragraph starts ``Comment
+`shipmate unlock <env> --evict` to ...``. It names the holders of the
 environment's changed locked cells, known ones ascending, then `an unknown
 holder`, joined by `, ` with ` and ` before the last; one holder reads ``…
 to release the locks #<a> holds; applying this pull request after that may
@@ -3903,7 +3913,7 @@ actionable warning cannot be lost on either path. In the order they render:
   reaches this renderer.
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
   then re-plan. If #<n> has already merged or closed, comment `shipmate unlock
-  <env> --evict` once its runs have ended.``, one per pull
+  <env> --evict` once #<n>'s apply and deploy runs have ended.``, one per pull
   request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
   with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
   unknown renders ``🔒 locked by an unknown holder: <cells>. Comment
@@ -3920,7 +3930,8 @@ actionable warning cannot be lost on either path. In the order they render:
   nothing itself when there is one, so it can apply now. `<remedy>` is
   `` it is locked by #<n>; wait for #<n> to merge or close, then re-plan. If
   #<n> has already merged or closed, comment `shipmate unlock <env> --evict`
-  once its runs have ended `` when another pull request locks
+  once #<n>'s apply and deploy runs have ended `` when another pull request
+  locks
   the blocker cell (`` it is locked by an unknown holder; comment
   `shipmate unlock <env> --evict` `` when its holder is unknown), whatever
   else holds its environment, followed by `. The base also changed it; update

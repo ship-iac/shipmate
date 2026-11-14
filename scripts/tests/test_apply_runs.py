@@ -4,6 +4,7 @@ compared whole."""
 import json
 
 import _shipmate
+import pytest
 
 _SHA = "df148592137074dd47f043a225f9ff859175ed6b"
 _OLD = "0" * 40
@@ -179,7 +180,7 @@ def test_the_live_statuses_are_pinned_whole():
 
 
 def _holders(pages, fail=()):
-    return _shipmate.holder_dispatch_runs("o/r", "shipmate.yml", {12, 9}, run=_gh(pages, fail))
+    return _shipmate.holder_dispatch_runs("o/r", {12, 9}, run=_gh(pages, fail))
 
 
 def test_holder_dispatch_runs_keeps_a_holders_apply_and_auto_runs_and_unparseable_titles():
@@ -236,16 +237,27 @@ def test_live_push_runs_lists_every_run_of_the_commit_not_completed():
         {"id": 5, "status": None},
     ]
     run = _gh({_PUSH: {"workflow_runs": rows}})
-    assert _shipmate.live_push_runs("o/r", "shipmate.yml", _SHA, run=run) == ([3, 5], True)
+    assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([3, 5], True)
     assert run.calls == [_PUSH]
 
 
 def test_live_push_runs_with_a_failed_page_or_a_malformed_run_is_incomplete():
     """Mutations: return the rows of a failed listing as complete -- red; keep a run without an
     int `id` -- red."""
-    assert _shipmate.live_push_runs("o/r", "shipmate.yml", _SHA, run=_gh({}, {_PUSH})) == (
+    assert _shipmate.live_push_runs("o/r", _SHA, run=_gh({}, {_PUSH})) == (
         [],
         False,
     )
     run = _gh({_PUSH: {"workflow_runs": [{"id": None, "status": "queued"}]}})
-    assert _shipmate.live_push_runs("o/r", "shipmate.yml", _SHA, run=run) == ([], False)
+    assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)
+
+
+@pytest.mark.parametrize("bad", [True, -5, "123"], ids=["bool", "negative", "string"])
+def test_a_run_id_unfit_for_a_link_makes_both_listings_incomplete(bad):
+    """A run id is bound into a link. A bool fails both checks of `_listed_run` (`str(True)` is
+    not digits). Mutations: drop its `type(rid) is int` -- red (string); drop its `is_run_id`
+    -- red (negative)."""
+    row = {"id": bad, "display_title": "x", "event": "workflow_dispatch", "status": "queued"}
+    assert _holders({_listing("queued"): {"workflow_runs": [row]}}) == ([], False)
+    run = _gh({_PUSH: {"workflow_runs": [{"id": bad, "status": "queued"}]}})
+    assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)

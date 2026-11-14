@@ -81,6 +81,7 @@ from _shipmate import (
     evict_release,
     is_head_sha,
     json_or_none,
+    known_holders,
     lock_who,
     one_line,
     run_annotated,
@@ -393,10 +394,12 @@ def stacked_hold(cells, locks, stacked, default_branch):
 
 def _evict_line(env, holders):
     """`shipmate unlock <env> --evict` naming `holders` (known ascending, then an unknown one)
-    and that applying after it may overwrite what they applied, once their runs have ended: the
-    eviction refuses while one may still apply."""
+    and that applying after it may overwrite what they applied, after the known holders' apply
+    and deploy runs have ended: the eviction refuses while one is live."""
     release = evict_release(holders, _md_name(env), "this pull request")
-    return f"Once their runs have ended, comment `shipmate unlock {env} --evict` to {release}.\n\n"
+    known = known_holders(holders)
+    when = f"Once the apply and deploy runs of {known} have ended, comment" if known else "Comment"
+    return f"{when} `shipmate unlock {env} --evict` to {release}.\n\n"
 
 
 def commands(locked, targeted=(), changed=(), stacked=()):
