@@ -338,7 +338,8 @@ def test_render_section_truncates_to_limit_with_a_checks_tab_link():
     assert len(s) <= 3_000
     assert s.startswith(f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource_0\n")
     assert s.endswith(
-        "\n```\n\n_Truncated; see the cell's apply check in [the Checks tab](https://gh/o/r/pull/5/checks)._\n</details>"
+        "\n```\n\n_Truncated; see the cell's apply check in [the Checks "
+        "tab](https://gh/o/r/pull/5/checks)._\n</details>"
     )
 
 
@@ -453,15 +454,21 @@ def _with_evict(*lines):
 
 
 _EVICT_12 = (
-    "Comment `shipmate unlock dev-eu --evict` to release the locks #12 holds; applying this pull "
+    "Once the apply, auto and deploy runs of #12 have ended, comment `shipmate unlock dev-eu "
+    "--evict` to "
+    "release the locks #12 holds; applying this pull "
     "request after that may overwrite what #12 applied to dev-eu."
 )
 _EVICT_12_UNKNOWN = (
-    "Comment `shipmate unlock dev-eu --evict` to release the locks #12 and an unknown holder "
+    "Once the apply, auto and deploy runs of #12 have ended, comment `shipmate unlock dev-eu "
+    "--evict` to "
+    "release the locks #12 and an unknown holder "
     "hold; applying this pull request after that may overwrite what they applied to dev-eu."
 )
 _EVICT_PROD_3 = (
-    "Comment `shipmate unlock prod --evict` to release the locks #3 holds; applying this pull "
+    "Once the apply, auto and deploy runs of #3 have ended, comment `shipmate unlock prod --evict` "
+    "to "
+    "release the locks #3 holds; applying this pull "
     "request after that may overwrite what #3 applied to prod."
 )
 
@@ -497,11 +504,15 @@ def test_the_evict_line_names_two_and_three_holders_ascending():
     """Mutations: `sorted(..., reverse=True)` over the known holders -- red; join every name
     with `, ` (no ` and `) -- red; `holds` and the holder's name for every count -- red."""
     assert sc.commands({"dev-eu": [9, 5, 9]}) == _with_evict(
-        "Comment `shipmate unlock dev-eu --evict` to release the locks #5 and #9 hold; applying "
+        "Once the apply, auto and deploy runs of #5 and #9 have ended, comment `shipmate unlock "
+        "dev-eu "
+        "--evict` to release the locks #5 and #9 hold; applying "
         "this pull request after that may overwrite what they applied to dev-eu."
     )
     assert sc.commands({"dev-eu": [9, 5, 12]}) == _with_evict(
-        "Comment `shipmate unlock dev-eu --evict` to release the locks #5, #9 and #12 hold; "
+        "Once the apply, auto and deploy runs of #5, #9 and #12 have ended, comment `shipmate "
+        "unlock "
+        "dev-eu --evict` to release the locks #5, #9 and #12 hold; "
         "applying this pull request after that may overwrite what they applied to dev-eu."
     )
 
@@ -521,7 +532,9 @@ def test_the_evict_line_renders_the_environment_through_md_name_outside_the_code
     """Mutation: render `{env}` instead of `{_md_name(env)}` after `applied to` -- the `@`
     mentions, red."""
     assert sc.commands({"dev@eu": [5]}) == _with_evict(
-        "Comment `shipmate unlock dev@eu --evict` to release the locks #5 holds; applying this "
+        "Once the apply, auto and deploy runs of #5 have ended, comment `shipmate unlock dev@eu "
+        "--evict` "
+        "to release the locks #5 holds; applying this "
         "pull request after that may overwrite what #5 applied to dev@<!-- -->eu."
     )
 
@@ -669,7 +682,9 @@ def test_a_locked_cell_in_a_targeted_environment_gets_both_paragraphs():
     assert _section(_LOCK_CELLS, targeted=["dev-eu"], locks=locks) == (
         "<details><summary>shipmate commands</summary>\n\n"
         "Comment `shipmate apply dev-eu` to apply dev-eu.\n\n"
-        "Comment `shipmate unlock dev-eu --evict` to release the locks #3 and #12 hold; applying "
+        "Once the apply, auto and deploy runs of #3 and #12 have ended, comment `shipmate unlock "
+        "dev-eu "
+        "--evict` to release the locks #3 and #12 hold; applying "
         "this pull request after that may overwrite what they applied to dev-eu.\n\n"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
@@ -1032,9 +1047,8 @@ def test_the_doctor_line_sits_under_the_verdict_above_the_unmanaged_line():
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/x"), None, 2) == (
         HEAD
         + f"⚪ nothing planned {AT}\n\n"
-        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: see [the run](https://gh/run/1)\n\n"
-        + _LEAD.format(1)
-        + ": stacks/x",
+        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: see [the "
+        "run](https://gh/run/1)\n\n" + _LEAD.format(1) + ": stacks/x",
         True,
         False,
     )
