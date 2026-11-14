@@ -33,6 +33,7 @@ EXPECTED = {
     ("apply-run.yml", "detect"): INPUT,
     ("apply-run.yml", "lock"): INPUT,
     ("apply-run.yml", "summary"): SLIM,
+    ("apply.yml", "outcome"): SLIM,
     ("ci.yml", "lint-test"): LATEST,
     ("comment-ops.yml", "ops"): INPUT,
     ("deploy.yml", "detect"): INPUT,

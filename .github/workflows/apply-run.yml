@@ -19,6 +19,21 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
       SHIPMATE_ENCRYPTION_KEY: { required: false }
+    # `apply.yml`'s `outcome` reads these. Every one reads empty when the call was cancelled while
+    # it waited in the queue, and a job's values read empty when that job never ran.
+    outputs:
+      # Empty: `review` never ran.
+      review_result: { value: "${{ jobs.review.result }}" }
+      # `true`: no open pull request matched. Empty: `review` did not reach that refusal.
+      unbound: { value: "${{ jobs.review.outputs.unbound }}" }
+      # `true`: the result comment posted. Empty: it did not, or `summary` never ran.
+      posted: { value: "${{ jobs.summary.outputs.posted }}" }
+      # Empty: `summary` never ran.
+      summary_result: { value: "${{ jobs.summary.result }}" }
+      # `summary` is left out: it can end `cancelled` with no run cancel, for example at a full
+      # gate-writer queue. Empty: the call ended before any job ran.
+      run_cancelled:
+        value: ${{ jobs.review.result == 'cancelled' || jobs.detect.result == 'cancelled' || jobs.lock.result == 'cancelled' || jobs.envlevel0.result == 'cancelled' || jobs.envlevel1.result == 'cancelled' || jobs.envlevel2.result == 'cancelled' || jobs.envlevel3.result == 'cancelled' }}
 # One apply run per pull request at a time; a later one waits rather than cancels. `apply.yml`'s
 # `guard` refuses a `pr_number` that is not canonical before it keys this group, and its
 # `outcome` stays outside the group so it still answers a run cancelled while it waits here.

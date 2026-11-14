@@ -158,7 +158,7 @@ SUMMARY_IF = "${{ always() && needs.review.result == 'success' }}"
 #: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
 DISPATCH_PATHS = ("apply.yml", "unlock.yml")
 #: The whole `needs:` of each job in `apply.yml`: `guard` gates the call into `apply-run.yml`.
-APPLY_NEEDS = {"guard": [], "run": ["guard"]}
+APPLY_NEEDS = {"guard": [], "run": ["guard"], "outcome": ["guard", "run"]}
 
 
 def _needs(job):

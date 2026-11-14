@@ -5,6 +5,11 @@ paths:
   .github/workflows/manifest-load.yml:
     ignore:
       - 'constant expression "false" in condition'
+  .github/workflows/apply-run.yml:
+    ignore:
+      # actionlint 1.7.12 types the `jobs` context of `workflow_call` outputs without `result`,
+      # which GitHub fills (measured live). The regex names the property: a typo still fails.
+      - 'property "result" is not defined in object type \{outputs: '
   .github/workflows/*.yml:
     ignore:
       # actionlint 1.7.12 has no `$/` self-repository syntax (GitHub, 2026-07-30) and reads

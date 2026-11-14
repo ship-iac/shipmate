@@ -21,8 +21,9 @@ on:
       SHIPMATE_ENCRYPTION_KEY: { required: false }
 jobs:
   # A human cannot make github.actor a bot login, so this rejects a human dispatch that would skip
-  # scripts/authorize; it admits any bot with actions:write. Its own job so `summary` can refuse
-  # a rejected dispatch yet report a genuine `detect` failure. No secrets, environment or checkout.
+  # scripts/authorize; it admits any bot with actions:write. A refusal here starts no apply job,
+  # while `apply-run.yml`'s `summary` still reports a genuine `detect` failure. No secrets,
+  # environment or checkout.
   guard:
     runs-on: ubuntu-slim
     permissions: {}
@@ -84,3 +85,27 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+
+  # `always()`, not `!cancelled()`: it must answer a cancelled run too, and only job-level status
+  # functions see that cancel. Outside `apply-run.yml`'s group, so it also answers a run cancelled
+  # while it waited there. Holds the App key but checks nothing out.
+  outcome:
+    needs: [guard, run]
+    if: ${{ always() && needs.guard.result == 'success' && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    steps:
+      # Passed raw: an output that did not arrive reads empty, which the action answers with the
+      # cancelled or ended text, never the refusal.
+      - uses: $/actions/outcome-reply
+        with:
+          verb: apply
+          environment: ${{ inputs.environment }}
+          pr-number: ${{ inputs.pr_number }}
+          run-result: ${{ needs.run.result }}
+          review-result: ${{ needs.run.outputs.review_result }}
+          summary-result: ${{ needs.run.outputs.summary_result }}
+          run-cancelled: ${{ needs.run.outputs.run_cancelled }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
