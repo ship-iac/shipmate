@@ -1129,7 +1129,8 @@ shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
 merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
 run is unknown`, `could not list the deploy runs of #<h>'s merge commit
-<sha>` or `could not list the jobs of #<h>'s deploy run <url>`. Past 4,000 characters the reply keeps the header and the lines that
+<sha>`, `could not list the jobs of #<h>'s deploy run <url>` or `#<h>'s deploy
+run <url> has not started`. Past 4,000 characters the reply keeps the header and the lines that
 fit, then `and <n> more line(s); the run log names every one`; the run log has
 every line.
 
@@ -1137,8 +1138,9 @@ every line.
   holder's cells has not ended: an `apply` or `auto` run of #<h>, by anyone and
   in any environment (a run title names no environment), a `workflow_dispatch`
   run whose title is not a shipmate run title, which could be #<h>'s, or the
-  merge deploy of #<h> once it merged, until its `deploy / summary` job has
-  completed and no job but a `warm` leg is unfinished. Evicting under it would let that run
+  merge deploy of #<h> once it merged, until its `summary` job has completed,
+  no job but a `warm` leg is unfinished, and every job is listed from the run's
+  current attempt. Evicting under it would let that run
   apply, or save state, over this pull request's plan.
   A `could not` line, or the merge commit line, means a read the check needs
   failed or answered malformed, or a listing ran past ten pages.

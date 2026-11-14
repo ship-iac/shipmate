@@ -121,7 +121,8 @@ _FLIP_STEP = {
 
 def test_the_action_verifies_mints_then_flips():
     """Mutations: drop `SHIPMATE_DEPLOY` or `SHIPMATE_PR_NUMBER` from the flip step's env; swap
-    the mint and the flip; drop `permission-pull-requests: read` from the mint."""
+    the mint and the flip; request `permission-pull-requests` unconditionally (`read`), or invert
+    the deploy test (`== 'true'`)."""
     steps = action_steps("apply-release")
     assert [s.get("name") for s in steps] == [
         "Verify the App key arrived",
@@ -134,6 +135,6 @@ def test_the_action_verifies_mints_then_flips():
         "owner": "${{ github.repository_owner }}",
         "repositories": "${{ github.event.repository.name }}",
         "permission-checks": "write",
-        "permission-pull-requests": "read",
+        "permission-pull-requests": "${{ inputs.deploy != 'true' && 'read' || '' }}",
     }
     assert steps[2] == _FLIP_STEP

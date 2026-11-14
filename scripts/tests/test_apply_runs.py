@@ -230,14 +230,14 @@ _PUSH = f"{_RUNS}?event=push&head_sha={_SHA}&per_page=100&page=1"
 
 def test_live_push_runs_lists_every_run_of_the_commit_not_completed():
     """Mutations: drop the `head_sha` filter -- red (the call differs); keep a `completed`
-    run -- red; read a non-string status as ended -- red."""
+    run -- red; read a non-string status as ended -- red; drop `run_attempt` -- red."""
     rows = [
-        {"id": 3, "status": "in_progress"},
+        {"id": 3, "status": "in_progress", "run_attempt": 2},
         {"id": 4, "status": "completed"},
-        {"id": 5, "status": None},
+        {"id": 5, "status": None, "run_attempt": 1},
     ]
     run = _gh({_PUSH: {"workflow_runs": rows}})
-    assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([3, 5], True)
+    assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([(3, 2), (5, 1)], True)
     assert run.calls == [_PUSH]
 
 
@@ -250,6 +250,21 @@ def test_live_push_runs_with_a_failed_page_or_a_malformed_run_is_incomplete():
     )
     run = _gh({_PUSH: {"workflow_runs": [{"id": None, "status": "queued"}]}})
     assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)
+
+
+@pytest.mark.parametrize("attempt", [None, "2", True], ids=["missing", "string", "bool"])
+def test_live_push_runs_with_a_live_run_without_an_int_attempt_is_incomplete(attempt):
+    """Mutation: drop the `run_attempt` check -- red."""
+    row = {"id": 3, "status": "queued", "run_attempt": attempt}
+    run = _gh({_PUSH: {"workflow_runs": [row]}})
+    assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)
+
+
+def test_listed_jobs_answers_an_empty_listing_as_no_jobs():
+    """`run_jobs` reads it as incomplete; `listed_jobs` tells it from a failure. Mutation:
+    `listed_jobs` returns None for an empty listing -- red."""
+    assert _shipmate.listed_jobs("o/r", 5, run=_gh({_jobs(1): {"jobs": []}})) == []
+    assert _shipmate.listed_jobs("o/r", 5, run=_gh({}, fail={_jobs(1)})) is None
 
 
 @pytest.mark.parametrize("bad", [True, -5, "123"], ids=["bool", "negative", "string"])

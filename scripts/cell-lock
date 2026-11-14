@@ -82,12 +82,12 @@ from _shipmate import (
     holder_dispatch_runs,
     is_head_sha,
     is_run_id,
+    listed_jobs,
     live_push_runs,
     lock_wait_remedy,
     lock_who,
     retried,
     run_annotated,
-    run_jobs,
     stacked_through,
     write_outputs,
 )
@@ -96,8 +96,6 @@ ag = _load("apply-gate")
 az = _load("authorize")
 ec = _load("env-config")
 
-#: A deploy run's job names start with the published fence's `deploy` job name.
-DEPLOY_JOB = "deploy / "
 LOCKS = "refs/shipmate/locks/"
 ZERO = "0" * 40
 _KEYS = {"pr", "env", "stack", "acquisition"}
@@ -572,33 +570,41 @@ def _deploy_runs(repo, holder, run):
         return [
             f"#{holder} merged, but its merge commit reads {sha!r}, so its deploy run is unknown"
         ]
-    ids, complete = live_push_runs(repo, sha, run)
+    runs, complete = live_push_runs(repo, sha, run)
     if not complete:
         return [f"could not list the deploy runs of #{holder}'s merge commit {sha}"]
-    lines = []
-    for i in ids:
-        jobs, complete = run_jobs(repo, i, run)
-        if not complete:
-            lines.append(
-                f"could not list the jobs of #{holder}'s deploy run {current_run_url(str(i))}"
-            )
-        elif _deploying(jobs):
-            lines.append(f"#{holder}'s deploy run is live: {current_run_url(str(i))}")
-    return lines
+    lines = (_deploy_line(repo, holder, i, attempt, run) for i, attempt in runs)
+    return [line for line in lines if line]
 
 
-def _deploying(jobs):
-    """Whether a deploy run listing `jobs` may still apply: until its `summary`, which runs after
-    every env-level, is listed `completed`, or while any job but a `warm` leg is not. `warm`
-    applies nothing, and a job blocked on `needs` may not be listed yet."""
-    names = {j["name"] for j in jobs if j["status"] == "completed"}
-    return f"{DEPLOY_JOB}summary" not in names or any(
-        j["status"] != "completed" for j in jobs if not _warm(j["name"])
+def _deploy_line(repo, holder, run_id, attempt, run):
+    """The refusal line for `holder`'s live deploy run `run_id` on `attempt`, from its jobs, or
+    None once only `warm` legs remain (`_deploying`)."""
+    url = current_run_url(str(run_id))
+    jobs = listed_jobs(repo, run_id, run)
+    if jobs is None:
+        return f"could not list the jobs of #{holder}'s deploy run {url}"
+    if not jobs:
+        return f"#{holder}'s deploy run {url} has not started"
+    return f"#{holder}'s deploy run is live: {url}" if _deploying(jobs, attempt) else None
+
+
+def _deploying(jobs, attempt):
+    """Whether a deploy run on `attempt` listing `jobs` may still apply: until its `summary`,
+    which runs after every env-level, is listed `completed`; while any job but a `warm` leg is
+    not; and while a job is listed from another attempt (a re-run whose jobs are not all
+    listed yet). `warm` applies nothing, and a job blocked on `needs` may not be listed yet.
+    Names are matched after the first ` / `, so the consumer's job name does not matter."""
+    called = [(j["name"].partition(" / ")[2], j) for j in jobs]
+    return (
+        not any(name == "summary" and j["status"] == "completed" for name, j in called)
+        or any(j.get("run_attempt") != attempt for j in jobs)
+        or any(j["status"] != "completed" for name, j in called if not _warm(name))
     )
 
 
 def _warm(name):
-    return name == f"{DEPLOY_JOB}warm" or name.startswith(f"{DEPLOY_JOB}warm / ")
+    return name == "warm" or name.startswith("warm / ")
 
 
 def evict_stacks(names, env):

@@ -30,7 +30,8 @@ takes the row of its matched job:
 | `cancelled` | `cancelled` | `queued`, `Cancelled` |
 | `skipped`, or none in a wave that did not run | `skipped` / null | `queued`, `Not run` |
 | any other conclusion | itself | `queued`, `Not applied (<conclusion>)`: never `success` |
-| no conclusion yet, or none in a wave that ran | no row | none; `main` exits `UNRESOLVED_EXIT` |
+| no conclusion yet | `unresolved: true` | none; `main` exits `UNRESOLVED_EXIT` |
+| none in a wave that ran | no row | none; `main` exits `UNRESOLVED_EXIT` |
 
 A job with no conclusion yet is the listing lagging, by seconds, a job that has already ended,
 so the caller asks again. A wave that did not run (a failed or skipped release, a failed
@@ -41,8 +42,11 @@ it starts, so its cells match nothing and are not run. That holds for every `ski
 that literal row, `cancelled`, under this job's own level (`SHIPMATE_JOB_ID`, this job's check
 run id, names the level) and lists no cell of the same wave. Any other missing cell, of a
 wave that ran (`success` or `failure`, or a result this script does not know), is a lost or
-lagging listing: it is retried, and after the retries the cell gets no write, so a stale
-listing never turns a completed `success` back to `queued`. Accepted limit: when every cell of
+lagging listing: it is retried. `plan` takes, per cell, a `success` row from any attempt; else
+the last row any attempt printed for it, so a resolved outcome an earlier attempt saw is
+written unless a later attempt listed the cell unresolved, which writes nothing. A cell no
+attempt resolved gets no write, so a stale listing never turns a completed `success` back to
+`queued`. Accepted limit: when every cell of
 a cancelled wave is missing while that literal row is listed, the cells are written `Not run`
 even if one started before the cancel; the check returns to `queued` either way, and only the
 title differs.
@@ -91,7 +95,8 @@ def unexpanded(jobs, job_id):
 def classify(by_wave, results, jobs, job_id=""):
     """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
     result, from the jobs listing `jobs` that holds this job, `job_id`: `unresolved` labels the
-    cells with no row."""
+    cells with no resolved row, each listed without a conclusion also getting an `unresolved`
+    row."""
     literal = unexpanded(jobs, job_id)
     rows, unresolved = [], []
     for wave in sorted(results):
@@ -115,8 +120,11 @@ def classify(by_wave, results, jobs, job_id=""):
                 rows.append(_row(check, ids, won))
             elif not matched and not_run:
                 rows.append(_row(check, ids))
-            elif not matched or any(j.get("conclusion") is None for j in matched):
+            elif not matched:
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
+            elif any(j.get("conclusion") is None for j in matched):
+                unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
+                rows.append({**_row(check, ids), "unresolved": True})
             else:
                 rows.append(_row(check, ids, matched[-1]))
     return rows, sorted(unresolved)
@@ -163,11 +171,12 @@ def writes(row, repo):
 
 def merge(every):
     """One row per check of `every`, each attempt's rows in order: a `success` row from any
-    attempt, else the last row seen for it. A later, staler or failed listing never downgrades
-    a success nor drops an outcome an earlier attempt saw."""
+    attempt, else the last row seen for it, and none when that row is `unresolved`. A later,
+    staler or failed listing never downgrades a success nor drops an outcome an earlier attempt
+    saw; a later attempt that lists the cell's job without a conclusion withholds it."""
     out = {r["check"]: r for r in every}
     out.update({r["check"]: r for r in every if r["conclusion"] == "success"})
-    return [out[check] for check in sorted(out)]
+    return [out[check] for check in sorted(out) if not out[check].get("unresolved")]
 
 
 def _rows(path):

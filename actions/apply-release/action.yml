@@ -34,7 +34,9 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-checks: write
-        permission-pull-requests: read
+        # Only a pre-merge flip reads its pull request; the action requests no permission
+        # whose input is empty.
+        permission-pull-requests: ${{ inputs.deploy != 'true' && 'read' || '' }}
 
     - name: Flip the wave's apply checks to in progress
       shell: bash

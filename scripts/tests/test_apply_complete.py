@@ -149,10 +149,11 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     assert _classify(jobs, by_wave)[0] == []
 
 
-def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
+def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_an_unresolved_row():
     """The listing lagging a finished job is the whole reason for the retry loop: a null
-    conclusion must be reported, never read as "did not run". Mutation: give it a `Not run`
-    row -> DNS has a row."""
+    conclusion must be reported, never read as "did not run". Its `unresolved` row withholds
+    an earlier attempt's outcome in `merge`. Mutations: give it a `Not run` row -> DNS's row
+    differs; drop the `unresolved` row -> DNS has none."""
     rows, unresolved = _classify(
         [
             job("L0 / dev-eu / stacks/dns", None),
@@ -160,7 +161,9 @@ def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
             job("L0 / dev-eu / stacks/web", "success"),
         ]
     )
-    assert (sorted(_by_check(rows)), unresolved) == ([APP, WEB], ["stacks/dns / dev-eu"])
+    assert unresolved == ["stacks/dns / dev-eu"]
+    assert _by_check(rows)[DNS] == {**row(DNS, [1]), "unresolved": True}
+    assert sorted(_by_check(rows)) == [APP, DNS, WEB]
 
 
 #: This completion job, `deploy / L1 / complete`, check run id 900.
@@ -371,6 +374,17 @@ def test_merge_keeps_a_success_any_attempt_saw_and_otherwise_the_last_row_seen()
     ]
 
 
+def test_merge_withholds_an_earlier_outcome_a_later_attempt_lists_unresolved():
+    """Attempt 1 wrote APP `Not run`; a later attempt lists APP's job without a conclusion, so
+    APP gets no write. A success still wins over a later unresolved row. Mutation: drop the
+    `unresolved` filter -> APP's unresolved row is returned (a `Not run` write)."""
+    ok = job("L0 / dev-eu / stacks/dns", "success")
+    later = [{**row(APP, [2, 3]), "unresolved": True}, {**row(DNS, [1]), "unresolved": True}]
+    assert apply_complete.merge([row(APP, [2, 3]), row(DNS, [1], ok), *later]) == [
+        row(DNS, [1], ok)
+    ]
+
+
 def _run(by_wave, results, jobs):
     return subprocess.run(
         [sys.executable, str(SCRIPTS / "apply-complete")],
@@ -396,7 +410,9 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
         + "the jobs listing shows no conclusion for these cells of waves that ran: "
         + "stacks/app / dev-eu, stacks/dns / dev-eu, stacks/web / dev-eu\n"
     )
-    assert done.stdout == ""
+    assert [json.loads(line) for line in done.stdout.splitlines()] == [
+        {**row(WEB, [4]), "unresolved": True}
+    ]
 
 
 def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():

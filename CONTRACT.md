@@ -222,7 +222,7 @@ id refuses the run before wave0.
 | `cancelled` | `queued`, titled `Cancelled` |
 | `skipped`, or no job in a wave that ended `skipped`, or in one that ended `cancelled` when the listing shows a `cancelled` literal `${{ matrix.environment }} / ${{ matrix.stack }}` row under the completion job's own level and no cell of that wave | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
-| no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes, then no write; the job fails |
+| no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes; then the outcome an earlier listing attempt saw, unless a later attempt listed the cell's job without a conclusion, else no write; the job fails |
 
 A write other than `success` reads the check first and leaves it alone when it
 reads `completed`: another writer, such as a merge deploy, completed it. A
@@ -245,7 +245,8 @@ that ran, or in a cancelled wave whose other cells it lists; the gate stays pend
 A success from any listing attempt is kept, so a later, staler listing never
 turns a completed check back to `queued`. Otherwise the last outcome any attempt
 saw for a cell is written, so a later failed or lagging listing does not drop a
-`failure`, `cancelled` or not-run outcome an earlier attempt saw. "Re-run failed jobs" skips `snapshot`
+`failure`, `cancelled` or not-run outcome an earlier attempt saw, unless a later
+attempt listed the cell's job without a conclusion: then the cell gets no write. "Re-run failed jobs" skips `snapshot`
 and reuses its outputs.
 
 Every flip and completion write retries a transient failure and waits out
@@ -1449,16 +1450,18 @@ the comment ran in) may still apply a holder's cells: a live `apply` or `auto`
 run titled for the holder, whoever dispatched it; a live `workflow_dispatch` run
 whose title does not parse, since it may be the holder's; or, when the holder
 has merged, a live `push` run of its merge commit (its deploy) that may still
-apply: until its `deploy / summary` job, which runs after every env-level, is
-listed `completed`, or while any job but a `warm` leg (`deploy / warm` or
-`deploy / warm / <stack>`, which applies nothing) is not `completed`. A job
-waiting on `needs` may not be listed yet, so the `summary` clause keeps such a
-run live. A listing that
+apply. Its jobs are named after their first ` / `, whatever the consumer names
+its calling job; the run is live until its `summary` job, which runs after every
+env-level, is listed `completed`, while any job but a `warm` leg (`warm` or
+`warm / <stack>`, which applies nothing) is not `completed`, and while a job is
+listed with a `run_attempt` other than the run's (a re-run not yet fully
+listed). A job waiting on `needs` may not be listed yet, so the `summary` clause
+keeps such a run live, and a run that lists no job yet refuses as not started. A listing that
 fails, answers malformed, holds a run whose id is not a run id or (a
 `workflow_dispatch` listing) a run without a string `display_title` or `event`,
 or runs past ten pages, a holder read that fails, a merged holder whose merge commit is not
-a commit sha, and a deploy run whose jobs listing fails, answers malformed or
-lists no job refuse too. The refusal collects every line found under ``no cell
+a commit sha, a live deploy run without an integer `run_attempt`, and a deploy
+run whose jobs listing fails or answers malformed refuse too. The refusal collects every line found under ``no cell
 lock in <env> was released: a holder's run may still apply, or the check could
 not tell. Wait for each run below to end, then comment again.``, one per cause:
 ``#<h> has a live `<verb>` run: <url>``, `a live run whose title is not a
@@ -1466,7 +1469,8 @@ shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
 merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
 run is unknown`, `could not list the deploy runs of #<h>'s merge commit
-<sha>` or `could not list the jobs of #<h>'s deploy run <url>`, fenced in the `🔴 failed:` reply above. Past 4,000 characters the reply keeps the
+<sha>`, `could not list the jobs of #<h>'s deploy run <url>` or `#<h>'s deploy
+run <url> has not started`, fenced in the `🔴 failed:` reply above. Past 4,000 characters the reply keeps the
 header and the lines that fit and ends `and <n> more line(s); the run log names
 every one`. A run title carries no
 environment, so a holder's live apply run in any environment refuses the
