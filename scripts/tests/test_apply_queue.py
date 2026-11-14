@@ -315,3 +315,29 @@ def test_a_job_outside_the_run_call_neither_holds_the_group_nor_keeps_a_stale_ru
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
+
+
+def test_a_malformed_jobs_listing_keeps_its_run_and_the_queue_still_replies(gh, monkeypatch):
+    """Through the real `run_jobs`: run 45's listing holds a job with no `name`, so it is
+    incomplete and kept, the holder pick after the cancel of 40 reads no job of it, and 45 is
+    named as the oldest kept run.
+
+    Mutation: `run_jobs` returns the partial list on an incomplete listing -- red (KeyError)."""
+    import json
+
+    import _shipmate
+
+    listings = {
+        40: [{"name": "apply / run / review", "status": "waiting"}],
+        45: [{"name": "apply / run / review", "status": "in_progress"}, {"status": "pending"}],
+    }
+
+    def gh_run(argv):
+        run_id = int(argv[2].split("/")[5])
+        return json.dumps({"jobs": listings[run_id]})
+
+    monkeypatch.setattr(aq, "run_jobs", lambda repo, rid: _shipmate.run_jobs(repo, rid, gh_run))
+    gh.runs = [_r(40), _r(45)]
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_WAITS.format(45), _CANCELLED.format(40))

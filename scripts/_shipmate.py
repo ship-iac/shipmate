@@ -531,13 +531,14 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
 
 def run_jobs(repo, run_id, run=None):
     """`(jobs, complete)`: every job of run `run_id`'s latest attempt, each as the API returns
-    it. `complete` is false when a page fails or is malformed, a job has no string `status` or
-    `name`, or the listing is empty: a live run that lists no job is not read as idle."""
+    it, or `([], False)` when a page fails or is malformed, a job has no string `status` or
+    `name`, or the listing is empty: a live run that lists no job is not read as idle, and no
+    caller sees a partial listing."""
     jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest", "jobs", run)
     if not jobs or not all(
         isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs
     ):
-        return jobs or [], False
+        return [], False
     return jobs, True
 
 

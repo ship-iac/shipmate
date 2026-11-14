@@ -1689,8 +1689,9 @@ one job of its `run` call (listed `<caller> / run / ...`) is `waiting` or
 `pending`, every such job not `completed` is `waiting` or `pending`, and both
 head reads agree; its `guard`, `queue` and `outcome` sit outside the group and
 are not counted. A `queued` job is released and about to
-start, so it keeps its run. A runs listing with a failed or malformed page, an
-App-dispatched run whose title does not parse, or a failed head read cancels
+start, so it keeps its run. A runs listing with a failed or malformed page or a
+malformed run (an `id` that is not a number, a title or event that is not text),
+an App-dispatched run whose title does not parse, or a failed head read cancels
 nothing. An untrusted run is never cancelled. `queue` writes, a cancel or a
 reply, only when its own run's `actor` and `triggering_actor` are both
 `<slug>[bot]`, so a human re-run of an App-dispatched run writes nothing. The

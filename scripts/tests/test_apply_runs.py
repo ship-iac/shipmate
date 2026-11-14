@@ -154,12 +154,12 @@ def test_run_jobs_with_no_job_is_incomplete():
 
 
 def test_run_jobs_with_a_job_without_status_is_incomplete():
-    """Mutation: drop the status check -- red."""
-    run = _gh({_jobs(1): {"jobs": [{"name": "x"}]}})
-    assert _shipmate.run_jobs("o/r", 5, run=run) == ([{"name": "x"}], False)
+    """Mutations: drop the status check -- red; return the partial list -- red."""
+    run = _gh({_jobs(1): {"jobs": [{"name": "x", "status": "pending"}, {"name": "y"}]}})
+    assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
 
 
 def test_run_jobs_with_a_job_without_name_is_incomplete():
     """`apply-queue` keys on the name. Mutation: drop the name check -- red."""
     run = _gh({_jobs(1): {"jobs": [{"status": "pending"}]}})
-    assert _shipmate.run_jobs("o/r", 5, run=run) == ([{"status": "pending"}], False)
+    assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
