@@ -1,0 +1,86 @@
+name: apply
+on:
+  workflow_call:
+    inputs:
+      # Empty runs a bare apply: every pending environment the review decision and `apply_mode`
+      # allow, in `needs` order. A name applies that one alone.
+      environment: { required: false, type: string, default: "" }
+      ref: { required: true, type: string }
+      pr_number: { required: true, type: string }
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
+      # The consumer's `auto` job passes a literal `true`: the auto form of apply-detect.
+      auto: { required: false, type: boolean, default: false }
+    # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
+    # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
+    secrets:
+      # `required: false` is load-bearing: the key lives on the `shipmate-engine` environment
+      # (docs/github-app.md §5), so a caller binding none has nothing to pass, and a required
+      # declaration rejects the call: "Secret ... is required, but not provided while calling".
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
+      SHIPMATE_SECRETS: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
+jobs:
+  # A human cannot make github.actor a bot login, so this rejects a human dispatch that would skip
+  # scripts/authorize; it admits any bot with actions:write. Its own job so `summary` can refuse
+  # a rejected dispatch yet report a genuine `detect` failure. No secrets, environment or checkout.
+  guard:
+    runs-on: ubuntu-slim
+    permissions: {}
+    steps:
+      - name: Reject dispatches that did not come from a bot actor
+        if: ${{ !endsWith(github.actor, '[bot]') }}
+        run: |
+          echo "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
+          exit 1
+      # A called workflow's `github` context is its caller's, so these read the dispatch itself.
+      # A fence `auto` job without `auto: true` would otherwise run the App's dispatch as a bare
+      # apply, skipping the actor, provenance, pusher and overlap checks.
+      - name: Reject an auto dispatch that does not run the auto form
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto }}
+        run: |
+          echo "::error::apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'; give the shipmate.yml 'auto' job the published 'with:' block (shipmate doctor names the difference)"
+          exit 1
+      - name: Reject the auto form outside an auto dispatch
+        if: ${{ inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'auto') }}
+        run: |
+          echo "::error::apply refused: the calling job passes 'auto: true', but this run is not a dispatch with verb 'auto'; only the shipmate.yml 'auto' job passes it"
+          exit 1
+      # Fails closed: an unreadable `inputs` reads '' and refuses every bare and targeted apply,
+      # as does any call that is not a dispatch.
+      - name: Reject a bare or targeted apply outside an apply dispatch
+        if: ${{ !inputs.auto && (github.event_name != 'workflow_dispatch' || github.event.inputs.verb != 'apply') }}
+        run: |
+          echo "::error::apply refused: this run is not a dispatch with verb 'apply' and the calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate doctor names the difference)"
+          exit 1
+
+      # The number keys `apply-run.yml`'s concurrency group, so two spellings of one pull request
+      # must not reach two groups. Read through `env:`: a `${{ }}` inside `run:` is injectable.
+      - name: Reject a pull request number that is not canonical
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then
+            echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero); comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
+            exit 1
+          fi
+
+  # Every apply job runs inside `apply-run.yml`, one run per pull request at a time. `!cancelled()`
+  # keeps a run cancelled before it starts from queueing an apply.
+  run:
+    needs: [guard]
+    if: ${{ !cancelled() && needs.guard.result == 'success' }}
+    uses: ./.github/workflows/apply-run.yml
+    # The union of what `apply-run.yml`'s jobs request; a callee job asking for more fails the run.
+    permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
+    with:
+      environment: ${{ inputs.environment }}
+      ref: ${{ inputs.ref }}
+      pr_number: ${{ inputs.pr_number }}
+      runs_on: ${{ inputs.runs_on }}
+      auto: ${{ inputs.auto }}
+    # Named like the wave calls' secrets: mapping a secret `apply-run.yml` does not declare is a
+    # load-time error, so declare a new one there in the same change.
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}

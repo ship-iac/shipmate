@@ -29,7 +29,7 @@ EXPECTED = {
         "cancel-in-progress": False,
         "queue": "max",
     },
-    "apply.yml": {
+    "apply-run.yml": {
         "group": "shipmate-gate-${{ inputs.ref || github.run_id }}",
         "cancel-in-progress": False,
         "queue": "max",

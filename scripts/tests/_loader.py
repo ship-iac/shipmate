@@ -72,6 +72,7 @@ ENGINE_CALL_SECRETS = {
     "drift.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "comment-ops.yml": _APP_KEY,
     "apply.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    "apply-run.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "deploy.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "apply-env-level.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the

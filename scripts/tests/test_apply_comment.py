@@ -1540,11 +1540,11 @@ def test_check_name_grammar_matches_apply_cells_construction():
 
 def test_every_env_level_job_is_named_for_its_level():
     """`apply-gate.is_cell_job` requires the `L<n>` segment, so every env-level job of
-    `apply.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
+    `apply-run.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
     up to `waves.MAX_ENV_LEVELS`, compared whole. Mutation: rename deploy.yml's `name: L0` to
     `level 0`."""
     expected = {f"envlevel{n}": f"L{n}" for n in range(wv.MAX_ENV_LEVELS)}
-    for wf in ("apply.yml", "deploy.yml"):
+    for wf in ("apply-run.yml", "deploy.yml"):
         jobs = workflow_yaml(wf)["jobs"]
         names = {j: v.get("name") for j, v in jobs.items() if j.startswith("envlevel")}
         assert names == expected, f"{wf}: {names}"
@@ -1594,7 +1594,7 @@ def test_wave_job_name_matches_the_cell_job_grammar():
 
 
 def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
-    """The render step's env for a targeted `dev-eu` apply as `apply.yml` wires it: `waves_json`
+    """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it: `waves_json`
     in env-level 0, the other levels and every env set empty."""
     monkeypatch.setenv("CELLS", str(cells_dir))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
@@ -1837,7 +1837,7 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
 
 
 def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
-    """A targeted apply's expected cells arrive in env-level 0, the slot `apply.yml` fills from
+    """A targeted apply's expected cells arrive in env-level 0, the slot `apply-run.yml` fills from
     `apply-detect`. `stacks/db` has no artifact, so only the expected-cell set can name it.
 
     Mutation: read the expected cells from `range(1, MAX_ENV_LEVELS)` in `_expected_cells` --

@@ -660,8 +660,8 @@ def test_a_locked_cell_stays_pending_as_on_a_bare_apply(tmp_path, monkeypatch):
 def test_detect_grants_exactly_these_permissions():
     """The auto form reads the pull request, and a reusable workflow's job cannot exceed it.
 
-    Mutation: drop `pull-requests: read` from `apply.yml`'s `detect`."""
-    assert workflow_jobs("apply.yml")["detect"]["permissions"] == {
+    Mutation: drop `pull-requests: read` from `apply-run.yml`'s `detect`."""
+    assert workflow_jobs("apply-run.yml")["detect"]["permissions"] == {
         "contents": "read",
         "checks": "read",
         "actions": "read",

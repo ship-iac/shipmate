@@ -45,7 +45,7 @@ _DETECT = {"id": "setup", "with": {"tofu": "false", "resolve": "true"}}
 _FROM_DETECT = "${{ needs.detect.outputs.tools }}"
 EXPECTED_STEPS = {
     "apply-env-level.yml": [{"with": {"versions": "${{ inputs.tools }}"}}] * 8,
-    "apply.yml": [_DETECT],
+    "apply-run.yml": [_DETECT],
     "deploy.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     "drift.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     # The remote parse probe never runs a step.
@@ -63,7 +63,7 @@ EXPECTED_STEPS = {
 
 def test_setup_call_sites_resolve_once_and_pass_only_the_switches():
     """Mutations: drop `tofu` from plan.yml's detect site; add `tofu: "false"` to drift.yml's
-    cell site; add `tofu-version: x` to apply.yml's detect site; delete drift.yml's cell
+    cell site; add `tofu-version: x` to apply-run.yml's detect site; delete drift.yml's cell
     site; rename plan.yml's detect site `id: setup` to `id: tools`; drop `cache-save` from
     unlock.yml's cell site; add `cache-save: "false"` to drift.yml's cell site; add
     `resolve: "true"` to plan.yml's cell site; set the wave cells' `versions` to `""`; drop

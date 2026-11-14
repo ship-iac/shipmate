@@ -168,14 +168,14 @@ def test_every_level_call_grants_what_the_wave_requests():
     wave requests fails at load. The levels' `with:` blocks, the deploy's passing the merged
     pull request with `deploy` true among them, are pinned whole by
     `test_no_env_level_call_passes_a_cap`. Mutation: drop `pull-requests: read` from
-    `apply.yml`'s, then `deploy.yml`'s, level permissions."""
+    `apply-run.yml`'s, then `deploy.yml`'s, level permissions."""
     found = {
         (workflow, lvl): workflow_jobs(workflow)[lvl]["permissions"]
-        for workflow in ("apply.yml", "deploy.yml")
+        for workflow in ("apply-run.yml", "deploy.yml")
         for lvl in LEVELS
     }
     assert found == dict.fromkeys(
-        [(w, lvl) for w in ("apply.yml", "deploy.yml") for lvl in LEVELS],
+        [(w, lvl) for w in ("apply-run.yml", "deploy.yml") for lvl in LEVELS],
         {
             "contents": "read",
             "checks": "read",
