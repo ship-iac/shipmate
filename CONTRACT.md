@@ -146,13 +146,18 @@ one by an invisible character is never satisfied, so every pull request is
 unmergeable while the status itself renders green.
 
 The middot is reserved for `shipmate.yml`'s `run-name`, a run title GitHub
-renders and nothing matches on. A dispatched run is titled
+renders and no check or ruleset matches on. A dispatched run is titled
 `shipmate · <verb> pr=<pr_number> ref=<ref> comment=<comment_id>`: `pr` and
 `comment` are the dispatch inputs as sent (the engine sends a decimal number or
 nothing), `ref` is the dispatched head (40 lowercase hex, or empty), and an input
 the dispatch omits renders empty (`pr=`). The title is built from dispatch
 inputs, so it identifies a run only when the App dispatched it: anyone who can
-dispatch the workflow chooses the inputs. A run of any other event is titled `shipmate · plan`,
+dispatch the workflow chooses the inputs. The engine reads a title only for a
+`workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
+`queue` lists a pull request's apply runs by it to cancel the stale ones and
+name the one a run waits behind (§Comment-ops, "One apply run per pull
+request"). `shipmate doctor` reports a `run-name` that differs from the
+published one outside its quoted literals. A run of any other event is titled `shipmate · plan`,
 `shipmate · release`, `shipmate · comment` or `shipmate · deploy`. That file's
 own `name:` is plain `shipmate`. The published drift fence sets no `run-name`,
 so a sweep's run is titled by the file's own `name:` (`shipmate drift` in the
@@ -1334,7 +1339,8 @@ later. Before each retry the engine lists `shipmate.yml`'s `workflow_dispatch`
 runs (one page of 100, newest first, on the dispatch's own App token, the read
 itself retried on a transient failure) and stops when any was created at or
 after `t0`, five seconds before the first attempt, whatever its title: a run's
-title is the consumer's `run-name`, which nothing checks. A concurrent dispatch
+title is the consumer's `run-name`, which only `shipmate doctor` checks, after
+the fact. A concurrent dispatch
 of another command landing in that window stops the retry too; a wrong stop
 costs a comment, a wrong retry a double start. A failed dispatch posts one of
 three replies:
@@ -2688,11 +2694,12 @@ The six jobs:
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — whether each file parses as YAML, stale engine
 pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
-and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:` and `pull_request_target` types observe whether the plan comment's
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:`, `pull_request_target` types and `run-name` observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
 whether the job it reaches is the one that verb names, whether the autoplan's
-dispatch runs the auto form, and whether every pull
-request event the fence routes starts a run, and whose sixth
+dispatch runs the auto form, whether every pull
+request event the fence routes starts a run, and whether shipmate can identify a
+pull request's apply runs by their titles, and whose seventh
 check reports a drift job in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the

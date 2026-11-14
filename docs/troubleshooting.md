@@ -148,6 +148,12 @@ combining fourteen live probes.
     no cell lock of a pull request closed without merging is released. The
     finding names what each missing type loses, and any extra type, which
     starts a plan the fence never routes.
+  - Whether its `run-name` is the fence's, compared with whitespace collapsed
+    outside quoted literals: inside `format`'s string a space is part of the
+    title. Without it shipmate cannot identify a pull request's apply runs, so
+    an apply run cancels no stale one and replies that it may wait behind
+    another without naming it. Re-pin the file with
+    `python <engine>/scripts/repin <consumer> <tag> --write-fence`.
   - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
     runs on that file's triggers. Move the drift job to a workflow file of its
     own, and drop the `schedule` trigger and the `drift` verb option from
