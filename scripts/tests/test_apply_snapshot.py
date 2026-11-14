@@ -232,11 +232,11 @@ def test_by_wave_slices_the_snapshot_per_wave():
 
 def test_a_wave_slice_reads_no_later_wave_as_unmatched():
     """wave0's completion runs before wave1 has a job in the listing. Mutation: `classify` walks
-    every key of `by_wave` instead of those of `releases` -> wave1's cells get `Not run` rows."""
+    every key of `by_wave` instead of those of its wave results -> wave1's cells read
+    unresolved."""
     jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
     by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
-    rows, unresolved, floor = apply_complete.classify(by_wave, {"wave0": "success"}, jobs)
-    assert (rows, unresolved, floor) == (
+    assert apply_complete.classify(by_wave, {"wave0": "success"}, jobs) == (
         [
             {
                 "check": "apply / dns / dev",
@@ -247,7 +247,6 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
             }
         ],
         [],
-        False,
     )
 
 

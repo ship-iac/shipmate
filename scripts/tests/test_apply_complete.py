@@ -24,8 +24,8 @@ BY_WAVE = {
     "wave1": {"apply / stacks/app / dev-eu": [2, 3]},
     "wave2": {"apply / stacks/web / dev-eu": [4]},
 }
-#: Every wave's release succeeded.
-RELEASED = {"wave0": "success", "wave1": "success", "wave2": "success"}
+#: Every wave ran.
+RAN = {"wave0": "success", "wave1": "success", "wave2": "success"}
 _IDS = iter(range(100, 10_000))
 
 
@@ -54,13 +54,15 @@ def _by_check(rows):
     return {r["check"]: r for r in rows}
 
 
-def _classify(jobs, by_wave=BY_WAVE, releases=RELEASED):
-    return apply_complete.classify(by_wave, releases, jobs)
+def _classify(jobs, by_wave=BY_WAVE, results=RAN):
+    return apply_complete.classify(by_wave, results, jobs)
 
 
 DNS = "apply / stacks/dns / dev-eu"
 APP = "apply / stacks/app / dev-eu"
 WEB = "apply / stacks/web / dev-eu"
+#: A skipped wave's one listing row: GitHub never expands a skipped job's matrix.
+SKIPPED_ROW = "deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}"
 
 
 def test_each_cell_takes_its_matched_jobs_row():
@@ -70,8 +72,8 @@ def test_each_cell_takes_its_matched_jobs_row():
         job("L0 / dev-eu / stacks/app", "failure"),
         job("L0 / dev-eu / stacks/web", "cancelled"),
     ]
-    rows, unresolved, floor = _classify(jobs)
-    assert (unresolved, floor) == ([], False)
+    rows, unresolved = _classify(jobs)
+    assert unresolved == []
     assert _by_check(rows) == {
         DNS: row(DNS, [1], jobs[0]),
         APP: row(APP, [2, 3], jobs[1]),
@@ -86,11 +88,12 @@ def test_matches_the_nested_reusable_workflow_job_name_suffix(prefix):
     """A called workflow's jobs display as `<caller job> / <called job> / <job>`, and the cell
     job is named `<env> / <stack>`; the same stack in another env matches nothing.
     Mutation: `apply-gate.cell_job_name` builds `<stack> / <env>`."""
+    by_wave = {"wave1": BY_WAVE["wave1"]}
     j = job(prefix, "success")
-    assert _by_check(_classify([j])[0])[APP] == row(APP, [2, 3], j)
+    assert _classify([j], by_wave) == ([row(APP, [2, 3], j)], [])
     other = job(prefix.replace("dev-eu", "dev-us"), "success")
-    assert _by_check(_classify([other, j])[0])[APP] == row(APP, [2, 3], j)
-    assert _classify([other])[2] is True
+    assert _classify([other, j], by_wave) == ([row(APP, [2, 3], j)], [])
+    assert _classify([other], by_wave) == ([], ["stacks/app / dev-eu"])
 
 
 @pytest.mark.parametrize(
@@ -105,23 +108,22 @@ def test_only_a_wave_job_completes_a_cell(by_wave, name):
     """A job outside an `L<n>` env-level can end in ` / <env> / <stack>`: the orchestration
     job `apply / detect` does for env `apply` and root stack `detect`, and it succeeds when
     that cell's wave failed. Mutation: `apply-gate.is_cell_job` drops the `L<n>` segment."""
-    rows, _, floor = _classify([job(name, "success")], by_wave)
-    assert (rows, floor) == ([], True)
+    rows, unresolved = _classify([job(name, "success")], by_wave)
+    assert (rows, len(unresolved)) == ([], len(by_wave))
 
 
 def test_a_rerun_success_after_a_failure_completes_the_cell():
     """Mutation: take the last matched job whatever its conclusion -> the failure row."""
     ok = job("L0 / dev-eu / stacks/dns", "success")
-    rows, _, _ = _classify([ok, job("L0 / dev-eu / stacks/dns", "failure")])
+    rows, _ = _classify([ok, job("L0 / dev-eu / stacks/dns", "failure")])
     assert _by_check(rows)[DNS] == row(DNS, [1], ok)
 
 
 def test_never_completes_a_cell_that_was_not_snapshotted():
-    rows, _, _ = _classify(
+    rows, _ = _classify(
         [job("L0 / dev-eu / stacks/rogue", "success"), job("L0 / dev-eu / stacks/dns", "failure")]
     )
     assert all(r["conclusion"] != "success" for r in rows)
-    assert sorted(_by_check(rows)) == [APP, DNS, WEB]
 
 
 def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
@@ -131,7 +133,7 @@ def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
     test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
     Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
     by_wave = {"wave0": {"apply / stacks/dns / eu": [1]}}
-    assert _classify([job("L0 / dev-eu / stacks/dns", "success")], by_wave)[:2] == ([], [])
+    assert _classify([job("L0 / dev-eu / stacks/dns", "success")], by_wave)[0] == []
 
 
 def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
@@ -144,84 +146,53 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
         job("L0 / dev-eu / stacks/my-app", "success"),
         job("L0 / prod-dev-eu / stacks/app", "success"),
     ]
-    assert _classify(jobs, by_wave)[:2] == ([], [])
+    assert _classify(jobs, by_wave)[0] == []
 
 
 def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
     """The listing lagging a finished job is the whole reason for the retry loop: a null
     conclusion must be reported, never read as "did not run". Mutation: give it a `Not run`
     row -> DNS has a row."""
-    rows, unresolved, floor = _classify(
+    rows, unresolved = _classify(
         [
             job("L0 / dev-eu / stacks/dns", None),
             job("L0 / dev-eu / stacks/app", "success"),
             job("L0 / dev-eu / stacks/web", "success"),
         ]
     )
-    assert (sorted(_by_check(rows)), unresolved, floor) == (
-        [APP, WEB],
-        ["stacks/dns / dev-eu"],
-        False,
-    )
+    assert (sorted(_by_check(rows)), unresolved) == ([APP, WEB], ["stacks/dns / dev-eu"])
 
 
-def test_a_cell_with_no_matching_job_gets_a_not_run_row():
-    """Skip-propagation: GitHub never expands a skipped job's matrix. Mutation: count every
-    skipped job as the cell's -> APP takes the skipped row."""
+@pytest.mark.parametrize("result", ["skipped", "cancelled"])
+def test_a_cell_of_a_wave_that_did_not_run_gets_a_not_run_row(result):
+    """A failed release, a failed earlier wave, or a cancel between the release and the wave
+    leaves the wave `skipped` or `cancelled` with no cell job. Mutations: count every skipped
+    job as the cell's -> APP takes the skipped row; treat a `cancelled` wave as one that ran ->
+    APP is unresolved."""
     ok = job("L0 / dev-eu / stacks/dns", "success")
-    rows, _, floor = _classify(
-        [ok, job("deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped")]
+    rows, unresolved = _classify(
+        [ok, job(SKIPPED_ROW, "skipped")], results={**RAN, "wave1": result, "wave2": result}
     )
-    assert floor is False
-    assert _by_check(rows)[APP] == row(APP, [2, 3])
+    assert unresolved == []
+    assert rows == [row(DNS, [1], ok), row(APP, [2, 3]), row(WEB, [4])]
 
 
-def test_a_stopped_release_marks_its_wave_and_every_later_one_not_run():
-    """wave1's release failed, so wave1 and wave2 never ran, whatever the listing holds.
-    Mutations: stop only the release's own wave -> WEB takes its listed success row; ignore a
-    `cancelled` release -> the same."""
-    jobs = [
-        job("L0 / dev-eu / stacks/dns", "success"),
-        job("L0 / dev-eu / stacks/web", "success"),
-    ]
-    for result in ("failure", "cancelled"):
-        releases = {**RELEASED, "wave1": result}
-        rows, _, floor = _classify(jobs, releases=releases)
-        assert floor is False
-        assert _by_check(rows) == {
-            DNS: row(DNS, [1], jobs[0]),
-            APP: row(APP, [2, 3]),
-            WEB: row(WEB, [4]),
-        }
+@pytest.mark.parametrize("result", ["success", "failure", "", "weird"])
+def test_a_missing_cell_of_a_wave_that_ran_is_unresolved_and_never_not_run(result):
+    """A wave that ran lists every cell job, so a missing one is a lagging or lost listing; a
+    `Not run` write would turn a completed `success` back to `queued`. Mutation: write `Not
+    run` for any missing cell -> APP gets a row."""
+    ok = job("L0 / dev-eu / stacks/dns", "success")
+    rows, unresolved = _classify([ok], results={"wave0": "success", "wave1": result})
+    assert (rows, unresolved) == ([row(DNS, [1], ok)], ["stacks/app / dev-eu"])
 
 
-def test_stopped_cells_need_no_listing_and_never_trip_the_floor():
-    """A failed first release leaves no cell a job. Mutation: count stopped cells in the floor
-    -> it trips and the run retries for two minutes over nothing."""
-    rows, unresolved, floor = _classify([], releases={**RELEASED, "wave0": "failure"})
-    assert (rows, unresolved, floor) == (
-        [row(DNS, [1]), row(APP, [2, 3]), row(WEB, [4])],
-        [],
-        False,
-    )
-
-
-def test_a_skipped_release_stops_nothing():
-    """An empty wave skips its release. Mutation: add `skipped` to `STOPPED` -> wave2 reads not
-    run."""
-    ok = job("L0 / dev-eu / stacks/web", "success")
-    rows, _, _ = _classify([ok], releases={**RELEASED, "wave1": "skipped"})
-    assert _by_check(rows)[WEB] == row(WEB, [4], ok)
-
-
-def test_the_floor_keeps_only_the_stopped_rows():
-    """No cell outside a stopped wave matched: the listing is lost or truncated. Mutation: keep
-    the unmatched rows on the floor -> DNS gets a `Not run` row from a listing nobody trusts."""
-    rows, _, floor = _classify(
-        [job("L0 / dev-eu / stacks/rogue", "success")], releases={**RELEASED, "wave1": "failure"}
-    )
-    assert floor is True
-    assert rows == [row(APP, [2, 3]), row(WEB, [4])]
+def test_a_cancelled_wave_keeps_its_listed_cells_rows():
+    """Only cells with no job read the wave's result. Mutation: write `Not run` for every cell
+    of a cancelled wave -> APP loses its `cancelled` row."""
+    stopped = job("L0 / dev-eu / stacks/app", "cancelled")
+    rows, _ = _classify([stopped], {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"})
+    assert rows == [row(APP, [2, 3], stopped)]
 
 
 def _write(conclusion, *, url="https://u/job/9", job_id=9, ids=(5,), repo="acme/demo"):
@@ -357,14 +328,14 @@ def test_merge_keeps_a_success_any_attempt_saw_and_otherwise_the_last_attempt():
     assert apply_complete.merge(first + last, last) == [row(APP, [2, 3]), row(DNS, [1], ok)]
 
 
-def _run(by_wave, releases, jobs):
+def _run(by_wave, results, jobs):
     return subprocess.run(
         [sys.executable, str(SCRIPTS / "apply-complete")],
         input="\n".join(json.dumps(j) for j in jobs),
         env={
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
-            "SHIPMATE_RELEASES_JSON": json.dumps(releases),
+            "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results),
         },
         capture_output=True,
         text=True,
@@ -372,12 +343,16 @@ def _run(by_wave, releases, jobs):
 
 
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
-    done = _run(BY_WAVE, RELEASED, [job("L0 / dev-eu / stacks/web", None)])
+    """A missing cell of a wave that ran retries like a lagging one. Mutation: exit 0 when a
+    cell is unresolved -> returncode 0."""
+    done = _run(BY_WAVE, RAN, [job("L0 / dev-eu / stacks/web", None)])
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
     assert done.stderr == (
         apply_complete.RETRY_PREFIX
-        + "the jobs listing reported no conclusion for these cells: stacks/web / dev-eu\n"
+        + "the jobs listing shows no conclusion for these cells of waves that ran: "
+        + "stacks/app / dev-eu, stacks/dns / dev-eu, stacks/web / dev-eu\n"
     )
+    assert done.stdout == ""
 
 
 def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():
@@ -385,22 +360,13 @@ def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():
         job("L0 / dev-eu / stacks/dns", "success"),
         job("L0 / dev-eu / stacks/app", "failure"),
     ]
-    done = _run(BY_WAVE, RELEASED, jobs)
+    done = _run(BY_WAVE, {**RAN, "wave2": "skipped"}, jobs)
     assert (done.returncode, done.stderr) == (0, "")
     assert [json.loads(line) for line in done.stdout.splitlines()] == [
         row(DNS, [1], jobs[0]),
         row(APP, [2, 3], jobs[1]),
         row(WEB, [4]),
     ]
-
-
-def test_the_zero_match_floor_is_retryable_and_prints_no_row():
-    """A run always lists its own wave jobs, so zero matches is never a real run state. Mutation:
-    exit 0 on the floor -> returncode 0."""
-    done = _run(BY_WAVE, RELEASED, [job("L0 / dev-eu / stacks/rogue", "success")])
-    assert done.returncode == apply_complete.UNRESOLVED_EXIT
-    assert done.stderr.startswith(apply_complete.RETRY_PREFIX + "no cell matched")
-    assert done.stdout == ""
 
 
 def test_plan_mode_writes_the_merged_rows(tmp_path):
@@ -522,10 +488,10 @@ HARNESS_BY_WAVE = {
     "wave0": {"apply / dns / dev-eu": [11], "apply / app / dev-eu": [22]},
     "wave1": {"apply / web / dev-eu": [33]},
 }
-HARNESS_RELEASES = {"wave0": "success", "wave1": "success"}
+HARNESS_RAN = {"wave0": "success", "wave1": "success"}
 
 
-def _select(tmp_path, listings, releases=None):
+def _select(tmp_path, listings, results=None):
     """Execute the selection step with `listings[n]` served on attempt n; return the process,
     the `{id: entry}` write plan, the attempt count and the env.
 
@@ -552,7 +518,7 @@ def _select(tmp_path, listings, releases=None):
         "GITHUB_ACTION_PATH": str(ENGINE / "actions" / "apply-complete").replace("\\", "/"),
         "RUNNER_TEMP": str(runner_temp).replace("\\", "/"),
         "SHIPMATE_BY_WAVE_JSON": json.dumps(HARNESS_BY_WAVE),
-        "SHIPMATE_RELEASES_JSON": json.dumps(releases or HARNESS_RELEASES),
+        "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results or HARNESS_RAN),
         "FIXTURES": str(fixtures).replace("\\", "/"),
         "LAST_FIXTURE": str(len(listings)),
         "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
@@ -607,8 +573,7 @@ def test_an_empty_listing_is_retried_rather_than_failed_on_the_first_attempt(tmp
 
 @bash_only
 def test_a_failed_fetch_never_feeds_its_half_written_file_to_the_selection(tmp_path):
-    # A truncated listing matches a subset of cells, so it slips past the all-cells-unmatched
-    # floor and writes `Not run` over the rows that did not survive.
+    # A truncated listing is never read: the cells it holds would be written from it.
     proc, plan, attempts, _ = _select(tmp_path, [None, _all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
     assert attempts == 2
@@ -617,7 +582,7 @@ def test_a_failed_fetch_never_feeds_its_half_written_file_to_the_selection(tmp_p
 
 @bash_only
 def test_a_listing_matching_no_cell_at_all_is_retried_and_writes_nothing_meanwhile(tmp_path):
-    # The zero-match floor routed through the loop rather than around it.
+    # Cells of waves that ran with no job retry through the loop rather than around it.
     proc, plan, attempts, _ = _select(
         tmp_path, [_all_success("rogue"), _all_success("dns", "app", "web")]
     )
@@ -630,7 +595,7 @@ def test_a_listing_matching_no_cell_at_all_is_retried_and_writes_nothing_meanwhi
 def test_a_success_seen_by_one_attempt_survives_a_staler_later_listing(tmp_path):
     """Replicas differ, so a later read can be missing a row an earlier one had. A later read
     may add a completion; it may never revoke one. Mutation: feed `plan` the last attempt as
-    both files -> dns and app read `Not run`."""
+    both files -> dns and app get no write."""
     first = jsonl(
         job("L0 / dev-eu / dns", "success"),
         job("L0 / dev-eu / app", "success"),
@@ -643,12 +608,14 @@ def test_a_success_seen_by_one_attempt_survives_a_staler_later_listing(tmp_path)
 
 
 @bash_only
-def test_a_failed_release_writes_not_run_without_the_floors_retries(tmp_path):
-    """wave0's release failed, so no cell has a job. Mutation: count stopped cells in the floor
-    -> 14 attempts."""
+@pytest.mark.parametrize("result", ["skipped", "cancelled"])
+def test_a_wave_that_did_not_run_writes_not_run_at_once(tmp_path, result):
+    """A failed release, or a cancel between the release and the wave, lists no cell job.
+    Mutation: treat a `skipped` or `cancelled` wave as one that ran -> 14 attempts and no
+    write."""
     skipped = jsonl(job("L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped"))
     proc, plan, attempts, _ = _select(
-        tmp_path, [skipped], releases={"wave0": "failure", "wave1": "skipped"}
+        tmp_path, [skipped], results={"wave0": result, "wave1": "skipped"}
     )
     assert (proc.returncode, attempts) == (0, 1), proc.stderr
     assert _outcomes(plan) == {11: "Not run", 22: "Not run", 33: "Not run"}
@@ -656,9 +623,11 @@ def test_a_failed_release_writes_not_run_without_the_floors_retries(tmp_path):
 
 @bash_only
 def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stranded(tmp_path):
-    """One cell resolves, one is unmatched by skip-propagation, one never resolves. The decided
-    writes must still reach the write step, the unmatched cell is written `Not run`, and the
-    stranded cell gets no write and is named in the `::error::`.
+    """One cell resolves, one of a wave that ran is missing from the listing, one never
+    resolves. The decided write must still reach the write step; the other two get no write,
+    since a missing cell of a wave that ran may already be completed, and both are named in
+    the `::error::`. Mutation: write `Not run` for a missing cell whatever its wave's result
+    -> app gets a write.
 
     The waits back off from 2 s to a 110 s total, and the last attempt does not sleep.
     Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
@@ -672,14 +641,18 @@ def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stra
     assert attempts == 14
     sleeps = (tmp_path / "sleeps").read_text(encoding="utf-8").splitlines()
     assert sleeps == ["2", "3", "5", "10", "10", "10", "10", "10", "10", "10", "10", "10", "10"]
-    assert _outcomes(plan) == {11: "completed", 22: "Not run"}
+    assert _outcomes(plan) == {11: "completed"}
 
     fail = run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120)
     assert fail.returncode == 1
     errors = [ln for ln in fail.stdout.splitlines() if "::error::" in ln]
-    assert len(errors) == 1
-    assert "web / dev-eu" in errors[0]
-    assert "app / dev-eu" not in errors[0]
+    assert errors == [
+        (
+            "::error::the retries were exhausted and these apply checks are left pending: the jobs "
+            "listing shows no conclusion for these cells of waves that ran: app / dev-eu, "
+            "web / dev-eu "
+        )
+    ]
 
 
 @bash_only

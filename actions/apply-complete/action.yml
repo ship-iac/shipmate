@@ -4,8 +4,8 @@ inputs:
   by-wave:
     description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
     required: true
-  releases:
-    description: JSON object mapping each wave key to write to the result of its release job; a `failure` or `cancelled` release stops that wave and every later one.
+  wave-results:
+    description: JSON object mapping each wave key to write to the result of its wave job; a cell of a `skipped` or `cancelled` wave with no job is not run, and one of any other wave with no job is retried and then left unwritten.
     required: true
   deploy:
     description: "`true` on the merge deploy. Otherwise a re-run writes nothing, and a merged pull request gets only its success writes."
@@ -32,7 +32,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
-        SHIPMATE_RELEASES_JSON: ${{ inputs.releases }}
+        SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
       # `--paginate --jq` because a 256-cell level exceeds the 100-per-page cap. Unlike
       # apply-summary's cosmetic listing, this one decides which checks complete, so it never
       # degrades to no data: that would silently strand every applied check pending.
@@ -61,8 +61,8 @@ runs:
               2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
           else
             # An empty or failed fetch is the extreme form of that lag, so it retries. The
-            # half-written file stays unread: a truncated listing matches a subset of cells
-            # and slips past the script's all-cells-unmatched floor.
+            # half-written file stays unread: a truncated listing would write `Not run` over
+            # the cells of a skipped wave it lost.
             rc=75
             echo "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells succeeded" \
               > "$RUNNER_TEMP/diagnostics.txt"

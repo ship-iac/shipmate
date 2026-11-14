@@ -27,7 +27,7 @@ _WITH_KEY = {
 
 def _completion(n):
     return {
-        "needs": ["snapshot", f"wave{n}-release", f"wave{n}"],
+        "needs": ["snapshot", f"wave{n}"],
         "if": (
             "${{ always() && needs.snapshot.result == 'success' && "
             f"(needs.wave{n}.result == 'success' || needs.wave{n}.result == 'failure') }}}}"
@@ -41,7 +41,7 @@ def _completion(n):
                 "uses": "$/actions/apply-complete",
                 "with": {
                     "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
-                    "releases": f'{{"wave{n}": "${{{{ needs.wave{n}-release.result }}}}"}}',
+                    "wave-results": f'{{"wave{n}": "${{{{ needs.wave{n}.result }}}}"}}',
                     "deploy": "${{ inputs.deploy }}",
                     "pr-number": "${{ inputs.pr_number }}",
                     **_WITH_KEY,
@@ -53,7 +53,7 @@ def _completion(n):
 
 #: Written out in full: a template-only guard cannot catch a wrong template.
 WAVE3_COMPLETE = {
-    "needs": ["snapshot", "wave3-release", "wave3"],
+    "needs": ["snapshot", "wave3"],
     "if": (
         "${{ always() && needs.snapshot.result == 'success' && "
         "(needs.wave3.result == 'success' || needs.wave3.result == 'failure') }}"
@@ -67,7 +67,7 @@ WAVE3_COMPLETE = {
             "uses": "$/actions/apply-complete",
             "with": {
                 "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
-                "releases": '{"wave3": "${{ needs.wave3-release.result }}"}',
+                "wave-results": '{"wave3": "${{ needs.wave3.result }}"}',
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -114,15 +114,15 @@ COMPLETE = {
             "uses": "$/actions/apply-complete",
             "with": {
                 "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
-                "releases": (
-                    '{"wave0": "${{ needs.wave0-release.result }}", '
-                    '"wave1": "${{ needs.wave1-release.result }}", '
-                    '"wave2": "${{ needs.wave2-release.result }}", '
-                    '"wave3": "${{ needs.wave3-release.result }}", '
-                    '"wave4": "${{ needs.wave4-release.result }}", '
-                    '"wave5": "${{ needs.wave5-release.result }}", '
-                    '"wave6": "${{ needs.wave6-release.result }}", '
-                    '"wave7": "${{ needs.wave7-release.result }}"}'
+                "wave-results": (
+                    '{"wave0": "${{ needs.wave0.result }}", '
+                    '"wave1": "${{ needs.wave1.result }}", '
+                    '"wave2": "${{ needs.wave2.result }}", '
+                    '"wave3": "${{ needs.wave3.result }}", '
+                    '"wave4": "${{ needs.wave4.result }}", '
+                    '"wave5": "${{ needs.wave5.result }}", '
+                    '"wave6": "${{ needs.wave6.result }}", '
+                    '"wave7": "${{ needs.wave7.result }}"}'
                 ),
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
@@ -251,7 +251,7 @@ WAVE2_RELEASE = {
 @pytest.mark.parametrize("n", range(8))
 def test_each_wave_completion_job_is_exactly(n):
     """Mutations: drop the `result` clause from `wave2-complete`'s `if:`; `.wave1` in
-    `wave2-complete`'s `releases`; `needs: [snapshot]` on `wave5-complete`; add `checks: write`
+    `wave2-complete`'s `wave-results`; `needs: [snapshot]` on `wave5-complete`; add `checks: write`
     to `wave5-complete`'s permissions; drop `continue-on-error` from `wave3-complete`."""
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-complete"] == _completion(n)
 
@@ -266,8 +266,8 @@ def test_complete_waits_for_every_release_wave_and_completion():
     land after it starts.
 
     Mutations: drop `wave7-complete` from `complete.needs`; add `continue-on-error: true` to
-    `complete`; drop `wave4-release` from `complete.needs`; `wave5-release` under `"wave6"` in
-    its `releases`."""
+    `complete`; drop `wave4-release` from `complete.needs`; `wave5` under `"wave6"` in its
+    `wave-results`."""
     assert workflow_jobs("apply-env-level.yml")["complete"] == COMPLETE
 
 

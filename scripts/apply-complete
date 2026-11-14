@@ -19,26 +19,27 @@ level and a ` / ` boundary, not a bare `str.endswith`, keeps out a job of env
 `dev-eu` for env `eu` and a non-wave job such as `apply / run / detect` for env
 `run` and stack `detect`; either would complete a check its own apply never earned.
 
-The cells are those of the waves named in `SHIPMATE_RELEASES_JSON`, `{wave key: result of its
-release job}`, read from `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s `by_wave`. A release that
-ended `failure` or `cancelled` stops its wave and every later one: their cells are not run,
-whatever the listing says. Every other cell takes the row of its matched job:
+The cells are those of the waves named in `SHIPMATE_WAVE_RESULTS_JSON`, `{wave key: result
+of its wave job}`, read from `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s `by_wave`. Each cell
+takes the row of its matched job:
 
 | Matched job | Row `conclusion` | Write (`plan`) |
 | --- | --- | --- |
 | any `success` | `success` | `completed`/`success`, the job's URL, the record title |
 | `failure` | `failure` | `queued`, `Failed: <first error line>`, the job's URL |
 | `cancelled` | `cancelled` | `queued`, `Cancelled` |
-| `skipped`, or none | `skipped` / null | `queued`, `Not run` |
+| `skipped`, or none in a wave that did not run | `skipped` / null | `queued`, `Not run` |
 | any other conclusion | itself | `queued`, `Not applied (<conclusion>)`: never `success` |
-| no conclusion yet | no row | none; `main` exits `UNRESOLVED_EXIT` |
+| no conclusion yet, or none in a wave that ran | no row | none; `main` exits `UNRESOLVED_EXIT` |
 
 A job with no conclusion yet is the listing lagging, by seconds, a job that has already ended,
-so the caller asks again. No matching job is skip-propagation: GitHub expands a matrix only for
-a job it starts, so a skipped wave lists one row under its literal `${{ matrix.environment }} /
-${{ matrix.stack }}` name. A lost or truncated listing looks the same, so a listing that matches
-none of the cells not stopped by a release is retried and then fails the run: a run always
-lists its own wave jobs. Those cells then get no row.
+so the caller asks again. A wave that did not run (`skipped` or `cancelled`: a failed or skipped
+release, a failed earlier wave, a cancel) lists one row under its literal `${{
+matrix.environment }} / ${{ matrix.stack }}` name, since GitHub expands a matrix only for a job
+it starts, so its cells match nothing and are not run. A cell of a wave that ran (`success` or
+`failure`, or a result this script does not know) always has a job, so a missing one is a lost
+or lagging listing: it is retried, and after the retries the cell gets no write, so a stale
+listing never turns a completed `success` back to `queued`.
 """
 
 import json
@@ -55,7 +56,7 @@ UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 # of stderr to annotate what it gave up on after its retries, so it is a line-anchored
 # contract, not a message.
 RETRY_PREFIX = "retry: "
-STOPPED = ("failure", "cancelled")
+NOT_RUN = ("skipped", "cancelled")
 ERROR_LINE_CAP = 120
 
 
@@ -70,33 +71,25 @@ def _row(check, ids, job=None):
     }
 
 
-def classify(by_wave, releases, jobs):
-    """`(rows, unresolved, floor)` for the cells of the waves keyed in `releases`, from the
-    jobs listing `jobs`: `unresolved` labels the cells with no conclusion yet, and `floor` is
-    True when no cell outside a stopped wave matched a job, in which case only stopped cells
-    get rows."""
-    stop = min((w for w, r in releases.items() if r in STOPPED), default=None)
-    stopped, rows, unresolved, unmatched = [], [], [], 0
-    for wave in sorted(releases):
+def classify(by_wave, results, jobs):
+    """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
+    result, from the jobs listing `jobs`: `unresolved` labels the cells with no row."""
+    rows, unresolved = [], []
+    for wave in sorted(results):
         for check, ids in sorted((by_wave.get(wave) or {}).items()):
-            if stop is not None and wave >= stop:
-                stopped.append(_row(check, ids))
-                continue
             matched = [
                 j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))
             ]
             won = next((j for j in matched if j.get("conclusion") == "success"), None)
             if won:
                 rows.append(_row(check, ids, won))
-            elif not matched:
-                unmatched += 1
+            elif not matched and results[wave] in NOT_RUN:
                 rows.append(_row(check, ids))
-            elif any(j.get("conclusion") is None for j in matched):
+            elif not matched or any(j.get("conclusion") is None for j in matched):
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
             else:
                 rows.append(_row(check, ids, matched[-1]))
-    floor = bool(rows) and unmatched == len(rows) and not unresolved
-    return stopped + ([] if floor else rows), sorted(unresolved), floor
+    return rows, sorted(unresolved)
 
 
 def error_line(job_id, repo):
@@ -164,24 +157,17 @@ def main(argv=()):
             raise SystemExit("::error::usage: apply-complete [plan <all rows> <last rows>]")
         plan(argv[1], argv[2])
         return
-    rows, unresolved, floor = classify(
+    rows, unresolved = classify(
         json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"]),
-        json.loads(os.environ["SHIPMATE_RELEASES_JSON"]),
+        json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"]),
         ag.parse_jsonl(sys.stdin),
     )
     for row in rows:
         print(json.dumps(row))
-    if floor:
-        print(
-            RETRY_PREFIX + "no cell matched a job in this run's listing. A run always lists its "
-            "own wave jobs, so the listing cannot be trusted; refusing to write over it",
-            file=sys.stderr,
-        )
-        sys.exit(UNRESOLVED_EXIT)
     if unresolved:
         print(
             RETRY_PREFIX
-            + "the jobs listing reported no conclusion for these cells: "
+            + "the jobs listing shows no conclusion for these cells of waves that ran: "
             + ", ".join(unresolved),
             file=sys.stderr,
         )
