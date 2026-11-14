@@ -43,8 +43,8 @@ def _call(pages, fail=()):
     return _shipmate.apply_runs("o/r", "shipmate.yml", "7", "shipmate-iac", run=_gh(pages, fail))
 
 
-def _row(id_, ref=_SHA, verb="apply", status="pending", trusted=True):
-    return {"id": id_, "ref": ref, "verb": verb, "status": status, "trusted": trusted}
+def _row(id_, ref=_SHA, verb="apply", status="pending", by_app=True):
+    return {"id": id_, "ref": ref, "verb": verb, "status": status, "by_app": by_app}
 
 
 def test_every_page_of_every_live_status_is_read():
@@ -85,7 +85,7 @@ def test_a_malformed_page_makes_the_listing_incomplete():
     assert _call({_listing("queued"): {"workflow_runs": [_apply(5), 7]}}) == ([], False)
 
 
-def test_an_untrusted_dispatcher_is_listed_untrusted_and_other_titles_are_ignored():
+def test_another_dispatcher_is_listed_not_by_app_and_other_titles_are_ignored():
     """A human or `GITHUB_TOKEN` dispatch, a push run carrying the App's actor, another pull
     request, and a `plan` and an `unlock` of this one.
 
@@ -101,7 +101,7 @@ def test_an_untrusted_dispatcher_is_listed_untrusted_and_other_titles_are_ignore
         _run(8, "shipmate · deploy", event="push"),
     ]
     got = _call({_listing("queued"): {"workflow_runs": runs}})
-    assert got == ([_row(1, trusted=False), _row(2, trusted=False), _row(3, trusted=False)], True)
+    assert got == ([_row(1, by_app=False), _row(2, by_app=False), _row(3, by_app=False)], True)
 
 
 def test_an_unparseable_title_on_an_app_dispatched_run_makes_the_listing_incomplete():
@@ -113,11 +113,11 @@ def test_an_unparseable_title_on_an_app_dispatched_run_makes_the_listing_incompl
     assert _call({_listing("queued"): {"workflow_runs": [human]}}) == ([], True)
 
 
-def test_an_empty_slug_trusts_nothing():
+def test_an_empty_slug_marks_no_run_by_app():
     """Mutation: build the bot login without the empty-slug check -- red (`[bot]` trusted)."""
     run = _gh({_listing("queued"): {"workflow_runs": [_apply(1, actor={"login": "[bot]"})]}})
     got = _shipmate.apply_runs("o/r", "shipmate.yml", "7", "", run=run)
-    assert got == ([_row(1, status="pending", trusted=False)], True)
+    assert got == ([_row(1, status="pending", by_app=False)], True)
 
 
 def test_the_current_run_is_listed_for_the_caller_to_exclude():

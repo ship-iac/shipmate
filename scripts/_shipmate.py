@@ -488,10 +488,10 @@ def _login(user):
 
 def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
     """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
-    `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, trusted}`.
+    `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, by_app}`.
 
     One `workflow_dispatch` listing per `LIVE_RUN_STATUSES` value, every page: no other event
-    can be trusted. `trusted` is true when the run is a
+    can be trusted. `by_app` is true when the run is a
     `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a re-run changes only
     `triggering_actor`); an empty slug trusts nothing. `complete` is false when a page fails or
     is malformed, a run is malformed, or a trusted-shaped run's title does not parse: such a run
@@ -513,12 +513,12 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
             if not isinstance(rid, int) or not isinstance(title, str) or not isinstance(event, str):
                 complete = False
                 continue
-            trusted = (
+            by_app = (
                 bot is not None and event == "workflow_dispatch" and _login(r.get("actor")) == bot
             )
             parsed = parse_run_title(title)
             if parsed is None:
-                complete = complete and not trusted
+                complete = complete and not by_app
                 continue
             if parsed["verb"] in ("apply", "auto") and parsed["pr"] == pr_number:
                 runs[rid] = {
@@ -526,7 +526,7 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
                     "ref": parsed["ref"],
                     "verb": parsed["verb"],
                     "status": r.get("status"),
-                    "trusted": trusted,
+                    "by_app": by_app,
                 }
     return [runs[k] for k in sorted(runs)], complete
 

@@ -115,9 +115,10 @@ def _link(run_id):
     return current_run_url(str(run_id))
 
 
-def sentences(own, holder, untrusted, cancelled, complete):
-    """The reply's sentences: the run `holder` this one waits for, the untrusted run, then each
-    cancelled run; with an incomplete listing, only that this run may wait."""
+def sentences(own, holder, foreign, cancelled, complete):
+    """The reply's sentences: the run `holder` this one waits for, the run `foreign` shipmate
+    did not dispatch, then each cancelled run; with an incomplete listing, only that this run
+    may wait."""
     me = f"[the apply run]({_link(own)})"
     if not complete:
         return [
@@ -132,9 +133,9 @@ def sentences(own, holder, untrusted, cancelled, complete):
             f"{me} waits for [an earlier apply run]({_link(holder['id'])}) of this pull request "
             "to finish."
         )
-    if untrusted:
+    if foreign:
         out.append(
-            f"{me} may wait for [an apply run]({_link(untrusted['id'])}) of this pull request "
+            f"{me} may wait for [an apply run]({_link(foreign['id'])}) of this pull request "
             "that shipmate did not dispatch."
         )
     out += [
@@ -165,26 +166,28 @@ def cancel(repo, run_id):
     return True
 
 
-def queue(repo, wf, pr, own, slug, trusted_self):
-    """The reply's sentences, after cancelling each stale run when `trusted_self`."""
+def queue(repo, wf, pr, own, slug, self_by_app):
+    """The reply's sentences, after cancelling each stale run when `self_by_app`."""
     runs, complete = apply_runs(repo, wf, pr, slug)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
     if not complete:
         return sentences(own, None, None, [], False)
-    trusted = [r for r in others if r["trusted"]]
-    untrusted = [r for r in others if not r["trusted"]]
+    app_runs = [r for r in others if r["by_app"]]
+    foreign = [r for r in others if not r["by_app"]]
     if head is None:
-        return sentences(own, None, (untrusted or [None])[0], [], True)
-    jobs = {r["id"]: run_jobs(repo, r["id"]) for r in trusted}
-    stale = [r for r in trusted if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])]
+        return sentences(own, None, (foreign or [None])[0], [], True)
+    jobs = {r["id"]: run_jobs(repo, r["id"]) for r in app_runs}
+    stale = [
+        r for r in app_runs if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])
+    ]
     if _head(repo, pr) != head:
         stale = []
-    cancelled = [r for r in stale if trusted_self and cancel(repo, r["id"])]
-    kept = [r for r in trusted if r not in cancelled]
+    cancelled = [r for r in stale if self_by_app and cancel(repo, r["id"])]
+    kept = [r for r in app_runs if r not in cancelled]
     holding = [r for r in kept if holds(jobs[r["id"]][0])]
     earlier = holding or [r for r in kept if r["id"] < own and _unfinished(jobs[r["id"]][0])]
-    return sentences(own, (earlier or [None])[0], (untrusted or [None])[0], cancelled, True)
+    return sentences(own, (earlier or [None])[0], (foreign or [None])[0], cancelled, True)
 
 
 def main():
@@ -199,15 +202,15 @@ def main():
     wf = workflow_file(repo, os.environ["GITHUB_WORKFLOW_REF"])
     slug = os.environ.get("SHIPMATE_APP_SLUG", "")
     bot = f"{slug}[bot]" if slug else None
-    trusted_self = bot is not None and (
+    self_by_app = bot is not None and (
         os.environ.get("SHIPMATE_ACTOR") == bot == os.environ.get("SHIPMATE_TRIGGERING_ACTOR")
     )
-    if not trusted_self:
+    if not self_by_app:
         print("::notice::this run was not dispatched by the shipmate App; it writes nothing")
-    said = queue(repo, wf, pr, int(own), slug, trusted_self)
+    said = queue(repo, wf, pr, int(own), slug, self_by_app)
     for line in said:
         print(line)
-    if not said or not trusted_self or os.environ.get("SHIPMATE_AUTO") == "true":
+    if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
         return
     body = rc.body(
         "apply", os.environ.get("SHIPMATE_ENV", ""), "notice", " ".join(said), current_run_url()

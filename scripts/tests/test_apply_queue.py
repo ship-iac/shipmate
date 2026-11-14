@@ -27,8 +27,8 @@ _INCOMPLETE = (
 _FOOT = f"[comment run]({_URL}50)"
 
 
-def _r(id_, ref=_OLD, trusted=True, status="pending"):
-    return {"id": id_, "ref": ref, "verb": "apply", "status": status, "trusted": trusted}
+def _r(id_, ref=_OLD, by_app=True, status="pending"):
+    return {"id": id_, "ref": ref, "verb": "apply", "status": status, "by_app": by_app}
 
 
 def _j(*statuses):
@@ -146,12 +146,12 @@ def test_an_incomplete_runs_listing_cancels_nothing_and_says_the_run_may_wait(gh
     assert gh.posts == _reply(_INCOMPLETE)
 
 
-def test_an_untrusted_run_is_never_cancelled_and_is_named_as_not_dispatched_by_shipmate(gh):
+def test_a_run_shipmate_did_not_dispatch_is_never_cancelled_and_is_named_so(gh):
     """An untrusted run at an older head whose jobs only wait: no jobs read, no cancel.
 
-    Mutations: treat every listed run as trusted (`trusted = others`) -- red (jobs read and
+    Mutations: treat every listed run as trusted (`app_runs = others`) -- red (jobs read and
     cancelled); drop the untrusted sentence -- red."""
-    gh.runs = [_r(30, trusted=False), _r(40, trusted=False)]
+    gh.runs = [_r(30, by_app=False), _r(40, by_app=False)]
     gh.jobs = {30: (_j("waiting"), True), 40: (_j("waiting"), True)}
     gh.go()
     assert gh.cancels == []
@@ -202,7 +202,7 @@ def test_a_failed_head_read_cancels_nothing(gh, monkeypatch):
     assert gh.posts == []
 
 
-def test_an_untrusted_own_run_writes_nothing(gh, monkeypatch, capsys):
+def test_an_own_run_the_app_did_not_dispatch_writes_nothing(gh, monkeypatch, capsys):
     """A human re-run keeps `actor` and changes `triggering_actor`. Mutations: read `actor`
     only -- red (cancelled and posted); trust any actor ending `[bot]` -- red (the second
     case)."""
