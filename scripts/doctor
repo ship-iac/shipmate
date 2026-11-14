@@ -38,7 +38,8 @@ Probes:
 - `pull_request_target` triggers in the consumer's workflow files.
 - the consumer's `shipmate.yml`: the plan-calling job named `plan`, or the plan
   cell checks are not `plan / <env> / <stack>`; the `workflow_dispatch` trigger
-  every commented verb needs, with its four inputs; and one job per engine reusable
+  every commented verb needs, with its five inputs; the `unlock` job's `pull-requests: write`
+  grant; and one job per engine reusable
   workflow, each with the `if:` that selects it — a wrong one sends a verb nowhere
   and its run completes green with every job skipped; and no call of `drift.yml`,
   which runs from its own workflow file.
@@ -1499,7 +1500,7 @@ def _dispatch_wiring_finding(doc, name):
     refusals. Each ends in a dispatch-time HTTP 422 with no run created, and they
     are told apart by the message GitHub answers with: `Workflow does not have
     'workflow_dispatch' trigger` and `Unexpected inputs provided` are the pair
-    `actions/dispatch` recognises, while `Required input not provided` is GitHub's
+    `scripts/dispatch-body` recognises, while `Required input not provided` is GitHub's
     answer to the requiredness finding and nothing downstream reads it. A wrong
     `options:` list is refused the same way, one verb at a time, and offers a verb
     no job's `if:` selects when it carries an extra.
