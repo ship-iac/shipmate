@@ -878,7 +878,8 @@ def test_marks_writes_each_foreign_holder_per_cell(monkeypatch, tmp_path):
     cl.main()
     assert github_outputs(out) == {
         "locks": json.dumps({"stacks/auth / dev": 12}),
-        "stacked": "[]",
+        "stacked": "{}",
+        "stacked_unknown": "{}",
     }
     assert gh.drained()
 
@@ -895,7 +896,32 @@ def pull(base_ref, state="open"):
     return json.dumps({"state": state, "base": {"ref": base_ref, "sha": "feat-a"}})
 
 
-def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a"):
+def list_read(branch, page=1):
+    """The walk's listing of the pull requests whose head is `branch`, hand-written."""
+    return [
+        "gh",
+        "api",
+        f"repos/{REPO}/pulls?state=all&head=acme%3A{branch}&per_page=100&page={page}",
+    ]
+
+
+def entry(number, head, base, state="open", merged_at=None, repo=REPO):
+    """A pull request as the list endpoint answers it: no `merged` field."""
+    head_repo = None if repo is None else {"full_name": repo}
+    return {
+        "number": number,
+        "state": state,
+        "merged_at": merged_at,
+        "head": {"ref": head, "repo": head_repo},
+        "base": {"ref": base},
+    }
+
+
+def entries(*items):
+    return json.dumps(list(items))
+
+
+def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a", default_branch="main"):
     out = tmp_path / "out"
     for key, value in {
         "GITHUB_OUTPUT": str(out),
@@ -903,6 +929,7 @@ def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a"):
         "SHIPMATE_PR_NUMBER": str(PR),
         "SHIPMATE_CELLS": json.dumps(cells),
         "SHIPMATE_HEAD_REF": head_ref,
+        "SHIPMATE_DEFAULT_BRANCH": default_branch,
     }.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(cl, "_run", gh)
@@ -911,32 +938,65 @@ def _marks(monkeypatch, tmp_path, gh, cells, head_ref="feat-a"):
     return github_outputs(out)
 
 
-def test_marks_writes_the_holders_stacked_on_this_pull_requests_head(monkeypatch, tmp_path):
-    """#12's base is this pull request's head branch, #9's is `main`. The base `sha` holds the
-    head branch's name too, so comparing it in place of `ref` is observable. Mutation: compare
-    `base.sha` to the head ref -- `[]`."""
-    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
+def _three_holders():
+    """Locks of #12 on auth, #9 on dns and #5 on app."""
+    gh = Gh().on(
+        listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER), (APP_REF, NEW))
+    )
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
-    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("main"))
-    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
-        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
-        "stacked": "[12]",
+    return gh.on(commit_read(NEW), commit(NEW, message(5, "dev", "stacks/app")))
+
+
+def test_marks_writes_the_stacked_holders_and_the_unknown_ones(monkeypatch, tmp_path, capsys):
+    """#12 is based on this head, #9 on `b`, whose #11 is based on this head, and #5's walk
+    fails. The base `sha` holds the head branch's name too, so comparing it in place of `ref`
+    is observable. Mutations: compare `base.sha` to the head ref -- #9 reads direct, red; write
+    the holders as a list -- red; drop `stacked_unknown` -- red."""
+    gh = _three_holders()
+    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("b")).on(pull_read(5), pull("c"))
+    gh.on(list_read("b"), entries(entry(11, "b", "c"), entry(10, "b", "feat-a")))
+    gh.on(list_read("c"), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS, APP]) == {
+        "locks": json.dumps(
+            {"stacks/auth / dev": 12, "stacks/dns / dev": 9, "stacks/app / dev": 5}
+        ),
+        "stacked": '{"9": [10], "12": []}',
+        "stacked_unknown": '{"5": "command failed (1): gh api | HTTP 502"}',
+    }
+    assert gh.drained()
+    assert capsys.readouterr().out == (
+        "::warning::could not tell whether #5 is stacked on this pull request (command failed "
+        "(1): gh api | HTTP 502); the plan comment says so\n"
+    )
+
+
+def test_marks_stops_at_the_default_branch_it_is_given(monkeypatch, tmp_path):
+    """#12 is based on `trunk`, the default branch here: no listing (the double refuses one).
+    Mutation: read the default branch from another variable -- unexpected call."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), pull("trunk"))
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH], default_branch="trunk") == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "{}",
+        "stacked_unknown": "{}",
     }
     assert gh.drained()
 
 
-@pytest.mark.parametrize("state", ["closed", None])
-def test_marks_leaves_out_a_holder_that_is_not_open(monkeypatch, tmp_path, state):
-    """A closed or merged holder will not merge after this pull request, so it is not stacked
-    even when its base branch is this head; a null state is malformed, warned and left out.
-    Mutation: drop the `state == "open"` check -- `[12]` for `closed`, red."""
+@pytest.mark.parametrize(
+    ("head_ref", "default_branch"), [("", "main"), ("feat-a", "")], ids=["head", "default"]
+)
+def test_an_empty_branch_reads_no_holder(monkeypatch, tmp_path, head_ref, default_branch):
+    """No pull read (the double refuses one). Mutation: drop either half of the empty-branch
+    early return -- unexpected call."""
     gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
-    gh.on(pull_read(12), pull("feat-a", state))
-    assert _marks(monkeypatch, tmp_path, gh, [AUTH]) == {
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH], head_ref, default_branch) == {
         "locks": json.dumps({"stacks/auth / dev": 12}),
-        "stacked": "[]",
+        "stacked": "{}",
+        "stacked_unknown": "{}",
     }
     assert gh.drained()
 
@@ -950,53 +1010,242 @@ def test_marks_reads_each_holder_once(monkeypatch, tmp_path):
     gh.on(pull_read(12), pull("feat-a"))
     assert _marks(monkeypatch, tmp_path, gh, [AUTH, APP]) == {
         "locks": json.dumps({"stacks/auth / dev": 12, "stacks/app / dev": 12}),
-        "stacked": "[12]",
+        "stacked": '{"12": []}',
+        "stacked_unknown": "{}",
     }
     assert gh.drained()
 
 
-def test_a_failed_holder_read_warns_and_still_writes_the_locks(monkeypatch, tmp_path, capsys):
-    """The stacked list is reviewer-facing, so a failed read leaves that holder out with a
-    one-line warning naming it, and the step still writes `locks`. Mutations: let the read
-    failure raise -- `SystemExit`; print `why` unflattened -- the warning splits, red."""
-    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
-    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
-    gh.on(commit_read(OTHER), commit(OTHER, message(9, "dev", "stacks/dns")))
-    gh.on(pull_read(12), SystemExit("::error::command failed (1): gh api\nHTTP 502"))
-    gh.on(pull_read(9), pull("feat-a"))
-    assert _marks(monkeypatch, tmp_path, gh, [AUTH, DNS]) == {
-        "locks": json.dumps({"stacks/auth / dev": 12, "stacks/dns / dev": 9}),
-        "stacked": "[9]",
-    }
-    assert gh.drained()
-    assert capsys.readouterr().out == (
-        "::warning::could not read pull request #12 (command failed (1): gh api | HTTP 502), so "
-        "the plan comment does not say whether it is stacked on this pull request\n"
-    )
-
-
-def test_an_empty_head_ref_reads_no_holder(monkeypatch, tmp_path):
-    """No head branch, nothing can be stacked on it: no pull read (the double refuses one).
-    Mutation: drop the empty-head-ref early return -- unexpected call."""
-    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
-    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
-    assert _marks(monkeypatch, tmp_path, gh, [AUTH], head_ref="") == {
-        "locks": json.dumps({"stacks/auth / dev": 12}),
-        "stacked": "[]",
-    }
-    assert gh.drained()
+def test_marks_output_reads_back_through_stacked_marks(monkeypatch, tmp_path, capsys):
+    """`summary-comment` reads `marks`' real output, not a hand-built value: JSON object keys
+    are strings. Mutation: drop the `int(...)` key conversion in `_holder_map` -- string keys,
+    red."""
+    sc = load_script("summary-comment")
+    gh = _three_holders()
+    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("b")).on(pull_read(5), pull("c"))
+    gh.on(list_read("b"), entries(entry(11, "b", "feat-a")))
+    gh.on(list_read("c"), entries(entry(4, "c", "b", "closed", "2026-11-12T10:00:00Z")))
+    out = _marks(monkeypatch, tmp_path, gh, [AUTH, DNS, APP])
+    assert sc.stacked_marks(out["stacked"]) == {12: (), 9: (11,), 5: (11, 4)}
+    assert sc.unknown_marks(out["stacked_unknown"]) == {}
+    assert capsys.readouterr().out == ""
 
 
 def test_stacked_reads_a_holder_once_on_a_transient_failure(sleeps, capsys):
-    """Reviewer-facing, so a transient failure warns at once. Mutation: drop `retry=False` from
-    `_stacked`'s read -- the double refuses the second call."""
+    """Reviewer-facing, so a transient failure reads unknown at once. Mutation: drop
+    `retry=False` from `_stacked`'s read -- the double refuses the second call."""
     gh = Gh().on(pull_read(12), BAD_GATEWAY)
-    assert (cl._stacked(REPO, {12}, "feat-a", gh), gh.drained(), sleeps) == ([], True, [])
-    assert capsys.readouterr().out == (
-        "::warning::could not read pull request #12 (command failed (1): gh api x | gh: Bad "
-        "Gateway (HTTP 502)), so the plan comment does not say whether it is stacked on this "
-        "pull request\n"
+    stacked, unknown = cl._stacked(REPO, {12}, "feat-a", "main", gh)
+    why = "command failed (1): gh api x | gh: Bad Gateway (HTTP 502)"
+    assert (stacked, unknown, gh.drained(), sleeps) == (
+        {},
+        {12: cl.Unknown(why, exhausted=False)},
+        True,
+        [],
     )
+    assert capsys.readouterr().out == (
+        f"::warning::could not tell whether #12 is stacked on this pull request ({why}); the "
+        "plan comment says so\n"
+    )
+
+
+def test_stacked_reads_each_listing_page_once(sleeps):
+    """Reviewer-facing, so a transient listing failure reads unknown at once. Mutation: read
+    the listing pages with `retry=True` inside `_stacked` -- the double refuses the retry."""
+    gh = Gh().on(pull_read(12), pull("b")).on(list_read("b"), BAD_GATEWAY)
+    assert cl._stacked(REPO, {12}, "feat-a", "main", gh)[1] == {
+        12: cl.Unknown("command failed (1): gh api x | gh: Bad Gateway (HTTP 502)", False)
+    }
+    assert (gh.drained(), sleeps) == (True, [])
+
+
+def chain(gh, base, state="open", memo=None, default="main"):
+    """`_chain` of an open holder based on `base`, against this pull request's head `feat-a`."""
+    holder = {"state": state, "base": {"ref": base}}
+    memo = {} if memo is None else memo
+    return cl._chain(REPO, holder, "feat-a", default, gh, memo, retry=False)
+
+
+@pytest.mark.parametrize(
+    ("state", "base"),
+    [("closed", "feat-a"), ("closed", "b"), ("open", "main")],
+    ids=["closed-direct", "closed-chained", "default-branch"],
+)
+def test_a_holder_not_open_or_on_the_default_branch_reads_nothing(state, base):
+    """A merged or closed holder will not merge after this pull request; a holder on the
+    default branch stops there. No listing (the empty double refuses one). Mutations: drop the
+    `state != "open"` check -- closed-direct is `OnChain`, red; drop the `default_branch`
+    stop -- default-branch lists `main`, unexpected call."""
+    assert chain(Gh(), base, state) == cl.NotStacked()
+
+
+def test_a_holder_answer_with_a_null_field_is_unknown():
+    """Mutation: check keys only (drop the `isinstance` check) -- `NotStacked`."""
+    assert chain(Gh(), "feat-a", None) == cl.Unknown(
+        "ValueError(\"base.ref 'feat-a', state None\")", exhausted=False
+    )
+
+
+def test_stacked_at_depth_one_two_and_three():
+    """Depth 1 reads no listing; the chain runs from this pull request outward. Mutations:
+    drop `reversed` -- depth 3 reads `(12, 11)`, red."""
+    assert chain(Gh(), "feat-a") == cl.OnChain(())
+    gh = Gh().on(list_read("b"), entries(entry(11, "b", "feat-a")))
+    assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
+    gh = Gh().on(list_read("c"), entries(entry(12, "c", "b")))
+    gh.on(list_read("b"), entries(entry(11, "b", "feat-a")))
+    assert (chain(gh, "c"), gh.drained()) == (cl.OnChain((11, 12)), True)
+
+
+def test_a_shared_head_is_stacked_when_any_of_its_pull_requests_leads_here():
+    """`b` heads #10 into `main` and #11 into this head; #10 is walked first. Mutation: follow
+    only the first entry -- `NotStacked`."""
+    gh = Gh().on(list_read("b"), entries(entry(10, "b", "main"), entry(11, "b", "feat-a")))
+    assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
+
+
+def test_a_base_cycle_ends_not_stacked():
+    """`x` and `y` are based on each other: each listed once. Mutation: drop the visited
+    check -- the walk circles through the memo until it runs out of pages, `Unknown`."""
+    gh = Gh().on(list_read("x"), entries(entry(20, "x", "y")))
+    gh.on(list_read("y"), entries(entry(21, "y", "x")))
+    assert (chain(gh, "x"), gh.drained()) == (cl.NotStacked(), True)
+
+
+def _full_page(head, first):
+    """A full page: 100 closed, unmerged pull requests of `head` into this head, none followed."""
+    return entries(*(entry(n, head, "feat-a", "closed") for n in range(first, first + 100)))
+
+
+def test_a_match_on_page_two_is_stacked():
+    """Mutation: read page 1 only -- `NotStacked`."""
+    gh = Gh().on(list_read("b"), _full_page("b", 1000))
+    gh.on(list_read("b", 2), entries(entry(11, "b", "feat-a")))
+    assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
+
+
+def test_a_merged_link_mid_chain_is_followed_and_a_closed_one_is_not():
+    """#11 merged into this head (`state: closed`, `merged_at` set, no `merged` field), its
+    branch kept: stacked. #12, closed unmerged, is not followed. Mutations: follow only `open`
+    -- `NotStacked` for `b`, red; read a `merged` field -- `KeyError`, red; follow any closed
+    -- `c` reads `OnChain`, red."""
+    gh = Gh().on(
+        list_read("b"), entries(entry(11, "b", "feat-a", "closed", "2026-11-12T10:00:00Z"))
+    )
+    assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
+    gh = Gh().on(list_read("c"), entries(entry(12, "c", "feat-a", "closed")))
+    assert (chain(gh, "c"), gh.drained()) == (cl.NotStacked(), True)
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        entry(11, "other", "feat-a"),
+        entry(11, "b", "feat-a", repo="fork/infra"),
+        entry(11, "b", "feat-a", repo=None),
+    ],
+    ids=["other-branch", "fork", "deleted-fork"],
+)
+def test_a_listed_pull_request_of_another_head_is_not_followed(listed):
+    """A malformed filter lists every pull request (probed). Mutations: drop the `head.ref`
+    check -- other-branch reads `OnChain`; drop the repository check -- fork reads `OnChain`;
+    read a null head repository as a mapping -- deleted-fork reads `Unknown`."""
+    gh = Gh().on(list_read("b"), entries(listed))
+    assert (chain(gh, "b"), gh.drained()) == (cl.NotStacked(), True)
+
+
+def test_the_head_repository_compares_without_case():
+    """GitHub names are case-insensitive. Mutation: compare `full_name` exactly -- red."""
+    gh = Gh().on(list_read("b"), entries(entry(11, "b", "feat-a", repo="Acme/Infra")))
+    assert chain(gh, "b") == cl.OnChain((11,))
+
+
+@pytest.mark.parametrize(
+    ("branch", "path"),
+    [
+        ("a+b", "acme%3Aa%2Bb"),
+        ("a&b", "acme%3Aa%26b"),
+        ("a#b", "acme%3Aa%23b"),
+    ],
+    ids=["plus", "ampersand", "hash"],
+)
+def test_a_branch_name_is_encoded_in_the_listing_query(branch, path):
+    """Unencoded, `+` reads as a space, `&` starts a new query value and `#` a fragment.
+    Mutation: drop `quote` -- each listing is an unexpected call."""
+    read = ["gh", "api", f"repos/{REPO}/pulls?state=all&head={path}&per_page=100&page=1"]
+    gh = Gh().on(read, entries(entry(11, branch, "feat-a")))
+    assert (chain(gh, branch), gh.drained()) == (cl.OnChain((11,)), True)
+
+
+@pytest.mark.parametrize(
+    ("answer", "why"),
+    [
+        (FAIL, "command failed (1): gh api"),
+        ('{"message": "x"}', "ValueError('page 1 of a pull request listing is not a list')"),
+        (
+            entries({**entry(11, "b", "feat-a"), "number": "11"}),
+            "ValueError('a pull request listing entry is malformed')",
+        ),
+        (entries({"number": 11}), "KeyError('head')"),
+        ("not json", "JSONDecodeError('Expecting value: line 1 column 1 (char 0)')"),
+    ],
+    ids=["failed", "not-a-list", "number", "missing", "not-json"],
+)
+def test_a_failed_or_malformed_listing_is_unknown(answer, why):
+    """Mutations: skip a malformed entry -- `NotStacked`; let a failure read `NotStacked` --
+    red; mark these `exhausted` -- red."""
+    gh = Gh().on(list_read("b"), answer)
+    assert chain(gh, "b") == cl.Unknown(why, exhausted=False)
+
+
+def _pages(gh, branch, full, last):
+    """Queue `full` full pages of `branch`, then the short page `last`."""
+    for n in range(1, full + 1):
+        gh.on(list_read(branch, n), _full_page(branch, 1000 * n))
+    return gh.on(list_read(branch, full + 1), last)
+
+
+EXHAUSTED = cl.Unknown(
+    "its chain of base branches needs more than 20 pages of pull requests", exhausted=True
+)
+
+
+def test_a_walk_of_twenty_pages_ends_and_a_twenty_first_is_unknown():
+    """Twenty pages end with the match on the last; twenty-one never read the last (the double
+    queues it, so `drained` is False). Mutations: `spent > WALK_PAGES` -- the 21st page is read
+    and the walk reads `OnChain`, red; `WALK_PAGES = 19` -- the first walk is `Unknown`, red."""
+    gh = _pages(Gh(), "b", 19, entries(entry(11, "b", "feat-a")))
+    assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
+    gh = _pages(Gh(), "b", 20, entries(entry(11, "b", "feat-a")))
+    assert (chain(gh, "b"), gh.drained()) == (EXHAUSTED, False)
+
+
+def test_a_memo_hit_is_charged_to_the_holder():
+    """#5 is based on `b`, which takes 20 pages (none followed); #6 on `c`, whose one page
+    leads to `b`. #6 needs 21 pages whether or not #5 was walked first. Mutation: charge only
+    a read the memo did not hold -- #6 reads `NotStacked` after #5, red."""
+    gh = _pages(Gh(), "b", 19, entries())
+    gh.on(list_read("c"), entries(entry(12, "c", "b")))
+    memo = {}
+    assert chain(gh, "b", memo=memo) == cl.NotStacked()
+    assert chain(gh, "c", memo=memo) == EXHAUSTED
+    assert gh.drained()
+    alone = _pages(Gh(), "b", 19, entries()).on(list_read("c"), entries(entry(12, "c", "b")))
+    assert chain(alone, "c") == EXHAUSTED
+
+
+def test_a_holder_walks_a_memoised_cycle_on_its_own_visited_set():
+    """`x` and `y` are based on each other and `y` also heads #22 into this head. #5 is based
+    on `x`, #6 on `y`; each listing is read once. Mutation: keep one visited set across holders
+    -- #6 starts on a visited `y` and reads `NotStacked`, red."""
+    gh = Gh().on(list_read("x"), entries(entry(20, "x", "y")))
+    gh.on(list_read("y"), entries(entry(21, "y", "x"), entry(22, "y", "feat-a")))
+    gh.on(pull_read(5), pull("x")).on(pull_read(6), pull("y"))
+    assert cl._read_stacked(REPO, {5, 6}, "feat-a", "main", gh, retry=False) == (
+        {5: (22, 20), 6: (22,)},
+        {},
+    )
+    assert gh.drained()
 
 
 HEAD = "d" * 40
@@ -1323,6 +1572,50 @@ def test_evict_cli_refuses_stacked_holders_in_one_error_and_deletes_nothing(monk
     assert gh.drained()
 
 
+_EXHAUSTED_LINE = (
+    "could not tell whether #9 is stacked on this pull request: its chain of base branches "
+    "needs more than 20 pages of pull requests. Commenting again does not change that until "
+    "the chain of pull requests between them is shortened."
+)
+
+
+def test_evict_cli_names_a_stacked_holders_chain(monkeypatch, tmp_path):
+    """#12 is based on `c`, #14 heads `c` into `b`, #13 heads `b` into this head; #9 is based
+    on `main`. Mutation: drop `stacked_through` from the refusal -- red."""
+    gh = _evict_three(*_THREE_PENDING)
+    gh.on(pull_read(12), pull("c")).on(pull_read(9), pull("main"))
+    gh.on(list_read("c"), entries(entry(14, "c", "b")))
+    gh.on(list_read("b"), entries(entry(13, "b", "feat-a")))
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
+    assert exc.value.code == (
+        "::error::#12 is stacked on this pull request through #13, #14 and holds 2 of its cell(s) "
+        "in dev; applying this pull request after evicting it would overwrite what it applied. "
+        "Retarget #12 to main and merge it first, or close it, which releases its locks."
+    )
+    assert github_outputs(out) == {"blocked": "true"}
+    assert gh.drained()
+
+
+def test_evict_cli_blocks_on_a_walk_out_of_pages_before_a_failed_read(monkeypatch, tmp_path):
+    """#9's walk runs out of pages and #12's read fails: commenting again cannot pass #9, so
+    the refusal is `blocked` and names only #9. Mutations: refuse the exhausted walk as a
+    failed read (no `exhausted` branch) -- no `blocked`, red; check failed reads before
+    `blocked` -- red."""
+    gh = _evict_three(*_THREE_PENDING)
+    gh.on(pull_read(12), FAIL).on(pull_read(9), pull("x"))
+    _pages(gh, "x", 20, entries())
+    out = tmp_path / "out"
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
+    assert exc.value.code == f"::error::{_EXHAUSTED_LINE}"
+    assert github_outputs(out) == {"blocked": "true"}
+    assert gh.calls[tuple(list_read("x", 21))] == [entries()]
+    del gh.calls[tuple(list_read("x", 21))]
+    assert gh.drained()
+
+
 def test_evict_cli_refuses_a_holder_it_cannot_judge_without_blocked(monkeypatch, tmp_path):
     """#12's read fails and #9's answer has no `base`: each gets its `could not tell` line,
     cause on one line, and nothing is deleted or written. Mutations: treat a failed read as not
@@ -1411,7 +1704,7 @@ def test_evict_cli_targets_only_pending_cells_failed_included(monkeypatch, tmp_p
 
 def test_evict_releases_an_unknown_holder_and_a_closed_one_based_on_this_branch():
     """An unknown holder is never read; a closed holder will not merge after this one.
-    Mutation: drop `state == "open"` from `_is_stacked` -- #12 refuses as stacked."""
+    Mutation: drop `_chain`'s `state != "open"` return -- #12 refuses as stacked."""
     gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(commit_read(OTHER), commit(OTHER, "garbage"))

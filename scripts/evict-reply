@@ -11,8 +11,8 @@ lock could not be released, or that there was none. Either list missing or not a
 refuses before any post. With `--failed` it posts only the failure reply, holding
 `SHIPMATE_EVICT_REFUSAL` (cell-lock's `refusal`, empty when the head read failed) in a fence: a
 refusal can name a branch-controlled stack path. With `--refused` it posts only the `refused`
-reply to an eviction cell-lock blocked over a stacked holder, the same refusal fenced, with no
-"comment again".
+reply to an eviction cell-lock blocked (a stacked holder, or one whose walk ran out of pages),
+the same refusal fenced, with no "comment again".
 
 The locks are already gone when this runs, so a notice that cannot be posted never stops the
 reply: the reply names the holders not told. The script exits 1 after posting a reply that
@@ -91,7 +91,7 @@ def failed(refusal, env):
 
 
 def refused_text(refusal, env):
-    """The reply to an eviction refused over a stacked holder: no retry would pass it."""
+    """The reply to an eviction cell-lock blocked: no retry would pass it."""
     return f"no cell lock in `{env}` was released.\n\n{sc.reason_fence(refusal)}"
 
 

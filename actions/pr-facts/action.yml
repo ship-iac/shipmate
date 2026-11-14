@@ -13,7 +13,7 @@ outputs:
     description: The head repository's full name (owner/repo). What build-matrix's fork refusal and the engine plan workflow's summary guard decide on.
     value: ${{ steps.facts.outputs.head_repo }}
   head-ref:
-    description: The pull request's head branch name, empty when the pull request names none. What the summary job's lock marks compare a holder's base branch against.
+    description: The pull request's head branch name, empty when the pull request names none. Where the summary job's lock marks end a walk of a holder's base branches.
     value: ${{ steps.facts.outputs.head_ref }}
   base-sha:
     description: The pull request's base commit; detect diffs from its merge base with the head.
