@@ -1664,7 +1664,10 @@ answers a run cancelled while it waits (§Outcome reply). The per-cell
 requests and the merge deploy.
 
 An apply run is cancelled by a manual cancel (the Actions UI or `gh run
-cancel`), or by GitHub when it arrives at a full queue. A job of the run can
+cancel`). GitHub cancels the run's call into `apply-run.yml` when the call
+arrives at a full queue (`run` ends `cancelled`; `guard` stays green and
+`outcome` replies); that is GitHub's documented `queue: max` behaviour, not
+probed for this group. A job of the run can
 also end `cancelled` while the run is not: a wave job evicted by its cell's
 concurrency group, a job timeout, or a `summary` at a full gate-writer queue
 (§Outcome reply says which text each selects). A run cancelled while
@@ -1745,11 +1748,11 @@ engine-owned scripts read it.
 - **Targeted `shipmate apply <env>`** — the env is known at comment time, so
   `actions/comment-ops` refuses early: `REVIEW_REQUIRED` on a review-exempt env
   authorizes, on any other env it refuses with the usual message extended to
-  name the env's `review` setting. The engine's `apply.yml` then
+  name the env's `review` setting. `apply-run.yml`'s `detect` then
   re-applies the identical rule to the freshly read decision and refuses the
   run before any wave, leaving every apply check — and the gate — pending.
 - **Bare `shipmate apply`** — authorized at comment time whenever any entry is
-  review-exempt, then partitioned per environment by the engine's `apply.yml`.
+  review-exempt, then partitioned per environment by `apply-run.yml`'s `detect`.
   `NONE` / `APPROVED` apply everything; `REVIEW_REQUIRED` applies the
   review-exempt environments and holds the rest — all of them when none is
   review-exempt; `CHANGES_REQUESTED`, an unknown value, or no decision at all
@@ -3793,7 +3796,8 @@ where `<url>` links the run that posts the reply. The verdict line is one of:
 **Apply.** `outcome` sits in `apply.yml`, outside the pull request's apply
 queue (§Comment-ops, "One apply run per pull request"), and reads the inner run
 only through `apply-run.yml`'s outputs: `review_result`, `unbound`, `posted`,
-`summary_result` and `run_cancelled`, plus the `run` job's own result. An output
+`summary_result` and `run_cancelled`, plus the `run` job's own result, which it folds into the `run-cancelled`
+input; `actions/outcome-reply` takes the same inputs from both callers. An output
 that did not arrive reads empty: every one when the call was cancelled while it
 waited in the queue, and a job's own when that job never ran. A call that
 failed, or was cancelled after its jobs started, still passes the results and
@@ -3808,11 +3812,11 @@ the conditions above hold for any other failed `review`, `outcome` runs with the
 refused text, and the reply still needs its own key check, mint and post. The reply is:
 
 - refused when `review` failed;
-- otherwise cancelled when `review` never ran and the `run` job ended
-  `cancelled` or `skipped`: the run was cancelled before its review, for
-  example while it waited in the queue;
-- otherwise cancelled when a job of `apply-run.yml` other than `summary` ended
-  `cancelled`: the run was cancelled;
+- otherwise cancelled when `run-cancelled` is `true`: a job of
+  `apply-run.yml` other than `summary` ended `cancelled`, or the `run` job did
+  not succeed and `review_result` is empty (the call ended before its review
+  reported: cancelled while it waited in the queue, skipped by a run cancel,
+  or failed before `review` ran);
 - otherwise summary cancelled when `summary` ended `cancelled` and no other job
   did, for example when it arrived at a full gate-writer queue for the head;
 - otherwise ended before a result.

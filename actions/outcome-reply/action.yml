@@ -11,10 +11,6 @@ inputs:
   pr-number:
     description: Pull request number to reply on.
     required: true
-  run-result:
-    description: "The apply run's result for its call into `apply-run.yml`. `cancelled` or `skipped` while `review-result` is empty means the run was cancelled before its review ran, for example while it waited in the pull request's apply queue. Empty for a plan."
-    required: false
-    default: ""
   review-result:
     description: The apply run's `review` result; `failure` selects the refused reply. Empty for a plan, or when the review never ran.
     required: false
@@ -23,7 +19,7 @@ inputs:
     description: "The run's `summary` result; `cancelled` while `run-cancelled` is not `true` means the summary was cancelled before it posted, for example at a full gate-writer queue for the head. Empty when an apply run's summary never ran."
     required: true
   run-cancelled:
-    description: "`true` when the run itself was cancelled. Computed by the caller from its jobs' results: in a job that starts after a run cancel, a step-level `cancelled()` is false. Empty when an apply run's call ended before any job ran."
+    description: "`true` when the run itself was cancelled. Computed by the caller from its jobs' results: in a job that starts after a run cancel, a step-level `cancelled()` is false."
     required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
@@ -57,15 +53,12 @@ runs:
         SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
         SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
         REVIEW_RESULT: ${{ inputs.review-result }}
-        RUN_RESULT: ${{ inputs.run-result }}
         RUN_CANCELLED: ${{ inputs.run-cancelled }}
         SUMMARY_RESULT: ${{ inputs.summary-result }}
       run: |
         run="[the $SHIPMATE_REPLY_VERB run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
         if [ "$REVIEW_RESULT" = failure ]; then
           outcome=refused text="its review check stopped $run before any cell applied; the reason is in that run's log."
-        elif [ -z "$REVIEW_RESULT" ] && { [ "$RUN_RESULT" = cancelled ] || [ "$RUN_RESULT" = skipped ]; }; then
-          outcome=failed text="$run was cancelled before it posted a result."
         elif [ "$RUN_CANCELLED" = true ]; then
           outcome=failed text="$run was cancelled before it posted a result."
         elif [ "$SUMMARY_RESULT" = cancelled ]; then

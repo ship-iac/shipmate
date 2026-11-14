@@ -10,7 +10,7 @@ nothing.
 Each step, `uses:` aside, is asserted whole against a hand-written table: `id: setup` and
 `resolve: "true"` at the five detect jobs, whose `tools` output reads that id; `versions` at every
 cell, from its detect job's output (`apply-env-level.yml` from its `tools` input, which
-`apply.yml` and `deploy.yml` fill from theirs) and at `deploy.yml`'s `warm` job, which installs
+`apply-run.yml` and `deploy.yml` fill from theirs) and at `deploy.yml`'s `warm` job, which installs
 OpenTofu only to save its cache entry; `tofu: "false"` at the detect jobs, which never run
 OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml site, whose workflow-level
 `cache-mode: read` denies the save with a warning; and `if: false` on the manifest-load parse

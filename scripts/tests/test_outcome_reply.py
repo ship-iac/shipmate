@@ -4,7 +4,8 @@ plan `outcome` jobs call it only then.
 The reply step picks its text from inputs only: in a job that starts after a run cancel, a
 step-level `cancelled()` is false, so the apply job passes the cancel in as `run-cancelled`. The
 apply `outcome` reads `apply-run.yml`'s outputs, which all read empty when the run was cancelled
-while it waited in the queue, so `run-result` carries the call's own result.
+while it waited in the queue, so its `run-cancelled` also reads a call that ended before
+`review` reported as a cancel.
 """
 
 import os
@@ -33,8 +34,8 @@ HINT = "Comment `shipmate help` for the available commands."
 TOKEN = "minted-token"  # noqa: S105 - a stub token, never sent
 
 #: (inputs, whole body) for each precedence case: refused, run cancelled, summary
-#: cancelled, ended. The apply cases with empty outputs are what `outcome` passes after a call
-#: that ended before `review` ran.
+#: cancelled, ended. The apply case with empty outputs is what `outcome` passes after a call
+#: that ended before `review` reported: cancelled while queued, or skipped by a run cancel.
 SELECTIONS = {
     "refused": (
         {
@@ -95,49 +96,17 @@ SELECTIONS = {
             f"[comment run]({URL}). {HINT}"
         ),
     ),
-    "apply cancelled while queued": (
+    "apply call ended before review": (
         {
             "verb": "apply",
             "environment": "dev-eu",
-            "run-result": "cancelled",
             "review-result": "",
             "summary-result": "",
-            "run-cancelled": "",
+            "run-cancelled": "true",
         },
         (
             "### shipmate apply dev-eu\n\n"
             f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
-            f"[comment run]({URL}). {HINT}"
-        ),
-    ),
-    "apply call skipped by a run cancel": (
-        {
-            "verb": "apply",
-            "environment": "dev-eu",
-            "run-result": "skipped",
-            "review-result": "",
-            "summary-result": "",
-            "run-cancelled": "",
-        },
-        (
-            "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
-            f"[comment run]({URL}). {HINT}"
-        ),
-    ),
-    "apply call failed before review": (
-        {
-            "verb": "apply",
-            "environment": "dev-eu",
-            "run-result": "failure",
-            "review-result": "",
-            "summary-result": "",
-            "run-cancelled": "",
-        },
-        (
-            "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) ended before it posted a result; the reason is in "
-            "that run's log.\n\n"
             f"[comment run]({URL}). {HINT}"
         ),
     ),
@@ -226,9 +195,7 @@ def test_each_case_posts_its_whole_body(tmp_path, case):
     run-cancelled and summary-cancelled conditions; drop the run-cancelled branch (a cancelled run
     whose summary was cancelled reads as a summary cancel); drop the `verb` check from the
     summary-cancelled text; post with `github.token` in place of the minted token; drop the
-    `run-result` branch (the queued cancel reads as ended); test `cancelled` only in it (the
-    skipped call reads as ended); key it on an empty `review-result` alone (the plan cases, which
-    pass no `run-result`, read as cancelled)."""
+    run-cancelled branch (the call that ended before review reads as ended)."""
     inputs, body = SELECTIONS[case]
     proc, calls = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -281,7 +248,6 @@ def test_the_composite_mints_only_a_pull_request_write_token():
         "SHIPMATE_REPLY_VERB": "${{ inputs.verb }}",
         "SHIPMATE_REPLY_ENV": "${{ inputs.environment }}",
         "REVIEW_RESULT": "${{ inputs.review-result }}",
-        "RUN_RESULT": "${{ inputs.run-result }}",
         "RUN_CANCELLED": "${{ inputs.run-cancelled }}",
         "SUMMARY_RESULT": "${{ inputs.summary-result }}",
     }
@@ -291,7 +257,9 @@ def test_the_composite_mints_only_a_pull_request_write_token():
 def test_the_apply_outcome_job_is_wired_exactly():
     """`always()`: it must run after a run cancel, including one while the call waited in
     `apply-run.yml`'s queue. Every fact about the inner run arrives through `run`'s outputs, which
-    read empty when they did not arrive; `guard` refuses an empty `pr_number`.
+    read empty when they did not arrive; `guard` refuses an empty `pr_number`. `run-cancelled`
+    also reads a call that did not succeed and whose `review_result` is empty as a cancel: the
+    call was cancelled while queued, or skipped by a run cancel.
 
     A failed `review` replies unless it found no open pull request, and never in an `auto` run.
 
@@ -299,7 +267,10 @@ def test_the_apply_outcome_job_is_wired_exactly():
     `needs.run.outputs.unbound != 'true' &&`; flip its `!=` to `==`; drop `&& !inputs.auto`;
     drop `run` from `needs`; `permissions: { pull-requests: write }`; pass
     `needs.run.outputs.review_result` as `summary-result`; replace `always()` with
-    `!cancelled()`; drop `run-result`."""
+    `!cancelled()`; drop `needs.run.result != 'success' &&` from `run-cancelled` (a queued
+    cancel and a success read alike); drop its `review_result == ''` clause (a failed review
+    reads as cancelled); drop its `run_cancelled == 'true' ||` clause (a mid-run cancel reads
+    as ended)."""
     assert workflow_jobs("apply.yml")["outcome"] == {
         "needs": ["guard", "run"],
         "if": (
@@ -318,10 +289,13 @@ def test_the_apply_outcome_job_is_wired_exactly():
                     "verb": "apply",
                     "environment": "${{ inputs.environment }}",
                     "pr-number": "${{ inputs.pr_number }}",
-                    "run-result": "${{ needs.run.result }}",
                     "review-result": "${{ needs.run.outputs.review_result }}",
                     "summary-result": "${{ needs.run.outputs.summary_result }}",
-                    "run-cancelled": "${{ needs.run.outputs.run_cancelled }}",
+                    "run-cancelled": (
+                        "${{ needs.run.outputs.run_cancelled == 'true' || "
+                        "(needs.run.result != 'success' && "
+                        "needs.run.outputs.review_result == '') }}"
+                    ),
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
                 },

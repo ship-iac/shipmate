@@ -42,8 +42,8 @@ def _refuse(line):
 CANONICAL_PR_NUMBER_RUN = (
     'if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then\n'
     '  echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, '
-    "no leading zero); comment 'shipmate apply' on the pull request instead of running a "
-    'direct workflow_dispatch"\n'
+    "no leading zero); a workflow or App other than shipmate's comment-ops and autoplan sent "
+    "this dispatch; comment 'shipmate apply' on the pull request instead\"\n"
     "  exit 1\n"
     "fi\n"
 )
@@ -233,7 +233,7 @@ def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     """`DOWNSTREAM_NEEDS`, whole list per job, also pins the env-level order: each level needs
     every level before it, so a bare apply runs them in `needs` order.
 
-    Mutation: drop `envlevel1` from `apply.yml`'s `envlevel2` `needs:` -- red."""
+    Mutation: drop `envlevel1` from `apply-run.yml`'s `envlevel2` `needs:` -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = workflow_jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map

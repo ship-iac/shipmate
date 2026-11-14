@@ -61,7 +61,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then
-            echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero); comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
+            echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero); a workflow or App other than shipmate's comment-ops and autoplan sent this dispatch; comment 'shipmate apply' on the pull request instead"
             exit 1
           fi
 
@@ -96,16 +96,15 @@ jobs:
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
-      # Passed raw: an output that did not arrive reads empty, which the action answers with the
-      # cancelled or ended text, never the refusal.
+      # An output that did not arrive reads empty, never the refused text. A call that ended
+      # before `review` reported (cancelled while queued, or skipped by a run cancel) is a cancel.
       - uses: $/actions/outcome-reply
         with:
           verb: apply
           environment: ${{ inputs.environment }}
           pr-number: ${{ inputs.pr_number }}
-          run-result: ${{ needs.run.result }}
           review-result: ${{ needs.run.outputs.review_result }}
           summary-result: ${{ needs.run.outputs.summary_result }}
-          run-cancelled: ${{ needs.run.outputs.run_cancelled }}
+          run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' || (needs.run.result != 'success' && needs.run.outputs.review_result == '') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

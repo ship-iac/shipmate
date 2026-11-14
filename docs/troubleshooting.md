@@ -2158,12 +2158,15 @@ When the first recurs, check the App's `actions: write` permission and reconcile
 §The workflow file, which offers `auto` as a `verb` option and holds the `auto`
 job.
 
-### `apply refused: pr_number is not a pull request number`
+### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 
 The `guard` job of `apply.yml` refused the dispatch before the run joined any
 apply queue, and nothing applied. The dispatch's `pr_number` is not 1 to 10
-digits without a leading zero, so a hand-made `workflow_dispatch` sent it.
-Comment `shipmate apply` on the pull request instead.
+digits without a leading zero. shipmate's comment-ops and autoplan never send
+such a number, and a hand-made dispatch is refused earlier by the bot-actor
+step, so a bot actor sent it: another workflow's `GITHUB_TOKEN` or another
+App. Find that workflow or App and stop it dispatching `shipmate.yml`; comment
+`shipmate apply` on the pull request to apply.
 
 ### `apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'`
 
