@@ -87,6 +87,7 @@ from _shipmate import (
     lock_who,
     retried,
     run_annotated,
+    run_jobs,
     stacked_through,
     write_outputs,
 )
@@ -95,6 +96,8 @@ ag = _load("apply-gate")
 az = _load("authorize")
 ec = _load("env-config")
 
+#: A deploy run's job names start with the published fence's `deploy` job name.
+DEPLOY_JOB = "deploy / "
 LOCKS = "refs/shipmate/locks/"
 ZERO = "0" * 40
 _KEYS = {"pr", "env", "stack", "acquisition"}
@@ -555,8 +558,9 @@ def _refuse_live_runs(repo, env, holders, run):
 
 def _deploy_runs(repo, holder, run):
     """The refusal lines for `holder`'s merge deploy, its pull request read fresh: one per live
-    deploy run of its merge commit, none while it is unmerged, and one when the read fails, the
-    merge commit is not a sha, or the listing is incomplete."""
+    deploy run of its merge commit that `_deploying` reads from its jobs, none while it is
+    unmerged, and one when the read fails, the merge commit is not a sha, or a runs or jobs
+    listing is incomplete."""
     try:
         pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
         merged, sha = pull["merged_at"] is not None, pull["merge_commit_sha"]
@@ -571,7 +575,30 @@ def _deploy_runs(repo, holder, run):
     ids, complete = live_push_runs(repo, sha, run)
     if not complete:
         return [f"could not list the deploy runs of #{holder}'s merge commit {sha}"]
-    return [f"#{holder}'s deploy run is live: {current_run_url(str(i))}" for i in ids]
+    lines = []
+    for i in ids:
+        jobs, complete = run_jobs(repo, i, run)
+        if not complete:
+            lines.append(
+                f"could not list the jobs of #{holder}'s deploy run {current_run_url(str(i))}"
+            )
+        elif _deploying(jobs):
+            lines.append(f"#{holder}'s deploy run is live: {current_run_url(str(i))}")
+    return lines
+
+
+def _deploying(jobs):
+    """Whether a deploy run listing `jobs` may still apply: until its `summary`, which runs after
+    every env-level, is listed `completed`, or while any job but a `warm` leg is not. `warm`
+    applies nothing, and a job blocked on `needs` may not be listed yet."""
+    names = {j["name"] for j in jobs if j["status"] == "completed"}
+    return f"{DEPLOY_JOB}summary" not in names or any(
+        j["status"] != "completed" for j in jobs if not _warm(j["name"])
+    )
+
+
+def _warm(name):
+    return name == f"{DEPLOY_JOB}warm" or name.startswith(f"{DEPLOY_JOB}warm / ")
 
 
 def evict_stacks(names, env):

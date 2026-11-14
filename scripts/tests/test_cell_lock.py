@@ -2072,6 +2072,40 @@ def test_a_live_run_refusal_past_the_cap_keeps_the_header_and_the_lines_that_fit
     assert gh.drained()
 
 
+def jobs_listing(run_id):
+    return [
+        "gh",
+        "api",
+        f"repos/{REPO}/actions/runs/{run_id}/jobs?filter=latest&per_page=100&page=1",
+    ]
+
+
+def deploy_jobs(**statuses):
+    """A deploy run's jobs listing, `{job name after "deploy / ": status}`."""
+    jobs = [{"name": f"deploy / {name}", "status": s} for name, s in statuses.items()]
+    return json.dumps({"jobs": jobs})
+
+
+#: A deploy run whose env-levels and `summary` have ended while two `warm` legs run.
+WARMING = {
+    "detect": "completed",
+    "warm / stacks/app": "in_progress",
+    "warm / tools": "queued",
+    "L0 / dev / stacks/app": "completed",
+    "summary": "completed",
+}
+
+
+def _merged_holder_with_one_deploy_run():
+    gh = _evict_auth()
+    for status in STATUSES:
+        gh.on(dispatch_listing(status), NO_RUNS)
+    gh.on(pull_read(12), pull("main", "closed", LATE, MERGE))
+    return gh.on(
+        push_listing(MERGE), json.dumps({"workflow_runs": [{"id": 42, "status": "queued"}]})
+    )
+
+
 def test_evict_refuses_a_merged_holders_live_deploy_run(monkeypatch, tmp_path):
     """Mutations: skip a merged holder (`if not merged` for `if True`) -- the push listing is
     never read and the delete is an unexpected call; keep a run listed `completed` (in
@@ -2082,7 +2116,51 @@ def test_evict_refuses_a_merged_holders_live_deploy_run(monkeypatch, tmp_path):
     gh.on(pull_read(12), pull("main", "closed", LATE, MERGE))
     rows = [{"id": 41, "status": "completed"}, {"id": 42, "status": "queued"}]
     gh.on(push_listing(MERGE), json.dumps({"workflow_runs": rows}))
+    gh.on(jobs_listing(42), deploy_jobs(detect="in_progress"))
     assert _refused(monkeypatch, tmp_path, gh) == f"{_LIVE}\n#12's deploy run is live: {_URL}/42"
+
+
+def test_evict_proceeds_past_a_deploy_run_only_warming(monkeypatch, tmp_path):
+    """`warm` applies nothing, so a deploy run whose other jobs have all completed does not hold
+    the eviction. Mutation: count a `warm` leg as live (drop `if not _warm(...)`) -- refused."""
+    gh = _merged_holder_with_one_deploy_run().on(jobs_listing(42), deploy_jobs(**WARMING))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    assert _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV) == {
+        "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}]),
+        "refused": "[]",
+    }
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("job", "status"),
+    [
+        pytest.param("detect", "in_progress", id="detect"),
+        pytest.param("L0 / dev / stacks/app", "waiting", id="cell"),
+        pytest.param("summary", "queued", id="summary"),
+        pytest.param("summary", None, id="summary-not-listed"),
+    ],
+)
+def test_evict_refuses_a_deploy_run_with_a_job_besides_warm_unfinished(
+    monkeypatch, tmp_path, job, status
+):
+    """A run with only warm legs left but this one job is live. `summary` not yet listed is
+    live too: a job blocked on `needs` may not be listed. Mutations: count every job as warm
+    (`_warm` returns True) -- detect and cell pass; drop the `summary` listed-completed clause
+    -- summary-not-listed passes."""
+    statuses = {**WARMING, job: status}
+    if status is None:
+        del statuses[job]
+    gh = _merged_holder_with_one_deploy_run().on(jobs_listing(42), deploy_jobs(**statuses))
+    assert _refused(monkeypatch, tmp_path, gh) == f"{_LIVE}\n#12's deploy run is live: {_URL}/42"
+
+
+def test_evict_refuses_a_deploy_run_whose_jobs_it_cannot_list(monkeypatch, tmp_path):
+    """Mutation: drop the `if not complete` branch -- the refusal names the run live instead."""
+    gh = _merged_holder_with_one_deploy_run().on(jobs_listing(42), FAIL)
+    assert _refused(monkeypatch, tmp_path, gh) == (
+        f"{_LIVE}\ncould not list the jobs of #12's deploy run {_URL}/42"
+    )
 
 
 def test_evict_reads_locks_then_dispatch_runs_then_the_holder_then_its_push_runs(

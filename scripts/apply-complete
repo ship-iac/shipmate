@@ -2,7 +2,7 @@
 """Decide each apply check's write from the state of its cell's wave job in THIS run.
 
 `apply-complete` reads the run's jobs listing on stdin and prints one row per decided cell;
-`apply-complete plan <all rows> <last rows>` turns rows into the `patch-checks` write plan.
+`apply-complete plan <rows>` turns every attempt's rows into the `patch-checks` write plan.
 
 Evidence is `GET /actions/runs/{id}/jobs`, not the cells' own artifacts: a job
 conclusion is written by GitHub, so one cell cannot claim another applied. A
@@ -161,10 +161,11 @@ def writes(row, repo):
     return [{"id": cid, "body": body, "title": title} for cid in row["ids"]]
 
 
-def merge(every, last):
-    """One row per check: a `success` row from any attempt in `every`, else its row in `last`.
-    A later, staler listing never downgrades a success."""
-    out = {r["check"]: r for r in last}
+def merge(every):
+    """One row per check of `every`, each attempt's rows in order: a `success` row from any
+    attempt, else the last row seen for it. A later, staler or failed listing never downgrades
+    a success nor drops an outcome an earlier attempt saw."""
+    out = {r["check"]: r for r in every}
     out.update({r["check"]: r for r in every if r["conclusion"] == "success"})
     return [out[check] for check in sorted(out)]
 
@@ -174,18 +175,18 @@ def _rows(path):
         return ag.parse_jsonl(fh)
 
 
-def plan(every_path, last_path):
+def plan(every_path):
     repo = os.environ["GITHUB_REPOSITORY"]
-    for row in merge(_rows(every_path), _rows(last_path)):
+    for row in merge(_rows(every_path)):
         for entry in writes(row, repo):
             print(json.dumps(entry))
 
 
 def main(argv=()):
     if argv:
-        if argv[0] != "plan" or len(argv) != 3:
-            raise SystemExit("::error::usage: apply-complete [plan <all rows> <last rows>]")
-        plan(argv[1], argv[2])
+        if argv[0] != "plan" or len(argv) != 2:
+            raise SystemExit("::error::usage: apply-complete [plan <rows>]")
+        plan(argv[1])
         return
     rows, unresolved = classify(
         json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"]),

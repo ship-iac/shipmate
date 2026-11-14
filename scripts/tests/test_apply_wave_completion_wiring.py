@@ -194,6 +194,7 @@ def _release(n):
                         f"${{{{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave{n}) }}}}"
                     ),
                     "deploy": "${{ inputs.deploy }}",
+                    "pr-number": "${{ inputs.pr_number }}",
                     **_WITH_KEY,
                 },
             }
@@ -217,6 +218,7 @@ WAVE0_RELEASE = {
             "with": {
                 "snapshot": "${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave0) }}",
                 "deploy": "${{ inputs.deploy }}",
+                "pr-number": "${{ inputs.pr_number }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
             },
@@ -243,6 +245,7 @@ WAVE2_RELEASE = {
             "with": {
                 "snapshot": "${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave2) }}",
                 "deploy": "${{ inputs.deploy }}",
+                "pr-number": "${{ inputs.pr_number }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
             },

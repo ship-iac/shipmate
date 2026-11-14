@@ -70,6 +70,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave0) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave1-release:
@@ -83,6 +84,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave1) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave2-release:
@@ -96,6 +98,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave2) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave3-release:
@@ -109,6 +112,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave3) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave4-release:
@@ -122,6 +126,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave4) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave5-release:
@@ -135,6 +140,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave5) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave6-release:
@@ -148,6 +154,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave6) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave7-release:
@@ -161,6 +168,7 @@ jobs:
         with:
           snapshot: ${{ toJSON(fromJSON(needs.snapshot.outputs.by_wave).wave7) }}
           deploy: ${{ inputs.deploy }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 

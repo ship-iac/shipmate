@@ -7431,9 +7431,11 @@ def test_the_shipmate_yml_probe_runs_the_trigger_types_finder(monkeypatch):
 
 # The run-name finding, hand-written and whole.
 _RUN_NAME_TEXT = (
-    "`shipmate.yml`'s `run-name` is not the published one, so shipmate cannot identify this "
-    "pull request's apply runs: an apply run cancels none of them waiting at an older head, and "
-    "replies that it may wait behind another without naming it. Re-pin the file with the "
+    "`shipmate.yml`'s `run-name` is not the published one, so shipmate cannot identify its runs "
+    "by their titles. The apply queue cancels no apply run waiting at an older head, and an "
+    "apply run replies that it may wait behind another without naming it. An `--evict` "
+    "unlock refuses while a run with such a title is live. A commented dispatch whose "
+    "response was lost is retried, which may start the command twice. Re-pin the file with the "
     "engine's `scripts/repin` and its `--write-fence` flag, after reading the diff it prints "
     "(docs/getting-started.md)."
 )

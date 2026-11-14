@@ -72,7 +72,7 @@ runs:
               > "$RUNNER_TEMP/diagnostics.txt"
           fi
           # Rows accumulate for the merge after the loop: replicas differ, so a later attempt
-          # can land on a staler one and lose a success an earlier attempt saw.
+          # can land on a staler one and lose a row an earlier attempt saw.
           cat "$RUNNER_TEMP/attempt-rows.jsonl" >> "$RUNNER_TEMP/rows.jsonl"
           # Only exit 75 (EX_TEMPFAIL) means "ask me again". Any other non-zero is the script
           # itself failing and propagates at once, so a broken invocation is not retried for
@@ -83,9 +83,9 @@ runs:
             *) cat "$RUNNER_TEMP/diagnostics.txt" >&2; exit "$rc" ;;
           esac
         done
-        # A success from any attempt, every other row from the last one only. Reads a failed
-        # job's annotations with this step's job token, before the App token exists.
-        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" plan           "$RUNNER_TEMP/rows.jsonl" "$RUNNER_TEMP/attempt-rows.jsonl" > "$RUNNER_TEMP/writes.jsonl"
+        # A success from any attempt, else the last row any attempt saw. Reads a failed job's
+        # annotations with this step's job token, before the App token exists.
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" plan "$RUNNER_TEMP/rows.jsonl" > "$RUNNER_TEMP/writes.jsonl"
         # Echoed once after the loop, not per attempt: the file is rewritten each time, so an
         # exhausted run would otherwise log the same warning once per attempt.
         cat "$RUNNER_TEMP/diagnostics.txt" >&2
