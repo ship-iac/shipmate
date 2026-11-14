@@ -47,9 +47,8 @@ outputs:
   warm:
     description: >-
       JSON list of `{stack, tf_vars}`, one managed stack of the merged tree per distinct provider
-      lock digest, changed or not, up to 256; a stack whose tf_vars do not resolve is skipped
-      with a warning naming it. One tools-only row `{"stack": "", "tf_vars": {}}` when no row
-      remains or the list could not be built.
+      lock digest, changed or not, up to 256; one tools-only row `{"stack": "", "tf_vars": {}}`
+      when none has a lock naming a provider or the list could not be built.
     value: "${{ steps.detect.outputs.warm }}"
   max_parallel:
     description: The `warm` matrix's `max-parallel`, the table's validated `max_parallel`.

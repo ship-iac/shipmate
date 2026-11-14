@@ -12,11 +12,11 @@ file in it. A save that stored nothing is told apart by exact-key lookups after 
 the case of another job saving the same entry first, is quiet; two misses warn once, naming the
 entry.
 
-`warm_rows` never returns []; the job's `if:` guards against one, since an empty matrix fails at
-strategy evaluation. It is a degrade job: no job needs it and the gate never reads it, so
-`continue-on-error` keeps its failure off the run's conclusion, the cells and the lock release. The
-deploy run waits for it, so it holds the deploy concurrency group for its batches of `max_parallel`
-legs, each up to the 15-minute timeout.
+The job's `if:` guards an empty matrix, which fails at strategy evaluation. It is a degrade job: no
+job needs it and the gate never reads it, so `continue-on-error` keeps its failure off the run's
+conclusion, the cells and the lock release. The deploy run waits for it, so it holds the deploy
+concurrency group while its legs run, at most `max_parallel` legs at once, each up to the 15-minute
+timeout.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed. The job and
 the action's steps are compared whole against hand-written constants.
@@ -229,3 +229,41 @@ def test_cell_init_env_and_slug_are_optional():
         "env": {"required": False, "default": ""},
         "slug": {"required": False, "default": ""},
     }
+
+
+def test_cell_init_requires_env_and_slug_through_its_first_step():
+    """Mutation: drop `env:`'s `SLUG` mapping from the step."""
+    step = action_yaml("cell-init")["runs"]["steps"][0]
+    assert {k: v for k, v in step.items() if k != "run"} == {
+        "name": "Require the state inputs",
+        "shell": "bash",
+        "env": {
+            "BACKEND": "${{ inputs.backend }}",
+            "CELL_ENV": "${{ inputs.env }}",
+            "SLUG": "${{ inputs.slug }}",
+        },
+    }
+
+
+@bash_only
+def test_a_no_backend_call_passes_and_a_cell_call_without_slug_refuses(tmp_path):
+    """Warm's shape, no backend and no `env` or `slug`, passes silently; a cell's shape missing
+    `slug` refuses. Mutations: `!= false` to `= false`; drop the `-z "$SLUG"` test."""
+    body = step_by("cell-init", name="Require the state inputs")["run"]
+    got = [
+        (r.returncode, r.stdout)
+        for r in (
+            run_step(tmp_path, body, {**os.environ, "BACKEND": b, "CELL_ENV": e, "SLUG": ""})
+            for b, e in (("false", ""), ("true", "dev-eu"))
+        )
+    ]
+    assert got == [
+        (0, ""),
+        (
+            1,
+            (
+                "::error title=cell-init input missing::actions/cell-init needs env and slug "
+                'unless backend is "false".\n'
+            ),
+        ),
+    ]

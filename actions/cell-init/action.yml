@@ -5,11 +5,11 @@ inputs:
     description: Stack path, e.g. stacks/app.
     required: true
   env:
-    description: Environment name, e.g. dev-eu. Read only when the backend is used, to restore local state.
+    description: Environment name, e.g. dev-eu. Read only when the backend is used, to restore local state; empty then refuses.
     required: false
     default: ""
   slug:
-    description: The stack path with `/` replaced by `-`, the key the state artifact is stored under. Read only when the backend is used, to restore local state.
+    description: The stack path with `/` replaced by `-`, the key the state artifact is stored under. Read only when the backend is used, to restore local state; empty then refuses.
     required: false
     default: ""
   encryption-key:
@@ -28,7 +28,7 @@ outputs:
     description: The provider cache key the restore read, computed before `init -reconfigure` can rewrite the committed lock. The key a saving cell writes under. Empty when the restore was skipped or the cache service was unavailable.
     value: ${{ steps.provider-cache.outputs.cache-primary-key }}
   init-outcome:
-    description: The outcome of `tofu init` itself, not of this action. A cache step failing first skips init, and the caller then reports "an earlier step failed" rather than a failed init.
+    description: The outcome of `tofu init` itself, not of this action. An earlier step failing skips init, and the caller then reports "an earlier step failed" rather than a failed init.
     value: ${{ steps.init.outcome }}
   state-path:
     description: The local state path read from the stack's `tofu init` record. Empty for a backend other than `local`, which skips the restore, and also when `Locate state` failed or was skipped (init failed) or `cell-init` was not reached. Only `restore-outcome == 'success'` means state was restored.
@@ -42,6 +42,20 @@ outputs:
 runs:
   using: composite
   steps:
+    # GitHub does not enforce `required` on a composite action's inputs, and `env` and `slug`
+    # are optional for the no-backend call, so a cell call that omits one refuses here.
+    - name: Require the state inputs
+      shell: bash
+      env:
+        BACKEND: ${{ inputs.backend }}
+        CELL_ENV: ${{ inputs.env }}
+        SLUG: ${{ inputs.slug }}
+      run: |
+        if [ "$BACKEND" != false ] && { [ -z "$CELL_ENV" ] || [ -z "$SLUG" ]; }; then
+          echo '::error title=cell-init input missing::actions/cell-init needs env and slug unless backend is "false".'
+          exit 1
+        fi
+
     - name: Provider cache key
       id: provider-cache-key
       shell: bash
