@@ -15,9 +15,10 @@ existing reaction, so exactly one run of a comment reads 201:
   the pull request. One exception: "re-run all jobs" deletes the earlier attempts' artifacts,
   so a plan run that owned the comment must plan again. With `SHIPMATE_OWNER_JOB` set (`plan.yml`
   passes `facts`, the job the claim gates) and `GITHUB_RUN_ATTEMPT` above 1, a 200 reads every
-  earlier attempt's jobs; a job named `<owner>` or `* / <owner>` that concluded `success` or
-  `failure` means this run owned the comment, so it writes `state=owned`; any other
-  conclusion reads as taken. A failed or malformed
+  earlier attempt's jobs; a job named `<owner>` or `* / <owner>` that concluded `success`,
+  `failure` or `timed_out` ran, so this run owned the comment and it writes `state=owned`. Any
+  other conclusion reads as taken: `cancelled` cannot tell a job cancelled before it started
+  from one cancelled while it ran, so it fails closed. A failed or malformed
   read, or one past `_shipmate`'s page bound, fails as below. `apply.yml` passes no owner job:
   its re-run is refused anyway.
 - A `COMMENT_ID` that is not a comment id, a `PR_NUMBER` that is not a pull request number, or
@@ -85,9 +86,9 @@ _JOB_ID = re.compile(r"[a-z][a-z0-9-]*")
 
 
 def owned_earlier(repo, run_id, attempt, owner):
-    """Whether job `owner` finished (`success` or `failure`) in an attempt of run `run_id` before
-    `attempt`. Raises `ValueError` when a listing fails, is malformed or runs past the page
-    bound."""
+    """Whether job `owner` ran to an end (`success`, `failure` or `timed_out`) in an attempt of
+    run `run_id` before `attempt`. Raises `ValueError` when a listing fails, is malformed or
+    runs past the page bound."""
     for n in range(1, attempt):
         jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/attempts/{n}/jobs", "jobs", run)
         if jobs is None:
@@ -99,6 +100,7 @@ def owned_earlier(repo, run_id, attempt, owner):
             if (name == owner or name.endswith(f" / {owner}")) and conclusion in (
                 "success",
                 "failure",
+                "timed_out",
             ):
                 return True
     return False

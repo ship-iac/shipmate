@@ -230,6 +230,7 @@ def _run_dispatch(
     env["REF"] = "abc123"
     env["PR_NUMBER"] = "42"
     env["COMMENT_ID"] = comment_id
+    env["SHIPMATE_APP_SLUG"] = "shipmate-app"
     env["COMMENT_TOKEN"] = "workflow_token"  # noqa: S105
     env["GITHUB_ACTION_PATH"] = str(ACTIONS / "dispatch")
     # Runner-supplied, and the failure comment's only content besides fixed text.

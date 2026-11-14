@@ -465,23 +465,31 @@ def test_a_run_of_another_command_does_not_stop_the_retry(calls, monkeypatch, ca
     assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
 
 
-def test_an_empty_slug_is_undetermined_and_never_retried(calls, monkeypatch, capsys):
-    """Without the App's slug no listed run can be told to be this command's, so a retry could
-    start the command twice. Mutation: drop the empty-slug refusal in `command_run_listed` ->
-    the window is read and the dispatch is sent again."""
-    sent = command(monkeypatch, calls, "apply", slug="")
-    answering(
-        monkeypatch,
-        calls,
-        [SystemExit(BAD_GATEWAY), ANSWER],
-        [run_row(COMMANDS["apply"][2], actor="[bot]")] * 9,
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+def test_a_commented_dispatch_without_the_slug_is_refused_before_any_post(
+    calls, monkeypatch, capsys, verb
+):
+    """Without the App's slug the run a lost answer started could not be found among the
+    listed runs, so the dispatch is refused at startup, as a wiring defect, and sends nothing.
+    Mutation: drop the startup refusal in `main` -> the dispatch is sent."""
+    command(monkeypatch, calls, verb, slug="")
+    answering(monkeypatch, calls, [ANSWER])
+    refusal = (
+        "::error::SHIPMATE_APP_SLUG is empty on a commented dispatch, so a run it started could "
+        "not be found after a lost answer; nothing was dispatched. This is an engine wiring "
+        "defect: actions/dispatch passes the slug of the App token it minted."
     )
-    code, _, err = post(capsys)
-    assert (code, calls) == (db.UNDETERMINED, [sent, SLEPT_2])
-    assert err.endswith(
-        "\nlisting shipmate.yml runs failed: ValueError: SHIPMATE_APP_SLUG is empty, so no "
-        "listed run is this command's\n"
-    )
+    assert post(capsys) == (refusal, "", "")
+    assert calls == []
+
+
+def test_a_comment_less_dispatch_needs_no_slug(calls, monkeypatch, capsys):
+    """The replan and `auto` read no title. Mutation: refuse an empty slug on every dispatch."""
+    monkeypatch.setenv("VERB", "plan")
+    monkeypatch.setenv("COMMENT_ID", "")
+    monkeypatch.setenv("SHIPMATE_APP_SLUG", "")
+    answering(monkeypatch, calls, [ANSWER])
+    assert post(capsys)[0] == 0
 
 
 def test_every_page_back_to_t0_is_read(calls, monkeypatch, capsys):

@@ -20,8 +20,9 @@ started a run: GitHub can start it and still answer 502. Before each retry it li
   attempt. A `workflow_dispatch` run whose actor is `<SHIPMATE_APP_SLUG>[bot]` and whose title
   parses (`_shipmate.parse_run_title`) as this verb and comment id, with this pull request, or
   for `unlock` no pull request and this ref, is this command's run and stops the retry. The
-  title is consumer-authored, so only an App run's title counts. An empty slug identifies no
-  run, so the retry stops `UNDETERMINED`.
+  title is consumer-authored, so only an App run's title counts. A commented dispatch with an
+  empty `SHIPMATE_APP_SLUG` exits 1 before the first POST, since no listed run could be told to
+  be its own.
 - Comment-less (`auto`, the replan): one page of 100 `workflow_dispatch` runs, newest first;
   any created since `t0` stops the retry. No title is read, because nothing marks such a run as
   this dispatch's. A concurrent dispatch landing in the window therefore stops the retry too; a
@@ -30,10 +31,11 @@ started a run: GitHub can start it and still answer 502. Before each retry it li
 Exit codes:
 
     0                   dispatched; stdout is the API's answer, unchanged
-    1                   failed on the first attempt with a failure that is not transient, so no
-                        run started. When the answer shows a `shipmate.yml` older than this
-                        dispatch (`skew_hint`), stdout is the remedy sentence and stderr ends
-                        with it as an `::error::` line
+    1                   a commented dispatch without `SHIPMATE_APP_SLUG`, refused before any
+                        request; or failed on the first attempt with a failure that is not
+                        transient, so no run started. When the answer shows a `shipmate.yml`
+                        older than this dispatch (`skew_hint`), stdout is the remedy sentence
+                        and stderr ends with it as an `::error::` line
     3 MAY_HAVE_STARTED  a listed run is this command's (commented) or was created since `t0`
                         (comment-less); not retried
     4 UNDETERMINED      the attempts ended on transient failures, a later attempt failed after a
@@ -182,14 +184,12 @@ def landed_since(repo: str, t0: datetime, run=run) -> bool:
 
 def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) -> bool:
     """True when a listed `shipmate.yml` run in `repo` is a `workflow_dispatch` whose actor is
-    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`. An empty `slug` raises
-    `ValueError`: no run can then be told to be this command's.
+    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`. `slug` must be
+    non-empty; `main` refuses a commented dispatch without one.
 
     Reads pages of 100, newest first, each through `retried`, until a page is short or holds a
     run created before `t0`. A failed read raises its `SystemExit`; a malformed row
     (`_listed_row`) or a listing past ten pages raises `ValueError`."""
-    if not slug:
-        raise ValueError("SHIPMATE_APP_SLUG is empty, so no listed run is this command's")
     jq = ".workflow_runs[] | {created_at, event, display_title, actor: .actor.login} | tojson"
     for page in range(1, _MAX_PAGES + 1):
         args = ["gh", "api", f"{_runs(repo)}?per_page={_PAGE}&page={page}", "--jq", jq]
@@ -267,6 +267,12 @@ def main(argv=()):
         raise SystemExit("::error::usage: dispatch-body")
     repo = os.environ["GITHUB_REPOSITORY"]
     data = json.dumps(body())
+    if os.environ.get("COMMENT_ID") and not os.environ.get("SHIPMATE_APP_SLUG"):
+        raise SystemExit(
+            "::error::SHIPMATE_APP_SLUG is empty on a commented dispatch, so a run it started "
+            "could not be found after a lost answer; nothing was dispatched. This is an engine "
+            "wiring defect: actions/dispatch passes the slug of the App token it minted."
+        )
     args = ["gh", "api", "-X", "POST", f"repos/{repo}/actions/workflows/shipmate.yml/dispatches"]
     args += ["--input", "-"]
     t0 = _now() - _CLOCK_MARGIN

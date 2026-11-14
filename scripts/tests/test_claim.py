@@ -226,11 +226,12 @@ def rerun(env, monkeypatch):
     return env
 
 
-@pytest.mark.parametrize("conclusion", ["success", "failure"])
+@pytest.mark.parametrize("conclusion", ["success", "failure", "timed_out"])
 def test_a_full_rerun_of_the_owner_owns_again(rerun, conclusion):
-    """ "Re-run all jobs" deletes the earlier attempts' artifacts, so the run whose `facts`
-    finished must plan again, whether it passed or failed. Mutations: drop the earlier-attempt
-    read; count only `success`; match the name exactly (the called job is `plan / facts`)."""
+    """ "Re-run all jobs" deletes the earlier attempts' artifacts, so the run whose `facts` ran
+    must plan again, whether it passed, failed or timed out. Mutations: drop the earlier-attempt
+    read; count only `success`; drop `timed_out`; match the name exactly (the called job is
+    `plan / facts`)."""
     rerun.pages = {_page(1): [{"name": "plan / facts", "conclusion": conclusion}]}
     assert rerun.go() == 0
     assert rerun.reads == [_page(1)]
@@ -238,10 +239,12 @@ def test_a_full_rerun_of_the_owner_owns_again(rerun, conclusion):
     assert rerun.replies == []
 
 
-@pytest.mark.parametrize("conclusion", ["cancelled", "timed_out", "neutral", "action_required"])
-def test_a_facts_that_did_not_finish_proves_no_ownership(rerun, conclusion):
-    """Only `success` or `failure` proves ownership; every other conclusion reads as taken.
-    Mutation: `conclusion not in (None, "skipped")` in place of the two-value allow-list."""
+@pytest.mark.parametrize("conclusion", ["cancelled", "neutral", "action_required", "stale"])
+def test_a_facts_that_may_not_have_run_proves_no_ownership(rerun, conclusion):
+    """Only `success`, `failure` or `timed_out` proves ownership; `cancelled` cannot tell a job
+    cancelled before it started from one cancelled while it ran, so it fails closed, as does
+    every other conclusion. Mutations: `conclusion not in (None, "skipped")` in place of the
+    allow-list; add `"cancelled"` to it."""
     rerun.pages = {_page(1): [{"name": "plan / facts", "conclusion": conclusion}]}
     assert rerun.go() == 0
     assert rerun.outputs() == "state=taken\n"
