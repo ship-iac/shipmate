@@ -1451,6 +1451,22 @@ def test_warm_past_the_matrix_limit_keeps_256_and_warns(tmp_path, monkeypatch, c
     )
 
 
+def test_an_unresolvable_stack_is_skipped_and_the_others_keep_their_rows(
+    tmp_path, monkeypatch, capsys
+):
+    """The next stack with the skipped stack's digest takes its row, and a stack with another
+    digest keeps its own. Mutations: drop the `try` (the whole list falls back to the tools-only
+    row); `break` instead of `continue`; drop the warning."""
+    _tree(tmp_path, monkeypatch, {"a": _LOCK_A, "b": _LOCK_A, "c": _LOCK_B})
+    table = {**_TF_VARS_TABLE, "environments": {"bad": {"vars": "x"}, "dev": {}}}
+    tag_map = {"a": ["env/bad"], "b": ["env/dev"], "c": ["env/dev"]}
+    assert dd.warm_rows(tag_map, table) == [
+        {"stack": "b", "tf_vars": {"TF_VAR_env": "dev", "TF_VAR_region": ""}},
+        {"stack": "c", "tf_vars": {"TF_VAR_env": "dev", "TF_VAR_region": ""}},
+    ]
+    assert capsys.readouterr().err == "::warning::a is not warmed: 'str' object is not a mapping\n"
+
+
 def test_no_lock_naming_a_provider_leaves_one_tools_only_row(tmp_path, monkeypatch, capsys):
     """A deploy still saves the OpenTofu release entry. Mutation: return `rows` alone."""
     _tree(tmp_path, monkeypatch, {"a": "# no provider block\n"})

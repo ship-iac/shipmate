@@ -3141,9 +3141,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   which the key carries, and a plan cell on another runner type still misses.
   When no managed stack commits a lock naming a provider, or the list of locks
   cannot be built, `warm` runs one tools-only leg that installs the tools and
-  nothing more. The
-  deploy run waits for `warm`, so it holds the deploy concurrency group for up
-  to its 15-minute timeout; no job, the gate, the cells or the lock release
+  nothing more. `warm` runs on every merge deploy that `detect` accepts, in
+  batches of `max_parallel` legs, each up to its 15-minute timeout, and the
+  deploy run waits for it, so it can hold the deploy concurrency group for
+  longer than one timeout; no job, the gate, the cells or the lock release
   read it, and its failure shows on that job only. An entry is keyed on its path, which
   lives under `RUNNER_TEMP`: a job on a runner image whose `RUNNER_TEMP`
   differs from the saving runner's misses and downloads. This replacement handles
@@ -4660,10 +4661,13 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   A hit, including when another job saved the entry first, adds no warning of
   `warm`'s own (`actions/cache/save` may log its own message on that race); a
   miss, looked up twice, warns `Provider cache entry not saved`, naming the
-  key. A leg runs per distinct lock on every merge deploy, including one with
-  no cells. It is a degrade job: a failed leg never fails the deploy, and a
-  list that cannot be built warns `no provider cache warm-up: <cause>` in
-  `detect` and falls back to the tools-only leg.
+  key. A leg runs per distinct lock on every merge deploy whose `detect`
+  passes, including one with no cells; a refused `detect` runs no `warm`. It
+  is a degrade job: a failed leg never fails the deploy; a stack whose
+  variables do not resolve warns `<stack> is not warmed: <cause>` in `detect`,
+  and the next stack with its lock takes its place; and a list that cannot be
+  built warns `no provider cache warm-up: <cause>` in `detect` and falls back
+  to the tools-only leg.
 - An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
   runner image whose `RUNNER_TEMP` differs from the saving runner's misses and
   downloads.

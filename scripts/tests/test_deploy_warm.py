@@ -3,18 +3,20 @@
 `detect` outputs `warm`, one managed stack per distinct lock digest (`deploy-detect`'s
 `warm_cells`), or one tools-only row with an empty `stack` when there is none, and `warm` runs one
 leg per row, at most `max_parallel` at once (it binds no `<env>-apply` environment), on the cells'
-runner, because the entry name carries the runner's OS and architecture. A leg checks out the merged
-commit, installs the tools (which also saves the OpenTofu entry), and, unless it is the tools-only
-row, runs `actions/warm`: it names the entry with the cells' own builder, looks it up, and on a miss
-initializes the stack through `cell-init` with `backend: "false"` under the row's injected
-variables, then saves the entry at the cells' own `path:` only when init left a file in it. A save
-that stored nothing is told apart by exact-key lookups after it: a hit, also the case of another job
-saving the same entry first, is quiet; two misses warn once, naming the entry.
+runner, because the entry name carries the runner's OS and architecture. A leg installs the tools
+(which also saves the OpenTofu entry) and, unless it is the tools-only row, checks out the merged
+commit first and runs `actions/warm` after: it names the entry with the cells' own builder, looks
+it up, and on a miss initializes the stack through `cell-init` with `backend: "false"` under the
+row's injected variables, then saves the entry at the cells' own `path:` only when init left a
+file in it. A save that stored nothing is told apart by exact-key lookups after it: a hit, also
+the case of another job saving the same entry first, is quiet; two misses warn once, naming the
+entry.
 
-The `if:` is load-bearing: an empty matrix fails at strategy evaluation. It is a degrade job: no job
-needs it and the gate never reads it, so `continue-on-error` keeps its failure off the run's
-conclusion, the cells and the lock release. The deploy run waits for it, so it holds the deploy
-concurrency group up to its 15-minute timeout.
+`warm_rows` never returns []; the job's `if:` guards against one, since an empty matrix fails at
+strategy evaluation. It is a degrade job: no job needs it and the gate never reads it, so
+`continue-on-error` keeps its failure off the run's conclusion, the cells and the lock release. The
+deploy run waits for it, so it holds the deploy concurrency group for its batches of `max_parallel`
+legs, each up to the 15-minute timeout.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed. The job and
 the action's steps are compared whole against hand-written constants.
@@ -41,7 +43,11 @@ EXPECTED_WARM = {
     },
     "name": "warm / ${{ matrix.stack || 'tools' }}",
     "steps": [
-        {"uses": _CHECKOUT, "with": {"ref": "${{ github.sha }}", "persist-credentials": False}},
+        {
+            "if": "${{ matrix.stack != '' }}",
+            "uses": _CHECKOUT,
+            "with": {"ref": "${{ github.sha }}", "persist-credentials": False},
+        },
         {"uses": "$/actions/setup", "with": {"versions": "${{ needs.detect.outputs.tools }}"}},
         {
             "if": "${{ matrix.stack != '' }}",
@@ -59,9 +65,10 @@ EXPECTED_WARM = {
 
 def test_warm_is_a_degrade_matrix_over_detects_rows():
     """Mutations: `!= '[]'` to `== '[]'` in its `if:`; drop the warm step's `if:`, which a
-    tools-only row needs; drop `max-parallel`; drop `fail-fast: false`; drop
-    `continue-on-error`; `runs-on: ubuntu-slim`; `permissions: {}`; drop the checkout's `ref:`;
-    add `tofu: "false"` to its setup step; drop `consumer-secrets` from its warm step."""
+    tools-only row needs; drop the checkout's `if:`, which a tools-only row skips; drop
+    `max-parallel`; drop `fail-fast: false`; drop `continue-on-error`; `runs-on: ubuntu-slim`;
+    `permissions: {}`; drop the checkout's `ref:`; add `tofu: "false"` to its setup step; drop
+    `consumer-secrets` from its warm step."""
     assert workflow_jobs("deploy.yml").get("warm") == EXPECTED_WARM
 
 
@@ -209,3 +216,16 @@ def test_the_warning_names_the_entry(tmp_path):
         "tofu-providers-Linux-X64-abc123 exists after the save; the cells whose lock it serves "
         "download their providers until it is saved.\n"
     )
+
+
+def test_cell_init_env_and_slug_are_optional():
+    """`actions/warm` calls `cell-init` with `backend: "false"` and no `env` or `slug`, which only
+    the state restore reads; `test_a_no_backend_init_skips_locating_and_restoring_state` pins
+    that gate. Mutations: `required: true` on `slug`; drop `env`'s default."""
+    inputs = action_yaml("cell-init")["inputs"]
+    assert {
+        n: {k: v for k, v in inputs[n].items() if k != "description"} for n in ("env", "slug")
+    } == {
+        "env": {"required": False, "default": ""},
+        "slug": {"required": False, "default": ""},
+    }

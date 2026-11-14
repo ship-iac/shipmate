@@ -225,8 +225,10 @@ def warm_cells(tag_map, table):
     over every managed stack of `tag_map`, changed or not, for `deploy.yml`'s `warm` matrix: a
     stack with an `env/*` tag and no `LOCAL_TAG`, so one a cell can run. A stack whose lock
     yields no digest is left out. Each digest's row is its first stack in path order, with the
-    `tf_vars` `table` resolves for that stack's first environment by name. Past the matrix
-    limit, the rest are dropped with one warning naming how many."""
+    `tf_vars` `table` resolves for that stack's first environment by name; a stack whose
+    `tf_vars` do not resolve is skipped with a warning naming it, and the next stack with that
+    digest takes the row. Past the matrix limit, the rest are dropped with one warning naming
+    how many."""
     rows = {}
     for stack in sorted(tag_map):
         tags = tag_map[stack]
@@ -235,7 +237,11 @@ def warm_cells(tag_map, table):
             continue
         found = pck.lock_digest(stack)
         if found and found not in rows:
-            tf_vars = bm.ec.resolve(table, envs[0], "apply", "")["tf_vars"]
+            try:
+                tf_vars = bm.ec.resolve(table, envs[0], "apply", "")["tf_vars"]
+            except (Exception, SystemExit) as e:
+                sys.stderr.write(f"::warning::{command_data(f'{stack} is not warmed: {e}')}\n")
+                continue
             rows[found] = {"stack": stack, "tf_vars": tf_vars}
     dropped = len(rows) - bm.MATRIX_LIMIT
     if dropped > 0:

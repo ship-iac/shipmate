@@ -50,8 +50,8 @@ jobs:
 
   # Saves the provider cache entry of each distinct lock on the merged tree, and the OpenTofu
   # entry through setup; a tools-only row (empty `stack`) runs setup alone. A degrade job: no job
-  # needs it, so `continue-on-error` keeps its failure off the run's conclusion. The `if:` is
-  # load-bearing: an empty matrix fails the run.
+  # needs it, so `continue-on-error` keeps its failure off the run's conclusion. `warm_rows` never
+  # returns []; the `if:` guards against one, since an empty matrix fails the run.
   warm:
     needs: [detect]
     if: ${{ needs.detect.outputs.warm != '[]' }}
@@ -66,7 +66,8 @@ jobs:
         include: ${{ fromJSON(needs.detect.outputs.warm) }}
     name: warm / ${{ matrix.stack || 'tools' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: ${{ matrix.stack != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ github.sha }}", persist-credentials: false }
       - uses: $/actions/setup
         with: { versions: "${{ needs.detect.outputs.tools }}" }

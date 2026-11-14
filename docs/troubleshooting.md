@@ -811,7 +811,8 @@ The fix in every case is the same: write the top-level settings at column 1.
 
 **Three settings refuse nothing when they are absent.** `needs`, `apply_mode`
 and `max_parallel` are optional and take tolerant defaults — no ordering, no
-exclusions, and at most 10 cell jobs at once per plan and drift sweep. A file
+exclusions, and at most 10 cell jobs at once per plan and drift sweep, and 10
+`warm` legs per merge deploy. A file
 that sets `apply_mode: targeted` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
 warns. `shipmate doctor` echoes all three on every report for exactly this reason,
@@ -1518,7 +1519,7 @@ job's log.
 |---|---|
 | "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum`, which every verify and install step checks, or `gpg` or `gpgconf`, which the OpenTofu step also checks. Install it on the runner image. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells and a merge deploy's `warm` job fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. `warm` runs on every merge deploy: one leg per distinct lock naming a provider that a managed stack (an `env/*` tag, no `shipmate/local`) commits, else one tools-only leg; a `no provider cache warm-up` warning in `detect` means the list of locks fell back to that tools-only leg. The deploy run waits for it, but no job, the gate, the cells or the lock release read it, and its failure shows on that job only. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells and a merge deploy's `warm` job fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. `warm` runs on every merge deploy whose `detect` passes (a refused `detect` runs no `warm`): one leg per distinct lock naming a provider that a managed stack (an `env/*` tag, no `shipmate/local`) commits, else one tools-only leg; a `<stack> is not warmed` warning in `detect` means that stack's variables did not resolve and the next stack with its lock, if any, took its place, and a `no provider cache warm-up` warning means the list of locks fell back to that tools-only leg. The deploy run waits for it, but no job, the gate, the cells or the lock release read it, and its failure shows on that job only. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
 | "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
 | "mktemp could not create a gpg keyring directory." | The runner could not create a temporary directory. Re-run the failed job. |
@@ -2961,6 +2962,11 @@ stacks stay pending and visible, which is the recoverable state: re-run that
 deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
+
+A long hold on that group makes the drop more likely. Every merge deploy whose
+`detect` passes runs `warm`, one leg per distinct provider lock in batches of
+`max_parallel`, each up to its 15-minute timeout, and the deploy run holds the
+group until `warm` ends, even with no cells to apply.
 
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the
