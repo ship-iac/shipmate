@@ -1,0 +1,112 @@
+name: shipmate warm
+description: Save the provider cache entry one stack's cells restore when it is missing. Initializes the stack through cell-init with `-backend=false`, plans nothing, and saves only when init left a file in the cache. Call it after actions/checkout of the merged commit and actions/setup.
+inputs:
+  stack:
+    description: Stack path, e.g. stacks/app.
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu, whose tf_vars the init runs with.
+    required: true
+  tf-vars:
+    description: The matrix row's resolved tf_vars, serialised with toJSON. Anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
+    required: true
+  github-vars:
+    description: The consumer's reachable GitHub variables, serialised with toJSON. Engine-built, so an empty rendering is a platform fact and not a consumer mistake; empty and null are both read as no variables.
+    required: false
+    default: ""
+  consumer-secrets:
+    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Provider cache key
+      id: provider-cache-key
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/provider-cache-key"
+
+    # The path is the cells' own expression: an entry's version includes the path string, so
+    # any other spelling saves an entry no cell restores.
+    - name: Look up the provider cache entry
+      id: lookup
+      if: ${{ steps.provider-cache-key.outputs.entry != '' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: ${{ steps.provider-cache-key.outputs.entry }}
+        lookup-only: "true"
+
+    - name: Inject identity variables
+      if: ${{ steps.provider-cache-key.outputs.entry != '' && steps.lookup.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        SHIPMATE_TF_VARS: ${{ inputs.tf-vars }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_SECRETS: ${{ inputs.consumer-secrets }}
+        STACK: ${{ inputs.stack }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
+
+    - name: Initialize the stack
+      id: init
+      if: ${{ steps.provider-cache-key.outputs.entry != '' && steps.lookup.outputs.cache-hit != 'true' }}
+      uses: $/actions/cell-init
+      with:
+        stack: ${{ inputs.stack }}
+        env: ${{ inputs.env }}
+        slug: ""
+        backend: "false"
+
+    - name: Check the provider cache
+      id: provider-cache-files
+      if: ${{ steps.init.outcome == 'success' }}
+      shell: bash
+      run: |
+        if [ -n "$(find "$TF_PLUGIN_CACHE_DIR" -type f -print -quit)" ]; then
+          echo "populated=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    # actions/cache/save succeeds when it stores nothing, so the lookups below decide whether
+    # to warn; continue-on-error keeps them running after a save that does fail.
+    - name: Save provider cache
+      if: ${{ steps.provider-cache-files.outputs.populated == 'true' }}
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: ${{ steps.provider-cache-key.outputs.entry }}
+
+    # A hit is also the quiet case of a save that lost the race to another job saving the same
+    # entry. A lookup right after a save can miss an entry that exists, so a miss waits once.
+    - name: Look up the saved entry
+      id: verify
+      if: ${{ steps.provider-cache-files.outputs.populated == 'true' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: ${{ steps.provider-cache-key.outputs.entry }}
+        lookup-only: "true"
+
+    - name: Wait before the second lookup
+      id: wait
+      if: ${{ steps.verify.outcome == 'success' && steps.verify.outputs.cache-hit != 'true' }}
+      shell: bash
+      run: sleep 10
+
+    - name: Look up the saved entry, try 2
+      id: verify2
+      if: ${{ steps.wait.outcome == 'success' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: ${{ steps.provider-cache-key.outputs.entry }}
+        lookup-only: "true"
+
+    - name: Warn that the entry was not saved
+      if: ${{ steps.verify2.outcome == 'success' && steps.verify2.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        ENTRY: ${{ steps.provider-cache-key.outputs.entry }}
+      run: echo "::warning title=Provider cache entry not saved::No cache entry ${ENTRY} exists after the save; the cells whose lock it serves download their providers until it is saved."

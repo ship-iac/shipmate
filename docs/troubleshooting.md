@@ -1511,7 +1511,7 @@ job's log.
 |---|---|
 | "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum`, which every verify and install step checks, or `gpg` or `gpgconf`, which the OpenTofu step also checks. Install it on the runner image. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells and a merge deploy's `warm` job fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. `warm` runs only on a deploy with no cells; the deploy run waits for it, but no job, the gate, the cells or the lock release read it, and its failure shows on that job only. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells and a merge deploy's `warm` job fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. `warm` runs on every merge deploy whose tree commits a lock naming a provider; the deploy run waits for it, but no job, the gate, the cells or the lock release read it, and its failure shows on that job only. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
 | "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
 | "mktemp could not create a gpg keyring directory." | The runner could not create a temporary directory. Re-run the failed job. |
@@ -1649,7 +1649,24 @@ the cause: the backend, credentials or the configuration.
    It starts `tofu-providers-`.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
-   drift or apply cell saves a fresh entry.
+   drift or apply cell, or the next merge deploy's `warm` job, saves a fresh
+   entry.
+
+### `Provider cache entry not saved`
+
+A merge deploy's `warm` leg saved the provider cache entry it names, and two
+exact-key lookups after the save found none. The deploy, its cells and the gate
+are unaffected; cells whose lock the entry serves download their providers
+until an entry exists ([`../CONTRACT.md`](../CONTRACT.md) §Terramate
+safeguards, "Lock files and the provider cache").
+
+1. Read why the save stored nothing in the leg's `Save provider cache` step
+   log.
+2. Check whether the entry exists now: `gh cache list --key <key> --repo
+   <owner>/<repo>`. A lookup can miss an entry saved moments before; if it is
+   listed, nothing more is needed.
+3. Otherwise re-run the `warm` leg, or wait for the next merge deploy, whose
+   `warm` saves the entry.
 
 ### `detect failed: <n> file(s) not formatted`, or `<n> generated file(s) stale`
 

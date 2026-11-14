@@ -1,37 +1,41 @@
-"""The provider plugin cache is restored per stack from a committed lock file and saved by drift
-and apply cells.
+"""The provider plugin cache is restored per stack from a committed lock file and saved by drift and
+apply cells and by the merge deploy's `warm` legs.
 
-`actions/cell-init` holds the restore and the `tofu init` every plan, drift and apply cell runs,
-and each cell calls it as one step with `id: init`. It restores the entry keyed on the provider
+`actions/cell-init` holds the restore and the `tofu init` every plan, drift and apply cell runs, and
+each cell calls it as one step with `id: init`. It restores the entry keyed on the provider
 addresses and versions in the stack's own `.terraform.lock.hcl` (`scripts/provider-cache-key`),
-exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set.
+exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set. The
+entry name comes whole from that one script at every site, so a prefix change is one edit there.
 `drift-cell` and `apply-cell` save; plan cells never do. An apply cell already holds the
 environment's apply role, so its save reaches nothing that cell's applied HCL could not. The save
-runs only after a restore that missed and an `init` that left at least one file in the cache, and
-it reuses the restore step's key, computed before `init -reconfigure` can rewrite the committed
-lock: a key computed after it could name a lock no restore reads. The cells read both through
-`cell-init`'s outputs. In `apply-cell` both steps follow `Save state` with no status function in
-their `if:`, so a failed apply saves nothing, and carry `continue-on-error: true`, so a failed save
-cannot fail an applied cell. When `init` fails installing a provider after a restore that hit,
-`cell-init` names the restored entry in one `::error::`, so a corrupt entry can be deleted by key;
-any other init failure (a backend or credentials) gets no cache remedy.
+runs only after a restore that missed and an `init` that left at least one file in the cache, and it
+reuses the restore step's key, computed before `init -reconfigure` can rewrite the committed lock: a
+key computed after it could name a lock no restore reads. The cells read both through `cell-init`'s
+outputs. `warm` (`actions/warm`) runs the script itself and initializes through `cell-init` with
+`backend: "false"`, which skips the state steps. In `apply-cell` both steps follow `Save state` with
+no status function in their `if:`, so a failed apply saves nothing, and carry `continue-on-error:
+true`, so a failed save cannot fail an applied cell. When `init` fails installing a provider after a
+restore that hit, `cell-init` names the restored entry in one `::error::`, so a corrupt entry can be
+deleted by key; any other init failure (a backend or credentials) gets no cache remedy.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
-save added to another cell, a dropped guard or a widened key. Each value is compared whole
-against a hand-written constant.
+save added to another cell, a dropped guard or a widened key. Each value is compared whole against a
+hand-written constant.
 
 Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the
-`cache-hit` clause dropped from `apply-cell`'s check; `always() &&` prefixed to `apply-cell`'s
-check `if:`; drift's check `if:` reverted to `steps.provider-cache.outcome == 'success'`; the
-save's key rebuilt from the key step's digest; `continue-on-error` dropped from `apply-cell`'s
-save; `-type f` dropped from the check's `find`; `restore-keys` added to the restore; `STACK`
-dropped from the key step's `env:`; `actions/cache/save` of the cache directory added to another
-action; the combined `actions/cache` action used anywhere; `failure() &&`,
-`steps.init.outcome == 'failure'` or the `cache-hit` clause dropped from the annotation's `if:`;
-the `cache-primary-key` output deleted, `cache-hit` mapped to `steps.provider-cache-key`,
-`init-outcome` mapped to `steps.provider-cache.outcome`, or `restore-outcome` mapped to
-`steps.init.outcome`; one cell's call step `id` changed to `cell-init`, its `env:` passed
-`inputs.stack`, or its `env:` and `slug:` values swapped.
+`cache-hit` clause dropped from `apply-cell`'s check; `always() &&` prefixed to `apply-cell`'s check
+`if:`; drift's check `if:` reverted to `steps.provider-cache.outcome == 'success'`; the save's key
+rebuilt from the key step's digest; the restore's key rebuilt in YAML as `tofu-providers-${{
+runner.os }}-${{ runner.arch }}-<digest>`; `-backend=false` dropped from cell-init's no-backend
+init; the `if:` dropped from `Locate state`; `continue-on-error` dropped from `apply-cell`'s save;
+`-type f` dropped from the check's `find`; `restore-keys` added to the restore; `STACK` dropped from
+the key step's `env:`; `actions/cache/save` of the cache directory added to another action; the
+combined `actions/cache` action used anywhere; `failure() &&`, `steps.init.outcome == 'failure'` or
+the `cache-hit` clause dropped from the annotation's `if:`; the `cache-primary-key` output deleted,
+`cache-hit` mapped to `steps.provider-cache-key`, `init-outcome` mapped to
+`steps.provider-cache.outcome`, or `restore-outcome` mapped to `steps.init.outcome`; one cell's call
+step `id` changed to `cell-init`, its `env:` passed `inputs.stack`, or its `env:` and `slug:` values
+swapped.
 """
 
 import os
@@ -64,12 +68,11 @@ _KEY_STEP = {
 _RESTORE = {
     "name": "Restore provider cache",
     "id": "provider-cache",
-    "if": "${{ steps.provider-cache-key.outputs.digest != '' }}",
+    "if": "${{ steps.provider-cache-key.outputs.entry != '' }}",
     "uses": "actions/cache/restore",
     "with": {
         "path": "${{ env.TF_PLUGIN_CACHE_DIR }}",
-        "key": "tofu-providers-${{ runner.os }}-${{ runner.arch }}-"
-        "${{ steps.provider-cache-key.outputs.digest }}",
+        "key": "${{ steps.provider-cache-key.outputs.entry }}",
     },
 }
 
@@ -77,11 +80,17 @@ _INIT_STEP = {
     "name": "Initialize the stack",
     "id": "init",
     "shell": "bash",
-    "env": {"STACK": "${{ inputs.stack }}"},
+    "env": {"STACK": "${{ inputs.stack }}", "BACKEND": "${{ inputs.backend }}"},
     "run": "set -euo pipefail\n"
     "set +e\n"
-    "terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
+    'if [ "$BACKEND" = false ]; then\n'
+    "  terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
+    '"$STACK" -- tofu init -input=false -reconfigure -backend=false 2>&1 | tee '
+    '"$RUNNER_TEMP/init.txt"\n'
+    "else\n"
+    "  terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
     '"$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"\n'
+    "fi\n"
     "status=${PIPESTATUS[0]}\n"
     "set -e\n"
     '[ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" '
@@ -154,8 +163,16 @@ def test_the_restore_is_keyed_on_the_stacks_own_lock_file():
 
 
 def test_init_runs_unconditionally_under_the_id_the_outputs_read():
-    """Mutation: drop `-reconfigure` from the init."""
+    """Mutations: drop `-reconfigure` from the init; drop `-backend=false` from the no-backend
+    init."""
     assert step_by(_INIT_ACTION, name="Initialize the stack") == _INIT_STEP
+
+
+def test_a_no_backend_init_skips_locating_and_restoring_state():
+    """`Restore state` runs only on a located path, so gating `Locate state` gates both.
+    Mutation: drop the `if:` from `Locate state`."""
+    assert step_by(_INIT_ACTION, name="Locate state")["if"] == "${{ inputs.backend != 'false' }}"
+    assert action_yaml(_INIT_ACTION)["inputs"]["backend"]["default"] == "true"
 
 
 def test_cell_init_exposes_the_restore_key_and_inits_own_outcome():
@@ -213,9 +230,10 @@ def _engine_tree():
 
 
 def test_every_cache_save_is_pinned_by_file_and_path():
-    """Every `actions/cache/save` in the engine, by file and path: apply's and drift's provider
-    saves, setup's Terramate and OpenTofu release saves, and the state save. Mutation: a save
-    step with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`."""
+    """Every `actions/cache/save` in the engine, by file and path: apply's, drift's and warm's
+    provider saves, setup's Terramate and OpenTofu release saves, and the state save. Mutations: a
+    save step with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`; warm's
+    save `path:` spelled `${{ runner.temp }}/.tofu-plugin-cache`."""
     saves = sorted(
         (name, (step.get("with") or {}).get("path"))
         for name, doc in _engine_tree().items()
@@ -228,7 +246,52 @@ def test_every_cache_save_is_pinned_by_file_and_path():
         ("setup", "${{ runner.temp }}/terramate-release"),
         ("setup", "${{ runner.temp }}/tofu-release"),
         ("state", "${{ inputs.path }}"),
+        ("warm", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
     ]
+
+
+_ENTRY = "${{ steps.provider-cache-key.outputs.entry }}"
+_RESTORED = "${{ steps.init.outputs.cache-primary-key }}"
+
+
+def test_every_provider_cache_site_takes_its_name_from_the_one_builder():
+    """Every `actions/cache` step on the provider cache directory, by file, step and key, and
+    every step running `scripts/provider-cache-key`. Each key is that script's `entry` output, read
+    directly or through `cell-init`'s `cache-primary-key` (the restore's own key), and no key in
+    the engine spells the `tofu-providers-` prefix. Mutations: restore cell-init's key as
+    `tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest
+    }}`; key warm's save on `${{ steps.init.outputs.cache-primary-key }}`."""
+    sites = sorted(
+        (name, step.get("name"), (step.get("with") or {}).get("key"))
+        for name, doc in _engine_tree().items()
+        for step in _uses_steps(doc)
+        if step["uses"].split("@")[0].startswith("actions/cache/")
+        and (step.get("with") or {}).get("path") == "${{ env.TF_PLUGIN_CACHE_DIR }}"
+    )
+    assert sites == [
+        ("apply-cell", "Save provider cache", _RESTORED),
+        ("cell-init", "Restore provider cache", _ENTRY),
+        ("drift-cell", "Save provider cache", _RESTORED),
+        ("warm", "Look up the provider cache entry", _ENTRY),
+        ("warm", "Look up the saved entry", _ENTRY),
+        ("warm", "Look up the saved entry, try 2", _ENTRY),
+        ("warm", "Save provider cache", _ENTRY),
+    ]
+    builders = sorted(
+        path.parent.name
+        for path in ACTIONS.glob("*/action.yml")
+        for step in action_yaml(path)["runs"]["steps"]
+        if "scripts/provider-cache-key" in step.get("run", "")
+    )
+    assert builders == ["cell-init", "warm"]
+    assert step_by("warm", name="Provider cache key") == _KEY_STEP
+    spelled = [
+        name
+        for name, doc in _engine_tree().items()
+        for step in _uses_steps(doc)
+        if "tofu-providers" in str((step.get("with") or {}).get("key", ""))
+    ]
+    assert spelled == []
 
 
 def test_nothing_uses_the_combined_restore_and_save_action():
@@ -340,3 +403,34 @@ def test_the_annotation_names_the_key_only_for_a_provider_install_failure(
     r = run_step(tmp_path, body, env)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == expected
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("backend", "flags"),
+    [("false", "-input=false -reconfigure -backend=false"), ("true", "-input=false -reconfigure")],
+)
+def test_the_init_passes_the_backend_flag_and_keeps_tofus_exit_status(tmp_path, backend, flags):
+    """The init's exit is tofu's, not `tee`'s, on both branches. Mutations: swap the two init
+    lines; `exit "$status"` becomes `exit 0`."""
+    body = step_by(_INIT_ACTION, name="Initialize the stack")["run"]
+    stub = 'terramate() { echo "$*" ; return 3 ; }\n'
+    runner_temp = tmp_path / "rt"
+    runner_temp.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_python3_shim(bin_dir)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "STACK": "stacks/app",
+        "BACKEND": backend,
+        "RUNNER_TEMP": str(runner_temp),
+        "GITHUB_ACTION_PATH": str(ACTIONS / _INIT_ACTION),
+    }
+    r = run_step(tmp_path, stub + body, env)
+    assert r.returncode == 3, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert (runner_temp / "init.txt").read_text(encoding="utf-8") == (
+        "run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C stacks/app -- "
+        f"tofu init {flags}\n"
+    )

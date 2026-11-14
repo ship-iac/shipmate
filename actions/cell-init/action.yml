@@ -14,6 +14,10 @@ inputs:
     description: SHIPMATE_ENCRYPTION_KEY, forwarded to actions/state to decrypt the restored local state. Empty refuses the restore, which runs only for a local backend.
     required: false
     default: ""
+  backend:
+    description: '"false" initializes with `-backend=false` and skips locating and restoring state, for a job that only fills the provider cache. Anything else initializes the backend.'
+    required: false
+    default: "true"
 outputs:
   cache-hit:
     description: '"true" when the provider cache restore found an exact match. Empty when the stack has no lock file and the restore was skipped.'
@@ -45,21 +49,26 @@ runs:
 
     - name: Restore provider cache
       id: provider-cache
-      if: ${{ steps.provider-cache-key.outputs.digest != '' }}
+      if: ${{ steps.provider-cache-key.outputs.entry != '' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest }}
+        key: ${{ steps.provider-cache-key.outputs.entry }}
 
     - name: Initialize the stack
       id: init
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
+        BACKEND: ${{ inputs.backend }}
       run: |
         set -euo pipefail
         set +e
-        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"
+        if [ "$BACKEND" = false ]; then
+          terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure -backend=false 2>&1 | tee "$RUNNER_TEMP/init.txt"
+        else
+          terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"
+        fi
         status=${PIPESTATUS[0]}
         set -e
         [ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" < "$RUNNER_TEMP/init.txt" || true
@@ -74,6 +83,7 @@ runs:
 
     - name: Locate state
       id: locate-state
+      if: ${{ inputs.backend != 'false' }}
       shell: bash
       env:
         STACK: ${{ inputs.stack }}

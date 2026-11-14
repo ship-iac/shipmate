@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Write the provider cache key's digest for the stack at ``$STACK`` to ``$GITHUB_OUTPUT``.
+"""Write the provider cache entry name for the stack at ``$STACK`` to ``$GITHUB_OUTPUT``.
 
-Used by the ``Provider cache key`` step of cell-init, which plan-cell, drift-cell and apply-cell
-call. The digest is the SHA-256 of the lock file's ``<address> <version>`` pairs, one per line,
-sorted. Constraint strings and hash lines stay out: one address at one version is one package, so
-two stacks naming it share a cache entry, and every reader still verifies the package against its
-own lock.
+The one builder of the name every provider cache restore and save uses: cell-init's
+``Provider cache key`` step, which plan-cell, drift-cell and apply-cell call, and the merge
+deploy's ``warm`` legs. Writes ``entry=tofu-providers-<RUNNER_OS>-<RUNNER_ARCH>-<digest>``, the
+OS and architecture of the runner it runs on. The digest is the SHA-256 of the lock file's
+``<address> <version>`` pairs, one per line, sorted. Constraint strings and hash lines stay out:
+one address at one version is one package, so two stacks naming it share a cache entry, and
+every reader still verifies the package against its own lock.
 
-Writes ``digest=`` when ``.terraform.lock.hcl`` holds no ``provider`` block or cannot be read
+Writes ``entry=`` when ``.terraform.lock.hcl`` holds no ``provider`` block or cannot be read
 (missing, a directory, unreadable); the cell then restores and saves nothing. Never exits
 non-zero on file content: the step runs inside apply-cell's init step and must not halt an apply.
 """
@@ -29,13 +31,21 @@ def digest(text):
     return hashlib.sha256("\n".join(sorted(pairs)).encode()).hexdigest()
 
 
-def main():
-    lock = pathlib.Path(os.environ["STACK"]) / ".terraform.lock.hcl"
+def lock_digest(stack):
+    """`digest` of the stack directory `stack`'s `.terraform.lock.hcl`; "" when unreadable."""
     try:
-        text = lock.read_text(encoding="utf-8", errors="replace")
+        text = (pathlib.Path(stack) / ".terraform.lock.hcl").read_text(
+            encoding="utf-8", errors="replace"
+        )
     except OSError:
         text = ""
-    write_outputs(digest=digest(text))
+    return digest(text)
+
+
+def main():
+    found = lock_digest(os.environ["STACK"])
+    platform = f"{os.environ['RUNNER_OS']}-{os.environ['RUNNER_ARCH']}"
+    write_outputs(entry=f"tofu-providers-{platform}-{found}" if found else "")
 
 
 if __name__ == "__main__":

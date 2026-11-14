@@ -40,6 +40,11 @@ EXPECTED_STRATEGIES = {
         }
         for n in range(8)
     },
+    #: One leg per distinct provider lock, uncapped: it binds no environment.
+    ("deploy.yml", "warm"): {
+        "fail-fast": False,
+        "matrix": {"include": "${{ fromJSON(needs.detect.outputs.warm) }}"},
+    },
 }
 
 #: Each env-level call's whole `with:` in the two callers.

@@ -44,6 +44,12 @@ outputs:
   pr_number:
     description: Number of the pull request the commit merged; empty for a push that merged none.
     value: "${{ steps.detect.outputs.pr_number }}"
+  warm:
+    description: >-
+      JSON list of `{stack, environment, tf_vars}`, one managed stack of the merged tree per
+      distinct provider lock digest, changed or not; `[]` when none has a lock or the list could
+      not be built.
+    value: "${{ steps.detect.outputs.warm }}"
   refused_locked:
     description: >-
       `true` when detect refused because another pull request holds a lock on a pending cell;

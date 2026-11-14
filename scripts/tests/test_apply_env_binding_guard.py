@@ -65,8 +65,20 @@ def test_every_cell_job_binds_the_resolved_environment():
         )
 
 
+#: Matrix jobs that touch no cell's state and bind no environment, written by hand. `warm` runs
+#: `init -backend=false` on the merged commit to fill the provider cache: no backend, no
+#: credentials, and a protected apply environment would hold each leg for a reviewer.
+UNBOUND_MATRIX = {("deploy.yml", "warm")}
+
+
+def test_the_unbound_matrix_jobs_bind_no_environment():
+    """Mutation: add `environment: ${{ matrix.env_binding }}` to `deploy.yml`'s `warm`."""
+    for workflow, job_id in sorted(UNBOUND_MATRIX):
+        assert "environment" not in workflow_jobs(workflow)[job_id]
+
+
 def test_the_cell_jobs_are_exactly_the_hand_written_set():
-    """Derived from every workflow file against the hand-written set, so a twelfth cell job
+    """Derived from every workflow file against the hand-written sets, so a twelfth cell job
     reddens here rather than binding whatever it computes.
 
     Mutation: add a job with a `strategy.matrix` and no `environment:`.
@@ -77,7 +89,7 @@ def test_the_cell_jobs_are_exactly_the_hand_written_set():
         for job_id, job in workflow_jobs(path.name).items()
         if (job.get("strategy") or {}).get("matrix") is not None
     }
-    assert found == CELL_BOUND
+    assert found == CELL_BOUND | UNBOUND_MATRIX
 
 
 def test_snapshot_and_complete_bind_the_engine_environment():

@@ -55,6 +55,19 @@ _INIT_TEED = [
     "tee",
     "$RUNNER_TEMP/init.txt",
 ]
+#: cell-init's init for `warm`, which fills the provider cache and touches no backend or state.
+_INIT_TEED_NO_BACKEND = [
+    *_WRAPPER,
+    "tofu",
+    "init",
+    "-input=false",
+    "-reconfigure",
+    "-backend=false",
+    "2>&1",
+    "|",
+    "tee",
+    "$RUNNER_TEMP/init.txt",
+]
 #: Reads the init record inside the wrapper, so it sees the TF_DATA_DIR and TF_WORKSPACE tofu saw.
 _LOCATE = [*_WRAPPER, "python3", "$GITHUB_ACTION_PATH/../../scripts/state-path"]
 #: Teed to RUNNER_TEMP for `tofu-error`, which annotates a failed plan with its first error.
@@ -115,7 +128,7 @@ _SHOW_JSON = [*_WRAPPER, "tofu", "show", "-json", "stack.otplan"]
 
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
-    "cell-init": [_INIT_TEED, _LOCATE],
+    "cell-init": [_INIT_TEED_NO_BACKEND, _INIT_TEED, _LOCATE],
     "plan-cell": [
         _PLAN,
         [*_SHOW_TEXT, ">", "plan.txt", "2>", "show-text.err", "&"],

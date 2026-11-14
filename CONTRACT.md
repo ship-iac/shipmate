@@ -3026,12 +3026,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   restore only and pass `setup` `cache-save: "false"`. Entries come from the
   apply, deploy and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
-  downloads the release files in every plan job. A deploy run's `warm` job
-  runs only on a deploy with no cells, because a cell that reaches its `setup`
-  step saves the entry (one refused before it saves nothing),
-  and installs OpenTofu at the versions its `detect` resolved. It saves
-  the entry for the deploy runner's operating system and architecture, which
-  the key carries, so a plan cell on another runner type still misses. The
+  downloads the release files in every plan job. Each leg of a deploy run's
+  `warm` job (§Terramate safeguards, "Lock files and the provider cache")
+  installs OpenTofu at the versions its `detect` resolved, so a merge deploy
+  saves the entry for the deploy runner's operating system and architecture,
+  which the key carries, and a plan cell on another runner type still misses.
+  When no managed stack commits a lock naming a provider, `warm` does not run,
+  and a deploy with no cells saves no OpenTofu entry. The
   deploy run waits for `warm`, so it holds the deploy concurrency group for up
   to its 15-minute timeout; no job, the gate, the cells or the lock release
   read it, and its failure shows on that job only. An entry is keyed on its path, which
@@ -4529,6 +4530,22 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   environment's cells. Each saves after a restore that missed, and only when
   `init` left a file in the cache; `apply-cell` saves only after a successful
   apply, and a failed save does not fail the cell.
+- Every merge deploy's `warm` job saves the entry of each distinct lock on the
+  merged commit, so no cell needs to have run for an entry to exist. Its
+  `detect` picks one stack per distinct digest among every managed stack,
+  changed or not (a stack with an `env/*` tag and no `shipmate/local`), and
+  `warm` runs one leg per pick on the cells' runner (`runs_on`), with only
+  `contents: read`, on the merged commit's code. A leg computes the key with
+  the same script on its own runner and looks it up; on a miss it runs the
+  cells' `init` through `actions/cell-init` under that stack's environment
+  variables with `-backend=false`, so it reads no state and needs no
+  credentials, plans nothing, and saves only when `init` left a file in the
+  cache. An exact-key lookup after the save decides the outcome: a hit, also
+  when another job saved the entry first, is quiet; a miss, looked up twice,
+  warns `Provider cache entry not saved`, naming the key. A leg runs per
+  distinct lock on every merge deploy, including one with no cells; it is a
+  degrade job, and a failed leg or a failed list (`detect` warns and runs no
+  leg) never fails the deploy.
 - An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
   runner image whose `RUNNER_TEMP` differs from the saving runner's misses and
   downloads.
@@ -4673,7 +4690,8 @@ stack-wave by stack-wave exactly as described above (see Fan-out).
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
 `apply-env-level.yml` → gate completion + cell lock release; beside the
-env-levels, `warm` saves the OpenTofu cache entry on a deploy with no cells; the
+env-levels, `warm` saves the provider cache entry of each distinct lock and the
+OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
 apply path as `.github/workflows/apply.yml` (guard → `apply-run.yml`, one run
 per pull request at a time: review → detect → cell lock acquisition →

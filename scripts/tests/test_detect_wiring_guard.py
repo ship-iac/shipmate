@@ -128,10 +128,11 @@ _DEPLOY_DETECT_OUTPUTS = {
     "pr_number": "${{ steps.d.outputs.pr_number }}",
     "refused_locked": "${{ steps.d.outputs.refused_locked }}",
     "tools": "${{ steps.setup.outputs.tools }}",
+    "warm": "${{ steps.d.outputs.warm }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
-#: the `comment-ops` step and the plan `summary` step.
+#: the deploy `warm` step, the `comment-ops` step and the plan `summary` step.
 _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
     ("drift.yml", "detect", "$/actions/build-matrix"),
@@ -141,6 +142,7 @@ _VARS_HOLDERS = {
     ("plan.yml", "plan", "$/actions/plan-cell"),
     ("drift.yml", "drift", "$/actions/drift-cell"),
     ("unlock.yml", "unlock", "$/actions/unlock-cell"),
+    ("deploy.yml", "warm", "$/actions/warm"),
     *(("apply-env-level.yml", f"wave{n}", "$/actions/apply-cell") for n in range(8)),
     ("comment-ops.yml", "ops", "$/actions/comment-ops"),
     ("plan.yml", "summary", "$/actions/summary"),
