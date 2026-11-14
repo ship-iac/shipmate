@@ -155,12 +155,12 @@ dispatch the workflow chooses the inputs. The engine reads a title only for a
 `queue` lists a pull request's apply runs by it to cancel the stale ones and
 name the one a run waits behind (§Comment-ops, "One apply run per pull
 request"), and `scripts/dispatch-body` looks for a comment's run by it before
-it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name` that differs from the
-published one outside its quoted literals. A run of any other event is titled `shipmate · plan`,
-`shipmate · release`, `shipmate · comment` or `shipmate · deploy`. That file's
-own `name:` is plain `shipmate`. The published drift fence sets no `run-name`,
-so a sweep's run is titled by the file's own `name:` (`shipmate drift` in the
-published fence).
+it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name`
+that differs from the published one outside its quoted literals. A run of any
+other event is titled `shipmate · plan`, `shipmate · release`,
+`shipmate · comment` or `shipmate · deploy`. That file's own `name:` is plain
+`shipmate`. The published drift fence sets no `run-name`, so a sweep's run is
+titled by the file's own `name:` (`shipmate drift` in the published fence).
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
@@ -1414,8 +1414,8 @@ how far a command got:
   check and only for a `comment_id` that is a comment id; it is display only and
   gates nothing, since a second `unlock` finds no lock.
 
-A reaction comment-ops cannot post is ignored, and so is the `unlock` 🚀: a
-failed write warns.
+A 👀 that cannot be posted is ignored; an `unlock` 🚀 that cannot be posted
+warns.
 
 A dispatch from a comment carries the comment's id as `comment_id`. The
 `claim` job of `plan.yml`, and of `apply.yml` after `guard` succeeds, runs when

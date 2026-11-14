@@ -507,7 +507,8 @@ on:
   workflow_dispatch:
     inputs:
       # Only verb is required: one schema serves four verbs, and GitHub answers 422 to an
-      # empty required input. The engine refuses a plan with no number, an apply with no ref.
+      # empty required input. The engine refuses a plan with no number, an apply with no ref
+      # or no comment id.
       verb:
         description: What to run (plan, apply, unlock or auto)
         type: choice
