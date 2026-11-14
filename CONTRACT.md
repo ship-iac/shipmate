@@ -1380,7 +1380,8 @@ base branches. A holder is stacked on a pull request when it is open and a
 chain of pull requests leads from its base branch to that pull request's head
 branch, at any depth; an unknown holder never is, and neither is a closed or
 merged one. Nothing is stacked on a pull request whose head branch is the
-default branch. The walk starts at the holder's base branch and, breadth first,
+default branch: no holder is read there, so none can refuse. The walk starts
+at the holder's base branch and, breadth first,
 for each branch that is neither the head branch nor the default branch, lists
 the pull requests whose head is that branch
 (`pulls?state=all&head=<owner>:<branch>`, every page, each query value
@@ -1419,11 +1420,15 @@ request's head branch. Retargeting the holder alone is enough: it carries the
 commits of its chain. After them, in the same refusal, comes one sentence per
 holder whose walk needs more than 20 pages, lowest first: `could not tell
 whether #<h> is stacked on this pull request: its chain of base branches needs
-more than 20 pages of pull requests. Commenting again does not change that
-until the chain of pull requests between them is shortened.` Then one sentence
-per holder whose read fails or answers malformed, lowest first: `could not
-tell whether #<h> is stacked on this pull request: <cause>`. One refusal names
-every such holder, so nothing is released. With a stacked holder or a walk out
+more than 20 pages of pull requests. Commenting again refuses the same way:
+retarget #<h> to <default branch>, or wait until it merges or closes, which
+releases its locks.` Then one sentence per holder whose read fails or answers
+malformed, lowest first: `could not tell whether #<h> is stacked on this pull
+request: <cause>`. One refusal names every such holder, so nothing is released.
+The run log names each of them; the reply carries the refusal on one line of at
+most 4,000 characters, and when the sentences would pass that, it keeps the
+leading whole sentences that fit and ends `and <n> more holder(s); the run log
+names every one`. With a stacked holder or a walk out
 of pages, the reply is the `🔴 refused:` one above; with only failed reads, it
 is ``🔴 failed: could not evict the cell locks in `<env>`. This run's log has
 the error; comment again.`` An empty head branch or
@@ -2341,7 +2346,7 @@ not this deleter's lock, and done; still on the same commit refuses.
 | merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
-| `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head; refuses, deleting none and naming every such holder, when a holder is stacked on this pull request at any depth or its walk is cut short (§Comment-ops) |
+| `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head; refuses, deleting none and naming every such holder in the run log (the reply may summarise past 4,000 characters), when a holder is stacked on this pull request at any depth or its walk is cut short (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder names its chain and says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`; a holder whose walk is cut short gets a `could not tell` line instead and leaves the gate alone (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
@@ -2479,7 +2484,8 @@ re-run still releases.
 `deploy.yml`'s `detect`, `apply-run.yml`'s `lock`, each apply cell (a merge deploy's included),
 the `release` job, the deploy's release step (whose failure fails the deploy's
 `summary`) and `--evict`. A holder's pull request read or listing read that
-fails refuses `--evict` before any delete. A release and an eviction continue past a delete
+fails refuses `--evict` before any delete, unless the pull request's head branch
+is the default branch, where no holder is read. A release and an eviction continue past a delete
 that refuses, then fail naming each lock left held. A failed release stays owed until
 a re-run of that job succeeds. The plan comment's marker alone degrades: a lock
 read that fails there warns, and the comment marks no cell; a holder whose walk
@@ -3497,9 +3503,11 @@ holder`, joined by `, ` with ` and ` before the last; one holder reads ``…
 to release the locks #<a> holds; applying this pull request after that may
 overwrite what #<a> applied to <env>.`` A lock does not prove its holder
 applied anything (`lock` takes every env-level's cells up front), so the line
-says only "may". An environment where any such holder is stacked on this pull
-request (§Cell line), or its walk ran out of pages, gets no paragraph, because
-the eviction would refuse (§Comment-ops); a holder whose read failed keeps it. A holder the cell line does not mark
+says only "may". An environment where any such holder blocks the eviction gets
+no paragraph, because the eviction would refuse (§Comment-ops): `cell-lock`
+decides which holders block, one stacked on this pull request (§Cell line) or
+one whose walk ran out of pages, for `--evict` and the plan comment alike, and a
+holder whose read failed does not block, so it keeps the paragraph. A holder the cell line does not mark
 stacked, as with an empty default branch, leaves the paragraph in place. A
 summary re-run after a partial apply still counts an applied cell as changed,
 so the paragraph can name a lock whose cell already applied; the eviction then
@@ -3552,8 +3560,13 @@ and `lost` outputs, which the same rule reads.
   under the cap. Then one line per such holder whose walk was cut short, lowest
   first: `🔒 could not tell whether #<n> is stacked on this pull request
   (<reason>)`, the reason on one line, followed by `; re-plan or try the
-  eviction` when a read failed (the commands section still names the eviction)
-  and by nothing when the walk ran out of pages; it never changes the gate. When the cell lines leave them
+  eviction` when no environment where #<n> holds a changed cell has a holder
+  that blocks the eviction (the commands section above), else by `; the eviction is blocked
+  by #<a>, #<b>`, naming those blocking holders (#<n> itself when its walk ran
+  out of pages); it never changes the gate. This hint does not depend on the
+  commands section: with `command_hints` off, or the section left out over the
+  size budget, the line still reads the same, and `shipmate unlock <env>
+  --evict` still works where nothing blocks it. When the cell lines leave them
   no room under the 65,536-character cap, they are left out with a warning.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings in this run: see [the run](<run url>)`, under any verdict. `N`

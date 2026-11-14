@@ -1062,24 +1062,27 @@ branch has none.
   pull requests the chain names need no retarget of their own. Then re-plan
   this pull request and apply it. Commenting the command again refuses the same
   way while #<h> stays stacked. The plan comment shows this in advance: it
-  marks the cell `🔒 locked by #<h>, stacked on this pull request` (with the
-  chain) and offers no `shipmate unlock <env> --evict` for that environment.
+  marks the cell `🔒 locked by #<h>, stacked on this pull request`, its line
+  for #<h> under the verdict names the chain, and it offers no `shipmate unlock
+  <env> --evict` for that environment.
 
 ### `shipmate unlock <env> --evict` is refused: `its chain of base branches needs more than 20 pages of pull requests`
 
 The reply reads ``🔴 refused: no cell lock in `<env>` was released.``, with ``
 could not tell whether #<h> is stacked on this pull request: its chain of base
-branches needs more than 20 pages of pull requests. Commenting again does not
-change that until the chain of pull requests between them is shortened. ``
-fenced, one per such holder, after any stacked holder's sentence pair.
+branches needs more than 20 pages of pull requests. Commenting again refuses
+the same way: retarget #<h> to <default branch>, or wait until it merges or
+closes, which releases its locks. `` fenced, one per such holder, after any
+stacked holder's sentence pair.
 
 - Cause: Walking #<h>'s base branches toward this pull request's head branch
   needs more than 20 pages of pull request listings: a very long chain, or
   branches with many pull requests.
 - Effect: Nothing is released and no holder is told. The plan comment shows
   this in advance with `🔒 could not tell whether #<h> is stacked on this pull
-  request (<reason>)` and offers no `shipmate unlock <env> --evict` for that
-  environment. The same refusal also names any holder whose read failed.
+  request (<reason>); the eviction is blocked by #<h>` and offers no `shipmate
+  unlock <env> --evict` for that environment. The same refusal also names any
+  holder whose read failed.
 - Remedy: Retarget #<h> to the default branch, or wait until it merges or
   closes, which releases its locks. Then comment the command again. A branch on
   the path whose pull request history alone needs more than 20 pages is an

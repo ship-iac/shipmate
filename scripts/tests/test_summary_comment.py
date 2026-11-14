@@ -526,42 +526,43 @@ def test_the_evict_line_renders_the_environment_through_md_name_outside_the_code
     )
 
 
-def test_an_environment_with_a_stacked_holder_has_no_evict_line():
-    """Evict refuses there: a stacked holder alone, and beside a non-stacked one. `prod`'s
-    holder is not stacked and keeps its line. Mutations: ignore `stacked` in `commands` -- red;
-    `all` in place of `any` -- the mixed environment renders its line, red."""
+def test_an_environment_with_a_blocking_holder_has_no_evict_line():
+    """Evict refuses there: a blocking holder alone, and beside a non-blocking one. `prod`'s
+    holder is not blocking and keeps its line. Mutation: ignore `blocked` in `commands` --
+    red."""
     cells = [*_LOCK_CELLS, (_cell(environment="prod"), None)]
-    kw = {"stacked": {7: (5,)}, "default_branch": "main"}
+    kw = {"stacked": {7: (5,)}, "blocking": {7}, "default_branch": "main"}
     only = {"stacks/app / dev-eu": 7, "stacks/app / prod": 3}
     assert _section(cells, locks=only, **kw) == _with_evict(_EVICT_PROD_3)
     mixed = {"stacks/app / dev-eu": 7, "stacks/db / dev-eu": 12, "stacks/app / prod": 3}
     assert _section(cells, locks=mixed, **kw) == _with_evict(_EVICT_PROD_3)
 
 
-def test_an_environment_with_a_holder_whose_walk_ran_out_has_no_evict_line():
-    """Evict refuses a holder whose walk ran out of pages. Mutation: pass only `stacked`'s
-    holders to `commands` -- dev-eu renders its line, red."""
+def test_an_environment_with_a_blocking_unknown_holder_has_no_evict_line():
+    """`cell-lock` decides an unknown holder blocks (its walk ran out of pages). Mutation: pass
+    `stacked` in place of `blocking` to `blocked_envs` -- dev-eu renders its line, red."""
     cells = [*_LOCK_CELLS, (_cell(environment="prod"), None)]
     locks = {"stacks/app / dev-eu": 7, "stacks/app / prod": 3}
-    unknown = {7: ("out of pages", True)}
-    section = _section(cells, locks=locks, unknown=unknown, default_branch="main")
+    unknown = {7: "out of pages"}
+    section = _section(cells, locks=locks, unknown=unknown, blocking={7}, default_branch="main")
     assert section == _with_evict(_EVICT_PROD_3)
 
 
 def test_an_environment_with_a_holder_whose_read_failed_keeps_its_evict_line():
-    """A failed read may pass on the eviction's own retried read. Mutation: suppress every
-    unknown holder (drop the `exhausted` filter) -- dev-eu loses its line, red."""
+    """A failed read may pass on the eviction's own retried read, so `cell-lock` leaves it out
+    of `blocking`. Mutation: pass `blocking | unknown.keys()` to `blocked_envs` -- dev-eu
+    loses its line, red."""
     locks = {"stacks/app / dev-eu": 12}
-    unknown = {12: ("a read failed", False)}
+    unknown = {12: "a read failed"}
     section = _section(_LOCK_CELLS, locks=locks, unknown=unknown, default_branch="main")
     assert section == _with_evict(_EVICT_12)
 
 
-def test_a_stacked_holder_with_no_default_branch_keeps_the_evict_line():
-    """`_stacked_held` judges no holder stacked without a default branch. Mutation: pass
-    `stacked` to `commands` in place of `_stacked_held`'s holders -- the line goes, red."""
+def test_a_blocking_holder_with_no_default_branch_keeps_the_evict_line():
+    """`blocked_envs` judges no holder blocking without a default branch. Mutation: drop its
+    `default_branch` check -- the line goes, red."""
     locks = {"stacks/app / dev-eu": 12}
-    section = _section(_LOCK_CELLS, locks=locks, stacked={12: ()}, default_branch="")
+    section = _section(_LOCK_CELLS, locks=locks, stacked={12: ()}, blocking={12}, default_branch="")
     assert section == _with_evict(_EVICT_12)
 
 
@@ -1603,8 +1604,9 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # -- a truncated plan refuses the step. Mutation: bind `SHIPMATE_STACKED` to
     # `steps.marks.outputs.locks`, or drop `SHIPMATE_DEFAULT_BRANCH` -- no holder is ever
     # named stacked. Mutation: bind `SHIPMATE_STACKED_UNKNOWN` to `steps.marks.outputs.stacked`
-    # -- no holder is ever named unknown. Mutation: dropping `SHIPMATE_ON_DEMAND` -- no
-    # superseded autoplan line.
+    # -- no holder is ever named unknown. Mutation: bind `SHIPMATE_BLOCKING` to
+    # `steps.marks.outputs.stacked` -- no eviction is ever suppressed. Mutation: dropping
+    # `SHIPMATE_ON_DEMAND` -- no superseded autoplan line.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -1621,6 +1623,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_LOCKS": "${{ steps.marks.outputs.locks }}",
         "SHIPMATE_STACKED": "${{ steps.marks.outputs.stacked }}",
         "SHIPMATE_STACKED_UNKNOWN": "${{ steps.marks.outputs.stacked_unknown }}",
+        "SHIPMATE_BLOCKING": "${{ steps.marks.outputs.blocking }}",
         "SHIPMATE_DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_ON_DEMAND": "${{ inputs.on-demand }}",
@@ -2514,14 +2517,16 @@ def test_the_stacked_gate_text_names_the_lowest_stacked_holder_and_its_cells():
 def test_the_stacked_lines_name_each_stacked_holder_once_lowest_first():
     """Two changed cells held by #7, one by #5 (through #4, #2), an unchanged one by #3, one by
     #9 of unknown stacking after a failed read and an exhausted #7 (never both in one
-    `marks` output, but each line renders on its own), which follow the stacked lines.
-    Mutations: `sorted(set(held), reverse=True)` -- #7 first, red; `len(held)` in place of
+    `marks` output, but each line renders on its own), which follow the stacked lines. dev-eu
+    is blocked by #5 and #7, so neither unknown line offers the eviction. Mutations:
+    `sorted(set(held), reverse=True)` -- #7 first, red; `len(held)` in place of
     `held.count(h)` -- red."""
     cells = [_cell(stack=s) for s in ("a", "b", "c", "e")] + [_cell(stack="d", changed=False)]
     locks = {"a / dev-eu": 7, "b / dev-eu": 7, "c / dev-eu": 5, "d / dev-eu": 3, "e / dev-eu": 9}
     stacked = {3: (), 5: (4, 2), 7: ()}
-    unknown = {9: ("a read failed", False), 7: ("ignored: #7 is stacked", True)}
-    assert sc.stacked_lines(cells, locks, stacked, "main", unknown) == [
+    unknown = {9: "a read failed", 7: "ignored: #7 is stacked"}
+    blocked = {"dev-eu": [5, 7]}
+    assert sc.stacked_lines(cells, locks, stacked, "main", unknown, blocked) == [
         (
             "🔒 #5 is stacked on this pull request through #4, #2 and holds 1 of its changed "
             "cell(s); merging this pull request first makes its deploy refuse. Retarget #5 to "
@@ -2532,13 +2537,40 @@ def test_the_stacked_lines_name_each_stacked_holder_once_lowest_first():
             "this pull request first makes its deploy refuse. Retarget #7 to main and merge it "
             "first."
         ),
-        ("🔒 could not tell whether #7 is stacked on this pull request (ignored: #7 is stacked)"),
         (
-            "🔒 could not tell whether #9 is stacked on this pull request (a read failed); "
-            "re-plan or try the eviction"
+            "🔒 could not tell whether #7 is stacked on this pull request (ignored: #7 is "
+            "stacked); the eviction is blocked by #5, #7"
+        ),
+        (
+            "🔒 could not tell whether #9 is stacked on this pull request (a read failed); the "
+            "eviction is blocked by #5, #7"
         ),
     ]
-    assert sc.stacked_lines(cells, locks, stacked, "", unknown) == []
+    assert sc.stacked_lines(cells, locks, stacked, "", unknown, blocked) == []
+
+
+def test_an_unknown_holder_offers_the_eviction_only_where_nothing_blocks_it():
+    """#9 holds cells in dev-eu and prod, #12 only in prod; #7 blocks dev-eu. #9's line names
+    #7 although prod's eviction is offered, so no line invites a refused eviction.
+    Mutations: return the hint whenever any of the holder's environments is free -- #9's line
+    offers the eviction, red; take every blocked environment's holders in place of those of
+    `envs` -- #12 names #7, red."""
+    cells = [_cell(stack="a"), _cell(stack="b", environment="prod"), _cell(stack="c")]
+    cells.append(_cell(stack="d", environment="prod"))
+    locks = {"a / dev-eu": 9, "b / prod": 9, "c / dev-eu": 7, "d / prod": 12}
+    unknown = {9: "HTTP 502", 12: "HTTP 404"}
+    blocked = sc.blocked_envs(cells, locks, {7}, "main")
+    assert blocked == {"dev-eu": [7]}
+    assert sc.stacked_lines(cells, locks, {}, "main", unknown, blocked) == [
+        (
+            "🔒 could not tell whether #9 is stacked on this pull request (HTTP 502); the "
+            "eviction is blocked by #7"
+        ),
+        (
+            "🔒 could not tell whether #12 is stacked on this pull request (HTTP 404); re-plan "
+            "or try the eviction"
+        ),
+    ]
 
 
 def test_three_hundred_cells_locked_by_a_stacked_holder_stay_under_the_hard_cap():
@@ -2654,7 +2686,7 @@ def test_main_warns_and_renders_the_plain_marker_for_malformed_stacked(
 _UNKNOWN_LOCK_BODY = (
     HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n"
     "🔒 could not tell whether #12 is stacked on this pull request (gh: @<!-- -->x | HTTP "
-    "502)\n\n"
+    "502); the eviction is blocked by #12\n\n"
     "#### dev-eu: 1 cell, 1 changed\n\n"
     f"<details><summary>{_bare_app('https://gh/o/r/actions/runs/1')} 🔒 locked by "
     "#12</summary>\n\n```diff\n"
@@ -2667,13 +2699,14 @@ _UNKNOWN_LOCK_BODY = (
 
 
 def test_main_renders_the_unknown_line_and_offers_no_eviction(tmp_path, monkeypatch, capsys):
-    """A walk out of pages: the reason renders on one line, through `_md_name`; evict would
-    refuse, so its line goes; the gate text stays empty. Mutations: drop the
-    `SHIPMATE_STACKED_UNKNOWN` read from `main` -- no line and an evict line, red; drop
+    """A walk out of pages, which `cell-lock` names blocking: the reason renders on one line,
+    through `_md_name`; evict would refuse, so its line goes and the unknown line names the
+    blocker; the gate text stays empty. Mutations: drop the `SHIPMATE_STACKED_UNKNOWN` read
+    from `main` -- no line, red; drop the `SHIPMATE_BLOCKING` read -- an evict line, red; drop
     `one_line` -- the line splits, red; drop `_md_name` -- the `@` mentions, red."""
     monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
-    walk = {"reason": "gh: @x\nHTTP 502", "exhausted": True}
-    monkeypatch.setenv("SHIPMATE_STACKED_UNKNOWN", json.dumps({"12": walk}))
+    monkeypatch.setenv("SHIPMATE_STACKED_UNKNOWN", json.dumps({"12": "gh: @x\nHTTP 502"}))
+    monkeypatch.setenv("SHIPMATE_BLOCKING", "[12]")
     monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
     monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
     out = _run_main(tmp_path, monkeypatch, [_cell()])
@@ -2682,24 +2715,47 @@ def test_main_renders_the_unknown_line_and_offers_no_eviction(tmp_path, monkeypa
     assert capsys.readouterr().out == ""
 
 
-def test_main_offers_eviction_past_a_failed_read(tmp_path, monkeypatch, capsys):
-    """Mutation: read `exhausted` as true in `unknown_marks` -- no evict line and no remedy,
-    red."""
+_BLOCKING_UNREAD = (
+    "::warning::the blocking lock holders are not a JSON list of pull request numbers; the plan "
+    "comment offers every eviction\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "warning"),
+    [
+        ("[]", ""),
+        ("", ""),
+        ('{"12": 1}', _BLOCKING_UNREAD),
+        ('["12"]', _BLOCKING_UNREAD),
+        ("[0]", _BLOCKING_UNREAD),
+        ("[true]", _BLOCKING_UNREAD),
+        ("not json", _BLOCKING_UNREAD),
+    ],
+    ids=["none", "empty", "object", "string", "zero", "bool", "not-json"],
+)
+def test_main_offers_eviction_past_a_failed_read(tmp_path, monkeypatch, capsys, raw, warning):
+    """`cell-lock` leaves a failed read out of `blocking`; an unreadable `blocking` degrades to
+    none with one warning. Mutations: read every unknown holder as blocking in `main`
+    (`blocking | unknown.keys()`) -- no evict line and no remedy, red; drop `blocking_marks`'
+    element check -- string, zero and bool pass silently, red; `isinstance(h, int)` for
+    `type(h) is int` -- bool passes silently, red."""
     monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
-    walk = {"reason": "HTTP 502", "exhausted": False}
-    monkeypatch.setenv("SHIPMATE_STACKED_UNKNOWN", json.dumps({"12": walk}))
+    monkeypatch.setenv("SHIPMATE_STACKED_UNKNOWN", json.dumps({"12": "HTTP 502"}))
+    monkeypatch.setenv("SHIPMATE_BLOCKING", raw)
     monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
     monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
     _run_main(tmp_path, monkeypatch, [_cell()])
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _UNKNOWN_LOCK_BODY.replace(
-        "(gh: @<!-- -->x | HTTP 502)", "(HTTP 502); re-plan or try the eviction"
+        "(gh: @<!-- -->x | HTTP 502); the eviction is blocked by #12",
+        "(HTTP 502); re-plan or try the eviction",
     ).replace(
         "Comment `shipmate help`",
         "Comment `shipmate unlock dev-eu --evict` to release the locks #12 holds; applying "
         "this pull request after that may overwrite what #12 applied to dev-eu.\n\n"
         "Comment `shipmate help`",
     )
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == warning
 
 
 @pytest.mark.parametrize(
@@ -2707,16 +2763,13 @@ def test_main_offers_eviction_past_a_failed_read(tmp_path, monkeypatch, capsys):
     [
         '{"12": 5}',
         '["x"]',
-        '{"012": {"reason": "x", "exhausted": true}}',
-        '{"12": "x"}',
+        '{"012": "x"}',
         '{"12": {"reason": "x"}}',
-        '{"12": {"reason": "x", "exhausted": "yes"}}',
     ],
-    ids=["int", "list", "leading-zero", "string", "no-exhausted", "string-exhausted"],
+    ids=["int", "list", "leading-zero", "object"],
 )
 def test_main_warns_on_malformed_unknown_holders(tmp_path, monkeypatch, capsys, raw):
-    """Mutations: drop the value check in `unknown_marks` -- `{"12": 5}` raises, red; accept
-    any `exhausted` -- string-exhausted renders a line, red."""
+    """Mutation: drop the value check in `unknown_marks` -- `{"12": 5}` raises, red."""
     monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
     monkeypatch.setenv("SHIPMATE_STACKED_UNKNOWN", raw)
     monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")

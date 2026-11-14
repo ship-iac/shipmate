@@ -880,6 +880,7 @@ def test_marks_writes_each_foreign_holder_per_cell(monkeypatch, tmp_path):
         "locks": json.dumps({"stacks/auth / dev": 12}),
         "stacked": "{}",
         "stacked_unknown": "{}",
+        "blocking": "[]",
     }
     assert gh.drained()
 
@@ -952,7 +953,7 @@ def test_marks_writes_the_stacked_holders_and_the_unknown_ones(monkeypatch, tmp_
     """#12 is based on this head, #9 on `b`, whose #11 is based on this head, and #5's walk
     fails. The base `sha` holds the head branch's name too, so comparing it in place of `ref`
     is observable. Mutations: compare `base.sha` to the head ref -- #9 reads direct, red; write
-    the holders as a list -- red; drop `stacked_unknown` -- red."""
+    the holders as a list -- red; drop `stacked_unknown` or `blocking` -- red."""
     gh = _three_holders()
     gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("b")).on(pull_read(5), pull("c"))
     gh.on(list_read("b"), entries(entry(11, "b", "c"), entry(10, "b", "feat-a")))
@@ -962,9 +963,8 @@ def test_marks_writes_the_stacked_holders_and_the_unknown_ones(monkeypatch, tmp_
             {"stacks/auth / dev": 12, "stacks/dns / dev": 9, "stacks/app / dev": 5}
         ),
         "stacked": '{"9": [10], "12": []}',
-        "stacked_unknown": (
-            '{"5": {"reason": "command failed (1): gh api | HTTP 502", "exhausted": false}}'
-        ),
+        "stacked_unknown": '{"5": "command failed (1): gh api | HTTP 502"}',
+        "blocking": "[9, 12]",
     }
     assert gh.drained()
     assert capsys.readouterr().out == (
@@ -983,6 +983,7 @@ def test_marks_stops_at_the_default_branch_it_is_given(monkeypatch, tmp_path):
         "locks": json.dumps({"stacks/auth / dev": 12}),
         "stacked": "{}",
         "stacked_unknown": "{}",
+        "blocking": "[]",
     }
     assert gh.drained()
 
@@ -999,6 +1000,7 @@ def test_an_empty_branch_reads_no_holder(monkeypatch, tmp_path, head_ref, defaul
         "locks": json.dumps({"stacks/auth / dev": 12}),
         "stacked": "{}",
         "stacked_unknown": "{}",
+        "blocking": "[]",
     }
     assert gh.drained()
 
@@ -1014,6 +1016,7 @@ def test_marks_reads_each_holder_once(monkeypatch, tmp_path):
         "locks": json.dumps({"stacks/auth / dev": 12, "stacks/app / dev": 12}),
         "stacked": '{"12": []}',
         "stacked_unknown": "{}",
+        "blocking": "[12]",
     }
     assert gh.drained()
 
@@ -1031,6 +1034,64 @@ def test_marks_output_reads_back_through_stacked_marks(monkeypatch, tmp_path, ca
     assert sc.stacked_marks(out["stacked"]) == {12: (), 9: (11,), 5: (11, 4)}
     assert sc.unknown_marks(out["stacked_unknown"]) == {}
     assert capsys.readouterr().out == ""
+
+
+#: One holder per environment of `stacks/app`: #12 stacked on this head in `dev`, #9 in `stg`
+#: whose walk runs out of pages, #5 in `prd` whose read fails.
+_ONE_PER_ENV = (("dev", 12, NEW), ("stg", 9, OLD), ("prd", 5, OTHER))
+
+
+def _per_env_double(envs):
+    """A double reading the locks of `envs` (of `_ONE_PER_ENV`) and their holders."""
+    gh = Gh()
+    for env, holder, sha in _ONE_PER_ENV:
+        if env in envs:
+            gh.on(listing(f"shipmate/locks/{env}/"), refs((cl.ref_name(env, "stacks/app"), sha)))
+            gh.on(commit_read(sha), commit(sha, message(holder, env, "stacks/app")))
+    gh.on(pull_read(12), pull("feat-a")).on(pull_read(9), pull("x")).on(pull_read(5), FAIL)
+    return _pages(gh, "x", 20, entries())
+
+
+def test_the_comment_offers_no_eviction_that_evict_refuses(monkeypatch, tmp_path):
+    """`marks`' output read by `summary-comment` drops the evict line in exactly the
+    environments where `evict` refuses as `Blocked`: `dev` and `stg`, not `prd`, whose failed
+    read may pass on evict's own read. Mutations: write `blocking` from `stacked` alone --
+    the comment offers `stg`, red; in `evict`, block only on `stacked` -- `stg` is not
+    `Blocked`, red."""
+    sc = load_script("summary-comment")
+    envs = [env for env, _, _ in _ONE_PER_ENV]
+    out = _marks(
+        monkeypatch, tmp_path, _per_env_double(envs), [{**APP, "environment": e} for e in envs]
+    )
+    counts = {"add": 1, "change": 0, "destroy": 0, "import": 0, "forget": 0}
+    cells = [({**APP, "environment": e, "changed": True, **counts}, None) for e in envs]
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "1")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://gh")
+    body = sc.build_comment(
+        cells,
+        {},
+        "https://gh/run/1",
+        "0" * 40,
+        hints=True,
+        locks=sc.lock_marks(out["locks"]),
+        stacked=sc.stacked_marks(out["stacked"]),
+        default_branch="main",
+        unknown=sc.unknown_marks(out["stacked_unknown"]),
+        blocking=sc.blocking_marks(out["blocking"]),
+    )[0]
+    offered = {e for e in envs if f"`shipmate unlock {e} --evict`" in body}
+    blocked = set()
+    for env in envs:
+        gh = _per_env_double({env}).on(
+            CHECK_RUNS_READ, jsonl(_check(f"apply / stacks/app / {env}", "queued", None))
+        )
+        try:
+            _main(monkeypatch, tmp_path, "evict", gh, {**EVICT_ENV, "SHIPMATE_ENV": env})
+        except cl.Blocked:
+            blocked.add(env)
+        except SystemExit:
+            pass
+    assert (set(envs) - offered, blocked) == ({"dev", "stg"}, {"dev", "stg"})
 
 
 def test_stacked_reads_a_holder_once_on_a_transient_failure(sleeps, capsys):
@@ -1107,8 +1168,9 @@ def test_a_shared_head_is_stacked_when_any_of_its_pull_requests_leads_here():
 
 
 def test_a_base_cycle_ends_not_stacked():
-    """`x` and `y` are based on each other: each listed once. Mutation: drop the visited
-    check -- the walk circles through the memo until it runs out of pages, `Unknown`."""
+    """`x` and `y` are based on each other: each listed once. Mutation: drop `_walk`'s
+    breadth-first `seen` check (`if onto not in seen:`) -- the walk circles through the memo
+    until it runs out of pages, an exhausted `Unknown`, red."""
     gh = Gh().on(list_read("x"), entries(entry(20, "x", "y")))
     gh.on(list_read("y"), entries(entry(21, "y", "x")))
     assert (chain(gh, "x"), gh.drained()) == (None, True)
@@ -1284,13 +1346,29 @@ def test_the_named_chain_is_a_shortest_one():
     assert chain(gh, "c") == cl.OnChain((4, 3))
 
 
-@pytest.mark.parametrize("base", ["main", "b"])
-def test_nothing_is_stacked_on_the_default_branch(base):
-    """This pull request's head is the default branch: no holder is stacked on it, and no
-    listing is read (the empty double refuses one). Mutation: drop the `head_ref ==
-    default_branch` return -- `main` reads `OnChain(())`, `b` an unexpected call, red."""
-    holder = {"state": "open", "base": {"ref": base}}
-    assert cl._chain(REPO, holder, "main", "main", Gh(), {}, retry=False) is None
+def test_nothing_is_stacked_on_the_default_branch():
+    """This pull request's head is the default branch: no holder is stacked on it and none is
+    read, so #12's failing read stays queued. Mutation: drop `_read_stacked`'s `head_ref ==
+    default_branch` return -- #12 reads unknown, red."""
+    gh = Gh().on(pull_read(12), FAIL)
+    assert cl._read_stacked(REPO, {12}, "main", "main", gh, retry=False) == ({}, {})
+    assert gh.calls == {tuple(pull_read(12)): [FAIL]}
+
+
+def test_marks_on_the_default_branch_reads_no_holder(monkeypatch, tmp_path, capsys):
+    """A failing holder read would warn and name #12 unknown. Mutation: drop `_read_stacked`'s
+    `head_ref == default_branch` return -- red."""
+    gh = Gh().on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), FAIL)
+    assert _marks(monkeypatch, tmp_path, gh, [AUTH], head_ref="main") == {
+        "locks": json.dumps({"stacks/auth / dev": 12}),
+        "stacked": "{}",
+        "stacked_unknown": "{}",
+        "blocking": "[]",
+    }
+    assert gh.calls[tuple(pull_read(12))] == [FAIL]
+    assert capsys.readouterr().out == ""
 
 
 HEAD = "d" * 40
@@ -1619,8 +1697,8 @@ def test_evict_cli_refuses_stacked_holders_in_one_error_and_deletes_nothing(monk
 
 _EXHAUSTED_LINE = (
     "could not tell whether #9 is stacked on this pull request: its chain of base branches "
-    "needs more than 20 pages of pull requests. Commenting again does not change that until "
-    "the chain of pull requests between them is shortened."
+    "needs more than 20 pages of pull requests. Commenting again refuses the same way: retarget "
+    "#9 to main, or wait until it merges or closes, which releases its locks."
 )
 
 
@@ -1645,9 +1723,9 @@ def test_evict_cli_names_a_stacked_holders_chain(monkeypatch, tmp_path):
 
 def test_evict_cli_blocks_on_a_walk_out_of_pages_before_a_failed_read(monkeypatch, tmp_path):
     """#9's walk runs out of pages and #12's read fails: commenting again cannot pass #9, so
-    the refusal is `blocked`, and it names both, each with its reason. Mutations: refuse the
-    exhausted walk as a failed read (no `exhausted` branch) -- no `blocked`, red; check failed
-    reads before `blocked` -- red; leave the unread holders out of `Blocked` -- red."""
+    the refusal is `blocked`, and it names both, each with its reason. Mutations: drop the
+    exhausted half of `blocking` -- no `blocked`, red; check failed reads before `blocked` --
+    red; leave the unread holders out of `Blocked` -- red."""
     gh = _evict_three(*_THREE_PENDING)
     gh.on(pull_read(12), FAIL).on(pull_read(9), pull("x"))
     _pages(gh, "x", 20, entries())
@@ -1748,6 +1826,66 @@ def test_evict_cli_targets_only_pending_cells_failed_included(monkeypatch, tmp_p
         "refused": "[]",
     }
     assert gh.drained()
+
+
+def test_evict_refusal_past_the_cap_keeps_whole_sentences_and_logs_every_holder(
+    monkeypatch, tmp_path, capsys
+):
+    """Twenty stacked holders, #996..#1015, one cell each: sixteen sentences and the tail fit
+    `REASON_CAP`, seventeen and the tail pass it by two characters. Mutations: size the kept
+    sentences without the tail -- seventeen kept and the output cut mid-tail, red; drop the
+    second error -- the log loses #1012..#1015, red."""
+    holders = range(996, 1016)
+    stacks = [f"stacks/s{i:02}" for i in range(20)]
+    shas = [f"{i + 1:040d}" for i in range(20)]
+    gh = Gh().on(
+        CHECK_RUNS_READ,
+        jsonl(
+            *(_check(f"apply / {s} / dev", "queued", None, run_id=i) for i, s in enumerate(stacks))
+        ),
+    )
+    gh.on(
+        listing("shipmate/locks/dev/"),
+        refs(*((cl.ref_name("dev", s), sha) for s, sha in zip(stacks, shas, strict=True))),
+    )
+    for h, s, sha in zip(holders, stacks, shas, strict=True):
+        gh.on(commit_read(sha), commit(sha, message(h, "dev", s)))
+        gh.on(pull_read(h), pull("feat-a"))
+    lines = [_stacked_line(h, 1) for h in holders]
+    tail = "and 4 more holder(s); the run log names every one"
+    with pytest.raises(SystemExit):
+        _shipmate.run_annotated(
+            lambda: _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV), refusal_output=True
+        )
+    assert github_outputs(tmp_path / "out") == {
+        "blocked": "true",
+        "refusal": " ".join([*lines[:16], tail]),
+    }
+    assert capsys.readouterr().err == (
+        f"::error::{_shipmate.command_data(chr(10).join([*lines[:16], tail]))}\n"
+        f"::error::{_shipmate.command_data(chr(10).join(lines[16:]))}\n"
+    )
+    assert gh.drained()
+
+
+def test_evict_on_the_default_branch_reads_no_holder(monkeypatch, tmp_path):
+    """Nothing is stacked on the default branch, so #12's failing read is never sent and the
+    eviction proceeds. Mutation: drop `_read_stacked`'s `head_ref == default_branch` return --
+    a `could not tell` refusal, red."""
+    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / stacks/auth / dev", "queued", None)))
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), FAIL).on(REPO_ID_READ, REPO_ID)
+    gh.on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    env = {**EVICT_ENV, "SHIPMATE_HEAD_REF": "main"}
+    assert _main(monkeypatch, tmp_path, "evict", gh, env) == {
+        "evicted": json.dumps([{"stack": "stacks/auth", "environment": "dev", "holder": 12}]),
+        "refused": "[]",
+    }
+    assert gh.calls == {
+        **{k: [] for k in gh.calls if k != tuple(pull_read(12))},
+        tuple(pull_read(12)): [FAIL],
+    }
 
 
 def test_evict_releases_an_unknown_holder_and_a_closed_one_based_on_this_branch():

@@ -10,7 +10,8 @@ cell summary, empty unless detect succeeded and `planned-cell-names` is a valid 
 `stacked_hold` is the pending gate text (`stacked_hold`) for a holder `SHIPMATE_STACKED` names
 and `SHIPMATE_DEFAULT_BRANCH` to retarget it to; gate-state writes it, and empty keeps the
 generic text. A holder `SHIPMATE_STACKED_UNKNOWN` names gets a line saying the comment cannot
-tell whether it is stacked, and never touches the gate.
+tell whether it is stacked, and never touches the gate. `SHIPMATE_BLOCKING` names the holders
+`cell-lock` decides an eviction refuses on; this module never re-derives that set.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
 reads no cell summary, only the `cell-error.json` files under $CELL_ERRORS (default
@@ -44,8 +45,8 @@ SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments
 each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
 `shipmate apply` once (`to apply the other environments` when a targeted line renders), then
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked,
-unless one of that environment's holders is stacked on this pull request, or its walk ran
-out of pages, where evict refuses, and `shipmate help`. An empty or unreadable
+unless one of that environment's holders is in `SHIPMATE_BLOCKING`, where evict refuses, and
+`shipmate help`. An empty or unreadable
 `targeted-envs` names no targeted environment, so the section degrades to the bare
 `shipmate apply` even when every changed environment is targeted; the unreadable one warns.
 
@@ -372,12 +373,35 @@ def _stacked_held(cells, locks, stacked, default_branch):
     return [locks[k] for c in cells if (k := _lock_key(c, locks)) and locks[k] in stacked]
 
 
-def stacked_lines(cells, locks, stacked, default_branch, unknown=_NONE):
+def blocked_envs(cells, locks, blocking, default_branch):
+    """`{env: sorted holders}` of the `blocking` (`blocking_marks`) holders of each
+    environment's changed locked cells of `cells`, where `shipmate unlock <env> --evict`
+    refuses; empty when `default_branch` is empty."""
+    out = {}
+    for c in cells:
+        key = _lock_key(c, locks)
+        if key and default_branch and locks[key] in blocking:
+            out.setdefault(c["environment"], set()).add(locks[key])
+    return {e: sorted(hs) for e, hs in out.items()}
+
+
+def _unknown_hint(cells, locks, holder, blocked):
+    """`; re-plan or try the eviction` when no environment where `holder` holds a changed cell
+    is in `blocked` (`blocked_envs`), else `; the eviction is blocked by #<a>, #<b>` naming
+    their blocking holders."""
+    envs = {c["environment"] for c in cells if (k := _lock_key(c, locks)) and locks[k] == holder}
+    by = sorted({h for e in envs for h in blocked.get(e, ())})
+    if not by:
+        return "; re-plan or try the eviction"
+    return "; the eviction is blocked by " + ", ".join(f"#{h}" for h in by)
+
+
+def stacked_lines(cells, locks, stacked, default_branch, unknown=_NONE, blocked=_NONE):
     """One line per holder in `stacked` of a changed cell of `cells`, lowest first, naming its
     chain, counting its changed locked cells and saying to retarget it to `default_branch`;
     then one per holder in `unknown` (`unknown_marks`) of such a cell, lowest first, naming the
-    reason it cannot tell, and for a walk not out of pages (eviction is still offered) what to
-    try. None when `default_branch` is empty."""
+    reason it cannot tell and `_unknown_hint` over `blocked`. None when `default_branch` is
+    empty."""
     held = _stacked_held(cells, locks, stacked, default_branch)
     unknown_held = _stacked_held(cells, locks, unknown, default_branch)
     return [
@@ -387,8 +411,7 @@ def stacked_lines(cells, locks, stacked, default_branch, unknown=_NONE):
         for h in sorted(set(held))
     ] + [
         f"🔒 could not tell whether #{h} is stacked on this pull request "
-        f"({_md_name(one_line(unknown[h][0]))})"
-        + ("" if unknown[h][1] else "; re-plan or try the eviction")
+        f"({_md_name(one_line(unknown[h]))})" + _unknown_hint(cells, locks, h, blocked)
         for h in sorted(set(unknown_held))
     ]
 
@@ -414,14 +437,14 @@ def _evict_line(env, holders):
     return f"Comment `shipmate unlock {env} --evict` to {release}.\n\n"
 
 
-def commands(locked, targeted=(), changed=(), stacked=()):
+def commands(locked, targeted=(), changed=(), blocked=()):
     """The folded command section: per environment of `changed` (the changed cells'
     environments in apply order), its `shipmate apply <env>` when it is in `targeted`, and at the
     first one that is not, `shipmate apply` once, worded `to apply the other environments` when
     a targeted line renders, else `to apply this plan`; with `changed` empty, only the bare
     line. Then per environment of `locked` (environment to the holders of its changed locked
-    cells), sorted, its `_evict_line`, unless a holder is in `stacked` (the `_stacked_held`
-    holders, stacked or unknown), where evict refuses; then `shipmate help`. No line starts
+    cells), sorted, its `_evict_line`, unless it is in `blocked` (`blocked_envs`: a holder
+    there is one `cell-lock` decides evict refuses on); then `shipmate help`. No line starts
     with `shipmate`, so the section is not itself a command."""
     what = "the other environments" if set(changed) & set(targeted) else "this plan"
     bare = f"Comment `shipmate apply` to apply {what}.\n\n"
@@ -431,9 +454,7 @@ def commands(locked, targeted=(), changed=(), stacked=()):
             lines.append(f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n")
         elif bare not in lines:
             lines.append(bare)
-    evict = "".join(
-        _evict_line(e, hs) for e, hs in sorted(locked.items()) if not any(h in stacked for h in hs)
-    )
+    evict = "".join(_evict_line(e, hs) for e, hs in sorted(locked.items()) if e not in blocked)
     return (
         "<details><summary>shipmate commands</summary>\n\n"
         f"{''.join(lines)}{evict}"
@@ -727,6 +748,7 @@ def build_comment(
     targeted=(),
     superseded=(),
     unknown=_NONE,
+    blocking=(),
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
     `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block,
@@ -739,7 +761,8 @@ def build_comment(
     otherwise, after every cell is sized, so it never shrinks one. `locks` (`lock_marks`) marks the
     changed cells another pull request holds, and `commands` names their environments, and the
     changed environments of `targeted` in `order`; `stacked` and `default_branch` go to `_plan_line`
-    and `stacked_lines`, and `unknown` to `stacked_lines`. Every cell is guaranteed its bare
+    and `stacked_lines`, `unknown` to `stacked_lines`, and `blocking` to `blocked_envs`, which
+    both `stacked_lines` and `commands` read. Every cell is guaranteed its bare
     line: the space all headings and bare lines need is reserved up front, so an early giant
     plan cannot starve a later cell. The free
     room left after the head and every bare line is shared equally among the changed environments'
@@ -751,6 +774,7 @@ def build_comment(
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     locks = locks or {}
+    blocked = blocked_envs(meta, locks, blocking, default_branch)
     entries = _entries(cells, order, checks, run_url, locks, stacked, default_branch)
     bares = [e[0] for e in entries]
     named = {}
@@ -758,7 +782,7 @@ def build_comment(
         ("\n".join(superseded), "superseded autoplan checks"),
         (auto, "auto apply not started"),
         (
-            "\n".join(stacked_lines(meta, locks, stacked, default_branch, unknown)),
+            "\n".join(stacked_lines(meta, locks, stacked, default_branch, unknown, blocked)),
             "stacked lock holders",
         ),
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
@@ -786,10 +810,7 @@ def build_comment(
     for c in meta:
         if key := _lock_key(c, locks):
             locked.setdefault(c["environment"], []).append(locks[key])
-    # Evict refuses a stacked holder and one whose walk ran out of pages; a failed read may pass.
-    blocking = stacked.keys() | {h for h, (_, exhausted) in unknown.items() if exhausted}
-    held = _stacked_held(meta, locks, blocking, default_branch)
-    section = commands(locked, targeted, changed, held)
+    section = commands(locked, targeted, changed, blocked)
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
@@ -1010,19 +1031,26 @@ def stacked_marks(raw):
 
 
 def unknown_marks(raw):
-    """`cell-lock marks`' `stacked_unknown` output `raw`, `{"<holder>": {"reason": "<reason>",
-    "exhausted": <bool>}}`, as `{holder: (reason, exhausted)}` (`_holder_map`)."""
-    walks = _holder_map(
-        raw,
-        lambda v: (
-            isinstance(v, dict)
-            and v.keys() == {"reason", "exhausted"}
-            and isinstance(v["reason"], str)
-            and isinstance(v["exhausted"], bool)
-        ),
-        "lock holders of unknown stacking",
+    """`cell-lock marks`' `stacked_unknown` output `raw`, `{"<holder>": "<reason>"}`, as
+    `{holder: reason}` (`_holder_map`)."""
+    return _holder_map(raw, lambda v: isinstance(v, str), "lock holders of unknown stacking")
+
+
+def blocking_marks(raw):
+    """`cell-lock marks`' `blocking` output `raw`, a JSON list of the holders an eviction
+    refuses, as a set: empty when `raw` is empty, and empty with one warning when it is not a
+    list of pull request numbers, so the commands section offers every eviction and the
+    eviction itself still refuses."""
+    if not raw:
+        return set()
+    value = json_or_none(raw)
+    if isinstance(value, list) and all(type(h) is int and h > 0 for h in value):
+        return set(value)
+    print(
+        "::warning::the blocking lock holders are not a JSON list of pull request numbers; the "
+        "plan comment offers every eviction"
     )
-    return {h: (w["reason"], w["exhausted"]) for h, w in walks.items()}
+    return set()
 
 
 CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
@@ -1137,6 +1165,7 @@ def main():
     locks = lock_marks(os.environ.get("SHIPMATE_LOCKS", ""))
     stacked = stacked_marks(os.environ.get("SHIPMATE_STACKED", ""))
     unknown = unknown_marks(os.environ.get("SHIPMATE_STACKED_UNKNOWN", ""))
+    blocking = blocking_marks(os.environ.get("SHIPMATE_BLOCKING", ""))
     default_branch = os.environ.get("SHIPMATE_DEFAULT_BRANCH", "")
     body, named, lost_named = build_comment(
         cells,
@@ -1164,6 +1193,7 @@ def main():
         targeted=targeted,
         superseded=_superseded(rows),
         unknown=unknown,
+        blocking=blocking,
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
