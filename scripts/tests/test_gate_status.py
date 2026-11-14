@@ -1180,17 +1180,27 @@ _SECONDARY = (
 )
 
 
+_DEPLOYED = [
+    "gh",
+    *_status_argv("success", "all env-levels applied (deploy env-level applies completed)"),
+]
+_HOLD = ["gh", *_status_argv("failure", "the reason")]
+
+
 @pytest.mark.parametrize(
-    "command",
+    ("command", "expected"),
     [
-        ["post", SHA, "pending", "the reason"],
-        ["hold", SHA, "the reason"],
-        ["deploy", SHA, "success", "success"],
+        (["post", SHA, "pending", "the reason"], [_POST, _USER, _READ, _POST]),
+        (["hold", SHA, "the reason"], [_HOLD, _HOLD]),
+        (["deploy", SHA, "success", "success"], [_DEPLOYED, _DEPLOYED]),
     ],
     ids=["post", "hold", "deploy"],
 )
-def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, command):
-    """Mutation: `post` writes through `retried` alone (drop `rate_limited`) -> the 403 raises."""
+def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, command, expected):
+    """The first write hits the secondary limit; `post` re-runs `refuse-newer` before its retry,
+    `hold` and `deploy` re-check nothing. Mutations, each run: `post` writes through `retried`
+    alone (drop `rate_limited`) -> the 403 raises; drop `before_retry=` from `post`'s
+    `rate_limited` -> the `post` case loses its reads."""
     calls = []
 
     def run(args):
@@ -1199,14 +1209,13 @@ def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, 
             return GATE_USER
         if args == _READ:
             return ""
-        if sum(a[:2] == ["gh", "api"] and "/statuses/" in a[2] for a in calls) == 1:
+        if len(calls) == 1:
             raise SystemExit(f"::error::{_SECONDARY}")
         return "{}"
 
     monkeypatch.setattr(gs, "_run", run)
     gs.main(command)
-    writes = [a for a in calls if a[:2] == ["gh", "api"] and "/statuses/" in a[2]]
-    assert (len(writes), writes[0] == writes[1], in_process) == (2, True, [60])
+    assert (calls, in_process) == (expected, [60])
 
 
 def test_refresh_stops_when_a_hold_lands_while_it_waits_out_a_rate_limit(
