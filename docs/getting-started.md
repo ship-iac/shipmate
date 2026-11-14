@@ -796,8 +796,9 @@ request until it merges or closes; another pull request's apply leaves that
 cell pending and names the holder, and `shipmate unlock <env> --evict` releases
 the lock on a cell the commenting pull request still applies. Any holder stacked
 on the commenting pull request refuses the whole command and releases nothing; a
-holder whose pull request cannot be read refuses too, and the reply says to
-comment again ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
+holder whose pull request cannot be read, or a holder's run that may still
+apply, refuses too, and the reply says to comment again
+([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
 
 **The two are coupled.** If you require `shipmate / gate` as a
 branch-protection check — tier 3 — then applies have to happen pre-merge, because

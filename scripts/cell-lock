@@ -28,8 +28,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   included); writes outputs `evicted` and `refused` (the locks whose delete refused, each also
   an `::error::`) before refusing. Refuses before any delete, writing neither, when a holder is
   open with `SHIPMATE_HEAD_REF` as its base branch (stacked; it also writes `blocked=true`) or
-  cannot be read, and before any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is
-  empty.
+  cannot be read; then, when a known holder remains, while a run of `shipmate.yml` may still
+  apply that holder's cells, or the runs cannot all be read (`_refuse_live_runs`). Refuses
+  before any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is empty.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds, and `stacked`, the
   sorted JSON list of those holders that are open with `SHIPMATE_HEAD_REF` as their base branch
@@ -59,16 +60,21 @@ import sys
 from collections.abc import Iterable
 
 from _shipmate import (
+    READ_ERRORS,
+    SHIPMATE_WORKFLOW,
     _load,
     _run,
     cell_names,
     check_runs,
     command_data,
+    current_run_url,
     deploy_lock_remedy,
     deploy_mode,
     gh_json,
+    holder_dispatch_runs,
     is_head_sha,
     is_run_id,
+    live_push_runs,
     lock_wait_remedy,
     lock_who,
     retried,
@@ -442,7 +448,8 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     Before any delete, each known holder is read once (`_is_stacked` against `head_ref`, the
     evicting pull request's head branch). Any holder stacked on it raises `Stacked`, one line
     per stacked holder naming `default_branch`; otherwise a holder whose read fails or answers
-    malformed refuses. Either way nothing is deleted."""
+    malformed refuses. Then, while a known holder remains, `_refuse_live_runs` reads the runs.
+    Either way nothing is deleted."""
     wanted = {ref_name(env, s) for s in stacks}
     locks = read_locks(repo, [env], run=run).values()
     locks = [lock for lock in locks if lock.ref in wanted and lock.pr != pr]
@@ -467,7 +474,55 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
                 for holder, why in unread
             )
         )
+    if held:
+        _refuse_live_runs(repo, env, set(held), run)
     return _delete_each(repo, locks, run)
+
+
+def _refuse_live_runs(repo, env, holders, run):
+    """Refuse while a run of `SHIPMATE_WORKFLOW` may still apply a cell of one of `holders`: a live
+    `apply` or `auto` run titled for one, a live dispatch run whose title does not parse, or a
+    live deploy run of a merged holder's merge commit (`_deploy_runs`, after the dispatch
+    listings). A failed or incomplete read refuses too; every line found is kept, so the
+    refusal names them all. A point-in-time check: a run started after its read is not seen."""
+    found, complete = holder_dispatch_runs(repo, holders, run)
+    lines = [] if complete else [f"could not list the live runs of {SHIPMATE_WORKFLOW}"]
+    lines += [
+        f"#{r['holder']} has a live `{r['verb']}` run: {current_run_url(str(r['id']))}"
+        if r["holder"] is not None
+        else "a live run whose title is not a shipmate title may be a holder's: "
+        + current_run_url(str(r["id"]))
+        for r in found
+    ]
+    for holder in sorted(holders):
+        lines += _deploy_runs(repo, holder, run)
+    if lines:
+        raise SystemExit(
+            f"::error::no cell lock in {env} was released: a holder's run may still apply, or "
+            "the check could not tell. Wait for each run below to end, then comment again.\n"
+            + "\n".join(lines)
+        )
+
+
+def _deploy_runs(repo, holder, run):
+    """The refusal lines for `holder`'s merge deploy, its pull request read fresh: one per live
+    deploy run of its merge commit, none while it is unmerged, and one when the read fails, the
+    merge commit is not a sha, or the listing is incomplete."""
+    try:
+        pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
+        merged, sha = pull["merged_at"] is not None, pull["merge_commit_sha"]
+    except READ_ERRORS as exc:
+        return [f"could not tell whether #{holder} has merged: {_why(exc)}"]
+    if not merged:
+        return []
+    if not is_head_sha(sha):
+        return [
+            f"#{holder} merged, but its merge commit reads {sha!r}, so its deploy run is unknown"
+        ]
+    ids, complete = live_push_runs(repo, sha, run)
+    if not complete:
+        return [f"could not list the deploy runs of #{holder}'s merge commit {sha}"]
+    return [f"#{holder}'s deploy run is live: {current_run_url(str(i))}" for i in ids]
 
 
 def evict_stacks(names, env):
@@ -610,7 +665,7 @@ def _read_stacked(repo, holders, head_ref, run, *, retry=True):
             pull = gh_json(f"repos/{repo}/pulls/{holder}", run, retry=retry)
             if _is_stacked(pull, head_ref):
                 stacked.append(holder)
-        except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
+        except READ_ERRORS as exc:
             unread.append((holder, _why(exc)))
     return stacked, unread
 

@@ -984,8 +984,8 @@ _REPLIES = {
         "SHIPMATE_REPLY_OUTCOME": "failed",
         "SHIPMATE_REPLY_TEXT": (
             "could not mint a GitHub App token. Is the shipmate App installed on this "
-            "repository, with contents:write, checks:read and pull-requests:write accepted? Ask "
-            "an org admin to install it or accept the permissions, then retry."
+            "repository, with contents:write, checks:read, pull-requests:write and actions:read "
+            "accepted? Ask an org admin to install it or accept the permissions, then retry."
         ),
     },
 }
@@ -1615,12 +1615,14 @@ def test_every_evict_route_step_is_behind_the_permission_decision():
 
 
 def test_the_evict_mint_requests_exactly_its_permissions():
-    """Mutation: request `permission-issues: write` in place of `permission-pull-requests`."""
+    """`actions: read` lists the holders' live runs. Mutations: request `permission-issues:
+    write` in place of `permission-pull-requests`; drop `permission-actions: read`."""
     with_ = step_by("comment-ops", id="evicttoken")["with"]
     assert {k: v for k, v in with_.items() if k.startswith("permission-")} == {
         "permission-contents": "write",
         "permission-checks": "read",
         "permission-pull-requests": "write",
+        "permission-actions": "read",
     }
 
 
