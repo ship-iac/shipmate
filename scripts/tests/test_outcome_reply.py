@@ -321,16 +321,23 @@ def test_the_plan_outcome_job_is_wired_exactly():
     `always()`; drop the fork clause's `head-repo == github.repository`; drop `summary-result`
     from `with:`; pass `run-cancelled: 'true'`; add `plan` to `needs`; drop the claim clause
     (a `taken` run of a comment would answer for the run that owns it); drop `claim` from
-    `needs`."""
+    `needs`.
+
+    A failed `facts` still replies when the run owns its comment, on the dispatch's
+    `pr_number`. Mutations: drop the `needs.facts.result == 'failure'` branch (no reply when
+    `facts` fails); `needs.claim.outputs.state == 'owned'` -> `needs.claim.result == 'skipped'`
+    in it (the comment-less replan's unvalidated number would be replied on); drop the
+    `|| github.event.inputs.pr_number` fallback."""
     assert workflow_jobs("plan.yml")["outcome"] == {
         "needs": ["claim", "facts", "summary"],
         "if": (
-            "${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && "
+            "${{ !cancelled() && ((needs.facts.outputs.on-demand == 'true' && "
             "needs.facts.outputs.head-repo != '' && "
             "needs.facts.outputs.head-repo == github.repository && "
             "needs.summary.outputs.superseded != 'true' && "
             "needs.summary.outputs.upsert != 'created' && "
-            "needs.summary.outputs.upsert != 'moved' && "
+            "needs.summary.outputs.upsert != 'moved') || "
+            "(needs.facts.result == 'failure' && needs.claim.outputs.state == 'owned')) && "
             "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
         ),
         "runs-on": "ubuntu-slim",
@@ -341,7 +348,9 @@ def test_the_plan_outcome_job_is_wired_exactly():
                 "uses": "$/actions/outcome-reply",
                 "with": {
                     "verb": "plan",
-                    "pr-number": "${{ needs.facts.outputs.pr-number }}",
+                    "pr-number": (
+                        "${{ needs.facts.outputs.pr-number || github.event.inputs.pr_number }}"
+                    ),
                     "summary-result": "${{ needs.summary.result }}",
                     "run-cancelled": "false",
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",

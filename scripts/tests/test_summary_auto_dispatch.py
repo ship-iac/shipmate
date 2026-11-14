@@ -212,7 +212,7 @@ _GH = """\
 printf '%s\\n' "$@" -- >> "$CALLS"
 if [[ "$*" == *dispatches* ]]; then
   cat > "$DISPATCH_BODY"
-  [ "$FAKE_DISPATCH_RC" = 0 ] || echo "gh: Validation Failed (HTTP 422)" >&2
+  [ "$FAKE_DISPATCH_RC" = 0 ] || echo "${FAKE_DISPATCH_ERR:-gh: Validation Failed (HTTP 422)}" >&2
   exit "$FAKE_DISPATCH_RC"
 elif [[ "$*" == *comments* ]]; then
   cat > "$REPLY_BODY"
@@ -231,10 +231,12 @@ def _run(
     token="x",  # noqa: S107 - a stub token, never sent
     event=None,
     auto='["dev"]',
+    dispatch_err="",
 ):
     """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
     is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default; `auto` is
-    build-matrix's `auto_envs` output; `post_rc` makes `python3` exit with it for
+    build-matrix's `auto_envs` output; `dispatch_err`, when set, is gh's stderr for a failed
+    dispatch; `post_rc` makes `python3` exit with it for
     `dispatch-body` in place of running it."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -261,6 +263,7 @@ def _run(
         "DISPATCH_BODY": str(tmp_path / "dispatch.json"),
         "REPLY_BODY": str(tmp_path / "reply.md"),
         "FAKE_DISPATCH_RC": str(dispatch_rc),
+        "FAKE_DISPATCH_ERR": dispatch_err,
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "GITHUB_OUTPUT": str(out),
         "GITHUB_REPOSITORY": "acme/demo",
@@ -409,6 +412,26 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
     assert "gh: Validation Failed (HTTP 422)" in proc.stderr.splitlines()
     assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
     assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
+
+
+@bash_only
+def test_a_dispatch_to_a_fence_without_its_inputs_logs_the_repin_remedy(tmp_path):
+    """The auto dispatch prints `dispatch-body`'s skew remedy, which names `repin
+    --write-fence`; the step still degrades to a warning and a reply.
+
+    Mutation: send dispatch-body's stderr to /dev/null -> the remedy leaves the log."""
+    proc, _, _ = _run(
+        tmp_path,
+        DISPATCH,
+        dispatch_rc=1,
+        dispatch_err='gh: Unexpected inputs provided: ["comment_id"] (HTTP 422)',
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (
+        "::error::This repository's .github/workflows/shipmate.yml does not declare every input "
+        "this engine's dispatch sends, so it is older than the engine pin. Write the published "
+        "file over it with `python <engine>/scripts/repin <consumer> <tag> --write-fence`."
+    ) in proc.stderr.splitlines(), proc.stderr
 
 
 @bash_only

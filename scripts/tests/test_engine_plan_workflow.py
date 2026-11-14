@@ -183,13 +183,15 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     Both fail toward a green gate over a pull request nobody planned.
 
     The shim owns the one read that has to exist -- the concurrency group, where `needs` is not
-    in scope -- so this file's count is zero outside `claim`, compared whole rather than per
-    expression. `claim` runs before `facts` exists and reads the dispatch's own `comment_id`,
-    which no pull request holds, and its `pr_number` only to address the not-started reply;
-    under `pull_request_target` both read empty and the job skips.
+    in scope -- so this file's count is zero outside `claim` and `outcome`, compared whole
+    rather than per expression. `claim` runs before `facts` exists and reads the dispatch's own
+    `comment_id`, which no pull request holds, and its `pr_number` only to address the
+    not-started reply; under `pull_request_target` both read empty and the job skips. `outcome`
+    reads `pr_number` only to address its reply when `facts` failed, and only for a run whose
+    `claim` validated that number.
 
     Mutations: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job;
-    `github.event.inputs.ref` added to `claim`'s `with:`.
+    `github.event.inputs.ref` added to `claim`'s `with:` or to `outcome`'s.
     """
     found = {
         job_id: sorted({m for s in strings(job) for m in re.findall(r"github\.event\.[\w.]*", s)})
@@ -202,7 +204,7 @@ def test_the_workflow_reads_the_event_payload_nowhere():
         "plan": [],
         "summary": [],
         "gate-hold": [],
-        "outcome": [],
+        "outcome": ["github.event.inputs.pr_number"],
     }, f"plan.yml reads the event payload: {found}"
 
 

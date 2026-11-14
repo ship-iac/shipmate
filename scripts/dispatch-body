@@ -3,7 +3,8 @@
 it and print the API's answer.
 
 Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `COMMENT_ID`, `DISPATCH_REF`,
-`GITHUB_REPOSITORY`, `GH_TOKEN`.
+`GITHUB_REPOSITORY`, `GH_TOKEN`, and `SHIPMATE_APP_SLUG`, the shipmate App's slug, which only a
+commented dispatch reads.
 
 `COMMENT_ID` is the command comment's id, sent as `comment_id`. A commented `apply` or
 `unlock` must carry one, and `plan` may; an empty one on a `plan` is the comment-less replan,
@@ -11,17 +12,29 @@ whose body carries no `comment_id`. `auto` carries none. Any other combination, 
 that is not a comment id (`_shipmate._COMMENT_ID`), exits 1 before any request.
 
 It retries a transient failure (`_shipmate.retried`), and a transient failure may have
-started a run: GitHub can start it and still answer 502. Before each retry it lists `shipmate.yml`'s
-`workflow_dispatch` runs (one page of 100, newest first) and stops when any was created since
-`t0`, five seconds before the first attempt. The stop rule reads no title: a run's title is the
-consumer's `run-name`, which nothing checks, so no title can prove a run is not this dispatch's.
-A concurrent dispatch landing in the window therefore stops the retry too; a wrong stop costs a
-comment, a wrong retry a double start. Exit codes:
+started a run: GitHub can start it and still answer 502. Before each retry it lists
+`shipmate.yml`'s runs, and what stops the retry depends on the dispatch:
+
+- Commented: every page of the per-workflow listing (no server filter) back to `t0`, five
+  seconds before the first attempt, read again each second until 10 s after the failed
+  attempt. A `workflow_dispatch` run whose actor is `<SHIPMATE_APP_SLUG>[bot]` and whose title
+  parses (`_shipmate.parse_run_title`) as this verb and comment id, with this pull request, or
+  for `unlock` no pull request and this ref, is this command's run and stops the retry. The
+  title is consumer-authored, so only an App run's title counts; an empty slug matches no run.
+- Comment-less (`auto`, the replan): one page of 100 `workflow_dispatch` runs, newest first;
+  any created since `t0` stops the retry. No title is read, because nothing marks such a run as
+  this dispatch's. A concurrent dispatch landing in the window therefore stops the retry too; a
+  wrong stop costs a comment, a wrong retry a double start.
+
+Exit codes:
 
     0                   dispatched; stdout is the API's answer, unchanged
     1                   failed on the first attempt with a failure that is not transient, so no
-                        run started
-    3 MAY_HAVE_STARTED  a listed run was created since `t0`; not retried
+                        run started. When the answer shows a `shipmate.yml` older than this
+                        dispatch (`skew_hint`), stdout is the remedy sentence and stderr ends
+                        with it as an `::error::` line
+    3 MAY_HAVE_STARTED  a listed run is this command's (commented) or was created since `t0`
+                        (comment-less); not retried
     4 UNDETERMINED      the attempts ended on transient failures, a later attempt failed after a
                         transient one, or the listing failed or was malformed
 
@@ -29,23 +42,45 @@ On 1 and 4 the final failure's message goes to stderr, unannotated. When 4 follo
 malformed listing, that message is the listing's error; the dispatch's own failure is in the
 retry notices printed above it.
 
-Known ceilings: a run that landed but is not listed yet when the listing is read is not seen, so
-that attempt can be retried and start twice. A runner clock ahead of GitHub's by more than five
-seconds puts `t0` after a run that landed.
+Known ceilings: a run not listed yet when the listing is last read is not seen, so that attempt
+can be retried and start twice; a second commented `plan` or `apply` run loses its comment's
+claim and does no work, and a second `unlock` finds no lock. A runner clock ahead of GitHub's by
+more than five seconds puts `t0` after a run that landed.
 """
 
 import json
 import os
 import sys
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
-from _shipmate import _COMMENT_ID, retried, run, run_annotated
+import _shipmate
+from _shipmate import _COMMENT_ID, parse_run_title, retried, run, run_annotated
 
 MAY_HAVE_STARTED = 3
 UNDETERMINED = 4
 #: How far `t0` sits before the first attempt: the margin for a runner clock ahead of GitHub's,
 #: which would otherwise put `t0` after a run that landed.
 _CLOCK_MARGIN = timedelta(seconds=5)
+#: How long after a failed commented attempt its run is looked for: probed, the per-workflow
+#: listing showed a dispatched run 0.2-2.4 s after its POST returned.
+_LIST_WINDOW = timedelta(seconds=10)
+_POLL_SECONDS = 1
+_PAGE = 100
+_MAX_PAGES = 10
+#: gh's text for an answer that shows a `shipmate.yml` older than this dispatch, measured: no
+#: file, no `workflow_dispatch` trigger, and fewer inputs than the body sends.
+_LAYOUT_ANSWERS = ("HTTP 404", "'workflow_dispatch' trigger")
+_INPUTS_ANSWER = "Unexpected inputs provided"
+_LAYOUT_HINT = (
+    "This repository has no .github/workflows/shipmate.yml, or that file declares no "
+    "workflow_dispatch trigger. docs/getting-started.md publishes it; re-pinning cannot create it."
+)
+_INPUTS_HINT = (
+    "This repository's .github/workflows/shipmate.yml does not declare every input this "
+    "engine's dispatch sends, so it is older than the engine pin. Write the published file over "
+    "it with `python <engine>/scripts/repin <consumer> <tag> --write-fence`."
+)
 
 
 def _now():
@@ -90,31 +125,133 @@ def body() -> dict:
     return {"ref": os.environ["DISPATCH_REF"], "inputs": inputs, "return_run_details": True}
 
 
+def skew_hint(message: str) -> str:
+    """The remedy for a failed dispatch whose gh `message` shows a `shipmate.yml` older than this
+    dispatch, or "" for any other failure. The first line, the argv, is not read."""
+    answer = "\n".join(message.splitlines()[1:])
+    if _INPUTS_ANSWER in answer:
+        return _INPUTS_HINT
+    if any(a in answer for a in _LAYOUT_ANSWERS):
+        return _LAYOUT_HINT
+    return ""
+
+
+def _listed_row(line: str):
+    """`(row, created_at)` of one listed run; `ValueError` when it is not an object with an
+    ISO 8601 `created_at` carrying a zone."""
+    listed = json.loads(line)
+    created = listed.get("created_at") if isinstance(listed, dict) else None
+    if not isinstance(created, str):
+        raise ValueError(f"listed run without a created_at: {line}")
+    at = datetime.fromisoformat(created)
+    if at.tzinfo is None:
+        raise ValueError(f"listed run created_at without a zone: {line}")
+    return listed, at
+
+
+def _runs(repo: str) -> str:
+    return f"repos/{repo}/actions/workflows/shipmate.yml/runs"
+
+
 def landed_since(repo: str, t0: datetime, run=run) -> bool:
     """True when a `shipmate.yml` `workflow_dispatch` run in `repo` was created at or after `t0`.
 
     Reads one page through `retried`: a retry window is seconds long, so 100 runs hold every
-    candidate. A failed read raises its `SystemExit`; a row that is not an object with an ISO 8601
-    `created_at` carrying a zone raises `ValueError`."""
+    candidate. A failed read raises its `SystemExit`; a malformed row (`_listed_row`) raises
+    `ValueError`."""
     args = [
         "gh",
         "api",
-        f"repos/{repo}/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&per_page=100",
+        f"{_runs(repo)}?event=workflow_dispatch&per_page=100",
         "--jq",
         ".workflow_runs[] | {created_at} | tojson",
     ]
     out = retried(lambda: run(args))
     landed = False
     for line in filter(None, out.splitlines()):
-        listed = json.loads(line)
-        created = listed.get("created_at") if isinstance(listed, dict) else None
-        if not isinstance(created, str):
-            raise ValueError(f"listed run without a created_at: {line}")
-        at = datetime.fromisoformat(created)
-        if at.tzinfo is None:
-            raise ValueError(f"listed run created_at without a zone: {line}")
-        landed = landed or at >= t0
+        landed = _listed_row(line)[1] >= t0 or landed
     return landed
+
+
+def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) -> bool:
+    """True when a listed `shipmate.yml` run in `repo` is a `workflow_dispatch` whose actor is
+    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`; an empty `slug` matches
+    none.
+
+    Reads pages of 100, newest first, each through `retried`, until a page is short or holds a
+    run created before `t0`. A failed read raises its `SystemExit`; a malformed row
+    (`_listed_row`) or a listing past ten pages raises `ValueError`."""
+    jq = ".workflow_runs[] | {created_at, event, display_title, actor: .actor.login} | tojson"
+    for page in range(1, _MAX_PAGES + 1):
+        args = ["gh", "api", f"{_runs(repo)}?per_page={_PAGE}&page={page}", "--jq", jq]
+        out = retried(partial(run, args))
+        rows = [_listed_row(line) for line in filter(None, out.splitlines())]
+        for listed, _ in rows:
+            if (
+                slug
+                and listed.get("event") == "workflow_dispatch"
+                and listed.get("actor") == f"{slug}[bot]"
+                and parse_run_title(listed.get("display_title")) == want
+            ):
+                return True
+        if len(rows) < _PAGE or any(at < t0 for _, at in rows):
+            return False
+    raise ValueError(f"shipmate.yml runs since {t0.isoformat()} run past {_MAX_PAGES} pages")
+
+
+def _command_title():
+    """This dispatch's run title as `parse_run_title` returns it, from the env."""
+    verb = os.environ["VERB"]
+    return {
+        "verb": verb,
+        "pr": "" if verb == "unlock" else os.environ.get("PR_NUMBER", ""),
+        "ref": "" if verb == "plan" else os.environ.get("REF", ""),
+        "comment": os.environ.get("COMMENT_ID", ""),
+    }
+
+
+def _before_retry(repo, t0, failed_at):
+    """The `retried` hook that lists `repo`'s runs and stops the retry: `MAY_HAVE_STARTED` when
+    a listed run may be this dispatch's, `UNDETERMINED` when the listing fails. `failed_at` holds
+    the time of each failed attempt."""
+    want, slug = _command_title(), os.environ.get("SHIPMATE_APP_SLUG", "")
+
+    def listed():
+        if not want["comment"]:
+            return landed_since(repo, t0, run=run)
+        deadline = failed_at[-1] + _LIST_WINDOW
+        while not command_run_listed(repo, t0, want, slug, run=run):
+            if _now() >= deadline:
+                return False
+            _shipmate._sleep(_POLL_SECONDS)
+        return True
+
+    def before_retry():
+        # Any failure of the listing leaves the question open, so none may fall through to a retry.
+        try:
+            landed = listed()
+        except (SystemExit, Exception) as e:
+            why = e if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
+            print(f"listing shipmate.yml runs failed: {why}", file=sys.stderr)
+            raise SystemExit(UNDETERMINED) from None
+        if landed:
+            raise SystemExit(MAY_HAVE_STARTED)
+
+    return before_retry
+
+
+def _exit_failed(e, failed):
+    """Exit for `retried`'s final `SystemExit` `e` after `failed` failed attempts."""
+    if isinstance(e.code, int):
+        raise e
+    print(e.code, file=sys.stderr)
+    # Only a first attempt that failed without a transient failure cannot have started a run.
+    if failed > 1:
+        raise SystemExit(UNDETERMINED) from None
+    if hint := skew_hint(e.code):
+        print(f"::error::{hint}", file=sys.stderr)
+        sys.stdout.write(hint)
+    raise SystemExit(1) from None
 
 
 def main(argv=()):
@@ -125,31 +262,19 @@ def main(argv=()):
     args = ["gh", "api", "-X", "POST", f"repos/{repo}/actions/workflows/shipmate.yml/dispatches"]
     args += ["--input", "-"]
     t0 = _now() - _CLOCK_MARGIN
-    attempts = []
+    failed_at = []
 
     def attempt():
-        attempts.append(None)
-        return run(args, stdin=data)
-
-    def before_retry():
-        # Any failure of the listing leaves the question open, so none may fall through to a retry.
         try:
-            landed = landed_since(repo, t0, run=run)
-        except (SystemExit, Exception) as e:
-            why = e if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
-            print(f"listing shipmate.yml runs failed: {why}", file=sys.stderr)
-            raise SystemExit(UNDETERMINED) from None
-        if landed:
-            raise SystemExit(MAY_HAVE_STARTED)
+            return run(args, stdin=data)
+        except SystemExit:
+            failed_at.append(_now())
+            raise
 
     try:
-        out = retried(attempt, before_retry)
+        out = retried(attempt, _before_retry(repo, t0, failed_at))
     except SystemExit as e:
-        if isinstance(e.code, int):
-            raise
-        print(e.code, file=sys.stderr)
-        # Only a first attempt that failed without a transient failure cannot have started a run.
-        raise SystemExit(1 if len(attempts) == 1 else UNDETERMINED) from None
+        _exit_failed(e, len(failed_at))
     sys.stdout.write(out)
 
 
