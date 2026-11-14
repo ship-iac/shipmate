@@ -184,12 +184,14 @@ def landed_since(repo: str, t0: datetime, run=run) -> bool:
 
 def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) -> bool:
     """True when a listed `shipmate.yml` run in `repo` is a `workflow_dispatch` whose actor is
-    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`. `slug` must be
-    non-empty; `main` refuses a commented dispatch without one.
+    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`. An empty `slug`
+    raises `ValueError`: it would match no run and let a retry start the command twice.
 
     Reads pages of 100, newest first, each through `retried`, until a page is short or holds a
     run created before `t0`. A failed read raises its `SystemExit`; a malformed row
     (`_listed_row`) or a listing past ten pages raises `ValueError`."""
+    if not slug:
+        raise ValueError("SHIPMATE_APP_SLUG is empty, so no listed run is this command's")
     jq = ".workflow_runs[] | {created_at, event, display_title, actor: .actor.login} | tojson"
     for page in range(1, _MAX_PAGES + 1):
         args = ["gh", "api", f"{_runs(repo)}?per_page={_PAGE}&page={page}", "--jq", jq]

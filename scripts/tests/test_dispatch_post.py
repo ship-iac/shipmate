@@ -483,11 +483,19 @@ def test_a_commented_dispatch_without_the_slug_is_refused_before_any_post(
     assert calls == []
 
 
-def test_a_comment_less_dispatch_needs_no_slug(calls, monkeypatch, capsys):
-    """The replan and `auto` read no title. Mutation: refuse an empty slug on every dispatch."""
-    monkeypatch.setenv("VERB", "plan")
-    monkeypatch.setenv("COMMENT_ID", "")
-    monkeypatch.setenv("SHIPMATE_APP_SLUG", "")
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"VERB": "plan", "PR_NUMBER": "42"},
+        {"VERB": "auto", "PR_NUMBER": "42", "REF": HEAD},
+    ],
+    ids=["replan", "auto"],
+)
+def test_a_comment_less_dispatch_needs_no_slug(calls, monkeypatch, capsys, env):
+    """The replan and `auto` read no title. Mutation: refuse an empty slug on every dispatch;
+    refuse it when `VERB` is `auto` (the auto row reddens)."""
+    for name, value in {**env, "COMMENT_ID": "", "SHIPMATE_APP_SLUG": ""}.items():
+        monkeypatch.setenv(name, value)
     answering(monkeypatch, calls, [ANSWER])
     assert post(capsys)[0] == 0
 
@@ -545,3 +553,11 @@ def test_the_replan_keeps_the_comment_less_rule(calls, monkeypatch, capsys):
         {"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, "return_run_details": True}
     )
     assert (post(capsys)[0], calls) == (0, [(POST, replan), SLEPT_2, LIST, (POST, replan)])
+
+
+def test_an_empty_slug_raises_before_any_listing():
+    """Mutation: drop the empty-slug `ValueError` in `command_run_listed` -> it lists."""
+    read = []
+    with pytest.raises(ValueError, match="SHIPMATE_APP_SLUG is empty"):
+        db.command_run_listed("acme/demo", NOW, {}, "", run=lambda args: read.append(args))
+    assert read == []
