@@ -945,9 +945,11 @@ nothing.
   Evicting an open #<n> works the same way, but applying this pull request
   afterwards may overwrite what #<n> applied. When #<n> is stacked on this pull
   request, eviction refuses (§`shipmate unlock <env> --evict` is refused: `#<h>
-  is stacked on this pull request`); while a run of #<n> may still apply, it
-  fails (§`shipmate unlock <env> --evict` failed: `a holder's run may still
-  apply`).
+  is stacked on this pull request`), and when #<n>'s walk ran out of pages it
+  refuses too (§`shipmate unlock <env> --evict` is refused: `its chain of base
+  branches needs more than 20 pages of pull requests`); while a run of #<n> may
+  still apply, it fails (§`shipmate unlock <env> --evict` failed: `a holder's
+  run may still apply`).
 - After the `lock` job form, comment `shipmate apply` again: the new run leaves
   the locked cell pending and applies the rest. "Re-run failed jobs" does not
   re-run `detect`, so its `lock` job tries the same cells again.
@@ -1043,25 +1045,57 @@ have ended.
 
 The reply reads ``🔴 refused: no cell lock in `<env>` was released.``, with the
 refusal fenced, one sentence pair per stacked holder, lowest first: `` #<h> is
-stacked on this pull request and holds <n> of its cell(s) in <env>; applying
-this pull request after evicting it would overwrite what it applied. Retarget
-#<h> to <default branch> and merge it first, or close it, which releases its
-locks. ``
+stacked on this pull request through #<b>, #<c> and holds <n> of its cell(s) in
+<env>; applying this pull request after evicting it would overwrite what it
+applied. Retarget #<h> to <default branch> and merge it first, or close it,
+which releases its locks. `` The chain names the pull requests between the two,
+from this pull request outward; a holder based on this pull request's head
+branch has none.
 
-- Cause: #<h> is open, its base branch is this pull request's head branch, and
-  it holds the lock on a cell whose apply check is still pending on this pull
-  request's head. Its change is built on this branch, so applying this pull
-  request's plan after evicting it would overwrite whatever #<h> applied there.
+- Cause: #<h> is open, a chain of open or merged pull requests leads from its
+  base branch to this pull request's head branch (its base branch is that head
+  branch when no chain is named), and it holds the lock on a cell whose apply
+  check is still pending on this pull request's head. Its change is built on
+  this branch, so applying this pull request's plan after evicting it would
+  overwrite whatever #<h> applied there. An old merged pull request from a
+  branch in the chain into this pull request's head branch, such as a sync
+  merge, also counts as a link.
 - Effect: Nothing is released, no holder is told, and the comment-handling run
   fails. The other holders' locks in `<env>` stay too: the whole command
   refuses.
 - Remedy: Retarget #<h> to the default branch and merge it first, so its
   deploy applies its cells and releases its locks, or close it, so its
-  `release` job deletes them. Then re-plan this pull request and apply it.
-  Commenting the command again refuses the same way while #<h> stays stacked.
-  The plan comment shows this in advance: it marks the cell `🔒 locked by #<h>,
-  stacked on this pull request` and offers no `shipmate unlock <env> --evict`
-  for that environment.
+  `release` job deletes them. #<h> carries the commits of its chain, so the
+  pull requests the chain names need no retarget of their own. Then re-plan
+  this pull request and apply it. Commenting the command again refuses the same
+  way while #<h> stays stacked. The plan comment shows this in advance: it
+  marks the cell `🔒 locked by #<h>, stacked on this pull request`, its line
+  for #<h> under the verdict names the chain, and it offers no `shipmate unlock
+  <env> --evict` for that environment.
+
+### `shipmate unlock <env> --evict` is refused: `its chain of base branches needs more than 20 pages of pull requests`
+
+The reply reads ``🔴 refused: no cell lock in `<env>` was released.``, with ``
+could not tell whether #<h> is stacked on this pull request: its chain of base
+branches needs more than 20 pages of pull requests. Commenting again refuses
+the same way: retarget #<h> to <default branch>, or wait until it merges or
+closes, after which the eviction is not blocked by it. `` fenced, one per such holder, after any
+stacked holder's sentence pair.
+
+- Cause: Walking #<h>'s base branches toward this pull request's head branch
+  needs more than 20 pages of pull request listings: a very long chain, or
+  branches with many pull requests.
+- Effect: Nothing is released and no holder is told. The plan comment shows
+  this in advance with `🔒 could not tell whether #<h> is stacked on this pull
+  request (<reason>); the eviction is blocked by #<h>` and offers no `shipmate
+  unlock <env> --evict` for that environment. The same refusal also names any
+  holder whose read failed.
+- Remedy: Retarget #<h> to the default branch, or wait until it merges or
+  closes, after which the eviction is not blocked by it. Then comment the
+  command again. A branch on
+  the path whose pull request history alone needs more than 20 pages is an
+  accepted limit ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops): shortening
+  the chain does not help there.
 
 ### `shipmate unlock <env> --evict` failed: `could not tell whether #<h> is stacked on this pull request`
 
@@ -1069,10 +1103,10 @@ The reply reads ``🔴 failed: could not evict the cell locks in `<env>`. This
 run's log has the error; comment again.``, with `` could not tell whether #<h>
 is stacked on this pull request: <cause> `` fenced, one per such holder.
 
-- Cause: The read of #<h>'s pull request failed after its retries, or answered
-  without a string base branch or state, so the command cannot tell whether
-  evicting #<h> would overwrite a pull request stacked on this one. `<cause>`
-  names the failure.
+- Cause: The read of #<h>'s pull request, or of a pull request listing its
+  walk needs, failed after its retries or answered malformed, so the command
+  cannot tell whether evicting #<h> would overwrite a pull request stacked on
+  this one. `<cause>` names the failure.
 - Effect: Nothing is released and no holder is told.
 - Remedy: Comment `shipmate unlock <env> --evict` again.
 
@@ -1092,7 +1126,9 @@ shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
 merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
 run is unknown` or `could not list the deploy runs of #<h>'s merge commit
-<sha>`.
+<sha>`. Past 4,000 characters the reply keeps the header and the lines that
+fit, then `and <n> more line(s); the run log names every one`; the run log has
+every line.
 
 - Cause: A run of the repository's `shipmate.yml` that may still apply a
   holder's cells has not ended: an `apply` or `auto` run of #<h>, by anyone and
@@ -1196,11 +1232,11 @@ gate is written on the merge commit. The apply checks stay pending.
    included, on the cells whose apply check is pending on its head (failed and
    cancelled included), so it also releases the locks a merged pull request
    kept on those cells. It refuses with a `🔴 refused:` reply,
-   releasing nothing, when a holder is stacked on the new pull request
-   (§`shipmate unlock <env> --evict` is refused: `#<h> is stacked on this pull
-   request`), and fails while a holder's apply or deploy run may still apply
-   (§`shipmate unlock <env> --evict` failed: `a holder's run may still apply`):
-   wait for the runs it links to end, then comment again.
+   releasing nothing, when a holder is stacked on the new pull request at any
+   depth (§`shipmate unlock <env> --evict` is refused: `#<h> is stacked on this
+   pull request`), and fails while a holder's apply or deploy run may still
+   apply (§`shipmate unlock <env> --evict` failed: `a holder's run may still
+   apply`): wait for the runs it links to end, then comment again.
 4. Its cells are applied before merge under a required gate (`shipmate apply`,
    and `shipmate apply <env>` for a `targeted` environment), or by its deploy
    otherwise. Merge it.

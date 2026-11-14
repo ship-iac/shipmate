@@ -338,7 +338,7 @@ def gh_json(path, run=None, *, retry=True):
     `json.loads(_run(...))` pair. A transient failure is retried (`retried`); `retry=False`
     reads once, for a read that degrades per item inside a loop that runs in every plan summary,
     where retries would hold the summary for their sleeps: `doctor`'s reads, each to a report
-    row, and `cell-lock._stacked`'s, once per lock holder.
+    row, and `cell-lock._stacked`'s, up to `WALK_PAGES` per lock holder.
 
     Homed beside `_run` for the same reason.
     """
@@ -381,6 +381,12 @@ def deploy_mode():
 def lock_who(holder: int | None) -> str:
     """Who holds a cell lock: `#<holder>`, or `an unknown holder` for None."""
     return f"#{holder}" if holder is not None else "an unknown holder"
+
+
+def stacked_through(chain) -> str:
+    """` through #B, #C` naming `chain`, the pull requests between a stacked holder and this
+    pull request from this one outward; empty for a holder based on this one's head."""
+    return f" through {', '.join(f'#{n}' for n in chain)}" if chain else ""
 
 
 def lock_wait_remedy(who: str, env: str) -> str:

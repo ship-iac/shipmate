@@ -375,7 +375,8 @@ request that is not a draft, with a folded section naming, in apply order,
 `shipmate apply <env>` for each `apply_mode: targeted` environment holding a
 changed cell and `shipmate apply` once, at the first changed environment that is
 not targeted, then `shipmate unlock <env> --evict` for an environment holding a
-locked changed cell, unless a holder there is stacked on the pull request, and
+locked changed cell, unless a holder there is stacked on the pull request or
+its walk ran out of pages, and
 `shipmate help`; it is off when absent. `tools` names the Terramate and
 OpenTofu versions every job installs, each the pinned engine's default when
 absent.
@@ -794,11 +795,18 @@ a draft — the six apply requirements in
 names which requirement failed. Each cell an apply runs is locked to the pull
 request until it merges or closes; another pull request's apply leaves that
 cell pending and names the holder, and `shipmate unlock <env> --evict` releases
-the lock on a cell the commenting pull request still applies. Any holder stacked
-on the commenting pull request refuses the whole command and releases nothing; a
-holder whose pull request cannot be read, or a holder's run that may still
-apply, refuses too, and the reply says to comment again
-([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
+the lock on a cell the commenting pull request still applies. The whole command
+refuses and releases nothing, naming each holder and its cause, when a holder is
+stacked on the commenting pull request through a chain of pull requests at any
+depth, or when a holder's walk ran out of pages (commenting again refuses the
+same way: retarget the holder to the default branch, or wait until it merges or
+closes); that reply also names any holder whose read failed. When no holder
+blocks, a holder whose pull request cannot be read, or a holder's run that may
+still apply, refuses too, and the reply says to comment again
+([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). Stacking pull requests that
+change the same cells is not recommended: while a holder is stacked, eviction
+refuses, and the holder has to be retargeted to the default branch and merged
+first ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
 
 **The two are coupled.** If you require `shipmate / gate` as a
 branch-protection check — tier 3 — then applies have to happen pre-merge, because
