@@ -3,9 +3,11 @@
 
 `SHIPMATE_SNAPSHOT_JSON` is the wave's `apply-snapshot` slice, `{check name: [check id, ...]}`.
 Each id gets one PATCH, one at a time, of exactly `{"status": "in_progress", "details_url": <this
-run's page>}` through `patch-checks`, which also writes nothing on a pre-merge re-run. Never
-`output`: that would replace the check's plan text. A failed write fails the job, which skips the
-wave, and the level's `complete` returns every check of it to `queued`, titled `Not run`.
+run's page>}` through `patch-checks`, which also writes nothing on a pre-merge re-run, nor on a
+pre-merge run whose pull request, `SHIPMATE_PR_NUMBER`, reads merged (one read, one notice; a
+merge deploy reads none). Never `output`: that would replace the check's plan text. A failed
+write or read fails the job, which skips the wave, and the level's `complete` returns every check
+of it to `queued`, titled `Not run`.
 """
 
 import json

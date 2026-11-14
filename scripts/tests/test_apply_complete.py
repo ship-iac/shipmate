@@ -149,10 +149,11 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     assert _classify(jobs, by_wave)[0] == []
 
 
-def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
+def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_an_unresolved_row():
     """The listing lagging a finished job is the whole reason for the retry loop: a null
-    conclusion must be reported, never read as "did not run". Mutation: give it a `Not run`
-    row -> DNS has a row."""
+    conclusion must be reported, never read as "did not run". Its `unresolved` row withholds
+    an earlier attempt's outcome in `merge`. Mutations: give it a `Not run` row -> DNS's row
+    differs; drop the `unresolved` row -> DNS has none."""
     rows, unresolved = _classify(
         [
             job("L0 / dev-eu / stacks/dns", None),
@@ -160,7 +161,9 @@ def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
             job("L0 / dev-eu / stacks/web", "success"),
         ]
     )
-    assert (sorted(_by_check(rows)), unresolved) == ([APP, WEB], ["stacks/dns / dev-eu"])
+    assert unresolved == ["stacks/dns / dev-eu"]
+    assert _by_check(rows)[DNS] == {**row(DNS, [1]), "unresolved": True}
+    assert sorted(_by_check(rows)) == [APP, DNS, WEB]
 
 
 #: This completion job, `deploy / L1 / complete`, check run id 900.
@@ -356,15 +359,30 @@ def test_a_job_id_that_is_not_an_integer_reads_nothing(annotations):
     assert annotations["calls"] == []
 
 
-def test_merge_keeps_a_success_any_attempt_saw_and_otherwise_the_last_attempt():
-    """Replicas differ: a later listing can lose a success an earlier one saw. Mutations: the
-    last attempt alone -> DNS reads `Not run`; every attempt, last row wins -> the same; take
-    WEB's failure from the first attempt -> WEB has a row."""
+def test_merge_keeps_a_success_any_attempt_saw_and_otherwise_the_last_row_seen():
+    """Replicas differ: a later listing can lose a row an earlier one saw. Mutations: the last
+    row wins whatever its conclusion -> DNS reads `Not run`; the first row wins -> APP keeps
+    its failure; successes only (`out = {}`) -> APP and WEB have no row."""
     ok = job("L0 / dev-eu / stacks/dns", "success")
     failed = job("L0 / dev-eu / stacks/app", "failure")
     first = [row(DNS, [1], ok), row(APP, [2, 3], failed), row(WEB, [4], failed)]
     last = [row(DNS, [1]), row(APP, [2, 3])]
-    assert apply_complete.merge(first + last, last) == [row(APP, [2, 3]), row(DNS, [1], ok)]
+    assert apply_complete.merge(first + last) == [
+        row(APP, [2, 3]),
+        row(DNS, [1], ok),
+        row(WEB, [4], failed),
+    ]
+
+
+def test_merge_withholds_an_earlier_outcome_a_later_attempt_lists_unresolved():
+    """Attempt 1 wrote APP `Not run`; a later attempt lists APP's job without a conclusion, so
+    APP gets no write. A success still wins over a later unresolved row. Mutation: drop the
+    `unresolved` filter -> APP's unresolved row is returned (a `Not run` write)."""
+    ok = job("L0 / dev-eu / stacks/dns", "success")
+    later = [{**row(APP, [2, 3]), "unresolved": True}, {**row(DNS, [1]), "unresolved": True}]
+    assert apply_complete.merge([row(APP, [2, 3]), row(DNS, [1], ok), *later]) == [
+        row(DNS, [1], ok)
+    ]
 
 
 def _run(by_wave, results, jobs):
@@ -392,7 +410,9 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
         + "the jobs listing shows no conclusion for these cells of waves that ran: "
         + "stacks/app / dev-eu, stacks/dns / dev-eu, stacks/web / dev-eu\n"
     )
-    assert done.stdout == ""
+    assert [json.loads(line) for line in done.stdout.splitlines()] == [
+        {**row(WEB, [4]), "unresolved": True}
+    ]
 
 
 def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():
@@ -410,16 +430,15 @@ def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():
 
 
 def test_plan_mode_writes_the_merged_rows(tmp_path):
-    """The last attempt's fetch failed, so it decided nothing; only the earlier success is
-    written. Mutation: swap the two file arguments -> WEB's earlier `Cancelled` is written."""
+    """The last attempt's fetch failed, so it decided nothing; the earlier success and the
+    earlier `Cancelled` are both written. Mutation: `merge` keeps successes only (`out = {}`)
+    -> WEB gets no write."""
     ok = job("L0 / dev-eu / stacks/dns", "success", jid=11)
     stopped = job("L0 / dev-eu / stacks/web", "cancelled", jid=12)
     every = tmp_path / "all.jsonl"
-    last = tmp_path / "last.jsonl"
     every.write_text(jsonl(row(DNS, [1], ok), row(WEB, [4], stopped)), encoding="utf-8")
-    last.write_text("", encoding="utf-8")
     done = subprocess.run(
-        [sys.executable, str(SCRIPTS / "apply-complete"), "plan", str(every), str(last)],
+        [sys.executable, str(SCRIPTS / "apply-complete"), "plan", str(every)],
         env={**os.environ, "GITHUB_REPOSITORY": "acme/demo"},
         capture_output=True,
         text=True,
@@ -431,15 +450,16 @@ def test_plan_mode_writes_the_merged_rows(tmp_path):
             "body": {"status": "completed", "conclusion": "success", "details_url": ok["html_url"]},
             "title": None,
         },
+        {"id": 4, "body": {"status": "queued"}, "title": "Cancelled"},
     ]
 
 
-@pytest.mark.parametrize("argv", [["plan"], ["ids", "a", "b"], ["plan", "a", "b", "c"]])
+@pytest.mark.parametrize("argv", [["plan"], ["ids", "a"], ["plan", "a", "b"]])
 def test_a_wrong_argument_list_refuses(argv):
     """Mutation: drop the length check -> `plan` with no files raises IndexError."""
     with pytest.raises(SystemExit) as exc:
         apply_complete.main(argv)
-    assert str(exc.value) == "::error::usage: apply-complete [plan <all rows> <last rows>]"
+    assert str(exc.value) == "::error::usage: apply-complete [plan <rows>]"
 
 
 def test_the_app_token_is_minted_after_the_listing_and_selection_step():
@@ -635,8 +655,8 @@ def test_a_listing_matching_no_cell_at_all_is_retried_and_writes_nothing_meanwhi
 @bash_only
 def test_a_success_seen_by_one_attempt_survives_a_staler_later_listing(tmp_path):
     """Replicas differ, so a later read can be missing a row an earlier one had. A later read
-    may add a completion; it may never revoke one. Mutation: feed `plan` the last attempt as
-    both files -> dns and app get no write."""
+    may add a completion; it may never revoke one. Mutation: feed `plan` the last attempt's
+    `attempt-rows.jsonl` -> dns and app get no write."""
     first = jsonl(
         job("L0 / dev-eu / dns", "success"),
         job("L0 / dev-eu / app", "success"),
@@ -663,6 +683,22 @@ def test_a_wave_that_did_not_run_writes_not_run_at_once(tmp_path, result):
     )
     assert (proc.returncode, attempts) == (0, 1), proc.stderr
     assert _outcomes(plan) == {11: "Not run", 22: "Not run", 33: "Not run"}
+
+
+@bash_only
+def test_a_failure_one_attempt_saw_survives_later_empty_listings(tmp_path):
+    """Attempt 1 lists app `failure` and web lagging; every later attempt's listing comes back
+    empty, so the retries run out. App still gets its `Failed` write. (A job id that is not an
+    integer keeps the annotation read out of the step.) Mutation: the step feeds `plan` only
+    the last attempt's `attempt-rows.jsonl` -> app gets no write."""
+    first = jsonl(
+        job("L0 / dev-eu / dns", "success"),
+        {**job("L0 / dev-eu / app", "failure"), "id": "app"},
+        job("L0 / dev-eu / web", None),
+    )
+    proc, plan, attempts, _ = _select(tmp_path, [first, ""])
+    assert (proc.returncode, attempts) == (0, 14), proc.stderr
+    assert _outcomes(plan) == {11: "completed", 22: "Failed"}
 
 
 @bash_only

@@ -1,11 +1,14 @@
 name: shipmate apply-release
-description: Flip one wave's apply checks to in_progress, linked to this run, before the wave runs. A pre-merge re-run writes nothing. A failed write fails the job, which skips the wave.
+description: Flip one wave's apply checks to in_progress, linked to this run, before the wave runs. A pre-merge re-run writes nothing, and neither does a pre-merge run whose pull request has merged. A failed write or pull request read fails the job, which skips the wave.
 inputs:
   snapshot:
     description: JSON object, the wave's slice of apply-snapshot's by_wave, mapping each cell to its apply-check ids.
     required: true
   deploy:
     description: "`true` on the merge deploy, whose re-runs still write."
+    required: true
+  pr-number:
+    description: The pull request the run applies; read before a pre-merge flip.
     required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
@@ -31,6 +34,9 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-checks: write
+        # Only a pre-merge flip reads its pull request; the action requests no permission
+        # whose input is empty.
+        permission-pull-requests: ${{ inputs.deploy != 'true' && 'read' || '' }}
 
     - name: Flip the wave's apply checks to in progress
       shell: bash
@@ -38,6 +44,7 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
         SHIPMATE_DEPLOY: ${{ inputs.deploy }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-release"

@@ -222,7 +222,7 @@ id refuses the run before wave0.
 | `cancelled` | `queued`, titled `Cancelled` |
 | `skipped`, or no job in a wave that ended `skipped`, or in one that ended `cancelled` when the listing shows a `cancelled` literal `${{ matrix.environment }} / ${{ matrix.stack }}` row under the completion job's own level and no cell of that wave | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
-| no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes, then no write; the job fails |
+| no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes; then the outcome an earlier listing attempt saw, unless a later attempt listed the cell's job without a conclusion, else no write; the job fails |
 
 A write other than `success` reads the check first and leaves it alone when it
 reads `completed`: another writer, such as a merge deploy, completed it. A
@@ -243,7 +243,10 @@ completion job's failure never fails the level (job-level
 when it was flipped), when the jobs listing never shows that cell's job in a wave
 that ran, or in a cancelled wave whose other cells it lists; the gate stays pending, and the next run's `snapshot` writes it again.
 A success from any listing attempt is kept, so a later, staler listing never
-turns a completed check back to `queued`. "Re-run failed jobs" skips `snapshot`
+turns a completed check back to `queued`. Otherwise the last outcome any attempt
+saw for a cell is written, so a later failed or lagging listing does not drop a
+`failure`, `cancelled` or not-run outcome an earlier attempt saw, unless a later
+attempt listed the cell's job without a conclusion: then the cell gets no write. "Re-run failed jobs" skips `snapshot`
 and reuses its outputs.
 
 Every flip and completion write retries a transient failure and waits out
@@ -254,10 +257,12 @@ one write per check at about 1.7 a second, one annotation read per failed cell,
 and the 3-minute rate budget. A job that still runs out fails, and `complete` or
 the next run's `snapshot` recovers.
 
-A pre-merge completion reads the pull request once before writing. A merged
-pull request gets only its `success` writes, since the merge deploy owns its
-pending checks; a closed or open one gets every write; a failed read writes
-nothing and fails the job.
+A pre-merge release or completion job reads the pull request once before
+writing; a merge deploy reads none. A merged pull request gets only its
+`success` writes, since the merge deploy owns its pending checks, so a release
+flips nothing and logs one notice; a closed or open one gets every write; a
+failed read writes nothing and fails the job, and a failed release skips its
+wave.
 
 **Re-runs.** On a pre-merge apply run whose `GITHUB_RUN_ATTEMPT` is above 1, each
 wave cell's pre-apply check refuses:
@@ -294,13 +299,14 @@ Accepted limits:
 - The cell job rows and the `<env>-apply` deployments stay under the default
   branch's commit, where the dispatched run is; the pull request shows only the
   App apply checks.
-- A release flip reads nothing before it writes. On a check another writer has
+- A release flip reads no check before it writes. On a check another writer has
   completed, its status-only flip leaves the check `completed` and replaces only
   the details link (probed: a status or `details_url` write to a settled completed
   check keeps it completed). A flip landing within seconds of that completion can
   reopen it, and the gate then stays pending until a later write.
 - A release flip or a completion write can race a merge that bypasses the gate:
-  one pull request read per completion job, none per release. The merge
+  one pull request read per pre-merge release or completion job, so a merge
+  landing after that read is not seen. The merge
   deploy's `snapshot` reads such a check as pending and applies or rewrites it;
   a cell lock the dead pre-merge run left is released with `shipmate unlock`.
 - A plan re-run can create a fresh duplicate apply check after the snapshot; it
@@ -1443,19 +1449,28 @@ every comment dispatch targets and every merge deploy runs in, whatever workflow
 the comment ran in) may still apply a holder's cells: a live `apply` or `auto`
 run titled for the holder, whoever dispatched it; a live `workflow_dispatch` run
 whose title does not parse, since it may be the holder's; or, when the holder
-has merged, a live `push` run of its merge commit (its deploy). A listing that
+has merged, a live `push` run of its merge commit (its deploy) that may still
+apply. Its jobs are named after their first ` / `, whatever the consumer names
+its calling job; the run is live until its `summary` job, which runs after every
+env-level, is listed `completed`, while any job but a `warm` leg (`warm` or
+`warm / <stack>`, which applies nothing) is not `completed`, and while a job is
+listed with a `run_attempt` other than the run's (a re-run not yet fully
+listed). A job waiting on `needs` may not be listed yet, so the `summary` clause
+keeps such a run live, and a run that lists no job yet refuses as not started. A listing that
 fails, answers malformed, holds a run whose id is not a run id or (a
 `workflow_dispatch` listing) a run without a string `display_title` or `event`,
-or runs past ten pages, a holder read that fails, and a merged holder whose merge commit is not
-a commit sha refuse too. The refusal collects every line found under ``no cell
+or runs past ten pages, a holder read that fails, a merged holder whose merge commit is not
+a commit sha, a live deploy run without an integer `run_attempt`, and a deploy
+run whose jobs listing fails or answers malformed refuse too. The refusal collects every line found under ``no cell
 lock in <env> was released: a holder's run may still apply, or the check could
 not tell. Wait for each run below to end, then comment again.``, one per cause:
 ``#<h> has a live `<verb>` run: <url>``, `a live run whose title is not a
 shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
 merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
-run is unknown` or `could not list the deploy runs of #<h>'s merge commit
-<sha>`, fenced in the `🔴 failed:` reply above. Past 4,000 characters the reply keeps the
+run is unknown`, `could not list the deploy runs of #<h>'s merge commit
+<sha>`, `could not list the jobs of #<h>'s deploy run <url>` or `#<h>'s deploy
+run <url> has not started`, fenced in the `🔴 failed:` reply above. Past 4,000 characters the reply keeps the
 header and the lines that fit and ends `and <n> more line(s); the run log names
 every one`. A run title carries no
 environment, so a holder's live apply run in any environment refuses the
@@ -1463,7 +1478,7 @@ eviction in every environment. The order is: the locks, the holders' stacked
 reads and walks, one `workflow_dispatch` listing per live status (`queued`,
 `in_progress`, `waiting`, `pending`, `requested`), a fresh read of each
 holder's pull request, then the `push` listing of each merged holder's merge
-commit. A listed run whose status is not `completed` counts as live.
+commit and the jobs of each live run it lists. A listed run whose status is not `completed` counts as live.
 
 The check is a point in time, not a hold. A run dispatched in the last few
 seconds may not be listed yet, a run that changes status between the
@@ -1624,15 +1639,12 @@ command can start twice. A runner clock ahead of GitHub's by more than five
 seconds puts `t0` after a run that landed, with the same result.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
-reads the claim as taken and does nothing. A double-started `auto` run fails
-safe at the exact-plan refusal.
-The two runs re-enter the same pull request's cell locks and serialize on each
-cell's `apply-<env>-<stack>` group, so whichever run reaches a cell second
-restores the state the first saved, and OpenTofu refuses the reviewed plan as
-stale; that run's comment shows the cell failed, its completion jobs write
-nothing to the check the first run completed, and it skips its later waves, so
-a double start that splits one wave's cells between the runs can leave
-downstream cells pending for another `shipmate apply`. The exception is a first
+reads the claim as taken and does nothing. A double-started `auto` run waits:
+the second run waits in `shipmate-apply-<pr_number>` until the first ends
+("One apply run per pull request"), and its `detect` then finds the checks the
+first run applied completed, so it applies none of them. A cell the first run
+left pending (failed, cancelled or not run) is pending for the second run too,
+which takes it up as a later `shipmate apply` would. The exception is a first
 run whose `Save state` failed on a local backend: the second run restores the
 pre-apply state and applies the plan again, the same risk a second `shipmate
 apply` comment already carries; `docs/troubleshooting.md` §`The apply step ran
@@ -4924,8 +4936,8 @@ The engine ships the merge-deploy path as the reusable workflow
 env-levels, `warm` saves the provider cache entry of each distinct lock and the
 OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
-apply path as `.github/workflows/apply.yml` (guard → `apply-run.yml`, one run
-per pull request at a time: review → detect → cell lock acquisition →
+apply path as `.github/workflows/apply.yml` (guard → claim → queue →
+`apply-run.yml`, one run per pull request at a time: review → detect → cell lock acquisition →
 env-levels 0..3 via `apply-env-level.yml` → gate refresh + result comment;
 then the outcome reply when no result comment posted; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order, an `auto` one

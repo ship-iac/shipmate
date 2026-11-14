@@ -1801,8 +1801,8 @@ def _normalize_expr(value):
 
 def _run_name_finding(doc, name):
     """One finding when the file's `run-name` is missing or is not `RUN_NAME` once
-    `_normalize_expr`ed: `scripts/apply-queue` identifies a pull request's apply runs by the
-    title it renders."""
+    `_normalize_expr`ed: `scripts/apply-queue`, the `cell-lock` evict live-run check and
+    `scripts/dispatch-body`'s retry identify runs by the title it renders."""
     found = doc.get("run-name")
     if isinstance(found, str) and _normalize_expr(found) == _normalize_expr(RUN_NAME):
         return []
@@ -1811,10 +1811,13 @@ def _run_name_finding(doc, name):
             WARNING,
             (
                 f"`{name}`'s `run-name` is not the published one, so shipmate cannot identify "
-                "this pull request's apply runs: an apply run cancels none of them waiting at an "
-                "older head, and replies that it may wait behind another without naming it. "
-                "Re-pin the file with the engine's `scripts/repin` and its `--write-fence` "
-                "flag, after reading the diff it prints (docs/getting-started.md)."
+                "its runs by their titles. The apply queue cancels no apply run waiting at an "
+                "older head, and an apply run replies that it may wait behind another without "
+                "naming it. An `--evict` unlock refuses while a run with such a "
+                "title is live. A commented dispatch whose response was lost is retried, which "
+                "may start the command twice. Re-pin the file with the engine's `scripts/repin` "
+                "and its `--write-fence` flag, after reading the diff it prints "
+                "(docs/getting-started.md)."
             ),
         )
     ]

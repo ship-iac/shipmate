@@ -157,9 +157,11 @@ combining fourteen live probes.
     starts a plan the fence never routes.
   - Whether its `run-name` is the fence's, compared with whitespace collapsed
     outside quoted literals: inside `format`'s string a space is part of the
-    title. Without it shipmate cannot identify a pull request's apply runs, so
-    an apply run cancels no stale one and replies that it may wait behind
-    another without naming it. Re-pin the file with
+    title. Without it shipmate cannot identify its runs by their titles: an
+    apply run cancels no stale one and replies that it may wait behind another
+    without naming it, `shipmate unlock <env> --evict` refuses while a run with
+    such a title is live, and a commented dispatch whose response was lost is
+    retried, which may start the command twice. Re-pin the file with
     `python <engine>/scripts/repin <consumer> <tag> --write-fence`.
   - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
     runs on that file's triggers. Move the drift job to a workflow file of its
@@ -1126,8 +1128,9 @@ found, one per cause: ``#<h> has a live `<verb>` run: <url>``, `a live run whose
 shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
 merged: <cause>`, `#<h> merged, but its merge commit reads <value>, so its deploy
-run is unknown` or `could not list the deploy runs of #<h>'s merge commit
-<sha>`. Past 4,000 characters the reply keeps the header and the lines that
+run is unknown`, `could not list the deploy runs of #<h>'s merge commit
+<sha>`, `could not list the jobs of #<h>'s deploy run <url>` or `#<h>'s deploy
+run <url> has not started`. Past 4,000 characters the reply keeps the header and the lines that
 fit, then `and <n> more line(s); the run log names every one`; the run log has
 every line.
 
@@ -1135,7 +1138,9 @@ every line.
   holder's cells has not ended: an `apply` or `auto` run of #<h>, by anyone and
   in any environment (a run title names no environment), a `workflow_dispatch`
   run whose title is not a shipmate run title, which could be #<h>'s, or the
-  merge deploy of #<h> once it merged. Evicting under it would let that run
+  merge deploy of #<h> once it merged, until its `summary` job has completed,
+  no job but a `warm` leg is unfinished, and every job is listed from the run's
+  current attempt. Evicting under it would let that run
   apply, or save state, over this pull request's plan.
   A `could not` line, or the merge commit line, means a read the check needs
   failed or answered malformed, or a listing ran past ten pages.

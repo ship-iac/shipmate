@@ -82,6 +82,7 @@ from _shipmate import (
     holder_dispatch_runs,
     is_head_sha,
     is_run_id,
+    listed_jobs,
     live_push_runs,
     lock_wait_remedy,
     lock_who,
@@ -555,8 +556,9 @@ def _refuse_live_runs(repo, env, holders, run):
 
 def _deploy_runs(repo, holder, run):
     """The refusal lines for `holder`'s merge deploy, its pull request read fresh: one per live
-    deploy run of its merge commit, none while it is unmerged, and one when the read fails, the
-    merge commit is not a sha, or the listing is incomplete."""
+    deploy run of its merge commit that `_deploying` reads from its jobs, none while it is
+    unmerged, and one when the read fails, the merge commit is not a sha, or a runs or jobs
+    listing is incomplete."""
     try:
         pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
         merged, sha = pull["merged_at"] is not None, pull["merge_commit_sha"]
@@ -568,10 +570,41 @@ def _deploy_runs(repo, holder, run):
         return [
             f"#{holder} merged, but its merge commit reads {sha!r}, so its deploy run is unknown"
         ]
-    ids, complete = live_push_runs(repo, sha, run)
+    runs, complete = live_push_runs(repo, sha, run)
     if not complete:
         return [f"could not list the deploy runs of #{holder}'s merge commit {sha}"]
-    return [f"#{holder}'s deploy run is live: {current_run_url(str(i))}" for i in ids]
+    lines = (_deploy_line(repo, holder, i, attempt, run) for i, attempt in runs)
+    return [line for line in lines if line]
+
+
+def _deploy_line(repo, holder, run_id, attempt, run):
+    """The refusal line for `holder`'s live deploy run `run_id` on `attempt`, from its jobs, or
+    None once only `warm` legs remain (`_deploying`)."""
+    url = current_run_url(str(run_id))
+    jobs = listed_jobs(repo, run_id, run)
+    if jobs is None:
+        return f"could not list the jobs of #{holder}'s deploy run {url}"
+    if not jobs:
+        return f"#{holder}'s deploy run {url} has not started"
+    return f"#{holder}'s deploy run is live: {url}" if _deploying(jobs, attempt) else None
+
+
+def _deploying(jobs, attempt):
+    """Whether a deploy run on `attempt` listing `jobs` may still apply: until its `summary`,
+    which runs after every env-level, is listed `completed`; while any job but a `warm` leg is
+    not; and while a job is listed from another attempt (a re-run whose jobs are not all
+    listed yet). `warm` applies nothing, and a job blocked on `needs` may not be listed yet.
+    Names are matched after the first ` / `, so the consumer's job name does not matter."""
+    called = [(j["name"].partition(" / ")[2], j) for j in jobs]
+    return (
+        not any(name == "summary" and j["status"] == "completed" for name, j in called)
+        or any(j.get("run_attempt") != attempt for j in jobs)
+        or any(j["status"] != "completed" for name, j in called if not _warm(name))
+    )
+
+
+def _warm(name):
+    return name == "warm" or name.startswith("warm / ")
 
 
 def evict_stacks(names, env):

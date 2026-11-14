@@ -681,10 +681,10 @@ def holder_dispatch_runs(repo, holders, run=None):
 
 
 def live_push_runs(repo, sha, run=None):
-    """`(ids, complete)`: the ids of the `push` runs of `SHIPMATE_WORKFLOW` on commit `sha` not
-    listed `completed`, ascending, every page. `complete` is false, and `ids` empty, when a page
-    fails or is malformed or a run fails `_listed_run`. A page shift can skip a run, as in
-    `_live_dispatch_runs`."""
+    """`(runs, complete)`: `(id, run_attempt)` of each `push` run of `SHIPMATE_WORKFLOW` on
+    commit `sha` not listed `completed`, ascending, every page. `complete` is false, and `runs`
+    empty, when a page fails or is malformed, a run fails `_listed_run`, or a live run's
+    `run_attempt` is not an int. A page shift can skip a run, as in `_live_dispatch_runs`."""
     listed = _pages(
         f"repos/{repo}/actions/workflows/{SHIPMATE_WORKFLOW}/runs?event=push&head_sha={sha}",
         "workflow_runs",
@@ -692,20 +692,29 @@ def live_push_runs(repo, sha, run=None):
     )
     if listed is None or not all(map(_listed_run, listed)):
         return [], False
-    return sorted({r["id"] for r in listed if r.get("status") != "completed"}), True
+    live = [r for r in listed if r.get("status") != "completed"]
+    if not all(type(r.get("run_attempt")) is int for r in live):
+        return [], False
+    return sorted({(r["id"], r["run_attempt"]) for r in live}), True
+
+
+def listed_jobs(repo, run_id, run=None):
+    """Every job of run `run_id`'s latest attempt, each as the API returns it, possibly none; or
+    None when a page fails or is malformed or a job has no string `status` or `name`, so no
+    caller sees a partial listing."""
+    jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest", "jobs", run)
+    if jobs is None or not all(
+        isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs
+    ):
+        return None
+    return jobs
 
 
 def run_jobs(repo, run_id, run=None):
-    """`(jobs, complete)`: every job of run `run_id`'s latest attempt, each as the API returns
-    it, or `([], False)` when a page fails or is malformed, a job has no string `status` or
-    `name`, or the listing is empty: a live run that lists no job is not read as idle, and no
-    caller sees a partial listing."""
-    jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest", "jobs", run)
-    if not jobs or not all(
-        isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs
-    ):
-        return [], False
-    return jobs, True
+    """`(jobs, complete)`: `listed_jobs`, or `([], False)` when it is None or empty: a live run
+    that lists no job is not read as idle."""
+    jobs = listed_jobs(repo, run_id, run)
+    return (jobs, True) if jobs else ([], False)
 
 
 def validate_head_sha(value, source="SHIPMATE_HEAD_SHA", *, annotate=True):
