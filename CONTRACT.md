@@ -2358,9 +2358,9 @@ on the pull request to apply it.``
   `guard` job admits and this check refuses. A human's "Re-run all jobs" of an
   `auto` run makes the human its triggering actor, so the re-run refuses;
   comment `shipmate apply` instead. "Re-run failed jobs" keeps the passed
-  `detect`, so each wave cell's pre-apply check refuses any `auto` run attempt
-  but `1`: ``an auto apply is never re-run (run attempt '<n>'): comment
-  `shipmate apply` ``.
+  `detect`, so each wave cell's pre-apply check refuses any run attempt but
+  `1`, of an `auto` run as of any apply run (§Apply check lifecycle):
+  ``an apply is never re-run (run attempt '<n>'): comment `shipmate apply` ``.
 - **Mergeability.** With a pending cell in an `auto` environment neither held
   nor `targeted`, `detect` reads the pull request
   until GitHub reports `mergeable` as non-null, at most 12 reads 5 s apart.
