@@ -539,6 +539,24 @@ def test_write_retried_retries_a_transient_failure_and_waits_out_a_limit(sleeps)
     assert (len(calls), sleeps) == (3, [2, 60])
 
 
+def test_write_retried_does_not_wait_out_a_limit_raised_by_before_retry(sleeps):
+    """The write fails transiently; the read in `before_retry` hits the secondary limit. Only
+    the write call is waited out, so that read fails the write. Mutation: swap the nesting
+    (`create_retried(lambda: retried(fn, before_retry), before_retry=before_retry)`) -> a 60 s
+    sleep and a second call that returns `x`."""
+    calls, call = _failing(_BAD_GATEWAY)
+    hooks = []
+
+    def hook():
+        hooks.append(None)
+        if len(hooks) == 1:
+            raise SystemExit(_SECONDARY)
+
+    with pytest.raises(SystemExit) as exc:
+        write_retried(call, before_retry=hook)
+    assert (exc.value.code, len(calls), len(hooks), sleeps) == (_SECONDARY, 1, 1, [2])
+
+
 def test_retried_does_not_wait_out_a_rate_limit(sleeps):
     """A read outside the listed writes keeps `retried` alone. Mutation: wire `is_rate_limited`
     into `retried` (retry when `is_transient(e) or is_rate_limited(e)`) -> a second call."""

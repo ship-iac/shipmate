@@ -2770,10 +2770,9 @@ wait.
 - Before retrying, the plan `summary`'s apply-check creation and final gate
   write read the gate again and stop without writing when a newer plan run
   holds it; a `refresh` stops when any hold stands.
-- A `hold` or `deploy` write re-posts after the wait with no re-check. A newer
-  run's gate written during the wait can be overwritten by the hold. That fails
-  closed: the gate stays held until a re-plan (comment `shipmate plan` or push)
-  rewrites it.
+- `hold` and `deploy` re-post after a wait with no re-check: a hold can
+  overwrite a newer run's gate (a re-plan clears it), and a deploy verdict can
+  overwrite a hold on the merged head, where the gate no longer gates a merge.
 
 ### A deploy refused an apply check on a stack that lost its env tag
 
