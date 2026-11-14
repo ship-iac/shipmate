@@ -36,15 +36,13 @@ import json
 import os
 import sys
 
-from _shipmate import _load, deploy_mode, is_pr_number, run, run_annotated, write_retried
-
-ag = _load("apply-gate")
+from _shipmate import decoded, deploy_mode, is_pr_number, run, run_annotated, write_retried
 
 SUCCESS = {"status": "completed", "conclusion": "success"}
 
 
 def _record_title(check):
-    title = (ag._decoded(check) or {}).get("title")
+    title = (decoded(check) or {}).get("title")
     return title if isinstance(title, str) and title else None
 
 

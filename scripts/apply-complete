@@ -38,10 +38,11 @@ earlier wave, a cancel before it started) lists one row under its literal `${{
 matrix.environment }} / ${{ matrix.stack }}` name, since GitHub expands a matrix only for a job
 it starts, so its cells match nothing and are not run. That holds for every `skipped` wave; a
 `cancelled` wave may have started, so its missing cell is not run only when the listing shows
-that literal row under this job's own level (`SHIPMATE_JOB_ID`, this job's check run id, names
-the level). Any other missing cell, of a wave that ran (`success` or `failure`, or a result this
-script does not know), is a lost or lagging listing: it is retried, and after the retries the
-cell gets no write, so a stale listing never turns a completed `success` back to `queued`.
+that literal row, `cancelled`, under this job's own level (`SHIPMATE_JOB_ID`, this job's check
+run id, names the level) and lists no cell of the same wave. Any other missing cell, of a
+wave that ran (`success` or `failure`, or a result this script does not know), is a lost or
+lagging listing: it is retried, and after the retries the cell gets no write, so a stale
+listing never turns a completed `success` back to `queued`.
 """
 
 import json
@@ -88,17 +89,28 @@ def classify(by_wave, results, jobs, job_id=""):
     """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
     result, from the jobs listing `jobs` that holds this job, `job_id`: `unresolved` labels the
     cells with no row."""
-    not_run = {"skipped"} | ({"cancelled"} if unexpanded(jobs, job_id) else set())
+    literal = unexpanded(jobs, job_id)
     rows, unresolved = [], []
     for wave in sorted(results):
-        for check, ids in sorted((by_wave.get(wave) or {}).items()):
-            matched = [
-                j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))
-            ]
+        cells = [
+            (
+                check,
+                ids,
+                [j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))],
+            )
+            for check, ids in sorted((by_wave.get(wave) or {}).items())
+        ]
+        # An expanded matrix lists all its cells at once, so a cell missing beside a listed
+        # sibling is a lagging listing, not a wave that never started.
+        started = any(matched for _, _, matched in cells)
+        not_run = results[wave] == "skipped" or (
+            results[wave] == "cancelled" and literal and not started
+        )
+        for check, ids, matched in cells:
             won = next((j for j in matched if j.get("conclusion") == "success"), None)
             if won:
                 rows.append(_row(check, ids, won))
-            elif not matched and results[wave] in not_run:
+            elif not matched and not_run:
                 rows.append(_row(check, ids))
             elif not matched or any(j.get("conclusion") is None for j in matched):
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))

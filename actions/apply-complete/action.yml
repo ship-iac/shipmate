@@ -5,13 +5,13 @@ inputs:
     description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
     required: true
   wave-results:
-    description: JSON object mapping each wave key to write to the result of its wave job; a cell of a `skipped` or `cancelled` wave with no job is not run, and one of any other wave with no job is retried and then left unwritten.
+    description: JSON object mapping each wave key to write to the result of its wave job. A cell with no job is not run when its wave is `skipped`, or `cancelled` with the level's `cancelled` literal matrix row listed and none of that wave's cells listed; any other cell with no job is retried and then left unwritten.
     required: true
   job-id:
     description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
     required: true
   deploy:
-    description: "`true` on the merge deploy. Otherwise a re-run writes nothing, and a merged pull request gets only its success writes."
+    description: "`true` on the merge deploy. Otherwise a re-run writes only its `success` entries, and a merged pull request gets only its `success` writes."
     required: true
   pr-number:
     description: The pull request the run applies; read before a pre-merge write.

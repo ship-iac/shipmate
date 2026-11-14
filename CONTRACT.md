@@ -213,7 +213,7 @@ id refuses the run before wave0.
 | `success` | `completed` / `success`, linked to the cell's job, titled with the record's `title`. A check whose record has none, created before the record carried it, keeps its current title, so one retitled `Failed: ...` keeps that title after a later success |
 | `failure` | `queued`, titled `Failed: <first error line>`, linked to the cell's job |
 | `cancelled` | `queued`, titled `Cancelled` |
-| `skipped`, or no job in a wave that ended `skipped`, or in one that ended `cancelled` when the listing shows a `cancelled` literal `${{ matrix.environment }} / ${{ matrix.stack }}` row under the completion job's own level | `queued`, titled `Not run` |
+| `skipped`, or no job in a wave that ended `skipped`, or in one that ended `cancelled` when the listing shows a `cancelled` literal `${{ matrix.environment }} / ${{ matrix.stack }}` row under the completion job's own level and no cell of that wave | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
 | no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes, then no write; the job fails |
 
@@ -258,10 +258,12 @@ wave cell's pre-apply check refuses:
 Its release jobs write nothing, and its completion jobs write only `success`: a
 later run may have completed the same checks, and any other write would reopen
 them, but re-running a completion job can still complete a cell an earlier
-listing missed. A merge deploy's re-run is allowed. The release job is not
-re-run, so a retried cell applies while its check reads `queued` with the first
-attempt's title (`Failed: ...`), and the re-run's completion jobs and `complete`
-write its outcome.
+listing missed. A merge deploy's re-run is allowed. "Re-run failed jobs" re-runs
+the failed wave and its dependents: a later wave's release, skipped the first
+time, runs then and flips its checks. "Re-run all jobs" re-runs every release. A
+retried cell whose release is not re-run applies while its check reads `queued`
+with the first attempt's title (`Failed: ...`), and the re-run's completion jobs
+and `complete` write its outcome.
 
 **Dead runs.** `apply-snapshot`, `deploy-detect`, `apply-detect`,
 `unlock-detect` and the gate read any check that is not `completed` as pending,

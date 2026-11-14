@@ -359,6 +359,16 @@ def write_outputs(**pairs):
             fh.write(f"{name}={value}\n")
 
 
+def decoded(run):
+    """The object check run `run`'s `external_id` decodes to, or None when it is empty, not
+    JSON, or not an object. No JSONDecodeError escapes."""
+    try:
+        record = json.loads(run.get("external_id") or "")
+    except json.JSONDecodeError:
+        return None
+    return record if isinstance(record, dict) else None
+
+
 def deploy_mode():
     """Whether `SHIPMATE_DEPLOY` is `true` (a merge deploy); unset reads as `false`, and any
     other value, empty included, refuses."""

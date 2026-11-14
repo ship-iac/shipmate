@@ -789,3 +789,24 @@ def test_the_listing_step_reads_this_job_and_the_wave_results():
         "SHIPMATE_WAVE_RESULTS_JSON": "${{ inputs.wave-results }}",
         "SHIPMATE_JOB_ID": "${{ inputs.job-id }}",
     }
+
+
+def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_unresolved():
+    """A wave whose matrix expanded lists all its cells at once; the level's literal row is
+    wave2's, which never expanded. Mutation: drop the expanded-sibling condition -> wave1's
+    missing cell gets a `Not run` row."""
+    by_wave = {
+        "wave1": {APP: [2, 3], "apply / stacks/api / dev-eu": [5]},
+        "wave2": BY_WAVE["wave2"],
+    }
+    listed = job("L1 / dev-eu / stacks/api", "cancelled")
+    rows, unresolved = apply_complete.classify(
+        by_wave,
+        {"wave1": "cancelled", "wave2": "cancelled"},
+        [OWN, listed, job(SKIPPED_ROW, "cancelled")],
+        "900",
+    )
+    assert (rows, unresolved) == (
+        [row("apply / stacks/api / dev-eu", [5], listed), row(WEB, [4])],
+        ["stacks/app / dev-eu"],
+    )

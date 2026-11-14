@@ -29,7 +29,15 @@ import re
 import sys
 import urllib.parse
 
-from _shipmate import gh_json, is_head_sha, is_pr_number, is_run_id, retried, run_annotated
+from _shipmate import (
+    decoded,
+    gh_json,
+    is_head_sha,
+    is_pr_number,
+    is_run_id,
+    retried,
+    run_annotated,
+)
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
@@ -213,7 +221,7 @@ def plan_actions(check_run_lines, app_id):
 def _newest_records(check_run_lines, app_id):
     """`(name, decoded record)` of each App-authored apply check whose newest run carries one."""
     for name, run in latest_by_name(app_runs(check_run_lines, app_id)).items():
-        record = _decoded(run)
+        record = decoded(run)
         if record is not None:
             yield name, record
 
@@ -245,7 +253,7 @@ def incomplete_runs(check_run_lines, app_id):
     for run in app_runs(check_run_lines, app_id):
         if not run["name"].startswith(APPLY_PREFIX):
             continue
-        record = _decoded(run)
+        record = decoded(run)
         plan_run = _plan_run(record) if record is not None else None
         if plan_run is None:
             continue
@@ -262,16 +270,6 @@ def incomplete_runs(check_run_lines, app_id):
         for run, named in names.items()
         if counts[run] != {len(named)}
     }
-
-
-def _decoded(run):
-    """The object `run`'s `external_id` decodes to, or None when it is empty, not JSON, or not
-    an object. No JSONDecodeError escapes."""
-    try:
-        record = json.loads(run.get("external_id") or "")
-    except json.JSONDecodeError:
-        return None
-    return record if isinstance(record, dict) else None
 
 
 def _plan_run(record):
