@@ -2,7 +2,7 @@
 """Complete App-authored apply checks: `patch-checks`, no arguments.
 
 Reads check-run ids on stdin, one per line (blank lines skipped), and PATCHes each with `BODY`
-through `retried` inside `rate_limited`, the body on gh's stdin. `GH_TOKEN` and
+through `write_retried`, the body on gh's stdin. `GH_TOKEN` and
 `GITHUB_REPOSITORY` come from the environment. Stdout carries only the ids PATCHed, one per line
 as each is acknowledged, for the step log only: nothing reads them. Every diagnostic goes to
 stderr.
@@ -20,7 +20,7 @@ import json
 import os
 import sys
 
-from _shipmate import rate_limited, retried, run, run_annotated
+from _shipmate import run, run_annotated, write_retried
 
 # Never `output`: a PATCH carrying it replaces the plan text on the check.
 BODY = {"status": "completed", "conclusion": "success"}
@@ -34,7 +34,7 @@ def main(argv=()):
     for cid in [line.strip() for line in sys.stdin if line.strip()]:
         args = ["gh", "api", "-X", "PATCH", f"repos/{repo}/check-runs/{cid}", "--input", "-"]
         try:
-            rate_limited(functools.partial(retried, functools.partial(run, args, stdin=body)))
+            write_retried(functools.partial(run, args, stdin=body))
         except SystemExit as exc:
             raise SystemExit(f"::error::failed to complete apply check {cid}\n{exc.code}") from None
         print(cid, flush=True)

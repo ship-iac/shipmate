@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Create App-authored apply checks: `create-checks <sha>`.
 
-Reads check-run bodies on stdin, one JSON object per line (blank lines skipped), and POSTs each to
-`repos/<GITHUB_REPOSITORY>/check-runs` through `rate_limited`, the body on gh's stdin. Before each
-rate-limited retry it runs `gate-status refuse-newer <sha>`, so a newer run's hold stops the loop
-with `NEWER` and a failed read exits 1. A transient failure is not retried: a POST that landed
-and still failed would create a duplicate check. `GH_TOKEN`, `GITHUB_REPOSITORY`,
+Reads check-run bodies on stdin, one JSON object per line (blank lines skipped), and POSTs each
+to `repos/<GITHUB_REPOSITORY>/check-runs` through `create_retried`, the body on gh's stdin.
+Before each rate-limited retry it runs `gate-status refuse-newer <sha>`, so a newer run's hold
+stops the loop with `NEWER` and a failed read exits 1. A transient failure is not retried: a POST
+that landed and still failed would create a duplicate check. `GH_TOKEN`, `GITHUB_REPOSITORY`,
 `GITHUB_RUN_ID` and `SHIPMATE_APP_SLUG` come from the environment.
 
 Fails closed, because the gate's work queue is the pending checks: the first body that still
@@ -17,7 +17,7 @@ import functools
 import os
 import sys
 
-from _shipmate import _load, rate_limited, run, run_annotated, validate_head_sha
+from _shipmate import _load, create_retried, run, run_annotated, validate_head_sha
 
 gs = _load("gate-status")
 
@@ -29,7 +29,7 @@ def main(argv):
     validate_head_sha(sha, "head SHA")
     args = ["gh", "api", f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", "--input", "-"]
     for body in [line.strip() for line in sys.stdin if line.strip()]:
-        rate_limited(
+        create_retried(
             functools.partial(run, args, stdin=body), before_retry=lambda: gs._refuse_newer(sha)
         )
 

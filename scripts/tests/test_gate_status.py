@@ -1199,8 +1199,8 @@ _HOLD = ["gh", *_status_argv("failure", "the reason")]
 def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, command, expected):
     """The first write hits the secondary limit; `post` re-runs `refuse-newer` before its retry,
     `hold` and `deploy` re-check nothing. Mutations, each run: `post` writes through `retried`
-    alone (drop `rate_limited`) -> the 403 raises; drop `before_retry=` from `post`'s
-    `rate_limited` -> the `post` case loses its reads."""
+    instead of `write_retried` -> the 403 raises; drop `before_retry=` from `post`'s
+    `write_retried` -> the `post` case loses its reads."""
     calls = []
 
     def run(args):
@@ -1222,7 +1222,7 @@ def test_refresh_stops_when_a_hold_lands_while_it_waits_out_a_rate_limit(
     in_process, monkeypatch, capsys
 ):
     """Read pending, the green POST hits the secondary limit, the re-read after the wait finds a
-    hold. Mutation: drop `before_retry=` from `post`'s `rate_limited` -> the second POST greens
+    hold. Mutation: drop `before_retry=` from `post`'s `write_retried` -> the second POST greens
     over the hold."""
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setattr(gs, "check_runs", lambda *_: DONE)
@@ -1248,3 +1248,30 @@ def test_refresh_stops_when_a_hold_lands_while_it_waits_out_a_rate_limit(
         [60],
     )
     assert capsys.readouterr().out == HELD
+
+
+def test_a_rate_limited_refuse_newer_read_is_not_waited_out_as_the_write(in_process, monkeypatch):
+    """The gate POST fails transiently; the `refuse-newer` statuses read before its retry hits
+    the secondary limit. That read fails the write at once instead of a 60 s wait and a re-post.
+    Mutation: `write_retried` wraps `retried` inside the rate-limit wait
+    (`create_retried(lambda: retried(fn, before_retry), before_retry=before_retry)`) -> a 60 s
+    sleep and a second POST."""
+    calls = []
+    limited = (
+        f"::error::command failed (1): gh {' '.join(STATUSES_ARGV)}\n" + _SECONDARY.split("\n")[1]
+    )
+
+    def run(args):
+        calls.append(args)
+        if args == _USER:
+            return GATE_USER
+        if args == _READ and calls.count(_READ) == 1:
+            raise SystemExit(limited)
+        if calls.count(args) == 1:
+            raise SystemExit(f"::error::{_BAD_GATEWAY}")
+        return "{}"
+
+    monkeypatch.setattr(gs, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        gs.main(["post", SHA, "pending", "the reason"])
+    assert (exc.value.code, calls, in_process) == (limited, [_POST, _USER, _READ], [2])

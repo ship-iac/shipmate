@@ -1,6 +1,6 @@
 """Suite-wide hooks: the `bash_only` marker, whose bash probe runs only when a marked test does,
 a `_shipmate._sleep` that fails any test reaching a retry without patching it, and a fresh
-`rate_limited` budget per test."""
+rate-limit wait budget per test."""
 
 import _shipmate
 import pytest

@@ -59,11 +59,11 @@ from _shipmate import (
     is_run_id,
     one_line,
     pr_head,
-    rate_limited,
     retried,
     run,
     run_annotated,
     validate_head_sha,
+    write_retried,
 )
 
 ag = _load("apply-gate")
@@ -193,9 +193,8 @@ def _refuse_held(sha):
 
 
 def post(sha, state, description, before_retry=None):
-    """Write the gate; a transient failure retries through `retried` and a secondary rate limit
-    through `rate_limited`, `before_retry` with each. A repeated POST of a status that landed
-    only adds an identical history entry.
+    """Write the gate through `write_retried`, `before_retry` before each retry. A repeated POST
+    of a status that landed only adds an identical history entry.
 
     Known ceiling: a retry re-posts over a hold its `before_retry` does not see, as a first POST
     already can over one written just before it (`gate-hold` writes outside the gate group). The
@@ -217,7 +216,7 @@ def post(sha, state, description, before_retry=None):
         "-f",
         f"target_url={current_run_url()}",
     ]
-    rate_limited(lambda: retried(lambda: _run(args), before_retry), before_retry=before_retry)
+    write_retried(lambda: _run(args), before_retry=before_retry)
 
 
 def refresh(sha):

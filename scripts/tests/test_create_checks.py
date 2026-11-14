@@ -1,4 +1,4 @@
-"""`scripts/create-checks`: the summary's apply-check POSTs, retried through `rate_limited` with
+"""`scripts/create-checks`: the summary's apply-check POSTs, retried through `create_retried` with
 `gate-status refuse-newer` before each retry. In process, because a child process would sleep
 the real 60 s."""
 
@@ -76,7 +76,7 @@ def test_each_body_is_posted_in_order_with_blank_lines_skipped(monkeypatch, gh):
 
 
 def test_a_secondary_rate_limit_runs_refuse_newer_then_posts_again(monkeypatch, capsys, gh):
-    """Mutations, each run: POST through `run` alone (no `rate_limited`) -> the 403 raises; drop
+    """Mutations, each run: POST through `run` alone (no `create_retried`) -> the 403 raises; drop
     `before_retry=` -> no statuses read before the second POST."""
     gh["fail"].append(_SECONDARY)
     _main(monkeypatch, '{"name": "a"}\n')
@@ -136,3 +136,19 @@ def test_the_summary_publishes_apply_checks_through_create_checks():
         f'python3 {script}/gate-status" refuse-newer "$SHIPMATE_HEAD_SHA" || exit 1',
         f'python3 {script}/create-checks" "$SHIPMATE_HEAD_SHA" < bodies.jsonl',
     ]
+
+
+def test_a_transient_failure_posts_once_and_fails(monkeypatch, gh):
+    """A POST that failed transiently may have landed, so a retry could duplicate the check.
+    Mutation: wrap the POST in `retried` inside `create_retried` -> a second POST."""
+    gh["fail"].append("gh: Bad Gateway (HTTP 502)")
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, '{"name": "a"}\n')
+    assert (exc.value.code, gh["calls"], gh["slept"]) == (
+        (
+            "command failed (1): gh api repos/acme/demo/check-runs --input -\n"
+            "gh: Bad Gateway (HTTP 502)"
+        ),
+        [(_POST, '{"name": "a"}')],
+        [],
+    )

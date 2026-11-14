@@ -224,28 +224,28 @@ def retried(call, before_retry=None):
 #: The wait before a rate-limited retry: gh's stderr carries no `Retry-After` header, and GitHub
 #: sent `Retry-After: 60` on a probed secondary-limit 403.
 RATE_LIMIT_WAIT = 60
-#: The waits one process may spend across all its `rate_limited` writes.
+#: The waits one process may spend across all its `create_retried` and `write_retried` writes.
 RATE_LIMIT_WAITS = 3
 _rate_limit_waits = 0
 
 
 def is_rate_limited(exc):
-    """True when `exc`, a `SystemExit`, carries GitHub's secondary rate limit under its first
-    line (that line is the argv, which can carry a consumer's text): `HTTP 429`, or `HTTP 403`
-    with `secondary rate limit`. A primary-limit 403 (`API rate limit exceeded`) does not match."""
+    """True when `exc`, a `SystemExit`, carries `secondary rate limit` under its first line (that
+    line is the argv, which can carry a consumer's text), whatever the status. A bare `HTTP 429`
+    and a primary-limit `API rate limit exceeded` do not match."""
     if not isinstance(exc.code, str):
         return False
-    stderr = "\n".join(exc.code.splitlines()[1:])
-    return "HTTP 429" in stderr or ("HTTP 403" in stderr and "secondary rate limit" in stderr)
+    return "secondary rate limit" in "\n".join(exc.code.splitlines()[1:])
 
 
-def rate_limited(fn, *, before_retry=None):
-    """`fn()`, called again `RATE_LIMIT_WAIT` seconds after each failure that GitHub's secondary
-    rate limit caused (`is_rate_limited`), each wait noted as one `::notice::` on stderr.
-    `before_retry`, when given, runs after each wait and may raise to stop. The waits draw on one
-    budget of `RATE_LIMIT_WAITS` per process, not per write; a failure once it is spent, and any
-    other `SystemExit`, re-raises unchanged. A 403 or 429 creates nothing, so a retried POST
-    cannot duplicate. Wrap `retried` inside it for transient failures."""
+def create_retried(fn, *, before_retry=None):
+    """`fn()`, a POST that creates, called again `RATE_LIMIT_WAIT` seconds after each failure that
+    GitHub's secondary rate limit caused (`is_rate_limited`), each wait noted as one `::notice::`
+    on stderr. A refused write created nothing, so the retry cannot duplicate; a transient
+    failure is never retried, because that write may have landed. `before_retry`, when given,
+    runs after each wait and may raise to stop. The waits draw on one budget of
+    `RATE_LIMIT_WAITS` per process, not per write; a failure once it is spent, and any other
+    `SystemExit`, re-raises unchanged."""
     global _rate_limit_waits
     while True:
         try:
@@ -261,6 +261,14 @@ def rate_limited(fn, *, before_retry=None):
         _sleep(RATE_LIMIT_WAIT)
         if before_retry:
             before_retry()
+
+
+def write_retried(fn, *, before_retry=None):
+    """`fn()`, a write that may be repeated, through `retried` for a transient failure, each
+    attempt through `create_retried` for the secondary rate limit, `before_retry` with both. The
+    rate-limit wait covers the write call only: a rate-limited read inside `before_retry` fails
+    the write instead of being waited out as it."""
+    return retried(lambda: create_retried(fn, before_retry=before_retry), before_retry)
 
 
 def command_data(s):

@@ -127,7 +127,7 @@ _SECONDARY = "gh: You have exceeded a secondary rate limit. (HTTP 403)"
 
 
 def test_a_secondary_rate_limit_waits_60_s_and_completes(monkeypatch, capsys, calls):
-    """Mutation: PATCH through `retried` alone (drop `rate_limited`) -> the 403 fails the loop."""
+    """Mutation: PATCH through `retried` instead of `write_retried` -> the 403 fails the loop."""
     recorded, fail = calls
     slept = []
     fail["1"] = _SECONDARY

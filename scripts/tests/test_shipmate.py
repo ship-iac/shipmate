@@ -14,6 +14,7 @@ from _shipmate import (
     check_runs,
     command_data,
     command_property,
+    create_retried,
     event_action,
     event_payload,
     gate_check,
@@ -23,13 +24,13 @@ from _shipmate import (
     is_transient,
     named,
     pr_head,
-    rate_limited,
     retried,
     review_count,
     run,
     run_annotated,
     utf8_output,
     validate_head_sha,
+    write_retried,
 )
 
 
@@ -427,8 +428,9 @@ _SECONDARY = (
     "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try "
     "again. (HTTP 403)"
 )
-_TOO_MANY = (
-    "::error::command failed (1): gh api repos/o/r/statuses/x\ngh: Too Many Requests (HTTP 429)"
+_SECONDARY_429 = (
+    "::error::command failed (1): gh api repos/o/r/statuses/x\n"
+    "gh: You have exceeded a secondary rate limit. (HTTP 429)"
 )
 _WAIT_NOTICE = (
     "::notice::waiting 60 s for GitHub's secondary rate limit, then retrying: "
@@ -436,13 +438,12 @@ _WAIT_NOTICE = (
 )
 
 
-@pytest.mark.parametrize("message", [_SECONDARY, _TOO_MANY], ids=["403-secondary", "429"])
-def test_rate_limited_waits_60_s_and_calls_again(message, sleeps, capsys):
-    """Mutations, each run: drop the `HTTP 429` test -> the 429 re-raises; drop the 403 test ->
-    the 403 re-raises; `RATE_LIMIT_WAIT = 30` -> the sleep differs; write the notice to stdout ->
-    the streams swap."""
+@pytest.mark.parametrize("message", [_SECONDARY, _SECONDARY_429], ids=["403", "429"])
+def test_create_retried_waits_60_s_on_a_secondary_limit(message, sleeps, capsys):
+    """Mutations, each run: `is_rate_limited` returns False -> both re-raise; `RATE_LIMIT_WAIT =
+    30` -> the sleep differs; write the notice to stdout -> the streams swap."""
     calls, call = _failing(message)
-    assert rate_limited(call) == "x"
+    assert create_retried(call) == "x"
     assert (len(calls), sleeps, capsys.readouterr()) == (2, [60], ("", _WAIT_NOTICE))
 
 
@@ -451,32 +452,45 @@ def test_rate_limited_waits_60_s_and_calls_again(message, sleeps, capsys):
     [
         "gh: Resource not accessible by integration (HTTP 403)",
         "gh: API rate limit exceeded for installation ID 1. (HTTP 403)",
+        "gh: API rate limit exceeded for installation ID 1. (HTTP 429)",
+        "gh: Too Many Requests (HTTP 429)",
     ],
-    ids=["permission", "primary-limit"],
+    ids=["permission-403", "primary-403", "primary-429", "bare-429"],
 )
-def test_rate_limited_re_raises_any_other_403_at_once(stderr, sleeps, capsys):
-    """Mutation: treat any 403 as rate-limited (drop `and "secondary rate limit" in stderr`) ->
-    a second call and a 60 s sleep."""
+def test_create_retried_re_raises_any_other_limit_or_403_at_once(stderr, sleeps, capsys):
+    """Mutations, each run: match any 429 (`or "HTTP 429" in ...`) -> the two 429 cases wait;
+    match any 403 -> the two 403 cases wait."""
     message = f"::error::command failed (1): gh api x\n{stderr}"
     calls, call = _failing(message)
     with pytest.raises(SystemExit) as exc:
-        rate_limited(call)
+        create_retried(call)
     assert (exc.value.code, len(calls), sleeps, capsys.readouterr()) == (message, 1, [], ("", ""))
 
 
-def test_rate_limited_ignores_limit_text_in_the_argv_line(sleeps):
+def test_create_retried_ignores_limit_text_in_the_argv_line(sleeps):
     """A gate description is consumer text on the argv line. Mutation: search the whole message
     in `is_rate_limited` -> a second call."""
     message = (
-        "::error::command failed (1): gh api x -f description=HTTP 429\ngh: Not Found (HTTP 404)"
+        "::error::command failed (1): gh api x -f description=secondary rate limit\n"
+        "gh: Not Found (HTTP 404)"
     )
     calls, call = _failing(message)
     with pytest.raises(SystemExit) as exc:
-        rate_limited(call)
+        create_retried(call)
     assert (exc.value.code, len(calls), sleeps) == (message, 1, [])
 
 
-def test_rate_limited_runs_before_retry_after_each_wait(monkeypatch):
+def test_create_retried_does_not_retry_a_transient_failure(sleeps):
+    """A POST that failed transiently may have landed. Mutation: route `create_retried` through
+    `retried` -> a second call and a 2 s sleep."""
+    message = "::error::command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)"
+    calls, call = _failing(message)
+    with pytest.raises(SystemExit) as exc:
+        create_retried(call)
+    assert (exc.value.code, len(calls), sleeps) == (message, 1, [])
+
+
+def test_create_retried_runs_before_retry_after_each_wait(monkeypatch):
     """Mutations, each run: skip `before_retry` -> no hook entries; run it before the sleep ->
     the order differs."""
     log = []
@@ -488,11 +502,11 @@ def test_rate_limited_runs_before_retry_after_each_wait(monkeypatch):
         return "x"
 
     monkeypatch.setattr("_shipmate._sleep", lambda s: log.append(f"sleep {s}"))
-    assert rate_limited(call, before_retry=lambda: log.append("hook")) == "x"
+    assert create_retried(call, before_retry=lambda: log.append("hook")) == "x"
     assert log == ["call", "sleep 60", "hook", "call", "sleep 60", "hook", "call"]
 
 
-def test_rate_limited_stops_when_before_retry_raises(sleeps):
+def test_create_retried_stops_when_before_retry_raises(sleeps):
     """`gate-status refuse-newer`'s `NEWER` exit carries an int code. Mutation: swallow a
     `SystemExit` from `before_retry` -> a second call returns `x`."""
     calls, call = _failing(_SECONDARY)
@@ -501,18 +515,28 @@ def test_rate_limited_stops_when_before_retry_raises(sleeps):
         raise SystemExit(4)
 
     with pytest.raises(SystemExit) as exc:
-        rate_limited(call, before_retry=refuse)
+        create_retried(call, before_retry=refuse)
     assert (exc.value.code, len(calls), sleeps) == (4, 1, [60])
 
 
-def test_rate_limited_budget_is_per_process_not_per_write(sleeps):
-    """Four writes each rate-limited once: three wait, the fourth re-raises. Mutation: a
-    per-write budget (a local counter in `rate_limited`) -> the fourth waits and returns `x`."""
-    results = [rate_limited(_failing(_SECONDARY)[1]) for _ in range(3)]
+def test_the_wait_budget_is_per_process_not_per_write(sleeps):
+    """Four writes each rate-limited once, through both helpers: three wait, the fourth re-raises.
+    Mutation: a per-write budget (a local counter in `create_retried`) -> the fourth waits and
+    returns `x`."""
+    results = [create_retried(_failing(_SECONDARY)[1]) for _ in range(2)]
+    results.append(write_retried(_failing(_SECONDARY)[1]))
     calls, call = _failing(_SECONDARY)
     with pytest.raises(SystemExit) as exc:
-        rate_limited(call)
+        write_retried(call)
     assert (results, exc.value.code, len(calls), sleeps) == (["x"] * 3, _SECONDARY, 1, [60] * 3)
+
+
+def test_write_retried_retries_a_transient_failure_and_waits_out_a_limit(sleeps):
+    """Mutations, each run: drop `retried` from `write_retried` -> the 502 raises; drop
+    `create_retried` -> the limit raises."""
+    calls, call = _failing(_BAD_GATEWAY, _SECONDARY)
+    assert write_retried(call) == "x"
+    assert (len(calls), sleeps) == (3, [2, 60])
 
 
 def test_retried_does_not_wait_out_a_rate_limit(sleeps):
