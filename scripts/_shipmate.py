@@ -386,31 +386,33 @@ def lock_who(holder: int | None) -> str:
 def lock_wait_remedy(who: str, env: str) -> str:
     """What frees a cell lock `who` (`lock_who`'s text for a known holder) holds in `env`, with no
     final period: a holder that merged or closed and kept its lock, as a refused deploy does, is
-    evicted once its apply and deploy runs have ended (the eviction refuses while one is live)."""
+    evicted once its apply, auto and deploy runs have ended (the eviction refuses while one is
+    live)."""
     return (
         f"wait for {who} to merge or close, then re-plan. If {who} has already merged or closed, "
-        f"comment `shipmate unlock {env} --evict` once {who}'s apply and deploy runs have ended"
+        f"comment `shipmate unlock {env} --evict` once {who}'s apply, auto and deploy runs have "
+        "ended"
     )
 
 
-def _joined(names):
+def joined_names(names):
+    """`names` as `<a>`, `<a> and <b>` or `<a>, <b> and <c>`."""
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def known_holders(holders):
-    """`holders`' pull requests as `#<a>, #<b> and #<c>`, ascending, or None when none is known:
+    """The known pull requests of `holders` as `#<n>`, ascending, without an unknown one (None):
     only a known holder's runs are checked before an eviction."""
-    known = sorted(h for h in set(holders) if h is not None)
-    return _joined([lock_who(h) for h in known]) if known else None
+    return [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
 
 
 def evict_release(holders, env_name: str, subject: str) -> str:
     """`release the locks <who> hold(s); applying <subject> after that may overwrite what <who>
     applied to <env_name>`, naming `holders` known ascending, then an unknown one (None)."""
-    names = [lock_who(h) for h in sorted(h for h in set(holders) if h is not None)]
+    names = known_holders(holders)
     if None in holders:
         names.append(lock_who(None))
-    who = _joined(names)
+    who = joined_names(names)
     hold, applied = ("holds", who) if len(names) == 1 else ("hold", "they")
     return (
         f"release the locks {who} {hold}; applying {subject} after that may overwrite what "
@@ -425,14 +427,18 @@ def deploy_lock_remedy(holders, stacks: str) -> str:
     """What frees the cell locks `holders`, `(holder, env)` pairs (holder None: unknown), that
     refuse a merge deploy, with no final period: a new pull request changing `stacks`, one
     eviction sentence per environment (`evict_release`), each naming the wait for its known
-    holders' apply and deploy runs (`known_holders`), then its apply."""
+    holders' apply, auto and deploy runs (`known_holders`), then its apply."""
     by_env = {}
     for holder, env in holders:
         by_env.setdefault(env, []).append(holder)
 
     def wait(hs):
         known = known_holders(hs)
-        return f", and for the apply and deploy runs of {known} to end," if known else ""
+        return (
+            f", and for the apply, auto and deploy runs of {joined_names(known)} to end,"
+            if known
+            else ""
+        )
 
     steps = " ".join(
         f"Comment `shipmate unlock {env} --evict` on it to {evict_release(hs, env, 'it')}. The "
@@ -540,7 +546,7 @@ def parse_run_title(title):
 
 
 #: The consumer's workflow every comment dispatch targets and every merge deploy runs in.
-FENCE_WORKFLOW = "shipmate.yml"
+SHIPMATE_WORKFLOW = "shipmate.yml"
 #: What a failed or malformed API read raises: `gh_json`'s refusal, then a missing or mistyped
 #: field of its answer.
 READ_ERRORS = (SystemExit, LookupError, TypeError, ValueError, AttributeError)
@@ -649,13 +655,13 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
 
 
 def holder_dispatch_runs(repo, holders, run=None):
-    """`(runs, complete)`: each live `workflow_dispatch` run of `FENCE_WORKFLOW` that
+    """`(runs, complete)`: each live `workflow_dispatch` run of `SHIPMATE_WORKFLOW` that
     may apply a cell of one of `holders` (pull request numbers), any actor: an `apply` or `auto`
     run titled for one, as `{id, verb, holder}`, and a run whose title does not parse, as
     `{id, verb: None, holder: None}`, since it may be one. A run listed `completed` has ended;
     any other status, a non-string one included, is live. `complete` is
     `_live_dispatch_runs`'."""
-    listed, complete = _live_dispatch_runs(repo, FENCE_WORKFLOW, run)
+    listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW, run)
     runs = []
     for r in listed:
         if r.get("status") == "completed":
@@ -669,12 +675,12 @@ def holder_dispatch_runs(repo, holders, run=None):
 
 
 def live_push_runs(repo, sha, run=None):
-    """`(ids, complete)`: the ids of the `push` runs of `FENCE_WORKFLOW` on commit `sha` not
+    """`(ids, complete)`: the ids of the `push` runs of `SHIPMATE_WORKFLOW` on commit `sha` not
     listed `completed`, ascending, every page. `complete` is false, and `ids` empty, when a page
     fails or is malformed or a run fails `_listed_run`. A page shift can skip a run, as in
     `_live_dispatch_runs`."""
     listed = _pages(
-        f"repos/{repo}/actions/workflows/{FENCE_WORKFLOW}/runs?event=push&head_sha={sha}",
+        f"repos/{repo}/actions/workflows/{SHIPMATE_WORKFLOW}/runs?event=push&head_sha={sha}",
         "workflow_runs",
         run,
     )

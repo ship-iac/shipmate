@@ -17,11 +17,13 @@ from _shipmate import (
     create_retried,
     event_action,
     event_payload,
+    evict_release,
     gate_check,
     gh_json,
     is_head_sha,
     is_pr_number,
     is_transient,
+    known_holders,
     named,
     pr_head,
     retried,
@@ -895,3 +897,13 @@ def test_the_go_transport_errors_are_transient(stderr, transient):
     exceeded`, `GOAWAY` -> its row; drop the `$` anchor -> `eof-mid-line`."""
     exc = SystemExit(f"::error::command failed (1): gh api x\n{stderr}")
     assert is_transient(exc) is transient
+
+
+def test_known_holders_names_the_known_ones_ascending_and_evict_release_appends_the_unknown():
+    """`evict_release` and both run waits name holders through `known_holders`. Mutations: drop
+    its `sorted` -- red; keep the unknown holder (`if h is not None` dropped) -- red."""
+    assert known_holders([12, None, 5, 12]) == ["#5", "#12"]
+    assert evict_release([12, None, 5], "dev", "it") == (
+        "release the locks #5, #12 and an unknown holder hold; applying it after that may "
+        "overwrite what they applied to dev"
+    )

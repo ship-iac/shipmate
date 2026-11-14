@@ -270,7 +270,7 @@ def test_another_pull_request_refuses_naming_it_and_rolls_back_this_calls_create
     assert exc.value.code == (
         "::error::`dev` / `stacks/auth` is locked by #12; wait for #12 to merge or close, then "
         "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict` once "
-        "#12's apply and deploy runs have ended"
+        "#12's apply, auto and deploy runs have ended"
     )
     assert gh.drained()
 
@@ -479,7 +479,7 @@ HELD = "d" * 40
 DNS_REFUSAL = (
     "::error::`dev` / `stacks/dns` is locked by #12; wait for #12 to merge or close, then "
     "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict` once "
-    "#12's apply and deploy runs have ended"
+    "#12's apply, auto and deploy runs have ended"
 )
 
 
@@ -1505,7 +1505,7 @@ def _refused(monkeypatch, tmp_path, gh):
 
 _LIVE = (
     "::error::no cell lock in dev was released: a holder's run may still apply, or the check "
-    "could not tell. Wait for any run below to end, then comment again."
+    "could not tell. Wait for each run below to end, then comment again."
 )
 _URL = f"https://github.com/{REPO}/actions/runs"
 
@@ -2135,7 +2135,7 @@ HELD_BY_9 = (
     "`shipmate unlock dev --evict` on it to release the locks #9 holds; applying it after that "
     "may overwrite what #9 applied to dev. The eviction releases only locks on the new pull "
     "request's pending cells in dev, any holder's, so wait for any holder still open to merge or "
-    "close, and for the apply and deploy runs of #9 to end, first. Then apply it"
+    "close, and for the apply, auto and deploy runs of #9 to end, first. Then apply it"
 )
 
 
@@ -2187,7 +2187,7 @@ def test_verify_deploy_names_the_cells_environment(monkeypatch, tmp_path):
         "`shipmate unlock prod --evict` on it to release the locks #9 holds; applying it after "
         "that may overwrite what #9 applied to prod. The eviction releases only locks on the new "
         "pull request's pending cells in prod, any holder's, so wait for any holder still open to "
-        "merge or close, and for the apply and deploy runs of #9 to end, first. Then apply it"
+        "merge or close, and for the apply, auto and deploy runs of #9 to end, first. Then apply it"
     )
 
 
@@ -2195,7 +2195,8 @@ def test_lock_wait_remedy_names_the_evict_for_a_merged_or_closed_holder():
     """Mutations: drop the merged-or-closed sentence -- red; drop the run wait -- red."""
     assert _shipmate.lock_wait_remedy("#12", "dev&lt;1") == (
         "wait for #12 to merge or close, then re-plan. If #12 has already merged or closed, "
-        "comment `shipmate unlock dev&lt;1 --evict` once #12's apply and deploy runs have ended"
+        "comment `shipmate unlock dev&lt;1 --evict` once #12's apply, auto and deploy runs have "
+        "ended"
     )
 
 

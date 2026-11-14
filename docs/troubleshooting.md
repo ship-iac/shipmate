@@ -915,10 +915,10 @@ Two locks this verb does not reach:
 The apply result comment carries
 ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close, then re-plan. If
 #<n> has already merged or closed, comment `shipmate unlock <env> --evict` once
-#<n>'s apply and deploy runs have ended.``, the plan comment ends a cell's line with `🔒 locked by #<n>`, or the apply run's
+#<n>'s apply, auto and deploy runs have ended.``, the plan comment ends a cell's line with `🔒 locked by #<n>`, or the apply run's
 `lock` job fails with `` `<env>` / `<stack>` is locked by #<n>; wait for #<n> to
 merge or close, then re-plan. If #<n> has already merged or closed, comment
-`shipmate unlock <env> --evict` once #<n>'s apply and deploy runs have ended ``,
+`shipmate unlock <env> --evict` once #<n>'s apply, auto and deploy runs have ended ``,
 or an apply cell
 fails with `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no
 longer holds its cell lock (<why>) ``.
@@ -935,7 +935,7 @@ nothing.
   push) and apply: #<n>'s apply may have changed what your plan was made
   against.
 - When #<n> has already merged or closed and kept the lock (§A cell stays
-  locked after its pull request closed), wait for #<n>'s apply and deploy runs
+  locked after its pull request closed), wait for #<n>'s apply, auto and deploy runs
   to end, then comment `shipmate unlock <env> --evict` on this pull request,
   with write access. It
   releases the locks other pull requests hold on the cells in `<env>` whose
@@ -1086,7 +1086,7 @@ before any lock or pull request read, and releases nothing; comment again.
 The reply reads ``🔴 failed: could not evict the cell locks in `<env>`. This
 run's log has the error; comment again.``, with `` no cell lock in <env> was
 released: a holder's run may still apply, or the check could not tell. Wait for
-any run below to end, then comment again. `` fenced, followed by every line
+each run below to end, then comment again. `` fenced, followed by every line
 found, one per cause: ``#<h> has a live `<verb>` run: <url>``, `a live run whose title is not a
 shipmate title may be a holder's: <url>`, `#<h>'s deploy run is live: <url>`,
 `could not list the live runs of shipmate.yml`, `could not tell whether #<h> has
@@ -1105,7 +1105,7 @@ run is unknown` or `could not list the deploy runs of #<h>'s merge commit
 - Effect: Nothing is released and no holder is told.
 - Remedy: Wait for each linked run to end, or cancel it if it should not
   apply, then comment `shipmate unlock <env> --evict` again; for a `could not`
-  line, comment again. A run waiting on an environment's approval counts as
+  line or the merge-commit line, comment again. A run waiting on an environment's approval counts as
   live: approve or reject it.
 
 The check reads the runs once, at the comment: a run dispatched in the last
@@ -1134,9 +1134,9 @@ a merged pull request:
   environment the refusal names (the `<env>` after the last ` / ` of each
   `<stack> / <env>` cell or `apply / <stack> / <env>` check). The eviction
   releases every pull request's lock on those pending cells, so wait for any
-  pull request still open that holds one to merge or close, and for the apply
-  and deploy runs of each pull request holding one to end, first, then apply
-  it.
+  pull request still open that holds one to merge or close, and for the apply,
+  auto and deploy runs of each pull request holding one to end, first, then
+  apply it.
 
 ### `could not map <sha> to the pull request that merged it: #<n> contains it but none records it as its merge commit; deploying it as a push to <branch>`
 
@@ -1169,7 +1169,7 @@ pending cell(s) are locked by another pull request: <stack> / <env> (locked by
 unlock <env> --evict` on it to release the locks <who> hold(s); applying it
 after that may overwrite what <who> applied to <env>. The eviction releases only
 locks on the new pull request's pending cells in <env>, any holder's, so wait
-for any holder still open to merge or close, and for the apply and deploy runs of
+for any holder still open to merge or close, and for the apply, auto and deploy runs of
 <known holders> to end, first. ... Then apply it. ``, with one `Comment`
 sentence pair per environment, sorted, naming that environment's holders
 ascending, then an unknown holder.
@@ -1213,7 +1213,7 @@ request. Open a pull request that changes this stack. Comment `shipmate unlock
 <env> --evict` on it to release the locks <who> holds; applying it after that
 may overwrite what <who> applied to <env>. The eviction releases only locks on
 the new pull request's pending cells in <env>, any holder's, so wait for any
-holder still open to merge or close, and for the apply and deploy runs of <who>
+holder still open to merge or close, and for the apply, auto and deploy runs of <who>
 to end, first. Then apply it ``. The run wait names known holders only: with an
 unknown holder alone it is left out.
 
@@ -2044,9 +2044,9 @@ stays pending and the rest of the run applied. Follow the remedy:
 
 - ``it is locked by #<n>; wait for #<n> to merge or close, then re-plan. If #<n>
   has already merged or closed, comment `shipmate unlock <env> --evict` once
-  #<n>'s apply and deploy runs have ended ``: another pull request holds the
+  #<n>'s apply, auto and deploy runs have ended ``: another pull request holds the
   blocker cell's lock. Wait for it to merge or close, then re-plan; when it has
-  already merged or closed and kept the lock, wait for its apply and deploy runs
+  already merged or closed and kept the lock, wait for its apply, auto and deploy runs
   to end and evict the lock with that comment.
 - ``it is locked by an unknown holder; comment `shipmate unlock <env> --evict` ``:
   the lock names no holder, so no merge or close releases it; evict it.

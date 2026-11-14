@@ -62,7 +62,7 @@ from _shipmate import (
     _COMMENT_ID,
     _MAX_PAGES,
     _PAGE,
-    FENCE_WORKFLOW,
+    SHIPMATE_WORKFLOW,
     parse_run_title,
     retried,
     run,
@@ -160,7 +160,7 @@ def _listed_row(line: str):
 
 
 def _runs(repo: str) -> str:
-    return f"repos/{repo}/actions/workflows/{FENCE_WORKFLOW}/runs"
+    return f"repos/{repo}/actions/workflows/{SHIPMATE_WORKFLOW}/runs"
 
 
 def landed_since(repo: str, t0: datetime, run=run) -> bool:
@@ -281,7 +281,7 @@ def main(argv=()):
         "api",
         "-X",
         "POST",
-        f"repos/{repo}/actions/workflows/{FENCE_WORKFLOW}/dispatches",
+        f"repos/{repo}/actions/workflows/{SHIPMATE_WORKFLOW}/dispatches",
     ]
     args += ["--input", "-"]
     t0 = _now() - _CLOCK_MARGIN

@@ -1247,7 +1247,7 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
 
 
 def _evict(who, hold, applied, known):
-    runs = f", and for the apply and deploy runs of {known} to end," if known else ""
+    runs = f", and for the apply, auto and deploy runs of {known} to end," if known else ""
     return (
         f"Comment `shipmate unlock dev-eu --evict` on it to release the locks {who} {hold}; "
         f"applying it after that may overwrite what {applied} applied to dev-eu. The eviction "
@@ -1357,11 +1357,13 @@ def test_the_lock_remedy_has_one_eviction_sentence_per_environment_in_order():
         "Open a pull request that changes these stacks. Comment `shipmate unlock dev --evict` on "
         "it to release the locks #7 holds; applying it after that may overwrite what #7 applied "
         "to dev. The eviction releases only locks on the new pull request's pending cells in dev, "
-        "any holder's, so wait for any holder still open to merge or close, and for the apply and "
+        "any holder's, so wait for any holder still open to merge or close, and for the apply, "
+        "auto and "
         "deploy runs of #7 to end, first. Comment `shipmate unlock prod --evict` on it to release "
         "the locks #9 holds; applying it after that may overwrite what #9 applied to prod. The "
         "eviction releases only locks on the new pull request's pending cells in prod, any "
-        "holder's, so wait for any holder still open to merge or close, and for the apply and "
+        "holder's, so wait for any holder still open to merge or close, and for the apply, auto "
+        "and "
         "deploy runs of #9 to end, first. Then apply it"
     )
 

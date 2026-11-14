@@ -60,8 +60,8 @@ import sys
 from collections.abc import Iterable
 
 from _shipmate import (
-    FENCE_WORKFLOW,
     READ_ERRORS,
+    SHIPMATE_WORKFLOW,
     _load,
     _run,
     cell_names,
@@ -480,13 +480,13 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
 
 
 def _refuse_live_runs(repo, env, holders, run):
-    """Refuse while a run of `FENCE_WORKFLOW` may still apply a cell of one of `holders`: a live
+    """Refuse while a run of `SHIPMATE_WORKFLOW` may still apply a cell of one of `holders`: a live
     `apply` or `auto` run titled for one, a live dispatch run whose title does not parse, or a
     live deploy run of a merged holder's merge commit (`_deploy_runs`, after the dispatch
     listings). A failed or incomplete read refuses too; every line found is kept, so the
     refusal names them all. A point-in-time check: a run started after its read is not seen."""
     found, complete = holder_dispatch_runs(repo, holders, run)
-    lines = [] if complete else [f"could not list the live runs of {FENCE_WORKFLOW}"]
+    lines = [] if complete else [f"could not list the live runs of {SHIPMATE_WORKFLOW}"]
     lines += [
         f"#{r['holder']} has a live `{r['verb']}` run: {current_run_url(str(r['id']))}"
         if r["holder"] is not None
@@ -499,7 +499,7 @@ def _refuse_live_runs(repo, env, holders, run):
     if lines:
         raise SystemExit(
             f"::error::no cell lock in {env} was released: a holder's run may still apply, or "
-            "the check could not tell. Wait for any run below to end, then comment again.\n"
+            "the check could not tell. Wait for each run below to end, then comment again.\n"
             + "\n".join(lines)
         )
 

@@ -80,6 +80,7 @@ from _shipmate import (
     event_action,
     evict_release,
     is_head_sha,
+    joined_names,
     json_or_none,
     known_holders,
     lock_who,
@@ -398,7 +399,11 @@ def _evict_line(env, holders):
     and deploy runs have ended: the eviction refuses while one is live."""
     release = evict_release(holders, _md_name(env), "this pull request")
     known = known_holders(holders)
-    when = f"Once the apply and deploy runs of {known} have ended, comment" if known else "Comment"
+    when = (
+        f"Once the apply, auto and deploy runs of {joined_names(known)} have ended, comment"
+        if known
+        else "Comment"
+    )
     return f"{when} `shipmate unlock {env} --evict` to {release}.\n\n"
 
 
