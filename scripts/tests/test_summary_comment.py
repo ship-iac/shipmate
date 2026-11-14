@@ -1418,7 +1418,6 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
     `"path": os.environ["STACK"]`) or drops one summary-comment requires, when the step stops
     invoking it, or when the step's env gains a key back (`ADD: ${{ steps.plan.outputs.add }}`)."""
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "fingerprint.txt").write_text("fp\n", encoding="utf-8")
     for k, v in {
         "STACK": "stacks/app",
         "ENV": "dev",
@@ -1433,7 +1432,6 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
         "stack": "stacks/app",
         "environment": "dev",
         "changed": True,
-        "fingerprint": "fp",
     }
     assert set(sc.CELL_KEYS) <= set(written)
     # And the step still runs that writer: a guard over a script nothing invokes pins nothing.

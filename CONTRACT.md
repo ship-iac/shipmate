@@ -203,8 +203,7 @@ id refuses the run before wave0.
    run's event action (`action`, empty when its payload names none, as a
    `shipmate plan` dispatch's does; §`apply_mode: auto` reads it) and the
    check's title (`title`). GitHub keeps 255 characters of an `external_id`, so
-   a record over that drops `title`, and one still over it refuses the plan
-   summary.
+   a record over that refuses the plan summary.
 2. Flipped to `in_progress` by the wave's `waveN-release` job right before the
    wave, its details link set to the apply run. The flip writes the status and
    the link only, one check at a time. Each wave needs its release, and each
@@ -3511,8 +3510,8 @@ exactly like the plan artifact, never reverse-parsed). Consumers download it
 with the glob pattern `cell-summary.*`. It contains verbatim:
 
 - `cell.json` — keys `stack` (the Terramate stack path, displayed and fed to the
-  check-name construction), `environment`, `changed`
-  (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
+  check-name construction), `environment` and `changed`
+  (boolean); written by `plan-cell` at plan time. `changed`
   comes from `scripts/plan-classify`; the cell line's add, change, destroy,
   import and forget counts come from `plan.txt`'s single column-0 OpenTofu
   tally line (tofu omits a zero import or forget count), or are zero when the
@@ -4072,7 +4071,8 @@ to the plan-run binding the apply path already carries: each cell's plan run
 is read from an App-authored apply check on that same head, so no plan run from
 another head can be named. That binding bounds which plan run may be
 applied; this one binds each individual plan to the tree it was produced from.
-Two open pull requests can share one head commit, so the record's `pr` field
+Two open pull requests can share one head commit, so the apply check's
+`external_id` record (§Apply check lifecycle) carries a `pr` field that
 binds the plan to its pull request as well: the targeted and the bare apply
 refuse, at detect, a cell they would apply whose record names another pull
 request than the dispatch, or none, and the remedy is a re-plan on that pull

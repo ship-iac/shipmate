@@ -87,7 +87,7 @@ def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells, action="sync
     """An `external_id` record as pending-checks writes it for a push's autoplan.
     `plan_sha256=None` omits the digest, `pr=None` the pull request, `cells=None` the run's
     planned cell count, `action=None` the event action."""
-    record = {"fingerprint": "a" * 64, "plan_run": plan_run}
+    record = {"plan_run": plan_run}
     if plan_sha256 is not None:
         record["plan_sha256"] = plan_sha256
     if pr is not None:

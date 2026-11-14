@@ -189,9 +189,7 @@ def _write_cells(tmp_path, *slugs):
         d = tmp_path / "cells" / f"cell-summary.dev.stacks-{slug}"
         d.mkdir(parents=True)
         cell = {"stack": f"stacks/{slug}", "environment": "dev", "changed": True}
-        (d / "cell.json").write_text(
-            json.dumps({**cell, "fingerprint": "f" * 64}), encoding="utf-8"
-        )
+        (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
         (d / "plan.txt").write_bytes(b"plan\n")
 
 

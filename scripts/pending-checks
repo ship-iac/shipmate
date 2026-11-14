@@ -14,8 +14,8 @@ the run published every check, and `action`, the plan run's event action (`""` w
 payload names none, as a `shipmate plan` dispatch's does), which the auto apply requires
 to be a push's, and `title`, the check's own output title, which a successful apply restores
 after a failed one retitled the check. GitHub caps `external_id` at `EXTERNAL_ID_CAP`
-characters and truncates a longer one, which no reader can decode: a record over the cap drops
-`title`, and one still over it refuses. That digest is computed here, over the whole
+characters and truncates a longer one, which no reader can decode, so a record over the cap
+refuses. That digest is computed here, over the whole
 plan.txt this job downloaded, never copied from the cell: it is what binds the
 reviewed text to the plan apply executes. The comment and the check embed capped prefixes of
 the same file, so the digest covers at least what a reviewer saw and often more.
@@ -151,12 +151,10 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
 
 
 def external_id(record):
-    """`record` as compact JSON, without its `title` when the whole would pass
-    `EXTERNAL_ID_CAP`; a record still over the cap refuses."""
-    for fields in (record, {k: v for k, v in record.items() if k != "title"}):
-        text = json.dumps(fields, separators=(",", ":"))
-        if len(text) <= EXTERNAL_ID_CAP:
-            return text
+    """`record` as compact JSON; a record over `EXTERNAL_ID_CAP` characters refuses."""
+    text = json.dumps(record, separators=(",", ":"))
+    if len(text) <= EXTERNAL_ID_CAP:
+        return text
     raise SystemExit(
         f"::error::the apply check record is {len(text)} characters, over GitHub's "
         f"{EXTERNAL_ID_CAP}-character external_id cap"

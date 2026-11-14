@@ -83,7 +83,6 @@ def test_changed_cell_yields_queued_body(tmp_path):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     (body,) = _emit(tmp_path)
     external_id = body.pop("external_id")
@@ -113,7 +112,6 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         stack="stacks/dns",
         environment="dev-eu",
         changed=False,
-        fingerprint="0" * 64,
     )
     (body,) = _emit(tmp_path)
     assert body["status"] == "completed"
@@ -142,7 +140,6 @@ def test_missing_plan_text_refuses_with_the_re_plan_remedy(tmp_path):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     with pytest.raises(SystemExit) as exc_info:
         _emit(tmp_path)
@@ -165,7 +162,6 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     monkeypatch.setenv("GITHUB_RUN_ID", "409181227")
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
@@ -199,7 +195,6 @@ def test_the_record_names_the_plan_runs_event_action(tmp_path, _push_event, payl
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     (body,) = _emit(cells)
     assert json.loads(body["external_id"])["action"] == action
@@ -213,7 +208,6 @@ def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     monkeypatch.delenv("GITHUB_RUN_ID")
     with pytest.raises(SystemExit, match="GITHUB_RUN_ID"):
@@ -236,7 +230,6 @@ def test_an_unusable_pull_request_number_refuses_naming_the_variable(tmp_path, m
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", value)
     with pytest.raises(SystemExit) as exc_info:
@@ -255,7 +248,6 @@ def test_an_unset_pull_request_number_refuses(tmp_path, monkeypatch):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
     )
     monkeypatch.delenv("SHIPMATE_PR_NUMBER")
     with pytest.raises(SystemExit) as exc_info:
@@ -295,7 +287,6 @@ def test_cells_sorted_and_multiple(tmp_path):
         stack="stacks/app",
         environment="dev-us",
         changed=True,
-        fingerprint="1" * 64,
     )
     _write_cell(
         tmp_path,
@@ -304,7 +295,6 @@ def test_cells_sorted_and_multiple(tmp_path):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="2" * 64,
     )
     names = [b["name"] for b in _emit(tmp_path)]
     assert names == ["apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"]
@@ -323,7 +313,6 @@ def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
                 "stack": "stacks/auth",
                 "environment": "dev-eu",
                 "changed": True,
-                "fingerprint": "c" * 64,
             }
         ),
         encoding="utf-8",
@@ -344,7 +333,6 @@ def test_each_cell_gets_the_digest_of_its_own_plan_text(tmp_path):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="1" * 64,
     )
     _write_cell(
         tmp_path,
@@ -354,7 +342,6 @@ def test_each_cell_gets_the_digest_of_its_own_plan_text(tmp_path):
         stack="stacks/app",
         environment="dev-us",
         changed=True,
-        fingerprint="2" * 64,
     )
     eu, us = _emit(tmp_path)
     assert json.loads(eu["external_id"])["plan_sha256"] == SHA_A
@@ -372,7 +359,6 @@ def test_digest_is_computed_never_copied_from_the_cell(tmp_path):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="f" * 64,
         plan_sha256="b" * 64,
     )
     (body,) = _emit(tmp_path)
@@ -392,7 +378,6 @@ def test_missing_plan_text_fails_loud_and_emits_nothing(tmp_path):
         stack="stacks/app",
         environment="dev-eu",
         changed=True,
-        fingerprint="1" * 64,
     )
     _write_cell(
         tmp_path,
@@ -402,7 +387,6 @@ def test_missing_plan_text_fails_loud_and_emits_nothing(tmp_path):
         stack="stacks/app",
         environment="dev-us",
         changed=True,
-        fingerprint="2" * 64,
     )
     assert [json.loads(b["external_id"])["plan_sha256"] for b in _emit(tmp_path)] == [
         SHA_A,
@@ -424,7 +408,7 @@ def _record_line(cid, name, external_id, *, status="completed", app=4242):
 
 
 def _ext(plan_run):
-    return json.dumps({"fingerprint": "f" * 64, "plan_run": plan_run, "pr": PR})
+    return json.dumps({"plan_run": plan_run, "pr": PR})
 
 
 def test_only_names_this_run_recorded_count_as_published(monkeypatch):
@@ -468,7 +452,7 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
     """The evidence count is every parsed cell, published or not, and so is the record's
     `cells`. Mutations: emit every cell (`done = set()`) -> the published cell is printed;
     `cell_count=len(todo)` -> nothing is printed; `body(..., len(todo))` -> `cells` is 1."""
-    for slug, fingerprint in (("stacks-app", "1"), ("stacks-dns", "2")):
+    for slug in ("stacks-app", "stacks-dns"):
         _write_cell(
             tmp_path,
             "dev-eu",
@@ -476,7 +460,6 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
             stack=f"stacks/{slug[7:]}",
             environment="dev-eu",
             changed=True,
-            fingerprint=fingerprint * 64,
         )
     listing = tmp_path / "apply-check-runs.jsonl"
     listing.write_text(
@@ -530,7 +513,6 @@ def _main(
             stack=f"stacks/c{i}",
             environment="dev",
             changed=True,
-            fingerprint="f" * 64,
         )
     listing = tmp_path / "apply-check-runs.jsonl"
     listing.write_text("".join(f"{r}\n" for r in records), encoding="utf-8")
@@ -672,7 +654,7 @@ NO_ROOM = (
     "_Plan too large to show here; the plan job's raw log in [the plan run]"
     "(https://ghe.example.com/acme/demo/actions/runs/32668143791) has the full plan._"
 )
-CHANGED = {"stack": "stacks/app", "environment": "dev-eu", "changed": True, "fingerprint": "f" * 64}
+CHANGED = {"stack": "stacks/app", "environment": "dev-eu", "changed": True}
 LINE = "a" * 99
 
 
@@ -797,14 +779,14 @@ def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_pa
 
 
 #: The largest record a plan can write: a 20-digit run id, a 6-digit pull request, 9999 cells,
-#: the longest event action an autoplan runs on, and a title with three 4-digit counts.
+#: the longest event action an autoplan runs on, and a title with all five counts at 4 digits.
 _WIDEST = {
     "plan_run": "9" * 20,
     "plan_sha256": "a" * 64,
     "pr": "999999",
     "cells": 9999,
     "action": "ready_for_review",
-    "title": "+9999 ~9999 -9999",
+    "title": "+9999 ~9999 -9999, 9999 import, 9999 forget",
 }
 
 
@@ -815,25 +797,35 @@ def test_the_widest_record_fits_under_githubs_cap_whole():
     text = pc.external_id(_WIDEST)
     assert text == (
         '{"plan_run":"99999999999999999999","plan_sha256":"' + "a" * 64 + '","pr":"999999",'
-        '"cells":9999,"action":"ready_for_review","title":"+9999 ~9999 -9999"}'
+        '"cells":9999,"action":"ready_for_review",'
+        '"title":"+9999 ~9999 -9999, 9999 import, 9999 forget"}'
     )
     assert pc.EXTERNAL_ID_CAP == 255
 
 
-def test_a_record_over_the_cap_drops_its_title():
-    """Mutation: return the over-cap record unchanged -- red; drop a field other than `title`
-    -- red."""
-    record = {**_WIDEST, "title": "x" * 200}
-    assert pc.external_id(record) == pc.external_id(
-        {k: v for k, v in _WIDEST.items() if k != "title"}
-    )
-
-
-def test_a_record_over_the_cap_without_its_title_refuses():
-    """Mutation: return the untitled record however long -- red."""
+def test_a_record_over_the_cap_refuses():
+    """Mutation: return the record however long -- red."""
     with pytest.raises(SystemExit) as exc:
         pc.external_id({**_WIDEST, "action": "x" * 200})
     assert str(exc.value.code) == (
-        "::error::the apply check record is 355 characters, over GitHub's 255-character "
+        "::error::the apply check record is 409 characters, over GitHub's 255-character "
         "external_id cap"
+    )
+
+
+def test_a_cell_missing_a_key_fails_loud(tmp_path):
+    """Mutation: drop `"changed"` from `_KEYS` -- a `KeyError` instead of the `SystemExit`."""
+    d = tmp_path / "cell-summary.dev-eu.stacks-app"
+    d.mkdir()
+    (d / "cell.json").write_text(
+        json.dumps({"stack": "stacks/app", "environment": "dev-eu"}), encoding="utf-8"
+    )
+    (d / "plan.txt").write_text("plan", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc_info:
+        _emit(tmp_path)
+    cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
+    assert str(exc_info.value) == (
+        f"::error::cell summary {cell_json} missing keys ['changed'] -- plan-cell and the "
+        "summary job must run the same engine revision; re-pin every engine reference to one "
+        "commit, then re-plan (comment shipmate plan or push)"
     )
