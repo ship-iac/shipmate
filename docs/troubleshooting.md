@@ -1688,7 +1688,7 @@ The step also writes the annotation as `setup`'s `refusal` output.
 Setup downloads six files with curl, three per tool: the checksum file, its
 signature and the archive, each only when the tool cache did not supply it.
 curl retries
-each after a network error, a 408, 429 or 5xx response, or a transfer below 1 KiB/s
+each after a network error, a 408, 429, 500, 502, 503 or 504 response, or a transfer below 1 KiB/s
 for 30 seconds, with waits that double from 1 second or follow the server's
 `Retry-After`, and gives up at once when a `Retry-After` wait would pass the limit.
 It starts no new retry once 120 seconds have passed. Each attempt stops after 600
