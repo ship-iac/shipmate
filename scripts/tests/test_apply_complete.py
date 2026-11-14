@@ -163,18 +163,57 @@ def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_no_row():
     assert (sorted(_by_check(rows)), unresolved) == ([APP, WEB], ["stacks/dns / dev-eu"])
 
 
-@pytest.mark.parametrize("result", ["skipped", "cancelled"])
-def test_a_cell_of_a_wave_that_did_not_run_gets_a_not_run_row(result):
-    """A failed release, a failed earlier wave, or a cancel between the release and the wave
-    leaves the wave `skipped` or `cancelled` with no cell job. Mutations: count every skipped
-    job as the cell's -> APP takes the skipped row; treat a `cancelled` wave as one that ran ->
-    APP is unresolved."""
+#: This completion job, `deploy / L1 / complete`, check run id 900.
+OWN = job("deploy / L1 / complete", None, jid=900)
+
+
+def test_a_cell_of_a_skipped_wave_gets_a_not_run_row():
+    """A failed release or a failed earlier wave skips the wave, which never starts. Mutations:
+    count every skipped job as the cell's -> APP takes the skipped row; read `skipped` like a
+    wave that ran -> APP is unresolved."""
     ok = job("L0 / dev-eu / stacks/dns", "success")
     rows, unresolved = _classify(
-        [ok, job(SKIPPED_ROW, "skipped")], results={**RAN, "wave1": result, "wave2": result}
+        [ok, job(SKIPPED_ROW, "skipped")], results={**RAN, "wave1": "skipped", "wave2": "skipped"}
     )
     assert unresolved == []
     assert rows == [row(DNS, [1], ok), row(APP, [2, 3]), row(WEB, [4])]
+
+
+def test_a_cancelled_wave_that_never_expanded_is_not_run():
+    """A cancel between the release and the wave lists the wave's literal row under this job's
+    level, `cancelled`. Mutation: read a `cancelled` wave like one that ran -> APP is
+    unresolved."""
+    unexpanded = job(SKIPPED_ROW, "cancelled")
+    rows, unresolved = apply_complete.classify(
+        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, [OWN, unexpanded], "900"
+    )
+    assert (rows, unresolved) == ([row(APP, [2, 3])], [])
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        pytest.param([OWN], id="no-literal-row"),
+        pytest.param(
+            [
+                OWN,
+                job("deploy / L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", "cancelled"),
+            ],
+            id="another-level",
+        ),
+        pytest.param([OWN, job(SKIPPED_ROW, "skipped")], id="skipped-row"),
+        pytest.param([job(SKIPPED_ROW, "cancelled")], id="own-job-not-listed"),
+    ],
+)
+def test_a_missing_cell_of_a_cancelled_wave_that_may_have_started_is_unresolved(listed):
+    """A wave cancelled after its matrix expanded may have applied the cell. Mutations: treat
+    every `cancelled` wave as not run -> APP gets a `Not run` row; match the literal row under
+    any level -> another-level gets a row; drop the `cancelled` conclusion check -> skipped-row
+    gets a row."""
+    rows, unresolved = apply_complete.classify(
+        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, listed, "900"
+    )
+    assert (rows, unresolved) == ([], ["stacks/app / dev-eu"])
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "", "weird"])
@@ -336,6 +375,7 @@ def _run(by_wave, results, jobs):
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
             "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results),
+            "SHIPMATE_JOB_ID": "900",
         },
         capture_output=True,
         text=True,
@@ -519,6 +559,7 @@ def _select(tmp_path, listings, results=None):
         "RUNNER_TEMP": str(runner_temp).replace("\\", "/"),
         "SHIPMATE_BY_WAVE_JSON": json.dumps(HARNESS_BY_WAVE),
         "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results or HARNESS_RAN),
+        "SHIPMATE_JOB_ID": "900",
         "FIXTURES": str(fixtures).replace("\\", "/"),
         "LAST_FIXTURE": str(len(listings)),
         "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
@@ -610,10 +651,13 @@ def test_a_success_seen_by_one_attempt_survives_a_staler_later_listing(tmp_path)
 @bash_only
 @pytest.mark.parametrize("result", ["skipped", "cancelled"])
 def test_a_wave_that_did_not_run_writes_not_run_at_once(tmp_path, result):
-    """A failed release, or a cancel between the release and the wave, lists no cell job.
-    Mutation: treat a `skipped` or `cancelled` wave as one that ran -> 14 attempts and no
-    write."""
-    skipped = jsonl(job("L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped"))
+    """A failed release, or a cancel between the release and the wave, lists no cell job, only
+    the wave's literal row under this job's level. Mutation: treat a `skipped` or `cancelled`
+    wave as one that ran -> 14 attempts and no write."""
+    skipped = jsonl(
+        job("L0 / complete", None, jid=900),
+        job("L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", result),
+    )
     proc, plan, attempts, _ = _select(
         tmp_path, [skipped], results={"wave0": result, "wave1": "skipped"}
     )
@@ -735,3 +779,13 @@ def test_the_write_step_writes_the_plan(tmp_path):
     proc, patched, _ = _run_action_step(tmp_path, "Write the apply checks", plan=plan)
     assert proc.returncode == 0, proc.stderr
     assert patched == ["repos/acme/demo/check-runs/1", "repos/acme/demo/check-runs/2"]
+
+
+def test_the_listing_step_reads_this_job_and_the_wave_results():
+    """Mutations: drop `SHIPMATE_JOB_ID`; map `SHIPMATE_WAVE_RESULTS_JSON` to `by-wave`."""
+    assert _step("List run jobs and decide each apply check's write")["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "SHIPMATE_BY_WAVE_JSON": "${{ inputs.by-wave }}",
+        "SHIPMATE_WAVE_RESULTS_JSON": "${{ inputs.wave-results }}",
+        "SHIPMATE_JOB_ID": "${{ inputs.job-id }}",
+    }

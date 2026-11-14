@@ -137,19 +137,62 @@ def test_a_failed_check_read_writes_nothing(monkeypatch, calls):
 
 
 @pytest.mark.parametrize("deploy", [None, "false"])
-def test_a_pre_merge_re_run_writes_nothing(monkeypatch, calls, capsys, deploy):
-    """Mutation: drop the attempt check -> two PATCHes."""
+def test_a_pre_merge_re_run_writes_only_its_successes(monkeypatch, calls, capsys, deploy):
+    """A re-run of a completion job can complete a cell an earlier listing missed, but never
+    reopens a check, and reads no pull request. Mutations: drop the attempt check -> 2 is
+    written; return before any write on a re-run -> 1 is not written."""
     recorded, _, reads = calls
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
     if deploy is not None:
         monkeypatch.setenv("SHIPMATE_DEPLOY", deploy)
+    reads[f"repos/{_REPO}/check-runs/2"] = _check()
     _main(monkeypatch, [_entry(1), _entry(2, {"status": "queued"}, title="Not run")])
-    assert (recorded, reads["calls"]) == ([], [])
+    assert ([a for a, _ in recorded], reads["calls"]) == ([_argv("1")], [])
     assert capsys.readouterr() == (
-        "",
-        "::notice::run attempt 2 of a pre-merge apply writes no apply check\n",
+        "1\n",
+        "::notice::run attempt 2 of a pre-merge apply writes only its successes\n",
     )
+
+
+def test_a_completed_check_is_never_reopened(monkeypatch, calls, capsys):
+    """Another writer, such as a merge deploy after a gate-bypassing merge, completed it.
+    Mutation: drop the completed check -> 4 is written `queued`."""
+    recorded, _, reads = calls
+    reads[f"repos/{_REPO}/check-runs/4"] = {**_check(), "status": "completed"}
+    reads[f"repos/{_REPO}/check-runs/5"] = _check()
+    _main(
+        monkeypatch,
+        [
+            _entry(4, {"status": "queued"}, title="Not run"),
+            _entry(5, {"status": "queued"}, title="Not run"),
+        ],
+    )
+    assert [a for a, _ in recorded] == [_argv("5")]
+    assert capsys.readouterr() == (
+        "5\n",
+        "::notice::apply check 4 is already completed; left as it is\n",
+    )
+
+
+def test_a_success_rewrites_a_completed_check(monkeypatch, calls):
+    """`complete` repeats a completion job's success write. Mutation: skip every write over a
+    completed check -> nothing is written."""
+    recorded, _, reads = calls
+    reads[f"repos/{_REPO}/check-runs/4"] = {**_check(), "status": "completed"}
+    _main(monkeypatch, [_entry(4, title=None)])
+    assert [a for a, _ in recorded] == [_argv("4")]
+
+
+@pytest.mark.parametrize("value", ["", "True", "1"])
+def test_a_deploy_flag_that_is_not_true_or_false_refuses_before_a_read(monkeypatch, calls, value):
+    """Mutation: compare `SHIPMATE_DEPLOY.lower() != "true"` -> each value runs as pre-merge."""
+    recorded, _, reads = calls
+    monkeypatch.setenv("SHIPMATE_DEPLOY", value)
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, [_entry(1)])
+    assert exc.value.code == f"::error::SHIPMATE_DEPLOY must be true or false (got: {value!r})"
+    assert (recorded, reads["calls"]) == ([], [])
 
 
 def test_a_merge_deploy_re_run_still_writes(monkeypatch, calls):

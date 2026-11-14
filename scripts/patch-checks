@@ -12,11 +12,16 @@ summary, keeps its output (no `output` sent). `GH_TOKEN` and `GITHUB_REPOSITORY`
 environment. Stdout carries only the ids written, one per line as each is acknowledged, for the
 step log only: nothing reads them. Every diagnostic goes to stderr.
 
-A pre-merge run (`SHIPMATE_DEPLOY` not `true`) writes nothing on a re-run (`GITHUB_RUN_ATTEMPT`
-above 1): its cells refuse to apply, and a later run may have completed the same checks. With
-`SHIPMATE_PR_NUMBER` set, a pre-merge run reads that pull request once before any write; when it
-is merged, only `completed`/`success` entries are written, since the merge deploy owns the rest.
-A failed read writes nothing and fails.
+An entry that does not complete its check `success` is skipped when the check reads `completed`:
+another writer, such as a merge deploy after a gate-bypassing merge, completed it.
+
+A pre-merge run (`SHIPMATE_DEPLOY` `false`; `deploy_mode` refuses any value but `true` and
+`false`) writes only its `completed`/`success` entries on a re-run (`GITHUB_RUN_ATTEMPT` above 1):
+its cells refuse to apply, and a later run may have completed the same checks, but a re-run of a
+completion job can still complete a cell an earlier listing missed. With `SHIPMATE_PR_NUMBER`
+set, a first attempt reads that pull request once before any write; when it is merged, only the
+`completed`/`success` entries are written, since the merge deploy owns the rest. A failed read
+writes nothing and fails.
 
 Fails closed, because the gate's work queue is the pending checks: the first id that still
 fails (a permanent failure at once, a transient one once its retries are exhausted, a
@@ -31,18 +36,20 @@ import json
 import os
 import sys
 
-from _shipmate import is_pr_number, run, run_annotated, write_retried
+from _shipmate import _load, deploy_mode, is_pr_number, run, run_annotated, write_retried
+
+ag = _load("apply-gate")
 
 SUCCESS = {"status": "completed", "conclusion": "success"}
 
 
 def _record_title(check):
-    try:
-        record = json.loads(check.get("external_id") or "")
-    except ValueError:
-        return None
-    title = record.get("title") if isinstance(record, dict) else None
+    title = (ag._decoded(check) or {}).get("title")
     return title if isinstance(title, str) and title else None
+
+
+def _succeeds(entry):
+    return {k: entry["body"].get(k) for k in SUCCESS} == SUCCESS
 
 
 def with_output(entry, check):
@@ -76,26 +83,35 @@ def _merged(repo, pr):
 def write(plan):
     """Write the entries of `plan` as the module docstring says."""
     repo = os.environ["GITHUB_REPOSITORY"]
-    if os.environ.get("SHIPMATE_DEPLOY", "").lower() != "true":
+    if not deploy_mode():
         attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+        pr = os.environ.get("SHIPMATE_PR_NUMBER", "")
         if attempt != "1":
             print(
-                f"::notice::run attempt {attempt} of a pre-merge apply writes no apply check",
+                f"::notice::run attempt {attempt} of a pre-merge apply writes only its successes",
                 file=sys.stderr,
             )
-            return
-        pr = os.environ.get("SHIPMATE_PR_NUMBER", "")
-        if pr and _merged(repo, pr):
+            plan = [e for e in plan if _succeeds(e)]
+        elif pr and _merged(repo, pr):
             print(
                 f"::notice::pull request #{pr} is merged; its merge deploy owns every apply check "
                 "this run did not apply",
                 file=sys.stderr,
             )
-            plan = [e for e in plan if {k: e["body"].get(k) for k in SUCCESS} == SUCCESS]
+            plan = [e for e in plan if _succeeds(e)]
     for entry in plan:
         cid = entry["id"]
         path = f"repos/{repo}/check-runs/{cid}"
-        body = with_output(entry, read(path)) if "title" in entry else entry["body"]
+        body = entry["body"]
+        if "title" in entry:
+            check = read(path)
+            if not _succeeds(entry) and check.get("status") == "completed":
+                print(
+                    f"::notice::apply check {cid} is already completed; left as it is",
+                    file=sys.stderr,
+                )
+                continue
+            body = with_output(entry, check)
         args = ["gh", "api", "-X", "PATCH", path, "--input", "-"]
         try:
             write_retried(functools.partial(run, args, stdin=json.dumps(body)))

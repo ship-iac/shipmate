@@ -2392,9 +2392,9 @@ An `auto` cell also refuses when:
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run was re-run
-  ("Re-run failed jobs" or "Re-run all jobs"). A re-run's cells would apply while
-  its release and completion jobs write no apply check, and a later run may have
-  completed those checks already. Comment `shipmate apply`. A merge deploy's
+  ("Re-run failed jobs" or "Re-run all jobs"). A re-run's release jobs write no
+  apply check and its completion jobs write only successes, since a later run may
+  have completed those checks already. Comment `shipmate apply`. A merge deploy's
   re-run is allowed.
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
@@ -2760,7 +2760,8 @@ back to `queued`, titled with the outcome; the plan summary is unchanged
   `timed_out` or a rejected environment approval. Comment `shipmate apply`.
 
 A successful apply of the cell completes the check `success` and restores its
-plan title. A check that stays `in_progress` after its run ended was left by a
+plan title; a check created before shipmate recorded that title keeps `Failed: ...`
+after the success. A check that stays `in_progress` after its run ended was left by a
 run that died, or by a completion whose jobs listing never showed the cell's
 job (`the retries were exhausted and these apply checks are left pending`); the
 next `shipmate apply` writes it again.

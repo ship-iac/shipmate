@@ -42,6 +42,7 @@ def _completion(n):
                 "with": {
                     "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
                     "wave-results": f'{{"wave{n}": "${{{{ needs.wave{n}.result }}}}"}}',
+                    "job-id": "${{ job.check_run_id }}",
                     "deploy": "${{ inputs.deploy }}",
                     "pr-number": "${{ inputs.pr_number }}",
                     **_WITH_KEY,
@@ -68,6 +69,7 @@ WAVE3_COMPLETE = {
             "with": {
                 "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
                 "wave-results": '{"wave3": "${{ needs.wave3.result }}"}',
+                "job-id": "${{ job.check_run_id }}",
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -124,6 +126,7 @@ COMPLETE = {
                     '"wave6": "${{ needs.wave6.result }}", '
                     '"wave7": "${{ needs.wave7.result }}"}'
                 ),
+                "job-id": "${{ job.check_run_id }}",
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",

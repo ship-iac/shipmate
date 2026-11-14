@@ -56,10 +56,9 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
-  # Flips one wave's apply checks to in_progress right before that wave, so a check reads as
-  # applying only while its wave can run. A wave needs its release, and each completion job needs
-  # its wave, so no flip lands after the completion that answers it. Every earlier wave and
-  # release must have succeeded or been skipped: `!cancelled()` alone would run past a failure.
+  # Flips one wave's apply checks to in_progress right before it; the wave needs it, so no flip
+  # lands after the completion. Each earlier wave and release must be success or skipped:
+  # `!cancelled()` alone would run past a failure.
   wave0-release:
     needs: [snapshot]
     if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}
@@ -316,10 +315,9 @@ jobs:
     name: *wave-name
     steps: *wave-steps
 
-  # Writes one wave's checks as soon as that wave ends: completed on success, otherwise queued and
-  # titled with the outcome. A skipped wave lists the literal matrix row, so it is excluded. A cell
-  # with no job in a wave that ran retries ~2 minutes, gets no write and errors; `continue-on-error`
-  # keeps that from failing the level, and `complete` lists the level again.
+  # Writes one wave's checks when it ends: success completes, any other outcome returns to
+  # queued with a title. `continue-on-error`: a cell missing from the listing fails this job
+  # after ~2 minutes of retries, and `complete` lists the level again.
   wave0-complete:
     needs: [snapshot, wave0]
     if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') }}
@@ -334,6 +332,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave0": "${{ needs.wave0.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -350,6 +349,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave1": "${{ needs.wave1.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -366,6 +366,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave2": "${{ needs.wave2.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -382,6 +383,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave3": "${{ needs.wave3.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -398,6 +400,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave4": "${{ needs.wave4.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -414,6 +417,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave5": "${{ needs.wave5.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -430,6 +434,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave6": "${{ needs.wave6.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -446,15 +451,15 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave7": "${{ needs.wave7.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
-  # Rewrites every snapshot check from its cell's wave job, the same writes the completion jobs
-  # make; holds the App key, and is the only writer on a cancelled run. It waits for every release,
-  # wave and completion, so no flip lands after it, and gate-refresh and apply-summary, which
-  # `needs:` this workflow, never read a check while a write is in flight.
+  # Rewrites every snapshot check like the completion jobs, and is the only writer on a
+  # cancelled run. It needs every release, wave and completion, so no flip lands after it and
+  # gate-refresh and apply-summary never read a check while a write is in flight.
   complete:
     needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7, wave0-complete, wave1-complete, wave2-complete, wave3-complete, wave4-complete, wave5-complete, wave6-complete, wave7-complete]
     if: ${{ always() && needs.snapshot.result == 'success' }}
@@ -466,6 +471,7 @@ jobs:
         with:
           by-wave: ${{ needs.snapshot.outputs.by_wave }}
           wave-results: '{"wave0": "${{ needs.wave0.result }}", "wave1": "${{ needs.wave1.result }}", "wave2": "${{ needs.wave2.result }}", "wave3": "${{ needs.wave3.result }}", "wave4": "${{ needs.wave4.result }}", "wave5": "${{ needs.wave5.result }}", "wave6": "${{ needs.wave6.result }}", "wave7": "${{ needs.wave7.result }}"}'
+          job-id: ${{ job.check_run_id }}
           deploy: ${{ inputs.deploy }}
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

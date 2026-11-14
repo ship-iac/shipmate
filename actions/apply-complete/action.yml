@@ -7,6 +7,9 @@ inputs:
   wave-results:
     description: JSON object mapping each wave key to write to the result of its wave job; a cell of a `skipped` or `cancelled` wave with no job is not run, and one of any other wave with no job is retried and then left unwritten.
     required: true
+  job-id:
+    description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
+    required: true
   deploy:
     description: "`true` on the merge deploy. Otherwise a re-run writes nothing, and a merged pull request gets only its success writes."
     required: true
@@ -33,6 +36,7 @@ runs:
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
         SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
+        SHIPMATE_JOB_ID: ${{ inputs.job-id }}
       # `--paginate --jq` because a 256-cell level exceeds the 100-per-page cap. Unlike
       # apply-summary's cosmetic listing, this one decides which checks complete, so it never
       # degrades to no data: that would silently strand every applied check pending.

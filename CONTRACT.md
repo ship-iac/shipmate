@@ -210,12 +210,17 @@ id refuses the run before wave0.
 
 | Cell's wave job | Write |
 | --- | --- |
-| `success` | `completed` / `success`, linked to the cell's job, titled with the record's `title` (a check whose record has none keeps its title) |
+| `success` | `completed` / `success`, linked to the cell's job, titled with the record's `title`. A check whose record has none, created before the record carried it, keeps its current title, so one retitled `Failed: ...` keeps that title after a later success |
 | `failure` | `queued`, titled `Failed: <first error line>`, linked to the cell's job |
 | `cancelled` | `queued`, titled `Cancelled` |
-| `skipped`, or no job in a wave that ended `skipped` or `cancelled` | `queued`, titled `Not run` |
+| `skipped`, or no job in a wave that ended `skipped`, or in one that ended `cancelled` when the listing shows a `cancelled` literal `${{ matrix.environment }} / ${{ matrix.stack }}` row under the completion job's own level | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
-| no conclusion yet, or no job in a wave that ran | retried for about two minutes, then no write; the job fails |
+| no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes, then no write; the job fails |
+
+A write other than `success` reads the check first and leaves it alone when it
+reads `completed`: another writer, such as a merge deploy, completed it. A
+`success` write rewrites a completed check, since `complete` repeats each
+completion job's writes.
 
 The first error line is the message of the cell job's first `failure`
 annotation: its first line, control characters stripped, cut at 120 characters.
@@ -247,12 +252,16 @@ pull request gets only its `success` writes, since the merge deploy owns its
 pending checks; a closed or open one gets every write; a failed read writes
 nothing and fails the job.
 
-**Re-runs.** A pre-merge apply run whose `GITHUB_RUN_ATTEMPT` is above 1 writes
-nothing in its release and completion jobs, and each wave cell's pre-apply check
-refuses: ``an apply is never re-run (run attempt '<n>'): comment `shipmate apply` ``.
-A later run may have completed the same checks, and a `Not run` write would
-reopen them. A merge deploy's re-run is allowed: its retried cells apply under
-the first attempt's flip, and its `complete` writes them.
+**Re-runs.** On a pre-merge apply run whose `GITHUB_RUN_ATTEMPT` is above 1, each
+wave cell's pre-apply check refuses:
+``an apply is never re-run (run attempt '<n>'): comment `shipmate apply` ``.
+Its release jobs write nothing, and its completion jobs write only `success`: a
+later run may have completed the same checks, and any other write would reopen
+them, but re-running a completion job can still complete a cell an earlier
+listing missed. A merge deploy's re-run is allowed. The release job is not
+re-run, so a retried cell applies while its check reads `queued` with the first
+attempt's title (`Failed: ...`), and the re-run's completion jobs and `complete`
+write its outcome.
 
 **Dead runs.** `apply-snapshot`, `deploy-detect`, `apply-detect`,
 `unlock-detect` and the gate read any check that is not `completed` as pending,
@@ -271,6 +280,11 @@ Accepted limits:
 - The cell job rows and the `<env>-apply` deployments stay under the default
   branch's commit, where the dispatched run is; the pull request shows only the
   App apply checks.
+- A release flip reads nothing before it writes. On a check another writer has
+  completed, its status-only flip leaves the check `completed` and replaces only
+  the details link (probed: a status or `details_url` write to a settled completed
+  check keeps it completed). A flip landing within seconds of that completion can
+  reopen it, and the gate then stays pending until a later write.
 - A release flip or a completion write can race a merge that bypasses the gate:
   one pull request read per completion job, none per release. The merge
   deploy's `snapshot` reads such a check as pending and applies or rewrites it;

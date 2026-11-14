@@ -359,6 +359,15 @@ def write_outputs(**pairs):
             fh.write(f"{name}={value}\n")
 
 
+def deploy_mode():
+    """Whether `SHIPMATE_DEPLOY` is `true` (a merge deploy); unset reads as `false`, and any
+    other value, empty included, refuses."""
+    deploy = os.environ.get("SHIPMATE_DEPLOY", "false")
+    if deploy not in ("true", "false"):
+        raise SystemExit(f"::error::SHIPMATE_DEPLOY must be true or false (got: {deploy!r})")
+    return deploy == "true"
+
+
 def lock_who(holder: int | None) -> str:
     """Who holds a cell lock: `#<holder>`, or `an unknown holder` for None."""
     return f"#{holder}" if holder is not None else "an unknown holder"

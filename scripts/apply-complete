@@ -33,13 +33,15 @@ takes the row of its matched job:
 | no conclusion yet, or none in a wave that ran | no row | none; `main` exits `UNRESOLVED_EXIT` |
 
 A job with no conclusion yet is the listing lagging, by seconds, a job that has already ended,
-so the caller asks again. A wave that did not run (`skipped` or `cancelled`: a failed or skipped
-release, a failed earlier wave, a cancel) lists one row under its literal `${{
+so the caller asks again. A wave that did not run (a failed or skipped release, a failed
+earlier wave, a cancel before it started) lists one row under its literal `${{
 matrix.environment }} / ${{ matrix.stack }}` name, since GitHub expands a matrix only for a job
-it starts, so its cells match nothing and are not run. A cell of a wave that ran (`success` or
-`failure`, or a result this script does not know) always has a job, so a missing one is a lost
-or lagging listing: it is retried, and after the retries the cell gets no write, so a stale
-listing never turns a completed `success` back to `queued`.
+it starts, so its cells match nothing and are not run. That holds for every `skipped` wave; a
+`cancelled` wave may have started, so its missing cell is not run only when the listing shows
+that literal row under this job's own level (`SHIPMATE_JOB_ID`, this job's check run id, names
+the level). Any other missing cell, of a wave that ran (`success` or `failure`, or a result this
+script does not know), is a lost or lagging listing: it is retried, and after the retries the
+cell gets no write, so a stale listing never turns a completed `success` back to `queued`.
 """
 
 import json
@@ -56,7 +58,7 @@ UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 # of stderr to annotate what it gave up on after its retries, so it is a line-anchored
 # contract, not a message.
 RETRY_PREFIX = "retry: "
-NOT_RUN = ("skipped", "cancelled")
+UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
 ERROR_LINE_CAP = 120
 
 
@@ -71,9 +73,22 @@ def _row(check, ids, job=None):
     }
 
 
-def classify(by_wave, results, jobs):
+def unexpanded(jobs, job_id):
+    """Whether `jobs` holds a `cancelled` literal unexpanded wave row of the level of the job
+    `job_id`. Every wave of a level shares that name, so the row does not say which wave."""
+    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
+    level = own.rpartition(" / ")[0]
+    row = level + " / " + UNEXPANDED
+    return bool(level) and any(
+        j.get("name") == row and j.get("conclusion") == "cancelled" for j in jobs
+    )
+
+
+def classify(by_wave, results, jobs, job_id=""):
     """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
-    result, from the jobs listing `jobs`: `unresolved` labels the cells with no row."""
+    result, from the jobs listing `jobs` that holds this job, `job_id`: `unresolved` labels the
+    cells with no row."""
+    not_run = {"skipped"} | ({"cancelled"} if unexpanded(jobs, job_id) else set())
     rows, unresolved = [], []
     for wave in sorted(results):
         for check, ids in sorted((by_wave.get(wave) or {}).items()):
@@ -83,7 +98,7 @@ def classify(by_wave, results, jobs):
             won = next((j for j in matched if j.get("conclusion") == "success"), None)
             if won:
                 rows.append(_row(check, ids, won))
-            elif not matched and results[wave] in NOT_RUN:
+            elif not matched and results[wave] in not_run:
                 rows.append(_row(check, ids))
             elif not matched or any(j.get("conclusion") is None for j in matched):
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
@@ -161,6 +176,7 @@ def main(argv=()):
         json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"]),
         json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"]),
         ag.parse_jsonl(sys.stdin),
+        os.environ["SHIPMATE_JOB_ID"],
     )
     for row in rows:
         print(json.dumps(row))
