@@ -4,9 +4,11 @@
 Runs BEFORE wave0: the trailing completer marks only these ids done, so an apply check
 created mid-run by a fresh plan is left pending (its plan was never applied here) instead of
 being greened. Only checks authored by the shipmate App are eligible — a forged same-name
-check from any other identity is never completed. The `snapshot` job holds the App key and
-checks out no repository content, so no branch content runs beside the key. `by_wave` slices
-the snapshot per wave, so each wave's checks complete right after that wave.
+check from any other identity is never completed — and only those not yet `completed`: a
+completed same-head duplicate is left alone, since a later write would relink or retitle it.
+The `snapshot` job holds the App key and checks out no repository content, so no branch content
+runs beside the key. `by_wave` slices the snapshot per wave, so each wave's checks are flipped
+right before that wave and completed right after it.
 """
 
 import json
@@ -19,7 +21,8 @@ ag = _load("apply-gate")
 
 
 def snapshot(waves, check_runs, app_id):
-    """{apply check name: [check id, ...]} for every cell in this run's waves.
+    """{apply check name: [check id, ...]} for every cell in this run's waves, each id a check
+    not yet `completed`.
 
     Every wanted cell must have one. A cell that has none fails the run here,
     before wave0 and so before anything applies. Skipping it would let that
@@ -37,12 +40,12 @@ def snapshot(waves, check_runs, app_id):
     out = {}
     for stack, env in wanted:
         name = ag.check_name(stack, env)
-        ids = [c["id"] for c in runs if c.get("name") == name]
+        ids = [c["id"] for c in runs if c.get("name") == name and c.get("status") != "completed"]
         if not ids:
             raise SystemExit(
-                f"::error::no App-authored apply check named '{name}' on the head "
-                "SHA before apply; this cell would apply with nothing to complete "
-                "afterwards, stranding its check pending. Re-plan."
+                f"::error::no App-authored apply check named '{name}' that is not yet "
+                "completed on the head SHA before apply; this cell would apply with nothing "
+                "to complete afterwards, stranding its check pending. Re-plan."
             )
         out[name] = ids
     return out

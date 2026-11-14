@@ -1644,23 +1644,25 @@ def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, actio
     )
 
 
+@pytest.mark.parametrize("auto", [pytest.param(AUTO, id="auto"), pytest.param({}, id="comment")])
 @pytest.mark.parametrize("attempt", ["2", "", "1x", None])
-def test_verify_auto_refuses_a_later_run_attempt_before_any_read(monkeypatch, tmp_path, attempt):
+def test_verify_refuses_a_later_run_attempt_before_any_read(monkeypatch, tmp_path, attempt, auto):
     """ "Re-run failed jobs" keeps the first attempt's passed detect, so its actor check never
-    runs again; the App never re-runs. Mutation: drop the attempt refusal (each row reaches the
-    lock read, unexpected). Mutation: compare `int(attempt) > 1` (the `""`, `1x` and unset rows
-    raise `ValueError`)."""
-    env = {**AUTO, "GITHUB_RUN_ATTEMPT": attempt}
+    runs again, and a re-run's release and completion jobs write no apply check. Mutation: drop
+    the attempt refusal (each row reaches the lock read, unexpected). Mutation: refuse only an
+    auto apply (`auto and attempt != "1"`; the comment rows reach the lock read). Mutation:
+    compare `int(attempt) > 1` (the `""`, `1x` and unset rows raise `ValueError`)."""
+    env = {**auto, "GITHUB_RUN_ATTEMPT": attempt}
     assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
-        f"::error::{WHERE} an auto apply is never re-run (run attempt "
+        f"::error::{WHERE} an apply is never re-run (run attempt "
         f"{(attempt or '')!r}): comment `shipmate apply`"
     )
 
 
-def test_verify_outside_auto_passes_a_later_run_attempt(monkeypatch, tmp_path):
-    """Mutation: refuse a later attempt whatever `SHIPMATE_AUTO` (refuses)."""
+def test_verify_passes_the_first_run_attempt(monkeypatch, tmp_path):
+    """Mutation: refuse attempt 1 too (`attempt != "0"`; refuses)."""
     gh = _held().on(PULL_READ, _pull())
-    assert _verify(monkeypatch, tmp_path, gh, {"GITHUB_RUN_ATTEMPT": "2"}) == {}
+    assert _verify(monkeypatch, tmp_path, gh, {"GITHUB_RUN_ATTEMPT": "1"}) == {}
 
 
 def test_verify_auto_refuses_a_draft(monkeypatch, tmp_path):
@@ -1936,6 +1938,14 @@ def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch
     else:
         gh = Gh().on(ref_read(AUTH_REF), "[]")
     assert _verify(monkeypatch, tmp_path, gh, DEPLOY) == {}
+    assert gh.drained()
+
+
+def test_verify_deploy_passes_a_later_run_attempt(monkeypatch, tmp_path):
+    """A merge deploy is recovered by re-running it. Mutation: check the attempt before the
+    deploy branch returns (refuses)."""
+    gh = Gh().on(ref_read(AUTH_REF), "[]")
+    assert _verify(monkeypatch, tmp_path, gh, {**DEPLOY, "GITHUB_RUN_ATTEMPT": "2"}) == {}
     assert gh.drained()
 
 

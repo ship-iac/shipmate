@@ -2202,7 +2202,7 @@ actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
 included, was dispatched by something else. A "Re-run all jobs" of an `auto` run
 runs with the re-runner as its triggering actor and refuses; do not re-run an
 `auto` run. "Re-run failed jobs" keeps the passed `detect`, so each wave cell
-refuses instead with `an auto apply is never re-run (run attempt '<n>')`. With no App-authored check on the head there is no slug to compare.
+refuses instead with `an apply is never re-run (run attempt '<n>')`. With no App-authored check on the head there is no slug to compare.
 Comment `shipmate apply` on the pull request, or push when the head carries no
 apply checks yet.
 
@@ -2391,9 +2391,11 @@ An `auto` cell also refuses when:
   filter. Comment `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
-- `an auto apply is never re-run (run attempt '<n>')`: the `auto` run was re-run
-  ("Re-run failed jobs" or "Re-run all jobs"); the App never re-runs one.
-  Comment `shipmate apply`.
+- `an apply is never re-run (run attempt '<n>')`: an apply run was re-run
+  ("Re-run failed jobs" or "Re-run all jobs"). A re-run's release jobs write no
+  apply check and its completion jobs write only successes, since a later run may
+  have completed those checks already. Comment `shipmate apply`. A merge deploy's
+  re-run is allowed.
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
 - a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),
@@ -2607,7 +2609,8 @@ A `shipmate apply` or `auto` run was dispatched for a head the pull request no
 longer has, and it was still waiting: in the apply queue, or on an
 `<env>-apply` environment's approval. This run cancelled it. A run cancelled in
 the queue changed nothing. A run cancelled at an approval leaves the apply
-checks of that wave's cells pending on the old head. The gate that counts is
+checks of that wave's cells pending on the old head, titled `Cancelled`, and
+those of its later waves titled `Not run`. The gate that counts is
 the current head's, which carries its own apply checks.
 
 ### `may wait for an earlier apply run of this pull request; its apply runs could not all be listed`
@@ -2736,6 +2739,32 @@ Cancel the queued run and start a new one once the change is on the default
 branch: a re-run reads the workflow file of the original run's commit, so it
 keeps the old label. [`aws.md`](aws.md) §Runner choice lists the jobs each
 label reaches.
+
+### An apply check is titled `Failed: ...`, `Cancelled`, `Not run` or `Not applied (...)`
+
+The cell did not apply in that run, and its `apply / <stack> / <env>` check went
+back to `queued`, titled with the outcome; the plan summary is unchanged
+(CONTRACT.md §Apply check lifecycle). The gate stays pending.
+
+- `Failed: <first error line>`: the cell's job failed. The check's details link
+  opens that job; the line is its first error annotation. `Failed` alone: the
+  job left no error annotation, or it could not be read. Fix the cause, then
+  comment `shipmate apply`.
+- `Cancelled`: the cell's job was cancelled, by a cancel of the run or by a
+  newer apply run of the pull request (§`cancelled an apply run of this pull
+  request waiting at an older head`). Comment `shipmate apply`.
+- `Not run`: the cell's wave never ran: its release job failed, an earlier wave
+  failed, or the run was cancelled before the wave started. Fix what stopped the
+  earlier wave, then comment `shipmate apply`.
+- `Not applied (<conclusion>)`: the job ended with another conclusion, such as
+  `timed_out` or a rejected environment approval. Comment `shipmate apply`.
+
+A successful apply of the cell completes the check `success` and restores its
+plan title; a check created before shipmate recorded that title keeps `Failed: ...`
+after the success. A check that stays `in_progress` after its run ended was left by a
+run that died, or by a completion whose jobs listing never showed the cell's
+job (`the retries were exhausted and these apply checks are left pending`); the
+next `shipmate apply` writes it again.
 
 ### An apply check never completes after a successful apply
 

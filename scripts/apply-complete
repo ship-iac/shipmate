@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Select the apply-check ids to complete: the pre-flight snapshot intersected
-with the wave jobs that actually succeeded in THIS run.
+"""Decide each apply check's write from the state of its cell's wave job in THIS run.
+
+`apply-complete` reads the run's jobs listing on stdin and prints one row per decided cell;
+`apply-complete plan <all rows> <last rows>` turns rows into the `patch-checks` write plan.
 
 Evidence is `GET /actions/runs/{id}/jobs`, not the cells' own artifacts: a job
 conclusion is written by GitHub, so one cell cannot claim another applied. A
@@ -17,102 +19,186 @@ level and a ` / ` boundary, not a bare `str.endswith`, keeps out a job of env
 `dev-eu` for env `eu` and a non-wave job such as `apply / run / detect` for env
 `run` and stack `detect`; either would complete a check its own apply never earned.
 
-A cell is therefore classified, not merely filtered, into four states.
+The cells are those of the waves named in `SHIPMATE_WAVE_RESULTS_JSON`, `{wave key: result
+of its wave job}`, read from `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s `by_wave`. Each cell
+takes the row of its matched job:
 
-*Matched, succeeded* — its ids are emitted.
+| Matched job | Row `conclusion` | Write (`plan`) |
+| --- | --- | --- |
+| any `success` | `success` | `completed`/`success`, the job's URL, the record title |
+| `failure` | `failure` | `queued`, `Failed: <first error line>`, the job's URL |
+| `cancelled` | `cancelled` | `queued`, `Cancelled` |
+| `skipped`, or none in a wave that did not run | `skipped` / null | `queued`, `Not run` |
+| any other conclusion | itself | `queued`, `Not applied (<conclusion>)`: never `success` |
+| no conclusion yet, or none in a wave that ran | no row | none; `main` exits `UNRESOLVED_EXIT` |
 
-*Matched, no conclusion yet* — the listing lags, by seconds, a job that has
-already ended. Under a plain success filter this cell is indistinguishable
-from one that never ran, so it would be dropped and its check stranded
-pending forever. It is reported retryable instead, and `main` exits
-`UNRESOLVED_EXIT` so the caller can tell "ask me again" from "I broke".
-
-*Matched, terminal, not `success`* — the cell failed, was cancelled, or was
-skipped. Its check legitimately stays pending, and no retry can change that,
-but it is named rather than dropped: everything that leaves a check pending
-has to be visible, or a step that reports success is the only trace.
-
-*No matching job at all* — the snapshot comes from the same `waves_json` the
-caller fans out (`actions/apply-snapshot`), so every snapshot cell is a cell
-of this run; there is no "belongs to another environment" case. What there is
-is skip-propagation: wave1..wave7 carry `if: !failure() && !cancelled()`, and
-`complete` runs on `always()`. GitHub expands a matrix only for a job it
-actually starts, so a skipped wave contributes exactly one row to the
-listing, named with the literal un-interpolated `${{ matrix.environment }} /
-${{ matrix.stack }}` template — matching no cell. (Observed on a real
-run whose `snapshot` job failed: all eight wave jobs listed that way, none
-expanded.) Those checks legitimately stay pending -- but a lost or truncated
-listing looks exactly the same, so they are named in a warning rather than
-skipped in silence, and a listing that matches *no* cell at all is retried
-and then fails the run: a run always lists its own wave jobs.
+A job with no conclusion yet is the listing lagging, by seconds, a job that has already ended,
+so the caller asks again. A wave that did not run (a failed or skipped release, a failed
+earlier wave, a cancel before it started) lists one row under its literal `${{
+matrix.environment }} / ${{ matrix.stack }}` name, since GitHub expands a matrix only for a job
+it starts, so its cells match nothing and are not run. That holds for every `skipped` wave; a
+`cancelled` wave may have started, so its missing cell is not run only when the listing shows
+that literal row, `cancelled`, under this job's own level (`SHIPMATE_JOB_ID`, this job's check
+run id, names the level) and lists no cell of the same wave. Any other missing cell, of a
+wave that ran (`success` or `failure`, or a result this script does not know), is a lost or
+lagging listing: it is retried, and after the retries the cell gets no write, so a stale
+listing never turns a completed `success` back to `queued`. Accepted limit: when every cell of
+a cancelled wave is missing while that literal row is listed, the cells are written `Not run`
+even if one started before the cancel; the check returns to `queued` either way, and only the
+title differs.
 """
 
 import json
 import os
 import sys
+import unicodedata
 
-from _shipmate import _load, run_annotated
+from _shipmate import _load, command_data, gh_json, run_annotated
 
 ag = _load("apply-gate")
 
 UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 # The one channel that says "ask me again, and here is why". The caller greps this prefix out
 # of stderr to annotate what it gave up on after its retries, so it is a line-anchored
-# contract, not a message: stderr also carries warnings naming other cells no retry can help.
+# contract, not a message.
 RETRY_PREFIX = "retry: "
+UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
+ERROR_LINE_CAP = 120
 
 
-def to_complete(snapshot, jobs):
-    out = []
-    unresolved = []
-    unmatched = []
-    unsuccessful = []
-    for check, ids in snapshot.items():
-        label = check.removeprefix(ag.APPLY_PREFIX)
-        matched = [
-            j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))
+def _row(check, ids, job=None):
+    job = job or {}
+    return {
+        "check": check,
+        "ids": ids,
+        "conclusion": job.get("conclusion"),
+        "job_id": job.get("id"),
+        "url": job.get("html_url"),
+    }
+
+
+def unexpanded(jobs, job_id):
+    """Whether `jobs` holds a `cancelled` literal unexpanded wave row of the level of the job
+    `job_id`. Every wave of a level shares that name, so the row does not say which wave."""
+    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
+    level = own.rpartition(" / ")[0]
+    row = level + " / " + UNEXPANDED
+    return bool(level) and any(
+        j.get("name") == row and j.get("conclusion") == "cancelled" for j in jobs
+    )
+
+
+def classify(by_wave, results, jobs, job_id=""):
+    """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
+    result, from the jobs listing `jobs` that holds this job, `job_id`: `unresolved` labels the
+    cells with no row."""
+    literal = unexpanded(jobs, job_id)
+    rows, unresolved = [], []
+    for wave in sorted(results):
+        cells = [
+            (
+                check,
+                ids,
+                [j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))],
+            )
+            for check, ids in sorted((by_wave.get(wave) or {}).items())
         ]
-        if any(j.get("conclusion") == "success" for j in matched):
-            out.extend(ids)
-        elif not matched:
-            unmatched.append(label)
-        elif any(j.get("conclusion") is None for j in matched):
-            unresolved.append(label)
-        else:
-            unsuccessful.append(label)
-    return sorted(out), sorted(unresolved), sorted(unmatched), sorted(unsuccessful)
+        # An expanded matrix lists all its cells at once, so a cell missing beside a listed
+        # sibling is a lagging listing, not a wave that never started.
+        started = any(matched for _, _, matched in cells)
+        not_run = results[wave] == "skipped" or (
+            results[wave] == "cancelled" and literal and not started
+        )
+        for check, ids, matched in cells:
+            won = next((j for j in matched if j.get("conclusion") == "success"), None)
+            if won:
+                rows.append(_row(check, ids, won))
+            elif not matched and not_run:
+                rows.append(_row(check, ids))
+            elif not matched or any(j.get("conclusion") is None for j in matched):
+                unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
+            else:
+                rows.append(_row(check, ids, matched[-1]))
+    return rows, sorted(unresolved)
 
 
-def main():
-    snapshot = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
-    jobs = ag.parse_jsonl(sys.stdin)
-    ids, unresolved, unmatched, unsuccessful = to_complete(snapshot, jobs)
-    for cid in ids:
-        print(cid)
-    if unmatched:
-        print(
-            "::warning::no job in this run's listing matched these cells, so their apply "
-            f"checks stay pending: {', '.join(unmatched)}",
-            file=sys.stderr,
-        )
-    if unsuccessful:
-        print(
-            "::warning::these cells' apply jobs did not succeed, so their apply checks "
-            f"stay pending: {', '.join(unsuccessful)}",
-            file=sys.stderr,
-        )
-    if snapshot and len(unmatched) == len(snapshot):
-        print(
-            RETRY_PREFIX + f"none of the {len(snapshot)} snapshot cells matched a job in this "
-            "run's listing. A run always lists its own wave jobs, so the listing cannot "
-            "be trusted; refusing to complete nothing",
-            file=sys.stderr,
-        )
-        sys.exit(UNRESOLVED_EXIT)
+def error_line(job_id, repo):
+    """`Failed: <message>` from the first `failure` annotation of the check run `job_id`: the
+    message's first line, control characters stripped, cut at `ERROR_LINE_CAP` characters.
+    `Failed` alone when there is none or the read fails: the title only names the error, the
+    outcome comes from the job's conclusion, so this read degrades instead of failing."""
+    if not isinstance(job_id, int):
+        return "Failed"
+    try:
+        notes = gh_json(f"repos/{repo}/check-runs/{job_id}/annotations?per_page=100", retry=False)
+    except SystemExit as exc:
+        why = command_data(str(exc.code).removeprefix("::error::"))
+        print(f"::warning::could not read the annotations of job {job_id}: {why}", file=sys.stderr)
+        return "Failed"
+    message = next(
+        (a.get("message") or "" for a in notes if a.get("annotation_level") == "failure"), ""
+    )
+    first = (message.splitlines() or [""])[0]
+    line = "".join(c for c in first if unicodedata.category(c) != "Cc").strip()
+    return f"Failed: {line[:ERROR_LINE_CAP]}" if line else "Failed"
+
+
+def writes(row, repo):
+    """The `patch-checks` entries for `row`, one per check id."""
+    conclusion = row["conclusion"]
+    if conclusion == "success":
+        body, title = {"status": "completed", "conclusion": "success"}, None
+    elif conclusion == "failure":
+        body, title = {"status": "queued"}, error_line(row["job_id"], repo)
+    elif conclusion == "cancelled":
+        body, title = {"status": "queued"}, "Cancelled"
+    elif conclusion in (None, "skipped"):
+        body, title = {"status": "queued"}, "Not run"
+    else:
+        body, title = {"status": "queued"}, f"Not applied ({conclusion})"
+    if conclusion in ("success", "failure") and row["url"]:
+        body["details_url"] = row["url"]
+    return [{"id": cid, "body": body, "title": title} for cid in row["ids"]]
+
+
+def merge(every, last):
+    """One row per check: a `success` row from any attempt in `every`, else its row in `last`.
+    A later, staler listing never downgrades a success."""
+    out = {r["check"]: r for r in last}
+    out.update({r["check"]: r for r in every if r["conclusion"] == "success"})
+    return [out[check] for check in sorted(out)]
+
+
+def _rows(path):
+    with open(path, encoding="utf-8") as fh:
+        return ag.parse_jsonl(fh)
+
+
+def plan(every_path, last_path):
+    repo = os.environ["GITHUB_REPOSITORY"]
+    for row in merge(_rows(every_path), _rows(last_path)):
+        for entry in writes(row, repo):
+            print(json.dumps(entry))
+
+
+def main(argv=()):
+    if argv:
+        if argv[0] != "plan" or len(argv) != 3:
+            raise SystemExit("::error::usage: apply-complete [plan <all rows> <last rows>]")
+        plan(argv[1], argv[2])
+        return
+    rows, unresolved = classify(
+        json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"]),
+        json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"]),
+        ag.parse_jsonl(sys.stdin),
+        os.environ["SHIPMATE_JOB_ID"],
+    )
+    for row in rows:
+        print(json.dumps(row))
     if unresolved:
         print(
             RETRY_PREFIX
-            + "the jobs listing reported no conclusion for these cells: "
+            + "the jobs listing shows no conclusion for these cells of waves that ran: "
             + ", ".join(unresolved),
             file=sys.stderr,
         )
@@ -120,4 +206,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, sys.argv[1:])

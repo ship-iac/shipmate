@@ -73,7 +73,8 @@ def _emit(cells_dir):
 
 
 def test_changed_cell_yields_queued_body(tmp_path):
-    """Mutations: omit `"pr"` from the record -- red; omit `"cells"` from the record -- red."""
+    """Mutations: omit `"pr"` from the record -- red; omit `"cells"` from the record -- red; omit
+    `"title"` from the record -- red."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -92,6 +93,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         "pr": PR,
         "cells": 1,
         "action": "synchronize",
+        "title": "+? ~? -?",
     }
     assert body == {
         "name": "apply / stacks/app / dev-eu",
@@ -131,6 +133,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         "pr": PR,
         "cells": 1,
         "action": "synchronize",
+        "title": "no changes",
     }
 
 
@@ -200,6 +203,7 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
         "pr": "31",
         "cells": 1,
         "action": "synchronize",
+        "title": "+? ~? -?",
     }
 
 
@@ -523,6 +527,7 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
                 "pr": PR,
                 "cells": 2,
                 "action": "synchronize",
+                "title": "+? ~? -?",
             },
         )
     ]

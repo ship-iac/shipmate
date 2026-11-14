@@ -56,6 +56,36 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
     assert out["apply / stacks/dns / dev-eu"] == [1, 5]
 
 
+def test_a_completed_duplicate_is_dropped_and_the_open_one_kept():
+    """A later write would relink or retitle a completed check; an `in_progress` one, a dead
+    run's flip, is still pending. Mutations: keep every id, whatever its status -> dns maps to
+    [1, 5]; keep only `queued` ids -> app has none and the run refuses."""
+    runs = [
+        {**check("apply / stacks/dns / dev-eu", 1), "status": "queued"},
+        {**check("apply / stacks/dns / dev-eu", 5), "status": "completed"},
+        {**check("apply / stacks/app / dev-eu", 2), "status": "in_progress"},
+    ]
+    assert apply_snapshot.snapshot(WAVES, runs, APP_ID) == {
+        "apply / stacks/dns / dev-eu": [1],
+        "apply / stacks/app / dev-eu": [2],
+    }
+
+
+def test_a_cell_whose_only_check_is_completed_fails_the_whole_run():
+    """Mutation: keep every id, whatever its status -> no refusal."""
+    runs = [
+        check("apply / stacks/dns / dev-eu", 1),
+        {**check("apply / stacks/app / dev-eu", 2), "status": "completed"},
+    ]
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.snapshot(WAVES, runs, APP_ID)
+    assert str(exc.value) == (
+        "::error::no App-authored apply check named 'apply / stacks/app / dev-eu' that is not "
+        "yet completed on the head SHA before apply; this cell would apply with nothing to "
+        "complete afterwards, stranding its check pending. Re-plan."
+    )
+
+
 def test_a_single_cell_with_no_apply_check_fails_the_whole_run():
     # Excluding the cell instead would let it apply for real with no id for the trailing
     # completer to PATCH: its check stays pending forever, the gate stays pending with it, and a
@@ -202,11 +232,23 @@ def test_by_wave_slices_the_snapshot_per_wave():
 
 
 def test_a_wave_slice_reads_no_later_wave_as_unmatched():
-    """wave0's completion runs before wave1 has a job in the listing. Mutation: hand
-    `to_complete` the whole snapshot instead of wave0's slice -> wave1's cells read unmatched."""
-    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "status": "completed"}]
-    wave0 = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)["wave0"]
-    assert apply_complete.to_complete(wave0, jobs) == ([1], [], [], [])
+    """wave0's completion runs before wave1 has a job in the listing. Mutation: `classify` walks
+    every key of `by_wave` instead of those of its wave results -> wave1's cells read
+    unresolved."""
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
+    assert apply_complete.classify(by_wave, {"wave0": "success"}, jobs) == (
+        [
+            {
+                "check": "apply / dns / dev",
+                "ids": [1],
+                "conclusion": "success",
+                "job_id": 9,
+                "url": "u",
+            }
+        ],
+        [],
+    )
 
 
 def test_main_writes_the_snapshot_and_its_slices(monkeypatch, tmp_path, capsys):

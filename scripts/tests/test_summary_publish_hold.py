@@ -211,6 +211,7 @@ def _check_post(slug, cells):
                 "pr": "7",
                 "cells": cells,
                 "action": "synchronize",
+                "title": "+? ~? -?",
             }
         ),
         "output": {"title": "+? ~? -?", "summary": "```diff\nplan\n```"},

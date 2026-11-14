@@ -36,8 +36,8 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   (empty reads none).
   A holder whose pull request read fails is left out with a `::warning::`.
 - `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
-  `STACK` in `SHIPMATE_ENV` and is open at `SHIPMATE_HEAD_SHA`. With `SHIPMATE_AUTO` `true` it
-  also refuses unless `GITHUB_RUN_ATTEMPT` is `1`, the pull request is not a draft,
+  `STACK` in `SHIPMATE_ENV`, is open at `SHIPMATE_HEAD_SHA` and `GITHUB_RUN_ATTEMPT` is `1`.
+  With `SHIPMATE_AUTO` `true` it also refuses unless the pull request is not a draft,
   `SHIPMATE_PROVENANCE_RUN` is the head's newest autoplan and the run the cell's newest plan
   record names, its pusher still passes
   `authorize.pusher_reason`, and the base tip is still `SHIPMATE_BASE_SHA`. A "Re-run
@@ -65,6 +65,7 @@ from _shipmate import (
     check_runs,
     command_data,
     deploy_lock_remedy,
+    deploy_mode,
     gh_json,
     is_head_sha,
     is_run_id,
@@ -772,19 +773,11 @@ def _draft(pull):
     return draft
 
 
-def _deploy_mode():
-    """`SHIPMATE_DEPLOY` is `true`; unset reads as `false`, and any other value refuses."""
-    deploy = os.environ.get("SHIPMATE_DEPLOY", "false")
-    if deploy not in ("true", "false"):
-        raise SystemExit(f"::error::SHIPMATE_DEPLOY must be true or false (got: {deploy!r})")
-    return deploy == "true"
-
-
 def _verify_cmd(repo, _, run):
     """`main` passes no pull request here: deploy mode decides how an empty one reads."""
     env, stack = _env(os.environ.get("SHIPMATE_ENV", "")), os.environ.get("STACK", "")
     where = f"`{env}` / `{stack}`"
-    deploy = _deploy_mode()
+    deploy = deploy_mode()
     # A push that merged no pull request deploys with pull request 0, which holds no lock.
     pr = 0 if deploy and not os.environ.get("SHIPMATE_PR_NUMBER") else int(ag.env_pr_number())
     if deploy:
@@ -810,12 +803,12 @@ def _verify_cmd(repo, _, run):
             f"::error::apply aborted for {where}: an auto apply reached the wave without its "
             f"plan run and base tip (got: {provenance!r}, {base!r}); {_RETRY}"
         )
-    # "Re-run failed jobs" reuses the passed detect, skipping its actor check; the App never
-    # re-runs, so a later attempt is a human's.
+    # "Re-run failed jobs" reuses the passed detect, skipping its actor check, and a re-run's
+    # release and completion jobs write nothing: a later run may have completed the same checks.
     attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
-    if auto and attempt != "1":
+    if attempt != "1":
         raise SystemExit(
-            f"::error::apply aborted for {where}: an auto apply is never re-run (run attempt "
+            f"::error::apply aborted for {where}: an apply is never re-run (run attempt "
             f"{attempt!r}): comment `shipmate apply`"
         )
     _verify_lock(repo, pr, env, stack, where, run)

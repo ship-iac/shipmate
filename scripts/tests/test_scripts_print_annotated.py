@@ -17,6 +17,7 @@ SCRIPTS_EXPECTED = [
     "apply-detect",
     "apply-gate",
     "apply-queue",
+    "apply-release",
     "apply-snapshot",
     "authorize",
     "auto-dispatch",
@@ -63,6 +64,8 @@ MAIN_BLOCK = "if __name__ == '__main__':\n    run_annotated(main)"
 #: Hand-written: each block that is not `MAIN_BLOCK`.
 BLOCKS = {
     "apply-detect": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
+    "apply-complete": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
+    "apply-release": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "apply-snapshot": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "build-matrix": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "cell-lock": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",

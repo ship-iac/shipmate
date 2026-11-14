@@ -1,16 +1,32 @@
 #!/usr/bin/env python3
-"""Complete App-authored apply checks: `patch-checks`, no arguments.
+"""Write App-authored apply checks: `patch-checks`, no arguments.
 
-Reads check-run ids on stdin, one per line (blank lines skipped), and PATCHes each with `BODY`
-through `write_retried`, the body on gh's stdin. `GH_TOKEN` and
-`GITHUB_REPOSITORY` come from the environment. Stdout carries only the ids PATCHed, one per line
-as each is acknowledged, for the step log only: nothing reads them. Every diagnostic goes to
-stderr.
+Reads a write plan on stdin, one JSON object per line (blank lines skipped): `id`, the check, and
+`body`, its PATCH body. Each is PATCHed in order, one at a time, through `write_retried`, the body
+on gh's stdin. Every read goes through `write_retried` too. An entry carrying `title` reads its
+check first (one GET) and its PATCH also carries
+`output`: the check's current summary, which pending-checks wrote once and nothing changes since,
+so no recent write can make the read stale; and as its title the `title` string, or, when that is
+null, the `title` of the check's `external_id` record. A check with no record title, or no
+summary, keeps its output (no `output` sent). `GH_TOKEN` and `GITHUB_REPOSITORY` come from the
+environment. Stdout carries only the ids written, one per line as each is acknowledged, for the
+step log only: nothing reads them. Every diagnostic goes to stderr.
+
+An entry that does not complete its check `success` is skipped when the check reads `completed`:
+another writer, such as a merge deploy after a gate-bypassing merge, completed it.
+
+A pre-merge run (`SHIPMATE_DEPLOY` `false`; `deploy_mode` refuses any value but `true` and
+`false`) writes only its `completed`/`success` entries on a re-run (`GITHUB_RUN_ATTEMPT` above 1):
+its cells refuse to apply, and a later run may have completed the same checks, but a re-run of a
+completion job can still complete a cell an earlier listing missed. With `SHIPMATE_PR_NUMBER`
+set, a first attempt reads that pull request once before any write; when it is merged, only the
+`completed`/`success` entries are written, since the merge deploy owns the rest. A failed read
+writes nothing and fails.
 
 Fails closed, because the gate's work queue is the pending checks: the first id that still
 fails (a permanent failure at once, a transient one once its retries are exhausted, a
 rate-limited one once the process's rate-limit waits are spent) stops the loop with
-`::error::failed to complete apply check <id>`, then run's `command failed (1): gh api ...`
+`::error::failed to write apply check <id>`, then run's `command failed (1): gh api ...`
 line, then gh's own error line; exit 1. Stopping there means the slim runner's time cap is never
 spent once per id.
 """
@@ -20,24 +36,92 @@ import json
 import os
 import sys
 
-from _shipmate import run, run_annotated, write_retried
+from _shipmate import decoded, deploy_mode, is_pr_number, run, run_annotated, write_retried
 
-# Never `output`: a PATCH carrying it replaces the plan text on the check.
-BODY = {"status": "completed", "conclusion": "success"}
+SUCCESS = {"status": "completed", "conclusion": "success"}
+
+
+def _record_title(check):
+    title = (decoded(check) or {}).get("title")
+    return title if isinstance(title, str) and title else None
+
+
+def _succeeds(entry):
+    return {k: entry["body"].get(k) for k in SUCCESS} == SUCCESS
+
+
+def with_output(entry, check):
+    """`entry`'s body, plus `output` when `entry` carries `title` and `check`, its check as read,
+    yields both a title and a summary."""
+    body = entry["body"]
+    if "title" not in entry:
+        return body
+    title = entry["title"] if entry["title"] is not None else _record_title(check)
+    summary = (check.get("output") or {}).get("summary")
+    if not (title and summary):
+        return body
+    return {**body, "output": {"title": title, "summary": summary}}
+
+
+def read(path):
+    """`gh api <path>` parsed, through `write_retried`: a read repeats safely, and the writes
+    beside it can draw GitHub's secondary rate limit on it too."""
+    try:
+        return json.loads(write_retried(functools.partial(run, ["gh", "api", path])))
+    except SystemExit as exc:
+        raise SystemExit(f"::error::{exc.code}") from None
+
+
+def _merged(repo, pr):
+    if not is_pr_number(pr):
+        raise SystemExit(f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {pr!r})")
+    return read(f"repos/{repo}/pulls/{pr}").get("merged") is True
+
+
+def write(plan):
+    """Write the entries of `plan` as the module docstring says."""
+    repo = os.environ["GITHUB_REPOSITORY"]
+    if not deploy_mode():
+        attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+        pr = os.environ.get("SHIPMATE_PR_NUMBER", "")
+        if attempt != "1":
+            print(
+                f"::notice::run attempt {attempt} of a pre-merge apply writes only its successes",
+                file=sys.stderr,
+            )
+            plan = [e for e in plan if _succeeds(e)]
+        elif pr and _merged(repo, pr):
+            print(
+                f"::notice::pull request #{pr} is merged; its merge deploy owns every apply check "
+                "this run did not apply",
+                file=sys.stderr,
+            )
+            plan = [e for e in plan if _succeeds(e)]
+    for entry in plan:
+        cid = entry["id"]
+        path = f"repos/{repo}/check-runs/{cid}"
+        body = entry["body"]
+        if "title" in entry:
+            check = read(path)
+            if not _succeeds(entry) and check.get("status") == "completed":
+                print(
+                    f"::notice::apply check {cid} is already completed; left as it is",
+                    file=sys.stderr,
+                )
+                continue
+            body = with_output(entry, check)
+        args = ["gh", "api", "-X", "PATCH", path, "--input", "-"]
+        try:
+            write_retried(functools.partial(run, args, stdin=json.dumps(body)))
+        except SystemExit as exc:
+            raise SystemExit(f"::error::failed to write apply check {cid}\n{exc.code}") from None
+        print(cid, flush=True)
 
 
 def main(argv=()):
     if argv:
-        raise SystemExit("::error::usage: patch-checks (ids on stdin, no arguments)")
-    body = json.dumps(BODY)
-    repo = os.environ["GITHUB_REPOSITORY"]
-    for cid in [line.strip() for line in sys.stdin if line.strip()]:
-        args = ["gh", "api", "-X", "PATCH", f"repos/{repo}/check-runs/{cid}", "--input", "-"]
-        try:
-            write_retried(functools.partial(run, args, stdin=body))
-        except SystemExit as exc:
-            raise SystemExit(f"::error::failed to complete apply check {cid}\n{exc.code}") from None
-        print(cid, flush=True)
+        raise SystemExit("::error::usage: patch-checks (write plan on stdin, no arguments)")
+    write([json.loads(line) for line in sys.stdin if line.strip()])
 
 
 if __name__ == "__main__":

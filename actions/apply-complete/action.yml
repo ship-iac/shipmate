@@ -1,8 +1,20 @@
 name: shipmate apply-complete
-description: Complete the apply checks of the given snapshot (one wave's slice, or the whole level) whose wave job succeeded in this run. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs.
+description: Write the apply checks of the given waves from their cells' wave jobs in this run - completed on success, otherwise returned to queued and titled with the outcome. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and checks:read to read a failed job's annotations.
 inputs:
-  snapshot:
-    description: JSON object from apply-snapshot mapping each cell to its pre-existing apply-check ids.
+  by-wave:
+    description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
+    required: true
+  wave-results:
+    description: JSON object mapping each wave key to write to the result of its wave job. A cell with no job is not run when its wave is `skipped`, or `cancelled` with the level's `cancelled` literal matrix row listed and none of that wave's cells listed; any other cell with no job is retried and then left unwritten.
+    required: true
+  job-id:
+    description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
+    required: true
+  deploy:
+    description: "`true` on the merge deploy. Otherwise a re-run writes only its `success` entries, and a merged pull request gets only its `success` writes."
+    required: true
+  pr-number:
+    description: The pull request the run applies; read before a pre-merge write.
     required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
@@ -18,17 +30,19 @@ runs:
       with:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-    - name: List run jobs and select the checks earned by this run
+    - name: List run jobs and decide each apply check's write
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
-        SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
+        SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
+        SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
+        SHIPMATE_JOB_ID: ${{ inputs.job-id }}
       # `--paginate --jq` because a 256-cell level exceeds the 100-per-page cap. Unlike
       # apply-summary's cosmetic listing, this one decides which checks complete, so it never
       # degrades to no data: that would silently strand every applied check pending.
       run: |
         set -euo pipefail
-        : > "$RUNNER_TEMP/earned-ids.txt"
+        : > "$RUNNER_TEMP/rows.jsonl"
         : > "$RUNNER_TEMP/stranded.txt"
         ok=""
         # ~2 minutes, not the ~30s a lag needs: exhausting it fails the env-level, and
@@ -41,26 +55,25 @@ runs:
         # the loop into one read plus the whole sleep budget over a fixed snapshot.
         for n in $(seq "$attempts"); do
           rc=0
-          : > "$RUNNER_TEMP/attempt-ids.txt"
+          : > "$RUNNER_TEMP/attempt-rows.jsonl"
           if gh api --paginate --jq '.jobs[]' \
                "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
                > "$RUNNER_TEMP/jobs.jsonl" && [ -s "$RUNNER_TEMP/jobs.jsonl" ]; then
             python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
               < "$RUNNER_TEMP/jobs.jsonl" \
-              > "$RUNNER_TEMP/attempt-ids.txt" \
+              > "$RUNNER_TEMP/attempt-rows.jsonl" \
               2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
           else
             # An empty or failed fetch is the extreme form of that lag, so it retries. The
-            # half-written file stays unread: a truncated listing matches a subset of cells
-            # and slips past the script's all-cells-unmatched floor.
+            # half-written file stays unread: a truncated listing would write `Not run` over
+            # the cells of a skipped wave it lost.
             rc=75
             echo "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells succeeded" \
               > "$RUNNER_TEMP/diagnostics.txt"
           fi
-          # Ids accumulate and are deduped after the loop: replicas differ, so a later
-          # attempt can land on a staler one and lose a row an earlier attempt saw. A later
-          # read only ever adds a completion -- every id comes from a job recorded `success`.
-          cat "$RUNNER_TEMP/attempt-ids.txt" >> "$RUNNER_TEMP/earned-ids.txt"
+          # Rows accumulate for the merge after the loop: replicas differ, so a later attempt
+          # can land on a staler one and lose a success an earlier attempt saw.
+          cat "$RUNNER_TEMP/attempt-rows.jsonl" >> "$RUNNER_TEMP/rows.jsonl"
           # Only exit 75 (EX_TEMPFAIL) means "ask me again". Any other non-zero is the script
           # itself failing and propagates at once, so a broken invocation is not retried for
           # two minutes and then misreported as a stale listing.
@@ -70,14 +83,13 @@ runs:
             *) cat "$RUNNER_TEMP/diagnostics.txt" >&2; exit "$rc" ;;
           esac
         done
-        sort -u "$RUNNER_TEMP/earned-ids.txt" > "$RUNNER_TEMP/complete-ids.txt"
+        # A success from any attempt, every other row from the last one only. Reads a failed
+        # job's annotations with this step's job token, before the App token exists.
+        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" plan           "$RUNNER_TEMP/rows.jsonl" "$RUNNER_TEMP/attempt-rows.jsonl" > "$RUNNER_TEMP/writes.jsonl"
         # Echoed once after the loop, not per attempt: the file is rewritten each time, so an
         # exhausted run would otherwise log the same warning once per attempt.
         cat "$RUNNER_TEMP/diagnostics.txt" >&2
         if [ -z "$ok" ]; then
-          # Only the script's `retry:` lines: the file also holds warnings naming cells no
-          # retry could have helped, and naming those as the failure's reason names the
-          # wrong cells.
           sed -n 's/^retry: //p' "$RUNNER_TEMP/diagnostics.txt" > "$RUNNER_TEMP/stranded.txt"
           [ -s "$RUNNER_TEMP/stranded.txt" ] ||
             echo "the retries were exhausted without the script naming a reason" \
@@ -94,22 +106,25 @@ runs:
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
         permission-checks: write
+        permission-pull-requests: read
 
-    - name: Complete the apply checks
+    - name: Write the apply checks
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_DEPLOY: ${{ inputs.deploy }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       # Fails closed: a stranded check blocks the gate, and a re-run cannot recover it because
       # the applied state has already advanced past the reviewed plan.
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" < "$RUNNER_TEMP/complete-ids.txt"
+        python3 "$GITHUB_ACTION_PATH/../../scripts/patch-checks" < "$RUNNER_TEMP/writes.jsonl"
 
     - name: Fail over any cell the jobs listing never resolved
       shell: bash
       # Deliberately last, and deliberately still a failure: a stranded check blocks the gate
       # forever while reporting success everywhere a human looks. Failing in the listing step
-      # instead would discard a level's earned completions over one lagging cell.
+      # instead would discard a level's decided writes over one lagging cell.
       run: |
         set -euo pipefail
         if [ -s "$RUNNER_TEMP/stranded.txt" ]; then

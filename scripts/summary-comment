@@ -820,6 +820,7 @@ _DRIFT_LINE = (
 
 
 #: Bytes of the apply check's summary that its fence and truncation trailer take from the plan.
+#: Nothing else is ever added: a completion keeps the summary and puts an error in the title.
 _CHECK_FRAME = 1024
 
 
