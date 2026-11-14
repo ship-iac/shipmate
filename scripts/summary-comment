@@ -373,14 +373,14 @@ def _stacked_held(cells, locks, stacked, default_branch):
     return [locks[k] for c in cells if (k := _lock_key(c, locks)) and locks[k] in stacked]
 
 
-def blocked_envs(cells, locks, blocking, default_branch):
+def blocked_envs(cells, locks, blocking):
     """`{env: sorted holders}` of the `blocking` (`blocking_marks`) holders of each
     environment's changed locked cells of `cells`, where `shipmate unlock <env> --evict`
-    refuses; empty when `default_branch` is empty."""
+    refuses."""
     out = {}
     for c in cells:
         key = _lock_key(c, locks)
-        if key and default_branch and locks[key] in blocking:
+        if key and locks[key] in blocking:
             out.setdefault(c["environment"], set()).add(locks[key])
     return {e: sorted(hs) for e, hs in out.items()}
 
@@ -774,7 +774,7 @@ def build_comment(
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     locks = locks or {}
-    blocked = blocked_envs(meta, locks, blocking, default_branch)
+    blocked = blocked_envs(meta, locks, blocking)
     entries = _entries(cells, order, checks, run_url, locks, stacked, default_branch)
     bares = [e[0] for e in entries]
     named = {}
@@ -1036,11 +1036,11 @@ def unknown_marks(raw):
     return _holder_map(raw, lambda v: isinstance(v, str), "lock holders of unknown stacking")
 
 
-def blocking_marks(raw):
+def blocking_marks(raw, stacked):
     """`cell-lock marks`' `blocking` output `raw`, a JSON list of the holders an eviction
-    refuses, as a set: empty when `raw` is empty, and empty with one warning when it is not a
-    list of pull request numbers, so the commands section offers every eviction and the
-    eviction itself still refuses."""
+    refuses, as a set: empty when `raw` is empty. When it is not a list of pull request
+    numbers, the holders of `stacked` (`stacked_marks`), which always block, with one
+    warning."""
     if not raw:
         return set()
     value = json_or_none(raw)
@@ -1048,9 +1048,9 @@ def blocking_marks(raw):
         return set(value)
     print(
         "::warning::the blocking lock holders are not a JSON list of pull request numbers; the "
-        "plan comment offers every eviction"
+        "plan comment treats only the stacked holders as blocking"
     )
-    return set()
+    return set(stacked)
 
 
 CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
@@ -1165,7 +1165,7 @@ def main():
     locks = lock_marks(os.environ.get("SHIPMATE_LOCKS", ""))
     stacked = stacked_marks(os.environ.get("SHIPMATE_STACKED", ""))
     unknown = unknown_marks(os.environ.get("SHIPMATE_STACKED_UNKNOWN", ""))
-    blocking = blocking_marks(os.environ.get("SHIPMATE_BLOCKING", ""))
+    blocking = blocking_marks(os.environ.get("SHIPMATE_BLOCKING", ""), stacked)
     default_branch = os.environ.get("SHIPMATE_DEFAULT_BRANCH", "")
     body, named, lost_named = build_comment(
         cells,

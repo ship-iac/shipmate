@@ -799,7 +799,8 @@ the lock on a cell the commenting pull request still applies. The whole command
 refuses and releases nothing, naming each holder and its cause, when a holder is
 stacked on the commenting pull request through a chain of pull requests at any
 depth, when a read of a holder failed (comment again), or when a holder's walk
-ran out of pages (commenting again will not change it)
+ran out of pages (commenting again refuses the same way: retarget the holder to
+the default branch, or wait until it merges or closes)
 ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). Stacking pull requests that
 change the same cells is not recommended: while a holder is stacked, eviction
 refuses, and the holder has to be retargeted to the default branch and merged

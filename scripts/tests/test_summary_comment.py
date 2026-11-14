@@ -558,12 +558,12 @@ def test_an_environment_with_a_holder_whose_read_failed_keeps_its_evict_line():
     assert section == _with_evict(_EVICT_12)
 
 
-def test_a_blocking_holder_with_no_default_branch_keeps_the_evict_line():
-    """`blocked_envs` judges no holder blocking without a default branch. Mutation: drop its
-    `default_branch` check -- the line goes, red."""
+def test_a_blocking_holder_with_no_default_branch_has_no_evict_line():
+    """`blocked_envs` trusts `blocking` as `cell-lock` wrote it, whatever the default branch.
+    Mutation: skip a holder when `default_branch` is empty -- the line renders, red."""
     locks = {"stacks/app / dev-eu": 12}
     section = _section(_LOCK_CELLS, locks=locks, stacked={12: ()}, blocking={12}, default_branch="")
-    assert section == _with_evict(_EVICT_12)
+    assert section == COMMANDS
 
 
 def test_a_lock_on_an_unchanged_cell_names_no_evict_command():
@@ -2559,7 +2559,7 @@ def test_an_unknown_holder_offers_the_eviction_only_where_nothing_blocks_it():
     cells.append(_cell(stack="d", environment="prod"))
     locks = {"a / dev-eu": 9, "b / prod": 9, "c / dev-eu": 7, "d / prod": 12}
     unknown = {9: "HTTP 502", 12: "HTTP 404"}
-    blocked = sc.blocked_envs(cells, locks, {7}, "main")
+    blocked = sc.blocked_envs(cells, locks, {7})
     assert blocked == {"dev-eu": [7]}
     assert sc.stacked_lines(cells, locks, {}, "main", unknown, blocked) == [
         (
@@ -2717,8 +2717,24 @@ def test_main_renders_the_unknown_line_and_offers_no_eviction(tmp_path, monkeypa
 
 _BLOCKING_UNREAD = (
     "::warning::the blocking lock holders are not a JSON list of pull request numbers; the plan "
-    "comment offers every eviction\n"
+    "comment treats only the stacked holders as blocking\n"
 )
+
+
+def test_main_reads_an_unreadable_blocking_as_the_stacked_holders(tmp_path, monkeypatch, capsys):
+    """#12 is stacked and `blocking` is malformed: a stacked holder always blocks, so dev-eu
+    has no evict line, with one warning. Mutation: return `set()` in place of `set(stacked)`
+    -- the evict line renders, red."""
+    monkeypatch.setenv("SHIPMATE_LOCKS", '{"stacks/app / dev-eu": 12}')
+    monkeypatch.setenv("SHIPMATE_STACKED", '{"12": []}')
+    monkeypatch.setenv("SHIPMATE_BLOCKING", '["12"]')
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
+    monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        f"{_STACKED_LOCK_BODY}\n\n{COMMANDS}"
+    )
+    assert capsys.readouterr().out == _BLOCKING_UNREAD
 
 
 @pytest.mark.parametrize(

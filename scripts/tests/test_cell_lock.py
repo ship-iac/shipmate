@@ -1077,7 +1077,7 @@ def test_the_comment_offers_no_eviction_that_evict_refuses(monkeypatch, tmp_path
         stacked=sc.stacked_marks(out["stacked"]),
         default_branch="main",
         unknown=sc.unknown_marks(out["stacked_unknown"]),
-        blocking=sc.blocking_marks(out["blocking"]),
+        blocking=sc.blocking_marks(out["blocking"], sc.stacked_marks(out["stacked"])),
     )[0]
     offered = {e for e in envs if f"`shipmate unlock {e} --evict`" in body}
     blocked = set()
@@ -1698,7 +1698,7 @@ def test_evict_cli_refuses_stacked_holders_in_one_error_and_deletes_nothing(monk
 _EXHAUSTED_LINE = (
     "could not tell whether #9 is stacked on this pull request: its chain of base branches "
     "needs more than 20 pages of pull requests. Commenting again refuses the same way: retarget "
-    "#9 to main, or wait until it merges or closes, which releases its locks."
+    "#9 to main, or wait until it merges or closes, after which the eviction is not blocked by it."
 )
 
 
@@ -1866,6 +1866,34 @@ def test_evict_refusal_past_the_cap_keeps_whole_sentences_and_logs_every_holder(
         f"::error::{_shipmate.command_data(chr(10).join(lines[16:]))}\n"
     )
     assert gh.drained()
+
+
+def test_evict_refusal_cuts_a_lone_sentence_past_the_cap(monkeypatch, tmp_path, capsys):
+    """#12's read fails with a 5,000-character cause: the reply keeps the sentence cut to
+    3,970 characters, `...` and the tail, 4,000 in all, and the log has it whole. Mutation:
+    drop the cut and return the tail alone when no sentence fits -- the reply names no holder,
+    red."""
+    cause = "x" * 5000
+    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / stacks/auth / dev", "queued", None)))
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(pull_read(12), SystemExit(f"::error::{cause}"))
+    sentence = f"could not tell whether #12 is stacked on this pull request: {cause}"
+    with pytest.raises(SystemExit):
+        _shipmate.run_annotated(
+            lambda: _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV), refusal_output=True
+        )
+    refusal = github_outputs(tmp_path / "out")["refusal"]
+    assert refusal == (
+        "could not tell whether #12 is stacked on this pull request: "
+        + "x" * 3910
+        + "... the run log has it in full"
+    )
+    assert len(refusal) == 4000
+    assert capsys.readouterr().err == (
+        f"::error::{_shipmate.command_data(chr(10).join([refusal[:3973], refusal[3974:]]))}\n"
+        f"::error::{sentence}\n"
+    )
 
 
 def test_evict_on_the_default_branch_reads_no_holder(monkeypatch, tmp_path):

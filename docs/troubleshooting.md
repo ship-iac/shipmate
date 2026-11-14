@@ -1072,7 +1072,7 @@ The reply reads ``🔴 refused: no cell lock in `<env>` was released.``, with ``
 could not tell whether #<h> is stacked on this pull request: its chain of base
 branches needs more than 20 pages of pull requests. Commenting again refuses
 the same way: retarget #<h> to <default branch>, or wait until it merges or
-closes, which releases its locks. `` fenced, one per such holder, after any
+closes, after which the eviction is not blocked by it. `` fenced, one per such holder, after any
 stacked holder's sentence pair.
 
 - Cause: Walking #<h>'s base branches toward this pull request's head branch
@@ -1084,7 +1084,8 @@ stacked holder's sentence pair.
   unlock <env> --evict` for that environment. The same refusal also names any
   holder whose read failed.
 - Remedy: Retarget #<h> to the default branch, or wait until it merges or
-  closes, which releases its locks. Then comment the command again. A branch on
+  closes, after which the eviction is not blocked by it. Then comment the
+  command again. A branch on
   the path whose pull request history alone needs more than 20 pages is an
   accepted limit ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops): shortening
   the chain does not help there.

@@ -469,7 +469,7 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     ] + [
         f"could not tell whether #{holder} is stacked on this pull request: {walk.reason}. "
         f"Commenting again refuses the same way: retarget #{holder} to {default_branch}, or "
-        "wait until it merges or closes, which releases its locks."
+        "wait until it merges or closes, after which the eviction is not blocked by it."
         for holder, walk in unknown.items()
         if holder in blocks
     ]
@@ -479,7 +479,7 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
         if holder not in blocks
     ]
     if blocked or unread:
-        raise (Blocked if blocks else SystemExit)(_refusal(blocked + unread))
+        raise (Blocked if blocked else SystemExit)(_refusal(blocked + unread))
     return _delete_each(repo, locks, run)
 
 
@@ -492,16 +492,29 @@ def blocking(stacked, unknown):
 
 
 def _refusal(sentences):
-    """`sentences` as one `::error::`, one per line. When `run_annotated`'s `refusal` output (the
-    lines joined by spaces) would pass `REASON_CAP`, that first error keeps the leading whole
-    sentences that fit and ends `and <n> more holder(s); the run log names every one`, and a
-    second error carries the rest, so the log still names every holder."""
-    for kept in range(len(sentences), -1, -1):
+    """`sentences` (at least one) as one `::error::`, one per line. When `run_annotated`'s
+    `refusal` output (the lines joined by spaces) would pass `REASON_CAP`, that first error
+    keeps the leading whole sentences that fit and ends `and <n> more holder(s); the run log
+    names every one`, and a second error carries the rest, so the log still names every holder.
+    When not even the first sentence fits beside that tail, the first error keeps the first
+    sentence cut to fit and ending `...`, then the tail (`the run log has it in full` for a lone
+    sentence), and the second error carries every sentence whole."""
+    for kept in range(len(sentences), 0, -1):
         rest = sentences[kept:]
-        tail = [f"and {len(rest)} more holder(s); the run log names every one"] if rest else []
-        if len(" ".join(sentences[:kept] + tail)) <= REASON_CAP:
-            break
-    errors = ["\n".join(sentences[:kept] + tail), "\n".join(rest)]
+        first = [*sentences[:kept], *([_more(len(rest))] if rest else [])]
+        if len(" ".join(first)) <= REASON_CAP:
+            return _errors(first, rest)
+    tail = _more(len(sentences) - 1) if len(sentences) > 1 else "the run log has it in full"
+    cut = sentences[0][: REASON_CAP - len(tail) - 4]
+    return _errors([f"{cut}...", tail], sentences)
+
+
+def _more(n):
+    return f"and {n} more holder(s); the run log names every one"
+
+
+def _errors(first, rest):
+    errors = ["\n".join(first), "\n".join(rest)]
     return "\n".join(f"::error::{e}" for e in errors if e)
 
 

@@ -1421,14 +1421,16 @@ commits of its chain. After them, in the same refusal, comes one sentence per
 holder whose walk needs more than 20 pages, lowest first: `could not tell
 whether #<h> is stacked on this pull request: its chain of base branches needs
 more than 20 pages of pull requests. Commenting again refuses the same way:
-retarget #<h> to <default branch>, or wait until it merges or closes, which
-releases its locks.` Then one sentence per holder whose read fails or answers
+retarget #<h> to <default branch>, or wait until it merges or closes, after
+which the eviction is not blocked by it.` Then one sentence per holder whose read fails or answers
 malformed, lowest first: `could not tell whether #<h> is stacked on this pull
 request: <cause>`. One refusal names every such holder, so nothing is released.
 The run log names each of them; the reply carries the refusal on one line of at
 most 4,000 characters, and when the sentences would pass that, it keeps the
 leading whole sentences that fit and ends `and <n> more holder(s); the run log
-names every one`. With a stacked holder or a walk out
+names every one`. When not even the first sentence fits beside that ending, the
+reply keeps the first sentence cut to fit and ending `...`, then the ending (`the
+run log has it in full` when it is the only sentence). With a stacked holder or a walk out
 of pages, the reply is the `🔴 refused:` one above; with only failed reads, it
 is ``🔴 failed: could not evict the cell locks in `<env>`. This run's log has
 the error; comment again.`` An empty head branch or
