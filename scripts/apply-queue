@@ -41,27 +41,17 @@ from _shipmate import (
     retried,
     run_annotated,
     run_jobs,
+    workflow_file,
 )
 
 rc = _load("reply-comment")
 
-_WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
 #: A wave cell of the call is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments;
 #: a caller job name containing ` / ` never matches, so such a run is kept.
 _LEVEL = re.compile(r"L[0-9]+")
-
-
-def workflow_file(repo, ref):
-    """The file name in `GITHUB_WORKFLOW_REF` (`<repo>/.github/workflows/<file>@<ref>`), refused
-    unless it lies in `repo` and is a plain YAML file name: it is bound into an API path."""
-    path = ref.partition("@")[0]
-    name = path.removeprefix(f"{repo}/.github/workflows/")
-    if name == path or _WORKFLOW_FILE.fullmatch(name) is None:
-        raise SystemExit(f"::error::GITHUB_WORKFLOW_REF is not a workflow of {repo}: {ref!r}")
-    return name
 
 
 def in_call(jobs):

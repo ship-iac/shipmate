@@ -282,8 +282,8 @@ def test_a_failed_cancel_keeps_the_run(gh, monkeypatch):
     ],
 )
 def test_a_workflow_ref_outside_this_repository_is_refused(ref):
-    """Mutations: `_WORKFLOW_FILE.search` for `fullmatch` -- red; drop `name == path` -- red
-    (a bare file name with no repository)."""
+    """Mutations: `_shipmate._WORKFLOW_FILE.search` for `fullmatch` -- red; drop
+    `name == path` -- red (a bare file name with no repository)."""
     with pytest.raises(SystemExit):
         aq.workflow_file("o/r", ref)
 

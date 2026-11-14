@@ -164,3 +164,88 @@ def test_run_jobs_with_a_job_without_name_is_incomplete():
     """`apply-queue` keys on the name. Mutation: drop the name check -- red."""
     run = _gh({_jobs(1): {"jobs": [{"status": "pending"}]}})
     assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
+
+
+def test_the_live_statuses_are_pinned_whole():
+    """`apply_runs` and `holder_dispatch_runs` both list these. Mutation: drop `requested` --
+    red."""
+    assert _shipmate.LIVE_RUN_STATUSES == (
+        "queued",
+        "in_progress",
+        "waiting",
+        "pending",
+        "requested",
+    )
+
+
+def _holders(pages, fail=()):
+    return _shipmate.holder_dispatch_runs("o/r", "shipmate.yml", {12, 9}, run=_gh(pages, fail))
+
+
+def test_holder_dispatch_runs_keeps_a_holders_apply_and_auto_runs_and_unparseable_titles():
+    """Any actor counts, a run listed under two statuses is kept once, and a status that is not
+    `completed` (a non-string one included) is live.
+
+    Mutations: compare the title's `pr` string with the int holder -- red (no holder run kept);
+    keep a run listed `completed` -- red; read a non-string status as ended -- red; drop the
+    unparseable-title branch -- red; keep `plan` and `unlock` titles -- red."""
+    rows = [
+        _apply(1, pr="12", actor={"login": "kp"}),
+        _run(2, "shipmate · auto pr=9 ref=" + _SHA + " comment="),
+        _apply(3, pr="7"),
+        _run(4, "shipmate · plan pr=12 ref= comment=11"),
+        _run(5, f"shipmate · unlock pr= ref={_SHA} comment=11"),
+        _run(6, "release the kraken", actor={"login": "kp"}),
+        _apply(7, pr="12", status="completed"),
+        _apply(8, pr="12", status=None),
+    ]
+    got = _holders(
+        {
+            _listing("queued"): {"workflow_runs": rows},
+            _listing("in_progress"): {"workflow_runs": [_apply(1, pr="12", status="in_progress")]},
+        }
+    )
+    assert got == (
+        [
+            {"id": 1, "verb": "apply", "holder": 12},
+            {"id": 2, "verb": "auto", "holder": 9},
+            {"id": 6, "verb": None, "holder": None},
+            {"id": 8, "verb": "apply", "holder": 12},
+        ],
+        True,
+    )
+
+
+def test_holder_dispatch_runs_with_a_failed_page_or_a_malformed_run_is_incomplete():
+    """Mutations: ignore a failed listing in `_live_dispatch_runs` -- red; keep a run without
+    an int `id` -- red."""
+    assert _holders({}, fail={_listing("waiting")}) == ([], False)
+    bad = {"id": "1", "display_title": "x", "event": "workflow_dispatch", "status": "queued"}
+    assert _holders({_listing("queued"): {"workflow_runs": [bad]}}) == ([], False)
+
+
+_PUSH = f"{_RUNS}?event=push&head_sha={_SHA}&per_page=100&page=1"
+
+
+def test_live_push_runs_lists_every_run_of_the_commit_not_completed():
+    """Mutations: drop the `head_sha` filter -- red (the call differs); keep a `completed`
+    run -- red; read a non-string status as ended -- red."""
+    rows = [
+        {"id": 3, "status": "in_progress"},
+        {"id": 4, "status": "completed"},
+        {"id": 5, "status": None},
+    ]
+    run = _gh({_PUSH: {"workflow_runs": rows}})
+    assert _shipmate.live_push_runs("o/r", "shipmate.yml", _SHA, run=run) == ([3, 5], True)
+    assert run.calls == [_PUSH]
+
+
+def test_live_push_runs_with_a_failed_page_or_a_malformed_run_is_incomplete():
+    """Mutations: return the rows of a failed listing as complete -- red; keep a run without an
+    int `id` -- red."""
+    assert _shipmate.live_push_runs("o/r", "shipmate.yml", _SHA, run=_gh({}, {_PUSH})) == (
+        [],
+        False,
+    )
+    run = _gh({_PUSH: {"workflow_runs": [{"id": None, "status": "queued"}]}})
+    assert _shipmate.live_push_runs("o/r", "shipmate.yml", _SHA, run=run) == ([], False)

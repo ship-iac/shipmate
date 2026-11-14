@@ -28,8 +28,11 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   included); writes outputs `evicted` and `refused` (the locks whose delete refused, each also
   an `::error::`) before refusing. Refuses before any delete, writing neither, when a holder is
   open with `SHIPMATE_HEAD_REF` as its base branch (stacked; it also writes `blocked=true`) or
-  cannot be read, and before any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is
-  empty.
+  cannot be read; then, when a known holder remains, while a run of the workflow
+  `GITHUB_WORKFLOW_REF` names may still apply that holder's cells, or the runs cannot all be
+  read (`_refuse_live_runs`). Refuses before any read when `SHIPMATE_HEAD_REF` or
+  `SHIPMATE_DEFAULT_BRANCH` is empty or `GITHUB_WORKFLOW_REF` is not a workflow of this
+  repository.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds, and `stacked`, the
   sorted JSON list of those holders that are open with `SHIPMATE_HEAD_REF` as their base branch
@@ -64,15 +67,19 @@ from _shipmate import (
     cell_names,
     check_runs,
     command_data,
+    current_run_url,
     deploy_lock_remedy,
     deploy_mode,
     gh_json,
+    holder_dispatch_runs,
     is_head_sha,
     is_run_id,
+    live_push_runs,
     lock_wait_remedy,
     lock_who,
     retried,
     run_annotated,
+    workflow_file,
     write_outputs,
 )
 
@@ -433,7 +440,9 @@ class Stacked(SystemExit):
     """`evict`'s refusal naming the holders stacked on the evicting pull request."""
 
 
-def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *, run=_run):
+def evict(
+    repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, workflow, *, run=_run
+):
     """Delete each lock in `env` on a stack in `stacks` held by anyone but `pr`, an unknown
     holder included. Returns (deleted locks, [(lock, refusal)] for each delete refused): a
     refusal does not stop the rest, so every lock deleted is reported and its holder told. An
@@ -442,7 +451,8 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     Before any delete, each known holder is read once (`_is_stacked` against `head_ref`, the
     evicting pull request's head branch). Any holder stacked on it raises `Stacked`, one line
     per stacked holder naming `default_branch`; otherwise a holder whose read fails or answers
-    malformed refuses. Either way nothing is deleted."""
+    malformed refuses. Then, while a known holder remains, `_refuse_live_runs` reads workflow
+    `workflow`'s runs. Either way nothing is deleted."""
     wanted = {ref_name(env, s) for s in stacks}
     locks = read_locks(repo, [env], run=run).values()
     locks = [lock for lock in locks if lock.ref in wanted and lock.pr != pr]
@@ -467,7 +477,63 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
                 for holder, why in unread
             )
         )
+    if held:
+        _refuse_live_runs(repo, env, workflow, set(held), run)
     return _delete_each(repo, locks, run)
+
+
+def _refuse_live_runs(repo, env, workflow, holders, run):
+    """Refuse while a run of workflow `workflow` may still apply a cell of one of `holders`: a
+    live `apply` or `auto` run titled for one, a live dispatch run whose title does not parse,
+    or a live deploy run of a merged holder's merge commit (`_deploy_runs`, after the dispatch
+    listings). A failed or incomplete read refuses. A point-in-time check: a run started after
+    its read is not seen."""
+    found, complete = holder_dispatch_runs(repo, workflow, holders, run)
+    if not complete:
+        raise SystemExit(
+            f"::error::could not list the live runs of {workflow}, so no cell lock in {env} was "
+            "released: a holder's run may still apply. Comment again."
+        )
+    lines = [
+        f"#{r['holder']} has a live `{r['verb']}` run: {current_run_url(str(r['id']))}"
+        if r["holder"] is not None
+        else "a live run whose title is not a shipmate title may be a holder's: "
+        + current_run_url(str(r["id"]))
+        for r in found
+    ]
+    for holder in sorted(holders):
+        lines += _deploy_runs(repo, env, workflow, holder, run)
+    if lines:
+        raise SystemExit(
+            f"::error::no cell lock in {env} was released: a holder's run may still apply. Wait "
+            "for each run below to end, then comment again.\n" + "\n".join(lines)
+        )
+
+
+def _deploy_runs(repo, env, workflow, holder, run):
+    """One line per live deploy run of `holder`'s merge commit, read fresh: none while it is
+    unmerged. A failed read, a merge commit that is not a sha, or a failed listing refuses."""
+    try:
+        pull = gh_json(f"repos/{repo}/pulls/{holder}", run)
+        merged, sha = pull["merged_at"] is not None, pull["merge_commit_sha"]
+    except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
+        raise SystemExit(
+            f"::error::could not tell whether #{holder} has merged: {_why(exc)}"
+        ) from None
+    if not merged:
+        return []
+    if not is_head_sha(sha):
+        raise SystemExit(
+            f"::error::#{holder} merged, but its merge commit reads {sha!r}, so whether its deploy "
+            "run is live is unknown"
+        )
+    ids, complete = live_push_runs(repo, workflow, sha, run)
+    if not complete:
+        raise SystemExit(
+            f"::error::could not list the deploy runs of #{holder}'s merge commit {sha}, so no "
+            f"cell lock in {env} was released. Comment again."
+        )
+    return [f"#{holder}'s deploy run is live: {current_run_url(str(i))}" for i in ids]
 
 
 def evict_stacks(names, env):
@@ -551,10 +617,11 @@ def _evict_cmd(repo, pr, run):
             "::error::SHIPMATE_HEAD_REF and SHIPMATE_DEFAULT_BRANCH must name branches (got: "
             f"{head_ref!r}, {default_branch!r})"
         )
+    workflow = workflow_file(repo, os.environ.get("GITHUB_WORKFLOW_REF", ""))
     stacks = evict_stacks(pending_names(*_head_names(repo, run)), env)
     by_ref = {ref_name(env, s): s for s in stacks}
     try:
-        gone, refused = evict(repo, env, pr, stacks, head_ref, default_branch, run=run)
+        gone, refused = evict(repo, env, pr, stacks, head_ref, default_branch, workflow, run=run)
     except Stacked:
         write_outputs(blocked=True)
         raise

@@ -385,10 +385,11 @@ def lock_who(holder: int | None) -> str:
 
 def lock_wait_remedy(who: str, env: str) -> str:
     """What frees a cell lock `who` (`lock_who`'s text) holds in `env`, with no final period: a
-    holder that merged or closed and kept its lock, as a refused deploy does, is evicted."""
+    holder that merged or closed and kept its lock, as a refused deploy does, is evicted once its
+    runs have ended (the eviction refuses while one may still apply)."""
     return (
         f"wait for {who} to merge or close, then re-plan. If {who} has already merged or closed, "
-        f"comment `shipmate unlock {env} --evict`"
+        f"comment `shipmate unlock {env} --evict` once its runs have ended"
     )
 
 
@@ -419,7 +420,8 @@ def deploy_lock_remedy(holders, stacks: str) -> str:
     steps = " ".join(
         f"Comment `shipmate unlock {env} --evict` on it to {evict_release(hs, env, 'it')}. The "
         f"eviction releases only locks on the new pull request's pending cells in {env}, any "
-        "holder's, so wait for any holder still open to merge or close first."
+        "holder's, so wait for any holder still open to merge or close, and for every holder's "
+        "runs to end, first."
         for env, hs in sorted(by_env.items())
     )
     return f"Open a pull request that changes {stacks}. {steps} Then apply it"
@@ -521,6 +523,20 @@ def parse_run_title(title):
     return {"verb": verb, "pr": pr, "ref": ref, "comment": comment}
 
 
+_WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
+
+
+def workflow_file(repo, ref):
+    """The file name in `GITHUB_WORKFLOW_REF` (`<repo>/.github/workflows/<file>@<ref>`), refused
+    unless it lies in `repo` and is a plain YAML file name: it is bound into an API path. In a
+    called workflow it names the caller, the consumer's file."""
+    path = ref.partition("@")[0]
+    name = path.removeprefix(f"{repo}/.github/workflows/")
+    if name == path or _WORKFLOW_FILE.fullmatch(name) is None:
+        raise SystemExit(f"::error::GITHUB_WORKFLOW_REF is not a workflow of {repo}: {ref!r}")
+    return name
+
+
 #: The run statuses of a run that has not ended.
 LIVE_RUN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
 #: GitHub's page size cap; a listing longer than `_MAX_PAGES` pages counts as incomplete.
@@ -555,18 +571,12 @@ def _login(user):
     return user.get("login") if isinstance(user, dict) else None
 
 
-def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
-    """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
-    `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, by_app}`.
-
-    One `workflow_dispatch` listing per `LIVE_RUN_STATUSES` value, every page: no other event
-    can be trusted. `by_app` is true when the run is a
-    `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a re-run changes only
-    `triggering_actor`); an empty slug trusts nothing. `complete` is false when a page fails or
-    is malformed, a run is malformed, or a trusted-shaped run's title does not parse: such a run
-    is unknown, never absent. A run that changes status between listings, or between the page
-    reads of one listing, can be missed."""
-    bot = f"{app_slug}[bot]" if app_slug else None
+def _live_dispatch_runs(repo, workflow_file, run=None):
+    """`(runs, complete)`: every run one `workflow_dispatch` listing of workflow
+    `workflow_file` per `LIVE_RUN_STATUSES` value returns, every page, each as listed, once per
+    id, ascending. `complete` is false when a page fails or is malformed, or a run has no int
+    `id`, string `display_title` and string `event` (that run is left out). A run that changes
+    status between listings, or between the page reads of one listing, can be missed."""
     runs, complete = {}, True
     for status in LIVE_RUN_STATUSES:
         page = _pages(
@@ -582,22 +592,74 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
             if not isinstance(rid, int) or not isinstance(title, str) or not isinstance(event, str):
                 complete = False
                 continue
-            by_app = (
-                bot is not None and event == "workflow_dispatch" and _login(r.get("actor")) == bot
-            )
-            parsed = parse_run_title(title)
-            if parsed is None:
-                complete = complete and not by_app
-                continue
-            if parsed["verb"] in ("apply", "auto") and parsed["pr"] == pr_number:
-                runs[rid] = {
-                    "id": rid,
+            runs[rid] = r
+    return [runs[k] for k in sorted(runs)], complete
+
+
+def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
+    """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
+    `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, by_app}`.
+
+    Listed by `_live_dispatch_runs`: no other event can be trusted. `by_app` is true when the
+    run is a `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a re-run changes only
+    `triggering_actor`); an empty slug trusts nothing. `complete` is also false when a
+    trusted-shaped run's title does not parse: such a run is unknown, never absent."""
+    bot = f"{app_slug}[bot]" if app_slug else None
+    listed, complete = _live_dispatch_runs(repo, workflow_file, run)
+    runs = []
+    for r in listed:
+        by_app = (
+            bot is not None and r["event"] == "workflow_dispatch" and _login(r.get("actor")) == bot
+        )
+        parsed = parse_run_title(r["display_title"])
+        if parsed is None:
+            complete = complete and not by_app
+            continue
+        if parsed["verb"] in ("apply", "auto") and parsed["pr"] == pr_number:
+            runs.append(
+                {
+                    "id": r["id"],
                     "ref": parsed["ref"],
                     "verb": parsed["verb"],
                     "status": r.get("status"),
                     "by_app": by_app,
                 }
-    return [runs[k] for k in sorted(runs)], complete
+            )
+    return runs, complete
+
+
+def holder_dispatch_runs(repo, workflow_file, holders, run=None):
+    """`(runs, complete)`: each live `workflow_dispatch` run of workflow `workflow_file` that
+    may apply a cell of one of `holders` (pull request numbers), any actor: an `apply` or `auto`
+    run titled for one, as `{id, verb, holder}`, and a run whose title does not parse, as
+    `{id, verb: None, holder: None}`, since it may be one. A run listed `completed` has ended;
+    any other status, a non-string one included, is live. `complete` is
+    `_live_dispatch_runs`'."""
+    listed, complete = _live_dispatch_runs(repo, workflow_file, run)
+    runs = []
+    for r in listed:
+        if r.get("status") == "completed":
+            continue
+        parsed = parse_run_title(r["display_title"])
+        if parsed is None:
+            runs.append({"id": r["id"], "verb": None, "holder": None})
+        elif parsed["verb"] in ("apply", "auto") and int(parsed["pr"]) in holders:
+            runs.append({"id": r["id"], "verb": parsed["verb"], "holder": int(parsed["pr"])})
+    return runs, complete
+
+
+def live_push_runs(repo, workflow_file, sha, run=None):
+    """`(ids, complete)`: the ids of the `push` runs of workflow `workflow_file` on commit
+    `sha` not listed `completed`, ascending, every page. `complete` is false, and `ids` empty,
+    when a page fails or is malformed or a run has no int `id`."""
+    listed = _pages(
+        f"repos/{repo}/actions/workflows/{workflow_file}/runs?event=push&head_sha={sha}",
+        "workflow_runs",
+        run,
+    )
+    if listed is None or not all(isinstance(r.get("id"), int) for r in listed):
+        return [], False
+    return sorted({r["id"] for r in listed if r.get("status") != "completed"}), True
 
 
 def run_jobs(repo, run_id, run=None):
