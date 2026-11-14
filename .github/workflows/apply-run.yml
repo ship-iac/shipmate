@@ -79,11 +79,9 @@ jobs:
           REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          # On a query error gh exits non-zero and prints the raw body, `--jq` not applied. A
-          # number matching no PR answers NOT_FOUND there, so `outcome` posts no reply for it;
-          # any other failed read does not write `unbound`. select() turns a bare null
-          # `pullRequest` into empty output. Every @tsv field is non-empty: `read` collapses
-          # adjacent tabs.
+          # On a query error gh prints the raw body (`--jq` not applied). Only NOT_FOUND there
+          # writes `unbound`, so `outcome` replies to every other failed read. `read` collapses
+          # adjacent tabs, so every @tsv field is non-empty.
           rc=0
           # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
           pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \

@@ -415,23 +415,31 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
 
 
 @bash_only
-def test_a_dispatch_to_a_fence_without_its_inputs_logs_the_repin_remedy(tmp_path):
+def test_a_dispatch_to_a_fence_without_its_inputs_logs_and_replies_the_repin_remedy(tmp_path):
     """The auto dispatch prints `dispatch-body`'s skew remedy, which names `repin
-    --write-fence`; the step still degrades to a warning and a reply.
+    --write-fence`, and the reply carries it in place of the advice to comment `shipmate apply`,
+    which would meet the same skew. The step still degrades.
 
-    Mutation: send dispatch-body's stderr to /dev/null -> the remedy leaves the log."""
+    Mutations: send dispatch-body's stderr to /dev/null -> the remedy leaves the log; call
+    `not_started` without `"$out"` -> the reply advises commenting."""
     proc, _, _ = _run(
         tmp_path,
         DISPATCH,
         dispatch_rc=1,
         dispatch_err='gh: Unexpected inputs provided: ["comment_id"] (HTTP 422)',
     )
+    remedy = (
+        "This repository's .github/workflows/shipmate.yml does not declare every input this "
+        "engine's dispatch sends, so it is older than the engine pin. Write the published file "
+        "over it with `python <engine>/scripts/repin <consumer> <tag> --write-fence`."
+    )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert (
-        "::error::This repository's .github/workflows/shipmate.yml does not declare every input "
-        "this engine's dispatch sends, so it is older than the engine pin. Write the published "
-        "file over it with `python <engine>/scripts/repin <consumer> <tag> --write-fence`."
-    ) in proc.stderr.splitlines(), proc.stderr
+    assert f"::error::{remedy}" in proc.stderr.splitlines(), proc.stderr
+    assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == [
+        "### shipmate apply",
+        "",
+        f"🔴 failed: auto apply not started: the dispatch failed. {remedy}",
+    ]
 
 
 @bash_only

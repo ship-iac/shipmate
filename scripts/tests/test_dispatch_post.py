@@ -317,12 +317,6 @@ def test_a_missing_file_or_trigger_prints_the_layout_hint(calls, monkeypatch, ca
     assert post(capsys) == (1, LAYOUT_HINT, f"{answer}\n::error::{LAYOUT_HINT}\n")
 
 
-def test_a_missing_file_prints_the_layout_hint(calls, monkeypatch, capsys):
-    """The literal case beside the parametrization. Mutation: drop `"HTTP 404"`."""
-    answering(monkeypatch, calls, [SystemExit(NOT_FOUND)])
-    assert post(capsys)[1] == LAYOUT_HINT
-
-
 @pytest.mark.parametrize(
     "message",
     [
@@ -468,7 +462,7 @@ def test_a_run_of_another_command_does_not_stop_the_retry(calls, monkeypatch, ca
     check."""
     sent = command(monkeypatch, calls, "apply")
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [listed] * 9)
-    assert (post(capsys)[0], calls[-1]) == (0, sent)
+    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
 
 
 def test_an_empty_slug_matches_no_run(calls, monkeypatch, capsys):
