@@ -20,7 +20,8 @@ started a run: GitHub can start it and still answer 502. Before each retry it li
   attempt. A `workflow_dispatch` run whose actor is `<SHIPMATE_APP_SLUG>[bot]` and whose title
   parses (`_shipmate.parse_run_title`) as this verb and comment id, with this pull request, or
   for `unlock` no pull request and this ref, is this command's run and stops the retry. The
-  title is consumer-authored, so only an App run's title counts; an empty slug matches no run.
+  title is consumer-authored, so only an App run's title counts. An empty slug identifies no
+  run, so the retry stops `UNDETERMINED`.
 - Comment-less (`auto`, the replan): one page of 100 `workflow_dispatch` runs, newest first;
   any created since `t0` stops the retry. No title is read, because nothing marks such a run as
   this dispatch's. A concurrent dispatch landing in the window therefore stops the retry too; a
@@ -55,7 +56,15 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import _shipmate
-from _shipmate import _COMMENT_ID, parse_run_title, retried, run, run_annotated
+from _shipmate import (
+    _COMMENT_ID,
+    _MAX_PAGES,
+    _PAGE,
+    parse_run_title,
+    retried,
+    run,
+    run_annotated,
+)
 
 MAY_HAVE_STARTED = 3
 UNDETERMINED = 4
@@ -66,8 +75,6 @@ _CLOCK_MARGIN = timedelta(seconds=5)
 #: listing showed a dispatched run 0.2-2.4 s after its POST returned.
 _LIST_WINDOW = timedelta(seconds=10)
 _POLL_SECONDS = 1
-_PAGE = 100
-_MAX_PAGES = 10
 #: gh's text for an answer that shows a `shipmate.yml` older than this dispatch, measured: no
 #: file, no `workflow_dispatch` trigger, and fewer inputs than the body sends.
 _LAYOUT_ANSWERS = ("HTTP 404", "'workflow_dispatch' trigger")
@@ -175,12 +182,14 @@ def landed_since(repo: str, t0: datetime, run=run) -> bool:
 
 def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) -> bool:
     """True when a listed `shipmate.yml` run in `repo` is a `workflow_dispatch` whose actor is
-    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`; an empty `slug` matches
-    none.
+    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`. An empty `slug` raises
+    `ValueError`: no run can then be told to be this command's.
 
     Reads pages of 100, newest first, each through `retried`, until a page is short or holds a
     run created before `t0`. A failed read raises its `SystemExit`; a malformed row
     (`_listed_row`) or a listing past ten pages raises `ValueError`."""
+    if not slug:
+        raise ValueError("SHIPMATE_APP_SLUG is empty, so no listed run is this command's")
     jq = ".workflow_runs[] | {created_at, event, display_title, actor: .actor.login} | tojson"
     for page in range(1, _MAX_PAGES + 1):
         args = ["gh", "api", f"{_runs(repo)}?per_page={_PAGE}&page={page}", "--jq", jq]
@@ -188,8 +197,7 @@ def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) 
         rows = [_listed_row(line) for line in filter(None, out.splitlines())]
         for listed, _ in rows:
             if (
-                slug
-                and listed.get("event") == "workflow_dispatch"
+                listed.get("event") == "workflow_dispatch"
                 and listed.get("actor") == f"{slug}[bot]"
                 and parse_run_title(listed.get("display_title")) == want
             ):

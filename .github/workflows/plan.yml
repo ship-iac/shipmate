@@ -20,7 +20,8 @@ cache-mode: read
 jobs:
   # A commented plan claims its comment before any work: a second run of the same comment (a
   # retried dispatch whose first landed) reads `taken` and does nothing. An autoplan and the
-  # comment-less replan carry no `comment_id`, so this job skips and the gate below admits them.
+  # comment-less replan carry no `comment_id`: this job skips, and the gates below admit a run by
+  # that empty input, never by the claim's result.
   claim:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
     runs-on: ubuntu-slim
@@ -45,7 +46,8 @@ jobs:
   facts:
     needs: [claim]
     # A status function, so a skipped `claim` does not skip this job; a failed one gates it closed.
-    if: ${{ !cancelled() && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
+    # Under `pull_request_target` `github.event.inputs` is null, which GitHub compares equal to ''.
+    if: ${{ !cancelled() && (needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}
     runs-on: ubuntu-slim
     permissions:
       pull-requests: read
@@ -228,7 +230,7 @@ jobs:
   # replies on the dispatch's `pr_number`, which `claim` validated before it reacted.
   outcome:
     needs: [claim, facts, summary]
-    if: ${{ !cancelled() && ((needs.facts.outputs.on-demand == 'true' && needs.facts.outputs.head-repo != '' && needs.facts.outputs.head-repo == github.repository && needs.summary.outputs.superseded != 'true' && needs.summary.outputs.upsert != 'created' && needs.summary.outputs.upsert != 'moved') || (needs.facts.result == 'failure' && needs.claim.outputs.state == 'owned')) && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
+    if: ${{ !cancelled() && ((needs.facts.outputs.on-demand == 'true' && needs.facts.outputs.head-repo != '' && needs.facts.outputs.head-repo == github.repository && needs.summary.outputs.superseded != 'true' && needs.summary.outputs.upsert != 'created' && needs.summary.outputs.upsert != 'moved') || (needs.facts.result == 'failure' && needs.claim.outputs.state == 'owned')) && (needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}

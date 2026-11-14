@@ -278,7 +278,8 @@ def test_the_apply_outcome_job_is_wired_exactly():
     comment owns it) and a failed claim, which replied itself, do not; an `auto` run, whose
     `claim` skips, does. Mutations: drop the claim clause; drop `claim` from `needs`; compare
     `state` with `!= 'taken'` (a failed claim's empty output would reply twice); drop
-    `|| needs.claim.result == 'skipped'` (an `auto` run would never reply). The constant pins
+    `|| github.event.inputs.comment_id == ''` (an `auto` run would never reply); bypass on
+    `needs.claim.result == 'skipped'` instead. The constant pins
     each: the expression is never evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
         "needs": ["guard", "claim", "run"],
@@ -287,7 +288,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
             "needs.run.outputs.posted != 'true' && "
             "(needs.run.outputs.review_result != 'failure' || "
             "(needs.run.outputs.unbound != 'true' && !inputs.auto)) && "
-            "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
+            "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -321,7 +322,7 @@ def test_the_plan_outcome_job_is_wired_exactly():
     `always()`; drop the fork clause's `head-repo == github.repository`; drop `summary-result`
     from `with:`; pass `run-cancelled: 'true'`; add `plan` to `needs`; drop the claim clause
     (a `taken` run of a comment would answer for the run that owns it); drop `claim` from
-    `needs`.
+    `needs`; bypass on `needs.claim.result == 'skipped'` instead of the empty `comment_id`.
 
     A failed `facts` still replies when the run owns its comment, on the dispatch's
     `pr_number`. Mutations: drop the `needs.facts.result == 'failure'` branch (no reply when
@@ -338,7 +339,7 @@ def test_the_plan_outcome_job_is_wired_exactly():
             "needs.summary.outputs.upsert != 'created' && "
             "needs.summary.outputs.upsert != 'moved') || "
             "(needs.facts.result == 'failure' && needs.claim.outputs.state == 'owned')) && "
-            "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
+            "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,

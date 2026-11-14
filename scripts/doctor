@@ -1686,12 +1686,13 @@ def _auto_with_finding(doc, name, engine):
 
 def _unlock_grant_finding(doc, name, engine):
     """One finding when the `unlock` job does not grant `unlock.yml` `pull-requests: write`, which
-    its `guard` job requests to mark the command started; `write-all` grants it. A file without
-    the job draws nothing here: that is `_routing_finding`'s."""
+    its `guard` job requests to mark the command started; `write-all` grants it. A job without
+    its own `permissions:` takes the workflow's. A file without the job draws nothing here: that
+    is `_routing_finding`'s."""
     job = dict(_engine_calls(doc, engine, "unlock.yml")).get("unlock")
     if job is None:
         return []
-    grant = job.get("permissions")
+    grant = job["permissions"] if "permissions" in job else doc.get("permissions")
     if grant == "write-all" or _mapping(grant).get("pull-requests") == "write":
         return []
     return [

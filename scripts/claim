@@ -15,8 +15,9 @@ existing reaction, so exactly one run of a comment reads 201:
   the pull request. One exception: "re-run all jobs" deletes the earlier attempts' artifacts,
   so a plan run that owned the comment must plan again. With `SHIPMATE_OWNER_JOB` set (`plan.yml`
   passes `facts`, the job the claim gates) and `GITHUB_RUN_ATTEMPT` above 1, a 200 reads every
-  earlier attempt's jobs; a job named `<owner>` or `* / <owner>` that concluded other than
-  `skipped` means this run owned the comment, so it writes `state=owned`. A failed or malformed
+  earlier attempt's jobs; a job named `<owner>` or `* / <owner>` that concluded `success` or
+  `failure` means this run owned the comment, so it writes `state=owned`; any other
+  conclusion reads as taken. A failed or malformed
   read, or one past `_shipmate`'s page bound, fails as below. `apply.yml` passes no owner job:
   its re-run is refused anyway.
 - A `COMMENT_ID` that is not a comment id, a `PR_NUMBER` that is not a pull request number, or
@@ -84,22 +85,20 @@ _JOB_ID = re.compile(r"[a-z][a-z0-9-]*")
 
 
 def owned_earlier(repo, run_id, attempt, owner):
-    """Whether job `owner` ran (any conclusion but `skipped`) in an attempt of run `run_id` before
+    """Whether job `owner` finished (`success` or `failure`) in an attempt of run `run_id` before
     `attempt`. Raises `ValueError` when a listing fails, is malformed or runs past the page
     bound."""
     for n in range(1, attempt):
-        jobs = _pages(
-            f"repos/{repo}/actions/runs/{run_id}/attempts/{n}/jobs", "jobs", lambda args: run(args)
-        )
+        jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/attempts/{n}/jobs", "jobs", run)
         if jobs is None:
             raise ValueError(f"could not list the jobs of attempt {n}")
         for job in jobs:
             name, conclusion = job.get("name"), job.get("conclusion")
             if not isinstance(name, str) or not isinstance(conclusion, (str, type(None))):
                 raise ValueError(f"a job of attempt {n} is malformed")
-            if (name == owner or name.endswith(f" / {owner}")) and conclusion not in (
-                None,
-                "skipped",
+            if (name == owner or name.endswith(f" / {owner}")) and conclusion in (
+                "success",
+                "failure",
             ):
                 return True
     return False

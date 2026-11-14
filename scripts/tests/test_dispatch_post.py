@@ -465,8 +465,10 @@ def test_a_run_of_another_command_does_not_stop_the_retry(calls, monkeypatch, ca
     assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
 
 
-def test_an_empty_slug_matches_no_run(calls, monkeypatch, capsys):
-    """Mutation: drop the `slug and` clause -> the `[bot]` actor matches."""
+def test_an_empty_slug_is_undetermined_and_never_retried(calls, monkeypatch, capsys):
+    """Without the App's slug no listed run can be told to be this command's, so a retry could
+    start the command twice. Mutation: drop the empty-slug refusal in `command_run_listed` ->
+    the window is read and the dispatch is sent again."""
     sent = command(monkeypatch, calls, "apply", slug="")
     answering(
         monkeypatch,
@@ -474,7 +476,12 @@ def test_an_empty_slug_matches_no_run(calls, monkeypatch, capsys):
         [SystemExit(BAD_GATEWAY), ANSWER],
         [run_row(COMMANDS["apply"][2], actor="[bot]")] * 9,
     )
-    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
+    code, _, err = post(capsys)
+    assert (code, calls) == (db.UNDETERMINED, [sent, SLEPT_2])
+    assert err.endswith(
+        "\nlisting shipmate.yml runs failed: ValueError: SHIPMATE_APP_SLUG is empty, so no "
+        "listed run is this command's\n"
+    )
 
 
 def test_every_page_back_to_t0_is_read(calls, monkeypatch, capsys):

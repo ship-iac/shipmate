@@ -283,7 +283,8 @@ the release commit, from `repo-example-stacks-aws`:
 
    ```bash
    gh workflow run shipmate.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
-     -f verb=apply -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>      -f comment_id=<id>
+     -f verb=apply -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n> \
+     -f comment_id=<id>
    ```
 
    A `workflow_dispatch` runs a workflow only if the file exists on the

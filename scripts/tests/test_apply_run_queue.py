@@ -24,7 +24,7 @@ RUN_JOB = {
     "needs": ["guard", "claim", "queue"],
     "if": (
         "${{ !cancelled() && needs.guard.result == 'success' && "
-        "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
+        "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}"
     ),
     "uses": "./.github/workflows/apply-run.yml",
     "permissions": {
@@ -115,8 +115,9 @@ def test_the_run_job_is_this_whole_job():
     """Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
     `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; drop
     `queue` from `needs` -- red; drop the claim clause, and a `taken` run of a comment applies
-    a second time -- red; drop `|| needs.claim.result == 'skipped'`, and no `auto` run applies
-    -- red; drop `claim` from `needs`, and its outputs read empty -- red."""
+    a second time -- red; drop `|| github.event.inputs.comment_id == ''`, and no `auto` run
+    applies -- red; bypass on `needs.claim.result == 'skipped'` instead -- red; drop `claim`
+    from `needs`, and its outputs read empty -- red."""
     assert workflow_jobs("apply.yml")["run"] == RUN_JOB
 
 
@@ -126,7 +127,7 @@ QUEUE_JOB = {
     "needs": ["guard", "claim"],
     "if": (
         "${{ !cancelled() && needs.guard.result == 'success' && "
-        "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
+        "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}"
     ),
     "runs-on": "ubuntu-slim",
     "environment": {"name": "shipmate-engine", "deployment": False},

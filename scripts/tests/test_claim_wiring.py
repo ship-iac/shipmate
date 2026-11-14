@@ -9,10 +9,11 @@ outputs then read empty), a grant widened, the claim moved after work or onto an
 
 from _loader import action_yaml, workflow_jobs
 
-#: Admits a run whose claim answered 201, and one whose claim skipped (an autoplan, the replan,
-#: an `auto` apply). A failed claim (`result == 'failure'`, `state` empty) and a `taken` one
-#: gate closed.
-CLAIMED = "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped')"
+#: Admits a run whose claim answered 201, and one that carries no `comment_id` (an autoplan,
+#: whose `github.event.inputs` is null and compares equal to '', the replan, an `auto` apply).
+#: The bypass reads the trigger's input, never the claim's result. A failed claim (`state`
+#: empty) and a `taken` one gate closed.
+CLAIMED = "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '')"
 CLAIM_IF = "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}"
 ENGINE_ENVIRONMENT = {"name": "shipmate-engine", "deployment": False}
 
@@ -53,7 +54,8 @@ def test_plan_facts_runs_only_for_an_owned_or_skipped_claim():
     `facts`, which skips `detect`, `plan` and `summary`. `!cancelled()`, so a skipped claim does
     not skip it. Mutations: drop `!cancelled() &&` (an autoplan's skipped claim skips the
     autoplan); drop the claim clause (a second run of one comment plans again); drop `claim`
-    from `needs` (its outputs read empty)."""
+    from `needs` (its outputs read empty); bypass on `needs.claim.result == 'skipped'` instead
+    of the trigger's empty `comment_id`."""
     facts = workflow_jobs("plan.yml")["facts"]
     assert (facts["needs"], facts["if"]) == (["claim"], f"${{{{ !cancelled() && {CLAIMED} }}}}")
 

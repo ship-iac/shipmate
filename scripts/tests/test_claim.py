@@ -226,16 +226,25 @@ def rerun(env, monkeypatch):
     return env
 
 
-@pytest.mark.parametrize("conclusion", ["success", "failure", "cancelled"])
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
 def test_a_full_rerun_of_the_owner_owns_again(rerun, conclusion):
-    """ "Re-run all jobs" deletes the earlier attempts' artifacts, so the run whose `facts` ran
-    must plan again; a `facts` that failed or was cancelled still ran under the claim.
-    Mutations: drop the earlier-attempt read; count only `success`; match the name exactly
-    (the called job is `plan / facts`)."""
+    """ "Re-run all jobs" deletes the earlier attempts' artifacts, so the run whose `facts`
+    finished must plan again, whether it passed or failed. Mutations: drop the earlier-attempt
+    read; count only `success`; match the name exactly (the called job is `plan / facts`)."""
     rerun.pages = {_page(1): [{"name": "plan / facts", "conclusion": conclusion}]}
     assert rerun.go() == 0
     assert rerun.reads == [_page(1)]
     assert rerun.outputs() == "state=owned\n"
+    assert rerun.replies == []
+
+
+@pytest.mark.parametrize("conclusion", ["cancelled", "timed_out", "neutral", "action_required"])
+def test_a_facts_that_did_not_finish_proves_no_ownership(rerun, conclusion):
+    """Only `success` or `failure` proves ownership; every other conclusion reads as taken.
+    Mutation: `conclusion not in (None, "skipped")` in place of the two-value allow-list."""
+    rerun.pages = {_page(1): [{"name": "plan / facts", "conclusion": conclusion}]}
+    assert rerun.go() == 0
+    assert rerun.outputs() == "state=taken\n"
     assert rerun.replies == []
 
 

@@ -74,7 +74,8 @@ jobs:
 
   # After `guard`, so a refused dispatch writes no reaction. A second run of the same comment (a
   # retried dispatch whose first landed) reads `taken` and does nothing. An `auto` dispatch
-  # carries no `comment_id`, so this job skips and the gates below admit it.
+  # carries no `comment_id`: this job skips, and the gates below admit a run by that empty input,
+  # never by the claim's result.
   claim:
     needs: [guard]
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
@@ -99,7 +100,7 @@ jobs:
   queue:
     needs: [guard, claim]
     # `!cancelled()` drops the implicit success of `guard`, so it is stated.
-    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     # Its writes use the App token; a job-token `actions: write` would fail every caller that
@@ -119,7 +120,7 @@ jobs:
   # tidies, never gates, so a failed `queue` does not stop the apply.
   run:
     needs: [guard, claim, queue]
-    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}
     uses: ./.github/workflows/apply-run.yml
     # The union of what `apply-run.yml`'s jobs request; a callee job asking for more fails the run.
     permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
@@ -141,7 +142,7 @@ jobs:
   # while it waited there. Holds the App key but checks nothing out.
   outcome:
     needs: [guard, claim, run]
-    if: ${{ always() && needs.guard.result == 'success' && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
+    if: ${{ always() && needs.guard.result == 'success' && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && (needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}

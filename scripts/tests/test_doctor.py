@@ -4488,6 +4488,38 @@ def test_an_unlock_job_granting_write_all_is_silent(monkeypatch):
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == []
 
 
+_UNLOCK_JOB_GRANT = (
+    "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
+    "id-token: write }\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("workflow_grant", "findings"),
+    [
+        ("write-all", []),
+        ("{ pull-requests: write }", []),
+        ("{ pull-requests: read }", [(doctor.WARNING, _UNLOCK_GRANT_TEXT)]),
+        ("{}", [(doctor.WARNING, _UNLOCK_GRANT_TEXT)]),
+    ],
+    ids=["write-all", "pull-requests-write", "read", "empty"],
+)
+def test_an_unlock_job_without_permissions_takes_the_workflows(
+    monkeypatch, workflow_grant, findings
+):
+    """A job with no `permissions:` inherits the workflow-level block. Mutations: read only
+    the job's own block (both granting rows warn); read the workflow's block even when the job
+    has one (`test_an_unlock_job_granting_write_all_is_silent` reds)."""
+    assert _SHIPMATE_WF.count(_UNLOCK_JOB_GRANT) == 1
+    assert _SHIPMATE_WF.count("permissions: {}\njobs:\n") == 1
+    text = _SHIPMATE_WF.replace(_UNLOCK_JOB_GRANT, "").replace(
+        "permissions: {}\njobs:\n", f"permissions: {workflow_grant}\njobs:\n"
+    )
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == findings
+
+
 def test_an_auto_job_with_a_wrong_or_extra_key_names_each():
     """Compared whole: a wrong `ref` and an extra `environment` are each named, `runs_on`
     is the consumer's and any value.

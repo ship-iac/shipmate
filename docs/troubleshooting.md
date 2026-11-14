@@ -2410,11 +2410,13 @@ An `auto` cell also refuses when:
   filter. Comment `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
-- `an apply is never re-run (run attempt '<n>')`: an apply run was re-run
-  ("Re-run failed jobs" or "Re-run all jobs"). A re-run's release jobs write no
-  apply check and its completion jobs write only successes, since a later run may
-  have completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed.
+- `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
+  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
+  check and its completion jobs write only successes, since a later run may have
+  completed those checks already. Comment `shipmate apply`. A merge deploy's
+  re-run is allowed. "Re-run all jobs" never reaches this check: a commented
+  apply's claim finds its comment taken and the run does nothing, and an `auto`
+  run refuses at `detect` (`a re-run of an auto apply never applies`).
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
 - a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),

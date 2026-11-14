@@ -188,7 +188,8 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     `comment_id`, which no pull request holds, and its `pr_number` only to address the
     not-started reply; under `pull_request_target` both read empty and the job skips. `outcome`
     reads `pr_number` only to address its reply when `facts` failed, and only for a run whose
-    `claim` validated that number.
+    `claim` validated that number. `facts` and `outcome` read `comment_id` for the claim gate's
+    bypass, which admits a run that carries none.
 
     Mutations: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job;
     `github.event.inputs.ref` added to `claim`'s `with:` or to `outcome`'s.
@@ -199,12 +200,12 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     }
     assert found == {
         "claim": ["github.event.inputs.comment_id", "github.event.inputs.pr_number"],
-        "facts": [],
+        "facts": ["github.event.inputs.comment_id"],
         "detect": [],
         "plan": [],
         "summary": [],
         "gate-hold": [],
-        "outcome": ["github.event.inputs.pr_number"],
+        "outcome": ["github.event.inputs.comment_id", "github.event.inputs.pr_number"],
     }, f"plan.yml reads the event payload: {found}"
 
 

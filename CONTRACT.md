@@ -1429,7 +1429,7 @@ the run is a `workflow_dispatch` with a non-empty `comment_id`. An autoplan, the
 plan `summary`'s comment-less replan and an `auto` run carry none: `claim` is
 skipped and the run proceeds. `apply.yml`'s `guard` refuses a `verb: apply`
 dispatch without one. `claim` binds `shipmate-engine`, checks nothing out,
-mints an App token granting `pull-requests: write` alone, and posts the App's
+mints an App token granting `pull-requests: write` and `actions: read`, and posts the App's
 🚀 on the comment once, never retried. GitHub answers the first creation of a
 reaction 201 and every later one 200, so one run of a comment does the work:
 
@@ -1455,9 +1455,10 @@ Re-runs follow from the claim's recorded result and its one POST. "Re-run failed
 jobs" keeps a finished claim's result: an owned run stays owned and a taken one
 stays taken. "Re-run all jobs" posts again and reads 200, and GitHub deletes the
 earlier attempts' artifacts. For a plan run, the claim then reads each earlier
-attempt's jobs: when `facts` ran in one (any conclusion but skipped), this run
-owned the comment, so it owns it again and plans again; otherwise it lost the
-claim and does nothing. A listing that fails or is malformed fails the claim as
+attempt's jobs: when `facts` finished in one (`success` or `failure`), this run
+owned the comment, so it owns it again and plans again; otherwise, `facts`
+skipped, cancelled or ended any other way included, it is taken and does
+nothing. A listing that fails or is malformed fails the claim as
 above. For an apply run, "Re-run all jobs" does nothing.
 Re-running a run whose claim failed posts again; when the failed attempt wrote
 no reaction it reads 201 and the run starts, so comment the command again or
@@ -1498,7 +1499,9 @@ dispatch:
   and whose title (§Check names) is this command's: this verb and comment id,
   with this pull request, or for `unlock` no pull request and this ref.
   Otherwise it retries: the claim (above) leaves a second `plan` or `apply` run
-  doing nothing, and a second `unlock` finds no lock.
+  doing nothing, and a second `unlock` finds no lock. Without the App's slug no
+  run can be told to be this command's, so the outcome is undetermined and the
+  dispatch is not retried.
 - A comment-less dispatch (`auto`, and the plan `summary`'s replan) reads one
   page of 100 `workflow_dispatch` runs and stops when any was created at or
   after `t0`, whatever its title, since nothing marks such a run as this
@@ -2328,8 +2331,10 @@ between refuses the whole run in `lock`, naming the holder
 re-plan. If #<n> has already merged or closed, comment `shipmate unlock <env>
 --evict` ``), and no cell applies.
 This is the one case in which a locked cell stops the pull request's other
-cells. Commenting `shipmate apply` again, or "Re-run all jobs", recomputes: its
-`detect` leaves that cell pending and the rest apply. "Re-run failed jobs" does
+cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
+cell pending and the rest apply. "Re-run all jobs" of a commented apply does
+nothing: its claim finds the comment taken (§Comment-ops, "Reactions and the
+comment claim"). "Re-run failed jobs" does
 not re-run `detect`, so its `lock` tries the same cells again.
 
 **Limit: every env-level is locked up front.** `lock` acquires the cells of
