@@ -895,6 +895,11 @@ No comment lands on the `auto` job. A plan run's `summary` dispatches
 environment, and the job calls `apply.yml` with `auto: true`
 (§Applying an environment after every push).
 
+The apply runs of one pull request run one at a time: a later `shipmate apply`
+or `auto` run waits until the earlier one ends
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops, "One apply run per pull
+request").
+
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
 `unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
 a state lock reads no plan artifact and mints no App token, so it declares neither

@@ -267,20 +267,20 @@ engine job but nineteen:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
-- `apply.yml` and `deploy.yml`: `detect`, the apply cells in
-  `apply-env-level.yml`, to which both pass `runs_on`, `lock` in
-  `apply.yml` and `warm` in `deploy.yml`.
+- `apply-run.yml` and `deploy.yml`: `detect`, the apply cells in
+  `apply-env-level.yml`, to which both pass `runs_on` (`apply.yml` passes it
+  to `apply-run.yml`), `lock` in `apply-run.yml` and `warm` in `deploy.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
 - `release.yml`: `release`.
 
 The input does not reach nineteen jobs, which run on `ubuntu-slim` and run neither
-`tofu` nor `terramate`: `facts`, `gate-hold` and `outcome` in `plan.yml`; `guard`,
-`review`, `summary` and `outcome` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`,
+`tofu` nor `terramate`: `facts`, `gate-hold` and `outcome` in `plan.yml`; `guard`
+and `outcome` in `apply.yml`; `review` and `summary` in `apply-run.yml`; `summary` in `deploy.yml`; `snapshot`,
 `wave0-complete` … `wave7-complete` and `complete` in `apply-env-level.yml`; and
 `guard` in `unlock.yml`.
 
-`issues` in `drift.yml`, `lock` in `apply.yml` and `release` in `release.yml`
+`issues` in `drift.yml`, `lock` in `apply-run.yml` and `release` in `release.yml`
 run neither tool too, yet stay on the `runs_on` runner because an `ubuntu-slim`
 job stops at 15 minutes and their work is not fixed: that of `issues` grows with
 the sweep's drifted cells and with the repository's open drift Issues, that of

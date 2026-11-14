@@ -9,13 +9,13 @@ per-cell completion already had.
 
 Job names are matched as `L<n> / <env> / <stack>` suffixes
 (`apply-gate.is_cell_job`) because a called workflow's jobs display as
-`<caller job> / <called job> / <matrix job>`: `apply.yml` and `deploy.yml` name
-the level `L<n>`, and CONTRACT.md pins the matrix job's own name to
-`<env> / <stack>`, read from the snapshot's check name with
-`apply-gate.parse_check_name`. Requiring the level and a ` / ` boundary, not a
-bare `str.endswith`, keeps out a job of env `dev-eu` for env `eu` and a non-wave
-job such as `apply / detect` for env `apply` and stack `detect`; either would
-complete a check its own apply never earned.
+`<caller job> / <called job> / <matrix job>`, one segment per call level
+(`apply / run / L<n> / ...`): `apply-run.yml` and `deploy.yml` name the level
+`L<n>`, and CONTRACT.md pins the matrix job's own name to `<env> / <stack>`, read
+from the snapshot's check name with `apply-gate.parse_check_name`. Requiring the
+level and a ` / ` boundary, not a bare `str.endswith`, keeps out a job of env
+`dev-eu` for env `eu` and a non-wave job such as `apply / run / detect` for env
+`run` and stack `detect`; either would complete a check its own apply never earned.
 
 A cell is therefore classified, not merely filtered, into four states.
 

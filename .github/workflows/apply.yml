@@ -11,7 +11,7 @@ on:
       # The consumer's `auto` job passes a literal `true`: the auto form of apply-detect.
       auto: { required: false, type: boolean, default: false }
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
-    # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
+    # wins over whatever the caller passed, empty included -- `outcome` binds `shipmate-engine`.
     secrets:
       # `required: false` is load-bearing: the key lives on the `shipmate-engine` environment
       # (docs/github-app.md §5), so a caller binding none has nothing to pass, and a required

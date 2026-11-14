@@ -213,5 +213,6 @@ runs:
         # an existing one.
         [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::pr-number must be numeric (got: $PR_NUMBER)"; exit 1; }
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md >/dev/null
-        # Written only after the POST: an unset `posted` makes apply.yml's outcome job reply.
+        # Written only after the POST: an unset `posted`, read through apply-run.yml's outputs,
+        # makes apply.yml's outcome job reply.
         echo "posted=true" >> "$GITHUB_OUTPUT"

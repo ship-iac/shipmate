@@ -3,7 +3,8 @@
 
 The dispatched workflow is the consumer's `shipmate.yml`, whose `apply` job
 the `verb: apply` body selects; the engine's own `apply.yml` is `workflow_call`
-and is what that job calls.
+and is what that job calls, and it runs this in the `detect` job of the
+`apply-run.yml` it calls in turn.
 
 Both forms source the work set from the head's own apply checks: a stack
 belongs to this run when `apply / <path> / <env>` is among the App-authored

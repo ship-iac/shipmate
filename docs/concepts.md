@@ -131,6 +131,8 @@ Terramate `after` DAG, across environments as well as inside one
 ([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply order), and a
 comment-triggered apply, an `auto` apply and a post-merge deploy share one
 concurrency group per stack × environment, so they never race on the same cell.
+The apply runs of one pull request also run one at a time: a later one waits
+for the earlier one to end.
 
 A cell one open pull request applied is locked to it until it merges or closes,
 so a second pull request's re-plan cannot roll that apply back: its apply leaves

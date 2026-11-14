@@ -1497,7 +1497,7 @@ starts "Terramate <version>: " or "OpenTofu <version>: " and ends with the cause
 and `<answering-url>` the URL that answered after redirects, its query removed.
 The verify and install steps also write the annotation, its lines joined into
 one, as `setup`'s `refusal` output. Only the `detect` jobs of `plan.yml` and
-`apply.yml` read it: plan's into the gate description, apply's into the apply
+`apply-run.yml` read it: plan's into the gate description, apply's into the apply
 result comment. A failure in any other job, a cell included, shows only in that
 job's log.
 
@@ -2055,8 +2055,9 @@ request's current head commit is the dispatched `ref`, compared whole. A push
 landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
-A run refused or cancelled in `review` posts no apply comment and leaves the
-gate as it was. It posts a `🔴` reply on the pull request instead, which links
+A run refused or cancelled in `review`, or cancelled while it waited in the
+pull request's apply queue, posts no apply comment and leaves the gate as it
+was. It posts a `🔴` reply on the pull request instead, which links
 the run: `its review check stopped [the apply run](<url>) before any cell
 applied` for a refusal, `[the apply run](<url>) was cancelled before it posted a
 result` for a cancel (`CONTRACT.md` §Outcome reply).
@@ -2156,6 +2157,13 @@ When the first recurs, check the App's `actions: write` permission and reconcile
 `shipmate.yml` against the fence in [`getting-started.md`](getting-started.md)
 §The workflow file, which offers `auto` as a `verb` option and holds the `auto`
 job.
+
+### `apply refused: pr_number is not a pull request number`
+
+The `guard` job of `apply.yml` refused the dispatch before the run joined any
+apply queue, and nothing applied. The dispatch's `pr_number` is not 1 to 10
+digits without a leading zero, so a hand-made `workflow_dispatch` sent it.
+Comment `shipmate apply` on the pull request instead.
 
 ### `apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'`
 
@@ -2558,6 +2566,10 @@ a result nor a 🔴 reply followed within a few minutes. The run ended before it
 failed at its key check or token mint, or green with a
 `could not post the no-result reply` warning.
 
+An apply run that has not ended may still wait behind an earlier apply run of
+the same pull request: the API reports its status as `pending` while it waits,
+and it answers once it runs (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
+
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
 `guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
@@ -2650,8 +2662,8 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 ### Every engine job fails before its first step
 
 All twenty-one jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `review`, `lock`,
-`summary` and `outcome`, `apply-env-level.yml` `snapshot`, `wave0-complete` … `wave7-complete`
+`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `outcome`,
+`apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-complete` … `wave7-complete`
 and `complete`, `deploy.yml` `summary`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
@@ -2764,7 +2776,7 @@ always passes one.
 A pull request merged, the `deploy` job for that merge was cancelled before it
 started, and its stacks are still pending.
 
-There is no server-side queue behind the apply path: the consumer's `deploy` job
+There is no server-side queue behind the merge deploy: the consumer's `deploy` job
 declares a `concurrency` group (`group: deploy-main`), and GitHub drops the older
 *pending* job whenever a second merge lands while the first is still queued. The
 stacks stay pending and visible, which is the recoverable state: re-run that

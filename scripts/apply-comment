@@ -561,7 +561,7 @@ _NO_REVIEW = "no approving review was required, so the default review: true had 
 
 def notices(rows, applied_exempt, review_not_required):
     """One `::notice::` workflow command per environment in `applied_exempt` (an all-environments
-    set: the caller passes it empty in the targeted form, as apply.yml reads it from the
+    set: the caller passes it empty in the targeted form, as apply-run.yml reads it from the
     bare-apply detector only) and per environment in `review_not_required` that has an applied,
     failed or unrecorded row, where infrastructure may have changed, so a run with no rows
     names none. Env names are author-controlled, so `command_data`-escaped.
@@ -673,7 +673,7 @@ def _overlap_lines(overlap):
 def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_after=None, bare=()):
     """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
     `excluded`, `skipped` and `held` are all-environments sets; the caller passes them empty in
-    the targeted form, because apply.yml reads them from the bare-apply detector only.
+    the targeted form, because apply-run.yml reads them from the bare-apply detector only.
     `waiting` and `held_cells` come from both forms: each waiting cell becomes an escaped
     `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`, its remedy
     the lock's when its blocker is a `locked` cell, the branch update when it is an `overlap`
@@ -808,7 +808,7 @@ def _footer_parts(
     one `🔒` line per lock holder and environment naming its locked cells and the remedy, then
     one line naming the overlap cells and the remedy, then one line per waiting cell naming its
     blocker and the blocker's remedy.
-    Only `waiting` and the locked `held_cells` come from both forms; apply.yml reads the other
+    Only `waiting` and the locked `held_cells` come from both forms; apply-run.yml reads the other
     sets from the bare-apply detector only. Stack and env names are author-controlled, so
     `_md_escape`d, a stack through `_md_name`. `compact` renders each disposition as one line
     naming its environments comma-separated, the skipped ones one line per set of predecessors,
