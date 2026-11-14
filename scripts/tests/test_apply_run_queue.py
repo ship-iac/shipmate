@@ -128,6 +128,7 @@ QUEUE_JOB = {
             "with": {
                 "pr-number": "${{ inputs.pr_number }}",
                 "environment": "${{ inputs.environment }}",
+                "ref": "${{ inputs.ref }}",
                 "auto": "${{ inputs.auto }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
@@ -143,6 +144,7 @@ QUEUE_STEP_ENV = {
     "PR_NUMBER": "${{ inputs.pr-number }}",
     "SHIPMATE_ENV": "${{ inputs.environment }}",
     "SHIPMATE_AUTO": "${{ inputs.auto }}",
+    "SHIPMATE_REF": "${{ inputs.ref }}",
     "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
     "SHIPMATE_ACTOR": "${{ github.actor }}",
     "SHIPMATE_TRIGGERING_ACTOR": "${{ github.triggering_actor }}",

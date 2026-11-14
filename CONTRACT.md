@@ -1690,8 +1690,9 @@ pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 `actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
 Then `queue` reads the pull request's live head, the jobs of each trusted run's
 latest attempt, and the head again. A trusted run whose title names another head
-is stale, and `queue` cancels it only when its jobs listing is complete, both
-head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
+is stale, and `queue` cancels it only when this run's own `ref` is the live head
+(a run that is itself stale cancels nothing, so it never cancels its peers at
+its own head), its jobs listing is complete, both head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
 cell is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments, so a
 caller job name containing ` / ` never matches and such a run is kept) either:
 

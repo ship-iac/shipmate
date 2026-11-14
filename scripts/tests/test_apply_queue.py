@@ -62,6 +62,7 @@ def gh(monkeypatch):
         "PR_NUMBER": "7",
         "SHIPMATE_ENV": "",
         "SHIPMATE_AUTO": "false",
+        "SHIPMATE_REF": _HEAD,
         "SHIPMATE_APP_SLUG": "shipmate-iac",
         "SHIPMATE_ACTOR": "shipmate-iac[bot]",
         "SHIPMATE_TRIGGERING_ACTOR": "shipmate-iac[bot]",
@@ -441,3 +442,14 @@ def test_a_waiting_job_that_is_not_a_cell_keeps_the_run(gh):
     )
     gh.go()
     assert gh.cancels == []
+
+
+def test_a_run_not_at_the_live_head_cancels_nothing(gh, monkeypatch):
+    """This run was dispatched at an older head too, so its peers there are not stale to it:
+    nothing is cancelled and no cancel sentence is posted. Mutation: drop `own_ref != head` --
+    red (40 cancelled)."""
+    monkeypatch.setenv("SHIPMATE_REF", _OLD)
+    gh.runs, gh.jobs = _stale([_rv("pending")])
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
