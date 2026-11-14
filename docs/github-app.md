@@ -282,8 +282,10 @@ as above, and step 5 runs in every consumer repository.
   cancelled), the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome
-  reply of a plan or apply run that ends without its result, and drift
-  issues. With the same `pull_requests: write` token it minimizes its earlier
+  reply of a plan or apply run that ends without its result, the queue reply
+  of an apply run, and drift issues. It cancels a pull request's stale apply
+  runs ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops, "One apply run per pull
+  request"). With the same `pull_requests: write` token it minimizes its earlier
   plan comments as outdated (GraphQL `minimizeComment`) after posting a new
   one. Nothing minimizes a `github-actions[bot]` reply. The plan matrix
   job's own `plan / <env> / <stack>` auto check-run stays on the

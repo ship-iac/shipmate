@@ -120,7 +120,8 @@ def test_an_empty_slug_trusts_nothing():
 
 
 def test_the_current_run_is_listed_for_the_caller_to_exclude():
-    """`apply_runs` does not read `GITHUB_RUN_ID`. Mutation: drop runs equal to it -- red."""
+    """`apply_runs` does not read `GITHUB_RUN_ID`; `apply-queue` drops its own run
+    (`test_this_run_is_neither_named_nor_cancelled`). Pins the row shape for a live run."""
     got = _call({_listing("in_progress"): {"workflow_runs": [_apply(42, status="in_progress")]}})
     assert got == ([_row(42, status="in_progress")], True)
 
@@ -156,3 +157,9 @@ def test_run_jobs_with_a_job_without_status_is_incomplete():
     """Mutation: drop the status check -- red."""
     run = _gh({_jobs(1): {"jobs": [{"name": "x"}]}})
     assert _shipmate.run_jobs("o/r", 5, run=run) == ([{"name": "x"}], False)
+
+
+def test_run_jobs_with_a_job_without_name_is_incomplete():
+    """`apply-queue` keys on the name. Mutation: drop the name check -- red."""
+    run = _gh({_jobs(1): {"jobs": [{"status": "pending"}]}})
+    assert _shipmate.run_jobs("o/r", 5, run=run) == ([{"status": "pending"}], False)

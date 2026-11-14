@@ -16,6 +16,7 @@ SCRIPTS_EXPECTED = [
     "apply-complete",
     "apply-detect",
     "apply-gate",
+    "apply-queue",
     "apply-snapshot",
     "authorize",
     "auto-dispatch",

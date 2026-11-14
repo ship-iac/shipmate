@@ -1685,8 +1685,10 @@ pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 Then `queue` reads the pull request's live head, the jobs of each trusted run's
 latest attempt, and the head again. A trusted run whose title names another head
 is stale, and `queue` cancels it only when its jobs listing is complete, at least
-one job is `waiting` or `pending`, every job not `completed` is `waiting` or
-`pending`, and both head reads agree. A `queued` job is released and about to
+one job of its `run` call (listed `<caller> / run / ...`) is `waiting` or
+`pending`, every such job not `completed` is `waiting` or `pending`, and both
+head reads agree; its `guard`, `queue` and `outcome` sit outside the group and
+are not counted. A `queued` job is released and about to
 start, so it keeps its run. A runs listing with a failed or malformed page, an
 App-dispatched run whose title does not parse, or a failed head read cancels
 nothing. An untrusted run is never cancelled. `queue` writes, a cancel or a
@@ -1698,8 +1700,8 @@ An `apply` run posts one ⚪ reply joining these sentences in this order, links
 built from run ids; an `auto` run posts none:
 
 - ``[the apply run](<url>) waits for [an earlier apply run](<url>) of this pull request to finish.``
-  It names the trusted run holding the group (a job `in_progress`, `queued` or
-  `waiting`), else the oldest kept trusted run older than this one, else nothing.
+  It names the trusted run holding the group (a job of its `run` call
+  `in_progress`, `queued` or `waiting`), else the oldest kept trusted run older than this one, else nothing.
 - ``[the apply run](<url>) may wait for [an apply run](<url>) of this pull request that shipmate did not dispatch.``
   It names the untrusted run with the lowest run id.
 - ``[the apply run](<url>) cancelled [an apply run](<url>) of this pull request waiting at an older head (<short sha>).``
@@ -1911,7 +1913,9 @@ Beyond minting the `workflow_dispatch`
 token for comment-ops (a dispatch needs `actions: write`; the `ops` job in
 `comment-ops.yml` grants its `GITHUB_TOKEN` only `actions: read`, and
 `actions/dispatch` mints the App token with `actions: write` in a step that runs
-only once the command is authorized) and reading the apply checks that name the
+only once the command is authorized), cancelling a pull request's stale apply
+runs (`actions/apply-queue`, also `actions: write`; §Comment-ops, "One apply run
+per pull request") and reading the apply checks that name the
 reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
@@ -2014,6 +2018,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
 - **The outcome reply** — posted by `actions/outcome-reply` in the `outcome`
   job of `plan.yml` and `apply.yml`, both bound to `shipmate-engine`
   (§Outcome reply).
+- **The queue reply** — posted by `actions/apply-queue` in `apply.yml`'s `queue`
+  job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
+  request").
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
   artifact. A separate `issues` job, bound to `shipmate-engine`, calls

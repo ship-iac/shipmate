@@ -10,9 +10,10 @@ consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's en
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
 run, read the head again. A trusted run whose title names another head is stale, and is
-cancelled only when its jobs listing is complete, at least one job is `waiting` or `pending`,
-every job not `completed` is `waiting` or `pending`, and both head reads agree. An incomplete
-runs listing or a failed head read cancels nothing. An untrusted run is never cancelled.
+cancelled only when its jobs listing is complete, at least one job of its `run` call is
+`waiting` or `pending`, every such job not `completed` is `waiting` or `pending`, and both head
+reads agree. An incomplete runs listing or a failed head read cancels nothing. An untrusted run
+is never cancelled.
 
 Writes, a cancel or the reply, happen only when this run's `actor` and `triggering_actor` are
 both `<slug>[bot]`; the reply's sentences print to the log either way. The queue only reports
@@ -46,6 +47,9 @@ _WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 _IDLE = ("waiting", "pending")
 #: Job statuses of a run that holds `shipmate-apply-<pr_number>`.
 _HOLDING = ("in_progress", "queued", "waiting")
+#: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
+#: `outcome` sit outside the group, so their status says nothing about it.
+_IN_CALL = " / run / "
 
 
 def workflow_file(repo, ref):
@@ -58,10 +62,15 @@ def workflow_file(repo, ref):
     return name
 
 
+def in_call(jobs):
+    """The jobs of `jobs` that run inside the `run` call, in `shipmate-apply-<pr_number>`."""
+    return [j for j in jobs if _IN_CALL in j["name"]]
+
+
 def idle(jobs):
-    """Whether a run whose `jobs` listing is complete only waits: a job `waiting` or `pending`,
-    and every job not `completed` one of those."""
-    unfinished = [j["status"] for j in jobs if j["status"] != "completed"]
+    """Whether a run whose `jobs` listing is complete only waits: a job of its `run` call
+    `waiting` or `pending`, and every one of those not `completed` one of the two."""
+    unfinished = [j["status"] for j in in_call(jobs) if j["status"] != "completed"]
     return bool(unfinished) and all(s in _IDLE for s in unfinished)
 
 
@@ -133,7 +142,7 @@ def queue(repo, wf, pr, own, slug, trusted_self):
         stale = []
     cancelled = [r for r in stale if trusted_self and cancel(repo, r["id"])]
     kept = [r for r in trusted if r not in cancelled]
-    holding = [r for r in kept if any(j["status"] in _HOLDING for j in jobs[r["id"]][0])]
+    holding = [r for r in kept if any(j["status"] in _HOLDING for j in in_call(jobs[r["id"]][0]))]
     earlier = holding or [r for r in kept if r["id"] < own]
     untrusted = [r for r in others if not r["trusted"]]
     return sentences(own, (earlier or [None])[0], (untrusted or [None])[0], cancelled, True)

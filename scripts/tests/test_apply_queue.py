@@ -32,7 +32,12 @@ def _r(id_, ref=_OLD, trusted=True, status="pending"):
 
 
 def _j(*statuses):
-    return [{"name": f"j{i}", "status": s} for i, s in enumerate(statuses)]
+    """Jobs of the `run` call, named as a jobs listing names them."""
+    return [{"name": f"apply / run / j{i}", "status": s} for i, s in enumerate(statuses)]
+
+
+_GUARD = {"name": "apply / guard", "status": "in_progress"}
+_QUEUE = {"name": "apply / queue", "status": "completed"}
 
 
 @pytest.fixture
@@ -65,7 +70,8 @@ def gh(monkeypatch):
 
     def run_jobs(repo, run_id):
         rec.job_reads.append(run_id)
-        return rec.jobs.get(run_id, ([], False))
+        own = ([_QUEUE, *_j("in_progress")], True)
+        return rec.jobs.get(run_id, own if run_id == 50 else ([], False))
 
     def pr_head(repo, pr):
         return rec.heads.pop(0), False, "open"
@@ -286,3 +292,26 @@ def test_contract_states_each_reply_sentence_as_the_script_renders_it(monkeypatc
     missing = [s for s in said if f"``{s.replace('0123456', '<short sha>')}``" not in contract]
     assert len(said) == 4
     assert missing == []
+
+
+def test_this_run_is_neither_named_nor_cancelled(gh):
+    """This run is listed with a job `in_progress`; only run 40, at the live head and waiting,
+    is named. Mutation: drop `r["id"] != own` -- red (run 50 named as the holder)."""
+    gh.runs = [_r(40, ref=_HEAD)]
+    gh.jobs = {40: (_j("pending"), True)}
+    gh.go()
+    assert gh.cancels == []
+    assert gh.posts == _reply(_WAITS.format(40))
+
+
+def test_a_job_outside_the_run_call_neither_holds_the_group_nor_keeps_a_stale_run(gh):
+    """A newer run still in its `guard` holds nothing, so it is not named; a stale run whose
+    `queue` is listed `completed` beside its waiting call is cancelled.
+
+    Mutations: `in_call` returns every job -- red (60 named as the holder); `_IN_CALL` as
+    `" / guard"` -- red (40 kept)."""
+    gh.runs = [_r(40), _r(60, ref=_HEAD)]
+    gh.jobs = {40: ([_QUEUE, *_j("waiting")], True), 60: ([_GUARD], True)}
+    gh.go()
+    assert gh.cancels == [_cancel(40)]
+    assert gh.posts == _reply(_CANCELLED.format(40))

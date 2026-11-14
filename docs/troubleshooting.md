@@ -2606,9 +2606,13 @@ the current head's, which carries its own apply checks.
 
 ### `may wait for an earlier apply run of this pull request; its apply runs could not all be listed`
 
-The list of this pull request's apply runs failed or came back malformed, so
-this run cancelled nothing and cannot say what it waits behind; the `queue`
-job's log has the warning. The run still starts once the apply queue frees.
+The list of this pull request's apply runs failed or came back malformed, or a
+run the shipmate App dispatched carries a title outside the grammar in
+`CONTRACT.md` §Check names, so this run cancelled nothing and cannot say what it
+waits behind; the `queue` job's log has the warning. When it happens on every
+apply, `shipmate.yml`'s `run-name` is not the published one: re-pin it with
+`python <engine>/scripts/repin <consumer> <tag> --write-fence`, after reading the
+diff it prints. The run still starts once the apply queue frees.
 Open the Actions tab and filter the runs whose title starts `shipmate · apply`
 or `shipmate · auto` (`CONTRACT.md` §Check names) to see the others.
 
@@ -2697,8 +2701,8 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All twenty-one jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `outcome`,
+All twenty-two jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `queue` and `outcome`,
 `apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-complete` … `wave7-complete`
 and `complete`, `deploy.yml` `summary`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
