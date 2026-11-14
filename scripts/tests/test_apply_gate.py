@@ -316,7 +316,7 @@ LEGACY_HEX = "a3f" + "b" * 61
 
 def _record(plan_run="111", pr="8", **extra):
     """A record as pending-checks writes it, `pr` included unless None."""
-    record = {"fingerprint": "a" * 64, "plan_run": plan_run, **extra}
+    record = {"plan_run": plan_run, **extra}
     if pr is not None:
         record["pr"] = pr
     return json.dumps(record)
@@ -371,10 +371,10 @@ def test_plan_records_unusable_external_id_is_absent(external_id):
 @pytest.mark.parametrize(
     "record",
     [
-        {"fingerprint": "a" * 64},
-        {"fingerprint": "a" * 64, "plan_run": "12x4"},
-        {"fingerprint": "a" * 64, "plan_run": ""},
-        {"fingerprint": "a" * 64, "plan_run": 1234},
+        {},
+        {"plan_run": "12x4"},
+        {"plan_run": ""},
+        {"plan_run": 1234},
     ],
 )
 def test_plan_records_bad_plan_run_value_reads_as_none(record):
@@ -499,7 +499,7 @@ _MISSING = object()
 def _counted(name, id, plan_run, cells=_MISSING, status="queued", app_id=999):
     """An App-authored check whose record names `plan_run` and declares `cells`, or no
     `cells` key when left out."""
-    record = {"fingerprint": "a" * 64, "plan_run": plan_run, "pr": "8"}
+    record = {"plan_run": plan_run, "pr": "8"}
     if cells is not _MISSING:
         record["cells"] = cells
     conclusion = "success" if status == "completed" else None

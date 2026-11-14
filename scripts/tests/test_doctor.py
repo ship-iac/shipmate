@@ -2558,7 +2558,7 @@ def test_a_check_run_in_the_projected_shape_yields_its_plan_run():
             "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "started_at": "2026-08-24T00:00:00Z",
-            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281", "pr": "8"}),
+            "external_id": json.dumps({"plan_run": "1281", "pr": "8"}),
             "app": {"id": 4326562},
         }
     )
@@ -2644,17 +2644,17 @@ _PLANNED = [
     (
         "apply / stacks/app / dev-eu",
         1,
-        json.dumps({"fingerprint": "a" * 64, "plan_run": "1281", "pr": "8"}),
+        json.dumps({"plan_run": "1281", "pr": "8"}),
     ),
     (
         "apply / stacks/app / dev-eu",
         2,
-        json.dumps({"fingerprint": "a" * 64, "plan_run": "1290", "pr": "8"}),
+        json.dumps({"plan_run": "1290", "pr": "8"}),
     ),
     (
         "apply / stacks/db / dev-us",
         3,
-        json.dumps({"fingerprint": "a" * 64, "plan_run": "1281", "pr": "8"}),
+        json.dumps({"plan_run": "1281", "pr": "8"}),
     ),
     ("apply / stacks/cache / dev-ap", 4, "b" * 64),
 ]
