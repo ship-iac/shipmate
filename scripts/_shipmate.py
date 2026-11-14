@@ -490,16 +490,18 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
     """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
     `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, trusted}`.
 
-    One listing per `LIVE_RUN_STATUSES` value, every page. `trusted` is true when the run is a
+    One `workflow_dispatch` listing per `LIVE_RUN_STATUSES` value, every page: no other event
+    can be trusted. `trusted` is true when the run is a
     `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a re-run changes only
     `triggering_actor`); an empty slug trusts nothing. `complete` is false when a page fails or
     is malformed, a run is malformed, or a trusted-shaped run's title does not parse: such a run
-    is unknown, never absent. A run that changes status between listings can be missed."""
+    is unknown, never absent. A run that changes status between listings, or between the page
+    reads of one listing, can be missed."""
     bot = f"{app_slug}[bot]" if app_slug else None
     runs, complete = {}, True
     for status in LIVE_RUN_STATUSES:
         page = _pages(
-            f"repos/{repo}/actions/workflows/{workflow_file}/runs?status={status}",
+            f"repos/{repo}/actions/workflows/{workflow_file}/runs?event=workflow_dispatch&status={status}",
             "workflow_runs",
             run,
         )

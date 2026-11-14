@@ -36,7 +36,7 @@ def _gh(pages, fail=()):
 
 
 def _listing(status, page=1):
-    return f"{_RUNS}?status={status}&per_page=100&page={page}"
+    return f"{_RUNS}?event=workflow_dispatch&status={status}&per_page=100&page={page}"
 
 
 def _call(pages, fail=()):
@@ -49,7 +49,8 @@ def _row(id_, ref=_SHA, verb="apply", status="pending", trusted=True):
 
 def test_every_page_of_every_live_status_is_read():
     """Mutations: stop after the first page -- red (run 1100 lost); drop `waiting` from
-    `LIVE_RUN_STATUSES` -- red; drop `requested` -- red (the call list differs)."""
+    `LIVE_RUN_STATUSES` -- red; drop `requested` -- red (the call list differs); drop the
+    `event=workflow_dispatch` filter -- red."""
     first = [_apply(1000 + i, pr="8") for i in range(99)] + [_apply(5)]
     run = _gh(
         {

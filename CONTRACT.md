@@ -1683,22 +1683,29 @@ it waits in the queue runs no job of `apply-run.yml`: its apply checks and
 `queue` cancels this pull request's stale apply runs and says which run this one
 waits behind. It runs after `guard` and before `run`, outside the group, binds
 `shipmate-engine` and holds no job-token permission: it writes with an App token
-granting `actions: write` and `pull-requests: write`. It lists the live runs
-(`queued`, `in_progress`, `waiting`, `pending`, `requested`) of the consumer's
-dispatching workflow whose title (§Check names) is an `apply` or `auto` of this
+granting `actions: write` and `pull-requests: write`. It lists the live
+`workflow_dispatch` runs (`queued`, `in_progress`, `waiting`, `pending`,
+`requested`) of the consumer's dispatching workflow whose title (§Check names) is an `apply` or `auto` of this
 pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 `actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
 Then `queue` reads the pull request's live head, the jobs of each trusted run's
 latest attempt, and the head again. A trusted run whose title names another head
-is stale, and `queue` cancels it only when its jobs listing is complete, at least
-one job of its `run` call (listed `<caller> / run / ...`) is `waiting` or
-`pending`, every such job not `completed` is `waiting` or `pending`, and both
-head reads agree; its `guard`, `queue` and `outcome` sit outside the group and
-are not counted. A `queued` job is released and about to
-start, so it keeps its run. A runs listing with a failed or malformed page or a
+is stale, and `queue` cancels it only when its jobs listing is complete, both
+head reads agree, and its `run` call (jobs listed `<caller> / run / ...`) either:
+
+- (a) waits for `shipmate-apply-<pr_number>`: its `<caller> / run / review` job is
+  `pending`, so no job inside the call has run; or
+- (b) waits on environment approval: every unfinished job of the call is
+  `waiting`, and none is `pending`, `queued` or `in_progress`.
+
+Anything else keeps the run. A `pending` job past `review` is a cell or `summary`
+waiting on its own concurrency group mid-run, after earlier cells may have
+applied; cancelling it would cut a level half-applied or drop the apply comment
+and gate refresh. `guard`, `queue` and `outcome` sit outside the group and are not
+counted. A runs listing with a failed or malformed page or a
 malformed run (an `id` that is not a number, a title or event that is not text),
 an App-dispatched run whose title does not parse, or a failed head read cancels
-nothing. An untrusted run is never cancelled. `queue` writes, a cancel or a
+nothing; after a failed first head read `queue` reads no run's jobs. An untrusted run is never cancelled. `queue` writes, a cancel or a
 reply, only when its own run's `actor` and `triggering_actor` are both
 `<slug>[bot]`, so a human re-run of an App-dispatched run writes nothing. The
 queue reports and tidies but never gates: a failed `queue` does not stop `run`.
@@ -1707,8 +1714,10 @@ An `apply` run posts one ⚪ reply joining these sentences in this order, links
 built from run ids; an `auto` run posts none:
 
 - ``[the apply run](<url>) waits for [an earlier apply run](<url>) of this pull request to finish.``
-  It names the trusted run holding the group (a job of its `run` call
-  `in_progress`, `queued` or `waiting`), else the oldest kept trusted run older than this one, else nothing.
+  It names the trusted run holding the group (an unfinished job of its `run`
+  call and a `review` that is not `pending`), else the oldest kept trusted run
+  older than this one with an unfinished job of its call, else nothing. A run
+  left only in `outcome` is not named.
 - ``[the apply run](<url>) may wait for [an apply run](<url>) of this pull request that shipmate did not dispatch.``
   It names the untrusted run with the lowest run id.
 - ``[the apply run](<url>) cancelled [an apply run](<url>) of this pull request waiting at an older head (<short sha>).``
@@ -1718,10 +1727,10 @@ built from run ids; an `auto` run posts none:
 
 A cancelled stale run writes, by where it waited:
 
-- In the group, before its call started: no job of `apply-run.yml` ran, so its
+- In the group, before its call started (a): no job of `apply-run.yml` ran, so its
   apply checks and `shipmate / gate` stay as they were, and `outcome` posts the
   cancelled reply.
-- On an `<env>-apply` environment's approval: the waiting wave ends `cancelled`,
+- On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
   so its `waveN-complete`, which runs on `success` or `failure` only, is skipped,
   and the level's `complete` completes only cells whose wave job succeeded, so
   the cancelled cells' apply checks stay pending. `summary` runs after a
@@ -1731,8 +1740,9 @@ A cancelled stale run writes, by where it waited:
 Two limits are accepted. A stale run's job can start between `queue`'s jobs read
 and its cancel, and the cancel then stops it mid-run; only a cell whose `ref` is
 the live head passes `pre-apply`, so that window needs a force-push back to the
-stale head. A run that changes status between two of the per-status listings
-can be missed by both, and is then neither cancelled nor named.
+stale head. A run that changes status between two of the per-status listings,
+or within one listing between its page reads, can be missed, and is then
+neither cancelled nor named.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env

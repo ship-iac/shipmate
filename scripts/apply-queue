@@ -10,10 +10,10 @@ consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's en
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
 run, read the head again. A trusted run whose title names another head is stale, and is
-cancelled only when its jobs listing is complete, at least one job of its `run` call is
-`waiting` or `pending`, every such job not `completed` is `waiting` or `pending`, and both head
-reads agree. An incomplete runs listing or a failed head read cancels nothing. An untrusted run
-is never cancelled.
+cancelled only when its jobs listing is complete, both head reads agree, and its call either
+waits for the group (its `review` is `pending`) or has every unfinished job `waiting` on an
+environment's approval. An incomplete runs listing or a failed head read cancels nothing, and
+a failed first head read skips the jobs reads. An untrusted run is never cancelled.
 
 Writes, a cancel or the reply, happen only when this run's `actor` and `triggering_actor` are
 both `<slug>[bot]`; the reply's sentences print to the log either way. The queue only reports
@@ -43,13 +43,11 @@ from _shipmate import (
 rc = _load("reply-comment")
 
 _WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
-#: Job statuses of a run still waiting in the queue or on an environment's approval.
-_IDLE = ("waiting", "pending")
-#: Job statuses of a run that holds `shipmate-apply-<pr_number>`.
-_HOLDING = ("in_progress", "queued", "waiting")
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
+#: The call's first job: listed `pending` while the call waits for `shipmate-apply-<pr_number>`.
+_REVIEW = " / run / review"
 
 
 def workflow_file(repo, ref):
@@ -67,11 +65,31 @@ def in_call(jobs):
     return [j for j in jobs if _IN_CALL in j["name"]]
 
 
+def _unfinished(jobs):
+    return [j for j in in_call(jobs) if j["status"] != "completed"]
+
+
+def _in_group_wait(jobs):
+    """Whether the run's call waits for `shipmate-apply-<pr_number>`: its `review` is
+    `pending`, so no job inside the call has run."""
+    return any(j["name"].endswith(_REVIEW) and j["status"] == "pending" for j in jobs)
+
+
 def idle(jobs):
-    """Whether a run whose `jobs` listing is complete only waits: a job of its `run` call
-    `waiting` or `pending`, and every one of those not `completed` one of the two."""
-    unfinished = [j["status"] for j in in_call(jobs) if j["status"] != "completed"]
-    return bool(unfinished) and all(s in _IDLE for s in unfinished)
+    """Whether a run whose `jobs` listing is complete may be cancelled: its call waits for the
+    group, or every unfinished job of its call is `waiting` on an environment's approval. A
+    `pending` job past `review` waits on its own concurrency group mid-run, after earlier cells
+    may have applied, so it keeps the run, as `queued` and `in_progress` do."""
+    if _in_group_wait(jobs):
+        return True
+    unfinished = _unfinished(jobs)
+    return bool(unfinished) and all(j["status"] == "waiting" for j in unfinished)
+
+
+def holds(jobs):
+    """Whether the run holds `shipmate-apply-<pr_number>`: a job of its call is unfinished and
+    its call no longer waits for the group."""
+    return bool(_unfinished(jobs)) and not _in_group_wait(jobs)
 
 
 def _link(run_id):
@@ -136,15 +154,17 @@ def queue(repo, wf, pr, own, slug, trusted_self):
     if not complete:
         return sentences(own, None, None, [], False)
     trusted = [r for r in others if r["trusted"]]
+    untrusted = [r for r in others if not r["trusted"]]
+    if head is None:
+        return sentences(own, None, (untrusted or [None])[0], [], True)
     jobs = {r["id"]: run_jobs(repo, r["id"]) for r in trusted}
     stale = [r for r in trusted if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])]
-    if head is None or _head(repo, pr) != head:
+    if _head(repo, pr) != head:
         stale = []
     cancelled = [r for r in stale if trusted_self and cancel(repo, r["id"])]
     kept = [r for r in trusted if r not in cancelled]
-    holding = [r for r in kept if any(j["status"] in _HOLDING for j in in_call(jobs[r["id"]][0]))]
-    earlier = holding or [r for r in kept if r["id"] < own]
-    untrusted = [r for r in others if not r["trusted"]]
+    holding = [r for r in kept if holds(jobs[r["id"]][0])]
+    earlier = holding or [r for r in kept if r["id"] < own and _unfinished(jobs[r["id"]][0])]
     return sentences(own, (earlier or [None])[0], (untrusted or [None])[0], cancelled, True)
 
 
