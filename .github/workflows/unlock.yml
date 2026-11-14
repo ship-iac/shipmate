@@ -20,13 +20,18 @@ jobs:
   # Rejects a human dispatch: see the guard job in apply.yml.
   guard:
     runs-on: ubuntu-slim
-    permissions: {}
+    # For the started reaction alone. This job checks nothing out, so it runs no pull-request HCL.
+    permissions: { pull-requests: write }
     steps:
       - name: Reject dispatches that did not come from a bot actor
         if: ${{ !endsWith(github.actor, '[bot]') }}
         run: |
           echo "::error::unlock refused: the dispatching actor is not a [bot]; comment 'shipmate unlock <env>' on the pull request instead of running a direct workflow_dispatch"
           exit 1
+      # Display only: an unlock is idempotent, so a second run of the comment needs no claim.
+      - uses: $/actions/unlock-rocket
+        with:
+          comment-id: ${{ github.event.inputs.comment_id }}
 
   detect:
     needs: [guard]
@@ -70,7 +75,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
     runs-on: ${{ inputs.runs_on }}
     # No PR comment, deliberately -- do not "fix" it: this job runs the pull request's HCL, so it
-    # holds no pull-requests: write. comment-ops' reaction acknowledges acceptance, step summaries
+    # holds no pull-requests: write. The command's reactions acknowledge it, step summaries
     # carry per-cell detail, and a failure reds the run and notifies the actor.
     permissions: { contents: read, actions: read, id-token: write }
     strategy:

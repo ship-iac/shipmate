@@ -79,13 +79,23 @@ jobs:
           REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          # A number matching no PR is a NOT_FOUND error: gh exits non-zero and `set -e` refuses
-          # here. select() turns a bare null `pullRequest` into empty output. Every @tsv field is
-          # non-empty: `read` collapses adjacent tabs.
+          # On a query error gh prints the raw body (`--jq` not applied). Only NOT_FOUND there
+          # writes `unbound`, so `outcome` replies to every other failed read. `read` collapses
+          # adjacent tabs, so every @tsv field is non-empty.
+          rc=0
           # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
           pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
-            --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv')
+            --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv') || rc=$?
+          if [[ "$rc" -ne 0 && "$pr" == *'"type":"NOT_FOUND"'* ]]; then
+            echo "unbound=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
+            exit 1
+          fi
+          if [[ "$rc" -ne 0 ]]; then
+            echo "::error::Could not read pull request #$PR_NUMBER (gh exited $rc); nothing applies. Comment \`shipmate apply\` on the pull request again."
+            exit 1
+          fi
           if [[ -z "$pr" ]]; then
             echo "unbound=true" >> "$GITHUB_OUTPUT"
             echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."

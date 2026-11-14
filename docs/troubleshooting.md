@@ -99,12 +99,12 @@ combining fourteen live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds six checks, so an unreadable file
-  leaves all six unverified together. A call counts only when it names the
+  the commit under examination, feeds eight checks, so an unreadable file
+  leaves all eight unverified together. A call counts only when it names the
   engine repository doctor runs from, in any letter case: a fork, a renamed
   engine or a wrapper workflow does not count. When that repository could not
-  be determined, the job-name, routing, `auto` `with:` and drift-call checks are a note
-  saying so, and the dispatch and trigger-types checks still run:
+  be determined, the job-name, routing, `auto` `with:`, `unlock` grant and drift-call checks are a note
+  saying so, and the dispatch, trigger-types and `run-name` checks still run:
   - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
     makes the plan cell checks `plan / <env> / <stack>`. Under another name
@@ -113,8 +113,9 @@ combining fourteen live probes.
     of the cell's own check. A job with no `name:` is judged by its job id,
     which is what GitHub displays then.
   - Whether it can serve a dispatched verb at all. That needs the
-    `workflow_dispatch` trigger every commented verb dispatches; all four inputs
-    those bodies name (`verb`, `environment`, `ref` and `pr_number`); a `verb`
+    `workflow_dispatch` trigger every commented verb dispatches; all five inputs
+    those bodies name (`verb`, `environment`, `ref`, `pr_number` and
+    `comment_id`); a `verb`
     offering the whole option list the file routes, since a missing option is
     refused at the dispatch form and at the API while an extra one offers a verb
     no job selects; and no input but `verb` declared `required: true`, because a
@@ -122,7 +123,9 @@ combining fourteen live probes.
     own refuses every verb, not just the one it was added for. Each is refused
     at dispatch time with an HTTP 422 and no run created; the comment-handling
     run carries the error, and the dispatch failure reply on the pull request
-    links it when it can be posted (`CONTRACT.md` §Comment-ops).
+    links it when it can be posted. When the trigger or an input is missing,
+    the reply names the remedy in place of the log pointer; for an input that
+    is `scripts/repin --write-fence` (`CONTRACT.md` §Comment-ops).
   - Whether each of its jobs is selected by the `if:` its event needs. The file
     gates seven jobs, each calling one engine reusable workflow other than
     `drift.yml`, and the probe compares each job's whole `if:` against the
@@ -142,6 +145,10 @@ combining fourteen live probes.
     whole, plus a `runs_on` of any value. The finding names each key missing,
     different or extra. Without `auto: true`, `apply.yml`'s `guard` refuses every
     `verb: auto` dispatch, so no `apply_mode: auto` environment applies.
+  - Whether its `unlock` job grants `pull-requests: write` (or `write-all`).
+    `unlock.yml`'s `guard` requests it for the 🚀 reaction, and a called
+    workflow's jobs are capped by the calling job's permissions, so without it
+    every unlock run dies at startup with no job and no log.
   - Whether its `pull_request_target` types are exactly the fence's `opened`,
     `synchronize`, `reopened`, `ready_for_review` and `closed`. A missing type
     starts no run for its event, and nothing else shows it: without `closed`,
@@ -1871,9 +1878,9 @@ silently inert:
   not `environments.dev-eu-apply`.
 
 **`shipmate apply` answers “could not resolve the gate settings” and carries no
-🚀 reaction.** A malformed entry, or any other refusal of the file, is raised
+👀 reaction.** A malformed entry, or any other refusal of the file, is raised
 while comment-ops resolves the gate settings, which is after the write-access
-check but before both the 🚀 reaction and the rest of the authorization. So for
+check but before both the 👀 reaction and the rest of the authorization. So for
 a commenter with write access, a repository-wide breakage of `shipmate apply`
 and `shipmate unlock` (every command, every environment, however well-formed)
 arrives as that one comment, whatever the command said, and
@@ -2083,10 +2090,14 @@ The same step refuses, also before any wave:
   comment. Mark it ready for review, then comment the apply again.
 - **`Pull request #<n> comes from a fork`.** See
   §`shipmate applies and unlocks only branches of this repository`.
-- **A run that fails at the query itself, with `Could not resolve to a
-  PullRequest`.** The dispatched number names no pull request in this
-  repository. `shipmate apply` always sends the commenting pull request's
-  number, so look for a dispatch that comment-ops did not send.
+- **`Pull request #<n> does not exist in this repository; nothing applies.`**
+  The dispatched number names no pull request in this repository, and no
+  outcome reply is posted. `shipmate apply` always sends the commenting pull
+  request's number, so look for a dispatch that comment-ops did not send.
+- **``Could not read pull request #<n> (gh exited <rc>); nothing applies.
+  Comment `shipmate apply` on the pull request again.``** The read failed for
+  another reason, such as a server error. The outcome reply says the review
+  check stopped the run; comment the apply again.
 
 ### `apply aborted: the plan recorded for ... was not made on pull request #<n>`
 
@@ -2149,6 +2160,14 @@ The pull request carries ``🔴 failed: auto apply not started: the dispatch
 failed; comment `shipmate apply` ``. The plan run's `summary` job could not mint
 its dispatch token or the dispatch call failed; a `::warning::` on that run names
 which. The gate is unchanged and nothing applied. Comment `shipmate apply`.
+
+When gh's answer shows a `shipmate.yml` older than the engine, the reply reads
+``🔴 failed: auto apply not started: the dispatch failed. <remedy>`` instead, and
+the plan run's log carries the remedy as an `::error::` line. For `Unexpected
+inputs provided` the remedy is to write the published file over it with
+`python <engine>/scripts/repin <consumer> <tag> --write-fence`; for a missing
+file or trigger it points at the fence in
+[`getting-started.md`](getting-started.md) §The workflow file.
 
 ``auto apply may have started: the dispatch answered with an error; check the
 Actions tab before commenting `shipmate apply` `` means the dispatch failed with
@@ -2391,11 +2410,15 @@ An `auto` cell also refuses when:
   filter. Comment `shipmate apply`, or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
-- `an apply is never re-run (run attempt '<n>')`: an apply run was re-run
-  ("Re-run failed jobs" or "Re-run all jobs"). A re-run's release jobs write no
-  apply check and its completion jobs write only successes, since a later run may
-  have completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed.
+- `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
+  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
+  check and its completion jobs write only successes, since a later run may have
+  completed those checks already. Comment `shipmate apply`. A merge deploy's
+  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
+  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
+  and the cell refuses on the attempt number. Otherwise a commented apply's claim
+  finds its comment taken and the run does nothing, and an `auto` run refuses at
+  `detect` (`a re-run of an auto apply never applies`).
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
 - a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),
@@ -2521,20 +2544,34 @@ the stack in the changed set until the undo applies: any edit to the stack's own
 files plans the destroy of what the revert removed from configuration, and a
 `removed` block forgets it from state instead.
 
-### `the dispatch answered with an error, but a shipmate.yml run started since it`
+### `the dispatch answered with an error, but this command's run is listed`
 
-The pull request carries ``⚪ the dispatch answered with an error, but a
-shipmate.yml run started since it; it may be this command's. Check the Actions
-tab before commenting again.``. The dispatch call failed with a server or
-network error, and before retrying it the engine found a `shipmate.yml`
-`workflow_dispatch` run created since the first attempt, so it did not retry.
-That run is this command's, or another command's dispatched in the same
-seconds (`CONTRACT.md` §Comment-ops).
+The pull request carries ``⚪ the dispatch answered with an error, but this
+command's run is listed in the Actions tab, so it was not dispatched again.``.
+The dispatch call failed with a server or network error, and before retrying it
+the engine found a `shipmate.yml` run the App dispatched for this command: its
+title names this verb and this comment's id (`CONTRACT.md` §Comment-ops). Wait
+for its answer on the pull request.
 
-Open the Actions tab and filter the runs of `shipmate.yml` created at the
-comment's time. A run whose title starts `shipmate · <verb>` for this command
-(`CONTRACT.md` §Check names) means it started: wait for its answer on the pull
-request. When none is this command's, comment it again.
+### `dispatching its workflow failed, so no run started`
+
+The pull request carries ``🔴 failed: the command was authorized, but
+dispatching its workflow failed, so no run started.`` and one more sentence.
+GitHub refused the dispatch without a server or network error, so no run
+started. The sentence names the remedy (`CONTRACT.md` §Comment-ops):
+
+- ``This repository's .github/workflows/shipmate.yml does not declare every
+  input this engine's dispatch sends, ...``: GitHub answered `Unexpected inputs
+  provided`, because the file is older than the engine pin. Run
+  `python <engine>/scripts/repin <consumer> <tag> --write-fence`, read the diff
+  it prints, merge it, and comment the command again.
+- ``This repository has no .github/workflows/shipmate.yml, or that file
+  declares no workflow_dispatch trigger. ...``: add the file from
+  [`getting-started.md`](getting-started.md) §The workflow file, merge it, and
+  comment again.
+- ``The error is in this run's log.``: open the comment run the footer links;
+  its log holds gh's error. `shipmate doctor` reports the other wiring that
+  GitHub refuses at dispatch time.
 
 ### `dispatching its workflow failed with a server or network error, so a run may have started`
 
@@ -2548,8 +2585,10 @@ run's log holds gh's error: the final failure printed is the dispatch's own,
 or the listing's when the listing failed, and then the dispatch's failures are
 in the retry notices above it.
 
-Check the Actions tab as above. When no run of this command started, comment
-it again.
+Open the Actions tab and filter the runs of `shipmate.yml` created at the
+comment's time. A run whose title is `shipmate · <verb>` with this comment's id
+in its `comment=` slot (`CONTRACT.md` §Check names) means it started: wait for
+its answer on the pull request. When none is this command's, comment it again.
 
 ### A dispatched verb produced a run in which every job was skipped
 
@@ -2561,31 +2600,54 @@ The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
 do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless the job is missing or another job
-calls the same workflow. The run is in the Actions tab. For `shipmate plan` and
-`shipmate apply` the pull request shows the 🚀 reaction (and 👀 for `shipmate
-plan`) and no reply, since the job that would answer never ran; for `shipmate
-unlock` the started-run reply links the run when it carries a link. Reconcile the job against the
+calls the same workflow. The run is in the Actions tab. The comment shows 👀
+and no 🚀, since no job of the run claimed it. For `shipmate plan` and
+`shipmate apply` no reply follows, since the job that would answer never ran;
+for `shipmate unlock` the started-run reply links the run when it carries a
+link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
 
-### Rocket reaction and no plan comment or reply
+### Eyes reaction and no plan comment or reply
 
-A `shipmate plan` or `shipmate apply` comment got the 🚀 reaction, and neither
-a result nor a 🔴 reply followed within a few minutes. The run ended before its
-`outcome` job could answer: an apply run's `guard` job refused it, a plan run's
-`facts` job failed, or the run failed at startup. Otherwise the run's
-`outcome` job shows why: skipped (`CONTRACT.md` §Outcome reply lists when),
-failed at its key check or token mint, or green with a
-`could not post the no-result reply` warning.
+A `shipmate plan` or `shipmate apply` comment got 👀, and neither a result nor
+a 🔴 reply followed within a few minutes. Which reactions it carries says where
+the run stopped (`CONTRACT.md` §Comment-ops, "Reactions and the comment
+claim"):
 
-An apply run that has not ended may still wait behind an earlier apply run of
-the same pull request: the API reports its status as `pending` while it waits,
-and it answers once it runs (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
+- 👀 and no 🚀: no run claimed the command. An apply run's `guard` refused it,
+  the run failed at startup, its `claim` job failed at the App key check or
+  token mint (no reply is possible there), or every job was skipped
+  (§A dispatched verb produced a run in which every job was skipped).
+- 👀 and 🚀: a run owns the command, and its `outcome` job shows why it did not
+  answer: skipped (`CONTRACT.md` §Outcome reply lists when), failed at its key
+  check or token mint, or green with a `could not post the no-result reply`
+  warning. An apply run that has not ended may still wait behind an earlier
+  apply run of the same pull request: the API reports its status as `pending`
+  while it waits, and it answers once it runs (`CONTRACT.md` §Comment-ops, "One
+  apply run per pull request").
+
+A run whose `claim` job summary says another run of this comment owns it did no
+work by design; the run that owns the comment answers. "Re-run all jobs" of the
+plan run that owns the comment plans again, because GitHub deleted that run's
+plan artifacts; of a run that lost the claim it does nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
-`guard` names its refusal in an `apply refused:` annotation; a failed `facts` or
-`review` names it in its job log. A startup failure shows on the run page with
-no jobs started, with GitHub's error for the workflow file.
+`guard` names its refusal in an `apply refused:` annotation; a failed `claim`,
+`facts` or `review` names it in its job log. A startup failure shows on the run
+page with no jobs started, with GitHub's error for the workflow file.
+
+### `could not claim this command for its run, so the command was not started`
+
+The pull request carries ``🔴 failed: could not claim this command for its run,
+so the command was not started. Comment it again.``. The dispatched run's `claim`
+job could not add the App's 🚀 to the command comment: GitHub answered other
+than 201 or 200, or the request failed. On a "Re-run all jobs" of a plan run, the
+claim also fails when it cannot list an earlier attempt's jobs. The run did nothing; the job log names
+the answer. Comment the command again. Re-running a `shipmate plan` run
+instead can also start it, so do one or the other, not both; a re-run of an
+apply run applies no cell (`CONTRACT.md` §Comment-ops, "Reactions and the
+comment claim").
 
 ### `waits for an earlier apply run of this pull request to finish`
 
@@ -2710,10 +2772,10 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All twenty-two jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `queue` and `outcome`,
-`apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-complete` … `wave7-complete`
-and `complete`, `deploy.yml` `summary`,
+All thirty-two jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`claim`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `claim`, `queue` and `outcome`,
+`apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
+`wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 

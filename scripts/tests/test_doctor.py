@@ -1354,6 +1354,10 @@ _SHIPMATE_WF = (
     "        description: Pull request number\n"
     "        required: false\n"
     "        default: ''\n"
+    "      comment_id:\n"
+    "        description: Command comment id\n"
+    "        required: false\n"
+    "        default: ''\n"
     "permissions: {}\n"
     "jobs:\n"
     "  plan:\n"
@@ -1389,6 +1393,8 @@ _SHIPMATE_WF = (
     "  unlock:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/unlock.yml@{_SHA}\n"
+    "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
+    "id-token: write }\n"
 )
 #: The drift workflow file `_quiet_new_probes()` serves beside `_SHIPMATE_WF`, in the shipped
 #: shape: pinned at `_SHA` like the rest, so the pin probe stays quiet over it too.
@@ -3661,7 +3667,7 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
 _UNPARSEABLE_WF = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
 _UNPARSEABLE_TEXT = (
     "`shipmate.yml` could not be parsed as YAML (expected ',' or ']', but got ':' "
-    "(line 39, column 9)): doctor skipped its checks."
+    "(line 43, column 9)): doctor skipped its checks."
 )
 
 
@@ -3931,18 +3937,19 @@ _WF_SHORT_OPTIONS = _SHIPMATE_WF.replace(
 # the three cannot collapse into one another.
 _NO_TRIGGER_TEXT = (
     "`shipmate.yml` declares no `workflow_dispatch` trigger, so every commented verb is "
-    "authorized, reacted to with a rocket, and then dispatches nothing: GitHub answers the "
+    "authorized, reacted to with eyes, and then dispatches nothing: GitHub answers the "
     "dispatch with `Workflow does not have 'workflow_dispatch' trigger`, no run is created, "
     "and the pull request gets a comment, when one can be posted, saying the dispatch failed "
     "and linking the comment-handling run that holds the error. Add the trigger, with its `verb`, "
-    "`environment`, `ref` and `pr_number` inputs (docs/getting-started.md)."
+    "`environment`, `ref`, `pr_number` and `comment_id` inputs (docs/getting-started.md)."
 )
 _NO_PR_NUMBER_TEXT = (
     "`shipmate.yml`'s `workflow_dispatch` trigger declares no `pr_number` input. "
     "`actions/dispatch` sends one body per verb, and GitHub refuses a body naming an input "
     "the workflow does not declare: `Unexpected inputs provided`, no run created, and the "
     "pull request pointed at the comment-handling run by a comment, when one can be posted, "
-    "saying the dispatch failed. Declare `verb`, `environment`, `ref` and `pr_number` under "
+    "saying the dispatch failed. Declare `verb`, `environment`, `ref`, `pr_number` and "
+    "`comment_id` under "
     "the trigger's "
     "`inputs:` (docs/getting-started.md)."
 )
@@ -3982,6 +3989,31 @@ def test_a_dispatch_trigger_without_pr_number_is_reported_on_its_own():
     out = doctor._dispatch_wiring_finding(_doc(_WF_NO_PR_NUMBER), "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_PR_NUMBER_TEXT)]
     assert _NO_PR_NUMBER_TEXT != _NO_TRIGGER_TEXT
+
+
+_WF_NO_COMMENT_ID = _SHIPMATE_WF.replace(
+    "      comment_id:\n"
+    "        description: Command comment id\n"
+    "        required: false\n"
+    "        default: ''\n",
+    "",
+)
+_NO_COMMENT_ID_TEXT = (
+    "`shipmate.yml`'s `workflow_dispatch` trigger declares no `comment_id` input. "
+    "`actions/dispatch` sends one body per verb, and GitHub refuses a body naming an input "
+    "the workflow does not declare: `Unexpected inputs provided`, no run created, and the "
+    "pull request pointed at the comment-handling run by a comment, when one can be posted, "
+    "saying the dispatch failed. Declare `verb`, `environment`, `ref`, `pr_number` and "
+    "`comment_id` under the trigger's `inputs:` (docs/getting-started.md)."
+)
+
+
+def test_a_dispatch_trigger_without_comment_id_is_reported():
+    """Every commented verb's body carries `comment_id`, so a file not re-pinned to declare it
+    refuses every command. Mutation: drop `"comment_id"` from `_DISPATCH_INPUTS`."""
+    assert _WF_NO_COMMENT_ID != _SHIPMATE_WF
+    out = doctor._dispatch_wiring_finding(_doc(_WF_NO_COMMENT_ID), "shipmate.yml")
+    assert out == [(doctor.WARNING, _NO_COMMENT_ID_TEXT)]
 
 
 def test_the_dispatch_probe_reports_a_required_input_other_than_verb():
@@ -4125,16 +4157,17 @@ def test_a_flow_style_on_value_is_silent():
     correctly wired file reported as declaring none.
 
     Every input is written flow-style too, `verb` first, so `verb`'s `required: true` must
-    not read as the three optional ones'.
+    not read as the four optional ones'.
 
-    Mutations: read every input's `required` from `verb`'s declaration -- the three optional
-    inputs are reported required; read `inputs` as `{}` -- all four are reported missing."""
+    Mutations: read every input's `required` from `verb`'s declaration -- the four optional
+    inputs are reported required; read `inputs` as `{}` -- all five are reported missing."""
     text = (
         "name: shipmate\n"
         "on: { pull_request_target: {}, workflow_dispatch: { inputs: { verb: { type: choice, "
         "options: [plan, apply, unlock, auto], required: true }, environment: "
         "{ required: false, default: '' }, ref: { required: false, default: '' }, "
-        "pr_number: { required: false, default: '' } } } }\n"
+        "pr_number: { required: false, default: '' }, "
+        "comment_id: { required: false, default: '' } } } }\n"
         "jobs:\n"
         "  plan:\n"
         "    name: plan\n"
@@ -4404,6 +4437,87 @@ def test_an_auto_job_without_auto_true_is_reported(monkeypatch):
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == [
         (doctor.WARNING, _auto_with_text("`auto`"))
     ]
+
+
+_UNLOCK_GRANT_TEXT = (
+    "`shipmate.yml`'s `unlock` job does not grant `pull-requests: write`. A called workflow's "
+    "jobs are capped by the calling job's permissions, and `unlock.yml`'s `guard` requests it, "
+    "so every unlock run dies at startup with no job and no log. Copy the published "
+    "`permissions:` block whole (docs/getting-started.md)."
+)
+
+
+@pytest.mark.parametrize(
+    "grant",
+    [
+        "{ contents: read, checks: read, pull-requests: read, actions: read, id-token: write }",
+        "{ contents: read, checks: read, actions: read, id-token: write }",
+        "read-all",
+    ],
+    ids=["read", "absent", "read-all"],
+)
+def test_an_unlock_job_without_the_pull_request_grant_is_reported(monkeypatch, grant):
+    """`unlock.yml`'s `guard` writes the started reaction with `pull-requests: write`; a caller
+    granting less kills every unlock run at startup. Run through `_shipmate_yml_warnings`, so the
+    finder is registered. Mutations: drop `_unlock_grant_finding` from `_shipmate_yml_warnings`;
+    compare with `!= 'read'`; read the `apply` job instead; accept any non-mapping grant
+    (`read-all` passes)."""
+    line = (
+        "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
+        "id-token: write }\n"
+    )
+    assert _SHIPMATE_WF.count(line) == 1
+    text = _SHIPMATE_WF.replace(line, f"    permissions: {grant}\n")
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == [
+        (doctor.WARNING, _UNLOCK_GRANT_TEXT)
+    ]
+
+
+def test_an_unlock_job_granting_write_all_is_silent(monkeypatch):
+    """`write-all` grants `pull-requests: write`. Mutation: drop `grant == "write-all" or`."""
+    line = (
+        "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
+        "id-token: write }\n"
+    )
+    text = _SHIPMATE_WF.replace(line, "    permissions: write-all\n")
+    assert text != _SHIPMATE_WF
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == []
+
+
+_UNLOCK_JOB_GRANT = (
+    "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
+    "id-token: write }\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("workflow_grant", "findings"),
+    [
+        ("write-all", []),
+        ("{ pull-requests: write }", []),
+        ("{ pull-requests: read }", [(doctor.WARNING, _UNLOCK_GRANT_TEXT)]),
+        ("{}", [(doctor.WARNING, _UNLOCK_GRANT_TEXT)]),
+    ],
+    ids=["write-all", "pull-requests-write", "read", "empty"],
+)
+def test_an_unlock_job_without_permissions_takes_the_workflows(
+    monkeypatch, workflow_grant, findings
+):
+    """A job with no `permissions:` inherits the workflow-level block. Mutations: read only
+    the job's own block (both granting rows warn); read the workflow's block even when the job
+    has one (`test_an_unlock_job_granting_write_all_is_silent` reds)."""
+    assert _SHIPMATE_WF.count(_UNLOCK_JOB_GRANT) == 1
+    assert _SHIPMATE_WF.count("permissions: {}\njobs:\n") == 1
+    text = _SHIPMATE_WF.replace(_UNLOCK_JOB_GRANT, "").replace(
+        "permissions: {}\njobs:\n", f"permissions: {workflow_grant}\njobs:\n"
+    )
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == findings
 
 
 def test_an_auto_job_with_a_wrong_or_extra_key_names_each():

@@ -45,6 +45,7 @@ def test_the_workflow_call_secrets_are_exactly_these():
 def test_every_job_declares_its_own_permissions():
     jobs = workflow_jobs(WF)
     assert {j: v.get("permissions") for j, v in jobs.items()} == {
+        "claim": {},
         "facts": {"pull-requests": "read"},
         "detect": {"contents": "read"},
         "plan": {"contents": "read", "id-token": "write"},
@@ -182,22 +183,44 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     Both fail toward a green gate over a pull request nobody planned.
 
     The shim owns the one read that has to exist -- the concurrency group, where `needs` is not
-    in scope -- so this file's count is zero, compared whole rather than per expression.
+    in scope -- so this file's count is zero outside `claim` and `outcome`, compared whole
+    rather than per expression. `claim` runs before `facts` exists and reads the dispatch's own
+    `comment_id`, which no pull request holds, and its `pr_number` only to address the
+    not-started reply; under `pull_request_target` both read empty and the job skips. `outcome`
+    reads `pr_number` only to address its reply when `facts` failed, and only for a run whose
+    `claim` validated that number. `facts` and `outcome` read `comment_id` for the claim gate's
+    bypass, which admits a run that carries none.
 
-    Mutation: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job.
+    Mutations: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job;
+    `github.event.inputs.ref` added to `claim`'s `with:` or to `outcome`'s.
     """
-    found = sorted(
-        {m for s in strings(workflow_yaml(WF)) for m in re.findall(r"github\.event\.[\w.]*", s)}
-    )
-    assert found == [], f"plan.yml reads the event payload: {found}"
+    found = {
+        job_id: sorted({m for s in strings(job) for m in re.findall(r"github\.event\.[\w.]*", s)})
+        for job_id, job in workflow_jobs(WF).items()
+    }
+    assert found == {
+        "claim": ["github.event.inputs.comment_id", "github.event.inputs.pr_number"],
+        "facts": ["github.event.inputs.comment_id"],
+        "detect": [],
+        "plan": [],
+        "summary": [],
+        "gate-hold": [],
+        "outcome": ["github.event.inputs.comment_id", "github.event.inputs.pr_number"],
+    }, f"plan.yml reads the event payload: {found}"
 
 
 #: Both gated jobs' whole `if:`, hand-written rather than read back from the file, as
 #: `test_engine_drift_workflow.py` pins drift's pair. A substring check over either survives
 #: `||` -> `&&`, which keeps every word and inverts the gate.
 _GATED_IF = {
-    "detect": "needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true'",
-    "plan": "needs.detect.outputs.empty == 'false'",
+    "detect": (
+        "${{ !cancelled() && needs.facts.result == 'success' && "
+        "(needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}"
+    ),
+    "plan": (
+        "${{ !cancelled() && needs.detect.result == 'success' && "
+        "needs.detect.outputs.empty == 'false' }}"
+    ),
 }
 
 
@@ -207,9 +230,11 @@ def test_the_detect_and_plan_jobs_carry_exactly_these_gates():
     runs and gate-state writes a `failure` gate (a skipped detect under an on-demand run is not
     the draft branch); turn either `||` into `&&`;
     invert `plan`'s `empty` comparison, and a pull request with changed stacks plans no cell
-    while the gate greens over it.
+    while the gate greens over it; replace either `!cancelled()` with nothing (the implicit
+    `success()` reads every ancestor, so an autoplan's skipped `claim` would skip both); drop
+    either `result == 'success'` clause (a failed `facts` or `detect` would start the next job).
 
-    `facts` and `summary` are absent by design: `facts` carries no gate, and
+    `facts` and `summary` are absent by design: `test_claim_wiring.py` owns `facts`'s gate, and
     `test_summary_workflow_guards.py` owns `summary`'s. The job-id list there is what fails when
     a fourth gated job appears.
     """

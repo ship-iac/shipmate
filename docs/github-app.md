@@ -353,7 +353,7 @@ actual work here:
   bare `<env>` for a `split: false` entry). Detect refuses the name
   `shipmate-engine`, so no cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
-  is named only in the `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
+  is named only in the `claim`, `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
   none of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
   names the secret in the `secrets:` block of each job that passes it, and
   `pull_request_target` runs the base copy of that file rather than the pull
@@ -364,7 +364,7 @@ actual work here:
   never by anything the pull request writes.
 
   **The constraint that follows: no job in engine `plan.yml` other than
-  `summary`, `gate-hold` and `outcome` may reference a `shipmate-engine` secret.** Adding one hands it to a
+  `claim`, `summary`, `gate-hold` and `outcome` may reference a `shipmate-engine` secret.** Adding one hands it to a
   plan cell whose environment the branch chooses.
   `scripts/tests/test_cells_hold_no_app_key.py` is the guard.
 - **A `push` to a non-default branch cannot reach the key.** Measured, not
@@ -397,7 +397,8 @@ actual work here:
   ref like the autoplan, and checks out nothing either: it reads only the event
   payload (`docs/hardening.md` §Contributors without push access).
 - **The plan-run jobs that hold the key run no consumer repository content.**
-  The `summary` job, `gate-hold`, which runs only when `summary` ended
+  `claim`, which runs only on a commented `shipmate plan` dispatch, the
+  `summary` job, `gate-hold`, which runs only when `summary` ended
   `cancelled` and the run was not cancelled, for example at a full gate-writer
   queue for the head, and `outcome`, which carries `summary`'s fork clause,
   check out nothing, and a consumer

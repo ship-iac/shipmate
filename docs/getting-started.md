@@ -480,7 +480,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except twenty that run neither `terramate` nor `tofu` and stay on
+engine job except thirty that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
@@ -507,7 +507,8 @@ on:
   workflow_dispatch:
     inputs:
       # Only verb is required: one schema serves four verbs, and GitHub answers 422 to an
-      # empty required input. The engine refuses a plan with no number, an apply with no ref.
+      # empty required input. The engine refuses a plan with no number, an apply with no ref
+      # or no comment id.
       verb:
         description: What to run (plan, apply, unlock or auto)
         type: choice
@@ -867,6 +868,13 @@ as the `verb` input. The `if:` on that job selects the `issue_comment` event and
 nothing else: `issue_comment` fires on issues too, and the engine's own `ops` job
 carries that filter, so a consumer cannot drop it. The engine `ops` job's
 `if:` also skips a comment by a bot or one without `shipmate` in it.
+
+Two reactions on the command comment show its progress. 👀 means shipmate
+accepted the command. 🚀 means a run claimed it: for `shipmate plan` and
+`shipmate apply`, the shipmate App's 🚀 marks the one run of that comment that
+does the work; for `shipmate unlock` it is `github-actions[bot]`'s and only
+marks the run started ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops,
+"Reactions and the comment claim").
 
 The engine's `ops` job behind that call binds `shipmate-engine`.
 `shipmate-engine` is the one *literal* environment name that appears in workflow

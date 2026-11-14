@@ -51,3 +51,4 @@ jobs:
           environment: ${{ steps.authz.outputs.environment }}
           ref: ${{ steps.authz.outputs.head-sha }}
           pr-number: ${{ github.event.issue.number }}
+          comment-id: ${{ github.event.comment.id }}

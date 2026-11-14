@@ -154,12 +154,13 @@ dispatch the workflow chooses the inputs. The engine reads a title only for a
 `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
 `queue` lists a pull request's apply runs by it to cancel the stale ones and
 name the one a run waits behind (§Comment-ops, "One apply run per pull
-request"). `shipmate doctor` reports a `run-name` that differs from the
-published one outside its quoted literals. A run of any other event is titled `shipmate · plan`,
-`shipmate · release`, `shipmate · comment` or `shipmate · deploy`. That file's
-own `name:` is plain `shipmate`. The published drift fence sets no `run-name`,
-so a sweep's run is titled by the file's own `name:` (`shipmate drift` in the
-published fence).
+request"), and `scripts/dispatch-body` looks for a comment's run by it before
+it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name`
+that differs from the published one outside its quoted literals. A run of any
+other event is titled `shipmate · plan`, `shipmate · release`,
+`shipmate · comment` or `shipmate · deploy`. That file's own `name:` is plain
+`shipmate`. The published drift fence sets no `run-name`, so a sweep's run is
+titled by the file's own `name:` (`shipmate drift` in the published fence).
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
@@ -484,10 +485,10 @@ Accepted limits:
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
-  `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
+  `claim`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
-  `outcome`, `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
-  `wave0-complete` … `wave7-complete` and `complete`,
+  `claim`, `queue` and `outcome`, `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
+  `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete`,
   `deploy.yml`'s `summary`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1400,9 +1401,70 @@ the store and the rest of the lock's lifecycle.
 `plan`, `doctor`, `apply`, `unlock` and `unlock --evict` require the commenter's
 write access (the "write access" apply requirement below defines it), read and decided once
 per comment before any step that mints a token, reads the pull request or
-dispatches; the 👀 acknowledgement on `plan` and `doctor` comes first. A refused
+dispatches. A refused
 commenter gets one `🔴 refused:` reply naming the verb and the permission read,
 or saying the permission could not be read. `help` answers anyone.
+
+**Reactions and the comment claim.** Two reactions on the command comment say
+how far a command got:
+
+- 👀 (`eyes`): shipmate accepted the command. Comment-ops writes it with its
+  job token: on `help` at once, on `doctor` and `unlock --evict` once the
+  commenter's permission allows them, and on `plan`, `apply` and `unlock` once
+  the command is authorized, right before the dispatch. A refused command gets
+  none.
+- 🚀 (`rocket`): a run claimed the command. On `plan` and `apply` the shipmate
+  App writes it from the dispatched run's `claim` job, and it decides whether
+  that run does any work (below). On `unlock`, `unlock.yml`'s `guard` writes it
+  with the job token, so it shows as `github-actions[bot]`'s, after its actor
+  check and only for a `comment_id` that is a comment id; it is display only and
+  gates nothing, since a second `unlock` finds no lock.
+
+A 👀 that cannot be posted is ignored; an `unlock` 🚀 that cannot be posted
+warns.
+
+A dispatch from a comment carries the comment's id as `comment_id`. The
+`claim` job of `plan.yml`, and of `apply.yml` after `guard` succeeds, runs when
+the run is a `workflow_dispatch` with a non-empty `comment_id`. An autoplan, the
+plan `summary`'s comment-less replan and an `auto` run carry none: `claim` is
+skipped and the run proceeds. `apply.yml`'s `guard` refuses a `verb: apply`
+dispatch without one. `claim` binds `shipmate-engine`, checks nothing out,
+mints an App token granting `pull-requests: write` and `actions: read`, and posts the App's
+🚀 on the comment once, never retried. GitHub answers the first creation of a
+reaction 201 and every later one 200, so one run of a comment does the work:
+
+- 201: the run owns the comment and proceeds.
+- 200: another run of the comment owns it. This run does nothing and writes
+  nothing on the pull request; its job summary says another run owns the
+  comment.
+- Any other answer, or a failed POST: the job fails, the run does nothing, and
+  it replies ``🔴 failed: could not claim this command for its run, so the
+  command was not started. Comment it again.``. A reply that cannot be posted
+  is a warning.
+- A `comment_id` that is not a comment id, a `pr_number` that is not a pull
+  request number, or a run whose `actor` is not the App's `<slug>[bot]`: the
+  job fails before any POST and replies nothing, because only the App
+  dispatches a commented run.
+- A missing App key or a failed token mint fails the job with no reply, since
+  there is no token to post one. The comment shows 👀 alone and the run is red.
+
+Every job after `claim` that does work or replies runs only when the claim
+owned the comment or was skipped, so a failed claim gates the run closed.
+
+Re-runs follow from the claim's recorded result and its one POST. "Re-run failed
+jobs" keeps a finished claim's result: an owned run stays owned and a taken one
+stays taken. "Re-run all jobs" posts again and reads 200, and GitHub deletes the
+earlier attempts' artifacts. For a plan run, the claim then reads each earlier
+attempt's jobs: when `facts` ran in one (`success`, `failure` or `timed_out`),
+this run owned the comment, so it owns it again and plans again. Any other
+conclusion of `facts`, such as skipped or cancelled, or no `facts` job, means
+the comment is taken, and the re-run does nothing; comment again. A listing
+that fails or is malformed fails the claim as above. For an apply run, "Re-run
+all jobs" does nothing unless an earlier claim failed before reacting (below).
+Re-running a run whose claim failed posts again; when the failed attempt wrote
+no reaction it reads 201 and the run starts, so comment the command again or
+re-run that run, not both. A re-run of an apply run applies no cell either way
+(§Apply check lifecycle, "Re-runs").
 
 Every dispatching verb dispatches the same file,
 `.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
@@ -1427,23 +1489,47 @@ comment-handling run, and the step keeps its own status.
 `TRANSIENT` class in `scripts/_shipmate.py`: a 5xx, a refused, reset or timed-out
 connection, a truncated body) may have started a run, since GitHub can start
 one and still answer 502, so it gets up to two more attempts, 2 and 5 seconds
-later. Before each retry the engine lists `shipmate.yml`'s `workflow_dispatch`
-runs (one page of 100, newest first, on the dispatch's own App token, the read
-itself retried on a transient failure) and stops when any was created at or
-after `t0`, five seconds before the first attempt, whatever its title: a run's
-title is the consumer's `run-name`, which only `shipmate doctor` checks, after
-the fact. A concurrent dispatch
-of another command landing in that window stops the retry too; a wrong stop
-costs a comment, a wrong retry a double start. A failed dispatch posts one of
-three replies:
+later. Before each retry the engine lists `shipmate.yml`'s runs on the
+dispatch's own App token, each read retried on a transient failure. `t0` is
+five seconds before the first attempt. What stops the retry depends on the
+dispatch:
+
+- A comment's dispatch reads every page of 100 runs, newest first, back to
+  `t0`, and reads again each second until 10 seconds after the failed attempt.
+  It stops at a `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`
+  and whose title (§Check names) is this command's: this verb and comment id,
+  with this pull request, or for `unlock` no pull request and this ref.
+  Otherwise it retries: the claim (above) leaves a second `plan` or `apply` run
+  doing nothing, and a second `unlock` finds no lock. Without the App's slug no
+  run can be told to be this command's, so the outcome is undetermined and the
+  dispatch is not retried.
+- A comment-less dispatch (`auto`, and the plan `summary`'s replan) reads one
+  page of 100 `workflow_dispatch` runs and stops when any was created at or
+  after `t0`, whatever its title, since nothing marks such a run as this
+  dispatch's. A concurrent dispatch of another command landing in that window
+  stops the retry too; a wrong stop costs a comment, a wrong retry a double
+  start.
+
+A listing that fails, is malformed or runs past ten pages leaves the outcome
+undetermined. A failed comment dispatch posts one of three replies:
 
 - ``🔴 failed: the command was authorized, but dispatching its workflow failed,
   so no run started. The error is in this run's log.`` when it failed before the
   first attempt, or the first attempt failed with a failure that is not
   transient (a 4xx, the refusals of an unwired file included). The step fails.
-- ``⚪ the dispatch answered with an error, but a shipmate.yml run started since
-  it; it may be this command's. Check the Actions tab before commenting
-  again.`` when the listing found a run. The step warns and passes.
+  When gh's answer shows a `shipmate.yml` older than the engine, a remedy
+  replaces `The error is in this run's log.`: for `Unexpected inputs provided`,
+  ``This repository's .github/workflows/shipmate.yml does not declare every
+  input this engine's dispatch sends, so it is older than the engine pin. Write
+  the published file over it with `python <engine>/scripts/repin <consumer>
+  <tag> --write-fence`.``; for an HTTP 404 or a missing `workflow_dispatch`
+  trigger, ``This repository has no .github/workflows/shipmate.yml, or that
+  file declares no workflow_dispatch trigger. docs/getting-started.md publishes
+  it; re-pinning cannot create it.``. The remedy is also an `::error::` line in
+  the comment-handling run's log.
+- ``⚪ the dispatch answered with an error, but this command's run is listed in
+  the Actions tab, so it was not dispatched again.`` when the listing found
+  this command's run. The step warns and passes.
 - ``🔴 failed: the command was authorized, but dispatching its workflow failed
   with a server or network error, so a run may have started. Check the Actions
   tab before commenting again; the error is in this run's log.`` when the
@@ -1452,12 +1538,15 @@ three replies:
   a failed listing, the last failure `dispatch-body` prints is the listing's;
   the dispatch's own failures are in the retry notices above it.
 
-Two ceilings remain. A run that landed but is not listed yet when the engine
-reads the listing is not seen, so that attempt is retried and the command can
-start twice. A runner clock ahead of GitHub's by more than five seconds puts
-`t0` after a run that landed, with the same result.
+Two ceilings remain. A run that landed but is not listed by the engine's last
+read (10 seconds after the failed attempt for a comment's dispatch, the one
+read for a comment-less one) is not seen, so that attempt is retried and the
+command can start twice. A runner clock ahead of GitHub's by more than five
+seconds puts `t0` after a run that landed, with the same result.
 
-A double-started `apply` or `auto` run fails safe at the exact-plan refusal.
+A double-started `plan` or `apply` of one comment does no harm: the second run
+reads the claim as taken and does nothing. A double-started `auto` run fails
+safe at the exact-plan refusal.
 The two runs re-enter the same pull request's cell locks and serialize on each
 cell's `apply-<env>-<stack>` group, so whichever run reaches a cell second
 restores the state the first saved, and OpenTofu refuses the reviewed plan as
@@ -1468,12 +1557,12 @@ downstream cells pending for another `shipmate apply`. The exception is a first
 run whose `Save state` failed on a local backend: the second run restores the
 pre-apply state and applies the plan again, the same risk a second `shipmate
 apply` comment already carries; `docs/troubleshooting.md` §`The apply step ran
-and its state was not saved` is the recovery. A double `plan` costs one extra
+and its state was not saved` is the recovery. A double replan costs one extra
 plan run and one minimized comment, and a double `unlock` finds no lock and
 exits green.
 
-A dispatch that started a `plan` or `apply` run posts no reply: the
-`rocket` reaction acknowledged the command when it was accepted, and the run
+A dispatch that started a `plan` or `apply` run posts no reply: 👀 marks the
+command accepted and the run's 🚀 marks it claimed, and the run
 answers on the pull request itself, with its plan comment or apply result
 comment, or, in the cases §Outcome reply lists, with the outcome reply.
 A dispatch that started an `unlock` run then tries to post the started-run
@@ -1608,10 +1697,8 @@ machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it dispatches nothing and changes no setting, and writes nothing
 but its own report comment, a copy of its report in the job summary
-and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
-all get that acknowledgement as soon as the command is accepted — `rocket`
-marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
-reaction that cannot be posted is ignored), a `🔴 failed:` reply when it
+and the 👀 reaction on the triggering comment (§Comment-ops, "Reactions and
+the comment claim"), a `🔴 failed:` reply when it
 cannot mint an App token or when reading or deciding the commenter's permission
 errors, a `🔴 refused:` reply when the commenter may not have
 the report (below), and untitled `::warning::` annotations on its own degrade
@@ -1742,8 +1829,8 @@ detect refuses a cell it would apply whose apply check records another pull
 request, or none (§Apply-match fingerprint); the remedy is a re-plan on this pull
 request.
 
-**One apply run per pull request.** `apply.yml` holds four jobs: `guard`, `queue`,
-`run` and `outcome`. `run` calls `apply-run.yml`, which holds every job that reviews,
+**One apply run per pull request.** `apply.yml` holds five jobs: `guard`, `claim`,
+`queue`, `run` and `outcome`. `run` calls `apply-run.yml`, which holds every job that reviews,
 detects, locks, applies or summarizes: `review`, `detect`, `lock`, `envlevel0` …
 `envlevel3` (named `L0` … `L3`) and `summary`. `apply-run.yml` runs in the
 top-level concurrency group `shipmate-apply-<pr_number>` with
@@ -1773,7 +1860,7 @@ it waits in the queue runs no job of `apply-run.yml`: its apply checks and
 `shipmate / gate` stay as they were, and `outcome` posts the cancelled reply.
 
 `queue` cancels this pull request's stale apply runs and says which run this one
-waits behind. It runs after `guard` and before `run`, outside the group, binds
+waits behind. It runs after `guard` and `claim` and before `run`, outside the group, binds
 `shipmate-engine` and holds no job-token permission: it writes with an App token
 granting `actions: write` and `pull-requests: write`. It lists the live
 `workflow_dispatch` runs (`queued`, `in_progress`, `waiting`, `pending`,
@@ -1798,7 +1885,7 @@ caller job name containing ` / ` never matches and such a run is kept) either:
 Anything else keeps the run, whatever its status. A run past `review` with a job
 `pending` on its own concurrency group is kept: the engine cancels only a run
 whose call has not started or whose only unfinished jobs are wave cells waiting
-on approval. `guard`, `queue` and `outcome` sit outside the group and are not
+on approval. `guard`, `claim`, `queue` and `outcome` sit outside the group and are not
 counted. A runs listing with a failed or malformed page or a
 malformed run (an `id` that is not a number, a title or event that is not text),
 an App-dispatched run whose title does not parse, or a failed head read cancels
@@ -2003,8 +2090,9 @@ one already requires, so a role that can apply an environment can already
 unlock it.
 
 The unlock run itself posts no comment — its `unlock` job runs the pull
-request's HCL, so `unlock.yml` requests no `pull-requests: write`. The `rocket`
-reaction confirms acceptance. The comment-handling run, which holds that
+request's HCL, so that job requests no `pull-requests: write`. Only `guard`,
+which checks nothing out, requests it, to add the 🚀 reaction (§Comment-ops,
+"Reactions and the comment claim"). The comment-handling run, which holds that
 permission, is the one that may post the started-run reply; §Comment-ops says
 when it is posted and when it links the unlock run. Per-cell detail lands in
 each job's step summary, and a failure reds the run.
@@ -2244,8 +2332,10 @@ between refuses the whole run in `lock`, naming the holder
 re-plan. If #<n> has already merged or closed, comment `shipmate unlock <env>
 --evict` ``), and no cell applies.
 This is the one case in which a locked cell stops the pull request's other
-cells. Commenting `shipmate apply` again, or "Re-run all jobs", recomputes: its
-`detect` leaves that cell pending and the rest apply. "Re-run failed jobs" does
+cells. Commenting `shipmate apply` again recomputes: its `detect` leaves that
+cell pending and the rest apply. "Re-run all jobs" of a commented apply does
+nothing: its claim finds the comment taken (§Comment-ops, "Reactions and the
+comment claim"). "Re-run failed jobs" does
 not re-run `detect`, so its `lock` tries the same cells again.
 
 **Limit: every env-level is locked up front.** `lock` acquires the cells of
@@ -2410,8 +2500,11 @@ any other run, and a run without `auto: true` that is not a dispatch whose verb 
 exactly `apply`, unreadable dispatch inputs included; `shipmate doctor` compares the `auto` job's `with:` against the
 published one. A failed mint or
 dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply not
-started: the dispatch failed; comment `shipmate apply` ``. The dispatch retries
-as a comment's does (§Comment-ops); one that may have started a run warns and
+started: the dispatch failed; comment `shipmate apply` ``, or, when gh's answer
+shows a `shipmate.yml` older than the engine, ``🔴 failed: auto apply not
+started: the dispatch failed. <remedy>`` with the remedy §Comment-ops quotes for
+a failed dispatch. The dispatch retries under the comment-less rule
+(§Comment-ops); one that may have started a run warns and
 posts ``auto apply may have started: the dispatch answered with an error; check
 the Actions tab before commenting `shipmate apply` `` instead, a `⚪` notice
 when the listing found a run and `🔴 failed:` when the outcome is undetermined.
@@ -2614,10 +2707,10 @@ The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
-Engine `plan.yml` is six jobs: `facts`, `detect`, `plan`, `summary`,
+Engine `plan.yml` is seven jobs: `claim`, `facts`, `detect`, `plan`, `summary`,
 `gate-hold`, `outcome`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
-check out the pull request's own head and hold no App credential. `summary`,
+check out the pull request's own head and hold no App credential. `claim`, `summary`,
 `gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
 `deployment: false`, like every engine job binding it, and none
 checks anything out. Every App-authored
@@ -2685,26 +2778,34 @@ attaches to the dispatch ref rather than to the pull request — which is why th
 `summary` job mirrors this run's completed `plan / ` checks onto the head
 commit on an `on-demand` run.
 
-**Requirement: no job in engine `plan.yml` other than `summary`, `gate-hold` and
+**Requirement: no job in engine `plan.yml` other than `claim`, `summary`, `gate-hold` and
 `outcome` may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
 a ref the environment's policy admits — the base ref, or the ref the plan was
 dispatched on — and the `plan` job's `environment:` is chosen by
 branch-authored `env/*` tags, so the file naming no such secret outside
-`summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
+`claim`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
 `plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
 that copy of the file is the base branch's or the default branch's — never the
 pull request's own.
 
-The six jobs:
+The seven jobs:
 
+- **`claim`** (engine, a `workflow_dispatch` carrying a `comment_id` only,
+  bound to `shipmate-engine`, `permissions: {}`) — claims the command comment
+  for this run with the App's 🚀 (§Comment-ops, "Reactions and the comment
+  claim"). It reads the dispatch's `comment_id` and `pr_number` from the event
+  payload, checks nothing out, and runs on `ubuntu-slim` whatever `runs_on` the
+  caller passes. `facts`, and through it every later job, runs only when the
+  claim owned the comment or was skipped.
 - **`facts`** (engine, either trigger) — `actions/pr-facts` alone. It authors
   nothing and mints no App token; it holds `pull-requests: read`, the one grant
   on this path a pull-request event does not need, because a dispatched run's
   payload carries no pull request and the number it was dispatched with is the
-  only thing it can look one up by. Nothing else in the file reads the event
-  payload, and nothing anywhere reads a head SHA or a head repository from a
+  only thing it can look one up by. Besides `claim`, and `outcome`, which falls
+  back to the dispatch's `pr_number` when `facts` failed, nothing else in the
+  file reads the event payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
   about its own head repository. Its outputs are `head-sha`, `head-repo`,
   `head-ref` (the head branch), `base-sha`, `pr-number`, `is-draft` and
@@ -2775,12 +2876,13 @@ The six jobs:
 - **`outcome`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
   posts the outcome reply when a `shipmate plan` run ends without writing its
   plan comment (§Outcome reply). Its `if:` carries `summary`'s fork clause, so
-  it holds the App key only for a head `summary` would admit, and it checks
-  nothing out. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
+  it holds the App key only for a head `summary` would admit, except after a
+  failed `facts` on an owned claim, when no head is known; it checks nothing
+  out. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
 - **`apply.yml` / `apply-run.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
-  jobs that mint an App token (reading the review decision, acquiring cell
+  jobs that mint an App token (claiming the command comment, reading the review decision, acquiring cell
   locks, proving before any wave that the App key authenticates (`snapshot`), completing apply checks, refreshing the gate, posting the apply result
   comment or the outcome reply, releasing a merged pull request's cell locks) are likewise bound to
   `shipmate-engine`.
@@ -2947,14 +3049,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but twenty, which run on
-  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts`, `gate-hold`
-  and `outcome`, `apply.yml`'s `guard`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
-  `apply-env-level.yml`'s `snapshot`, `wave0-complete` … `wave7-complete` and
+  every engine job but thirty, which run on
+  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `gate-hold`
+  and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
+  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and
   `complete`, and `unlock.yml`'s
   `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the twenty
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -3559,7 +3661,7 @@ no auto apply follows it (§`apply_mode: auto`). It joins the consumer's
 waiting run, and the plan that runs resolves the live head from the pull
 request. The listing holds only `pull_request_target` runs, so it does not see
 an earlier dispatched plan of the live head, and a second queued plan is
-possible. The dispatch retries as a comment's does (§Comment-ops). On this
+possible. The dispatch retries under the comment-less rule (§Comment-ops). On this
 path a failed head read, run listing, token mint or dispatch warns with the
 remedy `comment shipmate plan`, and a dispatch that may have started a plan
 warns to check the Actions tab before commenting it; neither fails anything: this run's
@@ -3982,10 +4084,11 @@ waited in the queue, and a job's own when that job never ran. A call that
 failed, or was cancelled after its jobs started, still passes the results and
 outputs of the jobs that finished. Empty never selects the refused text. `outcome` runs under `always()` when `guard`
 succeeded, which also means the run carries a canonical pull request number,
-and `summary` did not output `posted` as `true`.
+`claim` owned the comment or was skipped, and `summary` did not output `posted` as `true`.
 `actions/apply-summary` writes `posted` only after its result comment's POST
 succeeded. `review` outputs `unbound` as `true` just before its two refusals
-that read the pull request as missing (a null `pullRequest`) or not `OPEN`; a
+that read the pull request as missing (a null `pullRequest`, or a query error
+whose body names `NOT_FOUND`) or not `OPEN`; a
 failed `review` with that output, or in an `auto` run, skips `outcome`. When
 the conditions above hold for any other failed `review`, `outcome` runs with the
 refused text, and the reply still needs its own key check, mint and post. The reply is:
@@ -4021,16 +4124,21 @@ nothing. The reply is:
   or at its comment write, and a plan cell that ended `cancelled` without a run
   cancel (a job timeout): its `summary` holds the gate and writes no comment.
 
-A dispatched plan whose `facts` job failed posts nothing: no pull request
-number reaches `outcome`, and the pull request shows only the `rocket`
-reaction.
+A commanded plan whose `facts` job failed after its claim owned the comment
+gets the ended text, posted to the dispatch's `pr_number`, which `claim`
+checked before it reacted. A run whose claim was skipped (an autoplan, the
+replan) posts nothing when `facts` failed: nothing checked that number.
+
+Either way, `outcome` runs only when the claim owned the comment or
+was skipped: a run whose claim read 200 does nothing, and a failed claim has
+posted its own reply.
 
 A push to a draft pull request, or a manual cancel, cancels a dispatched
 `shipmate plan` run, which then ends with no answer: a draft autoplan writes no
 plan comment, and `outcome` does not run in a cancelled plan run.
 
 A run that never reaches `outcome` (a failed `guard`, a workflow startup
-failure) leaves only the `rocket` reaction on the command comment.
+failure) leaves only 👀 on the command comment.
 
 A reply that cannot be posted warns `could not post the no-result reply` and
 the job passes. A missing App key or a failed token mint fails the job, in a
@@ -4693,9 +4801,9 @@ by a plan run; passes `auto: true`, `ref` and `pr_number`) and the `unlock` job
 (dispatched `unlock`; a `secrets:` block naming
 `SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), the
 `deploy`, `apply` and `auto` jobs grant `pull-requests: read`, and the `unlock`
-job grants `pull-requests: write`. `unlock.yml` requests none yet; the grant is
-there so that a re-pin to an engine whose `unlock.yml` requests it does not fail
-at load.
+job grants `pull-requests: write`, which `unlock.yml`'s `guard` requests for the
+🚀 reaction; without it every unlock run fails at startup, and `shipmate doctor`
+reports the missing grant.
 
 ## OpenTofu note
 
