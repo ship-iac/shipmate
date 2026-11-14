@@ -32,8 +32,8 @@ def _r(id_, ref=_OLD, trusted=True, status="pending"):
 
 
 def _j(*statuses):
-    """Jobs of the `run` call, named as a jobs listing names them."""
-    return [{"name": f"apply / run / j{i}", "status": s} for i, s in enumerate(statuses)]
+    """Wave cells of the `run` call, named as a jobs listing names them."""
+    return [{"name": f"apply / run / L0 / dev / s{i}", "status": s} for i, s in enumerate(statuses)]
 
 
 def _rv(status):
@@ -341,7 +341,7 @@ def test_a_malformed_jobs_listing_keeps_its_run_and_the_queue_still_replies(gh, 
     import _shipmate
 
     listings = {
-        40: [{"name": "apply / run / review", "status": "waiting"}],
+        40: [{"name": "apply / run / L0 / prod / app", "status": "waiting"}],
         45: [{"name": "apply / run / review", "status": "in_progress"}, {"status": "pending"}],
     }
 
@@ -416,3 +416,27 @@ def test_a_run_left_only_in_outcome_is_not_named(gh):
     gh.jobs = {40: ([_rv("completed"), _job("summary", "completed"), outcome], True)}
     gh.go()
     assert gh.posts == []
+
+
+def test_a_pending_cell_of_env_run_and_stack_review_is_not_the_group_wait(gh):
+    """Env `run` and root stack `review` give a cell named `apply / run / L1 / run / review`.
+    Mutation: match the review job by `endswith(" / run / review")` -- red (cancelled)."""
+    gh.runs, gh.jobs = _stale(
+        [
+            _rv("completed"),
+            _job("L0 / dev / dns", "completed"),
+            _job("L1 / run / review", "pending"),
+        ]
+    )
+    gh.go()
+    assert gh.cancels == []
+
+
+def test_a_waiting_job_that_is_not_a_cell_keeps_the_run(gh):
+    """`summary` `waiting` as the only unfinished job is no approval of a cell. Mutation: drop
+    the `_is_cell` filter from `idle` -- red (cancelled)."""
+    gh.runs, gh.jobs = _stale(
+        [_rv("completed"), _job("L0 / dev / app", "completed"), _job("summary", "waiting")]
+    )
+    gh.go()
+    assert gh.cancels == []

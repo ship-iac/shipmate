@@ -46,8 +46,8 @@ _WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
-#: The call's first job: listed `pending` while the call waits for `shipmate-apply-<pr_number>`.
-_REVIEW = " / run / review"
+#: A wave cell of the call, `<caller> / run / L<n> / <env> / <stack>` (`apply-gate.is_cell_job`).
+_LEVEL = re.compile(r"L[0-9]+")
 
 
 def workflow_file(repo, ref):
@@ -69,21 +69,39 @@ def _unfinished(jobs):
     return [j for j in in_call(jobs) if j["status"] != "completed"]
 
 
+def _segments(job):
+    return job["name"].split(" / ")
+
+
+def _is_review(job):
+    """Whether `job` is the call's first job, `<caller> / run / review`, matched whole: a cell
+    of env `run` and root stack `review` also ends in ` / run / review`."""
+    segments = _segments(job)
+    return len(segments) == 3 and segments[1:] == ["run", "review"]
+
+
+def _is_cell(job):
+    """Whether `job` is a wave cell of the call, `<caller> / run / L<n> / <env> / <stack>`."""
+    segments = _segments(job)
+    return len(segments) == 5 and segments[1] == "run" and _LEVEL.fullmatch(segments[2]) is not None
+
+
 def _in_group_wait(jobs):
     """Whether the run's call waits for `shipmate-apply-<pr_number>`: its `review` is
-    `pending`, so no job inside the call has run."""
-    return any(j["name"].endswith(_REVIEW) and j["status"] == "pending" for j in jobs)
+    `pending`, so no job of this attempt inside the call has run."""
+    return any(_is_review(j) and j["status"] == "pending" for j in jobs)
 
 
 def idle(jobs):
     """Whether a run whose `jobs` listing is complete may be cancelled: its call waits for the
-    group, or every unfinished job of its call is `waiting` on an environment's approval. A
-    `pending` job past `review` waits on its own concurrency group mid-run, after earlier cells
-    may have applied, so it keeps the run, as `queued` and `in_progress` do."""
+    group, or every unfinished job of its call is a wave cell `waiting` on an environment's
+    approval. Any other unfinished job keeps the run: a `pending` cell or `summary` waits on its
+    own concurrency group mid-run, and a cancelled `summary` drops the apply comment and the
+    gate refresh."""
     if _in_group_wait(jobs):
         return True
     unfinished = _unfinished(jobs)
-    return bool(unfinished) and all(j["status"] == "waiting" for j in unfinished)
+    return bool(unfinished) and all(_is_cell(j) and j["status"] == "waiting" for j in unfinished)
 
 
 def holds(jobs):

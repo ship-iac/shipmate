@@ -1693,15 +1693,15 @@ latest attempt, and the head again. A trusted run whose title names another head
 is stale, and `queue` cancels it only when its jobs listing is complete, both
 head reads agree, and its `run` call (jobs listed `<caller> / run / ...`) either:
 
-- (a) waits for `shipmate-apply-<pr_number>`: its `<caller> / run / review` job is
-  `pending`, so no job inside the call has run; or
-- (b) waits on environment approval: every unfinished job of the call is
-  `waiting`, and none is `pending`, `queued` or `in_progress`.
+- (a) waits for `shipmate-apply-<pr_number>`: its job named exactly
+  `<caller> / run / review` is `pending`, so no job of this attempt inside the
+  call has run (a full re-run's earlier attempt may have applied); or
+- (b) waits on environment approval: every unfinished job of the call is a wave
+  cell (`<caller> / run / L<n> / <env> / <stack>`) listed `waiting`.
 
-Anything else keeps the run. A `pending` job past `review` is a cell or `summary`
-waiting on its own concurrency group mid-run, after earlier cells may have
-applied; cancelling it would cut a level half-applied or drop the apply comment
-and gate refresh. `guard`, `queue` and `outcome` sit outside the group and are not
+Anything else keeps the run, whatever its status. A `pending` job past `review`
+keeps it because a cancelled `summary` drops the apply comment and the gate
+refresh; a stale run's later cells are refused by `pre-apply` either way. `guard`, `queue` and `outcome` sit outside the group and are not
 counted. A runs listing with a failed or malformed page or a
 malformed run (an `id` that is not a number, a title or event that is not text),
 an App-dispatched run whose title does not parse, or a failed head read cancels
