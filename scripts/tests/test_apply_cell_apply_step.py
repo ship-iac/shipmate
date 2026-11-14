@@ -100,10 +100,10 @@ def _run_step(
     apply arms touch a marker before running their body, because "init never ran" and "the apply
     never ran" are the orderings the refusal tests turn on, and an exit code alone shows neither.
 
-    `PLAN_SHA256`, `ENV` and `STACK` are exported for every caller: under `set -u` an unset
-    one aborts the script before it reaches the behaviour under test, which would green a refusal
-    test for the wrong reason. The default is a well-formed digest of the default `tofu` stub's
-    output, so the callers testing the `tee` contract still run all the way to the apply.
+    `PLAN_SHA256`, `ENV`, `STACK` and `BACKEND` are exported for every caller: under `set -u` an
+    unset one aborts the script before it reaches the behaviour under test, which would green a
+    refusal test for the wrong reason. The default is a well-formed digest of the default `tofu`
+    stub's output, so the callers testing the `tee` contract still run all the way to the apply.
 
     The script runs in its own empty directory, standing in for the consumer's checkout: the
     action must leave nothing at its root, and pytest's own cwd is the engine tree.
@@ -137,6 +137,8 @@ def _run_step(
         "RUNNER_TEMP": str(runner_temp),
         "PLAN_SHA256": plan_sha256,
         "ENV": "dev-eu",
+        # cell-init's default: an apply cell initializes its backend.
+        "BACKEND": "true",
         # The init body names `tofu-error` through it under `set -u`.
         "GITHUB_ACTION_PATH": str(ACTIONS / "cell-init"),
     }

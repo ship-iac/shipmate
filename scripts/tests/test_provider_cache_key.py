@@ -1,9 +1,12 @@
-"""`scripts/provider-cache-key` digests a lock file's provider addresses and versions, and nothing
-else, and prints an empty digest rather than failing when there is nothing to digest.
+"""`scripts/provider-cache-key` prints the whole provider cache entry name,
+`tofu-providers-<RUNNER_OS>-<RUNNER_ARCH>-<digest>`, digesting a lock file's provider addresses and
+versions and nothing else, and prints an empty name rather than failing when there is nothing to
+digest.
 
 Mutations that red this module: `sorted(pairs)` replaced by `pairs`; the constraints line
 captured into the digest input; `except OSError` narrowed to `except FileNotFoundError`;
-`errors="replace"` dropped from the lock read.
+`errors="replace"` dropped from the lock read; `RUNNER_ARCH` replaced by a literal `X64`; the
+`tofu-providers-` prefix changed.
 """
 
 import os
@@ -45,7 +48,12 @@ _HEADER = (
 )
 
 
-def _run(tmp_path, lock=None, *, lock_is_dir=False):
+def _entry(found, arch="X64"):
+    """The output line for digest `found`, written out whole: the name every site restores."""
+    return f"entry=tofu-providers-Linux-{arch}-{found}\n"
+
+
+def _run(tmp_path, lock=None, *, lock_is_dir=False, arch="X64"):
     stack = tmp_path / "stack"
     stack.mkdir()
     if lock_is_dir:
@@ -56,7 +64,13 @@ def _run(tmp_path, lock=None, *, lock_is_dir=False):
         (stack / ".terraform.lock.hcl").write_text(lock, encoding="utf-8")
     out = tmp_path / "github_output"
     out.write_text("", encoding="utf-8")
-    env = {**os.environ, "STACK": str(stack), "GITHUB_OUTPUT": str(out)}
+    env = {
+        **os.environ,
+        "STACK": str(stack),
+        "GITHUB_OUTPUT": str(out),
+        "RUNNER_OS": "Linux",
+        "RUNNER_ARCH": arch,
+    }
     r = subprocess.run(
         [sys.executable, str(SCRIPTS / "provider-cache-key")],
         env=env,
@@ -69,14 +83,14 @@ def _run(tmp_path, lock=None, *, lock_is_dir=False):
 
 
 def test_the_sample_lock_digests_its_one_provider(tmp_path):
-    assert _run(tmp_path, _HEADER + _RANDOM) == f"digest={_RANDOM_ONLY}\n"
+    assert _run(tmp_path, _HEADER + _RANDOM) == _entry(_RANDOM_ONLY)
 
 
 @pytest.mark.parametrize(
     "lock", [_NULL + "\n" + _RANDOM, _RANDOM + "\n" + _NULL], ids=["a-b", "b-a"]
 )
 def test_provider_order_does_not_change_the_digest(tmp_path, lock):
-    assert _run(tmp_path, _HEADER + lock) == f"digest={_NULL_AND_RANDOM}\n"
+    assert _run(tmp_path, _HEADER + lock) == _entry(_NULL_AND_RANDOM)
 
 
 def test_constraints_and_hashes_do_not_change_the_digest(tmp_path):
@@ -86,7 +100,7 @@ def test_constraints_and_hashes_do_not_change_the_digest(tmp_path):
         '    "h1:CEQeHfnUDB3uqAkKoEWfWgbj+kpoQHgcuPbAjPzbh+U=",\n',
     )
     assert lock != _RANDOM
-    assert _run(tmp_path, lock) == f"digest={_RANDOM_ONLY}\n"
+    assert _run(tmp_path, lock) == _entry(_RANDOM_ONLY)
 
 
 def test_a_changed_version_changes_the_digest(tmp_path):
@@ -94,7 +108,7 @@ def test_a_changed_version_changes_the_digest(tmp_path):
     assert lock != _RANDOM
     # `printf 'registry.opentofu.org/hashicorp/random 3.9.2' | sha256sum`
     want = "7020e6d492b317e777cddd3d8a73c2469395c297485e335d54be36f7024d2788"
-    assert _run(tmp_path, lock) == f"digest={want}\n"
+    assert _run(tmp_path, lock) == _entry(want)
 
 
 @pytest.mark.parametrize(
@@ -103,11 +117,16 @@ def test_a_changed_version_changes_the_digest(tmp_path):
     ids=["no-file", "no-provider-block", "directory"],
 )
 def test_nothing_to_digest_is_an_empty_digest_and_exit_zero(tmp_path, lock, lock_is_dir):
-    assert _run(tmp_path, lock, lock_is_dir=lock_is_dir) == "digest=\n"
+    assert _run(tmp_path, lock, lock_is_dir=lock_is_dir) == "entry=\n"
 
 
 def test_a_non_utf8_byte_still_digests_the_provider(tmp_path):
     """Mutation: drop `errors="replace"`, which raises on the 0xff byte and exits non-zero."""
     lock = _RANDOM.replace('"~> 3.0"', '"~> 3.0 \xff"').encode("latin-1")
     assert b"\xff" in lock
-    assert _run(tmp_path, lock) == f"digest={_RANDOM_ONLY}\n"
+    assert _run(tmp_path, lock) == _entry(_RANDOM_ONLY)
+
+
+def test_the_name_carries_the_runner_architecture(tmp_path):
+    """Mutation: replace `RUNNER_ARCH` with a literal `X64`."""
+    assert _run(tmp_path, _HEADER + _RANDOM, arch="ARM64") == _entry(_RANDOM_ONLY, "ARM64")

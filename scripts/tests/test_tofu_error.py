@@ -242,8 +242,9 @@ def test_the_init_step_annotates_before_its_exit_and_never_masks_the_status():
     extractor failure nor `tee`'s own status can change it. Mutations: drop `|| true`; read
     `status=$?`; read `plan-run.txt`; move the line below `exit "$status"`."""
     lines = run_lines(step_by("cell-init", id="init"))
-    init = next(i for i, ln in enumerate(lines) if ln.startswith("terramate run"))
-    assert lines[init + 1] == "status=${PIPESTATUS[0]}"
+    # The init runs in one of two branches, with or without a backend; the status follows both.
+    init = max(i for i, ln in enumerate(lines) if ln.startswith("terramate run"))
+    assert lines[init + 1 : init + 3] == ["fi", "status=${PIPESTATUS[0]}"]
     assert lines.count(ANNOTATE_INIT) == 1
     assert lines.index(ANNOTATE_INIT) < lines.index('exit "$status"')
 

@@ -29,6 +29,7 @@ jobs:
       pr_number: ${{ steps.d.outputs.pr_number }}
       refused_locked: ${{ steps.d.outputs.refused_locked }}
       tools: ${{ steps.setup.outputs.tools }}
+      warm: ${{ steps.d.outputs.warm }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
@@ -46,18 +47,33 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}
 
-  # Saves the OpenTofu cache entry on a deploy with no cells; a cell that reaches setup saves it. A degrade
-  # job: no job needs it, so `continue-on-error` keeps its failure off the run's conclusion.
+  # Saves the provider cache entry of each distinct lock on the merged tree, and the OpenTofu
+  # entry through setup. A degrade job: no job needs it, so `continue-on-error` keeps its failure
+  # off the run's conclusion. The `if:` is load-bearing: an empty matrix fails the run.
   warm:
     needs: [detect]
-    if: ${{ needs.detect.outputs.tools != '' && needs.detect.outputs.envlevel0_empty == 'true' && needs.detect.outputs.envlevel1_empty == 'true' && needs.detect.outputs.envlevel2_empty == 'true' && needs.detect.outputs.envlevel3_empty == 'true' }}
+    if: ${{ needs.detect.outputs.warm != '[]' }}
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 15
-    permissions: {}
+    permissions: { contents: read }
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detect.outputs.warm) }}
+    name: warm / ${{ matrix.stack }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "${{ github.sha }}", persist-credentials: false }
       - uses: $/actions/setup
         with: { versions: "${{ needs.detect.outputs.tools }}" }
+      - uses: $/actions/warm
+        with:
+          stack: ${{ matrix.stack }}
+          env: ${{ matrix.environment }}
+          tf-vars: ${{ toJSON(matrix.tf_vars) }}
+          github-vars: ${{ toJSON(vars) }}
+          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
 
   envlevel0:
     # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name

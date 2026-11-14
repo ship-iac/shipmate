@@ -84,3 +84,5 @@ jobs:
         uses: ship-iac/shipmate/actions/verify-app-key@main
       - if: false
         uses: ship-iac/shipmate/actions/verify-environments@main
+      - if: false
+        uses: ship-iac/shipmate/actions/warm@main

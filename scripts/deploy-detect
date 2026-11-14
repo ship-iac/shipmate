@@ -14,8 +14,11 @@ the bare-apply path's targeted and held envs. It refuses the whole run instead i
 cases. A pending cell that `after` runs behind a pending cell `needs` puts on a later env-level
 has no order that meets both. A pending cell another pull request locks refuses too;
 CONTRACT.md §Cell locks gives the reason.
+
+It also writes `warm`, the provider cache warm-up matrix (`warm_cells`), which never refuses.
 """
 
+import json
 import os
 import sys
 import time
@@ -38,6 +41,7 @@ wv = _load("waves")
 # No apply-gate load of its own: the App-scoped "already applied" query is
 # ad.ag.app_done_names, and test_detect_app_scoping pins this script to it.
 ad = _load("apply-detect")
+pck = _load("provider-cache-key")
 
 
 def _merged_head(repo, merge_sha, branch, _attempts=3, _sleep=2):
@@ -211,6 +215,36 @@ def run_graph_deps(pending):
         ) from e
 
 
+def warm_cells(tag_map, table):
+    """One `{stack, environment, tf_vars}` row per distinct provider lock digest
+    (`provider-cache-key`'s) over every managed stack of `tag_map`, changed or not, for
+    `deploy.yml`'s `warm` matrix: a stack with an `env/*` tag and no `LOCAL_TAG`, so one a cell
+    can run. A stack whose lock yields no digest is left out. Each digest's row is its first
+    stack in path order, at that stack's first environment by name, with the `tf_vars` `table`
+    resolves for it. Capped at the matrix limit."""
+    rows = {}
+    for stack in sorted(tag_map):
+        tags = tag_map[stack]
+        envs = sorted(t[len("env/") :] for t in tags if t.startswith("env/"))
+        if not envs or bm.LOCAL_TAG in tags:
+            continue
+        found = pck.lock_digest(stack)
+        if found and found not in rows:
+            tf_vars = bm.ec.resolve(table, envs[0], "apply", "")["tf_vars"]
+            rows[found] = {"stack": stack, "environment": envs[0], "tf_vars": tf_vars}
+    return list(rows.values())[: bm.MATRIX_LIMIT]
+
+
+def warm_or_none(tag_map, table):
+    """`warm_cells`, or `[]` after a warning when it raises. A degrade: `warm` only fills the
+    provider cache, so a failure here must not refuse the deploy."""
+    try:
+        return warm_cells(tag_map, table)
+    except (Exception, SystemExit) as e:
+        sys.stderr.write(f"::warning::{command_data(f'no provider cache warm-up: {e}')}\n")
+        return []
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
@@ -261,7 +295,7 @@ def main():
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
         f"envlevels={level_counts} empty={not any(level_counts)}"
     )
-    write_outputs(**wv.env_level_outputs(per_level))
+    write_outputs(**wv.env_level_outputs(per_level), warm=json.dumps(warm_or_none(tag_map, table)))
 
 
 if __name__ == "__main__":
