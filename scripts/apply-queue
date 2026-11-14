@@ -4,8 +4,7 @@
 Runs in `apply.yml`'s `queue` job, before this run's call joins `shipmate-apply-<pr_number>`.
 Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` (in a called workflow, the
 consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's environment),
-`SHIPMATE_AUTO` (`true` posts no reply), `SHIPMATE_REF` (the head this run was dispatched
-with), `SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`,
+`SHIPMATE_AUTO` (`true` posts no reply), `SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`,
 `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with `actions: write` and
 `pull-requests: write`).
 
@@ -14,9 +13,10 @@ run, read the head again. A trusted run whose title names another head is stale,
 cancelled only when its jobs listing is complete, both head reads agree, and its call's
 `review` waits for the group, or every unfinished job of the call is a wave cell `waiting` on
 an environment's approval. An incomplete runs listing or a failed head read cancels nothing, and
-a failed first head read skips the jobs reads. Only a run whose own `SHIPMATE_REF` is the live
-head cancels: a run that is itself stale would cancel its peers at the same head. An untrusted
-run is never cancelled.
+a failed first head read skips the jobs reads. Only a run whose own listed `ref` is the live
+head cancels: a run not at the live head is stale itself and leaves stale runs to a run at the
+live head; a run missing from its own listing cancels nothing. An untrusted run is never
+cancelled.
 
 Writes, a cancel or the reply, happen only when this run's `actor` and `triggering_actor` are
 both `<slug>[bot]`; the reply's sentences print to the log either way. The queue only reports
@@ -169,10 +169,11 @@ def cancel(repo, run_id):
     return True
 
 
-def queue(repo, wf, pr, own, own_ref, slug, self_by_app):
-    """The reply's sentences, after cancelling each stale run when `self_by_app` and `own_ref`
-    is the live head."""
+def queue(repo, wf, pr, own, slug, self_by_app):
+    """The reply's sentences, after cancelling each stale run when `self_by_app` and this run's
+    own listed `ref` is the live head."""
     runs, complete = apply_runs(repo, wf, pr, slug)
+    own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
     if not complete:
@@ -211,7 +212,7 @@ def main():
     )
     if not self_by_app:
         print("::notice::this run was not dispatched by the shipmate App; it writes nothing")
-    said = queue(repo, wf, pr, int(own), os.environ.get("SHIPMATE_REF", ""), slug, self_by_app)
+    said = queue(repo, wf, pr, int(own), slug, self_by_app)
     for line in said:
         print(line)
     if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":

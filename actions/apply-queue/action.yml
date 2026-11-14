@@ -8,9 +8,6 @@ inputs:
     description: The targeted apply's environment, shown in the reply header. Empty for a bare apply.
     required: false
     default: ""
-  ref:
-    description: The head this run was dispatched with; only a run at the live head cancels.
-    required: true
   auto:
     description: "`true` for an auto apply, which posts no reply."
     required: true
@@ -46,7 +43,6 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_ENV: ${{ inputs.environment }}
         SHIPMATE_AUTO: ${{ inputs.auto }}
-        SHIPMATE_REF: ${{ inputs.ref }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
         SHIPMATE_ACTOR: ${{ github.actor }}
         SHIPMATE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}

@@ -62,7 +62,6 @@ def gh(monkeypatch):
         "PR_NUMBER": "7",
         "SHIPMATE_ENV": "",
         "SHIPMATE_AUTO": "false",
-        "SHIPMATE_REF": _HEAD,
         "SHIPMATE_APP_SLUG": "shipmate-iac",
         "SHIPMATE_ACTOR": "shipmate-iac[bot]",
         "SHIPMATE_TRIGGERING_ACTOR": "shipmate-iac[bot]",
@@ -70,14 +69,14 @@ def gh(monkeypatch):
         monkeypatch.setenv(k, v)
 
     class Rec:
-        runs, complete, jobs, heads = [], True, {}, [_HEAD, _HEAD]
+        runs, complete, jobs, heads, own_ref = [], True, {}, [_HEAD, _HEAD], _HEAD
         cancels, posts, job_reads = [], [], []
 
     rec = Rec()
 
     def apply_runs(repo, wf, pr, slug):
         assert (repo, wf, pr, slug) == ("o/r", "shipmate.yml", "7", "shipmate-iac")
-        return [*rec.runs, _r(50, ref=_HEAD, status="in_progress")], rec.complete
+        return [*rec.runs, _r(50, ref=rec.own_ref, status="in_progress")], rec.complete
 
     def run_jobs(repo, run_id):
         rec.job_reads.append(run_id)
@@ -444,11 +443,10 @@ def test_a_waiting_job_that_is_not_a_cell_keeps_the_run(gh):
     assert gh.cancels == []
 
 
-def test_a_run_not_at_the_live_head_cancels_nothing(gh, monkeypatch):
-    """This run was dispatched at an older head too, so its peers there are not stale to it:
-    nothing is cancelled and no cancel sentence is posted. Mutation: drop `own_ref != head` --
-    red (40 cancelled)."""
-    monkeypatch.setenv("SHIPMATE_REF", _OLD)
+def test_a_run_not_at_the_live_head_cancels_nothing(gh):
+    """This run's own listed title names the older head too: nothing is cancelled and no cancel
+    sentence is posted. Mutation: drop `own_ref != head` -- red (40 cancelled)."""
+    gh.own_ref = _OLD
     gh.runs, gh.jobs = _stale([_rv("pending")])
     gh.go()
     assert gh.cancels == []

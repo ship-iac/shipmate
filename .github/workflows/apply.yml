@@ -79,7 +79,6 @@ jobs:
         with:
           pr-number: ${{ inputs.pr_number }}
           environment: ${{ inputs.environment }}
-          ref: ${{ inputs.ref }}
           auto: ${{ inputs.auto }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
