@@ -56,7 +56,7 @@ EXPECTED_ENVLEVEL_WITH = {
     }
     for workflow, extra in (
         (
-            "apply.yml",
+            "apply-run.yml",
             {
                 "pr_number": "${{ inputs.pr_number }}",
                 "auto": "${{ inputs.auto }}",
@@ -77,7 +77,7 @@ EXPECTED_DETECT_OUTPUT = {
     "plan.yml": "${{ steps.matrix.outputs.max_parallel }}",
     "drift.yml": "${{ steps.m.outputs.max_parallel }}",
     "unlock.yml": None,
-    "apply.yml": None,
+    "apply-run.yml": None,
     "deploy.yml": None,
 }
 
@@ -123,11 +123,11 @@ def test_apply_env_level_takes_no_cap():
 
 def test_no_env_level_call_passes_a_cap():
     """Mutations: pass `max_parallel` in `deploy.yml`'s `envlevel2` call; drop `deploy: true`
-    or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply.yml`'s
-    `envlevel0` call; drop `tools` from `apply.yml`'s `envlevel3` call."""
+    or `pr_number` from `deploy.yml`'s `envlevel1` call; pass `deploy` in `apply-run.yml`'s
+    `envlevel0` call; drop `tools` from `apply-run.yml`'s `envlevel3` call."""
     found = {
         (workflow, job_id): job["with"]
-        for workflow in ("apply.yml", "deploy.yml")
+        for workflow in ("apply-run.yml", "deploy.yml")
         for job_id, job in workflow_jobs(workflow).items()
         if job.get("uses") == "./.github/workflows/apply-env-level.yml"
     }

@@ -12,14 +12,14 @@ inputs:
     description: Pull request number to reply on.
     required: true
   review-result:
-    description: The apply run's `needs.review.result`; `failure` selects the refused reply. Empty for a plan.
+    description: The apply run's `review` result; `failure` selects the refused reply. Empty for a plan, or when the review never ran.
     required: false
     default: ""
   summary-result:
-    description: "The run's `needs.summary.result`; `cancelled` while `run-cancelled` is `false` means the summary was cancelled before it posted, for example at a full gate-writer queue for the head."
+    description: "The run's `summary` result; `cancelled` while `run-cancelled` is not `true` means the summary was cancelled before it posted, for example at a full gate-writer queue for the head. Empty when an apply run's summary never ran."
     required: true
   run-cancelled:
-    description: "`true` when the run itself was cancelled. Computed by the caller from its `needs.*.result`: in a job that starts after a run cancel, a step-level `cancelled()` is false."
+    description: "`true` when the run itself was cancelled. Computed by the caller from its jobs' results: in a job that starts after a run cancel, a step-level `cancelled()` is false."
     required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).

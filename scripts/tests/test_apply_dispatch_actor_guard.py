@@ -10,11 +10,12 @@ have to be told apart:
   apply check records no plan run -- must still reach `summary`, or the developer gets no failure
   comment and no gate refresh at all.
 
-`if: always() && needs.detect.result == 'success'` silenced both. Keying `summary` on `review`,
-which needs `guard`, separates them, and every fan-out job carries `guard` in its `needs` so the
-rejection reaches its `!failure()` clause: a rejected dispatch leaves `detect` skipped, a skipped
-`detect` reads its outputs as empty strings, and the fan-out jobs' `!= 'true'` guards read empty as
-"not empty" and would start on it.
+`if: always() && needs.detect.result == 'success'` silenced both. In `apply.yml`, `run` needs
+`guard` and starts `apply-run.yml` only on its success, so a rejected dispatch starts no apply job;
+inside, keying `summary` on `review` separates the two outcomes. In `unlock.yml` every fan-out job
+carries `guard` in its `needs` so the rejection reaches its `!failure()` clause: a rejected
+dispatch leaves `detect` skipped, a skipped `detect` reads its outputs as empty strings, and the
+fan-out jobs' `!= 'true'` guards read empty as "not empty" and would start on it.
 
 A guard on `deploy.yml`'s `detect` would break every post-merge deploy, where `github.actor` is
 the human who merged. That workflow must stay guard-free.
@@ -25,16 +26,40 @@ reopened, `||` instead of `&&` -- and against a guard step moved to the end of `
 the dispatcher-controlled ref had already been checked out.
 """
 
+import re
+
+import _shipmate
 from _loader import workflow_jobs
 
 GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
-#: The guard job's whole step list per workflow, as `(if, ::error:: line)`. The bot-actor
+
+
+def _refuse(line):
+    return f'echo "{line}"\nexit 1\n'
+
+
+CANONICAL_PR_NUMBER_RUN = (
+    'if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then\n'
+    '  echo "::error::apply refused: pr_number is not a pull request number (1 to 10 digits, '
+    "no leading zero); a workflow or App other than shipmate's comment-ops and autoplan sent "
+    "this dispatch; comment 'shipmate apply' on the pull request instead\"\n"
+    "  exit 1\n"
+    "fi\n"
+)
+#: The canonical-number step whole: its value read through `env:`, never `${{ }}` in `run:`.
+CANONICAL_PR_NUMBER_STEP = {
+    "name": "Reject a pull request number that is not canonical",
+    "env": {"PR_NUMBER": "${{ inputs.pr_number }}"},
+    "run": CANONICAL_PR_NUMBER_RUN,
+}
+#: The guard job's refusal steps per workflow, as `(if, ::error:: line)`. The bot-actor
 #: rejection runs first in both. `apply.yml` also refuses an `auto` dispatch reaching a caller job
 #: that does not pass `auto: true`, which would run the App's dispatch as a bare apply,
 #: `auto: true` on any other run, and a run without it that is not a dispatch with verb
 #: `apply`, which fails closed when the dispatch inputs read empty. A called workflow's `github`
-#: context is its caller's, so `github.event.inputs.verb` is the dispatch's own verb.
+#: context is its caller's, so `github.event.inputs.verb` is the dispatch's own verb. Its last
+#: step, in `GUARD_TAIL`, refuses a `pr_number` that is not canonical before it keys a group.
 GUARD_STEPS = {
     "apply.yml": [
         (
@@ -89,12 +114,15 @@ GUARD_STEPS = {
         ),
     ],
 }
+#: The guard job's steps after `GUARD_STEPS`, as `(if, run)`.
+GUARD_TAIL = {"apply.yml": [(None, CANONICAL_PR_NUMBER_RUN)], "unlock.yml": []}
 #: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path waits on
-#: the `review` job that reads the pull request's review decision server-side. `unlock.yml`
+#: the `review` job that reads the pull request's review decision server-side; it runs in
+#: `apply-run.yml`, which only `apply.yml`'s `run` starts, after `guard` succeeded. `unlock.yml`
 #: carries no such job, because an approval reviews a diff and unlock applies none. Compared
 #: whole, so neither `guard` dropping out nor an unreviewed extra dependency can slip in.
 DETECT_NEEDS = {
-    "apply.yml": ["guard", "review"],
+    "apply-run.yml": ["review"],
     "unlock.yml": ["guard"],
 }
 #: The whole `needs:` list of every job downstream of `detect`, per file. Every job that can fail
@@ -106,22 +134,13 @@ DETECT_NEEDS = {
 #: Compared whole, per job, so neither a pre-`detect` job dropping out nor a new one being
 #: omitted passes unnoticed.
 DOWNSTREAM_NEEDS = {
-    "apply.yml": {
-        "lock": ["guard", "review", "detect"],
-        "envlevel0": ["guard", "review", "detect", "lock"],
-        "envlevel1": ["guard", "review", "detect", "lock", "envlevel0"],
-        "envlevel2": ["guard", "review", "detect", "lock", "envlevel0", "envlevel1"],
-        "envlevel3": [
-            "guard",
-            "review",
-            "detect",
-            "lock",
-            "envlevel0",
-            "envlevel1",
-            "envlevel2",
-        ],
+    "apply-run.yml": {
+        "lock": ["review", "detect"],
+        "envlevel0": ["review", "detect", "lock"],
+        "envlevel1": ["review", "detect", "lock", "envlevel0"],
+        "envlevel2": ["review", "detect", "lock", "envlevel0", "envlevel1"],
+        "envlevel3": ["review", "detect", "lock", "envlevel0", "envlevel1", "envlevel2"],
         "summary": [
-            "guard",
             "review",
             "detect",
             "lock",
@@ -129,17 +148,6 @@ DOWNSTREAM_NEEDS = {
             "envlevel1",
             "envlevel2",
             "envlevel3",
-        ],
-        "outcome": [
-            "guard",
-            "review",
-            "detect",
-            "lock",
-            "envlevel0",
-            "envlevel1",
-            "envlevel2",
-            "envlevel3",
-            "summary",
         ],
     },
     # No `summary` job at all: an unlock posts no comment and refreshes no gate, which is why
@@ -149,6 +157,8 @@ DOWNSTREAM_NEEDS = {
 SUMMARY_IF = "${{ always() && needs.review.result == 'success' }}"
 #: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
 DISPATCH_PATHS = ("apply.yml", "unlock.yml")
+#: The whole `needs:` of each job in `apply.yml`: `guard` gates the call into `apply-run.yml`.
+APPLY_NEEDS = {"guard": [], "run": ["guard"], "outcome": ["guard", "run"]}
 
 
 def _needs(job):
@@ -168,9 +178,8 @@ def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
     for name, expected in GUARD_STEPS.items():
         steps = workflow_jobs(name)[GUARD_JOB]["steps"]
         got = [(step.get("if"), step.get("run")) for step in steps]
-        assert got == [(cond, f'echo "{line}"\nexit 1\n') for cond, line in expected], (
-            f"{name}: {GUARD_JOB} steps differ from the pinned list: {got!r}"
-        )
+        want = [(cond, _refuse(line)) for cond, line in expected] + GUARD_TAIL[name]
+        assert got == want, f"{name}: {GUARD_JOB} steps differ from the pinned list: {got!r}"
 
 
 def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
@@ -189,28 +198,42 @@ def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
 
 
 def test_every_fan_out_job_carries_the_guard_in_its_needs():
-    # A rejected dispatch leaves `detect` skipped, and a skipped `detect`'s outputs are empty
-    # strings, which `needs.detect.outputs.*_empty != 'true'` reads as "not empty". `guard` in
-    # `needs` is what makes the rejection visible to each job's `!failure()` clause.
-    for name in DISPATCH_PATHS:
-        jobs = workflow_jobs(name)
-        assert _needs(jobs["detect"]) == DETECT_NEEDS[name], (
-            f"{name}: detect must need exactly {DETECT_NEEDS[name]!r}, "
-            f"got {_needs(jobs['detect'])!r}"
+    """A rejected dispatch leaves `detect` skipped, and a skipped `detect`'s outputs are empty
+    strings, which `needs.detect.outputs.*_empty != 'true'` reads as "not empty". In `unlock.yml`
+    `guard` in each job's `needs` is what makes the rejection visible to its `!failure()`
+    clause. In `apply.yml` every apply job sits behind `run`, which needs `guard`; `apply-run.yml`
+    holds no `guard`, so its jobs' needs are pinned by `DOWNSTREAM_NEEDS` instead.
+
+    Mutation: drop `guard` from `apply.yml`'s `run` `needs:` -- red."""
+    for name, expected in DETECT_NEEDS.items():
+        got = _needs(workflow_jobs(name)["detect"])
+        assert got == expected, f"{name}: detect must need exactly {expected!r}, got {got!r}"
+    for job_id, job in workflow_jobs("unlock.yml").items():
+        if job_id in (GUARD_JOB, "detect"):
+            continue
+        assert GUARD_JOB in _needs(job), (
+            f"unlock.yml: job {job_id!r} must carry {GUARD_JOB!r} in its needs, got {_needs(job)!r}"
         )
-        for job_id, job in jobs.items():
-            if job_id in (GUARD_JOB, "detect"):
-                continue
-            assert GUARD_JOB in _needs(job), (
-                f"{name}: job {job_id!r} must carry {GUARD_JOB!r} in its needs, got {_needs(job)!r}"
-            )
+    got = {job_id: _needs(job) for job_id, job in workflow_jobs("apply.yml").items()}
+    assert got == APPLY_NEEDS, f"apply.yml: jobs and needs must be exactly {APPLY_NEEDS!r}"
+
+
+def test_the_canonical_pr_number_step_is_this_whole_step():
+    """The step is pinned whole, and its regex equals the pattern `_shipmate.is_pr_number`
+    accepts, anchored, so the two readings of a pull request number cannot drift apart.
+
+    Mutations: delete the step -- red; loosen its pattern to `^[0-9]+$` -- red."""
+    steps = workflow_jobs("apply.yml")[GUARD_JOB]["steps"]
+    assert steps[-1] == CANONICAL_PR_NUMBER_STEP
+    regex = re.search(r"=~ (\S+) \]\]", steps[-1]["run"]).group(1)
+    assert regex == "^" + _shipmate._PR_NUMBER.pattern + "$"
 
 
 def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
     """`DOWNSTREAM_NEEDS`, whole list per job, also pins the env-level order: each level needs
     every level before it, so a bare apply runs them in `needs` order.
 
-    Mutation: drop `envlevel1` from `apply.yml`'s `envlevel2` `needs:` -- red."""
+    Mutation: drop `envlevel1` from `apply-run.yml`'s `envlevel2` `needs:` -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = workflow_jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map
@@ -245,14 +268,15 @@ def test_deploy_detect_carries_no_bot_actor_guard():
 def test_apply_summary_is_gated_on_the_review_and_not_on_detect():
     """`if: always()` alone runs `summary` regardless of every `needs` conclusion, and
     `summary`'s steps read raw workflow_call inputs (pr_number, ref) rather than anything gated
-    on `detect`. So a bare `always()`, or one gated on `guard` alone, would let a dispatch whose
-    `review` refused the `pr_number`/`ref` binding mint the App key, comment on that pull request
-    and refresh its gate. `review` needs `guard`, so its success implies the guard's. Gating on
+    on `detect`. So a bare `always()` would let a dispatch whose `review` refused the
+    `pr_number`/`ref` binding mint the App key, comment on that pull request and refresh its
+    gate. `apply-run.yml` starts only after `guard` succeeded, so `review`'s success implies the
+    guard's. Gating on
     `needs.detect.result` instead is the opposite regression: it also silences every genuine
     detect failure, so the developer gets no failure comment and no gate refresh. The whole
     expression is pinned so either escape fails.
-    Mutation: replace the review clause with `needs.guard.result == 'success'` -> red."""
-    job = workflow_jobs("apply.yml")["summary"]
+    Mutation: replace the review clause with `needs.detect.result == 'success'` -> red."""
+    job = workflow_jobs("apply-run.yml")["summary"]
     summary_if = job.get("if")
     assert summary_if == SUMMARY_IF, (
         f"summary's if: must be exactly {SUMMARY_IF!r}, got {summary_if!r}"

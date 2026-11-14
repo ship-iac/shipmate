@@ -1,4 +1,4 @@
-"""Guards `apply.yml`'s `review` job and its wiring into `detect`.
+"""Guards `apply-run.yml`'s `review` job and its wiring into `detect`.
 
 The job re-reads the pull request's `reviewDecision` server-side, on both apply forms, so the
 apply decision rests on GitHub's answer rather than on a dispatch input, and it refuses unless
@@ -33,16 +33,15 @@ from _loader import ENGINE, ENGINE_ENVIRONMENT, bash_only, run_step, step_by, wo
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
 
-#: The whole `if:` expression `apply.yml`'s `detect` carries, hand-written.
+#: The whole `if:` expression `apply-run.yml`'s `detect` carries, hand-written.
 #: A failed `review` must skip it; nothing else may.
 _DETECT_IF = "${{ !failure() && !cancelled() }}"
-_DETECT_NEEDS = ["guard", "review"]
+_DETECT_NEEDS = ["review"]
 
 #: The whole `review` job minus its steps, hand-written. No `if:` is part of the value, and the
 #: App key reaches the job only through `shipmate-engine`, whose branch policy admits the default
 #: branch alone. An unmapped output arrives empty, which detect holds everything on.
 _REVIEW_JOB = {
-    "needs": ["guard"],
     "runs-on": "ubuntu-slim",
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
@@ -124,7 +123,7 @@ _MINT_PERMISSIONS = {"permission-pull-requests": "read"}
 
 
 def _review():
-    return workflow_jobs("apply.yml")["review"]
+    return workflow_jobs("apply-run.yml")["review"]
 
 
 def _rd():
@@ -164,7 +163,7 @@ def test_detect_needs_review_and_refuses_to_run_after_it_failed():
     read as anything but a dead run.
 
     Mutation: set detect's `if:` to `${{ always() }}`."""
-    detect = workflow_jobs("apply.yml")["detect"]
+    detect = workflow_jobs("apply-run.yml")["detect"]
     assert detect.get("needs") == _DETECT_NEEDS
     # `.get`, not `[...]`: a deleted `if:` is a fail-open mutation, and a KeyError would red
     # without naming the expression that went missing.

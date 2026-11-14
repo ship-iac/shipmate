@@ -1,0 +1,340 @@
+name: apply-run
+on:
+  workflow_call:
+    inputs:
+      # Empty runs a bare apply: every pending environment the review decision and `apply_mode`
+      # allow, in `needs` order. A name applies that one alone.
+      environment: { required: false, type: string, default: "" }
+      ref: { required: true, type: string }
+      pr_number: { required: true, type: string }
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
+      # The consumer's `auto` job passes a literal `true`: the auto form of apply-detect.
+      auto: { required: false, type: boolean, default: false }
+    # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
+    # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
+    secrets:
+      # `required: false` is load-bearing: the key lives on the `shipmate-engine` environment
+      # (docs/github-app.md §5), so a caller binding none has nothing to pass, and a required
+      # declaration rejects the call: "Secret ... is required, but not provided while calling".
+      SHIPMATE_APP_PRIVATE_KEY: { required: false }
+      SHIPMATE_SECRETS: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
+    # `apply.yml`'s `outcome` reads these. Every one reads empty when the call was cancelled while
+    # it waited in the queue, and a job's values read empty when that job never ran.
+    outputs:
+      # Empty: `review` never ran.
+      review_result: { value: "${{ jobs.review.result }}" }
+      # `true`: no open pull request matched. Empty: `review` did not reach that refusal.
+      unbound: { value: "${{ jobs.review.outputs.unbound }}" }
+      # `true`: the result comment posted. Empty: it did not, or `summary` never ran.
+      posted: { value: "${{ jobs.summary.outputs.posted }}" }
+      # Empty: `summary` never ran.
+      summary_result: { value: "${{ jobs.summary.result }}" }
+      # `summary` is left out: it can end `cancelled` with no run cancel, for example at a full
+      # gate-writer queue. Empty: the call ended before any job ran.
+      run_cancelled:
+        value: ${{ jobs.review.result == 'cancelled' || jobs.detect.result == 'cancelled' || jobs.lock.result == 'cancelled' || jobs.envlevel0.result == 'cancelled' || jobs.envlevel1.result == 'cancelled' || jobs.envlevel2.result == 'cancelled' || jobs.envlevel3.result == 'cancelled' }}
+# One apply run per pull request at a time; a later one waits rather than cancels. `apply.yml`'s
+# `guard` refuses a `pr_number` that is not canonical before it keys this group, and its
+# `outcome` stays outside the group so it still answers a run cancelled while it waits here.
+concurrency:
+  group: shipmate-apply-${{ inputs.pr_number }}
+  cancel-in-progress: false
+  queue: max
+jobs:
+  review:
+    # Deliberately unconditional -- no `if:`. Running always closes the TOCTOU between the
+    # comment that authorized this apply and the dispatch: the decision is re-read here, so an
+    # approval dismissed in between holds.
+    # Re-reads the decision server-side, away from branch-controlled HCL (CONTRACT.md
+    # §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it. A hand-made
+    # dispatch never reaches decide(), so this job also binds `ref` to the open PR's own head.
+    runs-on: ubuntu-slim
+    # Reaches the App key the same way `summary` does.
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    outputs:
+      decision: ${{ steps.rd.outputs.decision }}
+      unbound: ${{ steps.rd.outputs.unbound }}
+    steps:
+      - name: Verify the App key arrived
+        uses: $/actions/verify-app-key
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      - id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: read
+      - id: rd
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          # A number matching no PR is a NOT_FOUND error: gh exits non-zero and `set -e` refuses
+          # here. select() turns a bare null `pullRequest` into empty output. Every @tsv field is
+          # non-empty: `read` collapses adjacent tabs.
+          # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
+          pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \
+            -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
+            --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv')
+          if [[ -z "$pr" ]]; then
+            echo "unbound=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
+            exit 1
+          fi
+          IFS=$'\t' read -r state draft cross head rd <<< "$pr"
+          if [[ "$state" != OPEN ]]; then
+            echo "unbound=true" >> "$GITHUB_OUTPUT"
+            echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. A merged pull request's plans apply through the merge deploy."
+            exit 1
+          fi
+          if [[ "$draft" != false ]]; then
+            echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. Mark it ready for review first."
+            exit 1
+          fi
+          if [[ "$cross" != false ]]; then
+            echo "::error::Pull request #$PR_NUMBER comes from a fork; nothing applies."
+            exit 1
+          fi
+          if [[ "$head" != "$REF" ]]; then
+            echo "::error::Pull request #$PR_NUMBER head is $head, but this dispatch names $REF; nothing applies. Comment \`shipmate apply\` on the pull request."
+            exit 1
+          fi
+          # NONE: no review rule, or code-owner review owns no changed file.
+          echo "decision=$rd" >> "$GITHUB_OUTPUT"
+
+  detect:
+    # A `review` that FAILS is caught by `!failure()`, so nothing applies and the run is visibly
+    # red. The explicit `if:` stays rather than reverting to GHA's default `success()`: both forms
+    # refuse a failed `review`, and this one says so.
+    needs: [review]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ${{ inputs.runs_on }}
+    permissions: { contents: read, checks: read, actions: read, pull-requests: read }
+    # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
+    outputs:
+      envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
+      envlevel1_waves: ${{ steps.d.outputs.envlevel1_waves }}
+      envlevel2_waves: ${{ steps.d.outputs.envlevel2_waves }}
+      envlevel3_waves: ${{ steps.d.outputs.envlevel3_waves }}
+      envlevel0_empty: ${{ steps.d.outputs.envlevel0_empty }}
+      envlevel1_empty: ${{ steps.d.outputs.envlevel1_empty }}
+      envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
+      envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
+      head_sha: ${{ steps.d.outputs.head_sha }}
+      excluded_envs: ${{ steps.d.outputs.excluded_envs }}
+      skipped_envs: ${{ steps.d.outputs.skipped_envs }}
+      skipped_after: ${{ steps.d.outputs.skipped_after }}
+      review_held_envs: ${{ steps.d.outputs.review_held_envs }}
+      applied_exempt_envs: ${{ steps.d.outputs.applied_exempt_envs }}
+      review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
+      waiting_cells: ${{ steps.d.outputs.waiting_cells }}
+      held_cells: ${{ steps.d.outputs.held_cells }}
+      env_order: ${{ steps.d.outputs.env_order }}
+      provenance_run: ${{ steps.d.outputs.provenance_run }}
+      pusher: ${{ steps.d.outputs.pusher }}
+      base_sha: ${{ steps.d.outputs.base_sha }}
+      bare_envs: ${{ steps.d.outputs.bare_envs }}
+      refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
+      tools: ${{ steps.setup.outputs.tools }}
+    steps:
+      - if: ${{ !inputs.auto }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: "${{ inputs.ref }}" }
+      # The auto form diffs the base tip from its merge base with the head, so it needs both
+      # histories. Two steps, not one depth expression: `0` is falsy in `&&`/`||`.
+      - if: ${{ inputs.auto }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - id: setup
+        uses: $/actions/setup
+        with: { tofu: "false", resolve: "true" }
+      - id: d
+        uses: $/actions/apply-detect
+        with:
+          environment: ${{ inputs.environment }}
+          auto: ${{ inputs.auto }}
+          head-sha: ${{ inputs.ref }}
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          # Passed through raw, never defaulted: an empty decision means the review signal never
+          # arrived, which refuses a targeted apply and holds every environment of a bare one.
+          review-decision: ${{ needs.review.outputs.decision }}
+          github-vars: ${{ toJSON(vars) }}
+
+  # Holds every cell the waves apply before the first one starts. A cell another pull request
+  # took after `detect` read the locks refuses the whole run here. A new `shipmate apply` or
+  # "Re-run all jobs" recomputes; "Re-run failed jobs" does not re-run `detect`.
+  lock:
+    needs: [review, detect]
+    if: ${{ !failure() && !cancelled() }}
+    # Its API calls grow with the cell count; an `ubuntu-slim` job stops at 15 minutes.
+    runs-on: ${{ inputs.runs_on }}
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    outputs:
+      refusal: ${{ steps.l.outputs.refusal }}
+    steps:
+      - id: l
+        uses: $/actions/lock-acquire
+        with:
+          envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
+          envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
+          envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
+          envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          pr-number: ${{ inputs.pr_number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  envlevel0:
+    # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name
+    # is load-bearing: renaming it strands apply checks pending. deploy.yml repeats it.
+    name: L0
+    # `review` is listed so its failure reaches `!failure()`: otherwise a failed one skips
+    # `detect`, whose outputs then read as '' -- which `!= 'true'` fans out on, over
+    # `fromJSON('')`.
+    needs: [review, detect, lock]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
+    # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
+    # consumer's `complete` job would hold no key, its applies would execute, and their apply
+    # checks would strand pending forever.
+    secrets: &envlevel-secrets
+      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
+      # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
+      # load-time error, unlike an undeclared action input, which is silently ignored.
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+
+  envlevel1:
+    name: L1
+    needs: [review, detect, lock, envlevel0]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: *envlevel-permissions
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
+    secrets: *envlevel-secrets
+
+  envlevel2:
+    name: L2
+    needs: [review, detect, lock, envlevel0, envlevel1]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: *envlevel-permissions
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
+    secrets: *envlevel-secrets
+
+  envlevel3:
+    name: L3
+    needs: [review, detect, lock, envlevel0, envlevel1, envlevel2]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: *envlevel-permissions
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ needs.detect.outputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ needs.detect.outputs.provenance_run }}
+      base_sha: ${{ needs.detect.outputs.base_sha }}
+    secrets: *envlevel-secrets
+
+  summary:
+    needs: [review, detect, lock, envlevel0, envlevel1, envlevel2, envlevel3]
+    # A `pr_number` review reads as missing or not open, or an `auto` run refused at review,
+    # gets a red run, no App comment and no gate write. Keyed on `review`:
+    # a `detect` failure after a bound review still gets both, as a failed or cancelled apply does.
+    if: ${{ always() && needs.review.result == 'success' }}
+    runs-on: ubuntu-slim
+    # One gate writer per head at a time, across the plan, apply and deploy runs.
+    concurrency:
+      group: shipmate-gate-${{ inputs.ref || github.run_id }}
+      cancel-in-progress: false
+      queue: max
+    # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
+    # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
+    # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
+    environment: { name: shipmate-engine, deployment: false }
+    # gate-refresh and apply-summary mint their own App tokens for their scans and writes; the
+    # one GITHUB_TOKEN scope needed is actions:read, for apply-summary's artifact download and
+    # run-jobs listing.
+    permissions: { actions: read }
+    outputs:
+      posted: ${{ steps.result.outputs.posted }}
+    steps:
+      - name: Complete gate if every apply check is done
+        uses: $/actions/gate-refresh
+        with:
+          head-sha: ${{ inputs.ref }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # A failed gate refresh still posts the run's results; the job stays red.
+      - name: Post apply result comment
+        id: result
+        if: ${{ !cancelled() }}
+        uses: $/actions/apply-summary
+        with:
+          pr-number: ${{ inputs.pr_number }}
+          head-sha: ${{ inputs.ref }}
+          environment: ${{ inputs.environment }}
+          envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
+          envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
+          envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
+          envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          excluded-envs: ${{ needs.detect.outputs.excluded_envs }}
+          skipped-envs: ${{ needs.detect.outputs.skipped_envs }}
+          skipped-after: ${{ needs.detect.outputs.skipped_after }}
+          review-held-envs: ${{ needs.detect.outputs.review_held_envs }}
+          applied-exempt-envs: ${{ needs.detect.outputs.applied_exempt_envs }}
+          review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
+          waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
+          held-cells: ${{ needs.detect.outputs.held_cells }}
+          bare-envs: ${{ needs.detect.outputs.bare_envs }}
+          detect-refusal: ${{ needs.detect.outputs.refusal }}
+          lock-refusal: ${{ needs.lock.outputs.refusal }}
+          env-order: ${{ needs.detect.outputs.env_order }}
+          auto: ${{ inputs.auto }}
+          pusher: ${{ needs.detect.outputs.pusher }}
+          results: ${{ join(needs.*.result, ',') }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

@@ -1,5 +1,5 @@
-"""One workflow file per verb: `apply.yml` applies, `unlock.yml` unlocks, and neither file can
-do the other's work.
+"""One workflow file per verb: `apply.yml` applies (its jobs run in `apply-run.yml`),
+`unlock.yml` unlocks, and neither can do the other's work.
 
 This replaces the `mode`-input split that kept the two paths apart inside a single file, so the
 guard holds in both directions -- a test that only read `unlock.yml` would go quiet on
@@ -7,9 +7,9 @@ guard holds in both directions -- a test that only read `unlock.yml` would go qu
 
 Pinned on the apply side:
 
-- its `workflow_call` inputs, whole. The retired `mode` rail coming back is the regression, and
-  an absence nothing compares is fail-open by construction;
-- its job ids, whole, and that no step anywhere in the file calls `unlock-cell`;
+- its `workflow_call` inputs, whole, in both files. The retired `mode` rail coming back is the
+  regression, and an absence nothing compares is fail-open by construction;
+- its job ids, whole, in both files, and that no step anywhere in either calls `unlock-cell`;
 - each `envlevel*` job's `if:`, which must carry no verb clause;
 - both `summary` action steps running unconditionally: an `if:` there was only ever the unlock
   skip.
@@ -51,9 +51,11 @@ import pytest
 from _loader import checkouts, local_action, secrets_refs, workflow_jobs, workflow_yaml
 
 APPLY = "apply.yml"
+APPLY_RUN = "apply-run.yml"
 UNLOCK = "unlock.yml"
 
-#: The whole `workflow_call.inputs` mapping of each file, hand-written. `mode` is absent from
+#: The whole `workflow_call.inputs` mapping of each file, hand-written; `apply.yml` forwards
+#: every input to `apply-run.yml`, so the two declare the same set. `mode` is absent from
 #: the apply side and never existed on the unlock side. On the unlock side the required inputs
 #: are also the dispatch contract: an input the body sends that this file does not declare kills
 #: the run at startup with no job, no check-run and no retrievable log.
@@ -75,16 +77,17 @@ UNLOCK_INPUTS = {
 #: in reds on the job list as well as on the action check below: a guard that only looks for a
 #: forbidden action name passes whenever the leaked job reaches for a different one.
 APPLY_JOBS = {
-    "guard",
-    "review",
-    "detect",
-    "lock",
-    "envlevel0",
-    "envlevel1",
-    "envlevel2",
-    "envlevel3",
-    "summary",
-    "outcome",
+    APPLY: {"guard", "run", "outcome"},
+    APPLY_RUN: {
+        "review",
+        "detect",
+        "lock",
+        "envlevel0",
+        "envlevel1",
+        "envlevel2",
+        "envlevel3",
+        "summary",
+    },
 }
 UNLOCK_JOBS = {"guard", "detect", "unlock"}
 
@@ -196,29 +199,32 @@ def _runs(job):
 
 
 def test_the_apply_workflow_declares_no_mode_rail():
-    got = _inputs(APPLY)
-    assert got == APPLY_INPUTS, (
-        f"{APPLY}'s workflow_call inputs are {got!r}, not {APPLY_INPUTS!r} -- the verb "
-        "is the workflow file now, so a `mode` input coming back is a second rail "
-        "deciding what an apply dispatch does"
-    )
+    """Mutation: drop `auto` from `apply-run.yml`'s inputs -- red."""
+    for name in (APPLY, APPLY_RUN):
+        got = _inputs(name)
+        assert got == APPLY_INPUTS, (
+            f"{name}'s workflow_call inputs are {got!r}, not {APPLY_INPUTS!r} -- the verb "
+            "is the workflow file now, so a `mode` input coming back is a second rail "
+            "deciding what an apply dispatch does"
+        )
 
 
 def test_the_apply_workflow_can_release_no_lock():
-    jobs = workflow_jobs(APPLY)
-    assert set(jobs) == APPLY_JOBS, (
-        f"{APPLY}'s jobs are {sorted(jobs)}, not {sorted(APPLY_JOBS)} -- an unlock job "
-        "back in this file force-unlocks state on the apply dispatch's authority"
-    )
-    leaked = {
-        job_id: [u for u in _uses(job) if "/actions/unlock-cell" in u]
-        for job_id, job in jobs.items()
-    }
-    leaked = {k: v for k, v in leaked.items() if v}
-    assert not leaked, (
-        f"{APPLY} calls unlock-cell from {leaked} -- releasing a lock is its own "
-        "workflow, reached by its own dispatch"
-    )
+    for name, expected in APPLY_JOBS.items():
+        jobs = workflow_jobs(name)
+        assert set(jobs) == expected, (
+            f"{name}'s jobs are {sorted(jobs)}, not {sorted(expected)} -- an unlock job "
+            "back in this file force-unlocks state on the apply dispatch's authority"
+        )
+        leaked = {
+            job_id: [u for u in _uses(job) if "/actions/unlock-cell" in u]
+            for job_id, job in jobs.items()
+        }
+        leaked = {k: v for k, v in leaked.items() if v}
+        assert not leaked, (
+            f"{name} calls unlock-cell from {leaked} -- releasing a lock is its own "
+            "workflow, reached by its own dispatch"
+        )
 
 
 def test_each_envlevel_job_runs_on_every_apply_dispatch():
@@ -226,7 +232,7 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
     cancelled predecessor and applies out of `needs` order.
 
     Mutation: drop the cancel guard from `envlevel2`'s `if:` -- red."""
-    got = {job_id: _job(APPLY, job_id).get("if") for job_id in ENVLEVEL_IF}
+    got = {job_id: _job(APPLY_RUN, job_id).get("if") for job_id in ENVLEVEL_IF}
     assert got == ENVLEVEL_IF, (
         f"the envlevel jobs' `if:` are {got!r}, not {ENVLEVEL_IF!r} -- a verb clause here "
         "would be a second place deciding what this file does, and the file already decided"
@@ -237,7 +243,7 @@ def test_both_summary_steps_run_on_every_apply_dispatch():
     """A gate refresh that finds a hold once every check is done, or hits an API error, fails
     its step; the result comment still posts the run's results. Mutation: delete the comment
     step's `if:` (the default `success()` skips it) -- red."""
-    steps = _job(APPLY, "summary")["steps"]
+    steps = _job(APPLY_RUN, "summary")["steps"]
     assert len(steps) == 2, f"summary no longer has exactly two steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
     assert conditions == [None, "${{ !cancelled() }}"], (

@@ -20,7 +20,15 @@ and unlock verbs with its own `GITHUB_TOKEN`, which the `guard` jobs of
 to a pull request: the `review` job refuses it unless the pull request is open,
 not a draft, from this repository, and its head commit is the dispatched `ref`,
 and detect refuses a cell whose apply check records another pull request or
-none (`CONTRACT.md` §Comment-ops). The unlock dispatch is not bound: it takes
+none (`CONTRACT.md` §Comment-ops). An apply dispatch that passes `review`
+holds its pull request's apply queue for its whole run, so the pull request's
+other apply runs wait behind it; sending one needs write access to the
+repository. Any bot-actor apply dispatch with a canonical `pr_number` takes a
+slot in that queue once `guard` passes, before `review` runs, so a flood of 101
+such dispatches into an idle group (one runs, 100 wait), or 100 behind a run
+already holding it, makes a real `shipmate apply` arrive at a full queue and be
+cancelled. Both the flood and the single held run need write access to the
+repository. The unlock dispatch is not bound: it takes
 `{environment, ref}` and runs `tofu init` over that ref inside `<env>-apply`
 with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
 needs only write access and runs the same init over a pull request head; write
@@ -1247,7 +1255,7 @@ App key (§16).
 
 The pull-request condition is the review decision GitHub reports for the pull
 request. `scripts/authorize` reads it when `shipmate apply` is commented and
-refuses there any decision the list below does not admit; `apply.yml`'s
+refuses there any decision the list below does not admit; `apply-run.yml`'s
 `review` job reads it again in the apply run, and `scripts/apply-detect`
 decides on that value: a targeted apply refuses, and a bare apply holds every
 environment the decision does not admit. The decision admits an apply to an

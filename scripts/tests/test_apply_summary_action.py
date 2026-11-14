@@ -414,7 +414,7 @@ def test_scan_step_uses_the_app_token_not_the_workflow_token():
     )
 
 
-#: The whole `with:` of `apply.yml`'s apply-summary step, hand-written.
+#: The whole `with:` of `apply-run.yml`'s apply-summary step, hand-written.
 _APPLY_SUMMARY_WITH = {
     "pr-number": "${{ inputs.pr_number }}",
     "head-sha": "${{ inputs.ref }}",
@@ -461,7 +461,7 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
     Mutation: drop `auto:` from the step's `with:` -- red.
     Mutation: drop `pusher:` from the step's `with:` -- red."""
-    steps = workflow_jobs("apply.yml")["summary"]["steps"]
+    steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
 
@@ -571,7 +571,7 @@ def test_the_action_exposes_posted_from_the_post_step():
 
 def test_the_apply_summary_job_passes_posted_on():
     """Mutations: map the job's `posted` to another step id; drop the step's `id: result`."""
-    job = workflow_jobs("apply.yml")["summary"]
+    job = workflow_jobs("apply-run.yml")["summary"]
     assert job["outputs"] == {"posted": "${{ steps.result.outputs.posted }}"}
     step = _find_step(job["steps"], uses_contains="actions/apply-summary")
     assert step["id"] == "result"

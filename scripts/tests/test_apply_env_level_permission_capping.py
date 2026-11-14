@@ -1,21 +1,27 @@
 """A reusable workflow's jobs cannot request a `GITHUB_TOKEN` scope above what the calling job
 granted: permissions only ever narrow across a `uses:` boundary, never widen.
 `apply-env-level.yml`'s `snapshot` job requests `checks: read`, so every caller job that `uses:`
-it must grant at least that. Otherwise GitHub fails the run at workflow-resolution time, and
-every `shipmate apply` and post-merge `deploy` breaks before a single wave runs.
+it must grant at least that, and `apply.yml`'s `run` must grant everything `apply-run.yml`'s jobs
+request. Otherwise GitHub fails the run at workflow-resolution time, and every `shipmate apply`
+and post-merge `deploy` breaks before a single wave runs.
 
-Source-derived, not a hardcoded list of caller sites. It reads the union of every job's
-`permissions:` inside `apply-env-level.yml` and checks it against each caller found by scanning
+Source-derived, not a hardcoded list of caller sites. Per callee, it reads the union of every
+job's `permissions:` inside it and checks it against each caller found by scanning
 every engine workflow for a `uses:` pointing at it, so a job added to the callee, or a new
 caller, is covered instead of silently falling outside a stale list.
 """
 
 import re
 
+import pytest
 from _loader import WORKFLOWS, workflow_yaml
 
-CALLEE = "apply-env-level.yml"
-_CALLEE_REF = re.compile(r"apply-env-level\.yml(?:@|$)")
+#: Each callee with its own `uses:` match: `apply-run.yml` must not match `apply.yml` or a
+#: longer name ending in it.
+CALLEES = {
+    "apply-env-level.yml": re.compile(r"/apply-env-level\.yml(?:@|$)"),
+    "apply-run.yml": re.compile(r"/apply-run\.yml(?:@|$)"),
+}
 
 # GitHub's permission scale for a single scope: absence and `none` grant nothing, `read` and
 # `write` are strictly ordered above it. For every scope, a caller must grant a level at least
@@ -27,10 +33,10 @@ def _rank(level):
     return _RANK.get(level, 0)
 
 
-def _callee_permission_union():
+def _callee_permission_union(callee):
     """The union, per scope, of every job's `permissions:` inside the callee: the ceiling a
     caller must clear for every one of the callee's jobs to run."""
-    jobs = workflow_yaml(CALLEE)["jobs"]
+    jobs = workflow_yaml(callee)["jobs"]
     union = {}
     for job in jobs.values():
         for scope, level in (job.get("permissions") or {}).items():
@@ -39,36 +45,50 @@ def _callee_permission_union():
     return union
 
 
-def _callers():
+def _callers(callee):
     """(workflow filename, job id, job dict) per job in any engine workflow whose `uses:` targets
     the callee."""
     found = []
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        if path.name == CALLEE:
+        if path.name == callee:
             continue
         spec = workflow_yaml(path.name)
         for job_id, job in (spec.get("jobs") or {}).items():
             uses = job.get("uses")
-            if uses and _CALLEE_REF.search(uses):
+            if uses and CALLEES[callee].search(uses):
                 found.append((path.name, job_id, job))
     return found
 
 
-def test_apply_env_level_has_at_least_one_caller():
-    # Otherwise test_every_caller_grants_at_least_the_callees_permission_union would pass
-    # vacuously over an empty list.
-    assert _callers(), f"no engine workflow calls {CALLEE} -- guard is vacuous"
+#: The callers each callee must have, hand-written, so a `uses:` match that stops matching
+#: reds here instead of leaving the grant check vacuous.
+EXPECTED_CALLERS = {
+    "apply-env-level.yml": {("apply-run.yml", f"envlevel{n}") for n in range(4)}
+    | {("deploy.yml", f"envlevel{n}") for n in range(4)},
+    "apply-run.yml": {("apply.yml", "run")},
+}
 
 
-def test_every_caller_grants_at_least_the_callees_permission_union():
-    ceiling = _callee_permission_union()
-    assert ceiling, f"{CALLEE} declares no job permissions -- guard is vacuous"
-    for wf_name, job_id, job in _callers():
+@pytest.mark.parametrize("callee", sorted(CALLEES))
+def test_each_callee_has_exactly_its_callers(callee):
+    """Otherwise test_every_caller_grants_at_least_the_callees_permission_union would pass
+    vacuously over an empty list. Mutation: point `apply.yml`'s `run` at `./.github/workflows/
+    apply-run.yaml` -- red."""
+    got = {(wf, job_id) for wf, job_id, _ in _callers(callee)}
+    assert got == EXPECTED_CALLERS[callee], f"{callee} callers are {sorted(got)}"
+
+
+@pytest.mark.parametrize("callee", sorted(CALLEES))
+def test_every_caller_grants_at_least_the_callees_permission_union(callee):
+    """Mutation: add `issues: write` to `apply-run.yml`'s `detect` -- red for `apply-run.yml`."""
+    ceiling = _callee_permission_union(callee)
+    assert ceiling, f"{callee} declares no job permissions -- guard is vacuous"
+    for wf_name, job_id, job in _callers(callee):
         granted = job.get("permissions") or {}
         for scope, required_level in ceiling.items():
             got = granted.get(scope, "none")
             assert _rank(got) >= _rank(required_level), (
-                f"{wf_name}:{job_id} `uses: {CALLEE}` but grants "
+                f"{wf_name}:{job_id} `uses: {callee}` but grants "
                 f"{scope}: {got!r}, which is below the callee's own "
                 f"{scope}: {required_level!r} -- the run will fail at "
                 "workflow-resolution time (permissions only narrow across a "

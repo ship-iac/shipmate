@@ -1,4 +1,4 @@
-"""`apply.yml`'s `lock` job acquires every cell the waves apply, before the first wave.
+"""`apply-run.yml`'s `lock` job acquires every cell the waves apply, before the first wave.
 
 Threat model: accidental regression in the job's wiring. A dropped `envlevelN-waves` input leaves
 that level's cells applying unlocked; a dropped `environment` leaves the mint with no App key; an
@@ -10,7 +10,7 @@ wave level needs `lock`.
 from _loader import ENGINE_ENVIRONMENT, workflow_jobs
 
 LOCK_JOB = {
-    "needs": ["guard", "review", "detect"],
+    "needs": ["review", "detect"],
     "if": "${{ !failure() && !cancelled() }}",
     "runs-on": "${{ inputs.runs_on }}",
     "environment": ENGINE_ENVIRONMENT,
@@ -37,4 +37,4 @@ LOCK_JOB = {
 def test_the_lock_job_acquires_every_level_with_the_engine_key():
     """Mutations: pass only `envlevel0-waves`; remove `environment`; `if:` to `always()`; add
     an `actions/checkout` step."""
-    assert workflow_jobs("apply.yml")["lock"] == LOCK_JOB
+    assert workflow_jobs("apply-run.yml")["lock"] == LOCK_JOB

@@ -8,7 +8,7 @@
   site passes it `toJSON(vars)`, so `env-config` can resolve a `{vars: NAME}` reference in
   the table. The
   `with:` of `plan.yml`, `drift.yml` and `unlock.yml`'s detect steps is pinned whole beside the
-  rest of those workflows; the other two steps are pinned here whole, beside `apply.yml`'s
+  rest of those workflows; the other two steps are pinned here whole, beside `apply-run.yml`'s
   `detect` outputs.
 - The set of workflow steps carrying `toJSON(vars)` is exactly the detect and cell steps. The
   enumeration holds every repository and organization variable, so a new holder is a decision.
@@ -56,10 +56,10 @@ _TABLE_READERS = (
     "summary",
 )
 
-#: The whole detect steps no other guard pins whole, by workflow and action. `apply.yml`'s one
+#: The whole detect steps no other guard pins whole, by workflow and action. `apply-run.yml`'s one
 #: step serves both apply forms, with no `if:`: the action picks the script from `environment`.
 _DETECT_STEPS = {
-    ("apply.yml", "$/actions/apply-detect"): {
+    ("apply-run.yml", "$/actions/apply-detect"): {
         "id": "d",
         "uses": "$/actions/apply-detect",
         "with": {
@@ -83,7 +83,7 @@ _DETECT_STEPS = {
     },
 }
 
-#: The whole `outputs:` of `apply.yml`'s `detect`, each read from the one step. A targeted apply
+#: The whole `outputs:` of `apply-run.yml`'s `detect`, each read from the one step. A targeted apply
 #: gets levels 1-3 `_empty = 'true'` from `apply-detect`'s own write; a missing `_empty` reads ''
 #: and runs its level red, never skips it.
 _APPLY_DETECT_OUTPUTS = {
@@ -135,7 +135,7 @@ _DEPLOY_DETECT_OUTPUTS = {
 _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
     ("drift.yml", "detect", "$/actions/build-matrix"),
-    ("apply.yml", "detect", "$/actions/apply-detect"),
+    ("apply-run.yml", "detect", "$/actions/apply-detect"),
     ("unlock.yml", "detect", "$/actions/unlock-detect"),
     ("deploy.yml", "detect", "$/actions/deploy-detect"),
     ("plan.yml", "plan", "$/actions/plan-cell"),
@@ -189,10 +189,10 @@ def test_every_table_reader_declares_the_variables_input(action):
 @pytest.mark.parametrize(("workflow", "uses"), sorted(_DETECT_STEPS))
 def test_the_detect_step_is_exactly_this_step(workflow, uses):
     """Mutation: delete the `github-vars:` line from `deploy.yml`'s detect step.
-    Mutation: give `apply.yml`'s detect step an `if: ${{ inputs.environment != '' }}`.
-    Mutation: delete `review-decision` from `apply.yml`'s detect step.
-    Mutation: delete `pr-number` from `apply.yml`'s detect step.
-    Mutation: delete `auto` from `apply.yml`'s detect step; an unwired composite input is
+    Mutation: give `apply-run.yml`'s detect step an `if: ${{ inputs.environment != '' }}`.
+    Mutation: delete `review-decision` from `apply-run.yml`'s detect step.
+    Mutation: delete `pr-number` from `apply-run.yml`'s detect step.
+    Mutation: delete `auto` from `apply-run.yml`'s detect step; an unwired composite input is
     silently ignored."""
     doc = workflow_yaml(workflow)
     steps = [s for s in doc["jobs"]["detect"]["steps"] if s.get("uses") == uses]
@@ -223,7 +223,7 @@ def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
     Mutation: delete the auto checkout's `if:`."""
     got = [
         {k: v for k, v in s.items() if k != "uses"}
-        for s in checkouts(workflow_yaml("apply.yml")["jobs"]["detect"]["steps"])
+        for s in checkouts(workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"])
     ]
     assert got == [
         {"if": "${{ !inputs.auto }}", "with": {"ref": "${{ inputs.ref }}"}},
@@ -238,7 +238,7 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     `base_sha`; delete `skipped_after`; delete `bare_envs`; delete `pusher`; drop
     `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal reaches the comment
     and the gate as the generic text; delete `tools`, so every wave cell refuses."""
-    assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
+    assert workflow_yaml("apply-run.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
 def test_the_deploy_detect_job_outputs_exactly_these_expressions():
@@ -267,7 +267,7 @@ def test_only_the_listed_steps_carry_the_variables():
     assert found == _VARS_HOLDERS
 
 
-#: The whole `outputs:` of `actions/apply-detect`, hand-written. `apply.yml`'s `detect` reads
+#: The whole `outputs:` of `actions/apply-detect`, hand-written. `apply-run.yml`'s `detect` reads
 #: each by name, and an output the action stops declaring reads '' there: a dropped
 #: `waiting_cells` renders a fully waiting targeted apply as `🟢 no pending applies`.
 _APPLY_DETECT_ACTION_OUTPUTS = {

@@ -30,6 +30,7 @@ EXPECTED_INPUTS = {
         ]
     },
     "apply.yml": {"workflow_call": ["auto", "environment", "pr_number", "ref", "runs_on"]},
+    "apply-run.yml": {"workflow_call": ["auto", "environment", "pr_number", "ref", "runs_on"]},
     "ci.yml": {},
     "comment-ops.yml": {"workflow_call": ["runs_on"]},
     "deploy.yml": {"workflow_call": ["runs_on"]},

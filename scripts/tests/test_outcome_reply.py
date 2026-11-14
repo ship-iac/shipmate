@@ -2,7 +2,10 @@
 plan `outcome` jobs call it only then.
 
 The reply step picks its text from inputs only: in a job that starts after a run cancel, a
-step-level `cancelled()` is false, so the apply job passes the cancel in as `run-cancelled`.
+step-level `cancelled()` is false, so the apply job passes the cancel in as `run-cancelled`. The
+apply `outcome` reads `apply-run.yml`'s outputs, which all read empty when the run was cancelled
+while it waited in the queue, so a call cancelled or skipped before `review` reported counts as
+a cancel; a call that failed before it reported gets the ended text.
 """
 
 import os
@@ -31,7 +34,8 @@ HINT = "Comment `shipmate help` for the available commands."
 TOKEN = "minted-token"  # noqa: S105 - a stub token, never sent
 
 #: (inputs, whole body) for each precedence case: refused, run cancelled, summary
-#: cancelled, ended.
+#: cancelled, ended. The apply case with empty outputs is what `outcome` passes after a call
+#: that ended before `review` reported: cancelled while queued, or skipped by a run cancel.
 SELECTIONS = {
     "refused": (
         {
@@ -89,6 +93,20 @@ SELECTIONS = {
             "### shipmate apply dev-eu\n\n"
             f"🔴 failed: [the apply run]({URL}) posted no result: its summary was cancelled "
             "before it posted a result. Its cells' results are on their apply checks.\n\n"
+            f"[comment run]({URL}). {HINT}"
+        ),
+    ),
+    "apply call ended before review": (
+        {
+            "verb": "apply",
+            "environment": "dev-eu",
+            "review-result": "",
+            "summary-result": "",
+            "run-cancelled": "true",
+        },
+        (
+            "### shipmate apply dev-eu\n\n"
+            f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
             f"[comment run]({URL}). {HINT}"
         ),
     ),
@@ -175,7 +193,8 @@ def _run(tmp_path, inputs, *, rc=0):
 def test_each_case_posts_its_whole_body(tmp_path, case):
     """Mutations: swap the run-cancelled and summary-cancelled texts in the `elif` chain; swap the
     run-cancelled and summary-cancelled conditions; drop the run-cancelled branch (a cancelled run
-    whose summary was cancelled reads as a summary cancel); drop the `verb` check from the
+    whose summary was cancelled reads as a summary cancel, and the call that ended before
+    review reads as ended); drop the `verb` check from the
     summary-cancelled text; post with `github.token` in place of the minted token."""
     inputs, body = SELECTIONS[case]
     proc, calls = _run(tmp_path, inputs)
@@ -235,30 +254,34 @@ def test_the_composite_mints_only_a_pull_request_write_token():
     assert not [s for s in strings(action_yaml(ACTION)) if "github.token" in s]
 
 
-_APPLY_NEEDS = ["guard", "review", "detect", "lock", "envlevel0", "envlevel1", "envlevel2"]
-_APPLY_NEEDS += ["envlevel3"]
-
-
 def test_the_apply_outcome_job_is_wired_exactly():
-    """`always()`: it must run after a run cancel. `run-cancelled` ORs every needed job but
-    `guard`, whose success the `if:` requires, and `summary`, whose `cancelled` alone is not a run
-    cancel.
+    """`always()`: it must run after a run cancel, including one while the call waited in
+    `apply-run.yml`'s queue. Every fact about the inner run arrives through `run`'s outputs, which
+    read empty when they did not arrive; `guard` refuses an empty `pr_number`. `run-cancelled`
+    also reads a call that ended `cancelled` or `skipped` with an empty `review_result` as a
+    cancel: it was cancelled while queued, or skipped by a run cancel. A call that failed before
+    `review` reported keeps the ended text.
 
     A failed `review` replies unless it found no open pull request, and never in an `auto` run.
 
-    Mutations: drop `&& needs.summary.outputs.posted != 'true'`; drop
-    `needs.review.outputs.unbound != 'true' &&`; flip its `!=` to `==`; drop `&& !inputs.auto`;
-    drop `summary` from `needs`;
-    `permissions: { pull-requests: write }`; pass `needs.review.result` as `summary-result`;
-    replace `always()` with `!cancelled()`; drop `needs.lock.result == 'cancelled'` from
-    `run-cancelled`."""
+    Mutations: drop `&& needs.run.outputs.posted != 'true'`; drop
+    `needs.run.outputs.unbound != 'true' &&`; flip its `!=` to `==`; drop `&& !inputs.auto`;
+    drop `run` from `needs`; `permissions: { pull-requests: write }`; pass
+    `needs.run.outputs.review_result` as `summary-result`; replace `always()` with
+    `!cancelled()`; widen the call-result clause to `needs.run.result != 'success'` (a call that
+    failed before `review` reported reads as cancelled); drop its `needs.run.result ==
+    'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a call
+    that ended `cancelled` after `review` succeeded, with `run_cancelled` false, reads as
+    cancelled instead of summary cancelled or ended); drop its `run_cancelled == 'true' ||`
+    clause (a mid-run cancel reads as ended). The constant pins each: the expression is never
+    evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
-        "needs": [*_APPLY_NEEDS, "summary"],
+        "needs": ["guard", "run"],
         "if": (
-            "${{ always() && needs.guard.result == 'success' && inputs.pr_number != '' && "
-            "needs.summary.outputs.posted != 'true' && "
-            "(needs.review.result != 'failure' || "
-            "(needs.review.outputs.unbound != 'true' && !inputs.auto)) }}"
+            "${{ always() && needs.guard.result == 'success' && "
+            "needs.run.outputs.posted != 'true' && "
+            "(needs.run.outputs.review_result != 'failure' || "
+            "(needs.run.outputs.unbound != 'true' && !inputs.auto)) }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -270,16 +293,12 @@ def test_the_apply_outcome_job_is_wired_exactly():
                     "verb": "apply",
                     "environment": "${{ inputs.environment }}",
                     "pr-number": "${{ inputs.pr_number }}",
-                    "review-result": "${{ needs.review.result }}",
-                    "summary-result": "${{ needs.summary.result }}",
+                    "review-result": "${{ needs.run.outputs.review_result }}",
+                    "summary-result": "${{ needs.run.outputs.summary_result }}",
                     "run-cancelled": (
-                        "${{ needs.review.result == 'cancelled' || "
-                        "needs.detect.result == 'cancelled' || "
-                        "needs.lock.result == 'cancelled' || "
-                        "needs.envlevel0.result == 'cancelled' || "
-                        "needs.envlevel1.result == 'cancelled' || "
-                        "needs.envlevel2.result == 'cancelled' || "
-                        "needs.envlevel3.result == 'cancelled' }}"
+                        "${{ needs.run.outputs.run_cancelled == 'true' || "
+                        "((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && "
+                        "needs.run.outputs.review_result == '') }}"
                     ),
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",

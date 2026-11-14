@@ -388,7 +388,7 @@ actual work here:
   deploy paths reach the key the same way: a `workflow_dispatch` on the default
   branch, which comment-ops sends and any workflow's own `GITHUB_TOKEN` can also
   send, or `push` to the default branch. Either way the run executes only the
-  default branch's workflow code, and `apply.yml`'s `review` job binds an apply
+  default branch's workflow code, and `apply-run.yml`'s `review` job binds an apply
   dispatch's inputs to its pull request (`CONTRACT.md` §Comment-ops). The unlock
   dispatch reaches no key (`docs/hardening.md` names its residual). The
   `release` job reaches it on `pull_request_target` `closed`, at the base branch

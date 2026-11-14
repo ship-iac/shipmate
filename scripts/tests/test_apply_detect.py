@@ -854,10 +854,10 @@ def test_main_names_a_reviewed_env_applied_with_no_review_required(
 
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
-    key on the apply path is caught. apply.yml reads the four `envlevelN_waves`, the four
+    key on the apply path is caught. apply-run.yml reads the four `envlevelN_waves`, the four
     `envlevelN_empty`, `head_sha`, `review_not_required_envs`, `waiting_cells` and
     `env_order`; a targeted apply is env-level 0 alone, so levels 1-3 must say `true` or
-    apply.yml runs them into `fromJSON('')`.
+    apply-run.yml runs them into `fromJSON('')`.
 
     Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
     `envlevel1`."""
