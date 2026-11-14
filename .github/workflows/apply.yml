@@ -96,8 +96,9 @@ jobs:
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
-      # An output that did not arrive reads empty, never the refused text. A call that ended
-      # before `review` reported (cancelled while queued, or skipped by a run cancel) is a cancel.
+      # An output that did not arrive reads empty, never the refused text. A call cancelled or
+      # skipped before `review` reported counts as a cancel; a call that failed before it
+      # reported gets the ended text.
       - uses: $/actions/outcome-reply
         with:
           verb: apply

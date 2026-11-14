@@ -3797,7 +3797,9 @@ where `<url>` links the run that posts the reply. The verdict line is one of:
 queue (§Comment-ops, "One apply run per pull request"), and reads the inner run
 only through `apply-run.yml`'s outputs: `review_result`, `unbound`, `posted`,
 `summary_result` and `run_cancelled`, plus the `run` job's own result, which it folds into the `run-cancelled`
-input; `actions/outcome-reply` takes the same inputs from both callers. An output
+input. `plan.yml` passes `actions/outcome-reply` the verb, the pull request and
+the `summary` result, with `run-cancelled` fixed to `false`; `apply.yml` also
+passes `review-result`, `environment` and a computed `run-cancelled`. An output
 that did not arrive reads empty: every one when the call was cancelled while it
 waited in the queue, and a job's own when that job never ran. A call that
 failed, or was cancelled after its jobs started, still passes the results and

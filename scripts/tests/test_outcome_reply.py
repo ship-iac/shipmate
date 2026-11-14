@@ -4,8 +4,8 @@ plan `outcome` jobs call it only then.
 The reply step picks its text from inputs only: in a job that starts after a run cancel, a
 step-level `cancelled()` is false, so the apply job passes the cancel in as `run-cancelled`. The
 apply `outcome` reads `apply-run.yml`'s outputs, which all read empty when the run was cancelled
-while it waited in the queue, so its `run-cancelled` also reads a call that ended before
-`review` reported as a cancel.
+while it waited in the queue, so a call cancelled or skipped before `review` reported counts as
+a cancel; a call that failed before it reported gets the ended text.
 """
 
 import os
@@ -193,9 +193,9 @@ def _run(tmp_path, inputs, *, rc=0):
 def test_each_case_posts_its_whole_body(tmp_path, case):
     """Mutations: swap the run-cancelled and summary-cancelled texts in the `elif` chain; swap the
     run-cancelled and summary-cancelled conditions; drop the run-cancelled branch (a cancelled run
-    whose summary was cancelled reads as a summary cancel); drop the `verb` check from the
-    summary-cancelled text; post with `github.token` in place of the minted token; drop the
-    run-cancelled branch (the call that ended before review reads as ended)."""
+    whose summary was cancelled reads as a summary cancel, and the call that ended before
+    review reads as ended); drop the `verb` check from the
+    summary-cancelled text; post with `github.token` in place of the minted token."""
     inputs, body = SELECTIONS[case]
     proc, calls = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -270,9 +270,11 @@ def test_the_apply_outcome_job_is_wired_exactly():
     `needs.run.outputs.review_result` as `summary-result`; replace `always()` with
     `!cancelled()`; widen the call-result clause to `needs.run.result != 'success'` (a call that
     failed before `review` reported reads as cancelled); drop its `needs.run.result ==
-    'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a failed
-    review reads as cancelled); drop its `run_cancelled == 'true' ||` clause (a mid-run cancel
-    reads as ended). The constant pins each: the expression is never evaluated here."""
+    'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a call
+    that ended `cancelled` after `review` succeeded, with `run_cancelled` false, reads as
+    cancelled instead of summary cancelled or ended); drop its `run_cancelled == 'true' ||`
+    clause (a mid-run cancel reads as ended). The constant pins each: the expression is never
+    evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
         "needs": ["guard", "run"],
         "if": (

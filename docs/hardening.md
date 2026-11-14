@@ -24,8 +24,9 @@ none (`CONTRACT.md` §Comment-ops). An apply dispatch that passes `review`
 holds its pull request's apply queue for its whole run, so the pull request's
 other apply runs wait behind it; sending one needs write access to the
 repository. Any bot-actor apply dispatch with a canonical `pr_number` takes a
-slot in that queue once `guard` passes, before `review` runs, so a flood of 100
-such dispatches makes a real `shipmate apply` arrive at a full queue and be
+slot in that queue once `guard` passes, before `review` runs, so a flood of 101
+such dispatches into an idle group (one runs, 100 wait), or 100 behind a run
+already holding it, makes a real `shipmate apply` arrive at a full queue and be
 cancelled. Both the flood and the single held run need write access to the
 repository. The unlock dispatch is not bound: it takes
 `{environment, ref}` and runs `tofu init` over that ref inside `<env>-apply`
