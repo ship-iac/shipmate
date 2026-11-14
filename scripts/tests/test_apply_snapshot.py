@@ -56,6 +56,35 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
     assert out["apply / stacks/dns / dev-eu"] == [1, 5]
 
 
+def test_a_completed_duplicate_is_dropped_and_the_open_one_kept():
+    """A later write would relink or retitle a completed check. Mutation: keep every id,
+    whatever its status -> dns maps to [1, 5]."""
+    runs = [
+        {**check("apply / stacks/dns / dev-eu", 1), "status": "queued"},
+        {**check("apply / stacks/dns / dev-eu", 5), "status": "completed"},
+        {**check("apply / stacks/app / dev-eu", 2), "status": "in_progress"},
+    ]
+    assert apply_snapshot.snapshot(WAVES, runs, APP_ID) == {
+        "apply / stacks/dns / dev-eu": [1],
+        "apply / stacks/app / dev-eu": [2],
+    }
+
+
+def test_a_cell_whose_only_check_is_completed_fails_the_whole_run():
+    """Mutation: keep every id, whatever its status -> no refusal."""
+    runs = [
+        check("apply / stacks/dns / dev-eu", 1),
+        {**check("apply / stacks/app / dev-eu", 2), "status": "completed"},
+    ]
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.snapshot(WAVES, runs, APP_ID)
+    assert str(exc.value) == (
+        "::error::no App-authored apply check named 'apply / stacks/app / dev-eu' that is not "
+        "yet completed on the head SHA before apply; this cell would apply with nothing to "
+        "complete afterwards, stranding its check pending. Re-plan."
+    )
+
+
 def test_a_single_cell_with_no_apply_check_fails_the_whole_run():
     # Excluding the cell instead would let it apply for real with no id for the trailing
     # completer to PATCH: its check stays pending forever, the gate stays pending with it, and a

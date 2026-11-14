@@ -12,7 +12,8 @@ planned, the sha256 of the plan text that run published, on either branch, and
 `cells`, the number of cells that run planned, against which apply judges whether
 the run published every check, and `action`, the plan run's event action (`""` when its
 payload names none, as a `shipmate plan` dispatch's does), which the auto apply requires
-to be a push's. That digest is computed here, over the whole
+to be a push's, and `title`, the check's own output title, which a successful apply restores
+after a failed one retitled the check. That digest is computed here, over the whole
 plan.txt this job downloaded, never copied from the cell: it is what binds the
 reviewed text to the plan apply executes. The comment and the check embed capped prefixes of
 the same file, so the digest covers at least what a reviewer saw and often more.
@@ -120,10 +121,18 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
             "one commit, then re-plan (comment shipmate plan or push)."
         )
     plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
-    out = {
+    if cell["changed"]:
+        status, output = {"status": "queued"}, check_output(cell, txt, url)
+    else:
+        status = {"status": "completed", "conclusion": "neutral"}
+        output = {
+            "title": "no changes",
+            "summary": "Plan produced no changes for this stack x environment.",
+        }
+    return {
         "name": name,
         "head_sha": head_sha,
-        "status": "queued",
+        **status,
         "external_id": json.dumps(
             {
                 "fingerprint": cell["fingerprint"],
@@ -132,19 +141,11 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
                 "pr": pr,
                 "cells": cells,
                 "action": action,
+                "title": output["title"],
             }
         ),
+        "output": output,
     }
-    if cell["changed"]:
-        out["output"] = check_output(cell, txt, url)
-    else:
-        out["status"] = "completed"
-        out["conclusion"] = "neutral"
-        out["output"] = {
-            "title": "no changes",
-            "summary": "Plan produced no changes for this stack x environment.",
-        }
-    return out
 
 
 def published(check_run_lines, app_id, plan_run):
