@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """The cross-pull-request cell lock store: one git ref per locked cell.
 
+A holder is stacked on a pull request when it is open and a chain of open or merged pull
+requests leads from its base branch to that pull request's head branch, at any depth
+(`_chain`).
+
 A cell `<stack>` in `<env>` is locked by the ref `refs/shipmate/locks/<env>/<cell_key(stack)>`,
 which targets a parentless commit whose message is one line of JSON,
 `{"pr": <int>, "env": <str>, "stack": <str>, "acquisition": "<run id>.<run attempt>"}`. Its
@@ -26,16 +30,18 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
   on the cells whose apply check on `SHIPMATE_HEAD_SHA` is pending (failed and cancelled
   included); writes outputs `evicted` and `refused` (the locks whose delete refused, each also
-  an `::error::`) before refusing. Refuses before any delete, writing neither, when a holder is
-  open with `SHIPMATE_HEAD_REF` as its base branch (stacked; it also writes `blocked=true`) or
-  cannot be read; then, when a known holder remains, while a run of `shipmate.yml` may still
-  apply that holder's cells, or the runs cannot all be read (`_refuse_live_runs`). Refuses
-  before any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is empty.
+  an `::error::`) before refusing. Refuses before any delete, writing neither, naming every
+  `blocking` holder and every holder whose read failed or answered malformed (`blocked=true`
+  when any is blocking); then, when a known holder remains, while a run of `shipmate.yml` may
+  still apply that holder's cells, or the runs cannot all be read (`_refuse_live_runs`).
+  Refuses before any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is empty, and
+  reads no holder's pull request for stacking when the two are equal.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
-  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds, and `stacked`, the
-  sorted JSON list of those holders that are open with `SHIPMATE_HEAD_REF` as their base branch
-  (empty reads none).
-  A holder whose pull request read fails is left out with a `::warning::`.
+  `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds; `stacked`,
+  `{"<holder>": [chain]}` for those holders stacked on `SHIPMATE_HEAD_REF` (`_chain`);
+  `stacked_unknown`, `{"<holder>": "<reason>"}` for those whose walk was cut short, each with a
+  `::warning::`; and `blocking`, the sorted JSON list of the holders an `evict` refuses
+  (`blocking`). `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` empty reads none.
 - `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
   `STACK` in `SHIPMATE_ENV`, is open at `SHIPMATE_HEAD_SHA` and `GITHUB_RUN_ATTEMPT` is `1`.
   With `SHIPMATE_AUTO` `true` it also refuses unless the pull request is not a draft,
@@ -57,10 +63,12 @@ import hashlib
 import json
 import os
 import sys
+import urllib.parse
 from collections.abc import Iterable
 
 from _shipmate import (
     READ_ERRORS,
+    REASON_CAP,
     SHIPMATE_WORKFLOW,
     _load,
     _run,
@@ -79,6 +87,7 @@ from _shipmate import (
     lock_who,
     retried,
     run_annotated,
+    stacked_through,
     write_outputs,
 )
 
@@ -435,8 +444,9 @@ def _delete_each(repo, locks, run):
     return gone, refused
 
 
-class Stacked(SystemExit):
-    """`evict`'s refusal naming the holders stacked on the evicting pull request."""
+class Blocked(SystemExit):
+    """`evict`'s refusal that commenting again cannot pass: a holder stacked on the evicting
+    pull request, or one whose walk ran out of pages."""
 
 
 def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *, run=_run):
@@ -445,38 +455,76 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     refusal does not stop the rest, so every lock deleted is reported and its holder told. An
     unreadable repository id refuses before any delete.
 
-    Before any delete, each known holder is read once (`_is_stacked` against `head_ref`, the
-    evicting pull request's head branch). Any holder stacked on it raises `Stacked`, one line
-    per stacked holder naming `default_branch`; otherwise a holder whose read fails or answers
-    malformed refuses. Then, while a known holder remains, `_refuse_live_runs` reads the runs.
-    Either way nothing is deleted."""
+    Before any delete, each known holder is walked (`_read_stacked` against `head_ref`, the
+    evicting pull request's head branch). Any holder stacked on it, or whose walk is cut short,
+    refuses in one message (`_refusal`) naming every such holder with its reason: stacked ones
+    naming their chain and `default_branch`, then the other `blocking` ones, then those whose
+    read failed or answered malformed. It raises `Blocked` when any is `blocking`. Then, while a
+    known holder remains, `_refuse_live_runs` reads the runs. Either way nothing is deleted."""
     wanted = {ref_name(env, s) for s in stacks}
     locks = read_locks(repo, [env], run=run).values()
     locks = [lock for lock in locks if lock.ref in wanted and lock.pr != pr]
     held = collections.Counter(lock.pr for lock in locks if lock.pr is not None)
-    stacked, unread = _read_stacked(repo, held, head_ref, run)
-    if stacked:
-        raise Stacked(
-            "::error::"
-            + "\n".join(
-                f"#{holder} is stacked on this pull request and holds {held[holder]} of its "
-                f"cell(s) in {env}; applying this pull request after evicting it would "
-                f"overwrite what it applied. Retarget #{holder} to {default_branch} and merge "
-                "it first, or close it, which releases its locks."
-                for holder in stacked
-            )
-        )
-    if unread:
-        raise SystemExit(
-            "::error::"
-            + "\n".join(
-                f"could not tell whether #{holder} is stacked on this pull request: {why}"
-                for holder, why in unread
-            )
-        )
+    stacked, unknown = _read_stacked(repo, held, head_ref, default_branch, run)
+    blocks = blocking(stacked, unknown)
+    blocked = [
+        f"#{holder} is stacked on this pull request{stacked_through(chain)} and holds "
+        f"{held[holder]} of its cell(s) in {env}; applying this pull request after evicting it "
+        f"would overwrite what it applied. Retarget #{holder} to {default_branch} and merge it "
+        "first, or close it, which releases its locks."
+        for holder, chain in stacked.items()
+    ] + [
+        f"could not tell whether #{holder} is stacked on this pull request: {walk.reason}. "
+        f"Commenting again refuses the same way: retarget #{holder} to {default_branch}, or "
+        "wait until it merges or closes, after which the eviction is not blocked by it."
+        for holder, walk in unknown.items()
+        if holder in blocks
+    ]
+    unread = [
+        f"could not tell whether #{holder} is stacked on this pull request: {walk.reason}"
+        for holder, walk in unknown.items()
+        if holder not in blocks
+    ]
+    if blocked or unread:
+        raise (Blocked if blocked else SystemExit)(_refusal(blocked + unread))
     if held:
         _refuse_live_runs(repo, env, set(held), run)
     return _delete_each(repo, locks, run)
+
+
+def blocking(stacked, unknown):
+    """The holders an eviction refuses, sorted: each in `stacked`, and each `Unknown` in
+    `unknown` whose walk ran out of pages, which commenting again reads the same. `evict`
+    refuses on them and `marks` writes them, so the plan comment offers no eviction they
+    block."""
+    return sorted(stacked.keys() | {h for h, walk in unknown.items() if walk.exhausted})
+
+
+def _refusal(sentences, what="holder(s)"):
+    """`sentences` (at least one) as one `::error::`, one per line. When `run_annotated`'s
+    `refusal` output (the lines joined by spaces) would pass `REASON_CAP`, that first error
+    keeps the leading whole sentences that fit and ends `and <n> more <what>; the run log
+    names every one`, and a second error carries the rest, so the log still names every one.
+    When not even the first sentence fits beside that tail, the first error keeps the first
+    sentence cut to fit and ending `...`, then the tail (`the run log has it in full` for a lone
+    sentence), and the second error carries every sentence whole."""
+    for kept in range(len(sentences), 0, -1):
+        rest = sentences[kept:]
+        first = [*sentences[:kept], *([_more(len(rest), what)] if rest else [])]
+        if len(" ".join(first)) <= REASON_CAP:
+            return _errors(first, rest)
+    tail = _more(len(sentences) - 1, what) if len(sentences) > 1 else "the run log has it in full"
+    cut = sentences[0][: REASON_CAP - len(tail) - 4]
+    return _errors([f"{cut}...", tail], sentences)
+
+
+def _more(n, what):
+    return f"and {n} more {what}; the run log names every one"
+
+
+def _errors(first, rest):
+    errors = ["\n".join(first), "\n".join(rest)]
+    return "\n".join(f"::error::{e}" for e in errors if e)
 
 
 def _refuse_live_runs(repo, env, holders, run):
@@ -484,7 +532,8 @@ def _refuse_live_runs(repo, env, holders, run):
     `apply` or `auto` run titled for one, a live dispatch run whose title does not parse, or a
     live deploy run of a merged holder's merge commit (`_deploy_runs`, after the dispatch
     listings). A failed or incomplete read refuses too; every line found is kept, so the
-    refusal names them all. A point-in-time check: a run started after its read is not seen."""
+    refusal names them all, under one header (`_refusal`, which keeps the reply under
+    `REASON_CAP`). A point-in-time check: a run started after its read is not seen."""
     found, complete = holder_dispatch_runs(repo, holders, run)
     lines = [] if complete else [f"could not list the live runs of {SHIPMATE_WORKFLOW}"]
     lines += [
@@ -497,11 +546,11 @@ def _refuse_live_runs(repo, env, holders, run):
     for holder in sorted(holders):
         lines += _deploy_runs(repo, holder, run)
     if lines:
-        raise SystemExit(
-            f"::error::no cell lock in {env} was released: a holder's run may still apply, or "
-            "the check could not tell. Wait for each run below to end, then comment again.\n"
-            + "\n".join(lines)
+        header = (
+            f"no cell lock in {env} was released: a holder's run may still apply, or the check "
+            "could not tell. Wait for each run below to end, then comment again."
         )
+        raise SystemExit(_refusal([header, *lines], "line(s)"))
 
 
 def _deploy_runs(repo, holder, run):
@@ -610,7 +659,7 @@ def _evict_cmd(repo, pr, run):
     by_ref = {ref_name(env, s): s for s in stacks}
     try:
         gone, refused = evict(repo, env, pr, stacks, head_ref, default_branch, run=run)
-    except Stacked:
+    except Blocked:
         write_outputs(blocked=True)
         raise
 
@@ -633,51 +682,192 @@ def _marks_cmd(repo, pr, run):
         )
     held = foreign(read_locks(repo, {c["environment"] for c in cells}, run=run), cells, pr)
     holders = {h["holder"] for h in held} - {None}
+    head_ref, default_branch = (
+        os.environ.get(k, "") for k in ("SHIPMATE_HEAD_REF", "SHIPMATE_DEFAULT_BRANCH")
+    )
+    stacked, unknown = _stacked(repo, holders, head_ref, default_branch, run)
+    # JSON object keys are strings: `summary-comment.stacked_marks` converts them back.
     write_outputs(
         locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held}),
-        stacked=json.dumps(_stacked(repo, holders, os.environ.get("SHIPMATE_HEAD_REF", ""), run)),
+        stacked=json.dumps({h: list(chain) for h, chain in stacked.items()}),
+        stacked_unknown=json.dumps({h: w.reason for h, w in unknown.items()}),
+        blocking=json.dumps(blocking(stacked, unknown)),
     )
 
 
-def _stacked(repo, holders, head_ref, run):
-    """The `holders` whose pull request is open with `head_ref` as its base branch, sorted.
-    Reviewer-facing, so a failed read warns and leaves that holder out."""
-    if not head_ref:
-        return []
-    # Reviewer-facing and read once per holder in every plan summary: a failure
-    # warns at once rather than holding the summary for the retries.
-    stacked, unread = _read_stacked(repo, holders, head_ref, run, retry=False)
-    for holder, why in unread:
+def _stacked(repo, holders, head_ref, default_branch, run):
+    """`_read_stacked` of `holders` read once each, `({}, {})` when either branch is empty.
+    Reviewer-facing, so an unknown holder warns and never blocks."""
+    if not (head_ref and default_branch):
+        return {}, {}
+    # Reviewer-facing and walked per holder in every plan summary: a failure
+    # reads as unknown at once rather than holding the summary for the retries.
+    stacked, unknown = _read_stacked(repo, holders, head_ref, default_branch, run, retry=False)
+    for holder, walk in unknown.items():
         print(
-            f"::warning::could not read pull request #{holder} ({command_data(why)}), "
-            "so the plan comment does not say whether it is stacked on this pull request"
+            f"::warning::could not tell whether #{holder} is stacked on this pull request "
+            f"({command_data(walk.reason)}); the plan comment says so"
         )
-    return stacked
+    return stacked, unknown
 
 
-def _read_stacked(repo, holders, head_ref, run, *, retry=True):
-    """Each of `holders` read once, in sorted order, through `gh_json`'s retry when `retry` is
-    set: (the holders `_is_stacked` on `head_ref`,
-    [(holder, `_why` reason)] for each whose read fails or answers malformed)."""
-    stacked, unread = [], []
+@dataclasses.dataclass(frozen=True)
+class OnChain:
+    """`_chain`'s stacked verdict. `chain` lists the pull requests between this pull request
+    and the holder, from this one outward; empty when the holder is based on this one's head."""
+
+    chain: tuple[int, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class Unknown:
+    """`_chain`'s verdict when the walk is cut short: `exhausted` when it ran out of pages
+    (commenting again reads the same), else a read failed or answered malformed."""
+
+    reason: str
+    exhausted: bool
+
+
+#: List pages one holder's walk may read: bounds a cycle, a deep chain and many forks alike.
+WALK_PAGES = 20
+_LIST_PAGE = 100
+
+
+class _Exhausted(Exception):
+    pass
+
+
+def _list_path(repo, branch, page):
+    owner = repo.split("/", 1)[0]
+    head = urllib.parse.quote(f"{owner}:{branch}", safe="")
+    return f"repos/{repo}/pulls?state=all&head={head}&per_page={_LIST_PAGE}&page={page}"
+
+
+def _followed(entries, branch, repo):
+    """`(number, base branch)` of each entry of a listing of `branch` the walk follows: head
+    `branch` in `repo`, and open, or closed with `merged_at` set (its commits are in its base;
+    the list has no `merged` field). A malformed filter lists every pull request, so another
+    head is skipped, as is a deleted fork's null head repository. Raises on a malformed
+    entry."""
+    out = []
+    for e in entries:
+        head, state, number, base = e["head"], e["state"], e["number"], e["base"]["ref"]
+        if not (
+            all(isinstance(v, str) for v in (head["ref"], state, base)) and type(number) is int
+        ):
+            raise ValueError("a pull request listing entry is malformed")
+        if head["ref"] != branch or head["repo"] is None:
+            continue
+        if head["repo"]["full_name"].lower() != repo.lower():
+            continue
+        if state == "open" or (state == "closed" and e["merged_at"] is not None):
+            out.append((number, base))
+    return out
+
+
+class _Pages:
+    """One holder's reader of pull request listings, charging each page to its budget."""
+
+    def __init__(self, repo, run, memo, retry):
+        self.repo, self.run, self.memo, self.retry, self.spent = repo, run, memo, retry, 0
+
+    def _page(self, branch, n):
+        if self.spent == WALK_PAGES:
+            raise _Exhausted
+        self.spent += 1
+        memo = self.memo
+        if (branch, n) not in memo:
+            try:
+                memo[branch, n] = gh_json(
+                    _list_path(self.repo, branch, n), self.run, retry=self.retry
+                )
+            except (SystemExit, ValueError) as exc:
+                memo[branch, n] = exc
+        if isinstance(memo[branch, n], (SystemExit, ValueError)):
+            raise memo[branch, n]
+        return memo[branch, n]
+
+    def links(self, branch):
+        """`_followed` over every page of `branch`'s listing, sorted; a short page ends it."""
+        out, n = [], 1
+        while True:
+            entries = self._page(branch, n)
+            if not isinstance(entries, list):
+                raise ValueError(f"page {n} of a pull request listing is not a list")
+            out += _followed(entries, branch, self.repo)
+            if len(entries) < _LIST_PAGE:
+                return sorted(out)
+            n += 1
+
+
+def _walk(pages, base, head_ref, default_branch):
+    """`OnChain` with a shortest chain when a path of followed pull requests leads from `base`
+    to `head_ref`, else None. Breadth-first, each branch's links in sorted order, and each link
+    is tested against `head_ref` as it is found, so a near path wins before a wide subgraph
+    spends the page budget. A path ends at `default_branch` and at a branch already queued."""
+    if base == head_ref:
+        return OnChain(())
+    queue, seen = collections.deque([(base, ())]), {base}
+    while queue:
+        branch, path = queue.popleft()
+        if branch == default_branch:
+            continue
+        for number, onto in pages.links(branch):
+            if onto == head_ref:
+                return OnChain(tuple(reversed((*path, number))))
+            if onto not in seen:
+                seen.add(onto)
+                queue.append((onto, (*path, number)))
+    return None
+
+
+def _chain(repo, pull, head_ref, default_branch, run, memo, *, retry):
+    """Whether the holder read as `pull` is stacked on the pull request whose head is
+    `head_ref`, one of three verdicts: `OnChain` when it is open and a path of followed pull
+    requests (`_followed`, `_walk`) leads from its base branch to `head_ref`; `Unknown` when
+    the walk is cut short; else None (not stacked). A merged or closed holder is not stacked:
+    it will not merge after this one.
+
+    Each listing page costs the holder one of `WALK_PAGES`, also when `memo` (`{(branch, page):
+    answer}`, shared across holders) already holds it, so a verdict never depends on which
+    holder was walked first. The first decisive event wins: a link reaching `head_ref` is
+    `OnChain`; running out of pages, or a read that fails or answers malformed, is
+    `Unknown`."""
+    try:
+        base, state = pull["base"]["ref"], pull["state"]
+        if not (isinstance(base, str) and isinstance(state, str)):
+            raise ValueError(f"base.ref {base!r}, state {state!r}")
+        if state != "open":
+            return None
+        return _walk(_Pages(repo, run, memo, retry), base, head_ref, default_branch)
+    except _Exhausted:
+        why = f"its chain of base branches needs more than {WALK_PAGES} pages of pull requests"
+        return Unknown(why, exhausted=True)
+    except (SystemExit, LookupError, TypeError, ValueError, AttributeError) as exc:
+        return Unknown(_why(exc), exhausted=False)
+
+
+def _read_stacked(repo, holders, head_ref, default_branch, run, *, retry=True):
+    """Each of `holders` read once and walked (`_chain`), in sorted order, through `gh_json`'s
+    retry when `retry` is set: ({holder: chain} for each `OnChain`, {holder: `Unknown`} for
+    each whose read fails or answers malformed, or whose walk is cut short). Nothing is stacked
+    on the default branch, so a `head_ref` equal to `default_branch` reads no holder, and a
+    holder read that would fail cannot refuse an eviction as unread or warn there."""
+    stacked, unknown, memo = {}, {}, {}
+    if head_ref == default_branch:
+        return stacked, unknown
     for holder in sorted(holders):
         try:
             pull = gh_json(f"repos/{repo}/pulls/{holder}", run, retry=retry)
-            if _is_stacked(pull, head_ref):
-                stacked.append(holder)
         except READ_ERRORS as exc:
-            unread.append((holder, _why(exc)))
-    return stacked, unread
-
-
-def _is_stacked(pull, head_ref) -> bool:
-    """Whether the pull request read as `pull` is open with `head_ref` as its base branch. A
-    closed or merged one is not: it will not merge after this one. Raises unless `base.ref` and
-    `state` are strings."""
-    base, state = pull["base"]["ref"], pull["state"]
-    if not (isinstance(base, str) and isinstance(state, str)):
-        raise ValueError(f"base.ref {base!r}, state {state!r}")
-    return base == head_ref and state == "open"
+            unknown[holder] = Unknown(_why(exc), exhausted=False)
+            continue
+        walk = _chain(repo, pull, head_ref, default_branch, run, memo, retry=retry)
+        if isinstance(walk, OnChain):
+            stacked[holder] = walk.chain
+        elif isinstance(walk, Unknown):
+            unknown[holder] = walk
+    return stacked, unknown
 
 
 def _why(exc):
