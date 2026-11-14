@@ -234,7 +234,7 @@ completion job's failure never fails the level (job-level
 `continue-on-error: true`): `complete` handles every check of the level again.
 `complete` fails the level, and leaves a cell's check as it was (`in_progress`
 when it was flipped), when the jobs listing never shows that cell's job in a wave
-that ran; the gate stays pending, and the next run's `snapshot` writes it again.
+that ran, or in a cancelled wave whose other cells it lists; the gate stays pending, and the next run's `snapshot` writes it again.
 A success from any listing attempt is kept, so a later, staler listing never
 turns a completed check back to `queued`. "Re-run failed jobs" skips `snapshot`
 and reuses its outputs.
@@ -258,10 +258,11 @@ wave cell's pre-apply check refuses:
 Its release jobs write nothing, and its completion jobs write only `success`: a
 later run may have completed the same checks, and any other write would reopen
 them, but re-running a completion job can still complete a cell an earlier
-listing missed. A merge deploy's re-run is allowed. "Re-run failed jobs" re-runs
-the failed wave and its dependents: a later wave's release, skipped the first
-time, runs then and flips its checks. "Re-run all jobs" re-runs every release. A
-retried cell whose release is not re-run applies while its check reads `queued`
+listing missed. A merge deploy's re-run is allowed. On a merge deploy, "Re-run
+failed jobs" re-runs the failed wave and its dependents: a later wave's release,
+skipped the first time, runs then and flips its checks. On a merge deploy, "Re-run
+all jobs" re-runs `snapshot` and every release, so it starts from the checks that
+are still open. A retried cell whose release is not re-run applies while its check reads `queued`
 with the first attempt's title (`Failed: ...`), and the re-run's completion jobs
 and `complete` write its outcome.
 
@@ -276,6 +277,10 @@ dead run.
 
 Accepted limits:
 
+- When every cell of a cancelled wave is missing from the listing while the
+  level's literal row is listed, its cells are written `Not run`, even if a cell
+  started before the cancel; the check returns to `queued` either way (fail
+  closed), and only the title differs.
 - `in_progress` marks the wave's release, not the cell's start, and lands after
   a runner delay: a cell waiting on an environment approval, or on a concurrency
   group inside its wave, already reads `in_progress`.

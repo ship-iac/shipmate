@@ -42,7 +42,10 @@ that literal row, `cancelled`, under this job's own level (`SHIPMATE_JOB_ID`, th
 run id, names the level) and lists no cell of the same wave. Any other missing cell, of a
 wave that ran (`success` or `failure`, or a result this script does not know), is a lost or
 lagging listing: it is retried, and after the retries the cell gets no write, so a stale
-listing never turns a completed `success` back to `queued`.
+listing never turns a completed `success` back to `queued`. Accepted limit: when every cell of
+a cancelled wave is missing while that literal row is listed, the cells are written `Not run`
+even if one started before the cancel; the check returns to `queued` either way, and only the
+title differs.
 """
 
 import json
