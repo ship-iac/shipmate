@@ -376,7 +376,7 @@ request that is not a draft, with a folded section naming, in apply order,
 changed cell and `shipmate apply` once, at the first changed environment that is
 not targeted, then `shipmate unlock <env> --evict` for an environment holding a
 locked changed cell, unless a holder there is stacked on the pull request or
-cannot be told apart from one, and
+its walk ran out of pages, and
 `shipmate help`; it is off when absent. `tools` names the Terramate and
 OpenTofu versions every job installs, each the pinned engine's default when
 absent.
@@ -794,10 +794,11 @@ a draft — the six apply requirements in
 names which requirement failed. Each cell an apply runs is locked to the pull
 request until it merges or closes; another pull request's apply leaves that
 cell pending and names the holder, and `shipmate unlock <env> --evict` releases
-the lock on a cell the commenting pull request still applies. Any holder stacked
-on the commenting pull request, through a chain of pull requests at any depth,
-refuses the whole command and releases nothing; a holder whose pull request
-cannot be read refuses too, and the reply says to comment again
+the lock on a cell the commenting pull request still applies. The whole command
+refuses and releases nothing, naming each holder and its cause, when a holder is
+stacked on the commenting pull request through a chain of pull requests at any
+depth, when a read of a holder failed (comment again), or when a holder's walk
+ran out of pages (commenting again will not change it)
 ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks). Stacking pull requests that
 change the same cells is not recommended: while a holder is stacked, eviction
 refuses, and the holder has to be retargeted to the default branch and merged

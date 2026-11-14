@@ -30,15 +30,16 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
   on the cells whose apply check on `SHIPMATE_HEAD_SHA` is pending (failed and cancelled
   included); writes outputs `evicted` and `refused` (the locks whose delete refused, each also
-  an `::error::`) before refusing. Refuses before any delete, writing neither, when a holder is
-  stacked on `SHIPMATE_HEAD_REF` (`_chain`) or its walk ran out of pages (both also write
-  `blocked=true`), or when a holder read fails or answers malformed; and before any read when
-  `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is empty.
+  an `::error::`) before refusing. Refuses before any delete, writing neither, naming every
+  holder stacked on `SHIPMATE_HEAD_REF` (`_chain`), whose walk ran out of pages, or whose read
+  failed or answered malformed (`blocked=true` when any is one of the first two); and before
+  any read when `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` is empty.
 - `marks`: writes output `locks`, `{"<stack> / <env>": holder}` for each cell of
   `SHIPMATE_CELLS` another pull request (or an unknown holder, `null`) holds; `stacked`,
   `{"<holder>": [chain]}` for those holders stacked on `SHIPMATE_HEAD_REF` (`_chain`); and
-  `stacked_unknown`, `{"<holder>": "<reason>"}` for those whose walk was cut short, each with
-  a `::warning::`. `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` empty reads none.
+  `stacked_unknown`, `{"<holder>": {"reason": "<reason>", "exhausted": <bool>}}` for those
+  whose walk was cut short (`exhausted` when it ran out of pages), each with a `::warning::`.
+  `SHIPMATE_HEAD_REF` or `SHIPMATE_DEFAULT_BRANCH` empty reads none.
 - `verify`: the pre-apply check, read-only; refuses unless the pull request holds the lock on
   `STACK` in `SHIPMATE_ENV`, is open at `SHIPMATE_HEAD_SHA` and `GITHUB_RUN_ATTEMPT` is `1`.
   With `SHIPMATE_AUTO` `true` it also refuses unless the pull request is not a draft,
@@ -57,7 +58,6 @@ import dataclasses
 import datetime
 import functools
 import hashlib
-import itertools
 import json
 import os
 import sys
@@ -448,10 +448,11 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
     unreadable repository id refuses before any delete.
 
     Before any delete, each known holder is walked (`_read_stacked` against `head_ref`, the
-    evicting pull request's head branch). A holder stacked on it, or one whose walk ran out of
-    pages, raises `Blocked`, one line per such holder, a stacked one naming its chain and
-    `default_branch`; otherwise a holder whose read fails or answers malformed refuses. Either
-    way nothing is deleted."""
+    evicting pull request's head branch). Any holder stacked on it, or whose walk is cut short,
+    refuses in one message naming every such holder with its reason: stacked ones naming their
+    chain and `default_branch`, then those whose walk ran out of pages, then those whose read
+    failed or answered malformed. It raises `Blocked` when any is stacked or ran out of pages.
+    Either way nothing is deleted."""
     wanted = {ref_name(env, s) for s in stacks}
     locks = read_locks(repo, [env], run=run).values()
     locks = [lock for lock in locks if lock.ref in wanted and lock.pr != pr]
@@ -470,16 +471,15 @@ def evict(repo, env: str, pr: int, stacks: set[str], head_ref, default_branch, *
         for holder, walk in unknown.items()
         if walk.exhausted
     ]
+    unread = [
+        f"could not tell whether #{holder} is stacked on this pull request: {walk.reason}"
+        for holder, walk in unknown.items()
+        if not walk.exhausted
+    ]
     if blocked:
-        raise Blocked("::error::" + "\n".join(blocked))
-    if unknown:
-        raise SystemExit(
-            "::error::"
-            + "\n".join(
-                f"could not tell whether #{holder} is stacked on this pull request: {walk.reason}"
-                for holder, walk in unknown.items()
-            )
-        )
+        raise Blocked("::error::" + "\n".join(blocked + unread))
+    if unread:
+        raise SystemExit("::error::" + "\n".join(unread))
     return _delete_each(repo, locks, run)
 
 
@@ -599,7 +599,9 @@ def _marks_cmd(repo, pr, run):
     write_outputs(
         locks=json.dumps({f"{h['stack']} / {h['environment']}": h["holder"] for h in held}),
         stacked=json.dumps({h: list(chain) for h, chain in stacked.items()}),
-        stacked_unknown=json.dumps({h: walk.reason for h, walk in unknown.items()}),
+        stacked_unknown=json.dumps(
+            {h: {"reason": w.reason, "exhausted": w.exhausted} for h, w in unknown.items()}
+        ),
     )
 
 
@@ -625,11 +627,6 @@ class OnChain:
     and the holder, from this one outward; empty when the holder is based on this one's head."""
 
     chain: tuple[int, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class NotStacked:
-    """`_chain`'s verdict that no path from the holder reaches this pull request's head."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -702,50 +699,58 @@ class _Pages:
 
     def links(self, branch):
         """`_followed` over every page of `branch`'s listing, sorted; a short page ends it."""
-        out = []
-        for n in itertools.count(1):
+        out, n = [], 1
+        while True:
             entries = self._page(branch, n)
             if not isinstance(entries, list):
                 raise ValueError(f"page {n} of a pull request listing is not a list")
             out += _followed(entries, branch, self.repo)
             if len(entries) < _LIST_PAGE:
                 return sorted(out)
-        return None
+            n += 1
 
 
-def _walk(pages, branch, path, head_ref, default_branch, visited):
-    """`OnChain` when a path from `branch` reaches `head_ref`, else None; `path` holds the pull
-    requests followed so far, from the holder inward."""
-    if branch == head_ref:
-        return OnChain(tuple(reversed(path)))
-    if branch == default_branch or branch in visited:
-        return None
-    visited.add(branch)
-    for number, base in pages.links(branch):
-        if found := _walk(pages, base, (*path, number), head_ref, default_branch, visited):
-            return found
+def _walk(pages, base, head_ref, default_branch):
+    """`OnChain` with a shortest chain when a path of followed pull requests leads from `base`
+    to `head_ref`, else None. Breadth-first, each branch's links in sorted order, and each link
+    is tested against `head_ref` as it is found, so a near path wins before a wide subgraph
+    spends the page budget. A path ends at `default_branch` and at a branch already queued."""
+    if base == head_ref:
+        return OnChain(())
+    queue, seen = collections.deque([(base, ())]), {base}
+    while queue:
+        branch, path = queue.popleft()
+        if branch == default_branch:
+            continue
+        for number, onto in pages.links(branch):
+            if onto == head_ref:
+                return OnChain(tuple(reversed((*path, number))))
+            if onto not in seen:
+                seen.add(onto)
+                queue.append((onto, (*path, number)))
     return None
 
 
 def _chain(repo, pull, head_ref, default_branch, run, memo, *, retry):
     """Whether the holder read as `pull` is stacked on the pull request whose head is
-    `head_ref`: open, and a path of followed pull requests (`_followed`) leads from its base
-    branch to `head_ref`. A merged or closed holder is `NotStacked`: it will not merge after
-    this one. A path stops at `default_branch` and at a branch it already visited.
+    `head_ref`, one of three verdicts: `OnChain` when it is open and a path of followed pull
+    requests (`_followed`, `_walk`) leads from its base branch to `head_ref`; `Unknown` when
+    the walk is cut short; else None (not stacked). A merged or closed holder is not stacked:
+    it will not merge after this one. Nothing is stacked on the default branch, so a
+    `head_ref` equal to `default_branch` reads None before any listing.
 
     Each listing page costs the holder one of `WALK_PAGES`, also when `memo` (`{(branch, page):
     answer}`, shared across holders) already holds it, so a verdict never depends on which
-    holder was walked first. Branches and links are walked in sorted order, and the first
-    decisive event wins: a path reaching `head_ref` is `OnChain`; running out of pages, or a
-    read that fails or answers malformed, is `Unknown`."""
+    holder was walked first. The first decisive event wins: a link reaching `head_ref` is
+    `OnChain`; running out of pages, or a read that fails or answers malformed, is
+    `Unknown`."""
     try:
         base, state = pull["base"]["ref"], pull["state"]
         if not (isinstance(base, str) and isinstance(state, str)):
             raise ValueError(f"base.ref {base!r}, state {state!r}")
-        if state != "open":
-            return NotStacked()
-        pages = _Pages(repo, run, memo, retry)
-        return _walk(pages, base, (), head_ref, default_branch, set()) or NotStacked()
+        if state != "open" or head_ref == default_branch:
+            return None
+        return _walk(_Pages(repo, run, memo, retry), base, head_ref, default_branch)
     except _Exhausted:
         why = f"its chain of base branches needs more than {WALK_PAGES} pages of pull requests"
         return Unknown(why, exhausted=True)

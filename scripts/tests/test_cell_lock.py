@@ -962,7 +962,9 @@ def test_marks_writes_the_stacked_holders_and_the_unknown_ones(monkeypatch, tmp_
             {"stacks/auth / dev": 12, "stacks/dns / dev": 9, "stacks/app / dev": 5}
         ),
         "stacked": '{"9": [10], "12": []}',
-        "stacked_unknown": '{"5": "command failed (1): gh api | HTTP 502"}',
+        "stacked_unknown": (
+            '{"5": {"reason": "command failed (1): gh api | HTTP 502", "exhausted": false}}'
+        ),
     }
     assert gh.drained()
     assert capsys.readouterr().out == (
@@ -1076,11 +1078,11 @@ def test_a_holder_not_open_or_on_the_default_branch_reads_nothing(state, base):
     default branch stops there. No listing (the empty double refuses one). Mutations: drop the
     `state != "open"` check -- closed-direct is `OnChain`, red; drop the `default_branch`
     stop -- default-branch lists `main`, unexpected call."""
-    assert chain(Gh(), base, state) == cl.NotStacked()
+    assert chain(Gh(), base, state) is None
 
 
 def test_a_holder_answer_with_a_null_field_is_unknown():
-    """Mutation: check keys only (drop the `isinstance` check) -- `NotStacked`."""
+    """Mutation: check keys only (drop the `isinstance` check) -- not stacked (None)."""
     assert chain(Gh(), "feat-a", None) == cl.Unknown(
         "ValueError(\"base.ref 'feat-a', state None\")", exhausted=False
     )
@@ -1099,7 +1101,7 @@ def test_stacked_at_depth_one_two_and_three():
 
 def test_a_shared_head_is_stacked_when_any_of_its_pull_requests_leads_here():
     """`b` heads #10 into `main` and #11 into this head; #10 is walked first. Mutation: follow
-    only the first entry -- `NotStacked`."""
+    only the first entry -- not stacked (None)."""
     gh = Gh().on(list_read("b"), entries(entry(10, "b", "main"), entry(11, "b", "feat-a")))
     assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
 
@@ -1109,7 +1111,7 @@ def test_a_base_cycle_ends_not_stacked():
     check -- the walk circles through the memo until it runs out of pages, `Unknown`."""
     gh = Gh().on(list_read("x"), entries(entry(20, "x", "y")))
     gh.on(list_read("y"), entries(entry(21, "y", "x")))
-    assert (chain(gh, "x"), gh.drained()) == (cl.NotStacked(), True)
+    assert (chain(gh, "x"), gh.drained()) == (None, True)
 
 
 def _full_page(head, first):
@@ -1118,7 +1120,7 @@ def _full_page(head, first):
 
 
 def test_a_match_on_page_two_is_stacked():
-    """Mutation: read page 1 only -- `NotStacked`."""
+    """Mutation: read page 1 only -- not stacked (None)."""
     gh = Gh().on(list_read("b"), _full_page("b", 1000))
     gh.on(list_read("b", 2), entries(entry(11, "b", "feat-a")))
     assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
@@ -1127,14 +1129,14 @@ def test_a_match_on_page_two_is_stacked():
 def test_a_merged_link_mid_chain_is_followed_and_a_closed_one_is_not():
     """#11 merged into this head (`state: closed`, `merged_at` set, no `merged` field), its
     branch kept: stacked. #12, closed unmerged, is not followed. Mutations: follow only `open`
-    -- `NotStacked` for `b`, red; read a `merged` field -- `KeyError`, red; follow any closed
+    -- not stacked (None) for `b`, red; read a `merged` field -- `KeyError`, red; follow any closed
     -- `c` reads `OnChain`, red."""
     gh = Gh().on(
         list_read("b"), entries(entry(11, "b", "feat-a", "closed", "2026-11-12T10:00:00Z"))
     )
     assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((11,)), True)
     gh = Gh().on(list_read("c"), entries(entry(12, "c", "feat-a", "closed")))
-    assert (chain(gh, "c"), gh.drained()) == (cl.NotStacked(), True)
+    assert (chain(gh, "c"), gh.drained()) == (None, True)
 
 
 @pytest.mark.parametrize(
@@ -1151,7 +1153,7 @@ def test_a_listed_pull_request_of_another_head_is_not_followed(listed):
     check -- other-branch reads `OnChain`; drop the repository check -- fork reads `OnChain`;
     read a null head repository as a mapping -- deleted-fork reads `Unknown`."""
     gh = Gh().on(list_read("b"), entries(listed))
-    assert (chain(gh, "b"), gh.drained()) == (cl.NotStacked(), True)
+    assert (chain(gh, "b"), gh.drained()) == (None, True)
 
 
 def test_the_head_repository_compares_without_case():
@@ -1192,7 +1194,7 @@ def test_a_branch_name_is_encoded_in_the_listing_query(branch, path):
     ids=["failed", "not-a-list", "number", "missing", "not-json"],
 )
 def test_a_failed_or_malformed_listing_is_unknown(answer, why):
-    """Mutations: skip a malformed entry -- `NotStacked`; let a failure read `NotStacked` --
+    """Mutations: skip a malformed entry -- None; let a failure read None --
     red; mark these `exhausted` -- red."""
     gh = Gh().on(list_read("b"), answer)
     assert chain(gh, "b") == cl.Unknown(why, exhausted=False)
@@ -1223,21 +1225,21 @@ def test_a_walk_of_twenty_pages_ends_and_a_twenty_first_is_unknown():
 def test_a_memo_hit_is_charged_to_the_holder():
     """#5 is based on `b`, which takes 20 pages (none followed); #6 on `c`, whose one page
     leads to `b`. #6 needs 21 pages whether or not #5 was walked first. Mutation: charge only
-    a read the memo did not hold -- #6 reads `NotStacked` after #5, red."""
+    a read the memo did not hold -- #6 reads not stacked (None) after #5, red."""
     gh = _pages(Gh(), "b", 19, entries())
     gh.on(list_read("c"), entries(entry(12, "c", "b")))
     memo = {}
-    assert chain(gh, "b", memo=memo) == cl.NotStacked()
+    assert chain(gh, "b", memo=memo) is None
     assert chain(gh, "c", memo=memo) == EXHAUSTED
     assert gh.drained()
     alone = _pages(Gh(), "b", 19, entries()).on(list_read("c"), entries(entry(12, "c", "b")))
     assert chain(alone, "c") == EXHAUSTED
 
 
-def test_a_holder_walks_a_memoised_cycle_on_its_own_visited_set():
+def test_a_memoised_cycle_is_listed_once_across_holders():
     """`x` and `y` are based on each other and `y` also heads #22 into this head. #5 is based
-    on `x`, #6 on `y`; each listing is read once. Mutation: keep one visited set across holders
-    -- #6 starts on a visited `y` and reads `NotStacked`, red."""
+    on `x`, #6 on `y`; each listing is read once. Mutation: read every page past the memo --
+    `y`'s second listing is an unexpected call, red."""
     gh = Gh().on(list_read("x"), entries(entry(20, "x", "y")))
     gh.on(list_read("y"), entries(entry(21, "y", "x"), entry(22, "y", "feat-a")))
     gh.on(pull_read(5), pull("x")).on(pull_read(6), pull("y"))
@@ -1246,6 +1248,49 @@ def test_a_holder_walks_a_memoised_cycle_on_its_own_visited_set():
         {},
     )
     assert gh.drained()
+
+
+def test_a_holder_walks_a_branch_another_holder_queued():
+    """#5 is based on `a`, whose #30 leads to `b`, whose #31 leads here; #6 is based on `c`,
+    whose #40 also leads to `b`. Each listing is read once. Mutation: keep one `seen` set
+    across holders (in `memo`) -- `b` is already seen for #6, which reads not stacked, red."""
+    gh = Gh().on(list_read("a"), entries(entry(30, "a", "b")))
+    gh.on(list_read("b"), entries(entry(31, "b", "feat-a")))
+    gh.on(list_read("c"), entries(entry(40, "c", "b")))
+    gh.on(pull_read(5), pull("a")).on(pull_read(6), pull("c"))
+    assert cl._read_stacked(REPO, {5, 6}, "feat-a", "main", gh, retry=False) == (
+        {5: (31, 30), 6: (31, 40)},
+        {},
+    )
+    assert gh.drained()
+
+
+def test_a_near_link_wins_before_a_wide_subgraph_spends_the_budget():
+    """`b` heads #5 into `x`, whose listing takes 19 pages, and #6 into this head. Breadth
+    first, #6 is found on `b`'s own page and `x` is never listed (the double queues none).
+    Mutation: test `head_ref` when a branch is dequeued, not when its link is found -- `x` is
+    listed first, an unexpected call, red."""
+    gh = Gh().on(list_read("b"), entries(entry(5, "b", "x"), entry(6, "b", "feat-a")))
+    assert (chain(gh, "b"), gh.drained()) == (cl.OnChain((6,)), True)
+
+
+def test_the_named_chain_is_a_shortest_one():
+    """`c` heads #3 into `d`, whose #4 leads here, and #7 into `e`, whose #9 leads to `f`,
+    whose #10 leads here. Mutation: `queue.pop()` (depth first) -- `(10, 9, 7)`, red."""
+    gh = Gh().on(list_read("c"), entries(entry(3, "c", "d"), entry(7, "c", "e")))
+    gh.on(list_read("d"), entries(entry(4, "d", "feat-a")))
+    gh.on(list_read("e"), entries(entry(9, "e", "f")))
+    gh.on(list_read("f"), entries(entry(10, "f", "feat-a")))
+    assert chain(gh, "c") == cl.OnChain((4, 3))
+
+
+@pytest.mark.parametrize("base", ["main", "b"])
+def test_nothing_is_stacked_on_the_default_branch(base):
+    """This pull request's head is the default branch: no holder is stacked on it, and no
+    listing is read (the empty double refuses one). Mutation: drop the `head_ref ==
+    default_branch` return -- `main` reads `OnChain(())`, `b` an unexpected call, red."""
+    holder = {"state": "open", "base": {"ref": base}}
+    assert cl._chain(REPO, holder, "main", "main", Gh(), {}, retry=False) is None
 
 
 HEAD = "d" * 40
@@ -1600,16 +1645,19 @@ def test_evict_cli_names_a_stacked_holders_chain(monkeypatch, tmp_path):
 
 def test_evict_cli_blocks_on_a_walk_out_of_pages_before_a_failed_read(monkeypatch, tmp_path):
     """#9's walk runs out of pages and #12's read fails: commenting again cannot pass #9, so
-    the refusal is `blocked` and names only #9. Mutations: refuse the exhausted walk as a
-    failed read (no `exhausted` branch) -- no `blocked`, red; check failed reads before
-    `blocked` -- red."""
+    the refusal is `blocked`, and it names both, each with its reason. Mutations: refuse the
+    exhausted walk as a failed read (no `exhausted` branch) -- no `blocked`, red; check failed
+    reads before `blocked` -- red; leave the unread holders out of `Blocked` -- red."""
     gh = _evict_three(*_THREE_PENDING)
     gh.on(pull_read(12), FAIL).on(pull_read(9), pull("x"))
     _pages(gh, "x", 20, entries())
     out = tmp_path / "out"
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV)
-    assert exc.value.code == f"::error::{_EXHAUSTED_LINE}"
+    assert exc.value.code == (
+        f"::error::{_EXHAUSTED_LINE}\ncould not tell whether #12 is stacked on this pull "
+        "request: command failed (1): gh api"
+    )
     assert github_outputs(out) == {"blocked": "true"}
     assert gh.calls[tuple(list_read("x", 21))] == [entries()]
     del gh.calls[tuple(list_read("x", 21))]

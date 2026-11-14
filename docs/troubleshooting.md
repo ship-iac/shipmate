@@ -1072,10 +1072,12 @@ fenced, one per such holder, after any stacked holder's sentence pair.
 - Effect: Nothing is released and no holder is told. The plan comment shows
   this in advance with `🔒 could not tell whether #<h> is stacked on this pull
   request (<reason>)` and offers no `shipmate unlock <env> --evict` for that
-  environment.
-- Remedy: Shorten the chain: merge or retarget the pull requests between #<h>
-  and this one to the default branch, or close #<h>, which releases its locks.
-  Then comment the command again.
+  environment. The same refusal also names any holder whose read failed.
+- Remedy: Retarget #<h> to the default branch, or wait until it merges or
+  closes, which releases its locks. Then comment the command again. A branch on
+  the path whose pull request history alone needs more than 20 pages is an
+  accepted limit ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops): shortening
+  the chain does not help there.
 
 ### `shipmate unlock <env> --evict` failed: `could not tell whether #<h> is stacked on this pull request`
 

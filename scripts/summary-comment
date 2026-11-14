@@ -44,8 +44,8 @@ SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments
 each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
 `shipmate apply` once (`to apply the other environments` when a targeted line renders), then
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked,
-unless one of that environment's holders is stacked on this pull request, or cannot be told
-apart from one, where evict refuses, and `shipmate help`. An empty or unreadable
+unless one of that environment's holders is stacked on this pull request, or its walk ran
+out of pages, where evict refuses, and `shipmate help`. An empty or unreadable
 `targeted-envs` names no targeted environment, so the section degrades to the bare
 `shipmate apply` even when every changed environment is targeted; the unreadable one warns.
 
@@ -353,14 +353,14 @@ def _lock_key(cell, locks):
 def _plan_line(cell, url, locks, stacked=_NONE, default_branch=""):
     """A cell's bare line; a changed cell another pull request holds ends with `🔒 locked by`
     and `lock_who` of its holder in `locks` (`cell-lock marks`' `<stack> / <env>` keys), then
-    `, stacked on this pull request` and `stacked_through` its chain when that holder is in
-    `stacked` (`stacked_marks`) and `default_branch` is not empty. `stacked_lines` carries the
-    explanation once per holder."""
+    `, stacked on this pull request` when that holder is in `stacked` and `default_branch` is
+    not empty. `stacked_lines` carries the chain and the explanation once per holder: a chain
+    on every cell line could pass the comment cap."""
     line = cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
     if key := _lock_key(cell, locks):
         line += f" 🔒 locked by {lock_who(locks[key])}"
         if locks[key] in stacked and default_branch:
-            line += f", stacked on this pull request{stacked_through(stacked[locks[key]])}"
+            line += ", stacked on this pull request"
     return line
 
 
@@ -376,7 +376,8 @@ def stacked_lines(cells, locks, stacked, default_branch, unknown=_NONE):
     """One line per holder in `stacked` of a changed cell of `cells`, lowest first, naming its
     chain, counting its changed locked cells and saying to retarget it to `default_branch`;
     then one per holder in `unknown` (`unknown_marks`) of such a cell, lowest first, naming the
-    reason it cannot tell. None when `default_branch` is empty."""
+    reason it cannot tell, and for a walk not out of pages (eviction is still offered) what to
+    try. None when `default_branch` is empty."""
     held = _stacked_held(cells, locks, stacked, default_branch)
     unknown_held = _stacked_held(cells, locks, unknown, default_branch)
     return [
@@ -386,7 +387,8 @@ def stacked_lines(cells, locks, stacked, default_branch, unknown=_NONE):
         for h in sorted(set(held))
     ] + [
         f"🔒 could not tell whether #{h} is stacked on this pull request "
-        f"({_md_name(one_line(unknown[h]))})"
+        f"({_md_name(one_line(unknown[h][0]))})"
+        + ("" if unknown[h][1] else "; re-plan or try the eviction")
         for h in sorted(set(unknown_held))
     ]
 
@@ -784,7 +786,9 @@ def build_comment(
     for c in meta:
         if key := _lock_key(c, locks):
             locked.setdefault(c["environment"], []).append(locks[key])
-    held = _stacked_held(meta, locks, stacked.keys() | unknown.keys(), default_branch)
+    # Evict refuses a stacked holder and one whose walk ran out of pages; a failed read may pass.
+    blocking = stacked.keys() | {h for h, (_, exhausted) in unknown.items() if exhausted}
+    held = _stacked_held(meta, locks, blocking, default_branch)
     section = commands(locked, targeted, changed, held)
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
@@ -1006,9 +1010,19 @@ def stacked_marks(raw):
 
 
 def unknown_marks(raw):
-    """`cell-lock marks`' `stacked_unknown` output `raw`, `{"<holder>": "<reason>"}`, as
-    `{holder: reason}` (`_holder_map`)."""
-    return _holder_map(raw, lambda v: isinstance(v, str), "lock holders of unknown stacking")
+    """`cell-lock marks`' `stacked_unknown` output `raw`, `{"<holder>": {"reason": "<reason>",
+    "exhausted": <bool>}}`, as `{holder: (reason, exhausted)}` (`_holder_map`)."""
+    walks = _holder_map(
+        raw,
+        lambda v: (
+            isinstance(v, dict)
+            and v.keys() == {"reason", "exhausted"}
+            and isinstance(v["reason"], str)
+            and isinstance(v["exhausted"], bool)
+        ),
+        "lock holders of unknown stacking",
+    )
+    return {h: (w["reason"], w["exhausted"]) for h, w in walks.items()}
 
 
 CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
