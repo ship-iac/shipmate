@@ -196,8 +196,15 @@ completed same-head duplicate is never relinked or retitled. A cell with no such
 id refuses the run before wave0.
 
 1. Created `queued` by `actions/summary`, titled with the plan's counts, its
-   summary the plan. The `external_id` record also carries that title as
-   `title`.
+   summary the plan. Its `external_id` is a compact JSON record of the id of
+   the plan run that produced the cell (`plan_run`), the number of the pull
+   request that run planned (`pr`), the digest of that cell's plan text
+   (`plan_sha256`), the number of cells that run planned (`cells`), the plan
+   run's event action (`action`, empty when its payload names none, as a
+   `shipmate plan` dispatch's does; §`apply_mode: auto` reads it) and the
+   check's title (`title`). GitHub keeps 255 characters of an `external_id`, so
+   a record over that drops `title`, and one still over it refuses the plan
+   summary.
 2. Flipped to `in_progress` by the wave's `waveN-release` job right before the
    wave, its details link set to the apply run. The flip writes the status and
    the link only, one check at a time. Each wave needs its release, and each
@@ -4032,12 +4039,7 @@ run that already ended without its result.
 
 ## Apply-match fingerprint
 
-Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
-check, the `external_id` JSON record holds it alongside the id of the plan run
-that produced the cell, the number of the pull request that run planned, the
-digest of that cell's plan text, the number of cells that run planned, below,
-and `action`, the plan run's event action, empty when its payload names none, as
-a `shipmate plan` dispatch's does; §`apply_mode: auto` reads it):
+Each plan stores a fingerprint (`fingerprint.txt` in the artifact):
 `sha256` over the sorted JSON of every non-empty
 `TF_VAR_*` environment variable (name→value) plus `TF_WORKSPACE` when it is set.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty

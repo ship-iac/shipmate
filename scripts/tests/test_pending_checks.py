@@ -73,8 +73,9 @@ def _emit(cells_dir):
 
 
 def test_changed_cell_yields_queued_body(tmp_path):
-    """Mutations: omit `"pr"` from the record -- red; omit `"cells"` from the record -- red; omit
-    `"title"` from the record -- red."""
+    """The record is compared as the exact string GitHub stores. Mutations: omit `"pr"` from the
+    record -- red; omit `"cells"` -- red; omit `"title"` -- red; drop the compact separators --
+    red."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -86,15 +87,10 @@ def test_changed_cell_yields_queued_body(tmp_path):
     )
     (body,) = _emit(tmp_path)
     external_id = body.pop("external_id")
-    assert json.loads(external_id) == {
-        "fingerprint": "f" * 64,
-        "plan_run": RUN_ID,
-        "plan_sha256": SHA_A,
-        "pr": PR,
-        "cells": 1,
-        "action": "synchronize",
-        "title": "+? ~? -?",
-    }
+    assert external_id == (
+        f'{{"plan_run":"{RUN_ID}","plan_sha256":"{SHA_A}","pr":"{PR}","cells":1,'
+        '"action":"synchronize","title":"+? ~? -?"}'
+    )
     assert body == {
         "name": "apply / stacks/app / dev-eu",
         "head_sha": HEAD,
@@ -127,7 +123,6 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         "summary": "Plan produced no changes for this stack x environment.",
     }
     assert json.loads(body["external_id"]) == {
-        "fingerprint": "0" * 64,
         "plan_run": RUN_ID,
         "plan_sha256": SHA_B,
         "pr": PR,
@@ -135,27 +130,6 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         "action": "synchronize",
         "title": "no changes",
     }
-
-
-def test_missing_fingerprint_fails_loud(tmp_path):
-    """Mutation: drop `"fingerprint"` from `_KEYS` -- a `KeyError` instead of
-    the `SystemExit`."""
-    _write_cell(
-        tmp_path,
-        "dev-eu",
-        "stacks-app",
-        stack="stacks/app",
-        environment="dev-eu",
-        changed=True,
-    )
-    with pytest.raises(SystemExit) as exc_info:
-        _emit(tmp_path)
-    cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
-    assert str(exc_info.value) == (
-        f"::error::cell summary {cell_json} missing keys ['fingerprint'] -- plan-cell and the "
-        "summary job must run the same engine revision; re-pin every engine reference to one "
-        "commit, then re-plan (comment shipmate plan or push)"
-    )
 
 
 def test_missing_plan_text_refuses_with_the_re_plan_remedy(tmp_path):
@@ -197,7 +171,6 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
     (body,) = _emit(tmp_path)
     assert json.loads(body["external_id"]) == {
-        "fingerprint": "f" * 64,
         "plan_run": "409181227",
         "plan_sha256": SHA_A,
         "pr": "31",
@@ -521,7 +494,6 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
         (
             "apply / stacks/dns / dev-eu",
             {
-                "fingerprint": "2" * 64,
                 "plan_run": RUN_ID,
                 "plan_sha256": SHA_A,
                 "pr": PR,
@@ -821,4 +793,47 @@ def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_pa
     assert body["output"]["summary"].endswith(TRAILER)
     assert json.loads(body["external_id"])["plan_sha256"] == (
         "6bec3c7c34b6f1ed2f7833c8f8bcc17aa3bb6fd865587d11e0faec55362fc0ef"
+    )
+
+
+#: The largest record a plan can write: a 20-digit run id, a 6-digit pull request, 9999 cells,
+#: the longest event action an autoplan runs on, and a title with three 4-digit counts.
+_WIDEST = {
+    "plan_run": "9" * 20,
+    "plan_sha256": "a" * 64,
+    "pr": "999999",
+    "cells": 9999,
+    "action": "ready_for_review",
+    "title": "+9999 ~9999 -9999",
+}
+
+
+def test_the_widest_record_fits_under_githubs_cap_whole():
+    """GitHub truncates an `external_id` over 255 characters into JSON no reader decodes.
+    Mutation: restore the default `json.dumps` separators -- red (the string differs); raise
+    `EXTERNAL_ID_CAP` past 255 -- red."""
+    text = pc.external_id(_WIDEST)
+    assert text == (
+        '{"plan_run":"99999999999999999999","plan_sha256":"' + "a" * 64 + '","pr":"999999",'
+        '"cells":9999,"action":"ready_for_review","title":"+9999 ~9999 -9999"}'
+    )
+    assert pc.EXTERNAL_ID_CAP == 255
+
+
+def test_a_record_over_the_cap_drops_its_title():
+    """Mutation: return the over-cap record unchanged -- red; drop a field other than `title`
+    -- red."""
+    record = {**_WIDEST, "title": "x" * 200}
+    assert pc.external_id(record) == pc.external_id(
+        {k: v for k, v in _WIDEST.items() if k != "title"}
+    )
+
+
+def test_a_record_over_the_cap_without_its_title_refuses():
+    """Mutation: return the untitled record however long -- red."""
+    with pytest.raises(SystemExit) as exc:
+        pc.external_id({**_WIDEST, "action": "x" * 200})
+    assert str(exc.value.code) == (
+        "::error::the apply check record is 355 characters, over GitHub's 255-character "
+        "external_id cap"
     )
