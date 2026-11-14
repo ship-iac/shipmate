@@ -1408,7 +1408,7 @@ def _shim_job_name_finding(doc, name, engine):
 #: `Unexpected inputs provided` (HTTP 422, no run); one it declares `required: true` that a body
 #: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
 #: file declares beside `verb`, a consumer's own included, must be optional.
-_DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
+_DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number", "comment_id")
 #: Every verb the engine dispatches (`auto` from the autoplan, the rest from `actions/dispatch`),
 #: compared in order with `verb`'s own parsed options, never another input's: a missing `unlock`
 #: refuses that verb, and an extra offers a verb no `if:` selects.
@@ -1512,13 +1512,13 @@ def _dispatch_wiring_finding(doc, name):
                 WARNING,
                 (
                     f"`{name}` declares no `workflow_dispatch` trigger, so every commented verb is "
-                    "authorized, reacted to with a rocket, and then dispatches nothing: "
+                    "authorized, reacted to with eyes, and then dispatches nothing: "
                     "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
                     "trigger`, no run is created, and the pull request gets a comment, when one "
                     "can be posted, saying the dispatch failed and linking the comment-handling "
                     "run that holds the error. "
                     "Add "
-                    "the trigger, with its `verb`, `environment`, `ref` and `pr_number` inputs "
+                    f"the trigger, with its {_and_list(_DISPATCH_INPUTS)} inputs "
                     "(docs/getting-started.md)."
                 ),
             )
@@ -1683,6 +1683,26 @@ def _auto_with_finding(doc, name, engine):
     ]
 
 
+def _unlock_grant_finding(doc, name, engine):
+    """One finding when the `unlock` job does not grant `unlock.yml` `pull-requests: write`, which
+    its `guard` job requests to mark the command started. A file without the job draws nothing
+    here: that is `_routing_finding`'s."""
+    job = dict(_engine_calls(doc, engine, "unlock.yml")).get("unlock")
+    if job is None or _mapping(job.get("permissions")).get("pull-requests") == "write":
+        return []
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `unlock` job does not grant `pull-requests: write`. A called "
+                "workflow's jobs are capped by the calling job's permissions, and `unlock.yml`'s "
+                "`guard` requests it, so every unlock run dies at startup with no job and no log. "
+                "Copy the published `permissions:` block whole (docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
 def _extra_caller_findings(doc, name, engine):
     """One finding per job calling a `ROUTING_IFS` callee under an id the table does not route
     to it."""
@@ -1816,10 +1836,10 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing, `auto` `with:`, trigger-types, run-name and
-    drift-call findings over the consumer's `shipmate.yml` alone, in that order, from one read
-    at the commit under examination (`_contents_ref`): a pull request that fixes the file must
-    not still be reported for the old state.
+    """The job-name, dispatch-wiring, routing, `auto` `with:`, `unlock` grant, trigger-types,
+    run-name and drift-call findings over the consumer's `shipmate.yml` alone, in that order,
+    from one read at the commit under examination (`_contents_ref`): a pull request that fixes
+    the file must not still be reported for the old state.
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
@@ -1829,7 +1849,7 @@ def _shipmate_yml_warnings(ctx):
     receives no dispatch. A file that does not parse is `_workflow_parse_warnings`' one
     finding and draws none here.
 
-    Without the engine repository the four engine-anchored findings give way to one notice:
+    Without the engine repository the five engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring,
     the trigger types and the run name read no engine slug and still run."""
     ref = _contents_ref(ctx)
@@ -1854,6 +1874,7 @@ def _shipmate_yml_warnings(ctx):
         *_dispatch_wiring_finding(doc, name),
         *_routing_finding(doc, name, engine),
         *_auto_with_finding(doc, name, engine),
+        *_unlock_grant_finding(doc, name, engine),
         *_pr_target_types_finding(doc, name),
         *_run_name_finding(doc, name),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),

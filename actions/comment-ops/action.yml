@@ -101,23 +101,6 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse" --help-markdown > help.md
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@help.md >/dev/null
 
-    - name: Acknowledge a command that changes no infrastructure
-      # Two of the three routes are slow to show a result: doctor spends 30-60s in API calls
-      # before its report comment appears, and a plan is a dispatched run that takes as long
-      # to surface. Without an acknowledgement the commenter's next move is to comment again.
-      if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'help' || steps.parse.outputs.route == 'plan' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        COMMENT_ID: ${{ inputs.comment-id }}
-      run: |
-        set -euo pipefail
-        # `eyes` is the conventional "working on it" for a command that changes no
-        # infrastructure; `rocket` marks an authorized dispatch. `|| true` because the reaction
-        # is cosmetic -- comment deleted, reactions disabled -- and must not fail the command.
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
-          -f content=eyes >/dev/null || true
-
     - name: Read the commenter's repository permission
       id: permission
       if: ${{ steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help' }}
@@ -160,6 +143,21 @@ runs:
         SHIPMATE_REPLY_OUTCOME: refused
         SHIPMATE_REPLY_TEXT: ${{ steps.access.outputs.reason }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
+
+    - name: Acknowledge an accepted help or doctor
+      # Doctor spends 30-60s in API calls before its report comment appears; without an
+      # acknowledgement the commenter's next move is to comment again.
+      if: ${{ steps.parse.outputs.route == 'help' || (steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true') }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        COMMENT_ID: ${{ inputs.comment-id }}
+      run: |
+        set -euo pipefail
+        # `eyes` marks an accepted command. `|| true` because the reaction is cosmetic -- comment
+        # deleted, reactions disabled -- and must not fail the command.
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
+          -f content=eyes >/dev/null || true
 
     - name: Permission check failed
       # A failed step skips every later `success()`-gated step, so without `failure()` here
@@ -577,9 +575,11 @@ runs:
         COMMENT_ID: ${{ inputs.comment-id }}
       run: |
         set -euo pipefail
-        # `|| true`: the reaction is cosmetic, and a failed step skips the caller's dispatch.
+        # `eyes` marks an accepted command; the dispatched plan or apply run adds `rocket` when
+        # it claims the comment. `|| true`: the reaction is cosmetic, and a failed step skips the
+        # caller's dispatch.
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
-          -f content=rocket >/dev/null || true
+          -f content=eyes >/dev/null || true
         echo "::notice title=comment-ops::command authorized (the caller's next step dispatches it)"
 
     # A report, not a decision: `reviewDecision` keeps no history, so nothing else records that

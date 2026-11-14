@@ -29,7 +29,7 @@ LIST = (
 BODY = json.dumps(
     {
         "ref": "main",
-        "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"},
+        "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", "comment_id": "99"},
         "return_run_details": True,
     }
 )
@@ -59,6 +59,7 @@ def calls(monkeypatch):
         "REF": "abc123",
         "PR_NUMBER": "42",
         "ENVIRONMENT": "",
+        "COMMENT_ID": "99",
         "DISPATCH_REF": "main",
     }.items():
         monkeypatch.setenv(name, value)

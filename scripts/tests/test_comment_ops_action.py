@@ -173,36 +173,47 @@ def _step(marker):
     return matches[0]
 
 
-def test_the_routes_that_change_no_infrastructure_are_acknowledged_with_a_reaction():
-    """`doctor` spends 30-60s in API calls before its comment appears, and a `plan` is a dispatched
-    run that takes as long to surface. Without an acknowledgement on the triggering comment the
-    commenter's next move is to comment again, so every route that changes no infrastructure reacts
-    -- and a failed reaction (comment deleted, reactions disabled) must not fail the command."""
-    block = _step("content=eyes")
-    assert "steps.parse.outputs.route == 'doctor'" in block
-    assert "steps.parse.outputs.route == 'help'" in block
-    assert "steps.parse.outputs.route == 'plan'" in block
-    # On the invocation itself, not somewhere in the block: the step's own comment explains
-    # the `|| true`, so a bare substring check for it stays green when the operator is
-    # deleted from the `gh api` line.
-    assert "-f content=eyes >/dev/null || true" in block
+#: The two `eyes` POSTs, whole: `|| true` on the invocation itself, because a failed cosmetic
+#: reaction (comment deleted, reactions disabled) must not fail the command.
+_EYES_POST = (
+    'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \\\n'
+    "  -f content=eyes >/dev/null || true\n"
+)
+#: The acknowledgement's whole `if:`: `help` needs no permission, `doctor` is acknowledged once
+#: the commenter's permission passed and before its 30-60s of probes.
+_ACK_IF = (
+    "${{ steps.parse.outputs.route == 'help' || (steps.parse.outputs.route == 'doctor' && "
+    "steps.access.outputs.authorized == 'true') }}"
+)
 
 
-def test_the_rocket_reaction_stays_on_an_authorized_dispatch():
-    # `eyes` = accepted a command that changes no infrastructure, `rocket` = a dispatch was
-    # authorized. The two must not collapse into one signal. It reads both routes' verdicts,
-    # not the apply route's alone: keyed on `authz` it stays silent on authorized plans.
-    # Mutation: `||` -> `&&` in React on accept's `if:`.
-    [step] = [s for s in action_steps("comment-ops") if "content=rocket" in s.get("run", "")]
+def test_an_accepted_help_or_doctor_is_acknowledged_with_eyes():
+    """`eyes` means comment-ops accepted the command. Mutations: drop the `help` clause; drop the
+    doctor clause's `access` check (a refused doctor would be acknowledged); `&&` -> `||` in it;
+    drop `|| true`; `content=rocket`."""
+    step = step_by("comment-ops", name="Acknowledge an accepted help or doctor")
+    assert step["if"] == _ACK_IF
+    assert step["run"].endswith(_EYES_POST)
+
+
+def test_an_authorized_dispatch_gets_eyes_and_comment_ops_writes_no_rocket():
+    """`eyes` on every accepted command; `rocket` is the dispatched run's, written when it claims
+    the comment (`scripts/claim`), so comment-ops must never write one. The reaction reads both
+    routes' verdicts, not the apply route's alone: keyed on `authz` it stays silent on authorized
+    plans. Mutations: `||` -> `&&` in React on accept's `if:`; `content=rocket` in it; a rocket
+    POST added to any step."""
+    step = step_by("comment-ops", name="React on accept")
     assert step["if"] == _AUTHORIZED
+    assert _EYES_POST in step["run"]
+    assert [s.get("name") for s in action_steps("comment-ops") if "content=rocket" in str(s)] == []
 
 
 @bash_only
-def test_a_failed_rocket_reaction_does_not_fail_the_authorized_command(tmp_path):
+def test_a_failed_reaction_does_not_fail_the_authorized_command(tmp_path):
     """A failed step skips the caller's dispatch, so a failed cosmetic reaction would drop an
     authorized command.
 
-    Mutation: drop `|| true` from the `rocket` POST -- the step exits non-zero with no notice.
+    Mutation: drop `|| true` from the `eyes` POST -- the step exits non-zero with no notice.
     """
     gh_path = tmp_path / "gh"
     gh_path.write_text("#!/bin/bash\nexit 1\n")
@@ -1072,9 +1083,8 @@ _PERMISSION_FAILED_IF = (
 def test_an_errored_permission_read_or_decision_is_answered():
     """`permission` and `access` carry no `continue-on-error`, so an error in either fails
     the job and skips every `success()`-gated step after it, the write-access refusal included.
-    Without this reply the commenter sees the eyes reaction on `plan` or `doctor` and nothing
-    else. Its env is pinned through `_REPLIES`, its body and `exit 1` through
-    `_FAILING_REPLY_RUNS`, its place through `_STEP_NAMES`.
+    Without this reply the commenter sees nothing at all. Its env is pinned through `_REPLIES`,
+    its body and `exit 1` through `_FAILING_REPLY_RUNS`, its place through `_STEP_NAMES`.
 
     Mutation: drop `failure() && ` (the implied `success()` then never runs it after the failure
     it reports); change `steps.access.outcome` to `steps.planauthz.outcome`."""
@@ -1366,10 +1376,10 @@ _STEP_NAMES = [
     "Parse command",
     "Reject malformed command",
     "Post help",
-    "Acknowledge a command that changes no infrastructure",
     "Read the commenter's repository permission",
     "Authorize the commenter's permission",
     "Reject a commenter without write access",
+    "Acknowledge an accepted help or doctor",
     "Permission check failed",
     "Authorize plan",
     "Reject an unauthorized plan",
@@ -1541,7 +1551,12 @@ def test_no_step_on_the_plan_route_touches_the_app_key():
         for s in action_steps("comment-ops")
         if any(
             m in (s.get("if") or "")
-            for m in ("outputs.route == 'plan'", _GATED_ROUTES_IF, "steps.access.outcome")
+            for m in (
+                "outputs.route == 'plan'",
+                _GATED_ROUTES_IF,
+                "steps.access.outcome",
+                "steps.planauthz.outputs.authorized",
+            )
         )
     ]
     assert len(on_plan) == 7, [s.get("name") for s in on_plan]

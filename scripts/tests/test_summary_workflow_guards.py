@@ -73,7 +73,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "env_order": "${{ steps.matrix.outputs.env_order }}",
     "tools": "${{ steps.setup.outputs.tools }}",
 }
-EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary", "gate-hold", "outcome"]
+EXPECTED_JOB_IDS = ["claim", "facts", "detect", "plan", "summary", "gate-hold", "outcome"]
 
 
 def _summary_job():

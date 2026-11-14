@@ -18,10 +18,33 @@ permissions: {}
 # request's HCL, and nothing in this file saves an Actions-cache entry.
 cache-mode: read
 jobs:
+  # A commented plan claims its comment before any work: a second run of the same comment (a
+  # retried dispatch whose first landed) reads `taken` and does nothing. An autoplan and the
+  # comment-less replan carry no `comment_id`, so this job skips and the gate below admits them.
+  claim:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    outputs:
+      state: ${{ steps.claim.outputs.state }}
+    steps:
+      - id: claim
+        uses: $/actions/claim
+        with:
+          verb: plan
+          pr-number: ${{ github.event.inputs.pr_number }}
+          comment-id: ${{ github.event.inputs.comment_id }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
   # One producer for every pull-request fact below, and its own job rather than `detect`'s first
   # step: `detect` can fail on a fmt check or stale codegen, and `summary` must still be told which
   # head to gate -- an empty `head-repo` there refuses, turning a failing gate into no gate at all.
   facts:
+    needs: [claim]
+    # A status function, so a skipped `claim` does not skip this job; a failed one gates it closed.
+    if: ${{ !cancelled() && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
     runs-on: ubuntu-slim
     permissions:
       pull-requests: read
@@ -39,8 +62,9 @@ jobs:
 
   detect:
     needs: facts
-    # Autoplan skips drafts; `shipmate plan` on a draft is an explicit request and plans it.
-    if: needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true'
+    # Autoplan skips drafts; `shipmate plan` on a draft is an explicit request and plans it. The
+    # implicit `success()` reads every ancestor, the skipped `claim` of an autoplan included.
+    if: ${{ !cancelled() && needs.facts.result == 'success' && (needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}
     runs-on: ${{ inputs.runs_on }}
     permissions:
       contents: read
@@ -87,7 +111,7 @@ jobs:
 
   plan:
     needs: [facts, detect]
-    if: needs.detect.outputs.empty == 'false'
+    if: ${{ !cancelled() && needs.detect.result == 'success' && needs.detect.outputs.empty == 'false' }}
     runs-on: ${{ inputs.runs_on }}
     permissions:
       contents: read
@@ -201,8 +225,8 @@ jobs:
   # `!cancelled()`, not `always()`: a push's autoplan cancels a dispatched plan and answers it.
   # Holds the App key but checks nothing out.
   outcome:
-    needs: [facts, summary]
-    if: ${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && needs.facts.outputs.head-repo != '' && needs.facts.outputs.head-repo == github.repository && needs.summary.outputs.superseded != 'true' && needs.summary.outputs.upsert != 'created' && needs.summary.outputs.upsert != 'moved' }}
+    needs: [claim, facts, summary]
+    if: ${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && needs.facts.outputs.head-repo != '' && needs.facts.outputs.head-repo == github.repository && needs.summary.outputs.superseded != 'true' && needs.summary.outputs.upsert != 'created' && needs.summary.outputs.upsert != 'moved' && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}

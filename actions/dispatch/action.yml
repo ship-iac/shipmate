@@ -18,7 +18,10 @@ inputs:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
     required: true
   pr-number:
-    description: PR number the dispatched run belongs to; the plan body carries it beside the verb alone, and the unlock body not at all.
+    description: PR number the dispatched run belongs to; the plan body carries it beside the verb and the comment id alone, and the unlock body not at all.
+    required: true
+  comment-id:
+    description: The command comment's id, sent as `comment_id` in every body. The dispatched plan or apply run claims the comment with it, so a second run of one comment does no work; the unlock run reacts on it.
     required: true
 runs:
   using: composite
@@ -51,6 +54,7 @@ runs:
         VERB: ${{ inputs.verb }}
         REF: ${{ inputs.ref }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        COMMENT_ID: ${{ inputs.comment-id }}
         # The App token above is minted `actions: write` and cannot comment; the calling job
         # already holds `pull-requests: write` for comment-ops' own refusals.
         COMMENT_TOKEN: ${{ github.token }}
@@ -89,6 +93,12 @@ runs:
           plan|apply|unlock) ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
+        # dispatch-body takes an empty id on a plan as the comment-less replan, which no comment sends.
+        if [ -z "${COMMENT_ID:-}" ]; then
+          echo "::error::The calling workflow did not pass a comment-id to shipmate/actions/dispatch, so the dispatched run cannot claim its comment. Wire that step's comment-id input to github.event.comment.id (docs/getting-started.md)."
+          say_no_run_started
+          exit 1
+        fi
         errfile=$(mktemp) || { echo "::error::could not create a temporary file for the dispatch"; say_no_run_started; exit 1; }
         trap 'rm -f -- "$errfile"' EXIT
         rc=0

@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Claim a commented run's command with the App's `rocket` reaction, so that one run of a
+comment does its work.
+
+Runs in the `claim` job of `plan.yml` and `apply.yml`. Reads `GITHUB_REPOSITORY`,
+`GITHUB_ACTOR`, `COMMENT_ID`, `PR_NUMBER`, `SHIPMATE_APP_SLUG`, `SHIPMATE_REPLY_VERB`,
+`SHIPMATE_REPLY_ENV` and `GH_TOKEN` (an App token with `pull-requests: write`).
+
+GitHub answers the first creation of a reaction 201 and every later one 200, naming the
+existing reaction, so exactly one run of a comment reads 201:
+
+- 201 writes the step output `state=owned`, and the run proceeds.
+- 200 writes `state=taken` and a job summary line. The run does no work and writes nothing on
+  the pull request.
+- A `COMMENT_ID` that is not a comment id, a `PR_NUMBER` that is not a pull request number, or
+  an actor other than `<slug>[bot]` exits 1 before any POST and replies nothing: only the App
+  dispatches a commented run, so another dispatcher is answered in the log alone.
+- Any other answer, or a failed POST, replies on the pull request that the command was not
+  started and to comment it again, then exits 1. A reply that fails only warns.
+
+The POST is sent once: a retried POST that had landed reads 200, which would leave the comment
+claimed by a run that does nothing.
+
+`--display` (`unlock.yml`'s `guard`, with the job token): POSTs the reaction when `COMMENT_ID`
+is a comment id and writes nothing otherwise. A failed POST only warns, and no output is
+written: the reaction there gates nothing.
+"""
+
+import os
+import re
+import sys
+
+from _shipmate import (
+    _COMMENT_ID,
+    _load,
+    command_data,
+    current_run_url,
+    is_pr_number,
+    one_line,
+    run,
+    run_annotated,
+    write_outputs,
+)
+
+rc = _load("reply-comment")
+
+#: gh's `--include` status line, captured raw from gh 2.93.0: `HTTP/2.0 200 OK`.
+_STATUS = re.compile(r"HTTP/\S+ ([0-9]{3})(?: .*)?")
+
+NOT_STARTED = (
+    "could not claim this command for its run, so the command was not started. Comment it again."
+)
+
+
+def react(repo, comment):
+    """The HTTP status of POSTing a `rocket` reaction on issue comment `comment`, or None when
+    gh's answer opens with no status line. A failed POST raises `run`'s `SystemExit`."""
+    out = run(
+        [
+            "gh",
+            "api",
+            "--include",
+            "-X",
+            "POST",
+            f"repos/{repo}/issues/comments/{comment}/reactions",
+            "-f",
+            "content=rocket",
+        ]
+    )
+    m = _STATUS.fullmatch(out.splitlines()[0] if out else "")
+    return m[1] if m else None
+
+
+def display(repo, comment):
+    if _COMMENT_ID.fullmatch(comment) is None:
+        note = f"comment_id {comment!r} is not a comment id; no reaction written"
+        print(f"::notice::{command_data(note)}")
+        return
+    try:
+        react(repo, comment)
+    except SystemExit as exc:
+        print(f"::warning::could not mark the command started: {one_line(exc.code)}")
+
+
+def refuse_untrusted(comment, pr):
+    """Exit 1, before any POST, unless the ids are well formed and the App dispatched this run."""
+    slug = os.environ.get("SHIPMATE_APP_SLUG", "")
+    actor = os.environ.get("GITHUB_ACTOR", "")
+    if _COMMENT_ID.fullmatch(comment) is None:
+        sys.exit(f"::error::claim refused: comment_id is not a comment id (got: {comment!r})")
+    if not is_pr_number(pr):
+        sys.exit(f"::error::claim refused: pr_number is not a pull request number (got: {pr!r})")
+    if not slug or actor != f"{slug}[bot]":
+        sys.exit(
+            f"::error::claim refused: this run's actor {actor!r} is not the shipmate App, and only "
+            "the App dispatches a commented run; comment the command on the pull request instead"
+        )
+
+
+def not_started(comment, pr, why):
+    """Reply that the command was not started, then exit 1."""
+    body = rc.body(
+        os.environ.get("SHIPMATE_REPLY_VERB", ""),
+        os.environ.get("SHIPMATE_REPLY_ENV", ""),
+        "failed",
+        NOT_STARTED,
+        current_run_url(),
+    )
+    try:
+        rc.post(pr, body)
+    except SystemExit as exc:
+        print(f"::warning::could not post the not-started reply on #{pr}: {one_line(exc.code)}")
+    sys.exit(f"::error::claiming comment {comment} failed: {why}")
+
+
+def claim(repo, comment):
+    pr = os.environ.get("PR_NUMBER", "")
+    refuse_untrusted(comment, pr)
+    try:
+        status = react(repo, comment)
+    except SystemExit as exc:
+        not_started(comment, pr, one_line(exc.code))
+    if status == "201":
+        write_outputs(state="owned")
+    elif status == "200":
+        write_outputs(state="taken")
+        line = "Another run of this comment owns it, so this run does no work."
+        print(f"::notice::{line}")
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+            fh.write(f"{line}\n")
+    else:
+        not_started(comment, pr, f"HTTP {status}" if status else "an unreadable answer")
+
+
+def main(argv=()):
+    if list(argv) not in ([], ["--display"]):
+        sys.exit("::error::usage: claim [--display]")
+    repo = os.environ["GITHUB_REPOSITORY"]
+    comment = os.environ.get("COMMENT_ID", "")
+    (display if argv else claim)(repo, comment)
+
+
+if __name__ == "__main__":
+    run_annotated(main, sys.argv[1:])

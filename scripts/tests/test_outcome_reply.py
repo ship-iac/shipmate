@@ -273,15 +273,21 @@ def test_the_apply_outcome_job_is_wired_exactly():
     'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a call
     that ended `cancelled` after `review` succeeded, with `run_cancelled` false, reads as
     cancelled instead of summary cancelled or ended); drop its `run_cancelled == 'true' ||`
-    clause (a mid-run cancel reads as ended). The constant pins each: the expression is never
-    evaluated here."""
+    clause (a mid-run cancel reads as ended). The claim clause: a run cancelled after its claim
+    was `owned` still replies, because `always()` stays; a `taken` run (another run of the
+    comment owns it) and a failed claim, which replied itself, do not; an `auto` run, whose
+    `claim` skips, does. Mutations: drop the claim clause; drop `claim` from `needs`; compare
+    `state` with `!= 'taken'` (a failed claim's empty output would reply twice); drop
+    `|| needs.claim.result == 'skipped'` (an `auto` run would never reply). The constant pins
+    each: the expression is never evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
-        "needs": ["guard", "run"],
+        "needs": ["guard", "claim", "run"],
         "if": (
             "${{ always() && needs.guard.result == 'success' && "
             "needs.run.outputs.posted != 'true' && "
             "(needs.run.outputs.review_result != 'failure' || "
-            "(needs.run.outputs.unbound != 'true' && !inputs.auto)) }}"
+            "(needs.run.outputs.unbound != 'true' && !inputs.auto)) && "
+            "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -313,16 +319,19 @@ def test_the_plan_outcome_job_is_wired_exactly():
 
     Mutations: drop the `superseded` clause; drop the `moved` clause; replace `!cancelled()` with
     `always()`; drop the fork clause's `head-repo == github.repository`; drop `summary-result`
-    from `with:`; pass `run-cancelled: 'true'`; add `plan` to `needs`."""
+    from `with:`; pass `run-cancelled: 'true'`; add `plan` to `needs`; drop the claim clause
+    (a `taken` run of a comment would answer for the run that owns it); drop `claim` from
+    `needs`."""
     assert workflow_jobs("plan.yml")["outcome"] == {
-        "needs": ["facts", "summary"],
+        "needs": ["claim", "facts", "summary"],
         "if": (
             "${{ !cancelled() && needs.facts.outputs.on-demand == 'true' && "
             "needs.facts.outputs.head-repo != '' && "
             "needs.facts.outputs.head-repo == github.repository && "
             "needs.summary.outputs.superseded != 'true' && "
             "needs.summary.outputs.upsert != 'created' && "
-            "needs.summary.outputs.upsert != 'moved' }}"
+            "needs.summary.outputs.upsert != 'moved' && "
+            "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,

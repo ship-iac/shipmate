@@ -54,6 +54,13 @@ jobs:
           echo "::error::apply refused: this run is not a dispatch with verb 'apply' and the calling job does not pass 'auto: true'; comment 'shipmate apply' on the pull request, and give the shipmate.yml 'apply' job the published 'if:' (shipmate doctor names the difference)"
           exit 1
 
+      # An apply dispatch claims its comment in `claim`; one without a comment id would bypass it.
+      - name: Reject an apply dispatch without a comment id
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '' }}
+        run: |
+          echo "::error::apply refused: this apply dispatch carries no comment_id, so no comment can be claimed for it; comment 'shipmate apply' on the pull request instead"
+          exit 1
+
       # The number keys `apply-run.yml`'s concurrency group, so two spellings of one pull request
       # must not reach two groups. Read through `env:`: a `${{ }}` inside `run:` is injectable.
       - name: Reject a pull request number that is not canonical
@@ -65,10 +72,34 @@ jobs:
             exit 1
           fi
 
+  # After `guard`, so a refused dispatch writes no reaction. A second run of the same comment (a
+  # retried dispatch whose first landed) reads `taken` and does nothing. An `auto` dispatch
+  # carries no `comment_id`, so this job skips and the gates below admit it.
+  claim:
+    needs: [guard]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    outputs:
+      state: ${{ steps.claim.outputs.state }}
+    steps:
+      - id: claim
+        uses: $/actions/claim
+        with:
+          verb: apply
+          environment: ${{ inputs.environment }}
+          pr-number: ${{ inputs.pr_number }}
+          comment-id: ${{ github.event.inputs.comment_id }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
   # Outside the group, before this run joins it: cancels this pull request's apply runs that wait
   # at an older head and replies naming the run this one waits behind (scripts/apply-queue).
   queue:
-    needs: [guard]
+    needs: [guard, claim]
+    # `!cancelled()` drops the implicit success of `guard`, so it is stated.
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     # Its writes use the App token; a job-token `actions: write` would fail every caller that
@@ -87,8 +118,8 @@ jobs:
   # keeps a run cancelled before it starts from queueing an apply. The queue only reports and
   # tidies, never gates, so a failed `queue` does not stop the apply.
   run:
-    needs: [guard, queue]
-    if: ${{ !cancelled() && needs.guard.result == 'success' }}
+    needs: [guard, claim, queue]
+    if: ${{ !cancelled() && needs.guard.result == 'success' && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
     uses: ./.github/workflows/apply-run.yml
     # The union of what `apply-run.yml`'s jobs request; a callee job asking for more fails the run.
     permissions: { contents: read, checks: read, actions: read, pull-requests: read, id-token: write }
@@ -109,8 +140,8 @@ jobs:
   # functions see that cancel. Outside `apply-run.yml`'s group, so it also answers a run cancelled
   # while it waited there. Holds the App key but checks nothing out.
   outcome:
-    needs: [guard, run]
-    if: ${{ always() && needs.guard.result == 'success' && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) }}
+    needs: [guard, claim, run]
+    if: ${{ always() && needs.guard.result == 'success' && needs.run.outputs.posted != 'true' && (needs.run.outputs.review_result != 'failure' || (needs.run.outputs.unbound != 'true' && !inputs.auto)) && (needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}

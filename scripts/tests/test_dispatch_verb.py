@@ -34,13 +34,14 @@ def _extract_dispatch_run_block():
     return run
 
 
-def _build_dispatch_body(verb, environment=""):
-    """The whole parsed dispatch body for `verb`."""
+def _build_dispatch_body(verb, environment="", comment="77"):
+    """The whole parsed dispatch body for `verb`, sent for comment `comment`."""
     env = {
         "DISPATCH_REF": "main",
         "REF": "abc123def456",
         "PR_NUMBER": "42",
         "ENVIRONMENT": environment,
+        "COMMENT_ID": comment,
         "VERB": verb,
     }
     with patch.dict(os.environ, env):
@@ -52,40 +53,82 @@ def _build_dispatch_body(verb, environment=""):
 # selectors for one property disagree eventually.
 
 
-def test_plan_body_is_the_dispatch_ref_the_verb_and_pr_number_alone():
-    """A plan body is exactly {ref: dispatch ref, inputs: {verb, pr_number}}. `verb` is what
-    selects the `plan` job in `shipmate.yml`; without it every job's `if:` is false and the
-    dispatched run completes having done nothing. The top-level ref is the dispatch ref rather
-    than the head SHA, because a plan states no head.
+def test_plan_body_is_the_dispatch_ref_the_verb_the_pr_number_and_the_comment():
+    """A commented plan body is exactly {ref: dispatch ref, inputs: {verb, pr_number,
+    comment_id}}. `verb` is what selects the `plan` job in `shipmate.yml`; without it every
+    job's `if:` is false and the dispatched run completes having done nothing. The top-level ref
+    is the dispatch ref rather than the head SHA, because a plan states no head. `comment_id` is
+    what the run claims, so a second run of one comment does no work.
 
     Mutations: drop the `verb` key; add `ref` or `environment` to the plan inputs; swap the
     top-level ref for the head SHA; drop `return_run_details`, which every body carries so the
-    API answers with the started run's id.
+    API answers with the started run's id; drop the `comment_id` key.
     """
     body = _build_dispatch_body("plan", environment="dev-eu")
     assert body == {
         "ref": "main",
+        "inputs": {"verb": "plan", "pr_number": "42", "comment_id": "77"},
+        "return_run_details": True,
+    }, f"plan body must carry the verb, the PR number and the comment, on the dispatch ref: {body}"
+
+
+def test_the_replan_body_carries_no_comment_id():
+    """The summary's comment-less replan sends no `COMMENT_ID`, and its run claims nothing.
+    Mutations: send `comment_id: ''` when it is empty; refuse an empty one on a plan."""
+    assert _build_dispatch_body("plan", comment="") == {
+        "ref": "main",
         "inputs": {"verb": "plan", "pr_number": "42"},
         "return_run_details": True,
-    }, f"plan body must carry the verb and the PR number alone, on the dispatch ref: {body}"
+    }
+
+
+def test_the_auto_body_carries_no_comment_id():
+    """`auto` is the autoplan's own dispatch: no comment, no claim. Mutation: send an empty
+    `comment_id` key."""
+    assert _build_dispatch_body("auto", comment="") == {
+        "ref": "main",
+        "inputs": {"verb": "auto", "ref": "abc123def456", "pr_number": "42"},
+        "return_run_details": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("verb", "comment", "message"),
+    [
+        ("apply", "", "::error::a commented apply needs COMMENT_ID, the command comment's id"),
+        ("unlock", "", "::error::a commented unlock needs COMMENT_ID, the command comment's id"),
+        ("plan", "0", "::error::verb plan cannot carry COMMENT_ID '0'"),
+        ("apply", "12a", "::error::verb apply cannot carry COMMENT_ID '12a'"),
+        ("unlock", "1" * 21, f"::error::verb unlock cannot carry COMMENT_ID '{'1' * 21}'"),
+        ("auto", "77", "::error::verb auto cannot carry COMMENT_ID '77'"),
+    ],
+)
+def test_a_missing_or_malformed_comment_id_is_a_usage_error(verb, comment, message):
+    """An apply or unlock without its comment would dispatch a run `apply.yml`'s `guard` refuses
+    or that marks nothing; a malformed id is bound into the claim's API path; `auto` has no
+    comment. Mutations: drop the `elif` for apply and unlock; drop the `_COMMENT_ID` check; drop
+    `verb == "auto"`."""
+    with pytest.raises(SystemExit) as e:
+        _build_dispatch_body(verb, comment=comment)
+    assert e.value.code == message
 
 
 def test_apply_body_omits_the_environment_when_it_is_empty():
-    """A bare `shipmate apply` sends {verb, ref, pr_number} and no environment key, which
-    `apply.yml` reads as `inputs.environment == ''` and runs as the bare form.
+    """A bare `shipmate apply` sends {verb, ref, pr_number, comment_id} and no environment key,
+    which `apply.yml` reads as `inputs.environment == ''` and runs as the bare form.
 
     Mutations: drop the `if os.environ.get("ENVIRONMENT")` guard -- the body carries an empty
-    `environment`, red; drop `return_run_details`.
+    `environment`, red; drop `return_run_details`; drop the `comment_id` key.
     """
     assert _build_dispatch_body("apply") == {
         "ref": "main",
-        "inputs": {"verb": "apply", "ref": "abc123def456", "pr_number": "42"},
+        "inputs": {"verb": "apply", "ref": "abc123def456", "pr_number": "42", "comment_id": "77"},
         "return_run_details": True,
     }
 
 
 def test_apply_body_carries_the_environment_when_it_is_set():
-    """A targeted `shipmate apply dev-eu` sends {verb, ref, pr_number, environment}.
+    """A targeted `shipmate apply dev-eu` sends {verb, ref, pr_number, environment, comment_id}.
 
     Mutations: drop the environment key entirely; drop `return_run_details`.
     """
@@ -96,23 +139,30 @@ def test_apply_body_carries_the_environment_when_it_is_set():
             "ref": "abc123def456",
             "pr_number": "42",
             "environment": "dev-eu",
+            "comment_id": "77",
         },
         "return_run_details": True,
     }
 
 
-def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
-    """An unlock body is exactly {verb, ref, environment} — no pr_number. Releasing a stranded
-    lock applies no plan and comments on no pull request, so nothing on that path reads one,
-    and `pr_number` is `required: false` on `shipmate.yml` precisely so this body is legal.
+def test_unlock_body_is_the_verb_the_ref_the_environment_and_the_comment():
+    """An unlock body is exactly {verb, ref, environment, comment_id} — no pr_number. Releasing a
+    stranded lock applies no plan and comments on no pull request, so nothing on that path reads
+    one, and `pr_number` is `required: false` on `shipmate.yml` precisely so this body is legal.
+    `comment_id` is where the unlock run marks the command started.
 
     Mutations: add `pr_number` to the unlock branch; drop `verb`, and the dispatched run
     matches no job's `if:` and unlocks nothing while reporting success; drop
-    `return_run_details`.
+    `return_run_details`; drop the `comment_id` key.
     """
     assert _build_dispatch_body("unlock", environment="dev-eu") == {
         "ref": "main",
-        "inputs": {"verb": "unlock", "ref": "abc123def456", "environment": "dev-eu"},
+        "inputs": {
+            "verb": "unlock",
+            "ref": "abc123def456",
+            "environment": "dev-eu",
+            "comment_id": "77",
+        },
         "return_run_details": True,
     }
 
@@ -157,6 +207,7 @@ def _run_dispatch(
     failing_script=None,
     stubs=None,
     cwd=None,
+    comment_id="77",
 ):
     """Run the shipped step with a gh stub that records its argv; returns the
     CompletedProcess and the recorded argv text. `failing_script` is `(name, exit_code,
@@ -178,6 +229,7 @@ def _run_dispatch(
     env["VERB"] = verb
     env["REF"] = "abc123"
     env["PR_NUMBER"] = "42"
+    env["COMMENT_ID"] = comment_id
     env["COMMENT_TOKEN"] = "workflow_token"  # noqa: S105
     env["GITHUB_ACTION_PATH"] = str(ACTIONS / "dispatch")
     # Runner-supplied, and the failure comment's only content besides fixed text.
@@ -222,6 +274,26 @@ def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_pa
     assert "/issues/42/comments" in argv and _RUN_URL in argv, (
         f"the commenter must be told no run started: {argv!r}"
     )
+
+
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+@bash_only
+def test_an_empty_comment_id_dispatches_nothing_and_says_so_on_the_pull_request(tmp_path, verb):
+    """Every verb this action dispatches comes from a comment, and `dispatch-body` reads an
+    empty id on a plan as the comment-less replan, whose run claims nothing: a caller that drops
+    the `comment-id` line would dispatch plans that a duplicate can run twice. The `plan` row is
+    the one only this check refuses. Mutations: delete the check (the `plan` row dispatches);
+    drop its `say_no_run_started`."""
+    result, argv = _run_dispatch(tmp_path, verb=verb, gh_stub=RECORDING_GH_STUB, comment_id="")
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert _DISPATCH_PATH not in argv, f"an empty comment id must dispatch nothing: {argv!r}"
+    assert (
+        "::error::The calling workflow did not pass a comment-id to shipmate/actions/dispatch, "
+        "so the dispatched run cannot claim its comment. Wire that step's comment-id input to "
+        "github.event.comment.id (docs/getting-started.md).\n"
+    ) in result.stdout
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, argv
 
 
 @pytest.mark.parametrize("verb", ["bogus", "auto"])
@@ -272,6 +344,7 @@ def test_the_action_declares_no_workflow_input():
     inputs = action_yaml(DISPATCH_ACTION)["inputs"]
     assert sorted(inputs) == [
         "app-id",
+        "comment-id",
         "environment",
         "pr-number",
         "private-key",
@@ -302,6 +375,7 @@ def test_dispatch_step_env_mapping_is_complete():
         "VERB": "${{ inputs.verb }}",
         "REF": "${{ inputs.ref }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
+        "COMMENT_ID": "${{ inputs.comment-id }}",
         "COMMENT_TOKEN": "${{ github.token }}",
     }
 
@@ -452,16 +526,16 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "plan",
             "dev-eu",
             (
-                '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, '
-                '"return_run_details": true}'
+                '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42", '
+                '"comment_id": "77"}, "return_run_details": true}'
             ),
         ),
         (
             "apply",
             "",
             (
-                '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"}, '
-                '"return_run_details": true}'
+                '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
+                '"comment_id": "77"}, "return_run_details": true}'
             ),
         ),
         (
@@ -469,7 +543,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
-                '"environment": "dev-eu"}, "return_run_details": true}'
+                '"environment": "dev-eu", "comment_id": "77"}, "return_run_details": true}'
             ),
         ),
         (
@@ -477,7 +551,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "unlock", "ref": "abc123", '
-                '"environment": "dev-eu"}, "return_run_details": true}'
+                '"environment": "dev-eu", "comment_id": "77"}, "return_run_details": true}'
             ),
         ),
     ],

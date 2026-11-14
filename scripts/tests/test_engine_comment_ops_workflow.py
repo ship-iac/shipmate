@@ -119,7 +119,8 @@ def test_the_authz_step_passes_this_whole_with_block():
 def test_the_dispatch_step_passes_this_whole_with_block():
     """Hand-written.
 
-    Mutation: `ref: ${{ github.event.pull_request.head.sha }}`.
+    Mutations: `ref: ${{ github.event.pull_request.head.sha }}`; drop `comment-id`, and no
+    dispatched run can claim its comment.
     """
     assert step_using(WF, "ops", "actions/dispatch")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -128,4 +129,5 @@ def test_the_dispatch_step_passes_this_whole_with_block():
         "environment": "${{ steps.authz.outputs.environment }}",
         "ref": "${{ steps.authz.outputs.head-sha }}",
         "pr-number": "${{ github.event.issue.number }}",
+        "comment-id": "${{ github.event.comment.id }}",
     }

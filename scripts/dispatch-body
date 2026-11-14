@@ -2,7 +2,13 @@
 """Build the `workflow_dispatch` request body for `shipmate.yml` (one input shape per verb), POST
 it and print the API's answer.
 
-Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `DISPATCH_REF`, `GITHUB_REPOSITORY`, `GH_TOKEN`.
+Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `COMMENT_ID`, `DISPATCH_REF`,
+`GITHUB_REPOSITORY`, `GH_TOKEN`.
+
+`COMMENT_ID` is the command comment's id, sent as `comment_id`. A commented `apply` or
+`unlock` must carry one, and `plan` may; an empty one on a `plan` is the comment-less replan,
+whose body carries no `comment_id`. `auto` carries none. Any other combination, or a value
+that is not a comment id (`_shipmate._COMMENT_ID`), exits 1 before any request.
 
 It retries a transient failure (`_shipmate.retried`), and a transient failure may have
 started a run: GitHub can start it and still answer 502. Before each retry it lists `shipmate.yml`'s
@@ -33,7 +39,7 @@ import os
 import sys
 from datetime import UTC, datetime, timedelta
 
-from _shipmate import retried, run, run_annotated
+from _shipmate import _COMMENT_ID, retried, run, run_annotated
 
 MAY_HAVE_STARTED = 3
 UNDETERMINED = 4
@@ -72,6 +78,13 @@ def body() -> dict:
         # `shipmate apply`, which `apply.yml` runs across every pending environment.
         if os.environ.get("ENVIRONMENT"):
             inputs["environment"] = os.environ["ENVIRONMENT"]
+    comment = os.environ.get("COMMENT_ID", "")
+    if comment:
+        if verb == "auto" or _COMMENT_ID.fullmatch(comment) is None:
+            raise SystemExit(f"::error::verb {verb} cannot carry COMMENT_ID {comment!r}")
+        inputs["comment_id"] = comment
+    elif verb in ("apply", "unlock"):
+        raise SystemExit(f"::error::a commented {verb} needs COMMENT_ID, the command comment's id")
     # `return_run_details` makes the API answer 200 with the started run's id, which the success
     # reply links when it is a usable id; without it the answer is an empty 204.
     return {"ref": os.environ["DISPATCH_REF"], "inputs": inputs, "return_run_details": True}

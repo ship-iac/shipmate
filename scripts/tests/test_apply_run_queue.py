@@ -21,8 +21,11 @@ APPLY_RUN_CONCURRENCY = {
 #: The whole `run` job of `apply.yml`. `permissions` is the union `apply-run.yml`'s jobs request;
 #: `with` forwards every input; `secrets` names each one `apply-run.yml` declares.
 RUN_JOB = {
-    "needs": ["guard", "queue"],
-    "if": "${{ !cancelled() && needs.guard.result == 'success' }}",
+    "needs": ["guard", "claim", "queue"],
+    "if": (
+        "${{ !cancelled() && needs.guard.result == 'success' && "
+        "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
+    ),
     "uses": "./.github/workflows/apply-run.yml",
     "permissions": {
         "contents": "read",
@@ -111,14 +114,20 @@ def test_actionlint_ignores_only_the_result_property_in_apply_run():
 def test_the_run_job_is_this_whole_job():
     """Mutations: drop `auto` from `with` -- red; drop `environment` from `with` -- red; drop
     `SHIPMATE_SECRETS` from `secrets` -- red; set `if:` to `${{ always() }}` -- red; drop
-    `queue` from `needs` -- red."""
+    `queue` from `needs` -- red; drop the claim clause, and a `taken` run of a comment applies
+    a second time -- red; drop `|| needs.claim.result == 'skipped'`, and no `auto` run applies
+    -- red; drop `claim` from `needs`, and its outputs read empty -- red."""
     assert workflow_jobs("apply.yml")["run"] == RUN_JOB
 
 
 #: The whole `queue` job of `apply.yml`. No job-token permission: its writes use the App token,
 #: and only under the trust rule `scripts/apply-queue` applies.
 QUEUE_JOB = {
-    "needs": ["guard"],
+    "needs": ["guard", "claim"],
+    "if": (
+        "${{ !cancelled() && needs.guard.result == 'success' && "
+        "(needs.claim.outputs.state == 'owned' || needs.claim.result == 'skipped') }}"
+    ),
     "runs-on": "ubuntu-slim",
     "environment": {"name": "shipmate-engine", "deployment": False},
     "permissions": {},
@@ -151,7 +160,10 @@ QUEUE_STEP_ENV = {
 
 def test_the_queue_job_is_this_whole_job():
     """Mutations: `permissions: { actions: write }` -- red; drop `auto` from `with` -- red; add
-    `continue-on-error: true` -- red."""
+    `continue-on-error: true` -- red; drop `needs.guard.result == 'success' &&`, and a guard
+    refusal with a non-empty `comment_id` (claim skipped behind it) starts the queue, because
+    `!cancelled()` drops the implicit success of `needs: guard` -- red; drop the claim clause --
+    red."""
     assert workflow_jobs("apply.yml")["queue"] == QUEUE_JOB
 
 
