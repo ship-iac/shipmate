@@ -36,8 +36,9 @@ def calls(monkeypatch):
     """`patch-checks` in this process with every retry sleep skipped, on attempt 1 of a
     pre-merge run with no pull request read. Returns `(recorded, fail, reads)`: `recorded` holds
     each PATCH's `(args, stdin)`, `fail` maps an id to the stderr its PATCH fails with, and
-    `reads` maps a GET path to its JSON (an exception instance is raised), each GET appended to
-    `reads["calls"]`. A PATCH updates the check stored at its path, so a later GET sees it."""
+    `reads` maps a GET path to its JSON (a string is the stderr the GET fails with), each GET
+    appended to `reads["calls"]`. A PATCH updates the check stored at its path, so a later GET
+    sees it."""
     monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
     monkeypatch.delenv("SHIPMATE_DEPLOY", raising=False)
@@ -48,6 +49,12 @@ def calls(monkeypatch):
     reads = {"calls": []}
 
     def run(args, secrets=(), stdin=None):
+        if args[:2] == ["gh", "api"] and len(args) == 3:
+            reads["calls"].append(args[2])
+            value = reads[args[2]]
+            if isinstance(value, str):
+                raise SystemExit(f"command failed (1): {' '.join(args)}\n{value}")
+            return json.dumps(value)
         recorded.append((args, stdin))
         cid = args[4].rsplit("/", 1)[1]
         if cid in fail:
@@ -58,15 +65,7 @@ def calls(monkeypatch):
             reads[args[4]] = {**stored, **body}
         return "{}"
 
-    def gh_json(path, run=None, *, retry=True):
-        reads["calls"].append(path)
-        value = reads[path]
-        if isinstance(value, BaseException):
-            raise value
-        return value
-
     monkeypatch.setattr(pc, "run", run)
-    monkeypatch.setattr(pc, "gh_json", gh_json)
     return recorded, fail, reads
 
 
@@ -131,7 +130,7 @@ def test_a_missing_record_title_sends_no_output(monkeypatch, calls):
 def test_a_failed_check_read_writes_nothing(monkeypatch, calls):
     """Mutation: treat a failed GET as a missing summary -> the PATCH is sent."""
     recorded, _, reads = calls
-    reads[f"repos/{_REPO}/check-runs/4"] = SystemExit("::error::command failed (1): gh api")
+    reads[f"repos/{_REPO}/check-runs/4"] = "gh: Not Found (HTTP 404)"
     with pytest.raises(SystemExit):
         _main(monkeypatch, [_entry(4, title="Not run")])
     assert recorded == []
@@ -194,10 +193,12 @@ def test_a_failed_pull_request_read_writes_nothing_and_fails(monkeypatch, calls)
     """Mutation: treat a failed read as not merged -> both are written."""
     recorded, _, reads = calls
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
-    reads[f"repos/{_REPO}/pulls/31"] = SystemExit("::error::command failed (1): gh api")
+    reads[f"repos/{_REPO}/pulls/31"] = "gh: Not Found (HTTP 404)"
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, [_entry(1)])
-    assert exc.value.code == "::error::command failed (1): gh api"
+    assert exc.value.code == (
+        "::error::command failed (1): gh api repos/acme/demo/pulls/31\ngh: Not Found (HTTP 404)"
+    )
     assert recorded == []
 
 
@@ -290,3 +291,23 @@ def test_a_secondary_rate_limit_waits_60_s_and_completes(monkeypatch, capsys, ca
     _main(monkeypatch, [_entry(1), _entry(2)])
     assert ([a for a, _ in recorded], slept) == ([_argv("1"), _argv("1"), _argv("2")], [60])
     assert capsys.readouterr().out == "1\n2\n"
+
+
+def test_a_rate_limited_read_waits_60_s_and_writes(monkeypatch, capsys, calls):
+    """The summary read sits between writes, so it draws the same limit. Mutation: read through
+    `gh_json` (transient retries only) instead of `write_retried` -> the 403 fails the loop."""
+    recorded, _, reads = calls
+    path = f"repos/{_REPO}/check-runs/4"
+    reads[path] = _SECONDARY
+    slept = []
+
+    def clear(_delay):
+        slept.append(_delay)
+        reads[path] = _check()
+
+    monkeypatch.setattr(_shipmate, "_sleep", clear)
+    _main(monkeypatch, [_entry(4, {"status": "queued"}, title="Not run")])
+    assert (reads["calls"], slept) == ([path, path], [60])
+    assert [json.loads(s) for _, s in recorded] == [
+        {"status": "queued", "output": {"title": "Not run", "summary": _SUMMARY}}
+    ]

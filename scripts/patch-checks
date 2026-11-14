@@ -3,7 +3,8 @@
 
 Reads a write plan on stdin, one JSON object per line (blank lines skipped): `id`, the check, and
 `body`, its PATCH body. Each is PATCHed in order, one at a time, through `write_retried`, the body
-on gh's stdin. An entry carrying `title` reads its check first (one GET) and its PATCH also carries
+on gh's stdin. Every read goes through `write_retried` too. An entry carrying `title` reads its
+check first (one GET) and its PATCH also carries
 `output`: the check's current summary, which pending-checks wrote once and nothing changes since,
 so no recent write can make the read stale; and as its title the `title` string, or, when that is
 null, the `title` of the check's `external_id` record. A check with no record title, or no
@@ -30,7 +31,7 @@ import json
 import os
 import sys
 
-from _shipmate import gh_json, is_pr_number, run, run_annotated, write_retried
+from _shipmate import is_pr_number, run, run_annotated, write_retried
 
 SUCCESS = {"status": "completed", "conclusion": "success"}
 
@@ -57,10 +58,19 @@ def with_output(entry, check):
     return {**body, "output": {"title": title, "summary": summary}}
 
 
+def read(path):
+    """`gh api <path>` parsed, through `write_retried`: a read repeats safely, and the writes
+    beside it can draw GitHub's secondary rate limit on it too."""
+    try:
+        return json.loads(write_retried(functools.partial(run, ["gh", "api", path])))
+    except SystemExit as exc:
+        raise SystemExit(f"::error::{exc.code}") from None
+
+
 def _merged(repo, pr):
     if not is_pr_number(pr):
         raise SystemExit(f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {pr!r})")
-    return gh_json(f"repos/{repo}/pulls/{pr}").get("merged") is True
+    return read(f"repos/{repo}/pulls/{pr}").get("merged") is True
 
 
 def write(plan):
@@ -85,7 +95,7 @@ def write(plan):
     for entry in plan:
         cid = entry["id"]
         path = f"repos/{repo}/check-runs/{cid}"
-        body = with_output(entry, gh_json(path)) if "title" in entry else entry["body"]
+        body = with_output(entry, read(path)) if "title" in entry else entry["body"]
         args = ["gh", "api", "-X", "PATCH", path, "--input", "-"]
         try:
             write_retried(functools.partial(run, args, stdin=json.dumps(body)))
