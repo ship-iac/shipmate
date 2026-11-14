@@ -24,6 +24,7 @@ from _loader import action_steps
 
 _EXPECTED = {
     "cell-init": [
+        "Require the state inputs",
         "Provider cache key",
         "Restore provider cache",
         "Initialize the stack",

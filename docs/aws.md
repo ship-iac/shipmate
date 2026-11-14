@@ -315,8 +315,8 @@ their cells download only `hashicorp/random`. An AWS repository's
 cells pull `hashicorp/aws`. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
 §Terramate safeguards, "Lock files and the provider cache") and a drift or
-apply cell has saved an entry for the same provider addresses and versions;
-plan cells never save. Without a committed lock, every `init -reconfigure`
+apply cell, or a merge deploy's `warm` job, has saved an entry for the same
+provider addresses and versions; plan cells never save. Without a committed lock, every `init -reconfigure`
 downloads the provider again. Before setting `runs_on:` to `ubuntu-slim`,
 weigh two costs: the provider download, and the PyYAML install with `apt-get`
 it adds to every job that parses YAML, since `ubuntu-slim` ships no PyYAML.

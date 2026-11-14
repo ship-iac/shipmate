@@ -366,9 +366,11 @@ yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
 then `shipmate doctor` reports that no active ruleset requires the gate.
 
 The top-level `max_parallel` key (default 10), beside `layout`, `identities`
-and `environments`, caps how many cells one plan or drift sweep runs at once ([`../CONTRACT.md`](../CONTRACT.md)
+and `environments`, caps how many cells one plan or drift sweep runs at once, and how many
+`warm` legs a merge deploy runs at once ([`../CONTRACT.md`](../CONTRACT.md)
 §Environment table). Each plan and drift sweep running at the same time takes
-up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
+up to `max_parallel` cells, and each merge deploy up to `max_parallel` `warm`
+legs, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
 `command_hints: true` ends each plan comment with a changed cell, on a pull
 request that is not a draft, with a folded section naming, in apply order,

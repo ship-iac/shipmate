@@ -25,6 +25,7 @@ _INIT_ACTION = "cell-init"
 _LOCATE = {
     "name": "Locate state",
     "id": "locate-state",
+    "if": "${{ inputs.backend != 'false' }}",
     "shell": "bash",
     "env": {"STACK": "${{ inputs.stack }}"},
     "run": (

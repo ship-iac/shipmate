@@ -602,7 +602,7 @@ keeps a leading `0`. Indentation is the one structure rule.
 ```yaml
 # .github/shipmate-config.yml
 layout: tf_vars                    # tf_vars | workspace | folder
-max_parallel: 10                   # cell jobs one plan or drift matrix runs at once
+max_parallel: 10                   # jobs one plan, drift or warm matrix runs at once
 # command_hints: true              # end a plan comment with a changed cell with its commands
 # tools:                           # versions every job installs; VERSIONS defaults when absent
 #   tofu: 1.13.2
@@ -684,9 +684,9 @@ that pull request's plans ran on the old version. `shipmate doctor` lists each
 tool's version and its source as the default branch decides them
 (`docs/troubleshooting.md` §shipmate doctor).
 
-**`max_parallel` caps the plan and drift matrices.** It is a whole number from
-1 to 256, and 10 when absent: each plan matrix and drift sweep runs at most that
-many cell jobs at once, and the rest queue, so a plan or sweep over the cap
+**`max_parallel` caps the plan and drift matrices and the merge deploy's
+`warm` matrix.** It is a whole number from 1 to 256, and 10 when absent: each
+plan matrix, drift sweep and `warm` matrix runs at most that many jobs at once, and the rest queue, so a plan or sweep over the cap
 takes longer, in batches. The cap is per matrix per run. 10 is half of the 20
 concurrent jobs GitHub allows standard GitHub-hosted runners on Free (40 on
 Pro, 60 on Team, 500 on Enterprise;
@@ -3225,14 +3225,17 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   restore only and pass `setup` `cache-save: "false"`. Entries come from the
   apply, deploy and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
-  downloads the release files in every plan job. A deploy run's `warm` job
-  runs only on a deploy with no cells, because a cell that reaches its `setup`
-  step saves the entry (one refused before it saves nothing),
-  and installs OpenTofu at the versions its `detect` resolved. It saves
-  the entry for the deploy runner's operating system and architecture, which
-  the key carries, so a plan cell on another runner type still misses. The
-  deploy run waits for `warm`, so it holds the deploy concurrency group for up
-  to its 15-minute timeout; no job, the gate, the cells or the lock release
+  downloads the release files in every plan job. Each leg of a deploy run's
+  `warm` job (§Terramate safeguards, "Lock files and the provider cache")
+  installs OpenTofu at the versions its `detect` resolved, so a merge deploy
+  saves the entry for the deploy runner's operating system and architecture,
+  which the key carries, and a plan cell on another runner type still misses.
+  When no managed stack commits a lock naming a provider, or the list of locks
+  cannot be built, `warm` runs one tools-only leg that installs the tools and
+  nothing more. `warm` runs on every merge deploy that `detect` accepts, at
+  most `max_parallel` legs at once, each up to its 15-minute timeout, and the
+  deploy run waits for it, so it can hold the deploy concurrency group for
+  longer than one timeout; no job, the gate, the cells or the lock release
   read it, and its failure shows on that job only. An entry is keyed on its path, which
   lives under `RUNNER_TEMP`: a job on a runner image whose `RUNNER_TEMP`
   differs from the saving runner's misses and downloads. This replacement handles
@@ -4750,6 +4753,30 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   environment's cells. Each saves after a restore that missed, and only when
   `init` left a file in the cache; `apply-cell` saves only after a successful
   apply, and a failed save does not fail the cell.
+- Every merge deploy's `warm` job saves the entry of each distinct lock on the
+  merged commit, up to 256 distinct locks, so no cell needs to have run for an
+  entry to exist. Its `detect` picks one stack per distinct digest among every
+  managed stack, changed or not (a stack with an `env/*` tag and no
+  `shipmate/local`); past 256 it warns how many locks are not warmed. `warm`
+  runs one leg per pick on the cells' runner (`runs_on`), at most
+  `max_parallel` at once, with only `contents: read`, on the merged commit's
+  code. A leg computes the key with
+  the same script on its own runner and looks it up; on a miss it runs the
+  cells' `init` through `actions/cell-init` with `-backend=false`, under the
+  variables of that stack's first environment by name: it initializes no backend, reads no state,
+  assumes no cloud role and plans nothing, and saves only when `init` left a
+  file in the cache. It binds no GitHub Environment, so it gets the
+  `SHIPMATE_SECRETS` the caller passes and no environment's secrets; an
+  `init` that needs an environment's secret (a private module source, say)
+  fails that leg only. An exact-key lookup after the save decides the outcome.
+  A hit, including when another job saved the entry first, adds no warning of
+  `warm`'s own (`actions/cache/save` may log its own message on that race); a
+  miss, looked up twice, warns `Provider cache entry not saved`, naming the
+  key. A leg runs per distinct lock on every merge deploy whose `detect`
+  passes, including one with no cells; a refused `detect` runs no `warm`. It
+  is a degrade job: a failed leg never fails the deploy, and a list that
+  cannot be built warns `no provider cache warm-up: <cause>` in `detect` and
+  falls back to the tools-only leg.
 - An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
   runner image whose `RUNNER_TEMP` differs from the saving runner's misses and
   downloads.
@@ -4894,7 +4921,8 @@ stack-wave by stack-wave exactly as described above (see Fan-out).
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
 `apply-env-level.yml` → gate completion + cell lock release; beside the
-env-levels, `warm` saves the OpenTofu cache entry on a deploy with no cells; the
+env-levels, `warm` saves the provider cache entry of each distinct lock and the
+OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the
 apply path as `.github/workflows/apply.yml` (guard → `apply-run.yml`, one run
 per pull request at a time: review → detect → cell lock acquisition →

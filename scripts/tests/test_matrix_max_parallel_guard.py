@@ -1,8 +1,9 @@
-"""The plan and drift matrices run at most `max_parallel` jobs at once; apply waves and unlock
-do not.
+"""The plan and drift matrices and the merge deploy's `warm` matrix run at most `max_parallel`
+jobs at once; apply waves and unlock do not.
 
-Apply waves and unlock bind `<env>-apply`, whose reviewers and wait timer would fire again for
-every batch, so they stay uncapped.
+Only jobs binding `<env>-apply` are exempt: its reviewers and wait timer would fire again for
+every batch, so apply waves and unlock stay uncapped. `warm` binds no environment, so it is
+capped.
 
 Threat model: an accidental regression -- a dropped or edited `max-parallel`, a new matrix job
 written without one, a cap added to a wave or to unlock -- not a hostile edit to a SHA-pinned
@@ -39,6 +40,11 @@ EXPECTED_STRATEGIES = {
             "matrix": {"include": f"${{{{ fromJSON(inputs.waves_json).wave{n} }}}}"},
         }
         for n in range(8)
+    },
+    ("deploy.yml", "warm"): {
+        "fail-fast": False,
+        "max-parallel": _FROM_DETECT,
+        "matrix": {"include": "${{ fromJSON(needs.detect.outputs.warm) }}"},
     },
 }
 
@@ -78,7 +84,7 @@ EXPECTED_DETECT_OUTPUT = {
     "drift.yml": "${{ steps.m.outputs.max_parallel }}",
     "unlock.yml": None,
     "apply-run.yml": None,
-    "deploy.yml": None,
+    "deploy.yml": "${{ steps.d.outputs.max_parallel }}",
 }
 
 
@@ -93,7 +99,8 @@ def test_every_matrix_job_carries_exactly_this_strategy():
     detect writes; any other `needs.detect.outputs.*` reads '' and `fromJSON('')` fails.
 
     Mutations: add `max-parallel` to `unlock` or to `wave3`; remove it from `plan`; write
-    `drift`'s as `${{ needs.detect.outputs.max_parallel }}` with no `fromJSON`; add a matrix
+    `drift`'s as `${{ needs.detect.outputs.max_parallel }}` with no `fromJSON`; drop it from
+    `deploy.yml`'s `warm`; add a matrix
     job to `unlock.yml`; add a `foo.yaml` holding a matrix job; `fail-fast: true` on a wave."""
     found = {
         (path.name, job_id): job["strategy"]

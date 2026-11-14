@@ -136,8 +136,8 @@ Each sweep runs at most `max_parallel` cells at once (10 unless the environment
 table sets it, [`../CONTRACT.md`](../CONTRACT.md) §Environment table), so a
 large sweep takes longer instead of starting every cell together. The cap is per
 sweep: drift files whose sweeps run together each take up to `max_parallel`,
-and so does a pull request's plan beside them, so stagger the drift files'
-crons.
+and so do a pull request's plan and a merge deploy's `warm` legs beside them,
+so stagger the drift files' crons.
 
 Splitting does not lift the tree's own ceiling. Every sweep hands drift-issues
 the full tree's cell list in one environment variable. Past about 2,000 cells

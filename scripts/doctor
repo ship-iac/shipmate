@@ -2029,7 +2029,7 @@ def _config_defaults(table):
 
     No absence here is invalid, so no validator can report any of them. `needs` and
     `apply_mode` decide what a comment can do, and `max_parallel` how many plan and drift cell
-    jobs run at once.
+    jobs, and merge deploy `warm` legs, run at once.
     An `apply_mode: targeted` set on no entry applies every environment, including the one a
     consumer meant to hold back. This is the last moment before the merge at which
     reading them costs nothing.
@@ -2070,7 +2070,10 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"{cap_head} each plan and drift sweep runs at most {cap} cell jobs at once.",
+            (
+                f"{cap_head} each plan and drift sweep runs at most {cap} cell jobs at once, "
+                f"and each merge deploy at most {cap} `warm` legs."
+            ),
         ),
     ]
     if autos:

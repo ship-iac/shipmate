@@ -763,7 +763,7 @@ merge it through a bypass actor.
 | `declares no layout` | either the key is genuinely absent, or it is indented under another key — see the indentation trap below |
 | `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments`, `max_parallel`, `command_hints` and `tools` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
 | `max_parallel is …; it must be a whole number from 1 to 256` | `max_parallel` takes a bare whole number, quoted or not: no sign, space, decimal point or leading zero. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0 is refused; remove the key for the default of 10 |
-| `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan and drift matrices stays a merged commit. Write the number |
+| `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan, drift and `warm` matrices stays a merged commit. Write the number |
 | `command_hints must be true or false, got …` | `command_hints` holds `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise read as set and resolve as unset |
 | `command_hints holds a variable reference, and it accepts none` | `command_hints` is written into the file, like the flags. Write `true` or `false` |
 | `tools is …; it must be a mapping of terramate and tofu to versions, got …` | `tools` holds `tofu:` and `terramate:` lines indented under it. An empty `tools:` reads as a string, a list as a list |
@@ -811,7 +811,8 @@ The fix in every case is the same: write the top-level settings at column 1.
 
 **Three settings refuse nothing when they are absent.** `needs`, `apply_mode`
 and `max_parallel` are optional and take tolerant defaults — no ordering, no
-exclusions, and at most 10 cell jobs at once per plan and drift sweep. A file
+exclusions, and at most 10 cell jobs at once per plan and drift sweep, and 10
+`warm` legs per merge deploy. A file
 that sets `apply_mode: targeted` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
 warns. `shipmate doctor` echoes all three on every report for exactly this reason,
@@ -1597,7 +1598,7 @@ job's log.
 |---|---|
 | "<tool> is not installed on the runner." | The runner lacks `curl`, `openssl`, `base64` or `sha256sum`, which every verify and install step checks, or `gpg` or `gpgconf`, which the OpenTofu step also checks. Install it on the runner image. |
 | "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
-| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells and a merge deploy's `warm` job fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. `warm` runs only on a deploy with no cells; the deploy run waits for it, but no job, the gate, the cells or the lock release read it, and its failure shows on that job only. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
+| "<base>/<file> answered HTTP <code> from <answering-url> (curl exit <rc>)." | `404`: no release of that version exists; check `tools` in `.github/shipmate-config.yml` on the default branch. Plan `detect` refuses such a version in the pull request that sets it, so here that pull request merged despite the refusal, or upstream removed the release. For Terramate, every job fails, the plan of the pull request that fixes `tools` included, so that pull request cannot pass the gate either: disable the gate rule until it merges, or merge it through a bypass actor. For OpenTofu, only the cells and a merge deploy's `warm` job fail, because `detect` installs no OpenTofu: a pull request that plans cells fails, and the pull request that fixes `tools` and changes no stack passes. `warm` runs on every merge deploy whose `detect` passes (a refused `detect` runs no `warm`): one leg per distinct lock naming a provider that a managed stack (an `env/*` tag, no `shipmate/local`) commits, else one tools-only leg; a `no provider cache warm-up` warning in `detect` means the list of locks fell back to that tools-only leg. The deploy run waits for it, but no job, the gate, the cells or the lock release read it, and its failure shows on that job only. Any other `<code>` is the failed download's own status, `000` meaning no response arrived: re-run the failed job. |
 | "<base>/checksums.txt.sig is not base64." | The signature download is not a signature, such as an HTML page a proxy or rate limit served with HTTP 200. Re-run the failed job. |
 | "the signature on checksums.txt did not verify against the committed Terramate key (openssl exit <rc>)." | The checksum file is not the one Terramate signed, or a key other than the committed one signed it. |
 | "mktemp could not create a gpg keyring directory." | The runner could not create a temporary directory. Re-run the failed job. |
@@ -1735,7 +1736,24 @@ the cause: the backend, credentials or the configuration.
    It starts `tofu-providers-`.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
-   drift or apply cell saves a fresh entry.
+   drift or apply cell, or the next merge deploy's `warm` job, saves a fresh
+   entry.
+
+### `Provider cache entry not saved`
+
+A merge deploy's `warm` leg saved the provider cache entry it names, and two
+exact-key lookups after the save found none. The deploy, its cells and the gate
+are unaffected; cells whose lock the entry serves download their providers
+until an entry exists ([`../CONTRACT.md`](../CONTRACT.md) §Terramate
+safeguards, "Lock files and the provider cache").
+
+1. Read why the save stored nothing in the leg's `Save provider cache` step
+   log.
+2. Check whether the entry exists now: `gh cache list --key <key> --repo
+   <owner>/<repo>`. A lookup can miss an entry saved moments before; if it is
+   listed, nothing more is needed.
+3. Otherwise re-run the `warm` leg, or wait for the next merge deploy, whose
+   `warm` saves the entry.
 
 ### `detect failed: <n> file(s) not formatted`, or `<n> generated file(s) stale`
 
@@ -3024,6 +3042,11 @@ stacks stay pending and visible, which is the recoverable state: re-run that
 deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
+
+A long hold on that group makes the drop more likely. Every merge deploy whose
+`detect` passes runs `warm`, one leg per distinct provider lock, at most
+`max_parallel` legs at once, each up to its 15-minute timeout, and the deploy run holds the
+group until `warm` ends, even with no cells to apply.
 
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the

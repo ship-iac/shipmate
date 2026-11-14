@@ -1404,3 +1404,116 @@ def test_a_failed_lock_read_refuses_and_writes_no_refused_locked(tmp_path, monke
         _locked_run(tmp_path, monkeypatch, SystemExit("::error::gh api exited 1: boom"))
     assert str(exc.value) == "::error::gh api exited 1: boom"
     assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "12"}
+
+
+#: A lock naming one provider; `_LOCK_B` another, so the two digest differently.
+_LOCK_A = 'provider "registry.opentofu.org/hashicorp/null" {\n  version = "3.2.4"\n}\n'
+_LOCK_B = 'provider "registry.opentofu.org/hashicorp/random" {\n  version = "3.9.1"\n}\n'
+_TF_VARS_TABLE = {"layout": "tf_vars", "environments": {"dev": {"region": "eu-west-1"}}}
+
+
+def _tree(tmp_path, monkeypatch, locks):
+    """A merged tree under `tmp_path`, the cwd, holding `locks`: `{stack: lock text}`."""
+    for stack, text in locks.items():
+        (tmp_path / stack).mkdir(parents=True)
+        (tmp_path / stack / ".terraform.lock.hcl").write_text(text, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+
+def test_warm_takes_one_managed_stack_per_distinct_lock(tmp_path, monkeypatch):
+    """Changed or not, every managed stack is a candidate; the first per digest in path order
+    wins, with the tf_vars the table resolves for its first environment by name. Unmanaged,
+    local and lock-less stacks are left out. Mutations: drop the `LOCAL_TAG` clause; drop the
+    `not envs` clause; key `rows` on the stack instead of the digest; take `envs[-1]`."""
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {
+            "a": _LOCK_A,
+            "b": _LOCK_A,
+            "c": _LOCK_B,
+            "d": "# no provider block\n",
+            "local": _LOCK_B + "\n" + _LOCK_A,
+            "unmanaged": 'provider "x/y/z" {\n  version = "1.0.0"\n}\n',
+        },
+    )
+    tag_map = {
+        "a": ["env/prd", "env/dev"],
+        "b": ["env/dev"],
+        "c": ["env/prd"],
+        "d": ["env/dev"],
+        "local": ["env/dev", "shipmate/local"],
+        "unmanaged": ["workload/app"],
+        "missing": ["env/dev"],
+    }
+    assert dd.warm_cells(tag_map, _TF_VARS_TABLE) == [
+        {"stack": "a", "tf_vars": {"TF_VAR_env": "dev", "TF_VAR_region": "eu-west-1"}},
+        {"stack": "c", "tf_vars": {"TF_VAR_env": "prd", "TF_VAR_region": ""}},
+    ]
+
+
+def test_warm_past_the_matrix_limit_keeps_256_and_warns(tmp_path, monkeypatch, capsys):
+    """Mutation: drop the slice (257 rows); drop the warning."""
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {f"s{i:03}": f'provider "x/y/p{i}" {{\n  version = "1.0.0"\n}}\n' for i in range(258)},
+    )
+    rows = dd.warm_cells({f"s{i:03}": ["env/dev"] for i in range(258)}, _TF_VARS_TABLE)
+    assert [r["stack"] for r in rows] == [f"s{i:03}" for i in range(256)]
+    assert capsys.readouterr().err == (
+        "::warning::2 of 258 distinct provider locks are not warmed: the warm matrix holds at "
+        "most 256.\n"
+    )
+
+
+def test_no_lock_naming_a_provider_leaves_one_tools_only_row(tmp_path, monkeypatch, capsys):
+    """A deploy still saves the OpenTofu release entry. Mutation: return `rows` alone."""
+    _tree(tmp_path, monkeypatch, {"a": "# no provider block\n"})
+    assert dd.warm_rows({"a": ["env/dev"]}, _TF_VARS_TABLE) == [{"stack": "", "tf_vars": {}}]
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    ("error", "said"),
+    [
+        (KeyError("environments"), "'environments'"),
+        (SystemExit("::error::refused"), "::error::refused"),
+    ],
+    ids=["exception", "refusal"],
+)
+def test_a_failed_warm_list_warns_and_warms_nothing(monkeypatch, capsys, error, said):
+    """A degrade: the deploy carries on with the tools-only row, after an exception and after a
+    `SystemExit` refusal, which is no `Exception`. Mutations: re-raise in `warm_rows`; catch
+    `Exception` alone (reds `refusal`)."""
+
+    def broken(tag_map, table):
+        raise error
+
+    monkeypatch.setattr(dd, "warm_cells", broken)
+    assert dd.warm_rows({}, {}) == [{"stack": "", "tf_vars": {}}]
+    assert capsys.readouterr().err == f"::warning::no provider cache warm-up: {said}\n"
+
+
+def test_main_writes_the_warm_list(tmp_path, monkeypatch):
+    """The rows and the cap come from the table the deploy loaded. Mutations: drop `warm=` from
+    the final `write_outputs`; pass `{}` for the table; drop `max_parallel=`."""
+    _tree(tmp_path / "tree", monkeypatch, {"stacks/app": _LOCK_A})
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
+        table={
+            "layout": "tf_vars",
+            "max_parallel": "4",
+            "environments": {"dev-eu": {"region": "eu-west-1"}},
+        },
+    )
+    assert (parsed["warm"], parsed["max_parallel"]) == (
+        (
+            '[{"stack": "stacks/app", '
+            '"tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}}]'
+        ),
+        "4",
+    )

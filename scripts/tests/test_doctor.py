@@ -6995,14 +6995,17 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 #: contract states.
 _MAX_PARALLEL_UNSET = (
     doctor.NOTICE,
-    ("`max_parallel`: not set, so each plan and drift sweep runs at most 10 cell jobs at once."),
+    (
+        "`max_parallel`: not set, so each plan and drift sweep runs at most 10 cell jobs at once, "
+        "and each merge deploy at most 10 `warm` legs."
+    ),
 )
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     """A table omitting `needs`, `apply_mode` and `max_parallel` is valid and takes the default for
     each: a bare `shipmate apply` applies every environment -- including the one a consumer
-    meant to exclude -- and each matrix runs at most 10 cell jobs at once. Nothing refuses and
+    meant to exclude -- and each matrix runs at most 10 jobs at once. Nothing refuses and
     no validator can, so the report says it.
 
     Mutations: drop `_config_defaults` from `config_status`; set `DEFAULT_MAX_PARALLEL` to 11 --
@@ -7031,10 +7034,13 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
 
 def test_a_set_max_parallel_is_read_back():
     """Mutations: `cap = ec.DEFAULT_MAX_PARALLEL` in `_config_defaults` -- the line says 10; test
-    `"max_parallel" not in table` -- the not-set line shows."""
+    `"max_parallel" not in table` -- the not-set line shows; drop the `warm` legs clause."""
     assert doctor._config_defaults({"layout": "folder", "max_parallel": "5"})[2] == (
         doctor.NOTICE,
-        ("`max_parallel: 5`: each plan and drift sweep runs at most 5 cell jobs at once."),
+        (
+            "`max_parallel: 5`: each plan and drift sweep runs at most 5 cell jobs at once, "
+            "and each merge deploy at most 5 `warm` legs."
+        ),
     )
 
 

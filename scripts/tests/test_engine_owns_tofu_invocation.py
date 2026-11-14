@@ -43,13 +43,13 @@ _WRAPPER = [
 ]
 _INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
 #: cell-init's init, teed to RUNNER_TEMP for `tofu-error`, which annotates a failed init with its
-#: first error. The unlock cell runs its own un-teed `_INIT`.
+#: first error. The unlock cell runs its own un-teed `_INIT`. Its flags, `-backend=false` added
+#: for `warm`, are pinned by test_provider_cache.py's whole init body.
 _INIT_TEED = [
     *_WRAPPER,
     "tofu",
     "init",
-    "-input=false",
-    "-reconfigure",
+    "${flags[@]}",
     "2>&1",
     "|",
     "tee",
