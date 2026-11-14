@@ -283,7 +283,8 @@ the release commit, from `repo-example-stacks-aws`:
 
    ```bash
    gh workflow run shipmate.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
-     -f verb=apply -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
+     -f verb=apply -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n> \
+     -f comment_id=<id>
    ```
 
    A `workflow_dispatch` runs a workflow only if the file exists on the
@@ -291,9 +292,14 @@ the release commit, from `repo-example-stacks-aws`:
    paragraph below — so `--ref` picks which branch's copy runs, not whether the
    file is dispatchable at all. `shipmate.yml` is on every sample's default
    branch, so `--ref` runs the scratch branch's copy. The command above sends
-   exactly the inputs `actions/dispatch` builds for the verb `-f verb=` names;
-   it does not send `return_run_details`, which only decides whether the API
-   answers with the started run's id.
+   exactly the inputs `actions/dispatch` builds for an apply; it does not send
+   `return_run_details`, which only decides whether the API answers with the
+   started run's id. `<id>` is the id of any comment on pull request `<n>`,
+   such as one you post for the smoke. Nothing claims it: the dispatch runs as
+   your login, not the shipmate App, so `apply.yml`'s `guard` refuses it at its
+   bot-actor check before `claim` starts, which is this dispatch's expected end
+   (below). Sending it is what checks that the scratch branch's `shipmate.yml`
+   declares the input: a file without it answers HTTP 422.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
    the repository's default branch, and the engine's `actions/dispatch` dispatches
@@ -339,7 +345,10 @@ file's first dispatch or schedule after the re-pin merges.
 When the release refuses a key the default branch's table still holds, a `verb=plan`
 dispatch on the scratch branch, or that drift-file dispatch, stops at detect on that
 key: expected, and that release's smoke is the `verb=apply` dispatch alone. Otherwise a `verb=plan`
-dispatch on the scratch branch runs the cells and stops at
+dispatch on the scratch branch, sent with `-f verb=plan -f pr_number=<n>` and
+no `comment_id` (the shape of the plan `summary`'s replan, which no claim
+gates; with one, `claim` refuses your login and no cell runs), runs the cells
+and stops at
 `plan.yml`'s `summary`, which holds the App key. It binds the
 `shipmate-engine` environment, whose deployment branch policy allows the
 default branch only, so the job fails at startup: zero steps, no log, and the

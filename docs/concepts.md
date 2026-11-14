@@ -96,7 +96,9 @@ and `shipmate / gate` ([`github-app.md`](github-app.md) §Key-exposure
 boundary). Its sibling `gate-hold`, bound and checking out nothing the same way,
 also holds the App key and writes the gate: a hold when the plan run's
 `summary` was cancelled before it published and the run was not cancelled. A third, `outcome`, holds it to
-reply when a `shipmate plan` run ends without writing its plan comment. Fork pull requests are refused before any plan cell starts
+reply when a `shipmate plan` run ends without writing its plan comment, and a
+fourth, `claim`, holds it to add the App's 🚀 to a `shipmate plan` comment, so
+that one run of that comment does the work. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check, and

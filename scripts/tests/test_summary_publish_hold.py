@@ -189,9 +189,7 @@ def _write_cells(tmp_path, *slugs):
         d = tmp_path / "cells" / f"cell-summary.dev.stacks-{slug}"
         d.mkdir(parents=True)
         cell = {"stack": f"stacks/{slug}", "environment": "dev", "changed": True}
-        (d / "cell.json").write_text(
-            json.dumps({**cell, "fingerprint": "f" * 64}), encoding="utf-8"
-        )
+        (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
         (d / "plan.txt").write_bytes(b"plan\n")
 
 
@@ -204,7 +202,6 @@ def _check_post(slug, cells):
         "status": "queued",
         "external_id": json.dumps(
             {
-                "fingerprint": "f" * 64,
                 "plan_run": RUN_ID,
                 # sha256 of b"plan\n", computed once off the tree.
                 "plan_sha256": "1b4025dc7b8d27cf38df85e77b20ed44a00851a2c28b338560560d85deded8e3",
@@ -212,7 +209,8 @@ def _check_post(slug, cells):
                 "cells": cells,
                 "action": "synchronize",
                 "title": "+? ~? -?",
-            }
+            },
+            separators=(",", ":"),
         ),
         "output": {"title": "+? ~? -?", "summary": "```diff\nplan\n```"},
     }
@@ -663,12 +661,12 @@ def test_the_hold_step_ends_a_superseded_run_green():
 @bash_only
 def test_a_pending_checks_failure_with_cells_holds(tmp_path):
     """Any pending-checks failure but the newer-run refusal holds: here a cell missing its
-    `fingerprint`. Mutation: exit before the hold on every non-zero exit (`[ "$rc" = 3 ]` ->
+    `changed`. Mutation: exit before the hold on every non-zero exit (`[ "$rc" = 3 ]` ->
     `[ "$rc" != 0 ]`) -> no POST, and an earlier green stands over the unpublished cells; pass
     that hold the publish text -> red."""
     d = tmp_path / "cells" / "cell-summary.dev.stacks-a"
     d.mkdir(parents=True)
-    cell = {"stack": "stacks/a", "environment": "dev", "changed": True}
+    cell = {"stack": "stacks/a", "environment": "dev"}
     (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
     codes, calls, _, _ = _run(tmp_path)
     assert (codes, calls) == ([1], [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, HOLD_POST])

@@ -67,6 +67,7 @@ _RD_STEP = {
         line + "\n"
         for line in (
             "set -euo pipefail",
+            "rc=0",
             (
                 "pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!)"
                 "{repository(owner:$owner,name:$repo){pullRequest(number:$pr)"
@@ -75,8 +76,23 @@ _RD_STEP = {
             '  -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \\',
             (
                 "  --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, "
-                '.isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv\')'
+                '.isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv\') || rc=$?'
             ),
+            'if [[ "$rc" -ne 0 && "$pr" == *\'"type":"NOT_FOUND"\'* ]]; then',
+            '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
+            (
+                '  echo "::error::Pull request #$PR_NUMBER does not exist in this repository; '
+                'nothing applies."'
+            ),
+            "  exit 1",
+            "fi",
+            'if [[ "$rc" -ne 0 ]]; then',
+            (
+                '  echo "::error::Could not read pull request #$PR_NUMBER (gh exited $rc); '
+                'nothing applies. Comment \\`shipmate apply\\` on the pull request again."'
+            ),
+            "  exit 1",
+            "fi",
             'if [[ -z "$pr" ]]; then',
             '  echo "unbound=true" >> "$GITHUB_OUTPUT"',
             (
@@ -264,13 +280,42 @@ _needs_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="jq not instal
 
 @bash_only
 @_needs_jq
-def test_a_pull_request_github_cannot_find_refuses_at_the_query(tmp_path):
+def test_a_pull_request_github_cannot_find_refuses_unbound(tmp_path):
     """A hand-made dispatch naming no pull request is the threat shape. GitHub answers it with
-    NOT_FOUND and gh exits 1, so `set -e` refuses on the assignment, before any message.
+    NOT_FOUND and gh exits 1; `unbound` keeps `outcome` from replying on a number that names no
+    pull request.
 
-    Mutation: append `|| true` to the gh call -- the raw body then reaches the state check, which
-    refuses with a message naming JSON as the state."""
-    assert _run_rd(tmp_path, None, gh=_NOT_FOUND_GH) == (1, "", "")
+    Mutations: drop the NOT_FOUND branch -> the failed-read refusal, no `unbound`; drop its
+    `unbound=true` write."""
+    assert _run_rd(tmp_path, None, gh=_NOT_FOUND_GH) == (
+        1,
+        "::error::Pull request #7 does not exist in this repository; nothing applies.\n",
+        "unbound=true\n",
+    )
+
+
+#: A failed read that is not NOT_FOUND: gh's text for a 502, exit 1.
+_BAD_GATEWAY_GH = """#!/bin/bash
+echo 'gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)' >&2
+exit 1
+"""
+
+
+@bash_only
+@_needs_jq
+def test_a_failed_read_refuses_without_unbound(tmp_path):
+    """A transient failure names no missing pull request, so `outcome` still replies.
+
+    Mutations: write `unbound=true` on every failed read; drop the failed-read branch -> the
+    empty output reaches the null-pull-request refusal, which writes `unbound`."""
+    assert _run_rd(tmp_path, None, gh=_BAD_GATEWAY_GH) == (
+        1,
+        (
+            "::error::Could not read pull request #7 (gh exited 1); nothing applies. Comment "
+            "`shipmate apply` on the pull request again.\n"
+        ),
+        "",
+    )
 
 
 @bash_only

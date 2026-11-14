@@ -102,6 +102,16 @@ GUARD_STEPS = {
                 "doctor names the difference)"
             ),
         ),
+        (
+            (
+                "${{ github.event_name == 'workflow_dispatch' && "
+                "github.event.inputs.verb == 'apply' && github.event.inputs.comment_id == '' }}"
+            ),
+            (
+                "::error::apply refused: this apply dispatch carries no comment_id, so no comment "
+                "can be claimed for it; comment 'shipmate apply' on the pull request instead"
+            ),
+        ),
     ],
     "unlock.yml": [
         (
@@ -114,8 +124,9 @@ GUARD_STEPS = {
         ),
     ],
 }
-#: The guard job's steps after `GUARD_STEPS`, as `(if, run)`.
-GUARD_TAIL = {"apply.yml": [(None, CANONICAL_PR_NUMBER_RUN)], "unlock.yml": []}
+#: The guard job's steps after `GUARD_STEPS`, as `(if, run)`. Unlock's is the started reaction,
+#: a `uses:` step that `test_claim_wiring.py` pins whole.
+GUARD_TAIL = {"apply.yml": [(None, CANONICAL_PR_NUMBER_RUN)], "unlock.yml": [(None, None)]}
 #: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path waits on
 #: the `review` job that reads the pull request's review decision server-side; it runs in
 #: `apply-run.yml`, which only `apply.yml`'s `run` starts, after `guard` succeeded. `unlock.yml`
@@ -160,9 +171,10 @@ DISPATCH_PATHS = ("apply.yml", "unlock.yml")
 #: The whole `needs:` of each job in `apply.yml`: `guard` gates the call into `apply-run.yml`.
 APPLY_NEEDS = {
     "guard": [],
-    "queue": ["guard"],
-    "run": ["guard", "queue"],
-    "outcome": ["guard", "run"],
+    "claim": ["guard"],
+    "queue": ["guard", "claim"],
+    "run": ["guard", "claim", "queue"],
+    "outcome": ["guard", "claim", "run"],
 }
 
 
@@ -179,7 +191,9 @@ def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
     Mutations (each run, red): drop `&& !inputs.auto` from apply.yml's second step; replace
     `||` with `&&` in its third; delete the third step; swap `exit 1` for `exit 0` in the
     second; `==` for `!=` in the fourth; drop `!inputs.auto` from the fourth (every auto run
-    refuses there); `&&` for its `||` (a non-dispatch call passes); delete the fourth step."""
+    refuses there); `&&` for its `||` (a non-dispatch call passes); delete the fourth step;
+    `== ''` for `!= ''` in the fifth (an apply dispatch with no comment would bypass the claim);
+    delete the fifth step."""
     for name, expected in GUARD_STEPS.items():
         steps = workflow_jobs(name)[GUARD_JOB]["steps"]
         got = [(step.get("if"), step.get("run")) for step in steps]
@@ -187,13 +201,19 @@ def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
         assert got == want, f"{name}: {GUARD_JOB} steps differ from the pinned list: {got!r}"
 
 
+#: The guard job's whole `permissions:` per file. Unlock's writes the started reaction on the
+#: command comment; the job checks nothing out, so no pull-request code holds that grant.
+GUARD_PERMISSIONS = {"apply.yml": {}, "unlock.yml": {"pull-requests": "write"}}
+
+
 def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
     # It gates the App key, so it must not be able to reach one, name the environment that holds
-    # one, or execute the dispatcher's ref.
+    # one, or execute the dispatcher's ref. Mutation: `permissions: { contents: read }` on
+    # unlock's guard -- red.
     for name in DISPATCH_PATHS:
         job = workflow_jobs(name)[GUARD_JOB]
-        assert job.get("permissions") == {}, (
-            f"{name}: {GUARD_JOB} must grant no token permissions, got {job.get('permissions')!r}"
+        assert job.get("permissions") == GUARD_PERMISSIONS[name], (
+            f"{name}: {GUARD_JOB} permissions differ, got {job.get('permissions')!r}"
         )
         assert job.get("environment") is None, f"{name}: {GUARD_JOB} must name no environment"
         assert job.get("secrets") is None, f"{name}: {GUARD_JOB} must be passed no secrets"

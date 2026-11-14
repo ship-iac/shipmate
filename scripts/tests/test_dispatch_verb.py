@@ -34,13 +34,14 @@ def _extract_dispatch_run_block():
     return run
 
 
-def _build_dispatch_body(verb, environment=""):
-    """The whole parsed dispatch body for `verb`."""
+def _build_dispatch_body(verb, environment="", comment="77"):
+    """The whole parsed dispatch body for `verb`, sent for comment `comment`."""
     env = {
         "DISPATCH_REF": "main",
         "REF": "abc123def456",
         "PR_NUMBER": "42",
         "ENVIRONMENT": environment,
+        "COMMENT_ID": comment,
         "VERB": verb,
     }
     with patch.dict(os.environ, env):
@@ -52,40 +53,82 @@ def _build_dispatch_body(verb, environment=""):
 # selectors for one property disagree eventually.
 
 
-def test_plan_body_is_the_dispatch_ref_the_verb_and_pr_number_alone():
-    """A plan body is exactly {ref: dispatch ref, inputs: {verb, pr_number}}. `verb` is what
-    selects the `plan` job in `shipmate.yml`; without it every job's `if:` is false and the
-    dispatched run completes having done nothing. The top-level ref is the dispatch ref rather
-    than the head SHA, because a plan states no head.
+def test_plan_body_is_the_dispatch_ref_the_verb_the_pr_number_and_the_comment():
+    """A commented plan body is exactly {ref: dispatch ref, inputs: {verb, pr_number,
+    comment_id}}. `verb` is what selects the `plan` job in `shipmate.yml`; without it every
+    job's `if:` is false and the dispatched run completes having done nothing. The top-level ref
+    is the dispatch ref rather than the head SHA, because a plan states no head. `comment_id` is
+    what the run claims, so a second run of one comment does no work.
 
     Mutations: drop the `verb` key; add `ref` or `environment` to the plan inputs; swap the
     top-level ref for the head SHA; drop `return_run_details`, which every body carries so the
-    API answers with the started run's id.
+    API answers with the started run's id; drop the `comment_id` key.
     """
     body = _build_dispatch_body("plan", environment="dev-eu")
     assert body == {
         "ref": "main",
+        "inputs": {"verb": "plan", "pr_number": "42", "comment_id": "77"},
+        "return_run_details": True,
+    }, f"plan body must carry the verb, the PR number and the comment, on the dispatch ref: {body}"
+
+
+def test_the_replan_body_carries_no_comment_id():
+    """The summary's comment-less replan sends no `COMMENT_ID`, and its run claims nothing.
+    Mutations: send `comment_id: ''` when it is empty; refuse an empty one on a plan."""
+    assert _build_dispatch_body("plan", comment="") == {
+        "ref": "main",
         "inputs": {"verb": "plan", "pr_number": "42"},
         "return_run_details": True,
-    }, f"plan body must carry the verb and the PR number alone, on the dispatch ref: {body}"
+    }
+
+
+def test_the_auto_body_carries_no_comment_id():
+    """`auto` is the autoplan's own dispatch: no comment, no claim. Mutation: send an empty
+    `comment_id` key."""
+    assert _build_dispatch_body("auto", comment="") == {
+        "ref": "main",
+        "inputs": {"verb": "auto", "ref": "abc123def456", "pr_number": "42"},
+        "return_run_details": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("verb", "comment", "message"),
+    [
+        ("apply", "", "::error::a commented apply needs COMMENT_ID, the command comment's id"),
+        ("unlock", "", "::error::a commented unlock needs COMMENT_ID, the command comment's id"),
+        ("plan", "0", "::error::verb plan cannot carry COMMENT_ID '0'"),
+        ("apply", "12a", "::error::verb apply cannot carry COMMENT_ID '12a'"),
+        ("unlock", "1" * 21, f"::error::verb unlock cannot carry COMMENT_ID '{'1' * 21}'"),
+        ("auto", "77", "::error::verb auto cannot carry COMMENT_ID '77'"),
+    ],
+)
+def test_a_missing_or_malformed_comment_id_is_a_usage_error(verb, comment, message):
+    """An apply or unlock without its comment would dispatch a run `apply.yml`'s `guard` refuses
+    or that marks nothing; a malformed id is bound into the claim's API path; `auto` has no
+    comment. Mutations: drop the `elif` for apply and unlock; drop the `_COMMENT_ID` check; drop
+    `verb == "auto"`."""
+    with pytest.raises(SystemExit) as e:
+        _build_dispatch_body(verb, comment=comment)
+    assert e.value.code == message
 
 
 def test_apply_body_omits_the_environment_when_it_is_empty():
-    """A bare `shipmate apply` sends {verb, ref, pr_number} and no environment key, which
-    `apply.yml` reads as `inputs.environment == ''` and runs as the bare form.
+    """A bare `shipmate apply` sends {verb, ref, pr_number, comment_id} and no environment key,
+    which `apply.yml` reads as `inputs.environment == ''` and runs as the bare form.
 
     Mutations: drop the `if os.environ.get("ENVIRONMENT")` guard -- the body carries an empty
-    `environment`, red; drop `return_run_details`.
+    `environment`, red; drop `return_run_details`; drop the `comment_id` key.
     """
     assert _build_dispatch_body("apply") == {
         "ref": "main",
-        "inputs": {"verb": "apply", "ref": "abc123def456", "pr_number": "42"},
+        "inputs": {"verb": "apply", "ref": "abc123def456", "pr_number": "42", "comment_id": "77"},
         "return_run_details": True,
     }
 
 
 def test_apply_body_carries_the_environment_when_it_is_set():
-    """A targeted `shipmate apply dev-eu` sends {verb, ref, pr_number, environment}.
+    """A targeted `shipmate apply dev-eu` sends {verb, ref, pr_number, environment, comment_id}.
 
     Mutations: drop the environment key entirely; drop `return_run_details`.
     """
@@ -96,23 +139,30 @@ def test_apply_body_carries_the_environment_when_it_is_set():
             "ref": "abc123def456",
             "pr_number": "42",
             "environment": "dev-eu",
+            "comment_id": "77",
         },
         "return_run_details": True,
     }
 
 
-def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
-    """An unlock body is exactly {verb, ref, environment} — no pr_number. Releasing a stranded
-    lock applies no plan and comments on no pull request, so nothing on that path reads one,
-    and `pr_number` is `required: false` on `shipmate.yml` precisely so this body is legal.
+def test_unlock_body_is_the_verb_the_ref_the_environment_and_the_comment():
+    """An unlock body is exactly {verb, ref, environment, comment_id} — no pr_number. Releasing a
+    stranded lock applies no plan and comments on no pull request, so nothing on that path reads
+    one, and `pr_number` is `required: false` on `shipmate.yml` precisely so this body is legal.
+    `comment_id` is where the unlock run marks the command started.
 
     Mutations: add `pr_number` to the unlock branch; drop `verb`, and the dispatched run
     matches no job's `if:` and unlocks nothing while reporting success; drop
-    `return_run_details`.
+    `return_run_details`; drop the `comment_id` key.
     """
     assert _build_dispatch_body("unlock", environment="dev-eu") == {
         "ref": "main",
-        "inputs": {"verb": "unlock", "ref": "abc123def456", "environment": "dev-eu"},
+        "inputs": {
+            "verb": "unlock",
+            "ref": "abc123def456",
+            "environment": "dev-eu",
+            "comment_id": "77",
+        },
         "return_run_details": True,
     }
 
@@ -157,6 +207,7 @@ def _run_dispatch(
     failing_script=None,
     stubs=None,
     cwd=None,
+    comment_id="77",
 ):
     """Run the shipped step with a gh stub that records its argv; returns the
     CompletedProcess and the recorded argv text. `failing_script` is `(name, exit_code,
@@ -178,6 +229,8 @@ def _run_dispatch(
     env["VERB"] = verb
     env["REF"] = "abc123"
     env["PR_NUMBER"] = "42"
+    env["COMMENT_ID"] = comment_id
+    env["SHIPMATE_APP_SLUG"] = "shipmate-app"
     env["COMMENT_TOKEN"] = "workflow_token"  # noqa: S105
     env["GITHUB_ACTION_PATH"] = str(ACTIONS / "dispatch")
     # Runner-supplied, and the failure comment's only content besides fixed text.
@@ -205,7 +258,7 @@ def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_pa
     body carries an empty `verb`, which GitHub reads as not provided for a `required: true`
     input and answers HTTP 422 — a raw API error on a run nobody is watching, where the wiring
     error names the missing `with:` line on the pull request instead. A consumer wired that way
-    is the shape this path exists for, so the commenter is told rather than left with a rocket
+    is the shape this path exists for, so the commenter is told rather than left with an eyes
     reaction and silence.
 
     Mutations: delete the refusal branch *and* give the `case` an `""` arm -- deleting it
@@ -222,6 +275,26 @@ def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_pa
     assert "/issues/42/comments" in argv and _RUN_URL in argv, (
         f"the commenter must be told no run started: {argv!r}"
     )
+
+
+@pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
+@bash_only
+def test_an_empty_comment_id_dispatches_nothing_and_says_so_on_the_pull_request(tmp_path, verb):
+    """Every verb this action dispatches comes from a comment, and `dispatch-body` reads an
+    empty id on a plan as the comment-less replan, whose run claims nothing: a caller that drops
+    the `comment-id` line would dispatch plans that a duplicate can run twice. The `plan` row is
+    the one only this check refuses. Mutations: delete the check (the `plan` row dispatches);
+    drop its `say_no_run_started`."""
+    result, argv = _run_dispatch(tmp_path, verb=verb, gh_stub=RECORDING_GH_STUB, comment_id="")
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, output
+    assert _DISPATCH_PATH not in argv, f"an empty comment id must dispatch nothing: {argv!r}"
+    assert (
+        "::error::The engine's comment-ops.yml passed no comment-id to shipmate/actions/dispatch, "
+        "so the dispatched run could not claim its comment; nothing was dispatched. This is an "
+        "engine defect: report it.\n"
+    ) in result.stdout
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, argv
 
 
 @pytest.mark.parametrize("verb", ["bogus", "auto"])
@@ -272,6 +345,7 @@ def test_the_action_declares_no_workflow_input():
     inputs = action_yaml(DISPATCH_ACTION)["inputs"]
     assert sorted(inputs) == [
         "app-id",
+        "comment-id",
         "environment",
         "pr-number",
         "private-key",
@@ -290,18 +364,21 @@ def test_dispatch_step_env_mapping_is_complete():
     from an input, or the dispatch ref leaving the default branch. The dispatch ref picks which
     branch's copy of `shipmate.yml` runs: a head ref runs the pull request author's copy, and
     the `shipmate-engine` environment's branch policy admits only the default branch. `REPO` is
-    absent: `dispatch-body` reads the runner's `GITHUB_REPOSITORY`.
+    absent: `dispatch-body` reads the runner's `GITHUB_REPOSITORY`. `SHIPMATE_APP_SLUG` comes
+    from the token step, so the retry trusts only a run this App dispatched.
 
-    Mutation: rename VERB in the env: block, re-add WORKFLOW or REPO, or set
-    `DISPATCH_REF: ${{ github.head_ref }}`.
+    Mutation: rename VERB in the env: block, re-add WORKFLOW or REPO, set
+    `DISPATCH_REF: ${{ github.head_ref }}`, or drop `SHIPMATE_APP_SLUG`.
     """
     assert step_by(DISPATCH_ACTION, name="workflow_dispatch apply").get("env") == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
         "ENVIRONMENT": "${{ inputs.environment }}",
         "VERB": "${{ inputs.verb }}",
         "REF": "${{ inputs.ref }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
+        "COMMENT_ID": "${{ inputs.comment-id }}",
         "COMMENT_TOKEN": "${{ github.token }}",
     }
 
@@ -452,16 +529,16 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "plan",
             "dev-eu",
             (
-                '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, '
-                '"return_run_details": true}'
+                '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42", '
+                '"comment_id": "77"}, "return_run_details": true}'
             ),
         ),
         (
             "apply",
             "",
             (
-                '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"}, '
-                '"return_run_details": true}'
+                '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
+                '"comment_id": "77"}, "return_run_details": true}'
             ),
         ),
         (
@@ -469,7 +546,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
-                '"environment": "dev-eu"}, "return_run_details": true}'
+                '"environment": "dev-eu", "comment_id": "77"}, "return_run_details": true}'
             ),
         ),
         (
@@ -477,7 +554,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call(
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "unlock", "ref": "abc123", '
-                '"environment": "dev-eu"}, "return_run_details": true}'
+                '"environment": "dev-eu", "comment_id": "77"}, "return_run_details": true}'
             ),
         ),
     ],
@@ -523,8 +600,8 @@ def test_the_log_prints_no_empty_line_for_a_missing_answer(tmp_path, out):
 
 
 # Only a failure that matches the skew shape gets the skew explanation: a 403 or a rate limit
-# explained as skew sends the operator to edit workflows that are fine. The remedy is pinned
-# too, because no such failure is fixed by a re-pin.
+# explained as skew sends the operator to edit workflows that are fine. `dispatch-body` classifies
+# (test_dispatch_post.py pins each shape); these pin that its remedy reaches the log and the reply.
 
 _NO_TRIGGER_STUB = (
     "#!/bin/bash\n"
@@ -537,50 +614,66 @@ _UNEXPECTED_INPUTS_STUB = (
 )
 _FORBIDDEN_STUB = "#!/bin/bash\necho 'HTTP 403: Forbidden' >&2\nexit 1\n"
 _LAYOUT_SKEW = "has no .github/workflows/shipmate.yml"
-#: The whole message, hand-written. It carries no interpolation, so there is one fully known
-#: value to compare and a part-check would only relocate the hole -- the remedy half in
-#: particular, which must name the page that publishes the file the consumer has to author:
-#: a pin bump does not write it, and `docs/releasing.md` is the maintainer's runbook.
-#: `_LAYOUT_SKEW` stays a substring for the three tests that assert this message is ABSENT.
-_LAYOUT_MESSAGE = (
-    "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no "
-    "workflow_dispatch trigger or not the inputs this verb's dispatch sends. "
-    "docs/getting-started.md publishes it; re-pinning cannot create it."
+#: The whole remedies, hand-written. `_LAYOUT_SKEW` stays a substring for the tests that assert
+#: the layout remedy is ABSENT.
+_LAYOUT_REMEDY = (
+    "This repository has no .github/workflows/shipmate.yml, or that file declares no "
+    "workflow_dispatch trigger. docs/getting-started.md publishes it; re-pinning cannot create it."
+)
+_INPUTS_REMEDY = (
+    "This repository's .github/workflows/shipmate.yml does not declare every input this "
+    "engine's dispatch sends, so it is older than the engine pin. Write the published file over "
+    "it with `python <engine>/scripts/repin <consumer> <tag> --write-fence`."
 )
 
 
-@pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB, _UNEXPECTED_INPUTS_STUB])
+@pytest.mark.parametrize(
+    ("stub", "remedy"),
+    [
+        (_NOT_FOUND_STUB, _LAYOUT_REMEDY),
+        (_NO_TRIGGER_STUB, _LAYOUT_REMEDY),
+        (_UNEXPECTED_INPUTS_STUB, _INPUTS_REMEDY),
+    ],
+)
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
 @bash_only
-def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_message(
-    tmp_path, verb, stub
-):
-    """All three shapes an absent or incomplete `shipmate.yml` produces get the layout message,
-    for every verb — every verb now aims at that one file. Measured: a workflow file that does
-    not exist answers 404; one with no such trigger answers `Workflow does not have
-    'workflow_dispatch' trigger (HTTP 422)`; one declaring fewer inputs than the body names
-    answers `Unexpected inputs provided`.
+def test_a_dispatch_to_an_old_or_missing_shipmate_yml_logs_its_remedy(tmp_path, verb, stub, remedy):
+    """The remedy prints beside gh's answer for every verb. Pinned against stdout, because the
+    reply's own gh call leaks the same text on stderr.
 
-    Mutations: scope the condition to one verb and the other two stop being explained;
-    drop any one of the three message-text halves and its shape stops being explained; point
-    the remedy at `docs/releasing.md`, or reword any other part of the message, and the
-    whole-value comparison reddens; delete the `$err` `printf` line and the hint prints without
-    the answer it explains (gh writes it to stderr); match on `$out` in place of `$err` and no
-    shape is explained.
-    """
+    Mutations: delete the `$err` `printf` line -> neither the answer nor the remedy prints;
+    print `$out` on a failure too -> the bare remedy prints a second time."""
     result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=stub)
-    output = result.stdout + result.stderr
-    assert result.returncode != 0, f"a {verb} failure must exit non-zero: {output}"
-    # The hint explains the answer; it does not replace it. Pinned per shape, because the
-    # remaining two carry no distinctive sentence of their own -- and against stdout alone,
-    # because the refusal comment's own gh call leaks the same text on stderr, which is what
-    # made the `"HTTP 4" in output` this replaces unable to fail.
-    if stub is _NO_TRIGGER_STUB:
-        assert "Workflow does not have" in result.stdout, (
-            f"the API's own answer must still print beside the hint: {output}"
-        )
-    assert _LAYOUT_MESSAGE in output.splitlines(), (
-        f"the layout message must be emitted whole and unchanged: {output}"
+    lines = result.stdout.splitlines()
+    assert result.returncode != 0, f"a {verb} failure must exit non-zero: {result.stdout}"
+    assert f"::error::{remedy}" in lines, f"the remedy must print whole: {result.stdout}"
+    assert remedy not in lines, f"the remedy must print once, annotated: {result.stdout}"
+
+
+#: Fails the dispatch with gh's answer for a fence without the sent inputs; saves the reply body.
+_INPUTS_BODY_STUB = (
+    "#!/bin/bash\n"
+    'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+    "  echo 'gh: Unexpected inputs provided: [\"comment_id\"] (HTTP 422)' >&2; exit 22\n"
+    "fi; done\n"
+    'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; done\n'
+)
+
+
+@bash_only
+def test_a_dispatch_to_a_fence_without_its_inputs_replies_with_repin(tmp_path):
+    """A fence not re-pinned after a pin bump 422s; the reply names the command that fixes it.
+
+    Mutation: call `say_no_run_started` without `"$out"` -> the reply points at the log."""
+    result, _ = _run_dispatch(
+        tmp_path, verb="apply", environment="dev-eu", gh_stub=_INPUTS_BODY_STUB
+    )
+    assert result.returncode == 1, f"dispatch-body's exit status must survive: {result.stdout}"
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        "### shipmate apply dev-eu\n\n"
+        "🔴 failed: the command was authorized, but dispatching its workflow failed, so no run "
+        f"started. {_INPUTS_REMEDY}\n\n"
+        f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
     )
 
 
@@ -589,8 +682,7 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
 def test_a_403_prints_no_skew_message(tmp_path, verb):
     """A 403 is not version skew, on any verb: the raw output prints, the message does not.
 
-    Mutation: drop the whole `[[ ... ]]` message-text condition, so any failure is reported as
-    skew. No single one of its three halves reddens it, because a 403 is none of them.
+    Mutation: make `dispatch-body`'s `skew_hint` return the layout remedy for any answer.
     """
     result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=_FORBIDDEN_STUB)
     output = result.stdout + result.stderr
@@ -607,7 +699,7 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     any 422 tells the operator to edit workflows that are already current and hides the real
     cause printed one line above.
 
-    Mutation: match any `HTTP 422` and this reddens.
+    Mutation: add `HTTP 422` to `dispatch-body`'s `_LAYOUT_ANSWERS` and this reddens.
     """
     stub = (
         "#!/bin/bash\n"
@@ -627,13 +719,13 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     )
 
 
-#: Fails like `_NOT_FOUND_STUB` and records each call's token ahead of its argv, so what
-#: the failure branch does after the refusal is observable rather than inferred.
+#: Fails with a 403, which no skew remedy explains, and records each call's token ahead of its
+#: argv, so what the failure branch does after the refusal is observable rather than inferred.
 _RECORDING_FAILURE_STUB = (
     "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
     "printf '%s\\n' \"$@\" >> argv.txt\n"
     '[[ " $* " == *" body=@- "* ]] && { cat; echo; } >> argv.txt\n'
-    "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+    "echo 'gh: Forbidden (HTTP 403)' >&2\nexit 1\n"
 )
 #: The run link, hand-written from the three runner variables the step reads.
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
@@ -649,7 +741,7 @@ _NO_RUN_STARTED = (
 def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
     """Every failure here lands on a run whose checks attach to the dispatch ref, so the pull
     request that asked for the verb shows no check, no comment and no gate change -- and the
-    commenter's last signal was comment-ops' rocket. One comment, on the pull request, carrying
+    commenter's last signal was comment-ops' eyes. One comment, on the pull request, carrying
     the run link.
 
     A 4xx on the first attempt cannot have started a run, and the reply says so.
@@ -670,7 +762,7 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
     )
     assert _RUN_URL in argv, f"the comment must carry the run link, gh saw: {argv!r}"
     assert f"\n{_NO_RUN_STARTED}\n" in argv, f"the reply must say no run started: {argv!r}"
-    assert "Not Found (HTTP 404)" not in argv, (
+    assert "Forbidden (HTTP 403)" not in argv, (
         f"the API's answer is unbounded and must not be pasted into a comment: {argv!r}"
     )
 
@@ -680,7 +772,7 @@ _BODY_FAILURE_STUB = (
     "#!/bin/bash\n"
     'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; '
     "done\n"
-    "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+    "echo 'gh: Forbidden (HTTP 403)' >&2\nexit 1\n"
 )
 
 
@@ -710,9 +802,9 @@ _BODY_SAVING_STUB = (
 
 @bash_only
 def test_a_may_have_started_dispatch_replies_and_exits_zero(tmp_path):
-    """`dispatch-body` exits 3 when a `shipmate.yml` run started after an attempt that
-    answered with an error. That run may be this command's, so the step warns, posts the whole
-    notice reply and passes.
+    """`dispatch-body` exits 3 when the App's run of this command is listed after an attempt
+    that answered with an error. The run started, so the step warns, posts the whole notice
+    reply and passes.
 
     Mutation: map exit 3 to `say_no_run_started`.
     """
@@ -723,15 +815,15 @@ def test_a_may_have_started_dispatch_replies_and_exits_zero(tmp_path):
         gh_stub=_BODY_SAVING_STUB,
         failing_script=("dispatch-body", 3, ""),
     )
-    assert result.returncode == 0, f"a run may have started: {result.stdout}{result.stderr}"
+    assert result.returncode == 0, f"a run started: {result.stdout}{result.stderr}"
     assert (
-        "::warning::the dispatch answered with an error, but a shipmate.yml run started since "
-        "it; not retried"
+        "::warning::the dispatch answered with an error, but this command's run is listed; not "
+        "retried"
     ) in result.stdout.splitlines(), f"the warning must print whole: {result.stdout}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
         "### shipmate apply dev-eu\n\n"
-        "⚪ the dispatch answered with an error, but a shipmate.yml run started since it; it "
-        "may be this command's. Check the Actions tab before commenting again.\n\n"
+        "⚪ the dispatch answered with an error, but this command's run is listed in the Actions "
+        "tab, so it was not dispatched again.\n\n"
         f"[comment run]({_RUN_URL})"
     )
 
@@ -762,8 +854,8 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
     the listing that would have told could not be read: a run may have started, so the failure
     reply sends the commenter to the Actions tab, and dispatch-body's message prints to the log.
 
-    Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo; call
-    `say_skew` on exit 4 (the stderr ends with a 422 that would match it).
+    Mutations: map exit 4 to `say_no_run_started`; delete its `::error::` echo. `dispatch-body`
+    prints no remedy on exit 4 (test_dispatch_post.py).
     """
     result, _ = _run_dispatch(
         tmp_path,
@@ -784,7 +876,6 @@ def test_an_undetermined_dispatch_says_a_run_may_have_started(tmp_path):
     assert "gh: Bad Gateway (HTTP 502)" in result.stdout.splitlines(), (
         f"dispatch-body's message must reach the log: {result.stdout}"
     )
-    assert _LAYOUT_SKEW not in result.stdout, f"exit 4 prints no layout hint: {result.stdout}"
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
         "### shipmate apply dev-eu\n\n"
         "🔴 failed: the command was authorized, but dispatching its workflow failed with a "
