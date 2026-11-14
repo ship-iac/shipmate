@@ -140,14 +140,25 @@ def test_a_status_line_below_the_first_is_not_the_status(env):
         ("PR_NUMBER", "x"),
     ],
 )
-def test_an_untrusted_or_malformed_run_fails_without_a_post(env, monkeypatch, var, value):
+def test_a_run_not_from_the_app_or_malformed_fails_without_a_post(env, monkeypatch, var, value):
     """Only the App dispatches a commented run, and a malformed id is bound into a path. Mutations:
-    drop the actor check; compare the actor with `endswith('[bot]')`; accept an empty slug; drop
-    the `_COMMENT_ID` check; drop the pull request number check."""
+    drop the actor check; compare the actor with `endswith('[bot]')`; replace `not slug or` with
+    `slug and` (the empty-slug row passes the actor check); drop the `_COMMENT_ID` check; drop
+    the pull request number check."""
     monkeypatch.setenv(var, value)
     assert env.go() == 1
     assert env.posts == []
     assert env.replies == []
+    assert env.outputs() == ""
+
+
+def test_an_empty_slug_admits_no_actor(env, monkeypatch):
+    """A failed mint leaves the slug empty, and `f"{slug}[bot]"` is then `[bot]`. Mutation: delete
+    `not slug or` from the actor check."""
+    monkeypatch.setenv("SHIPMATE_APP_SLUG", "")
+    monkeypatch.setenv("GITHUB_ACTOR", "[bot]")
+    assert env.go() == 1
+    assert env.posts == []
     assert env.outputs() == ""
 
 

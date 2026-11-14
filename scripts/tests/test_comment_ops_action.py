@@ -179,19 +179,19 @@ _EYES_POST = (
     'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \\\n'
     "  -f content=eyes >/dev/null || true\n"
 )
-#: The acknowledgement's whole `if:`: `help` needs no permission, `doctor` is acknowledged once
-#: the commenter's permission passed and before its 30-60s of probes.
+#: The acknowledgement's whole `if:`: `help` needs no permission; `doctor` and `evict` are
+#: acknowledged once the commenter's permission passed, before their own work.
 _ACK_IF = (
-    "${{ steps.parse.outputs.route == 'help' || (steps.parse.outputs.route == 'doctor' && "
-    "steps.access.outputs.authorized == 'true') }}"
+    "${{ steps.parse.outputs.route == 'help' || ((steps.parse.outputs.route == 'doctor' || "
+    "steps.parse.outputs.route == 'evict') && steps.access.outputs.authorized == 'true') }}"
 )
 
 
-def test_an_accepted_help_or_doctor_is_acknowledged_with_eyes():
+def test_an_accepted_help_doctor_or_evict_is_acknowledged_with_eyes():
     """`eyes` means comment-ops accepted the command. Mutations: drop the `help` clause; drop the
-    doctor clause's `access` check (a refused doctor would be acknowledged); `&&` -> `||` in it;
-    drop `|| true`; `content=rocket`."""
-    step = step_by("comment-ops", name="Acknowledge an accepted help or doctor")
+    `evict` clause; drop the `access` check (a refused doctor or evict would be acknowledged);
+    `&&` -> `||` in it; drop `|| true`; `content=rocket`."""
+    step = step_by("comment-ops", name="Acknowledge an accepted help, doctor or evict")
     assert step["if"] == _ACK_IF
     assert step["run"].endswith(_EYES_POST)
 
@@ -1379,7 +1379,7 @@ _STEP_NAMES = [
     "Read the commenter's repository permission",
     "Authorize the commenter's permission",
     "Reject a commenter without write access",
-    "Acknowledge an accepted help or doctor",
+    "Acknowledge an accepted help, doctor or evict",
     "Permission check failed",
     "Authorize plan",
     "Reject an unauthorized plan",

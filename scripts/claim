@@ -82,7 +82,7 @@ def display(repo, comment):
         print(f"::warning::could not mark the command started: {one_line(exc.code)}")
 
 
-def refuse_untrusted(comment, pr):
+def refuse_unless_app(comment, pr):
     """Exit 1, before any POST, unless the ids are well formed and the App dispatched this run."""
     slug = os.environ.get("SHIPMATE_APP_SLUG", "")
     actor = os.environ.get("GITHUB_ACTOR", "")
@@ -115,7 +115,7 @@ def not_started(comment, pr, why):
 
 def claim(repo, comment):
     pr = os.environ.get("PR_NUMBER", "")
-    refuse_untrusted(comment, pr)
+    refuse_unless_app(comment, pr)
     try:
         status = react(repo, comment)
     except SystemExit as exc:

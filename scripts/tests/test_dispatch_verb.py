@@ -289,9 +289,9 @@ def test_an_empty_comment_id_dispatches_nothing_and_says_so_on_the_pull_request(
     assert result.returncode == 1, output
     assert _DISPATCH_PATH not in argv, f"an empty comment id must dispatch nothing: {argv!r}"
     assert (
-        "::error::The calling workflow did not pass a comment-id to shipmate/actions/dispatch, "
-        "so the dispatched run cannot claim its comment. Wire that step's comment-id input to "
-        "github.event.comment.id (docs/getting-started.md).\n"
+        "::error::The engine's comment-ops.yml passed no comment-id to shipmate/actions/dispatch, "
+        "so the dispatched run could not claim its comment; nothing was dispatched. This is an "
+        "engine defect: report it.\n"
     ) in result.stdout
     assert "/issues/42/comments" in argv and _RUN_URL in argv, argv
 

@@ -95,7 +95,7 @@ runs:
         esac
         # dispatch-body takes an empty id on a plan as the comment-less replan, which no comment sends.
         if [ -z "${COMMENT_ID:-}" ]; then
-          echo "::error::The calling workflow did not pass a comment-id to shipmate/actions/dispatch, so the dispatched run cannot claim its comment. Wire that step's comment-id input to github.event.comment.id (docs/getting-started.md)."
+          echo "::error::The engine's comment-ops.yml passed no comment-id to shipmate/actions/dispatch, so the dispatched run could not claim its comment; nothing was dispatched. This is an engine defect: report it."
           say_no_run_started
           exit 1
         fi

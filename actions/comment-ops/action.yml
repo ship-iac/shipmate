@@ -144,10 +144,10 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.access.outputs.reason }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
-    - name: Acknowledge an accepted help or doctor
+    - name: Acknowledge an accepted help, doctor or evict
       # Doctor spends 30-60s in API calls before its report comment appears; without an
       # acknowledgement the commenter's next move is to comment again.
-      if: ${{ steps.parse.outputs.route == 'help' || (steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true') }}
+      if: ${{ steps.parse.outputs.route == 'help' || ((steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'evict') && steps.access.outputs.authorized == 'true') }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}

@@ -4452,15 +4452,16 @@ _UNLOCK_GRANT_TEXT = (
     [
         "{ contents: read, checks: read, pull-requests: read, actions: read, id-token: write }",
         "{ contents: read, checks: read, actions: read, id-token: write }",
-        "write-all",
+        "read-all",
     ],
-    ids=["read", "absent", "not-a-mapping"],
+    ids=["read", "absent", "read-all"],
 )
 def test_an_unlock_job_without_the_pull_request_grant_is_reported(monkeypatch, grant):
     """`unlock.yml`'s `guard` writes the started reaction with `pull-requests: write`; a caller
     granting less kills every unlock run at startup. Run through `_shipmate_yml_warnings`, so the
     finder is registered. Mutations: drop `_unlock_grant_finding` from `_shipmate_yml_warnings`;
-    compare with `!= 'read'`; read the `apply` job instead."""
+    compare with `!= 'read'`; read the `apply` job instead; accept any non-mapping grant
+    (`read-all` passes)."""
     line = (
         "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
         "id-token: write }\n"
@@ -4472,6 +4473,19 @@ def test_an_unlock_job_without_the_pull_request_grant_is_reported(monkeypatch, g
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == [
         (doctor.WARNING, _UNLOCK_GRANT_TEXT)
     ]
+
+
+def test_an_unlock_job_granting_write_all_is_silent(monkeypatch):
+    """`write-all` grants `pull-requests: write`. Mutation: drop `grant == "write-all" or`."""
+    line = (
+        "    permissions: { contents: read, checks: read, pull-requests: write, actions: read, "
+        "id-token: write }\n"
+    )
+    text = _SHIPMATE_WF.replace(line, "    permissions: write-all\n")
+    assert text != _SHIPMATE_WF
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_ENGINE_REPO)) == []
 
 
 def test_an_auto_job_with_a_wrong_or_extra_key_names_each():
