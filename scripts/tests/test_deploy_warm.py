@@ -1,17 +1,18 @@
 """deploy.yml's `warm` job saves the provider cache entry of every distinct lock on the merged tree.
 
 `detect` outputs `warm`, one managed stack per distinct lock digest (`deploy-detect`'s
-`warm_cells`), and `warm` runs one leg per row on the cells' runner, because the entry name carries
-the runner's OS and architecture. A leg checks out the merged commit, installs the tools (which
-also saves the OpenTofu entry), and runs `actions/warm`: it names the entry with the cells' own
-builder, looks it up, and on a miss initializes the stack through `cell-init` with
-`backend: "false"` under the row's injected variables, then saves the entry at the cells' own
-`path:` only when init left a file in it. A save that stored nothing is told apart by exact-key
-lookups after it: a hit, also the case of another job saving the same entry first, is quiet; two
-misses warn once, naming the entry.
+`warm_cells`), or one tools-only row with an empty `stack` when there is none, and `warm` runs one
+leg per row, at most `max_parallel` at once (it binds no `<env>-apply` environment), on the cells'
+runner, because the entry name carries the runner's OS and architecture. A leg checks out the merged
+commit, installs the tools (which also saves the OpenTofu entry), and, unless it is the tools-only
+row, runs `actions/warm`: it names the entry with the cells' own builder, looks it up, and on a miss
+initializes the stack through `cell-init` with `backend: "false"` under the row's injected
+variables, then saves the entry at the cells' own `path:` only when init left a file in it. A save
+that stored nothing is told apart by exact-key lookups after it: a hit, also the case of another job
+saving the same entry first, is quiet; two misses warn once, naming the entry.
 
-The `if:` is load-bearing: an empty matrix fails at strategy evaluation. It is a degrade job: no
-job needs it and the gate never reads it, so `continue-on-error` keeps its failure off the run's
+The `if:` is load-bearing: an empty matrix fails at strategy evaluation. It is a degrade job: no job
+needs it and the gate never reads it, so `continue-on-error` keeps its failure off the run's
 conclusion, the cells and the lock release. The deploy run waits for it, so it holds the deploy
 concurrency group up to its 15-minute timeout.
 
@@ -35,17 +36,18 @@ EXPECTED_WARM = {
     "continue-on-error": True,
     "strategy": {
         "fail-fast": False,
+        "max-parallel": "${{ fromJSON(needs.detect.outputs.max_parallel) }}",
         "matrix": {"include": "${{ fromJSON(needs.detect.outputs.warm) }}"},
     },
-    "name": "warm / ${{ matrix.stack }}",
+    "name": "warm / ${{ matrix.stack || 'tools' }}",
     "steps": [
         {"uses": _CHECKOUT, "with": {"ref": "${{ github.sha }}", "persist-credentials": False}},
         {"uses": "$/actions/setup", "with": {"versions": "${{ needs.detect.outputs.tools }}"}},
         {
+            "if": "${{ matrix.stack != '' }}",
             "uses": "$/actions/warm",
             "with": {
                 "stack": "${{ matrix.stack }}",
-                "env": "${{ matrix.environment }}",
                 "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
                 "github-vars": "${{ toJSON(vars) }}",
                 "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
@@ -56,7 +58,8 @@ EXPECTED_WARM = {
 
 
 def test_warm_is_a_degrade_matrix_over_detects_rows():
-    """Mutations: `!= '[]'` to `== '[]'` in its `if:`; drop `fail-fast: false`; drop
+    """Mutations: `!= '[]'` to `== '[]'` in its `if:`; drop the warm step's `if:`, which a
+    tools-only row needs; drop `max-parallel`; drop `fail-fast: false`; drop
     `continue-on-error`; `runs-on: ubuntu-slim`; `permissions: {}`; drop the checkout's `ref:`;
     add `tofu: "false"` to its setup step; drop `consumer-secrets` from its warm step."""
     assert workflow_jobs("deploy.yml").get("warm") == EXPECTED_WARM
@@ -121,12 +124,7 @@ EXPECTED_STEPS = [
         "id": "init",
         "if": _MISS,
         "uses": "$/actions/cell-init",
-        "with": {
-            "stack": "${{ inputs.stack }}",
-            "env": "${{ inputs.env }}",
-            "slug": "",
-            "backend": "false",
-        },
+        "with": {"stack": "${{ inputs.stack }}", "backend": "false"},
     },
     {
         "name": "Check the provider cache",

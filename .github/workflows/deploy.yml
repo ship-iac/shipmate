@@ -30,6 +30,7 @@ jobs:
       refused_locked: ${{ steps.d.outputs.refused_locked }}
       tools: ${{ steps.setup.outputs.tools }}
       warm: ${{ steps.d.outputs.warm }}
+      max_parallel: ${{ steps.d.outputs.max_parallel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
@@ -48,8 +49,9 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
 
   # Saves the provider cache entry of each distinct lock on the merged tree, and the OpenTofu
-  # entry through setup. A degrade job: no job needs it, so `continue-on-error` keeps its failure
-  # off the run's conclusion. The `if:` is load-bearing: an empty matrix fails the run.
+  # entry through setup; a tools-only row (empty `stack`) runs setup alone. A degrade job: no job
+  # needs it, so `continue-on-error` keeps its failure off the run's conclusion. The `if:` is
+  # load-bearing: an empty matrix fails the run.
   warm:
     needs: [detect]
     if: ${{ needs.detect.outputs.warm != '[]' }}
@@ -59,18 +61,19 @@ jobs:
     continue-on-error: true
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(needs.detect.outputs.max_parallel) }}
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.warm) }}
-    name: warm / ${{ matrix.stack }}
+    name: warm / ${{ matrix.stack || 'tools' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ github.sha }}", persist-credentials: false }
       - uses: $/actions/setup
         with: { versions: "${{ needs.detect.outputs.tools }}" }
-      - uses: $/actions/warm
+      - if: ${{ matrix.stack != '' }}
+        uses: $/actions/warm
         with:
           stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}

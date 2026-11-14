@@ -4,11 +4,8 @@ inputs:
   stack:
     description: Stack path, e.g. stacks/app.
     required: true
-  env:
-    description: Environment name, e.g. dev-eu, whose tf_vars the init runs with.
-    required: true
   tf-vars:
-    description: The matrix row's resolved tf_vars, serialised with toJSON. Anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
+    description: The matrix row's resolved tf_vars, those of the stack's first environment by name, serialised with toJSON. Anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
     required: true
   github-vars:
     description: The consumer's reachable GitHub variables, serialised with toJSON. Engine-built, so an empty rendering is a platform fact and not a consumer mistake; empty and null are both read as no variables.
@@ -55,8 +52,6 @@ runs:
       uses: $/actions/cell-init
       with:
         stack: ${{ inputs.stack }}
-        env: ${{ inputs.env }}
-        slug: ""
         backend: "false"
 
     - name: Check the provider cache

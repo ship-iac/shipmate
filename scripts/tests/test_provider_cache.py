@@ -82,15 +82,11 @@ _INIT_STEP = {
     "shell": "bash",
     "env": {"STACK": "${{ inputs.stack }}", "BACKEND": "${{ inputs.backend }}"},
     "run": "set -euo pipefail\n"
+    "flags=(-input=false -reconfigure)\n"
+    '[ "$BACKEND" != false ] || flags+=(-backend=false)\n'
     "set +e\n"
-    'if [ "$BACKEND" = false ]; then\n'
-    "  terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
-    '"$STACK" -- tofu init -input=false -reconfigure -backend=false 2>&1 | tee '
-    '"$RUNNER_TEMP/init.txt"\n'
-    "else\n"
-    "  terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
-    '"$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"\n'
-    "fi\n"
+    "terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
+    '"$STACK" -- tofu init "${flags[@]}" 2>&1 | tee "$RUNNER_TEMP/init.txt"\n'
     "status=${PIPESTATUS[0]}\n"
     "set -e\n"
     '[ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" '
@@ -411,8 +407,8 @@ def test_the_annotation_names_the_key_only_for_a_provider_install_failure(
     [("false", "-input=false -reconfigure -backend=false"), ("true", "-input=false -reconfigure")],
 )
 def test_the_init_passes_the_backend_flag_and_keeps_tofus_exit_status(tmp_path, backend, flags):
-    """The init's exit is tofu's, not `tee`'s, on both branches. Mutations: swap the two init
-    lines; `exit "$status"` becomes `exit 0`."""
+    """The init's exit is tofu's, not `tee`'s, with and without a backend. Mutations: `!=` to
+    `=` in the `flags+=` test; `exit "$status"` becomes `exit 0`."""
     body = step_by(_INIT_ACTION, name="Initialize the stack")["run"]
     stub = 'terramate() { echo "$*" ; return 3 ; }\n'
     runner_temp = tmp_path / "rt"

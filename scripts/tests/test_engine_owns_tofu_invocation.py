@@ -43,26 +43,13 @@ _WRAPPER = [
 ]
 _INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
 #: cell-init's init, teed to RUNNER_TEMP for `tofu-error`, which annotates a failed init with its
-#: first error. The unlock cell runs its own un-teed `_INIT`.
+#: first error. The unlock cell runs its own un-teed `_INIT`. Its flags, `-backend=false` added
+#: for `warm`, are pinned by test_provider_cache.py's whole init body.
 _INIT_TEED = [
     *_WRAPPER,
     "tofu",
     "init",
-    "-input=false",
-    "-reconfigure",
-    "2>&1",
-    "|",
-    "tee",
-    "$RUNNER_TEMP/init.txt",
-]
-#: cell-init's init for `warm`, which fills the provider cache and touches no backend or state.
-_INIT_TEED_NO_BACKEND = [
-    *_WRAPPER,
-    "tofu",
-    "init",
-    "-input=false",
-    "-reconfigure",
-    "-backend=false",
+    "${flags[@]}",
     "2>&1",
     "|",
     "tee",
@@ -128,7 +115,7 @@ _SHOW_JSON = [*_WRAPPER, "tofu", "show", "-json", "stack.otplan"]
 
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
-    "cell-init": [_INIT_TEED_NO_BACKEND, _INIT_TEED, _LOCATE],
+    "cell-init": [_INIT_TEED, _LOCATE],
     "plan-cell": [
         _PLAN,
         [*_SHOW_TEXT, ">", "plan.txt", "2>", "show-text.err", "&"],

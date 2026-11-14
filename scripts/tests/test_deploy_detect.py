@@ -1406,7 +1406,7 @@ def _tree(tmp_path, monkeypatch, locks):
 
 def test_warm_takes_one_managed_stack_per_distinct_lock(tmp_path, monkeypatch):
     """Changed or not, every managed stack is a candidate; the first per digest in path order
-    wins, at its first environment by name, with the tf_vars the table resolves for it. Unmanaged,
+    wins, with the tf_vars the table resolves for its first environment by name. Unmanaged,
     local and lock-less stacks are left out. Mutations: drop the `LOCAL_TAG` clause; drop the
     `not envs` clause; key `rows` on the stack instead of the digest; take `envs[-1]`."""
     _tree(
@@ -1431,13 +1431,31 @@ def test_warm_takes_one_managed_stack_per_distinct_lock(tmp_path, monkeypatch):
         "missing": ["env/dev"],
     }
     assert dd.warm_cells(tag_map, _TF_VARS_TABLE) == [
-        {
-            "stack": "a",
-            "environment": "dev",
-            "tf_vars": {"TF_VAR_env": "dev", "TF_VAR_region": "eu-west-1"},
-        },
-        {"stack": "c", "environment": "prd", "tf_vars": {"TF_VAR_env": "prd", "TF_VAR_region": ""}},
+        {"stack": "a", "tf_vars": {"TF_VAR_env": "dev", "TF_VAR_region": "eu-west-1"}},
+        {"stack": "c", "tf_vars": {"TF_VAR_env": "prd", "TF_VAR_region": ""}},
     ]
+
+
+def test_warm_past_the_matrix_limit_keeps_256_and_warns(tmp_path, monkeypatch, capsys):
+    """Mutation: drop the slice (257 rows); drop the warning."""
+    _tree(
+        tmp_path,
+        monkeypatch,
+        {f"s{i:03}": f'provider "x/y/p{i}" {{\n  version = "1.0.0"\n}}\n' for i in range(258)},
+    )
+    rows = dd.warm_cells({f"s{i:03}": ["env/dev"] for i in range(258)}, _TF_VARS_TABLE)
+    assert [r["stack"] for r in rows] == [f"s{i:03}" for i in range(256)]
+    assert capsys.readouterr().err == (
+        "::warning::2 of 258 distinct provider locks are not warmed: the warm matrix holds at "
+        "most 256.\n"
+    )
+
+
+def test_no_lock_naming_a_provider_leaves_one_tools_only_row(tmp_path, monkeypatch, capsys):
+    """A deploy still saves the OpenTofu release entry. Mutation: return `rows` alone."""
+    _tree(tmp_path, monkeypatch, {"a": "# no provider block\n"})
+    assert dd.warm_rows({"a": ["env/dev"]}, _TF_VARS_TABLE) == [{"stack": "", "tf_vars": {}}]
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize(
@@ -1449,30 +1467,37 @@ def test_warm_takes_one_managed_stack_per_distinct_lock(tmp_path, monkeypatch):
     ids=["exception", "refusal"],
 )
 def test_a_failed_warm_list_warns_and_warms_nothing(monkeypatch, capsys, error, said):
-    """A degrade: the deploy carries on, after an exception and after a `SystemExit` refusal,
-    which is no `Exception`. Mutations: re-raise in `warm_or_none`; catch `Exception` alone
-    (reds `refusal`)."""
+    """A degrade: the deploy carries on with the tools-only row, after an exception and after a
+    `SystemExit` refusal, which is no `Exception`. Mutations: re-raise in `warm_rows`; catch
+    `Exception` alone (reds `refusal`)."""
 
     def broken(tag_map, table):
         raise error
 
     monkeypatch.setattr(dd, "warm_cells", broken)
-    assert dd.warm_or_none({}, {}) == []
+    assert dd.warm_rows({}, {}) == [{"stack": "", "tf_vars": {}}]
     assert capsys.readouterr().err == f"::warning::no provider cache warm-up: {said}\n"
 
 
 def test_main_writes_the_warm_list(tmp_path, monkeypatch):
-    """The rows resolve against the table the deploy loaded. Mutations: drop `warm=` from the
-    final `write_outputs`; pass `{}` for the table."""
+    """The rows and the cap come from the table the deploy loaded. Mutations: drop `warm=` from
+    the final `write_outputs`; pass `{}` for the table; drop `max_parallel=`."""
     _tree(tmp_path / "tree", monkeypatch, {"stacks/app": _LOCK_A})
     parsed = _run_main(
         tmp_path,
         monkeypatch,
         cells=[_cell("stacks/app")],
         checks=[_apply_check("stacks/app", cells=1)],
-        table={"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}},
+        table={
+            "layout": "tf_vars",
+            "max_parallel": "4",
+            "environments": {"dev-eu": {"region": "eu-west-1"}},
+        },
     )
-    assert parsed["warm"] == (
-        '[{"stack": "stacks/app", "environment": "dev-eu", '
-        '"tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}}]'
+    assert (parsed["warm"], parsed["max_parallel"]) == (
+        (
+            '[{"stack": "stacks/app", '
+            '"tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}}]'
+        ),
+        "4",
     )

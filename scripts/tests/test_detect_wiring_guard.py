@@ -129,6 +129,7 @@ _DEPLOY_DETECT_OUTPUTS = {
     "refused_locked": "${{ steps.d.outputs.refused_locked }}",
     "tools": "${{ steps.setup.outputs.tools }}",
     "warm": "${{ steps.d.outputs.warm }}",
+    "max_parallel": "${{ steps.d.outputs.max_parallel }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
