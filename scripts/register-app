@@ -49,6 +49,10 @@ _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,33}")
 #: GitHub converts a manifest code without authentication; the code is the credential.
 CONVERSIONS = "https://api.github.com/app-manifests/{}/conversions"
 
+#: Every way the POST or reading its answer fails: transport and HTTP errors (`OSError`, which
+#: `urllib.error` subclasses), a truncated read, and a body that is not UTF-8 JSON.
+_FAILURES = (OSError, http.client.HTTPException, ValueError)
+
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "app" / "manifest.json"
 
 DONE_PAGE = b"""<!doctype html><meta charset=utf-8>
@@ -130,10 +134,9 @@ def _convert(code):
 
     A plain HTTPS POST rather than `gh api`: the endpoint takes no token, and the code then never
     sits in a command line. Any failure, a read or decode after the POST included, refuses with
-    the code scrubbed out, raw and quoted, since it converts into a private key; an HTTP error
-    names its status and GitHub's answer."""
-    quoted = urllib.parse.quote(code, safe="")
-    url = CONVERSIONS.format(quoted)
+    the code scrubbed out, since it converts into a private key; an HTTP error names its status
+    and the start of GitHub's answer."""
+    url = CONVERSIONS.format(urllib.parse.quote(code, safe=""))
     # The URL is the fixed https endpoint with only the quoted code in its path.
     req = urllib.request.Request(  # noqa: S310
         url,
@@ -143,14 +146,24 @@ def _convert(code):
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
             return json.loads(resp.read().decode("utf-8"))
-    except (OSError, http.client.HTTPException, ValueError) as e:
-        why = f"HTTP {e.code}" if isinstance(e, urllib.error.HTTPError) else repr(e)
+    except _FAILURES as e:
+        if isinstance(e, urllib.error.HTTPError):
+            why = f"HTTP {e.code}"
+        elif isinstance(e, urllib.error.URLError):
+            why = str(e.reason)
+        else:
+            why = str(e) or type(e).__name__
         try:
             body = e.read().decode("utf-8", "replace").strip() if hasattr(e, "read") else ""
-        except (OSError, http.client.HTTPException):
+        except _FAILURES:
             body = ""
-        message = f"converting the manifest code failed: {why} from {url}"
-        raise SystemExit(scrub(message + (f"\n{body}" if body else ""), (code, quoted))) from None
+        message = (
+            f"converting the manifest code failed: {why} from {url}"
+            + (f"\n{body[:2000]}" if body else "")
+            + "\nIf the App was created anyway, this code is spent: delete the App in the org's "
+            "settings and register again."
+        )
+        raise SystemExit(scrub(message, (code,))) from None
 
 
 def _validate_out(path):

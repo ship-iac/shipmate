@@ -261,12 +261,13 @@ def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
 
     with pytest.raises(SystemExit) as exc:
         ra._run(
-            ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--body", "SECRET_PEM"],
+            ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY"],
             secrets=("SECRET_PEM",),
+            stdin="SECRET_PEM",
         )
 
     assert str(exc.value) == (
-        "command failed (1): gh secret set SHIPMATE_APP_PRIVATE_KEY --body ***\n"
+        "command failed (1): gh secret set SHIPMATE_APP_PRIVATE_KEY\n"
         "gh: HTTP 403 (value *** rejected)"
     )
     assert capsys.readouterr() == ("", "")
@@ -315,21 +316,26 @@ def test_convert_failure_scrubs_the_code_out_of_the_url_and_answer(monkeypatch):
     assert str(exc.value) == (
         "converting the manifest code failed: HTTP 404 from "
         "https://api.github.com/app-manifests/***/conversions\n"
-        '{"message": "code *** not found"}'
+        '{"message": "code *** not found"}\n'
+        "If the App was created anyway, this code is spent: delete the App in the org's "
+        "settings and register again."
     )
 
 
 @pytest.mark.parametrize(
     ("raised", "why"),
     [
-        (TimeoutError("timed out"), "TimeoutError('timed out')"),
-        (ValueError("Expecting value"), "ValueError('Expecting value')"),
+        (TimeoutError("timed out"), "timed out"),
+        (ValueError("Expecting value"), "Expecting value"),
+        (ra.http.client.IncompleteRead(b"x"), "IncompleteRead(1 bytes read)"),
     ],
-    ids=["read-timeout", "not-json"],
+    ids=["read-timeout", "not-json", "truncated"],
 )
 def test_convert_refuses_a_read_or_decode_failure_after_the_post(monkeypatch, raised, why):
-    """A failure after GitHub accepted the POST still refuses with the scrubbed URL, never a
-    traceback. Mutation: catch only `urllib.error.URLError` -> the raw exception escapes."""
+    """A failure after GitHub accepted the POST still refuses with the scrubbed URL and the
+    spent-code remedy, never a traceback. Mutations: catch only `urllib.error.URLError` -> the
+    timeout escapes; drop `http.client.HTTPException` from `_FAILURES` -> the truncated read
+    escapes."""
 
     class _Failing(_Answer):
         def read(self):
@@ -337,8 +343,32 @@ def test_convert_refuses_a_read_or_decode_failure_after_the_post(monkeypatch, ra
 
     monkeypatch.setattr(ra.urllib.request, "urlopen", lambda req, timeout: _Failing(b""))
     with pytest.raises(SystemExit) as exc:
-        ra._convert("a b")
+        ra._convert("CODE123")
     assert str(exc.value) == (
         f"converting the manifest code failed: {why} from "
-        "https://api.github.com/app-manifests/***/conversions"
+        "https://api.github.com/app-manifests/***/conversions\n"
+        "If the App was created anyway, this code is spent: delete the App in the org's "
+        "settings and register again."
+    )
+
+
+def test_convert_refuses_when_reading_the_error_body_fails(monkeypatch):
+    """Mutation: drop `ValueError` from the guarded body read -> the closed-file error escapes."""
+    import urllib.error
+
+    class _Closed:
+        def read(self):
+            raise ValueError("I/O operation on closed file")
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", {}, _Closed())
+
+    monkeypatch.setattr(ra.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(SystemExit) as exc:
+        ra._convert("CODE123")
+    assert str(exc.value) == (
+        "converting the manifest code failed: HTTP 502 from "
+        "https://api.github.com/app-manifests/***/conversions\n"
+        "If the App was created anyway, this code is spent: delete the App in the org's "
+        "settings and register again."
     )

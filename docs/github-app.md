@@ -26,8 +26,8 @@ loop — see the appendix.
 ## Prerequisites
 
 - `gh` CLI, authenticated as an org owner (`gh auth status`).
-- Direct HTTPS to `api.github.com`: the manifest conversion is a plain POST, outside `gh`'s
-  host, proxy and CA settings.
+- HTTPS to `api.github.com`: the manifest conversion is a plain POST through the environment's
+  proxy (`HTTPS_PROXY`) and Python's CA store, not `gh`'s host or CA settings.
 - Admin rights on the org that will own the App.
 - This repo checked out locally (`app/manifest.json` is read by the steps below).
 
