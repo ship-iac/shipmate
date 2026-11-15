@@ -251,22 +251,23 @@ def test_run_error_scrubs_the_secret_out_of_the_argv(monkeypatch, capsys):
 
 
 def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
-    """gh quotes the URL it called, and the one-time manifest code is in that URL, so
-    scrubbing the argv is not enough: anything the caller declares as a secret must be
-    scrubbed from gh's message too, and the diagnosis itself survives.
+    """gh can quote the value it was handed, so scrubbing the argv is not enough: anything the
+    caller declares as a secret must be scrubbed from gh's message too, and the diagnosis itself
+    survives.
 
     Mutation: drop the `scrub(...)` around the stderr in `_shipmate.run`'s message.
     """
-    _failing_gh(monkeypatch, "gh: HTTP 404 (POST app-manifests/CODE123/conversions)\n")
+    _failing_gh(monkeypatch, "gh: HTTP 403 (value SECRET_PEM rejected)\n")
 
     with pytest.raises(SystemExit) as exc:
         ra._run(
-            ["gh", "api", "-X", "POST", "app-manifests/CODE123/conversions"], secrets=("CODE123",)
+            ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--body", "SECRET_PEM"],
+            secrets=("SECRET_PEM",),
         )
 
     assert str(exc.value) == (
-        "command failed (1): gh api -X POST app-manifests/***/conversions\n"
-        "gh: HTTP 404 (POST app-manifests/***/conversions)"
+        "command failed (1): gh secret set SHIPMATE_APP_PRIVATE_KEY --body ***\n"
+        "gh: HTTP 403 (value *** rejected)"
     )
     assert capsys.readouterr() == ("", "")
 
@@ -315,4 +316,29 @@ def test_convert_failure_scrubs_the_code_out_of_the_url_and_answer(monkeypatch):
         "converting the manifest code failed: HTTP 404 from "
         "https://api.github.com/app-manifests/***/conversions\n"
         '{"message": "code *** not found"}'
+    )
+
+
+@pytest.mark.parametrize(
+    ("raised", "why"),
+    [
+        (TimeoutError("timed out"), "TimeoutError('timed out')"),
+        (ValueError("Expecting value"), "ValueError('Expecting value')"),
+    ],
+    ids=["read-timeout", "not-json"],
+)
+def test_convert_refuses_a_read_or_decode_failure_after_the_post(monkeypatch, raised, why):
+    """A failure after GitHub accepted the POST still refuses with the scrubbed URL, never a
+    traceback. Mutation: catch only `urllib.error.URLError` -> the raw exception escapes."""
+
+    class _Failing(_Answer):
+        def read(self):
+            raise raised
+
+    monkeypatch.setattr(ra.urllib.request, "urlopen", lambda req, timeout: _Failing(b""))
+    with pytest.raises(SystemExit) as exc:
+        ra._convert("a b")
+    assert str(exc.value) == (
+        f"converting the manifest code failed: {why} from "
+        "https://api.github.com/app-manifests/***/conversions"
     )
