@@ -303,9 +303,7 @@ def mask(values):
                 # exact string, so the runner must be handed it. It consumes the command rather
                 # than echoing it, and masks the value everywhere after. Do not "fix" this by
                 # masking a digest or a prefix -- neither registers anything.
-                print(  # codeql[py/clear-text-logging-sensitive-data]
-                    f"::add-mask::{line.replace('%', '%25')}", flush=True
-                )
+                print(f"::add-mask::{line.replace('%', '%25')}", flush=True)
 
 
 #: The child `terramate run` executes: the checked names' values only, never the whole
