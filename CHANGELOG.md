@@ -8,7 +8,11 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.56.0] — 2026-11-15
+
+Tags (backfilled after the tag).
+
+Re-pin with `scripts/repin <consumer> v0.56.0 --write-fence`: the published `shipmate.yml` fence gains the `comment_id` `workflow_dispatch` input and a `run-name`, and a dispatch to a fence without them answers HTTP 422.
 
 ### Changed
 
@@ -28,6 +32,10 @@ section below names the SHA the release tags.
 - **A dispatch refused by an older `shipmate.yml` names the remedy in its reply.** For `Unexpected inputs provided` the failure reply ends with the `python <engine>/scripts/repin <consumer> <tag> --write-fence` command; for a missing file or `workflow_dispatch` trigger it says `docs/getting-started.md` publishes the file. The auto apply reply carries the same remedy, ``🔴 failed: auto apply not started: the dispatch failed. <remedy>``, and the remedy is also an `::error::` line in the dispatching run's log (`docs/troubleshooting.md`).
 - **A commanded plan whose `facts` job failed replies.** It gets ``🔴 failed: [the plan run](<url>) ended before it posted a result; the reason is in that run's log.``, posted to the dispatched pull request number that `claim` checked (`CONTRACT.md` §Outcome reply).
 - **An apply run's `review` tells a missing pull request from a failed read.** A pull request GitHub answers `NOT_FOUND` for refuses with `Pull request #<n> does not exist in this repository; nothing applies.` and no reply, as a null one did; any other failed read refuses with ``Could not read pull request #<n> (gh exited <rc>); nothing applies. Comment `shipmate apply` on the pull request again.`` and gets the outcome reply (`docs/troubleshooting.md`).
+
+### Fixed
+
+- **`scripts/register-app` converts the manifest code with a direct HTTPS POST instead of a `gh api` command line.** The single-use code no longer reaches a subprocess argv; every failure after the POST refuses with the code scrubbed and says that a spent code needs the App deleted and registered again (`docs/github-app.md` lists the HTTPS prerequisite).
 
 ## [0.55.1] — 2026-11-12
 
