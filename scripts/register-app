@@ -22,6 +22,7 @@ short-lived, so this is for a retry after a later step failed).
 """
 
 import argparse
+import http.client
 import http.server
 import json
 import os
@@ -30,10 +31,12 @@ import re
 import secrets
 import tempfile
 import threading
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 
-from _shipmate import APP_ID_VAR, REPO_RE, utf8_output
+from _shipmate import APP_ID_VAR, REPO_RE, scrub, utf8_output
 from _shipmate import run as _run
 
 #: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
@@ -42,6 +45,13 @@ _CODE_RE = re.compile(r"[A-Za-z0-9_-]+")
 #: `--name` is embedded in the local HTML form, where a quote would escape the attribute holding
 #: it. 34 is GitHub's App-name limit.
 _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,33}")
+
+#: GitHub converts a manifest code without authentication; the code is the credential.
+CONVERSIONS = "https://api.github.com/app-manifests/{}/conversions"
+
+#: Every way the POST or reading its answer fails: transport and HTTP errors (`OSError`, which
+#: `urllib.error` subclasses), a truncated read, and a body that is not UTF-8 JSON.
+_FAILURES = (OSError, http.client.HTTPException, ValueError)
 
 MANIFEST = pathlib.Path(__file__).resolve().parents[1] / "app" / "manifest.json"
 
@@ -119,6 +129,43 @@ def _capture_code(name, org):
     return _Handler.code
 
 
+def _convert(code):
+    """The App GitHub returns for the single-use manifest `code`, as a dict.
+
+    A plain HTTPS POST rather than `gh api`: the endpoint takes no token, and the code then never
+    sits in a command line. Any failure, a read or decode after the POST included, refuses with
+    the code scrubbed out, since it converts into a private key; an HTTP error names its status
+    and the start of GitHub's answer."""
+    url = CONVERSIONS.format(urllib.parse.quote(code, safe=""))
+    # The URL is the fixed https endpoint with only the quoted code in its path.
+    req = urllib.request.Request(  # noqa: S310
+        url,
+        method="POST",
+        headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            return json.loads(resp.read().decode("utf-8"))
+    except _FAILURES as e:
+        if isinstance(e, urllib.error.HTTPError):
+            why = f"HTTP {e.code}"
+        elif isinstance(e, urllib.error.URLError):
+            why = str(e.reason)
+        else:
+            why = str(e) or type(e).__name__
+        try:
+            body = e.read().decode("utf-8", "replace").strip() if hasattr(e, "read") else ""
+        except _FAILURES:
+            body = ""
+        message = (
+            f"converting the manifest code failed: {why} from {url}"
+            + (f"\n{body[:2000]}" if body else "")
+            + "\nIf the App was created anyway, this code is spent: delete the App in the org's "
+            "settings and register again."
+        )
+        raise SystemExit(scrub(message, (code,))) from None
+
+
 def _validate_out(path):
     """Refuse an unusable --out BEFORE the conversion call.
 
@@ -180,8 +227,7 @@ def main(argv=None):
     if not _CODE_RE.fullmatch(code):
         # Never echoed: the code converts into a private key.
         raise SystemExit("the manifest code must be letters, digits, '_' or '-'; refusing it.")
-    out = _run(["gh", "api", "-X", "POST", f"app-manifests/{code}/conversions"], secrets=(code,))
-    app = json.loads(out)
+    app = _convert(code)
     app_id = str(app["id"])
     # The id first, so a refusal below still leaves the operator with it; then
     # the key, before the variable set, because a failing `gh` there would

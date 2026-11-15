@@ -26,6 +26,8 @@ loop — see the appendix.
 ## Prerequisites
 
 - `gh` CLI, authenticated as an org owner (`gh auth status`).
+- HTTPS to `api.github.com`: the manifest conversion is a plain POST through the environment's
+  proxy (`HTTPS_PROXY`) and Python's CA store, not `gh`'s host or CA settings.
 - Admin rights on the org that will own the App.
 - This repo checked out locally (`app/manifest.json` is read by the steps below).
 
@@ -77,7 +79,8 @@ with the port its listener actually bound.
 ## 2. What step 1 stored
 
 The command in step 1 converts the captured code
-(`gh api -X POST app-manifests/<code>/conversions`) and then stores two things:
+(an unauthenticated `POST https://api.github.com/app-manifests/<code>/conversions`) and
+then stores two things:
 
 - `SHIPMATE_APP_ID` — a repository variable on `--repo`, the repository you
   are setting up. The app id is not a secret.

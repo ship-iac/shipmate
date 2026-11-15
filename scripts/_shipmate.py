@@ -125,9 +125,9 @@ def run(args, secrets=(), stdin=None, *, env=None):
     `gh secret set`, and a CRLF-mangled PEM is not the key that was read.
 
     `secrets` are the live credential values this call carries, scrubbed from
-    the argv and the child's stderr in the failure message: the manifest `code`
-    sits in the conversions URL gh quotes, and the private key fails exactly
-    when it has been minted but not yet stored. The stderr goes in the message
+    the argv and the child's stderr in the failure message: the private key
+    fails exactly when it has been minted but not yet stored, and gh can quote
+    what it was handed. The stderr goes in the message
     so that `onboard`'s `_gh_json_or_none` can swallow a 404 without printing it.
     Nothing else prints, so a caller that discards the exception discards the
     noise too.

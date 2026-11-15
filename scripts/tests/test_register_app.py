@@ -12,16 +12,20 @@ ra = load_script("register-app")
 
 
 def _stub_run(monkeypatch):
-    """Record every `gh` argv; answer the conversion call with a fixed App."""
+    """Record every `gh` argv and every conversion (as `("convert", code)`); answer the
+    conversion with a fixed App."""
     calls = []
 
     def fake_run(args, secrets=(), stdin=None):
         calls.append(args)
-        if "conversions" in args[-1]:
-            return '{"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate-acme"}'
         return ""
 
+    def fake_convert(code):
+        calls.append(("convert", code))
+        return {"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate-acme"}
+
     monkeypatch.setattr(ra, "_run", fake_run)
+    monkeypatch.setattr(ra, "_convert", fake_convert)
     return calls
 
 
@@ -35,7 +39,7 @@ def test_main_writes_the_key_to_a_file_and_creates_no_repository_secret(monkeypa
     ra.main(["--name", "shipmate-acme", "--repo", "org/repo", "--out", str(out), "--code", "c123"])
 
     assert calls == [
-        ["gh", "api", "-X", "POST", "app-manifests/c123/conversions"],
+        ("convert", "c123"),
         ["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", "org/repo", "--body", "42"],
     ]
     assert out.read_text(encoding="utf-8") == "PRIVATE_KEY"
@@ -247,21 +251,124 @@ def test_run_error_scrubs_the_secret_out_of_the_argv(monkeypatch, capsys):
 
 
 def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
-    """gh quotes the URL it called, and the one-time manifest code is in that URL, so
-    scrubbing the argv is not enough: anything the caller declares as a secret must be
-    scrubbed from gh's message too, and the diagnosis itself survives.
+    """gh can quote the value it was handed, so scrubbing the argv is not enough: anything the
+    caller declares as a secret must be scrubbed from gh's message too, and the diagnosis itself
+    survives.
 
     Mutation: drop the `scrub(...)` around the stderr in `_shipmate.run`'s message.
     """
-    _failing_gh(monkeypatch, "gh: HTTP 404 (POST app-manifests/CODE123/conversions)\n")
+    _failing_gh(monkeypatch, "gh: HTTP 403 (value SECRET_PEM rejected)\n")
 
     with pytest.raises(SystemExit) as exc:
         ra._run(
-            ["gh", "api", "-X", "POST", "app-manifests/CODE123/conversions"], secrets=("CODE123",)
+            ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY"],
+            secrets=("SECRET_PEM",),
+            stdin="SECRET_PEM",
         )
 
     assert str(exc.value) == (
-        "command failed (1): gh api -X POST app-manifests/***/conversions\n"
-        "gh: HTTP 404 (POST app-manifests/***/conversions)"
+        "command failed (1): gh secret set SHIPMATE_APP_PRIVATE_KEY\n"
+        "gh: HTTP 403 (value *** rejected)"
     )
     assert capsys.readouterr() == ("", "")
+
+
+class _Answer:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body
+
+
+def test_convert_posts_the_quoted_code_to_the_conversions_endpoint(monkeypatch):
+    """Mutation: drop `urllib.parse.quote` -> the URL carries the raw code; send GET -> red."""
+    seen = []
+
+    def fake_urlopen(req, timeout):
+        seen.append((req.full_url, req.get_method(), timeout))
+        return _Answer(b'{"id": 7, "pem": "K"}')
+
+    monkeypatch.setattr(ra.urllib.request, "urlopen", fake_urlopen)
+    assert ra._convert("a b") == {"id": 7, "pem": "K"}
+    assert seen == [("https://api.github.com/app-manifests/a%20b/conversions", "POST", 30)]
+
+
+def test_convert_failure_scrubs_the_code_out_of_the_url_and_answer(monkeypatch):
+    """Mutation: drop `scrub` -> the code appears in the refusal."""
+    import io
+    import urllib.error
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(
+            req.full_url, 404, "Not Found", {}, io.BytesIO(b'{"message": "code CODE123 not found"}')
+        )
+
+    monkeypatch.setattr(ra.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(SystemExit) as exc:
+        ra._convert("CODE123")
+    assert str(exc.value) == (
+        "converting the manifest code failed: HTTP 404 from "
+        "https://api.github.com/app-manifests/***/conversions\n"
+        '{"message": "code *** not found"}\n'
+        "If the App was created anyway, this code is spent: delete the App in the org's "
+        "settings and register again."
+    )
+
+
+@pytest.mark.parametrize(
+    ("raised", "why"),
+    [
+        (TimeoutError("timed out"), "timed out"),
+        (ValueError("Expecting value"), "Expecting value"),
+        (ra.http.client.IncompleteRead(b"x"), "IncompleteRead(1 bytes read)"),
+    ],
+    ids=["read-timeout", "not-json", "truncated"],
+)
+def test_convert_refuses_a_read_or_decode_failure_after_the_post(monkeypatch, raised, why):
+    """A failure after GitHub accepted the POST still refuses with the scrubbed URL and the
+    spent-code remedy, never a traceback. Mutations: catch only `urllib.error.URLError` -> the
+    timeout escapes; drop `http.client.HTTPException` from `_FAILURES` -> the truncated read
+    escapes."""
+
+    class _Failing(_Answer):
+        def read(self):
+            raise raised
+
+    monkeypatch.setattr(ra.urllib.request, "urlopen", lambda req, timeout: _Failing(b""))
+    with pytest.raises(SystemExit) as exc:
+        ra._convert("CODE123")
+    assert str(exc.value) == (
+        f"converting the manifest code failed: {why} from "
+        "https://api.github.com/app-manifests/***/conversions\n"
+        "If the App was created anyway, this code is spent: delete the App in the org's "
+        "settings and register again."
+    )
+
+
+def test_convert_refuses_when_reading_the_error_body_fails(monkeypatch):
+    """Mutation: drop `ValueError` from the guarded body read -> the closed-file error escapes."""
+    import urllib.error
+
+    class _Closed:
+        def read(self):
+            raise ValueError("I/O operation on closed file")
+
+    def fake_urlopen(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", {}, _Closed())
+
+    monkeypatch.setattr(ra.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(SystemExit) as exc:
+        ra._convert("CODE123")
+    assert str(exc.value) == (
+        "converting the manifest code failed: HTTP 502 from "
+        "https://api.github.com/app-manifests/***/conversions\n"
+        "If the App was created anyway, this code is spent: delete the App in the org's "
+        "settings and register again."
+    )
