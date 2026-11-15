@@ -10,7 +10,7 @@ section below names the SHA the release tags.
 
 ## [0.56.0] — 2026-11-15
 
-Tags (backfilled after the tag).
+Tags `da8eb04`.
 
 Re-pin with `scripts/repin <consumer> v0.56.0 --write-fence`: the published `shipmate.yml` fence gains the `comment_id` `workflow_dispatch` input and a `run-name`, and a dispatch to a fence without them answers HTTP 422.
 
