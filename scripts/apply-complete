@@ -3,7 +3,8 @@
 
 `apply-complete list` prints this run's jobs listing, one job per line;
 `apply-complete` reads that listing on stdin and prints one row per decided cell;
-`apply-complete plan <rows>` turns every attempt's rows into the `patch-checks` write plan.
+`apply-complete plan <rows>` turns every attempt's rows into the `patch-checks` write plan;
+`apply-complete stranded <reasons>` refuses with the reasons no attempt resolved.
 
 Evidence is `GET /actions/runs/{id}/jobs`, not the cells' own artifacts: a job
 conclusion is written by GitHub, so one cell cannot claim another applied. A
@@ -217,15 +218,25 @@ def list_jobs():
     sys.stdout.write(listing)
 
 
+def stranded(reasons_path):
+    """Refuse with the `RETRY_PREFIX` reasons in `reasons_path` on one line: they hold gh's
+    stderr and stack names raw, and `run_annotated` prints the refusal escaped."""
+    with open(reasons_path, encoding="utf-8") as fh:
+        reasons = one_line(fh.read())
+    raise SystemExit(
+        f"::error::the retries were exhausted and these apply checks are left pending: {reasons}"
+    )
+
+
 def main(argv=()):
     if argv == ["list"]:
         list_jobs()
         return
-    if argv:
-        if argv[0] != "plan" or len(argv) != 2:
-            raise SystemExit("::error::usage: apply-complete [list | plan <rows>]")
-        plan(argv[1])
+    if len(argv) == 2 and argv[0] in ("plan", "stranded"):
+        (plan if argv[0] == "plan" else stranded)(argv[1])
         return
+    if argv:
+        raise SystemExit("::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]")
     try:
         results = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
     except ValueError:

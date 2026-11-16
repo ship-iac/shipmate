@@ -479,12 +479,16 @@ def test_plan_mode_writes_the_merged_rows(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("argv", [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"]])
+@pytest.mark.parametrize(
+    "argv", [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"], ["stranded"]]
+)
 def test_a_wrong_argument_list_refuses(argv):
     """Mutation: drop the length check -> `plan` with no files raises IndexError."""
     with pytest.raises(SystemExit) as exc:
         apply_complete.main(argv)
-    assert str(exc.value) == "::error::usage: apply-complete [list | plan <rows>]"
+    assert str(exc.value) == (
+        "::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]"
+    )
 
 
 #: `apply-complete list`'s one gh call, whole.
@@ -851,14 +855,11 @@ def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stra
 
     fail = run_step(tmp_path, _fail_body(), env, timeout=120)
     assert fail.returncode == 1
-    errors = [ln for ln in fail.stdout.splitlines() if "::error::" in ln]
-    assert errors == [
-        (
-            "::error::the retries were exhausted and these apply checks are left pending: the jobs "
-            "listing shows no conclusion for these cells of waves that ran: app / dev-eu, "
-            "web / dev-eu "
-        )
-    ]
+    assert fail.stderr == (
+        "::error::the retries were exhausted and these apply checks are left pending: the jobs "
+        "listing shows no conclusion for these cells of waves that ran: app / dev-eu, "
+        "web / dev-eu\n"
+    )
 
 
 @bash_only
@@ -899,31 +900,37 @@ def test_a_listing_failing_after_one_resolved_cell_writes_it_and_fails_naming_th
 
     fail = run_step(tmp_path, _fail_body(), env, timeout=120)
     assert fail.returncode == 1
-    assert [ln for ln in fail.stdout.splitlines() if ln.startswith("::")] == [
-        (
-            "::error::the retries were exhausted and these apply checks are left pending: "
-            f"{cause.replace('%', '%25')} "
-        )
-    ]
+    assert fail.stderr == (
+        "::error::the retries were exhausted and these apply checks are left pending: "
+        f"{cause.replace('%', '%25')}\n"
+    )
 
 
 @bash_only
 def test_the_fail_over_escapes_a_stranded_cell_name(tmp_path):
-    """The classifier's `retry: ` line names cells raw; a stack path holding `%0A` or a CR stays
-    itself in the refusal. Mutation: no escaping in the fail-over step (`%0A`, a raw CR)."""
+    """The classifier's `retry: ` line names cells raw; a stack path holding `%0A` stays itself
+    in the refusal, and a CR or LF in the reasons becomes a ` | ` separator. Mutations: skip
+    `one_line` (the line ends print as `%0D` and `%0A`); bypass `command_data` in
+    `print_annotated` (`%0A`); print the refusal to stdout instead of raising it."""
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
     (runner_temp / "stranded.txt").write_bytes(
         b"the jobs listing shows no conclusion for these cells of waves that ran: "
         b"stacks/a%0Ab\r / dev-eu\nthe other\n"
     )
-    env = {**os.environ, "RUNNER_TEMP": runner_temp.as_posix()}
+    bin_dir = _bin(tmp_path)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "RUNNER_TEMP": runner_temp.as_posix(),
+        "GITHUB_ACTION_PATH": (ENGINE / "actions" / "apply-complete").as_posix(),
+    }
     fail = run_step(tmp_path, _fail_body(), env, timeout=120)
-    assert fail.returncode == 1
-    assert fail.stdout == (
+    assert (fail.returncode, fail.stdout) == (1, "")
+    assert fail.stderr == (
         "::error::the retries were exhausted and these apply checks are left pending: the jobs "
-        "listing shows no conclusion for these cells of waves that ran: stacks/a%250Ab%0D / "
-        "dev-eu the other \n"
+        "listing shows no conclusion for these cells of waves that ran: stacks/a%250Ab |  / "
+        "dev-eu | the other\n"
     )
 
 

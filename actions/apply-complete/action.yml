@@ -124,8 +124,6 @@ runs:
       run: |
         set -euo pipefail
         if [ -s "$RUNNER_TEMP/stranded.txt" ]; then
-          # Raw `retry: ` text (gh's stderr, stack names): escaped as workflow-command data.
-          why=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$RUNNER_TEMP/stranded.txt" | tr '\n' ' ')
-          echo "::error::the retries were exhausted and these apply checks are left pending: $why"
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" stranded "$RUNNER_TEMP/stranded.txt"
           exit 1
         fi
