@@ -31,6 +31,7 @@ from _shipmate import (
     review_count,
     run,
     run_annotated,
+    status_text,
     utf8_output,
     validate_head_sha,
     write_retried,
@@ -1001,3 +1002,37 @@ def test_plan_runs_since_is_incomplete_over_a_failed_read_or_an_unshaped_run(cap
     rows = [_dispatched(3, "shipmate · plan pr=7 ref= comment="), {"id": 4, "status": "queued"}]
     runs, complete = _since(rows)[0]
     assert ([r["id"] for r in runs], complete) == ([3], False)
+
+
+@pytest.mark.parametrize(
+    "total",
+    [
+        pytest.param(1, id="more-advertised"),
+        pytest.param(None, id="missing"),
+        pytest.param(True, id="bool"),
+    ],
+)
+def test_plan_runs_since_is_incomplete_when_the_listing_returns_another_count_than_it_advertises(
+    total, capsys
+):
+    """A listing advertising one run and returning none hides it. Mutations: drop the count
+    check (more-advertised answers complete); skip it when `total_count` is absent (missing);
+    accept a bool count (`True == 1`, so bool passes)."""
+    argv = []
+
+    def gh(args):
+        argv.append(args)
+        rows = [_dispatched(2, "shipmate · plan pr=7 ref= comment=")] if total is True else []
+        body = {"workflow_runs": rows}
+        if total is not None:
+            body["total_count"] = total
+        return json.dumps(body)
+
+    assert plan_runs_since("o/r", "7", _SINCE, run=gh) == ([], False)
+    assert "::warning::" in capsys.readouterr().err
+
+
+def test_status_text_reads_a_listed_status_as_words():
+    """Mutations: drop the `_` replacement; drop `one_line` (the newline survives)."""
+    assert status_text("in_progress") == "in progress"
+    assert status_text("a\nb") == "a | b"

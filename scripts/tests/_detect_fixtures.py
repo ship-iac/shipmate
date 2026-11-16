@@ -271,12 +271,12 @@ def dispatched_plan(run_id, pr, status="in_progress", **keys):
     return run | keys
 
 
-def plan_jobs(run_id, detect="success", attempt=1, names=None):
+def plan_jobs(run_id, detect="success", attempt=1, names=None, total=None):
     """The jobs listing body of dispatched plan run `run_id`, shaped like `gh api
     'repos/ship-iac/repo-example-stacks/actions/runs/43638853580/jobs?filter=latest&per_page=100'`
     (2026-11-16) answers it, cut to the keys the engine reads: every job `completed` at run
     attempt `attempt`, `plan / detect` concluding `detect`, or absent when `detect` is None.
-    `names` replaces the job names."""
+    `names` replaces the job names, `total` the advertised `total_count`."""
     rows = [
         ("plan / claim", "success"),
         ("release", "skipped"),
@@ -299,4 +299,4 @@ def plan_jobs(run_id, detect="success", attempt=1, names=None):
         }
         for i, (name, conclusion) in enumerate(rows)
     ]
-    return json.dumps({"total_count": len(jobs), "jobs": jobs})
+    return json.dumps({"total_count": len(jobs) if total is None else total, "jobs": jobs})

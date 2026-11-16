@@ -35,10 +35,10 @@ from _shipmate import (
     is_head_sha,
     is_pr_number,
     is_run_id,
+    listed_jobs,
     plan_runs_since,
     retried,
     run_annotated,
-    run_jobs,
 )
 
 APPLY_PREFIX = "apply / "
@@ -392,42 +392,44 @@ def provenance_reason(newest, plan_run, head, cells):
     return ("action", actions) if actions else None
 
 
-def newer_plans(repo, pr_number, newest, *, jobs, run):
-    """`(counted, complete)`: the `shipmate plan` runs of pull request `pr_number`, a str, any
-    actor, with a greater id than autoplan `newest` (`newest_autoplan`'s object, the plan run an
-    auto apply applies), that count against that apply, ascending by id. Listed by
-    `plan_runs_since` from `newest["created_at"]`: a run created in the same second can be newer,
-    so ids decide. A run not listed `completed` counts. With `jobs`, a completed run counts when
-    its jobs (`run_jobs`) show it `planned`, whatever its conclusion: a failed plan run whose
-    `detect` succeeded may have rewritten the head's records. Without `jobs`, a completed run is
-    ignored and no jobs are read. `complete` is false when the listing is, or a completed run's
-    jobs cannot be listed or list none, carry another run attempt than the listed one, or cannot
-    tell (`planned` raises). Raises `ValueError` on an int `pr_number`."""
-    runs, complete = plan_runs_since(repo, pr_number, newest.get("created_at"), run)
-    counted = []
+def newer_plans(repo, pr_number, newest, *, since, run):
+    """`(counted, complete)`: the first `shipmate plan` run of pull request `pr_number`, a str,
+    any actor, created at or after `since` (`plan_runs_since`) with a greater id than autoplan
+    `newest` (`newest_autoplan`'s object, the plan run an auto apply applies), that counts against
+    that apply, as a one-item list, or an empty one. Runs are judged ascending by id and the
+    read stops at the first counted one. Ids decide: a run created in the same second can be
+    newer. A run whose status is not `completed` counts. A completed run counts when its jobs
+    (`listed_jobs`, count checked) show it `planned`, whatever its conclusion: a failed plan run
+    whose `detect` succeeded may have rewritten the head's records. A complete and empty jobs
+    listing (cancelled while queued, a startup failure) did not plan. `complete` is false when
+    the listing is, or a judged run's status or conclusion is not a str
+    (`status_and_conclusion`), or a completed run's `run_attempt` is not an int, or its jobs
+    cannot be listed, carry another run attempt, or cannot tell (`planned` raises). Raises
+    `ValueError` on an int `pr_number`."""
+    runs, complete = plan_runs_since(repo, pr_number, since, run)
     for listed in runs:
         if listed["id"] <= newest["id"]:
             continue
-        if listed.get("status") != "completed":
-            counted.append(listed)
+        try:
+            status, _ = status_and_conclusion(listed, f"shipmate plan run {listed['id']}")
+        except ValueError:
+            complete = False
             continue
-        if not jobs:
-            continue
-        listing, read = run_jobs(repo, listed["id"], run)
+        if status != "completed":
+            return [listed], complete
         attempt = listed.get("run_attempt")
-        if (
-            not read
-            or type(attempt) is not int
-            or any(j.get("run_attempt") != attempt for j in listing)
-        ):
+        jobs = (
+            None if type(attempt) is not int else listed_jobs(repo, listed["id"], run, counted=True)
+        )
+        if jobs is None or any(j.get("run_attempt") != attempt for j in jobs):
             complete = False
             continue
         try:
-            if planned(listing):
-                counted.append(listed)
+            if planned(jobs):
+                return [listed], complete
         except ValueError:
             complete = False
-    return counted, complete
+    return [], complete
 
 
 def newer_plan(counted, complete):

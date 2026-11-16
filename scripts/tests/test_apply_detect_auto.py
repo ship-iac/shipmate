@@ -932,6 +932,10 @@ def _completed(conclusion="cancelled"):
             {NEWER: plan_jobs(NEWER, names=["plan / claim", "release"])},
             id="cancelled-before-detect",
         ),
+        pytest.param(_completed(), {NEWER: plan_jobs(NEWER, names=[])}, id="cancelled-queued"),
+        pytest.param(
+            _completed("startup_failure"), {NEWER: plan_jobs(NEWER, names=[])}, id="startup-failure"
+        ),
         pytest.param(
             _completed("success"),
             {NEWER: plan_jobs(NEWER, detect="skipped")},
@@ -952,10 +956,12 @@ def _completed(conclusion="cancelled"):
     ],
 )
 def test_a_shipmate_plan_run_that_does_not_count_applies(tmp_path, monkeypatch, plans, jobs):
-    """Mutations: count every completed run (the cancelled and skipped rows refuse); drop the
-    id filter (older refuses); `>=` against the plan run (the-plan-run-itself refuses); drop
-    the pull request filter (other-pull-request refuses); count every unparsed title
-    (unparsed-apply-title refuses)."""
+    """A completed run whose jobs listing is complete and empty never started a job, so it did
+    not plan. Mutations: count every completed run (the cancelled, startup and skipped rows
+    refuse); read the jobs through `run_jobs`, which reads an empty listing as unlistable
+    (cancelled-queued and startup-failure refuse); drop the id filter (older refuses); `>=`
+    against the plan run (the-plan-run-itself refuses); drop the pull request filter
+    (other-pull-request refuses); count every unparsed title (unparsed-apply-title refuses)."""
     parsed = _run_auto(tmp_path, monkeypatch, plans=plans, jobs=jobs)
     assert _applied(parsed) == [("stacks/app", "dev-eu")]
 
@@ -968,7 +974,23 @@ def test_a_shipmate_plan_run_that_does_not_count_applies(tmp_path, monkeypatch, 
         pytest.param({"listing": ({"created_at": "2026-11-15T22:47:48"},)}, id="created-at-bad"),
         pytest.param({"plans": _completed(), "jobs": {NEWER: _FAIL}}, id="jobs-fail"),
         pytest.param(
-            {"plans": _completed(), "jobs": {NEWER: plan_jobs(NEWER, names=[])}}, id="no-job"
+            {
+                "plans": _completed(),
+                "jobs": {NEWER: plan_jobs(NEWER, names=["plan / claim"], total=2)},
+            },
+            id="jobs-count-short",
+        ),
+        pytest.param({"plans": [dispatched_plan(NEWER, PR_NUMBER, status=None)]}, id="status-null"),
+        pytest.param(
+            {"plans": [dispatched_plan(NEWER, PR_NUMBER, status="completed", conclusion=None)]},
+            id="conclusion-null",
+        ),
+        pytest.param(
+            {
+                "plans": [dispatched_plan(NEWER, PR_NUMBER, run_attempt="1", status="completed")],
+                "jobs": {NEWER: plan_jobs(NEWER, names=[])},
+            },
+            id="attempt-not-int",
         ),
         pytest.param(
             {"plans": _completed(), "jobs": {NEWER: plan_jobs(NEWER, attempt=2)}},
@@ -986,8 +1008,20 @@ def test_a_shipmate_plan_run_that_does_not_count_applies(tmp_path, monkeypatch, 
 def test_a_newer_plan_it_cannot_rule_out_refuses(tmp_path, monkeypatch, kw):
     """Mutations: answer a failed listing as complete (listing-fails applies); drop the
     timestamp check (a malformed `created_at` is read, created-at-bad applies); answer an
-    unlistable jobs read as not planned (jobs-fail applies); read the jobs through
-    `listed_jobs`, which answers an empty listing as complete (no-job applies); drop the run
-    attempt check (jobs-of-another-attempt applies); answer `planned`'s `ValueError` as not planned
-    (two-detect-jobs applies)."""
+    unlistable jobs read as not planned (jobs-fail applies); drop the jobs listing's count check
+    (jobs-count-short applies, its one listed job no detect); read a run's status unchecked
+    (status-null refuses as `None` and newer, conclusion-null reads its jobs, an unqueued read);
+    drop the run attempt comparison (jobs-of-another-attempt applies); drop the `run_attempt`
+    type check (attempt-not-int, whose listing holds no job to compare, applies); answer
+    `planned`'s `ValueError` as not planned (two-detect-jobs applies)."""
     assert _refusal(tmp_path, monkeypatch, **kw) == LISTING_REFUSAL
+
+
+def test_the_first_counted_newer_plan_ends_the_read(tmp_path, monkeypatch):
+    """A live newer plan refuses without reading the jobs of a later completed one (the double
+    fails any jobs read). Mutation: keep reading after the first counted run."""
+    plans = [
+        dispatched_plan(NEWER, PR_NUMBER),
+        dispatched_plan(NEWER + 1, PR_NUMBER, status="completed"),
+    ]
+    assert _refusal(tmp_path, monkeypatch, plans=plans) == _live_refusal("in progress")

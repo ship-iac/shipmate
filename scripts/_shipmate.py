@@ -565,10 +565,12 @@ _PAGE = 100
 _MAX_PAGES = 10
 
 
-def _pages(path, field, run):
+def _pages(path, field, run, *, counted=False):
     """Every item of `field` across the pages of listing `path`, or None when a page fails, is
-    malformed, or the listing runs past `_MAX_PAGES` pages; the cause prints as one warning."""
-    items = []
+    malformed, or the listing runs past `_MAX_PAGES` pages; the cause prints as one warning.
+    With `counted`, also None unless every page advertises an int `total_count` equal to the
+    items returned: a listing that hides an item it counts is incomplete."""
+    items, totals = [], []
     for page in range(1, _MAX_PAGES + 1):
         sep = "&" if "?" in path else "?"
         try:
@@ -582,7 +584,14 @@ def _pages(path, field, run):
             sys.stderr.write(f"::warning::page {page} of {command_data(path)} is malformed\n")
             return None
         items += got
+        totals.append(body.get("total_count"))
         if len(got) < _PAGE:
+            if counted and not all(type(t) is int and t == len(items) for t in totals):
+                sys.stderr.write(
+                    f"::warning::{command_data(path)} advertised {command_data(repr(totals))} "
+                    f"entries and returned {len(items)}\n"
+                )
+                return None
             return items
     sys.stderr.write(f"::warning::{command_data(path)} runs past {_MAX_PAGES} pages\n")
     return None
@@ -711,7 +720,8 @@ def plan_runs_since(repo, pr_number, since, run=None):
     status, any actor, as listed, ascending by id. The listing's `created` filter includes the
     same second. `complete` is false, and nothing is read, when `since` is not a whole-second
     UTC timestamp: GitHub answers a malformed filter with an empty listing, not an error. It is
-    also false when a page fails or is malformed, or a run fails `_listed_run` with
+    also false when a page fails or is malformed, its advertised `total_count` differs from the
+    runs returned (`_pages`), or a run fails `_listed_run` with
     `display_title` (that run is left out). A run dispatched seconds before the read can be
     missing from the listing. Raises as `_pr_number_str` does, before any read."""
     _pr_number_str(pr_number)
@@ -723,6 +733,7 @@ def plan_runs_since(repo, pr_number, since, run=None):
         f"?event=workflow_dispatch&created={created}",
         "workflow_runs",
         run,
+        counted=True,
     )
     if listed is None:
         return [], False
@@ -768,11 +779,13 @@ def live_push_runs(repo, sha, run=None):
     return sorted({(r["id"], r["run_attempt"]) for r in live}), True
 
 
-def listed_jobs(repo, run_id, run=None):
+def listed_jobs(repo, run_id, run=None, *, counted=False):
     """Every job of run `run_id`'s latest attempt, each as the API returns it, possibly none; or
     None when a page fails or is malformed or a job has no string `status` or `name`, so no
-    caller sees a partial listing."""
-    jobs = _pages(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest", "jobs", run)
+    caller sees a partial listing, or, with `counted`, when `_pages` finds the count short."""
+    jobs = _pages(
+        f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest", "jobs", run, counted=counted
+    )
     if jobs is None or not all(
         isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs
     ):
@@ -807,6 +820,11 @@ def one_line(text):
     """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
     command in the log."""
     return " | ".join(part for part in re.split(r"[\r\n]+", str(text)) if part)
+
+
+def status_text(status):
+    """A listed run's `status` as log or refusal words: one line, `_` read as a space."""
+    return one_line(status).replace("_", " ")
 
 
 def pr_head(repo, pr, run=run):

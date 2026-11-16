@@ -9,7 +9,7 @@ import json
 
 import _shipmate
 import pytest
-from _detect_fixtures import autoplans_read, dispatched_plan, listed_autoplan
+from _detect_fixtures import autoplans_read, dispatched_plan, listed_autoplan, plan_jobs
 from _loader import github_outputs, jsonl, load_script
 
 cl = load_script("cell-lock")
@@ -2357,11 +2357,18 @@ def _autoplans(*ids, **keys):
 
 
 PERMISSION_READ = ["gh", "api", f"repos/{REPO}/collaborators/k3np/permission"]
+#: The wave's own apply run (`GITHUB_RUN_ID`), read for its `created_at`.
+RUN_READ = ["gh", "api", f"repos/{REPO}/actions/runs/900"]
+APPLY_CREATED = "2026-11-16T03:00:00Z"
 PLANS_READ = [
     "gh",
     "api",
-    f"{RUNS}?event=workflow_dispatch&created=%3E%3D2026-11-15T22%3A47%3A48Z&per_page=100&page=1",
+    f"{RUNS}?event=workflow_dispatch&created=%3E%3D2026-11-16T03%3A00%3A00Z&per_page=100&page=1",
 ]
+
+
+def _this_run(created_at=APPLY_CREATED):
+    return json.dumps({"id": 900, "created_at": created_at})
 
 
 def _plans(*runs):
@@ -2509,7 +2516,7 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     check-run reads are left unconsumed). Mutation: read the record with no `name` (an
     unexpected call)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
-    gh.on(RECORD_READ, _records("1", RUN)).on(PLANS_READ, _plans())
+    gh.on(RECORD_READ, _records("1", RUN)).on(RUN_READ, _this_run()).on(PLANS_READ, _plans())
     gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
@@ -2581,7 +2588,7 @@ def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
 
 def _pusher_gh(autoplans, permission=None):
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
-    gh.on(RECORD_READ, _records(RUN)).on(PLANS_READ, _plans())
+    gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, _this_run()).on(PLANS_READ, _plans())
     if permission is not None:
         gh.on(PERMISSION_READ, permission)
     return gh
@@ -2925,12 +2932,18 @@ def test_verify_refuses_a_malformed_deploy_mode_before_any_read(monkeypatch, tmp
 
 
 NEWER = 4250
+NEWER_JOBS = [
+    "gh",
+    "api",
+    f"repos/{REPO}/actions/runs/{NEWER}/jobs?filter=latest&per_page=100&page=1",
+]
 
 
 def _newer_gh(plans):
-    """A double whose wave check passes up to the `shipmate plan` listing, answered `plans`."""
+    """A double whose wave check passes up to the `shipmate plan` listing, answered `plans`, read
+    from this apply run's `created_at`."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
-    return gh.on(RECORD_READ, _records(RUN)).on(PLANS_READ, plans)
+    return gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, _this_run()).on(PLANS_READ, plans)
 
 
 @pytest.mark.parametrize(
@@ -2950,11 +2963,12 @@ def _newer_gh(plans):
 )
 def test_verify_auto_refuses_a_live_newer_shipmate_plan_run(monkeypatch, tmp_path, plan, status):
     """Through `verify` with `SHIPMATE_PR_NUMBER` set, so `_verify_cmd`'s int pull request
-    number reaches the read: a newer plan of it, created in the plan run's second, refuses after
+    number reaches the read: a plan of it listed since this apply run was created refuses after
     the record check, before the pusher read. Mutations: pass `pr` unconverted (the int is
-    refused as could-not-confirm, not this text); ignore live runs (each passes to the pusher
-    read, an unexpected call); filter by the App's actor (human passes); hard-code `in progress`
-    (waiting differs); ignore prefix-matching unparsed titles (unparsed-plan-title passes)."""
+    refused as could-not-confirm, not this text); list since the autoplan's `created_at` (an
+    unqueued listing); ignore live runs (each passes to the pusher read, an unexpected call);
+    filter by the App's actor (human passes); hard-code `in progress` (waiting differs); ignore
+    prefix-matching unparsed titles (unparsed-plan-title passes)."""
     gh = _newer_gh(_plans(plan))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} shipmate plan run {NEWER} of this pull request is {status} and newer "
@@ -2963,52 +2977,90 @@ def test_verify_auto_refuses_a_live_newer_shipmate_plan_run(monkeypatch, tmp_pat
     )
 
 
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+def test_verify_auto_refuses_a_newer_plan_that_planned_since_detect(
+    monkeypatch, tmp_path, conclusion
+):
+    """A plan dispatched after detect that planned and ended while the wave waited, publishing
+    no record or failing, refuses the cell. Mutations: ignore completed runs per cell (passes to
+    the pusher read); count only `success` runs (failure passes)."""
+    plan = dispatched_plan(NEWER, str(PR), status="completed", conclusion=conclusion)
+    gh = _newer_gh(_plans(plan)).on(NEWER_JOBS, plan_jobs(NEWER))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} shipmate plan run {NEWER} of this pull request planned after plan run "
+        f"{RUN}, which this auto apply applies; review its plan, then comment `shipmate apply`"
+    )
+
+
 @pytest.mark.parametrize(
-    "plan",
+    ("plan", "jobs"),
     [
-        pytest.param(dispatched_plan(NEWER, str(PR), status="completed"), id="completed"),
-        pytest.param(dispatched_plan(4200, str(PR)), id="older"),
-        pytest.param(dispatched_plan(int(RUN), str(PR)), id="the-plan-run-itself"),
-        pytest.param(dispatched_plan(NEWER, "70"), id="other-pull-request"),
+        pytest.param(
+            dispatched_plan(NEWER, str(PR), status="completed", conclusion="cancelled"),
+            plan_jobs(NEWER, names=[]),
+            id="cancelled-queued",
+        ),
+        pytest.param(
+            dispatched_plan(NEWER, str(PR), status="completed", conclusion="cancelled"),
+            plan_jobs(NEWER, names=["plan / claim"]),
+            id="cancelled-before-detect",
+        ),
+        pytest.param(dispatched_plan(4200, str(PR)), None, id="older"),
+        pytest.param(dispatched_plan(int(RUN), str(PR)), None, id="the-plan-run-itself"),
+        pytest.param(dispatched_plan(NEWER, "70"), None, id="other-pull-request"),
         pytest.param(
             dispatched_plan(NEWER, str(PR), display_title=f"shipmate · apply pr={PR} ref=x"),
+            None,
             id="unparsed-apply-title",
         ),
     ],
 )
-def test_verify_auto_passes_a_shipmate_plan_run_that_does_not_count_per_cell(
-    monkeypatch, tmp_path, plan
+def test_verify_auto_passes_a_shipmate_plan_run_that_does_not_count(
+    monkeypatch, tmp_path, plan, jobs
 ):
-    """A completed newer plan, even one that planned, is detect's to refuse: the wave reads no
-    jobs (the strict double fails any read not queued). Mutations: read jobs per cell (`jobs=True`
-    in `_verify_auto`; completed reads an unqueued jobs listing); drop the id filter (older
-    refuses); `>=` against the plan run (the-plan-run-itself refuses); drop the pull request
-    filter (other-pull-request refuses); count every unparsed title (unparsed-apply-title
-    refuses)."""
-    gh = _newer_gh(_plans(plan)).on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    """Mutations: count every completed run (cancelled rows refuse); read the jobs through
+    `run_jobs` (cancelled-queued refuses as unlistable); drop the id filter (older refuses);
+    `>=` against the plan run (the-plan-run-itself refuses); drop the pull request filter
+    (other-pull-request refuses); count every unparsed title (unparsed-apply-title refuses)."""
+    gh = _newer_gh(_plans(plan))
+    if jobs is not None:
+        gh.on(NEWER_JOBS, jobs)
+    gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
 
 
 @pytest.mark.parametrize(
-    ("autoplans", "plans"),
+    ("this_run", "plans"),
     [
-        pytest.param(_autoplans(RUN), FAIL, id="listing-fails"),
-        pytest.param(_autoplans(RUN, created_at="2026-11-15T22:47:48"), None, id="created-at-bad"),
-        pytest.param(_autoplans(RUN, created_at=None), None, id="created-at-null"),
+        pytest.param(_this_run(), FAIL, id="listing-fails"),
+        pytest.param(_this_run(), json.dumps({"total_count": 1, "workflow_runs": []}), id="short"),
+        pytest.param(_this_run("2026-11-16T03:00:00"), None, id="created-at-bad"),
+        pytest.param(_this_run(None), None, id="created-at-null"),
     ],
 )
 def test_verify_auto_refuses_a_newer_plan_it_cannot_rule_out(
-    monkeypatch, tmp_path, autoplans, plans
+    monkeypatch, tmp_path, this_run, plans
 ):
-    """A malformed `created_at` makes no read. Mutations: answer a failed listing as complete
-    (listing-fails passes to the pusher read); drop the timestamp check (created-at-bad reads an
-    unqueued listing); word the refusal without the pull request (the text differs)."""
-    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
-    gh.on(RECORD_READ, _records(RUN))
+    """A malformed `created_at` makes no listing read. Mutations: answer a failed listing as
+    complete (listing-fails passes to the pusher read); drop the listing's count check (short
+    passes); drop the timestamp check (created-at-bad reads an unqueued listing); word the
+    refusal without the pull request (the text differs)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, this_run)
     if plans is not None:
         gh.on(PLANS_READ, plans)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} could not confirm no newer shipmate plan run of pull request #{PR} "
         f"(the listing is incomplete); {RETRY}"
+    )
+
+
+def test_verify_auto_refuses_when_its_own_run_cannot_be_read(monkeypatch, tmp_path):
+    """Mutation: answer a failed run read with the autoplan's `created_at` (passes)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, _records(RUN)).on(RUN_READ, FAIL)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} could not confirm no newer shipmate plan run of pull request #{PR} "
+        f"(command failed (1): gh api); {RETRY}"
     )

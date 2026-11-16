@@ -4,8 +4,8 @@ description: >-
   is 1 and the pull request holds the cell's lock and is open at the applied head; with auto true,
   also unless the pull request is not a draft, the provenance run is still the head's newest
   autoplan and the run the cell's newest plan record names, that record names a push event
-  action (opened or synchronize), no newer shipmate plan run of the pull request is live, by any
-  actor, its pusher still has write access, and the base tip is still
+  action (opened or synchronize), no newer shipmate plan run of the pull request, by any actor,
+  created since this apply run is live or planned (its plan / detect job succeeded), its pusher still has write access, and the base tip is still
   the one detect read. With deploy true (a merge deploy's wave) it runs none of those and refuses
   only when a pull request other than pr-number, the merged one (empty on a push), holds the
   cell's lock. A read that fails refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read and pull-requests:read, and, with auto true,

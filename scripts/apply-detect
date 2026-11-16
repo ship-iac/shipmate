@@ -45,8 +45,8 @@ from _shipmate import (
     check_runs,
     gh_json,
     named,
-    one_line,
     run_annotated,
+    status_text,
     validate_head_sha,
     write_outputs,
 )
@@ -424,7 +424,7 @@ def refuse_provenance(repo, head, runnable, actions, pr_number):
     """The newest autoplan of `head`, refused unless every cell in `runnable` records one plan
     run and `apply-gate.provenance_reason` admits it, with each cell's event action from
     `actions` (`apply-gate.plan_actions`), and no `shipmate plan` run of pull request
-    `pr_number`, a str, counts as newer (`apply-gate.newer_plans` with jobs read).
+    `pr_number`, a str, created since the plan run counts as newer (`apply-gate.newer_plans`).
 
     A `shipmate plan` run is a `workflow_dispatch`, so its commenter is lost and nothing
     authorizes it as the pusher; it is never the autoplan listed. Any actor's newer plan run
@@ -463,7 +463,8 @@ def refuse_provenance(repo, head, runnable, actions, pr_number):
             f"::error::auto apply refused: {_provenance_text(runs[0], head, *reason)} "
             + _AUTO_REMEDY
         )
-    reason = ag.newer_plan(*ag.newer_plans(repo, pr_number, newest, jobs=True, run=_run))
+    since = newest.get("created_at")
+    reason = ag.newer_plan(*ag.newer_plans(repo, pr_number, newest, since=since, run=_run))
     if reason:
         raise SystemExit(f"::error::auto apply refused: {_newer_plan_text(runs[0], *reason)}")
     return newest
@@ -476,7 +477,7 @@ def _newer_plan_text(run_id, cause, newer):
             "the shipmate plan runs of this pull request could not all be listed, so a newer one "
             "may exist. " + _AUTO_REMEDY
         )
-    status = one_line(newer.get("status")).replace("_", " ")
+    status = status_text(newer.get("status"))
     if status == "completed":
         return (
             f"shipmate plan run {newer['id']} of this pull request planned after plan run "
