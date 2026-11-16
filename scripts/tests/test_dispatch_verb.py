@@ -498,7 +498,8 @@ def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_
 def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
     """`dispatch-body` exits 1 here, as it does when the body cannot be built or the first
     attempt fails with a failure that is not transient. The step exits 1, annotates the failure
-    itself (`post` prints it unannotated), and posts the failure reply carrying the run link.
+    itself (`dispatch-body` prints its cause only as a warning), and posts the failure reply
+    carrying the run link.
 
     Mutations: drop the failure branch's `::error::` echo; drop its `say_no_run_started`.
     """

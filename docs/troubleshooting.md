@@ -680,8 +680,8 @@ step log, and the one error annotation is:
 Every job installs the OpenTofu version the default branch decides
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), so a merged
 `tools.tofu` change, or an engine re-pin that moves the `VERSIONS` default,
-invalidates every plan awaiting apply. Re-plan: on an open pull request, comment
-`shipmate plan` or push; after the merge, open a new pull request touching the
+invalidates every plan awaiting apply. Re-plan (comment `shipmate plan` or push on
+an open pull request), or after the merge open a new pull request touching the
 stack.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
@@ -1348,8 +1348,8 @@ The apply cell could not open its reviewed plan artifact; the error at
 the end of the message says why. Nothing was applied.
 
 - **The artifact downloaded without `stack.otplan`.** No earlier step reports
-  it. Re-plan: comment `shipmate plan` or push on an open pull request; after
-  the merge, open a new pull request touching the stack. A re-run downloads the
+  it. Re-plan (comment `shipmate plan` or push on an open pull request), or
+  after the merge open a new pull request touching the stack. A re-run downloads the
   same artifact.
 - **The runner's disk failed.** The refusal comes before any apply step, so a
   re-run of the job is safe; a self-hosted runner needs its disk fixed.
