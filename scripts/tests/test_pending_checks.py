@@ -720,7 +720,7 @@ def test_a_cut_plans_digest_covers_the_whole_file(tmp_path):
 def test_a_plan_over_the_cap_in_bytes_but_not_characters_is_cut(tmp_path):
     """3,200 lines of ten `é`: 35,200 characters, 67,200 UTF-8 bytes. The room is 65,535 less
     the 12-byte empty fence and the 134-byte trailer, 65,389 bytes: 3,113 whole 21-byte lines.
-    Mutation: measure with `len(str)` (`_utf8_len = len`) -> emitted whole, red."""
+    Mutation: measure with `len(str)` (summary-comment's `_bytes = len`) -> emitted whole, red."""
     summary = _output(tmp_path, (("é" * 10 + "\n") * 3200).encode())["summary"]
     assert summary == "```diff\n" + "\n".join(["é" * 10] * 3113) + "\n```" + TRAILER
 

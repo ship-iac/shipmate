@@ -307,7 +307,8 @@ def print_annotated(code):
     `%25` in a stack path verbatim. A caller printing one cause whose lines can start
     `::error::`, such as gh's stderr, passes it on one line (`one_line`).
 
-    Producers stay raw: this is the one print site of an annotated message.
+    Producers stay raw: this is the one print site of an annotated error; dispatch-body's
+    `_warn` prints its warning through `command_data` itself.
     """
     errors = []
     for line in code.splitlines():

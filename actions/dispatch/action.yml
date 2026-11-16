@@ -104,7 +104,9 @@ runs:
         rc=0
         # On success stdout is the API's answer, parsed below; on exit 1 it is the skew remedy or
         # empty, which the reply carries. dispatch-body writes a failure to stderr already
-        # escaped: a failed attempt as one warning, a refusal before any request as an error.
+        # escaped: a failed attempt as one warning (followed by an error naming the remedy when the
+        # consumer's shipmate.yml is older than the dispatch), a refusal before any request as an
+        # error.
         # Exit codes are documented in scripts/dispatch-body.
         out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" 2>"$errfile") || rc=$?
         err=$(<"$errfile")
