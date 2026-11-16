@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- **`apply-detect` hands the apply result comment one `report` output.** The comment's eleven fields (the environment dispositions, waiting and held cells, environment order, pusher and environments left for a bare apply) travel as one JSON object instead of eleven outputs and inputs. Past 96 KiB, `report` drops waiting cells, then held cells, then environment names from the end, and the comment's footer ends with one `⚪ and <n> more <kind>; see the run` line per trimmed kind; no apply decision reads it.
+
 ### Fixed
 
 - **`scripts/repin` resolves the tag from any engine clone that holds it, shallow or single-branch.** It fetches the whole history of `main` into `origin/main` by an explicit refspec, so a `git clone --depth 1 --branch <tag>` clone no longer fails with `Not a valid object name origin/main`, and a tag below a shallow `main`'s tip is no longer refused as not on `origin/main`. The release runbook's `main` fetches name the same destination (`docs/releasing.md`).

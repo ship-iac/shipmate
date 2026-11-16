@@ -3911,7 +3911,7 @@ names an error. A job that failed without an `::error::` renders no fence.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a
   blank line on both sides, one per environment in the plan comment's order,
-  from `apply-detect`'s `env_order` output (a bare apply orders every
+  from the `env_order` field of `apply-detect`'s `report` output (a bare apply orders every
   environment with an apply check on the head, a targeted one names its
   environment).
 - **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per
@@ -3945,8 +3945,9 @@ names an error. A job that failed without an `::error::` renders no fence.
   pointer to the lost-save section.
 - **Footer lines**, one per line: the bare and `auto` forms' environment
   dispositions, then, in every form, one line per lock holder and environment,
-  then, in the `auto` form, the overlap line, then one line per waiting cell. The comment
-  states no gate line: the `shipmate / gate` status shows the gate's state.
+  then, in the `auto` form, the overlap line, then one line per waiting cell, then the trimmed
+  counts (below). The comment states no gate line: the `shipmate / gate` status shows the gate's
+  state.
 
 There is no separate "nothing pending" input: the expected cell set is the
 same waves JSON both `apply-detect` forms already compute, and a
@@ -4025,6 +4026,13 @@ actionable warning cannot be lost on either path. In the order they render:
   environment. The targeted form has no held or skipped environments to
   consult, so its remedy names the lock's or `shipmate apply <env>`, even for a
   blocker that waits on a review or on `needs`.
+- **trimmed** — `⚪ and <n> more waiting cell(s); see the run`, `⚪ and <n> more held
+  cell(s); see the run`, and `⚪ and <n> more environment name(s); see the run`, each only
+  when `apply-detect` trimmed that many entries from its `report` to keep it within 96 KiB
+  (the render step receives it as one environment string, which Linux caps at 128 KiB). It
+  trims the waiting cells first, then the held cells, then the environment lists, each from
+  the end. The verdict counts and the other lines cover only the entries it kept. Nothing
+  else reads `report`, so trimming changes no apply.
 
 Two audit facts are not comment lines. The render step prints each as one
 `::notice::` workflow annotation in its own log, environment names escaped as
@@ -4045,7 +4053,7 @@ log text holds every line:
 - **no review required** — `<env>: no approving review was required, so the
   default review: true had nothing to enforce`, one per `review: true`
   environment a `NONE` decision authorized. It has its own cause, so it has its
-  own detect output (`review_not_required_envs`, from both detects) rather than
+  own `report` field (`review_not_required_envs`, from both detects) rather than
   widening `applied_exempt_envs`. It prints in the targeted and the
   all-environments form, and names only environments with an applied, failed
   or not-recorded row — apply ran there, so infrastructure may have changed —
