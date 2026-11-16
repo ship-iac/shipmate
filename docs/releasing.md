@@ -22,13 +22,15 @@ table and consumer-file edit the release's CHANGELOG `### Removed` and `### Chan
 name in the re-pin commit itself. The re-pin pull request's runs use the default branch's old
 pin and table, so the edits take effect together at merge.
 
-1. Rewrite every engine ref. `<engine>` is an engine clone that holds the tag:
+1. Rewrite every engine ref. `<engine>` is any clone of the engine that holds the tag,
+   shallow or single-branch:
 
    ```bash
    python <engine>/scripts/repin <consumer> vX.Y.Z [--write-fence]
    ```
 
-   It fetches `origin/main` and checks, before it writes anything:
+   It fetches `main` into `origin/main`, the whole history when the clone is shallow, and
+   checks, before it writes anything:
 
    - the tag has the `vX.Y.Z` form and resolves as a tag, never as a branch of that name;
    - when `origin` holds the tag, it names the same commit as the local tag. A stale local
