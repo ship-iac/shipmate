@@ -220,7 +220,8 @@ def _md_name(s):
 def behind_line(row, report):
     """The `⏪` line of the behind cell `row` of the behind report `report`
     (`gate-state.behind_cells`): what changed its stack since the branch left the base (the
-    commits it lists, `; `-separated, and how many more; or a module it sources, over the range;
+    commits it lists, `; `-separated, and how many more; or, with none under its own files, a
+    file it reads from outside its directory (a module it sources, a `watch` file), over the range;
     or a conflict of the branch with the base) and the remedy, updating the branch from the base.
     Author text (names, the base branch, commit subjects) is `_md_name`d."""
     base = _md_name(report["base"])
@@ -234,7 +235,7 @@ def behind_line(row, report):
             what = f"{named}{more} changed it"
         else:
             span = f"{report['since'][:7]}..{report['tip'][:7]}"
-            what = f"a module it sources changed in `{span}`"
+            what = f"a file it reads from outside its directory changed in `{span}`"
         what += " since this branch left it; a plan of this branch would revert that change."
     return f"⏪ {where} is behind {base}: {what} Update the branch from {base}."
 
@@ -897,20 +898,22 @@ def counts(path):
     read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered text."""
     if not path.exists():
         return None
-    return counts_of(path.read_bytes().decode("utf-8"))
+    # tofu prints a CR from author text raw; only LF ends a line, or the text after the CR would
+    # sit at column 0.
+    with open(path, encoding="utf-8", newline="\n") as fh:
+        return counts_of(fh)
 
 
-def counts_of(text):
-    """(add, change, destroy, import, forget) from `tofu show` text: its one column-0 `Plan:`
-    tally line, where tofu omits a zero import or forget count (0 here), or all zeros when it has
-    none and has a line starting with the no-changes or outputs-only sentence. None for no
+def counts_of(lines):
+    """(add, change, destroy, import, forget) from `tofu show` text read line by line from
+    `lines`, a text stream that ends lines at LF only: its one column-0 `Plan:` tally line, where
+    tofu omits a zero import or forget count (0 here), or all zeros when it has none and has a
+    line starting with the no-changes or outputs-only sentence. None for no
     recognised line, or two tally lines.
     Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts."""
     hits, zero = [], False
-    # tofu prints a CR from author text raw; only LF ends a line, or the text after the CR would
-    # sit at column 0.
-    for line in text.split("\n"):
-        line = line.rstrip("\r")
+    for line in lines:
+        line = line.rstrip("\r\n")
         if m := _TALLY.fullmatch(line):
             hits.append(m)
         zero = zero or line.startswith(_ZERO_COUNT)

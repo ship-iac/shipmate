@@ -108,7 +108,7 @@ outputs:
       are left out of `matrix`, `count`, `cells` and `env_order`; a plan of them would revert the
       base's change. `shas` lists up to three base commits under the stack's directory, newest
       first, `more` counts the rest, and `commits` holds exactly the listed ones; `shas` is empty
-      for a conflict and for a stack held only through a module. With no behind cell, `tip` and
+      for a conflict and for a stack with no base commit under its own files (a module it sources, a `watch` file). With no behind cell, `tip` and
       `since` are empty and `commits` and `cells` are too; a plan with no changed cell reads no
       tip. A value over 100 KiB refuses. Empty on a sweep.
     value: ${{ steps.build.outputs.behind }}

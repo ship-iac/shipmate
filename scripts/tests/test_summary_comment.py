@@ -3384,9 +3384,9 @@ _ROW_COMMITS = (
     "branch would revert that change. Update the branch from main."
 )
 _ROW_MODULE = (
-    "⏪ stacks/net / prod is behind main: a module it sources changed in `ddddddd..ccccccc` "
-    "since this branch left it; a plan of this branch would revert that change. Update the "
-    "branch from main."
+    "⏪ stacks/net / prod is behind main: a file it reads from outside its directory changed in "
+    "`ddddddd..ccccccc` since this branch left it; a plan of this branch would revert that "
+    "change. Update the branch from main."
 )
 _ROW_CONFLICT = (
     "⏪ stacks/app / dev-eu is behind main: the branch conflicts with main. Update the branch "

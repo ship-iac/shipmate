@@ -22,6 +22,7 @@ skipped `detect` there is a failure like any other non-success.
 import json
 import os
 import pathlib
+import re
 
 from _shipmate import _load, cell_names, is_head_sha, run_annotated, write_outputs
 
@@ -48,8 +49,11 @@ BEHIND_UNREAD = (
 OLDER_UNREAD = "could not read this head's apply checks; push a commit to re-plan"
 _BEHIND_KEYS = {"base", "tip", "since", "commits", "cells"}
 _ROW_KEYS = {"stack", "environment", "cause", "shas", "more"}
-#: How many base commits `build-matrix` names per behind cell.
-_SHAS = 3
+#: How many base commits `build-matrix` names per behind cell; it reads this one.
+BEHIND_SHAS = 3
+#: A short commit sha as `git log`'s `%h` prints it: what a behind cell lists and the comment
+#: renders in a code span.
+_SHORT_SHA = re.compile(r"[0-9a-f]{4,40}")
 
 
 def _is_name(value):
@@ -65,11 +69,11 @@ def _valid_row(row):
         return False
     if row["cause"] not in ("changed", "conflict") or not isinstance(shas, list):
         return False
-    if not isinstance(more, int) or isinstance(more, bool) or more < 0 or len(shas) > _SHAS:
+    if not isinstance(more, int) or isinstance(more, bool) or more < 0 or len(shas) > BEHIND_SHAS:
         return False
     if row["cause"] == "conflict" and (shas or more):
         return False
-    return all(isinstance(s, str) for s in shas)
+    return all(isinstance(s, str) and _SHORT_SHA.fullmatch(s) for s in shas)
 
 
 def behind_cells(raw):
@@ -205,11 +209,12 @@ def evidence_gap(*, plan_result, planned_cells, cell_count, behind, missing=()):
             "the planned cell count was not reported, so this run's evidence is "
             "unknown; re-plan before merging"
         )
+    plan_gap = _plan_gap(plan_result=plan_result, planned=planned, missing=missing)
+    if plan_gap:
+        return plan_gap
     if behind is None:
         return BEHIND_UNREAD
-    return _plan_gap(plan_result=plan_result, planned=planned, missing=missing) or _evidence_gap(
-        cell_count=cell_count, planned=planned
-    )
+    return _evidence_gap(cell_count=cell_count, planned=planned)
 
 
 def _detect_gap(detect_result, refusal):
@@ -333,7 +338,13 @@ def main():
     # A stack path holding CR or LF would end the `GITHUB_OUTPUT` line. `reason` is the whole
     # text, for the held comment.
     flat = desc.replace("\r", " ").replace("\n", " ")
-    write_outputs(state=state or "", description=flat[:140], reason=flat, comment_mode=mode)
+    write_outputs(
+        state=state or "",
+        description=flat[:140],
+        reason=flat,
+        comment_mode=mode,
+        behind="" if report is None else len(report["cells"]),
+    )
 
 
 if __name__ == "__main__":

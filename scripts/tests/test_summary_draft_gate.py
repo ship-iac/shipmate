@@ -123,6 +123,7 @@ def _run_gate(
         "STATE": state,
         "DESCRIPTION": "the reason",
         "MODE": mode,
+        "BEHIND": "0",
         "PLAN_RESULT": "skipped",
         "SHIPMATE_APP_ID": "7",
         "SHIPMATE_APP_SLUG": "shipmate-test",

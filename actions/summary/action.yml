@@ -555,6 +555,7 @@ runs:
         STATE: ${{ steps.gate.outputs.state }}
         DESCRIPTION: ${{ steps.gate.outputs.description }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
+        BEHIND: ${{ steps.gate.outputs.behind }}
         PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
@@ -589,8 +590,9 @@ runs:
         python3 "$gate_status" post "$HEAD_SHA" "$STATE" "$DESCRIPTION"
         # Degrades: the `pending` above is the fail-closed write, and the refresh only upgrades it
         # when every apply check is already done (an apply's refresh that ran before this write).
-        # Skipped when this run published a queued check, which cannot be done yet.
-        if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ -f bodies.jsonl ] \
+        # Skipped when this run published a queued check, which cannot be done yet, and over a
+        # behind cell, whose pending gate no apply check can lift.
+        if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ "$BEHIND" = "0" ] && [ -f bodies.jsonl ] \
           && ! grep -q '"status": "queued"' bodies.jsonl; then
           # `run_annotated` prints the error as one escaped command; swapping its severity keeps it
           # escaped, so the runner decodes `%0A` and no stderr line starts a command. A hold or a

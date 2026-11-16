@@ -4661,3 +4661,24 @@ def test_a_behind_value_over_the_cap_refuses_and_writes_none(monkeypatch, tmp_pa
         "the 100-byte limit the summary job reads. Update the branch from main and push."
     )
     assert github_outputs(tmp_path / "out.txt") == {}
+
+
+def test_a_stacks_commits_leave_out_its_nested_stacks_and_read_paths_literally(git_repo):
+    """`infra` holds the nested stack `infra/db`; a base commit touching only `infra/db` is not
+    `infra`'s. A stack path holding `[` names only itself (git also answered so to the
+    non-literal pathspec when probed, so no mutation of `:(literal)` reddens this row).
+
+    Mutation: exclude nested stacks for the root stack only -- `infra` lists the `infra/db`
+    commit, red."""
+    _commit(
+        {"infra/main.tf": "i\n", "infra/db/main.tf": "d\n", "w[1]/main.tf": "w\n", "w1/x": "x\n"},
+        "common",
+    )
+    since = _git("rev-parse", "HEAD").strip()
+    _commit({"infra/db/main.tf": "d2\n"}, "db only")
+    own = _commit({"infra/main.tf": "i2\n"}, "infra own")
+    _commit({"w1/x": "x2\n"}, "w1 only")
+    tip = _commit({"w[1]/main.tf": "w2\n"}, "bracket own")
+    stacks = ["infra", "infra/db", "w[1]", "w1"]
+    assert bm._stack_commits(since, tip, "infra", stacks) == [(_short(own), "infra own")]
+    assert bm._stack_commits(since, tip, "w[1]", stacks) == [(_short(tip), "bracket own")]

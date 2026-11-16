@@ -667,7 +667,7 @@ LINE = "a" * 99
 
 def _output(tmp_path, plan):
     """`check_output` of a changed cell whose plan.txt holds the bytes `plan`."""
-    return pc.check_output(CHANGED, plan.decode("utf-8"), URL)
+    return pc.check_output(CHANGED, plan, URL)
 
 
 def _emit_changed(tmp_path, plan):
@@ -1017,4 +1017,41 @@ def test_an_unreadable_behind_value_publishes_nothing(tmp_path, monkeypatch, cap
     assert (out, err) == (
         "",
         f"::warning::this run publishes no apply check: {pc.gs.BEHIND_UNREAD}\n",
+    )
+
+
+def test_an_earlier_attempts_plan_check_does_not_stand_for_a_behind_cell(tmp_path, monkeypatch):
+    """Every attempt of a run shares its run id. Attempt 1 published a plan check for
+    `stacks/workers` that completed; this attempt finds the cell behind, so its behind check is
+    published over it.
+
+    Mutation: skip every name this run published (`not in done`) -- no behind body, red."""
+    earlier = _record_line(
+        9,
+        "apply / stacks/workers / dev-eu",
+        json.dumps({"plan_run": RUN_ID, "plan_sha256": SHA_A, "pr": PR}),
+    )
+    bodies = _emit_behind(tmp_path, monkeypatch, records=[earlier])
+    assert [b["name"] for b in bodies] == [
+        "apply / stacks/c0 / dev",
+        "apply / stacks/workers / dev-eu",
+        "apply / modules/net / prod",
+    ]
+
+
+def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
+    """1,000,000 bytes of ASCII lines, then the byte 0xFF: a whole strict UTF-8 decode raises
+    `UnicodeDecodeError`. `counts_of` streams the whole text for the tally, so a double stands in
+    for it. The digest was computed once, off the tree. Mutation: decode the whole text for the
+    prefix (`raw.decode("utf-8")[: CHECK_OUTPUT_CAP + 1]`) -- red."""
+
+    def counts_of(lines):
+        return (1, 0, 0, 0, 0)
+
+    monkeypatch.setattr(pc.sc, "counts_of", counts_of)
+    body = _emit_changed(tmp_path, ((LINE + "\n") * 10_000).encode() + b"\xff")
+    assert body["output"]["title"] == "+1 ~0 -0"
+    assert body["output"]["summary"].endswith(TRAILER)
+    assert json.loads(body["external_id"])["plan_sha256"] == (
+        "6bec3c7c34b6f1ed2f7833c8f8bcc17aa3bb6fd865587d11e0faec55362fc0ef"
     )

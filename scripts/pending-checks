@@ -42,6 +42,7 @@ body.
 """
 
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -86,17 +87,23 @@ def _utf8_len(text):
     return len(text.encode("utf-8"))
 
 
-def check_output(cell, text, url):
-    """The check `output` of the changed cell `cell` whose plan text is `text`: its counts as the
-    title (`+? ~? -?` when underivable) and the plan in a `diff` fence as the summary, at most
-    `CHECK_OUTPUT_CAP` UTF-8 bytes, with CRLF and CR read as line ends. A cut plan keeps whole
-    lines and ends with a link to `url`, the plan run's page, whose plan job's raw log has the
-    full plan; when no whole line fits, the summary is that link alone."""
-    tally = sc.counts_of(text) or ("?",) * 5
+def _text(raw, newline=None):
+    """The UTF-8 bytes `raw` as a text stream decoded as it is read, with `open`'s `newline`."""
+    return io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8", newline=newline)
+
+
+def check_output(cell, raw, url):
+    """The check `output` of the changed cell `cell` whose plan text is the bytes `raw`: its
+    counts as the title (`+? ~? -?` when underivable) and the plan in a `diff` fence as the
+    summary, at most `CHECK_OUTPUT_CAP` UTF-8 bytes. A cut plan keeps whole lines and ends with a
+    link to `url`, the plan run's page, whose plan job's raw log has the full plan; when no whole
+    line fits, the summary is that link alone. Both are streamed from `raw`: the counts line by
+    line, and only a prefix for the summary."""
+    tally = sc.counts_of(_text(raw, newline="\n")) or ("?",) * 5
     title = sc.state({**cell, **dict(zip(sc.COUNT_KEYS, tally, strict=True))})
     # No prefix longer than the cap can fit. The fence is sized over the whole prefix, a
     # superset of any cut, so the cut text cannot close it.
-    prefix = text.replace("\r\n", "\n").replace("\r", "\n")[: CHECK_OUTPUT_CAP + 1]
+    prefix = _text(raw).read(CHECK_OUTPUT_CAP + 1)
     mapped = sc.diff_map(prefix)
     f = sc._fence_of(mapped)
     whole = sc.fence(mapped, f)
@@ -130,7 +137,7 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
     raw = txt.read_bytes()
     plan_sha256 = hashlib.sha256(raw).hexdigest()
     if cell["changed"]:
-        status, output = {"status": "queued"}, check_output(cell, raw.decode("utf-8"), url)
+        status, output = {"status": "queued"}, check_output(cell, raw, url)
     else:
         status = {"status": "completed", "conclusion": "neutral"}
         output = {
@@ -239,8 +246,11 @@ def main():
     total = len(cells) + len(rows)
     for name, cj, cell in todo:
         print(json.dumps(body(name, cj, cell, head, plan_run, pr, total, action, url)))
+    # This run's earlier attempt may have published a plan check under the name; only a behind
+    # record of this run stands for this behind cell.
+    behind = ag.behind_names(lines, os.environ.get("SHIPMATE_APP_ID", ""))
     for row in rows:
-        if ag.check_name(row["stack"], row["environment"]) not in done:
+        if ag.check_name(row["stack"], row["environment"]) not in done & behind:
             print(json.dumps(behind_body(row, report, head, plan_run, pr, total, action)))
 
 

@@ -30,6 +30,7 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
+gs = _load("gate-state")
 ec = _load("env-config")
 wv = _load("waves")
 
@@ -402,18 +403,22 @@ def _merge_stacks(base_ref, candidates):
 #: The most bytes the serialized `behind` output may take: the summary job hands it to three
 #: step `env:` values, each capped at 128 KiB by Linux.
 BEHIND_CAP = 100 * 1024
-#: How many base commits a behind cell names; its `more` counts the rest.
-BEHIND_SHAS = 3
+#: How many base commits a behind cell names; its `more` counts the rest. The reader's bound.
+BEHIND_SHAS = gs.BEHIND_SHAS
 SUBJECT_CAP = 72
 
 
 def _stack_commits(since, tip, stack, stacks):
-    """`(short sha, subject)` per commit of `since..tip` that touches `stack`'s directory, newest
-    first. Path limiting compares trees, so the blobless clone fetches no blob for it. The root
-    stack `.` holds the paths no other stack of `stacks` holds, as `_inside` reads them."""
-    paths = [f"{stack}/"]
-    if stack == ".":
-        paths = [".", *(f":(exclude){s}/" for s in sorted(stacks) if s != ".")]
+    """`(short sha, subject)` per commit of `since..tip` that touches `stack`'s own files, newest
+    first: its directory less the directory of every other stack of `stacks` nested in it, so the
+    root stack `.` holds the paths no other stack holds, as `_inside` reads them. Path limiting
+    compares trees, so the blobless clone fetches no blob for it. Every pathspec is literal, so a
+    stack path holding `[` or `*` names only itself."""
+    own = "." if stack == "." else f"{stack}/"
+    nested = sorted(
+        s for s in stacks if s not in (".", stack) and (own == "." or s.startswith(own))
+    )
+    paths = [f":(literal){own}", *(f":(exclude,literal){s}/" for s in nested)]
     out = _run(["git", "log", "--format=%h%x00%s", f"{since}..{tip}", "--", *paths])
     return [tuple(line.split("\0", 1)) for line in out.split("\n") if "\0" in line]
 
@@ -426,9 +431,9 @@ def behind_report(base_ref, cells, stacks):
     refuses. Each behind cell lists `shas`, up to `BEHIND_SHAS` commits of `since..tip` under
     its stack's directory (`_stack_commits`, over `stacks`, every stack path), newest first, and
     `more`, the count of the rest; `commits` maps exactly the listed shas to their subjects cut
-    to `SUBJECT_CAP` characters. `shas` is empty for a conflict and for a stack held only
-    through a module it sources. With no behind cell `tip` and `since` are empty; no `cells`
-    reads no tip."""
+    to `SUBJECT_CAP` characters. `shas` is empty for a conflict and for a stack with no base
+    commit under its own files: a module it sources or a `watch` file changed it. With no behind
+    cell `tip` and `since` are empty; no `cells` reads no tip."""
     report = {"base": base_ref, "tip": "", "since": "", "commits": {}, "cells": []}
     if not cells:
         return report

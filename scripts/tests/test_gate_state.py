@@ -252,7 +252,10 @@ def _main_body(tmp_path, monkeypatch, capsys, **env):
             monkeypatch.setenv(k, v)
     gate_state.main()
     assert capsys.readouterr().out == ""
-    return github_outputs(tmp_path / "out")
+    outputs = github_outputs(tmp_path / "out")
+    # Pinned by `test_main_writes_the_behind_count_the_refresh_reads`.
+    outputs.pop("behind")
+    return outputs
 
 
 def test_main_holds_the_gate_on_an_empty_planned_count_env(tmp_path, monkeypatch, capsys):
@@ -710,3 +713,45 @@ def test_a_docs_only_plan_greens_through_the_gate_steps_own_env(tmp_path, monkey
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
     gate_state.main()
     assert github_outputs(tmp_path / "out")["state"] == "success"
+
+
+@pytest.mark.parametrize(
+    "sha", ["abc`@x", "ABCDEF1", "abc", "a" * 41], ids=["markup", "upper", "short", "long"]
+)
+def test_the_behind_reader_refuses_a_sha_that_is_not_a_short_hex_sha(sha):
+    """A listed sha is rendered in a code span of the plan comment, so anything but 4 to 40
+    lowercase hex characters is a gap, not a line. Mutation: drop the sha pattern check -- the
+    report reads, red."""
+    report = {**ONE_BEHIND, "commits": {sha: "x"}, "cells": [{**_ROW, "shas": [sha]}]}
+    assert gate_state.behind_cells(json.dumps(report)) is None
+
+
+def test_a_failed_plan_job_is_named_before_an_unread_behind_report():
+    """The plan-job checks run before the evidence checks. Mutation: test `behind` before the
+    plan job -- the behind text, red."""
+    got = gate_state.evidence_gap(
+        plan_result="failure", planned_cells="2", cell_count=1, behind=None
+    )
+    assert got == _PLAN_FAILED
+
+
+@pytest.mark.parametrize(
+    ("raw", "count"), [(json.dumps(ONE_BEHIND), "1"), (json.dumps(NO_BEHIND), "0"), ("{", "")]
+)
+def test_main_writes_the_behind_count_the_refresh_reads(tmp_path, monkeypatch, raw, count):
+    """`Create/refresh gate` refreshes only on `0`, so an unread report writes empty. Mutation:
+    write `0` for an unread report -- red."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", raw)
+    for k, v in {
+        "SHIPMATE_DETECT_RESULT": "success",
+        "SHIPMATE_PLAN_RESULT": "success",
+        "SHIPMATE_PLANNED_CELLS": "1",
+        "SHIPMATE_CELL_COUNT": "1",
+        "SHIPMATE_PENDING": "true",
+        "SHIPMATE_CHECK_RUNS": "",
+        "SHIPMATE_BODIES": "",
+        "GITHUB_OUTPUT": str(tmp_path / "out"),
+    }.items():
+        monkeypatch.setenv(k, v)
+    gate_state.main()
+    assert github_outputs(tmp_path / "out")["behind"] == count
