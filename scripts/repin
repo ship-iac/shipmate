@@ -9,7 +9,9 @@ every file as it was:
 
 1. `<tag>` is `vX.Y.Z` and resolves as a tag, never as a branch of that name. When `origin`
    holds the tag, its commit is the local tag's commit: a stale local tag refuses. The commit
-   is on the engine's `origin/main`, fetched first. It prints `<tag> -> <sha>`, and
+   is on the engine's `origin/main`, fetched first into `refs/remotes/origin/main` at
+   infinite depth, so any clone holding the tag resolves it, shallow or single-branch. It
+   prints `<tag> -> <sha>`, and
    `origin has no tag <tag>: pinning to a local tag` when `origin` lacks it, the pre-push
    release smoke being the intended case.
 2. In every `*.yml` and `*.yaml` file directly under `<consumer>/.github/workflows/` (GitHub
@@ -100,9 +102,12 @@ def _resolve(tag):
     tag on `origin/main` agreeing with `origin`'s."""
     if not onboard._VERSION_RE.fullmatch(tag):
         raise SystemExit(f"{tag!r} is not a vX.Y.Z release tag.")
-    rc, _out, err = _git("fetch", "origin", "main")
+    # An explicit destination: a single-branch clone's fetch of `main` writes only FETCH_HEAD.
+    # git's infinite depth completes a shallow clone and is a no-op on a full one.
+    fetch = ["fetch", "--depth=2147483647", "origin", "+refs/heads/main:refs/remotes/origin/main"]
+    rc, _out, err = _git(*fetch)
     if rc:
-        raise SystemExit(f"git fetch origin main failed in {ENGINE}:\n{err}")
+        raise SystemExit(f"git {' '.join(fetch)} failed in {ENGINE}:\n{err}")
     rc, sha, _err = _git("rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}")
     if rc:
         raise SystemExit(

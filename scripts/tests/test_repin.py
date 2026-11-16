@@ -460,6 +460,94 @@ def test_a_file_that_is_not_utf8_is_refused_before_any_write(engine, tmp_path, m
     assert on_disk(wf) == files
 
 
+def _clone(tmp_path, monkeypatch, shallow, *args):
+    """Make a `file://` clone of the fixture's origin with `args` the engine, asserted shallow or
+    not: git ignores `--depth` for a plain local path."""
+    clone = tmp_path / "clone"
+    url = (tmp_path / "origin.git").as_uri()
+    subprocess.run(["git", "clone", "-q", *args, url, str(clone)], check=True)
+    assert _git(clone, "rev-parse", "--is-shallow-repository") == shallow
+    monkeypatch.setattr(repin, "ENGINE", clone)
+    return clone
+
+
+@pytest.mark.parametrize(
+    "shallow, args",
+    [
+        pytest.param("true", ("--depth", "1"), id="shallow"),
+        pytest.param("false", ("--single-branch",), id="single-branch"),
+    ],
+)
+def test_a_clone_of_the_tag_alone_resolves(engine, tmp_path, monkeypatch, capsys, shallow, args):
+    """A clone of the tag alone fetches no branch, so `origin/main` exists only once the fetch
+    names its destination. Mutations, each red with `merge-base` failing on the missing
+    `origin/main`: fetch `origin main` without the destination refspec (both); drop the destination
+    refspec only when the clone is not shallow (single-branch alone)."""
+    _commit(engine.path, {"next.txt": "x\n"}, "next")
+    _git(engine.path, "push", "-q", "origin", "main")
+    _clone(tmp_path, monkeypatch, shallow, *args, "--branch", TAG)
+    wf = consumer(tmp_path, {"shipmate.yml": _fence_shim("main", f"{OLD} # v0.1.0", "\n")})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 0
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\npins updated shipmate.yml\n"
+        "shipmate.yml matches the v1.2.3 fence\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": _fence_shim("main", f"{engine.sha} # v1.2.3", "\n")}
+
+
+def test_a_shallow_clone_of_main_resolves_an_older_tag(engine, tmp_path, monkeypatch, capsys):
+    """A depth-1 clone of `main` two commits past the tag, the tag fetched at depth 1: the
+    ancestry walk stops at the shallow tip. Mutation: drop `--depth=2147483647` -- the run
+    refuses `not on origin/main`."""
+    for name in ("one.txt", "two.txt"):
+        _commit(engine.path, {name: "x\n"}, name)
+    _git(engine.path, "push", "-q", "origin", "main")
+    clone = _clone(tmp_path, monkeypatch, "true", "--depth", "1", "--branch", "main")
+    _git(clone, "fetch", "-q", "--depth", "1", "origin", "tag", TAG)
+    wf = consumer(tmp_path, {"shipmate.yml": _fence_shim("main", f"{OLD} # v0.1.0", "\n")})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 0
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\npins updated shipmate.yml\n"
+        "shipmate.yml matches the v1.2.3 fence\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": _fence_shim("main", f"{engine.sha} # v1.2.3", "\n")}
+
+
+def test_a_shallow_clone_refuses_a_tag_off_main_after_unshallowing(
+    engine, tmp_path, monkeypatch, capsys
+):
+    """The refusal is the real one: the clone is complete when it fires. Mutation: drop
+    `--depth=2147483647` -- the refusal text is the same, but the clone is still shallow."""
+    _git(engine.path, "checkout", "-q", "-b", "side")
+    side = _commit(engine.path, {"side.txt": "x\n"}, "side")
+    _git(engine.path, "tag", "-a", "-m", "v2.0.0", "v2.0.0")
+    _git(engine.path, "push", "-q", "origin", "v2.0.0")
+    clone = _clone(tmp_path, monkeypatch, "true", "--depth", "1", "--branch", "v2.0.0")
+    wf = consumer(tmp_path, {"shipmate.yml": GOOD})
+    assert run(monkeypatch, str(tmp_path / "consumer"), "v2.0.0") == (
+        f"v2.0.0 ({side}) is not on origin/main. A commit reachable only from a branch stops "
+        "resolving once that branch is force-pushed or deleted."
+    )
+    assert _git(clone, "rev-parse", "--is-shallow-repository") == "false"
+    assert capsys.readouterr().out == ""
+    assert on_disk(wf) == {"shipmate.yml": GOOD}
+
+
+def test_a_failed_fetch_refuses_naming_its_argv(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: name `git fetch origin main` in the fetch refusal -- the message differs."""
+    real = repin._git
+    monkeypatch.setattr(
+        repin, "_git", lambda *a: (128, "", "boom") if a[0] == "fetch" else real(*a)
+    )
+    wf = consumer(tmp_path, {"shipmate.yml": GOOD})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == (
+        "git fetch --depth=2147483647 origin +refs/heads/main:refs/remotes/origin/main failed "
+        f"in {engine.path}:\nboom"
+    )
+    assert capsys.readouterr().out == ""
+    assert on_disk(wf) == {"shipmate.yml": GOOD}
+
+
 def test_a_local_tag_on_another_commit_than_origins_is_refused(
     engine, tmp_path, monkeypatch, capsys
 ):

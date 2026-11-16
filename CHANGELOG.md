@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **`scripts/repin` resolves the tag from any engine clone that holds it, shallow or single-branch.** It fetches the whole history of `main` into `origin/main` by an explicit refspec, so a `git clone --depth 1 --branch <tag>` clone no longer fails with `Not a valid object name origin/main`, and a tag below a shallow `main`'s tip is no longer refused as not on `origin/main`. The release runbook's `main` fetches name the same destination (`docs/releasing.md`).
+
 ## [0.56.0] — 2026-11-15
 
 Tags `da8eb04`.
