@@ -179,8 +179,9 @@ queue for the head, and is completed to success by whichever of these happens fi
 gate"):
 
 - the plan run's own `summary`, right after it writes `pending`, when it
-  published no queued apply check and every `apply / <stack> / <env>` check on
-  the PR head is already complete (an apply's refresh ran before that write);
+  published no queued apply check, found no behind cell, and every `apply / <stack> /
+  <env>` check on the PR head is already complete (an apply's refresh ran before that
+  write);
 - the pre-merge apply path (`gate-refresh`, called from the apply
   workflow's summary job) once every `apply / <stack> / <env>` check on
   the PR head is complete — a targeted `shipmate apply <env>` of only some
@@ -3480,9 +3481,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   matrix is built over `terramate list --changed` from the merge base of the
   pull request's base and head, so a narrower diff is a smaller matrix. A
   branch behind its base plans only the stacks its own commits change, not
-  stacks only the base changed. A stack both changed still plans the head's
-  tree against state holding the base's applied change, so its plan shows
-  that change reverted: update the branch from the base before applying it.
+  stacks only the base changed. A stack both changed is not planned: it is
+  behind the base (§Plan comment), since its plan would revert the base's
+  change, until the branch is updated from the base.
   Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
@@ -3843,8 +3844,9 @@ and `lost` outputs, which the same rule reads.
   directory. Under the stacked holder lines, one line per behind cell reads
   ``⏪ <stack> / <env> is behind <base>: `<sha>` <subject>; ... and <n> more
   commit(s) changed it since this branch left it; a plan of this branch would
-  revert that change. Update the branch from <base>.``, with ``a module it sources
-  changed in `<since7>..<tip7>` `` for a stack held only through a module, and
+  revert that change. Update the branch from <base>.``, with ``a file it reads from
+  outside its directory changed in `<since7>..<tip7>` `` for a stack with no base
+  commit under its own directory (a module it sources, a `watch` file), and
   ``the branch conflicts with <base>.`` in place of the commits and the revert
   clause on a conflict; then ``⏪ <n> cell(s) are not planned until the branch is
   updated from <base>.``. Subjects are cut to 72 characters. Each line yields to
@@ -4118,7 +4120,7 @@ first attempt that landed although it reported a failure stays written. An apply
 POST or final write that GitHub's secondary rate limit refuses waits 60 s and is retried
 the same way, at most three waits per script process (`docs/troubleshooting.md`). A final `pending` gate is followed
 by a refresh, unless this run published a queued apply check, which cannot be
-done yet: when every apply check is already done (an apply's refresh ran before
+done yet, or found a behind cell, whose gate only a new plan lifts: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh, or one
 refused by a hold, warns and leaves the `pending` standing.
 
@@ -4660,7 +4662,7 @@ Nothing was applied. Re-plan (comment shipmate plan or push), or after the
 merge open a new pull request touching the stack."
 
 The record's `cells` field binds each apply check to the rest of its plan run:
-the number of cells that run planned. The summary job publishes its apply checks
+the number of cells that run planned plus its behind cells. The summary job publishes its apply checks
 one at a time, so a job that fails partway leaves a run with fewer apply checks
 than cells. A "Re-run all jobs" attempt of the same run that plans a different
 cell set adds checks beside the first attempt's, so the run has more checks than

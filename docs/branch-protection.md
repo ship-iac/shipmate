@@ -19,10 +19,12 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   pull request current with the base before it can merge. It gates merging
   and nothing else. It does not gate the pre-merge apply path. Plan detect diffs
   from the merge base, so a stale branch plans only the stacks its own commits
-  change; but a stack that both this branch and main changed plans the branch's
-  tree against state holding main's applied change, and a `shipmate apply <env>`
-  of that plan reverts main's change in real infrastructure. Update the branch
-  from the base before running a pre-merge apply.
+  change. A changed stack that main also changed since the branch left it, or
+  every changed stack when the merge of main into the branch conflicts, is not
+  planned: it is behind, its apply check reads `Behind <base>: update the
+  branch`, the gate stays `pending`, and every pre-merge apply refuses or holds
+  it, since its plan would revert main's change. Update the branch from the base
+  and push to plan it.
 
 `shipmate / gate` is written on the PR head commit by `scripts/gate-status`,
 through `actions/summary` (the plan run) and `actions/gate-refresh` (the

@@ -2753,8 +2753,8 @@ Update the branch from <base>.`` (or ``... the branch conflicts with <base>.``),
 the cell's apply check is queued as `Behind <base>: update the branch`, and the
 gate is `pending`, `<n> cell(s) behind <base>; update the branch from <base>`.
 With every changed cell behind, the verdict is `⏪ nothing planned: <n> cell(s)
-behind <base>`. The base changed the stack, or a module it sources, after the
-branch left it, or the merge of the base into the branch conflicts, so the cell
+behind <base>`. The base changed the stack, or a file it reads from outside its
+directory such as a module it sources, after the branch left it, or the merge of the base into the branch conflicts, so the cell
 was not planned and no apply of the head reaches it. Update the branch from the
 base and push: the push plans the cell on the merged tree. A plan whose behind
 report could not be read holds the gate with `the behind cells were not
@@ -2779,7 +2779,8 @@ pull request changes a stack with no `env/*` tag that is not local, it removes
 one `env/*` tag from a stack that keeps another (the lost pairs line), or a
 `shipmate plan` command started the run, any of which still posts one,
 headlined `⚪ nothing planned` — and the gate goes green over no work, unless an
-earlier plan's apply check is still open on the head (below).
+earlier plan's apply check is still open on the head (§The gate is pending over
+an earlier plan's apply checks, above).
 The skipped plan job's one check shows its name expression literally,
 `plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped; GitHub
 renders a skipped matrix job that way.
