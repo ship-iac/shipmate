@@ -3844,9 +3844,10 @@ and `lost` outputs, which the same rule reads.
   directory. Under the stacked holder lines, one line per behind cell reads
   ``⏪ <stack> / <env> is behind <base>: `<sha>` <subject>; ... and <n> more
   commit(s) changed it since this branch left it; a plan of this branch would
-  revert that change. Update the branch from <base>.``, with ``a file it reads from
-  outside its directory changed in `<since7>..<tip7>` `` for a stack with no base
-  commit under its own directory (a module it sources, a `watch` file), and
+  revert that change. Update the branch from <base>.``, with ``the base changed
+  files this stack depends on in `<since7>..<tip7>` `` for a stack with no base
+  commit under its own files (a module it sources, a `watch` file, a deletion under
+  a nested stack's directory), and
   ``the branch conflicts with <base>.`` in place of the commits and the revert
   clause on a conflict; then ``⏪ <n> cell(s) are not planned until the branch is
   updated from <base>.``. Subjects are cut to 72 characters. Each line yields to

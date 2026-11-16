@@ -3384,7 +3384,7 @@ _ROW_COMMITS = (
     "branch would revert that change. Update the branch from main."
 )
 _ROW_MODULE = (
-    "⏪ stacks/net / prod is behind main: a file it reads from outside its directory changed in "
+    "⏪ stacks/net / prod is behind main: the base changed files this stack depends on in "
     "`ddddddd..ccccccc` since this branch left it; a plan of this branch would revert that "
     "change. Update the branch from main."
 )

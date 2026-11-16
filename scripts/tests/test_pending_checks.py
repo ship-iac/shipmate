@@ -1040,8 +1040,10 @@ def test_an_earlier_attempts_plan_check_does_not_stand_for_a_behind_cell(tmp_pat
 
 
 def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
-    """1,000,000 bytes of ASCII lines, then the byte 0xFF: a whole strict UTF-8 decode raises
-    `UnicodeDecodeError`. `counts_of` streams the whole text for the tally, so a double stands in
+    """The summary decodes only a prefix of the plan text, never a second whole copy, and the
+    digest covers the whole file. 1,000,000 bytes of ASCII lines then the byte 0xFF, which a
+    whole decode refuses, show where the prefix read stops. `counts_of` reads the whole text
+    and refuses that byte, as it did before the plan text was read once, so a double stands in
     for it. The digest was computed once, off the tree. Mutation: decode the whole text for the
     prefix (`raw.decode("utf-8")[: CHECK_OUTPUT_CAP + 1]`) -- red."""
 

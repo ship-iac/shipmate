@@ -24,7 +24,14 @@ import os
 import pathlib
 import re
 
-from _shipmate import _load, cell_names, is_head_sha, run_annotated, write_outputs
+from _shipmate import (
+    BEHIND_SHAS,
+    _load,
+    cell_names,
+    is_head_sha,
+    run_annotated,
+    write_outputs,
+)
 
 ag = _load("apply-gate")
 
@@ -49,8 +56,6 @@ BEHIND_UNREAD = (
 OLDER_UNREAD = "could not read this head's apply checks; push a commit to re-plan"
 _BEHIND_KEYS = {"base", "tip", "since", "commits", "cells"}
 _ROW_KEYS = {"stack", "environment", "cause", "shas", "more"}
-#: How many base commits `build-matrix` names per behind cell; it reads this one.
-BEHIND_SHAS = 3
 #: A short commit sha as `git log`'s `%h` prints it: what a behind cell lists and the comment
 #: renders in a code span.
 _SHORT_SHA = re.compile(r"[0-9a-f]{4,40}")
@@ -313,6 +318,7 @@ def _success(mode, open_older):
 
 def main():
     report = behind_cells(os.environ.get("SHIPMATE_BEHIND", ""))
+    behind = None if report is None else len(report["cells"])
     state, desc, mode = decide(
         detect_result=os.environ["SHIPMATE_DETECT_RESULT"],
         plan_result=os.environ["SHIPMATE_PLAN_RESULT"],
@@ -327,7 +333,7 @@ def main():
         refusal=os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
         missing=cell_names(os.environ.get("SHIPMATE_MISSING", "")),
         stacked_hold=os.environ.get("SHIPMATE_STACKED_HOLD", ""),
-        behind=None if report is None else len(report["cells"]),
+        behind=behind,
         base="" if report is None else report["base"],
         open_older=open_older(
             os.environ.get("SHIPMATE_CHECK_RUNS", ""),
@@ -343,7 +349,7 @@ def main():
         description=flat[:140],
         reason=flat,
         comment_mode=mode,
-        behind="" if report is None else len(report["cells"]),
+        behind="" if behind is None else behind,
     )
 
 
