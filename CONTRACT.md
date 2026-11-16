@@ -306,13 +306,13 @@ This refusal runs after the stranded-check and behind-check refusals and before
 the deploy reads any plan run. The check's details link names the holding run
 only when it is exactly `<server>/<owner>/<repo>/actions/runs/<id>` of this
 repository. A link to the deploy's own run passes, so a re-run of the deploy
-proceeds over its own flips. `detect` reads the holding run once and, once it
-reads `completed`, that run's jobs listing across every attempt, through the job
-token's `actions: read`:
+proceeds over its own flips. `detect` reads the holding run and, once it reads
+`completed`, that run's jobs listing across every attempt, then the run again,
+through the job token's `actions: read`:
 
 | Holding run | Deploy |
 | --- | --- |
-| not `completed`; or `completed` while its listing shows a job of an attempt above the one read with that status (a re-run between the two reads), or a job of the cell that is not `completed` | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand |
+| not `completed`, or not the same completed attempt when read again after the listing (a re-run between the reads), or a job of the cell not `completed` | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand |
 | `completed`, and no job of the cell applied: each lists no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check` (after which `apply-cell` only refuses); or no job of the cell is listed | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it``: the run that holds the check has ended and writes nothing more to it |
 | `completed`, and it lists a job of the cell that does not show it never applied | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` |
 | the run or its jobs listing could not be read completely | refuses: ``<cells>: run <id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.`` |

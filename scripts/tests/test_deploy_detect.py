@@ -380,10 +380,15 @@ def _in_flight(stack, env="dev-eu", url=RUN_PAGE + HOLDER, **kw):
     return {**_apply_check(stack, env, **kw), "status": "in_progress", "details_url": url}
 
 
-def _holder(status, jobs=None, total=None, attempt=1):
-    """`_run_main`'s `runs`: run `HOLDER` read with `status`, and `jobs` as its one-page jobs
-    listing advertising `total` jobs (default: as many as it holds), the run on `attempt`."""
-    answers = {RUN_PATH: json.dumps({"id": int(HOLDER), "status": status, "run_attempt": attempt})}
+def _holder(status, jobs=None, total=None, attempt=1, again=None):
+    """`_run_main`'s `runs`: run `HOLDER` read with `status` on `attempt`, and `jobs` as its
+    one-page jobs listing advertising `total` jobs (default: as many as it holds). `again`, a run
+    object or an exception, answers the second run read (default: the first answer again)."""
+    first = json.dumps({"id": int(HOLDER), "status": status, "run_attempt": attempt})
+    second = first if again is None else again
+    if isinstance(second, dict):
+        second = json.dumps({"id": int(HOLDER), **second})
+    answers = {RUN_PATH: [first, second]}
     if jobs is not None:
         count = len(jobs) if total is None else total
         answers[JOBS_PATH] = json.dumps({"total_count": count, "jobs": jobs})
@@ -391,8 +396,11 @@ def _holder(status, jobs=None, total=None, attempt=1):
 
 
 def _answer(runs, path):
-    """`_run_main`'s answer to `path` from `runs`: its text, or its exception raised."""
+    """`_run_main`'s answer to `path` from `runs`: its text, or its exception raised. A list
+    answers each read with its next item, and every later read with its last."""
     held = (runs or {}).get(path)
+    if isinstance(held, list):
+        held = held.pop(0) if len(held) > 1 else held[0]
     if isinstance(held, BaseException):
         raise held
     return held
@@ -735,17 +743,7 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
             _apply_check("stacks/app", "dev-eu", plan_run="42", cells=2),
             _in_flight("stacks/app", "dev-us", plan_run="42", cells=2, id=2),
         ],
-        runs=_holder(
-            "completed",
-            [
-                {
-                    "name": "apply / run / detect",
-                    "status": "completed",
-                    "steps": [],
-                    "run_attempt": 1,
-                }
-            ],
-        ),
+        runs=_holder("completed", [_job(name="apply / run / detect", steps=[])]),
     )
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
 
@@ -1784,15 +1782,13 @@ _LIVE = (
 )
 
 
-def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed", attempt=1):
-    """One listed job of run attempt `attempt`; `steps`, `(name, conclusion)` pairs, default to a
-    started apply."""
+def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed"):
+    """One listed job; `steps`, `(name, conclusion)` pairs, default to a started apply."""
     if steps is None:
         steps = [("Set up job", "success"), ("Apply the cell", "success")]
     return {
         "name": name,
         "status": status,
-        "run_attempt": attempt,
         "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps],
     }
 
@@ -1839,18 +1835,22 @@ def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkey
     assert str(exc.value) == _LIVE
 
 
-def test_a_rerun_between_the_reads_holds_the_cell_live(tmp_path, monkeypatch):
-    """Run 77 reads `completed` on attempt 1; by the listing it was re-run, and attempt 2 lists
-    only a queued `detect`, not yet the cell's job. The cell's attempt-1 job never applied, but
-    attempt 2 may still apply it, so the cell is held as live.
+@pytest.mark.parametrize(
+    "again",
+    [{"status": "completed", "run_attempt": 2}, {"status": "queued", "run_attempt": 1}],
+    ids=["attempt advanced", "queued"],
+)
+def test_a_rerun_between_the_reads_holds_the_cell_live(tmp_path, monkeypatch, again):
+    """Run 77 reads `completed` on attempt 1 and its cell job never applied, but read again after
+    the listing it is a newer attempt, or queued again: a re-run whose jobs may not be listed yet
+    may still apply the cell, so the cell is held as live.
 
-    Mutation: drop the attempt comparison -- deploys, red."""
-    jobs = [
-        _job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")]),
-        _job(name="apply / run / detect", steps=[], status="queued", attempt=2),
-    ]
+    Mutation: skip the second read -- deploys, red.
+    Mutation: compare the status only -- the advanced attempt deploys, red.
+    Mutation: compare the attempt only -- the queued read deploys, red."""
+    runs = _holder("completed", [_job(steps=[])], again=again)
     with pytest.raises(SystemExit) as exc:
-        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+        _two_cells(tmp_path, monkeypatch, runs)
     assert str(exc.value) == _LIVE
 
 
@@ -1892,8 +1892,6 @@ def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
     again, so the deploy queues it and warns.
 
     Mutation: refuse on any ended run -- refuses, red.
-    Mutation: compare attempts with `>=` -- every case on the run's own attempt reads live,
-    red.
     Mutation: drop the `Pre-apply check` clause -- the two pre-apply cases refuse, red."""
     parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
@@ -1943,6 +1941,10 @@ def test_an_ended_run_whose_apply_may_have_started_refuses(tmp_path, monkeypatch
 _GH_500 = SystemExit("::error::gh api repos/acme/iac/actions/runs/77 failed\nHTTP 500: boom")
 
 
+_NEVER_APPLIED = [_job(steps=[])]
+_BAD_ATTEMPTS = [None, True, "2"]
+
+
 @pytest.mark.parametrize(
     ("runs", "reads"),
     [
@@ -1955,10 +1957,17 @@ _GH_500 = SystemExit("::error::gh api repos/acme/iac/actions/runs/77 failed\nHTT
         ),
         ({RUN_PATH: json.dumps({"id": 77, "run_attempt": 1})}, (1, 0)),
         ({RUN_PATH: json.dumps({"id": 77, "status": "completed"})}, (1, 0)),
-        (
-            _holder("completed", [{k: v for k, v in _job().items() if k != "run_attempt"}]),
-            (1, 1),
-        ),
+        *[(_holder("completed", _NEVER_APPLIED, attempt=bad), (1, 0)) for bad in _BAD_ATTEMPTS],
+        *[
+            (
+                _holder(
+                    "completed", _NEVER_APPLIED, again={"status": "completed", "run_attempt": bad}
+                ),
+                (2, 1),
+            )
+            for bad in _BAD_ATTEMPTS
+        ],
+        (_holder("completed", _NEVER_APPLIED, again=_GH_500), (4, 1)),
     ],
     ids=[
         "run read",
@@ -1967,13 +1976,16 @@ _GH_500 = SystemExit("::error::gh api repos/acme/iac/actions/runs/77 failed\nHTT
         "short listing",
         "no status",
         "run with no attempt",
-        "job with no attempt",
+        *[f"first attempt {bad!r}" for bad in _BAD_ATTEMPTS],
+        *[f"second attempt {bad!r}" for bad in _BAD_ATTEMPTS],
+        "second read",
     ],
 )
 def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypatch, runs, reads):
-    """A run read or jobs listing that fails after its retries, an empty listing, a listing
-    short of its `total_count`, a run with no status or attempt, and a job with no attempt each
-    refuse naming the run: the cell may be applying. A repeat points at the by-hand section.
+    """A run read (first or second) or jobs listing that fails after its retries, an empty
+    listing, a listing short of its `total_count`, and a run read with no string status or no
+    int `run_attempt` (null, true or "2", on either read) each refuse naming the run, with no
+    traceback: the cell may be applying. A repeat points at the by-hand section.
     `reads` counts the run reads and the jobs listing reads. Under `filter=all`, `total_count`
     counts every attempt's jobs: a probe of run 43649538511 listed 51 of 51 under `all` and 38
     of 38 under `latest`.
@@ -1981,7 +1993,9 @@ def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypa
     Mutation: deploy on a failed read -- deploys, red.
     Mutation: deploy on a failed listing -- deploys, red.
     Mutation: list without the count check -- the short listing deploys, red.
-    Mutation: read a missing status as `completed` -- the listing is read, red."""
+    Mutation: read a missing status as `completed` -- the listing is read, red.
+    Mutation: `isinstance` in place of `type(...) is int` -- a `true` attempt on both reads
+    deploys, red."""
     monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
     urls = []
     with pytest.raises(SystemExit) as exc:
