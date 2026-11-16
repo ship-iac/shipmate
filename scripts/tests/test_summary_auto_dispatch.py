@@ -543,7 +543,11 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
         "::warning::the auto apply dispatch for dev failed; comment shipmate apply to apply"
         in proc.stdout
     )
-    assert "gh: Validation Failed (HTTP 422)" in proc.stderr.splitlines()
+    assert (
+        "::warning::command failed (1): gh api -X POST "
+        "repos/acme/demo/actions/workflows/shipmate.yml/dispatches --input - | "
+        "gh: Validation Failed (HTTP 422)"
+    ) in proc.stderr.splitlines()
     assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
     assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
 

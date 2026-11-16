@@ -423,7 +423,11 @@ def test_a_failed_dispatch_warns_with_the_remedy(tmp_path):
             "comment shipmate plan to plan pull request #42"
         )
     ]
-    assert "gh: Validation Failed (HTTP 422)" in stderr.splitlines()
+    assert (
+        "::warning::command failed (1): gh api -X POST "
+        "repos/acme/demo/actions/workflows/shipmate.yml/dispatches --input - | "
+        "gh: Validation Failed (HTTP 422)"
+    ) in stderr.splitlines()
 
 
 @bash_only

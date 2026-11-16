@@ -295,8 +295,8 @@ REASON_CAP = 4000
 CHECK_OUTPUT_CAP = 65_535
 
 
-def print_annotated(code):
-    """Print `code`, a message starting `::error::`, to stderr as one escaped `::error::`
+def print_annotated(code, severity="error"):
+    """Print `code`, a message starting `::error::`, to stderr as one escaped `::<severity>::`
     workflow command per error; return the errors, each a list of its lines, prefix removed.
 
     The runner parses workflow commands per line, so a raw multi-line message annotates only its
@@ -317,7 +317,7 @@ def print_annotated(code):
             errors[-1].append(line)
     for lines in errors:
         message = "\n".join(lines).rstrip("\n")
-        sys.stderr.write(f"::error::{command_data(message)}\n")
+        sys.stderr.write(f"::{severity}::{command_data(message)}\n")
     sys.stderr.flush()
     return errors
 
