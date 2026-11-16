@@ -895,6 +895,25 @@ in that environment with a pending `apply / <stack> / <env>` check is probed;
 each reports in its own job, and a cell that cannot determine its lock state
 fails red rather than reporting the lock absent.
 
+When the cells end, the run replies once on the pull request (`CONTRACT.md`
+§Comment-ops, "The unlock result reply"). Every reply ends by saying that a bare
+`shipmate unlock` releases OpenTofu state locks only: a cell lock (`🔒 locked
+by`) stays until its pull request merges or closes, and `--evict` releases
+another pull request's.
+
+| Reply | Meaning |
+|---|---|
+| `⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...` | Those locks are gone. Re-apply, as below. |
+| `⚪ released no state lock in <env>: no probed cell held a state lock.` | Every cell with a pending apply check was probed and none was locked. A failing apply is held by something else: a cell lock, or a lock on a cell outside the queue (below). |
+| `⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...` | Nothing was probed. A lock on a cell whose check completed, or on a stack applied out of band, is released out of band (below). |
+| `🔴 failed: could not determine the lock of <stack>, ...` | That cell's init, probe or `force-unlock` failed; its job in the linked run has the error. Its lock may still be held. Comment `shipmate unlock <env>` again once the cause is fixed. |
+| `🔴 failed: ... <stack> did not run` | That cell's job left no result: it was skipped, or failed before its result was recorded. Its job in the linked run says which. |
+| `🔴 failed: could not read the cells' results; see the run.` | The cells ran, but their results could not be downloaded; each cell's job has its outcome. |
+| `🔴 failed: the unlock run failed before probing any cell; see the run.` | `detect` failed, for example on a missing `<env>-apply` environment; nothing was probed or released. |
+
+No reply at all means the run was cancelled, the dispatch was refused, or the
+reply could not be posted; the run's `result` job warns with the cause.
+
 Then re-apply. Unlocking is not recovery: a cancelled apply usually advanced
 the state, so `shipmate apply <env>` may now be refused by the exact-plan
 fail-safe of §`Saved plan is stale`, or `does not match the reviewed plan's

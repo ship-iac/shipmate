@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Added
+
+- **`shipmate unlock <env>` replies with what it released.** A new `result` job in `unlock.yml` posts one reply on the pull request after the unlock legs end: ``⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...``, ``⚪ released no state lock in <env>: <reason>`` when no probed cell held one or no cell had a pending apply check, or ``🔴 failed: ...`` naming each cell whose lock could not be determined or released and each cell that did not run, or saying the run failed before probing any cell or its cells' results could not be read. Every reply adds that a bare `shipmate unlock` releases OpenTofu state locks only, and that `--evict` releases another pull request's cell locks. Each unlock leg uploads a `shipmate-unlock-<n>` artifact holding its outcome; `result` reads the pull request from the command comment with the job token (`pull-requests: write`, which the fence's `unlock` job already grants), checks nothing out, and its reply is display only: a failed read, download or post never fails the run (`CONTRACT.md` §Comment-ops, `docs/troubleshooting.md`).
+
 ## [0.56.0] — 2026-11-15
 
 Tags `da8eb04`.

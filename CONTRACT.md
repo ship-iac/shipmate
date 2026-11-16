@@ -1668,7 +1668,9 @@ reply, a `⚪` notice:
   fails is a warning on the comment-handling run, not a failure, and the pull
   request gets nothing.
 
-Nothing minimizes or edits the started-run reply.
+Nothing minimizes or edits the started-run reply. It says only that the run
+started; the unlock run then posts its own result reply, saying what it
+released (the unlock result reply, below).
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
@@ -2180,13 +2182,50 @@ state lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that 
 one already requires, so a role that can apply an environment can already
 unlock it.
 
-The unlock run itself posts no comment — its `unlock` job runs the pull
-request's HCL, so that job requests no `pull-requests: write`. Only `guard`,
-which checks nothing out, requests it, to add the 🚀 reaction (§Comment-ops,
-"Reactions and the comment claim"). The comment-handling run, which holds that
-permission, is the one that may post the started-run reply; §Comment-ops says
-when it is posted and when it links the unlock run. Per-cell detail lands in
-each job's step summary, and a failure reds the run.
+The `unlock` job posts no comment: it runs the pull request's HCL, so it
+requests no `pull-requests: write`. Two jobs that check nothing out request it:
+`guard`, to add the 🚀 reaction (§Comment-ops, "Reactions and the comment
+claim"), and `result`, to post the unlock result reply. The comment-handling run
+may post the started-run reply; §Comment-ops says when it is posted and when it
+links the unlock run. Per-cell detail lands in each job's step summary, and a
+failed cell reds the run.
+
+**The unlock result reply.** Each `unlock` leg uploads a record, even when it
+failed: artifact `shipmate-unlock-<strategy.job-index>` holding its outcome and
+the probed lock id. The outcome is `released` only when `force-unlock`
+succeeded, `none` when a clean probe found no lock, and `failed` otherwise (a
+failed init, probe or `force-unlock`, or a leg that failed before
+`unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
+`permissions: { pull-requests: write }`, `ubuntu-slim`, the job token) runs
+unless the run was cancelled or `detect` was skipped. It reads the pull request
+number from the command comment's `html_url`, downloads the records, and posts
+one reply through `scripts/reply-comment`: the header
+`### shipmate unlock <env>`, the verdict line, then a blank line and
+``A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks stay until it merges or closes, and `--evict` releases another pull request's.``,
+and the footer of a §Comment-ops reply, linking the unlock run. The verdict line
+is one of:
+
+- ``⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...`` when every
+  probed cell recorded `released` or `none` and at least one released.
+- ``⚪ released no state lock in <env>: no probed cell held a state lock.``
+- ``⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...``
+  for an empty queue: the warning `detect` prints, whole.
+- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
+  each clause present when it names a cell: `failed` cells, then cells with no
+  usable record, then the released ones.
+- ``🔴 failed: could not read the cells' results; see the run.`` when the record
+  download failed.
+- ``🔴 failed: the unlock run failed before probing any cell; see the run.``
+  when `detect` failed.
+
+The reply is display only and gates nothing. A record is written by a job that
+runs the pull request's HCL, so it can be forged: the reply names a cell only by
+the index in its artifact name, into `detect`'s queue, never by a name in the
+record; a record whose own `index` differs from its artifact name's is ignored,
+and a lock id outside the charset `scripts/lock-info` accepts is dropped. Stack
+names are escaped. A comment not on a pull request, an unreadable comment or a
+failed post posts nothing and warns; a failed download is named in the reply.
+None of them fails `result`: the `unlock` legs' results stay the run's.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan
