@@ -2613,6 +2613,15 @@ reason. On every form it refuses when:
   and push.
 - `the apply reached the wave without its base tip, plan run and plan-text
   digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
+- `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
+  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
+  check and its completion jobs write only successes, since a later run may have
+  completed those checks already. Comment `shipmate apply`. A merge deploy's
+  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
+  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
+  and the cell refuses on the attempt number. Otherwise a commented apply's claim
+  finds its comment taken and the run does nothing, and an `auto` run refuses at
+  `detect` (`a re-run of an auto apply never applies`).
 
 An `auto` cell also refuses when:
 - `the newest autoplan of <head> is run <n>, not plan run <p>, which this auto
@@ -2641,15 +2650,10 @@ An `auto` cell also refuses when:
   or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
-- `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
-  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
-  check and its completion jobs write only successes, since a later run may have
-  completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
-  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
-  and the cell refuses on the attempt number. Otherwise a commented apply's claim
-  finds its comment taken and the run does nothing, and an `auto` run refuses at
-  `detect` (`a re-run of an auto apply never applies`).
+- `the wave row applies plan run <r>, not plan run <p>, which this auto apply
+  applies`: the wave matrix and the provenance run `detect` bound disagree, so
+  the plan the cell would download is not the one checked. Comment `shipmate
+  apply`.
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
 - a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),

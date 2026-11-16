@@ -195,9 +195,11 @@ check-run ids `actions/apply-snapshot` recorded for that name in the `snapshot`
 job, before the first wave, and only ids whose check was not yet `completed`: a
 completed same-head duplicate is never relinked or retitled. An id is also
 recorded only when its check's record names the wave row's plan run and
-plan-text digest, so a check a newer plan, or a plan that found the cell behind
-the base, published after `detect` is never completed by this run. A cell with
-no such id refuses the run before wave0.
+plan-text digest, or an older plan run and no behind record: a check a newer
+plan, or a plan that found the cell behind the base, published after `detect`
+is never completed by this run, while an older plan's unfinished duplicate is
+completed with the cell. A cell with no check recording the wave row's plan
+refuses the run before wave0.
 
 1. Created `queued` by `actions/summary`, titled with the plan's counts, its
    summary the plan. Its `external_id` is a compact JSON record of the id of
@@ -2517,11 +2519,12 @@ credentials. It refuses unless the pull request holds the cell's lock (an evicti
 or a release after a close, takes it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
-unless the pull request is open at the applied head, unless the base branch's tip,
+unless the pull request is open at the applied head, unless the run attempt is
+`1`, unless the base branch's tip,
 read from its ref, is still the one detect read, whatever the stack, and unless the
 cell's newest apply check still records the wave row's plan run and plan-text digest
 and is no behind record (§`apply_mode: auto`, Wave re-check, for the texts). Under
-`apply_mode: auto` it also refuses unless the run attempt is `1`, the pull request is not a draft, the plan run detect bound is
+`apply_mode: auto` it also refuses unless the wave row's plan run is the plan run detect bound, the pull request is not a draft, the plan run detect bound is
 still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action (`opened` or
 `synchronize`), no newer `shipmate plan` run of the pull request created since the plan run
@@ -2910,10 +2913,11 @@ apply this run; see its line below` for one holding a locked, overlap or waiting
 cell, and `shipmate apply` otherwise (§Apply result comment).
 
 **Wave re-check.** Every pre-merge wave cell's pre-apply check (§Cell locks)
-refuses unless the base tip, read from the branch ref, is still the one `detect`
-read, and the cell's newest apply check still records the wave row's plan run
-and plan-text digest and is no behind record. Each `auto` wave cell also
-refuses unless the run attempt is `1`, the plan run `detect` bound is still the
+refuses unless the run attempt is `1`, the base tip, read from the branch ref,
+is still the one `detect` read, and the cell's newest apply check still records
+the wave row's plan run and plan-text digest and is no behind record. Each
+`auto` wave cell also refuses unless the wave row's plan run is the plan run
+`detect` bound, which apply-cell downloads, the plan run `detect` bound is still the
 head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action
 (`opened` or `synchronize`), the pull request is still not a draft, no newer
