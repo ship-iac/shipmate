@@ -14,6 +14,10 @@ section below names the SHA the release tags.
 
 - **`shipmate unlock <env>` replies with what it released.** A new `result` job in `unlock.yml` posts one reply on the pull request after the unlock legs end: ``⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...``, ``⚪ released no state lock in <env>: <reason>`` when no probed cell held one or no cell had a pending apply check, or ``🔴 failed: ...`` naming each cell whose lock could not be determined or released and each cell that did not run, and saying when some results could not be read, or that the run failed before probing any cell or its queue could not be read. The footer links the unlock run as `[unlock run](<url>)`. Every reply adds that a bare `shipmate unlock` releases OpenTofu state locks only, and that `--evict` releases another pull request's cell locks. Each unlock leg uploads a `shipmate-unlock-<n>` artifact holding its outcome, stack and environment, and a record that does not match its queue entry is ignored; `result` reads the pull request from the command comment with the job token (`pull-requests: write`, which the fence's `unlock` job already grants), checks nothing out, and its reply is display only: a failed read, download or post never fails the run (`CONTRACT.md` §Comment-ops, `docs/troubleshooting.md`).
 
+### Fixed
+
+- **`scripts/repin` resolves the tag from any engine clone that holds it, shallow or single-branch.** It fetches the whole history of `main` into `origin/main` by an explicit refspec, so a `git clone --depth 1 --branch <tag>` clone no longer fails with `Not a valid object name origin/main`, and a tag below a shallow `main`'s tip is no longer refused as not on `origin/main`. The release runbook's `main` fetches name the same destination (`docs/releasing.md`).
+
 ## [0.56.0] — 2026-11-15
 
 Tags `da8eb04`.
