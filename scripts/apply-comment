@@ -1097,7 +1097,8 @@ def _shape_error(fields):
 
 def read_report(path, refused=False):
     """(fields, unread) from apply-detect's report file at `path`. `fields` holds every
-    `_REPORT_DEFAULTS` key, a missing one at its default. Only a report `write_report` finished
+    `_REPORT_DEFAULTS` key, a missing one at its default: a behind refusal's report holds only
+    `behind` and `base`. Only a report `write_report` finished
     carries `"complete": true`; an incomplete one is read only when the detect job `refused`
     (failed with a refusal), whose report is the empty one written before any step (or what the
     refusal wrote). `unread` is True, and `fields` all defaults, when the file is missing or

@@ -35,7 +35,7 @@ jobs:
           exit 1
       # A called workflow's `github` context is its caller's, so these read the dispatch itself.
       # A fence `auto` job without `auto: true` would otherwise run the App's dispatch as a bare
-      # apply, skipping the actor, provenance, pusher and overlap checks.
+      # apply, skipping the actor, provenance, pusher and mergeability checks.
       - name: Reject an auto dispatch that does not run the auto form
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'auto' && !inputs.auto }}
         run: |

@@ -444,5 +444,5 @@ def test_each_page_holds_its_fences():
         ("docs/releasing.md", "bash"): 8,
         ("docs/troubleshooting.md", "bash"): 1,
         ("docs/troubleshooting.md", "hcl"): 2,
-        ("docs/troubleshooting.md", "text"): 6,
+        ("docs/troubleshooting.md", "text"): 7,
     }, f"fence labels per page changed: {sorted(found.items())}"

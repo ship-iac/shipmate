@@ -36,7 +36,7 @@ the run refuses.
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
 refuses unless the actor, the plan's provenance, the pusher's permission and the pull
 request's mergeability hold, and holds a cell whose stack the merge of the base into the
-branch changes.
+branch changes or whose apply check records that its plan found the base changed it.
 """
 
 import json
@@ -80,7 +80,8 @@ def write_report(report):
     Its fields: `excluded_envs`, `skipped_envs`, `skipped_after`, `review_held_envs` and
     `applied_exempt_envs` (bare and auto forms), `review_not_required_envs`, `waiting_cells`,
     `held_cells` and `env_order` (every form), `pusher` and `bare_envs` (auto form), as each
-    form's docstring describes them. A file, not a job output: the report has no size cap, and
+    form's docstring describes them; a behind refusal writes only `behind` and `base`
+    (`refuse_behind`). A file, not a job output: the report has no size cap, and
     GitHub drops a whole job output when any substring of it is masked."""
     path = pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"])
     path.parent.mkdir(parents=True, exist_ok=True)
