@@ -101,25 +101,13 @@ def check_output(cell, raw, url):
     line, and only a prefix for the summary."""
     tally = sc.counts_of(_text(raw, newline="\n")) or ("?",) * 5
     title = sc.state({**cell, **dict(zip(sc.COUNT_KEYS, tally, strict=True))})
-    # No prefix longer than the cap can fit. The fence is sized over the whole prefix, a
-    # superset of any cut, so the cut text cannot close it.
-    prefix = _text(raw).read(CHECK_OUTPUT_CAP + 1)
-    mapped = sc.diff_map(prefix)
-    f = sc._fence_of(mapped)
-    whole = sc.fence(mapped, f)
-    if len(prefix) <= CHECK_OUTPUT_CAP and _utf8_len(whole) <= CHECK_OUTPUT_CAP:
-        return {"title": title, "summary": whole}
-    where = f"the plan job's raw log in [the plan run]({url}) has the full plan"
-    trailer = f"\n\n_Truncated; {where}._"
-    room = CHECK_OUTPUT_CAP - _utf8_len(sc.fence("", f)) - _utf8_len(trailer)
-    # `room + 1` keeps a line whose newline is byte `room + 1`; the newline itself is dropped.
-    # A negative room yields an empty or over-cap candidate, which the guard below refuses.
-    cut = mapped.encode("utf-8")[: room + 1].decode("utf-8", errors="ignore")
-    kept = cut.rpartition("\n")[0]
-    summary = sc.fence(kept, f) + trailer
-    if not kept or _utf8_len(summary) > CHECK_OUTPUT_CAP:
-        return {"title": title, "summary": f"_Plan too large to show here; {where}._"}
-    return {"title": title, "summary": summary}
+    # No prefix longer than the cap can fit.
+    f, kept, cut = sc.check_frame(_text(raw).read(CHECK_OUTPUT_CAP + 1), url)
+    if not cut:
+        return {"title": title, "summary": sc.fence(kept, f)}
+    if not kept:
+        return {"title": title, "summary": f"_Plan too large to show here; {sc.check_where(url)}._"}
+    return {"title": title, "summary": sc.fence(kept, f) + sc.check_trailer(url)}
 
 
 def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):

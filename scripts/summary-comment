@@ -930,19 +930,51 @@ _DRIFT_LINE = (
 )
 
 
-#: Bytes of the apply check's summary that its fence and truncation trailer take from the plan.
-#: Nothing else is ever added: a completion keeps the summary and puts an error in the title.
-_CHECK_FRAME = 1024
+def check_where(url):
+    """Where a cut apply check's plan text sends the reader: the plan run `url`'s raw log."""
+    return f"the plan job's raw log in [the plan run]({url}) has the full plan"
 
 
-def fold_drift(text):
+def check_trailer(url):
+    """The line a cut apply check's summary ends with, linking the plan run `url`."""
+    return f"\n\n_Truncated; {check_where(url)}._"
+
+
+def check_frame(prefix, url):
+    """`(f, kept, cut)` for the apply check of a plan whose text starts with `prefix`, its first
+    `CHECK_OUTPUT_CAP + 1` characters, cut with a trailer linking the plan run `url`: the fence
+    `f`, sized over the whole mapped prefix, a superset of any cut, so the cut text cannot close
+    it; the mapped plan text the check's summary holds; and whether it was cut. `kept` is all of
+    it when the fenced text fits `CHECK_OUTPUT_CAP` UTF-8 bytes, else the whole lines that fit
+    beside the fence and `check_trailer`, else empty: the summary is then only a link. Messages
+    and a completion never add to the summary, so this is all the check holds."""
+    mapped = diff_map(prefix)
+    f = _fence_of(mapped)
+    if len(prefix) <= CHECK_OUTPUT_CAP and _bytes(fence(mapped, f)) <= CHECK_OUTPUT_CAP:
+        return f, mapped, False
+    room = CHECK_OUTPUT_CAP - _bytes(fence("", f)) - _bytes(check_trailer(url))
+    # `room + 1` keeps a line whose newline is byte `room + 1`; the newline itself is dropped.
+    # A negative room yields an empty or over-cap candidate, which the check below refuses.
+    cut = mapped.encode("utf-8")[: room + 1].decode("utf-8", errors="ignore")
+    kept = cut.rpartition("\n")[0]
+    if not kept or _bytes(fence(kept, f) + check_trailer(url)) > CHECK_OUTPUT_CAP:
+        return f, "", True
+    return f, kept, True
+
+
+def _bytes(text):
+    return len(text.encode("utf-8"))
+
+
+def fold_drift(text, kept_bytes):
     """`text` with OpenTofu's outside-changes note, from the note line to the first following
     line made only of `─`, replaced by one line counting the note's `has changed` and
     `has been deleted` headers. Unchanged unless the note line is the first non-empty line,
     where tofu prints it (author text, even split at a CR by the text-mode read, cannot reach
     it there), the rule line is complete (a cut read can stop inside it), and the text through
-    the rule fits `CHECK_OUTPUT_CAP - _CHECK_FRAME` UTF-8 bytes, so the apply check the counted
-    line names holds the whole note."""
+    the rule, its final newline excluded, lies within the first `kept_bytes` UTF-8 bytes of
+    the plan text the apply check holds (`check_frame`), so the check the counted line names
+    holds the whole note. `diff_map` keeps each line's byte length."""
     body = text.lstrip("\n")
     if not body.startswith(_DRIFT_NOTE + "\n"):
         return text
@@ -953,8 +985,8 @@ def fold_drift(text):
     for end in range(1, len(lines) - 1):
         line = lines[end]
         if line and not line.strip("─"):
-            note = "\n".join(lines[: end + 1]) + "\n"
-            if lead + len(note.encode("utf-8")) > CHECK_OUTPUT_CAP - _CHECK_FRAME:
+            note = "\n".join(lines[: end + 1])
+            if lead + _bytes(note) > kept_bytes:
                 return text
             return "\n".join([text[:lead] + _DRIFT_LINE.format(n), *lines[end + 1 :]])
         n += bool(_DRIFT_HEADER.match(line))
@@ -973,7 +1005,7 @@ def _validate_cell(cell, path):
         raise SystemExit(f"::error::cell summary {path} key 'changed' must be a bool")
 
 
-def load_cells(cells_dir):
+def load_cells(cells_dir, url):
     """(cell, plan_text) per downloaded cell-summary artifact, sorted by
     (environment, stack). A cell.json missing schema keys, or carrying the
     right keys with the wrong types, fails loud — that is plan-cell/summary
@@ -981,8 +1013,9 @@ def load_cells(cells_dir):
     `destroy`, `import` and `forget` are set here from `counts` over its
     `plan.txt`, whatever cell.json holds; underivable counts become "?" each,
     with one warning. `plan_text` is `fold_drift` of the file's first SIZE_BUDGET characters,
-    topped up to SIZE_BUDGET when the fold shrank it; a fold that lengthens it leaves it over
-    SIZE_BUDGET by that much."""
+    measured against the apply check `check_frame` builds with the plan run `url`, topped up to
+    SIZE_BUDGET when the fold shrank it; a fold that lengthens it leaves it over SIZE_BUDGET by
+    that much."""
     out = []
     skew = "(plan-cell and summary must be pinned at the same engine SHA)"
     for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
@@ -1002,7 +1035,10 @@ def load_cells(cells_dir):
             # A SIZE_BUDGET text exceeds every section limit, so a cut one renders truncated; the
             # top-up refills what `fold_drift` shrank (`max`: a negative size reads the whole file).
             with open(txt, encoding="utf-8") as fh:
-                text = fold_drift(fh.read(SIZE_BUDGET))
+                prefix = fh.read(CHECK_OUTPUT_CAP + 1)
+                kept = check_frame(prefix, url)[1]
+                text = fold_drift(prefix[:SIZE_BUDGET], _bytes(kept))
+                text += prefix[SIZE_BUDGET:][: max(0, SIZE_BUDGET - len(text))]
                 text += fh.read(max(0, SIZE_BUDGET - len(text)))
         out.append((cell, text))
     out.sort(key=lambda ct: (ct[0]["environment"], ct[0]["stack"]))
@@ -1207,7 +1243,7 @@ def main():
     if mode == "held":
         _held_main(checks, url)
         return
-    cells = load_cells(os.environ.get("CELLS", "cells"))
+    cells = load_cells(os.environ.get("CELLS", "cells"), url)
     unmanaged = _named_output(
         os.environ.get("SHIPMATE_UNMANAGED", ""), "unmanaged-stacks", "paths", "unmanaged stack"
     )

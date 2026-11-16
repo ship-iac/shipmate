@@ -19,6 +19,7 @@ from _loader import (
 from _loader import ENGINE as _ENGINE
 
 sc = load_script("summary-comment")
+pc = load_script("pending-checks")
 
 
 @pytest.fixture(autouse=True)
@@ -725,7 +726,7 @@ def test_without_an_env_order_environments_sort_by_name(tmp_path):
         "No changes. Your infrastructure matches the configuration.\n",
     )
     checks = {"plan / prod / stacks/app": {"html_url": "https://ck/app-prod"}}
-    cells = sc.load_cells(str(tmp_path))
+    cells = sc.load_cells(str(tmp_path), RUN_URL)
     cells.reverse()
     body = sc.build_comment(cells, checks, RUN_URL, SHA)[0]
     assert body == (
@@ -1251,7 +1252,7 @@ def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
     b = tmp_path / "cell-summary.dev-eu.stacks-app"
     b.mkdir()
     (b / "cell.json").write_text(json.dumps(_cell()))
-    cells = sc.load_cells(str(tmp_path))
+    cells = sc.load_cells(str(tmp_path), RUN_URL)
     assert [(c["environment"], c["stack"]) for c, _ in cells] == [
         ("dev-eu", "stacks/app"),
         ("dev-us", "stacks/db"),
@@ -1266,7 +1267,7 @@ def test_load_cells_fails_loud_on_missing_schema_keys(tmp_path):
     del legacy["stack"]
     (d / "cell.json").write_text(json.dumps(legacy))
     with pytest.raises(SystemExit) as exc:
-        sc.load_cells(str(tmp_path))
+        sc.load_cells(str(tmp_path), RUN_URL)
     path = os.path.join(str(tmp_path), "cell-summary.x.y", "cell.json")
     assert str(exc.value) == (
         f"::error::cell summary {path} missing keys ['stack'] "
@@ -1275,7 +1276,7 @@ def test_load_cells_fails_loud_on_missing_schema_keys(tmp_path):
 
 
 def test_load_cells_empty_dir_ok(tmp_path):
-    assert sc.load_cells(str(tmp_path / "nope")) == []
+    assert sc.load_cells(str(tmp_path / "nope"), RUN_URL) == []
 
 
 def test_load_cells_fails_loud_on_wrong_type_bool_field(tmp_path):
@@ -1284,7 +1285,7 @@ def test_load_cells_fails_loud_on_wrong_type_bool_field(tmp_path):
     bad = _cell(changed="false")  # A truthy string must not pass as a bool.
     (d / "cell.json").write_text(json.dumps(bad))
     with pytest.raises(SystemExit, match="changed"):
-        sc.load_cells(str(tmp_path))
+        sc.load_cells(str(tmp_path), RUN_URL)
 
 
 def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
@@ -1293,7 +1294,7 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     (d / "cell.json").write_text(json.dumps(_cell()))
     line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars.
     (d / "plan.txt").write_text(line * 1_112 + _MIXED)  # Over 70_000 chars, past SIZE_BUDGET.
-    cells = sc.load_cells(str(tmp_path))
+    cells = sc.load_cells(str(tmp_path), RUN_URL)
     assert sc.state(cells[0][0]) == "+1 ~2 -2"
     assert len(cells[0][1]) == sc.SIZE_BUDGET
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
@@ -1402,7 +1403,7 @@ def test_the_comment_counts_come_from_plan_text_not_cell_json(tmp_path):
         _cell(add=99, change=99, destroy=99),
         "  + resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
     )
-    body = sc.build_comment(sc.load_cells(str(tmp_path)), {}, RUN_URL, SHA)[0]
+    body = sc.build_comment(sc.load_cells(str(tmp_path), RUN_URL), {}, RUN_URL, SHA)[0]
     assert f"<details><summary>{_bare_app(RUN_URL)}</summary>" in body.splitlines()
     assert "99" not in body
 
@@ -1410,7 +1411,7 @@ def test_the_comment_counts_come_from_plan_text_not_cell_json(tmp_path):
 def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path, capsys):
     """Mutation: printing the warning twice reddens the exact stdout comparison."""
     _write_cell(tmp_path, _cell())
-    cells = sc.load_cells(str(tmp_path))
+    cells = sc.load_cells(str(tmp_path), RUN_URL)
     assert [tuple(c[k] for k in _COUNT_KEYS) for c, _ in cells] == [("?",) * 5]
     assert capsys.readouterr().out == (
         "::warning::plan text for stacks/app / dev-eu has no single OpenTofu tally line; "
@@ -1423,7 +1424,7 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
 def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
     """Mutation: dropping the workflow-command escaping lets the name start a second command."""
     _write_cell(tmp_path, _cell(stack="a\n::error::forged"))
-    sc.load_cells(str(tmp_path))
+    sc.load_cells(str(tmp_path), RUN_URL)
     assert capsys.readouterr().out == (
         "::warning::plan text for a%0A::error::forged / dev-eu has no single OpenTofu tally line; "
         "its counts render as ?\n"
@@ -1435,7 +1436,7 @@ def test_load_cells_accepts_a_cell_json_without_counts(tmp_path):
     for k in _COUNT_KEYS:
         del cell[k]
     _write_cell(tmp_path, cell, _MIXED)
-    [(loaded, _)] = sc.load_cells(str(tmp_path))
+    [(loaded, _)] = sc.load_cells(str(tmp_path), RUN_URL)
     assert tuple(loaded[k] for k in _COUNT_KEYS) == (1, 2, 2, 0, 0)
 
 
@@ -1444,7 +1445,7 @@ def test_load_cells_still_fails_loud_without_changed(tmp_path):
     del cell["changed"]
     _write_cell(tmp_path, cell, _MIXED)
     with pytest.raises(SystemExit, match="changed"):
-        sc.load_cells(str(tmp_path))
+        sc.load_cells(str(tmp_path), RUN_URL)
 
 
 def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeypatch):
@@ -2186,6 +2187,8 @@ _DRIFT_NOTE = "Note: Objects have changed outside of OpenTofu\n"
 _COUNTED_1 = "ℹ️ 1 object(s) changed outside OpenTofu; the full note is in this cell's apply check."
 _COUNTED_2 = "ℹ️ 2 object(s) changed outside OpenTofu; the full note is in this cell's apply check."
 _DRIFT_FOLDED = "\n" + _COUNTED_2 + "\n" + "".join(_DRIFT_LINES[25:])
+#: A `kept_bytes` past every plan in these tests: the apply check holds the whole note.
+_HOLDS_ALL = sc.CHECK_OUTPUT_CAP
 _TRAILER = (
     "\n\n_Truncated; see the cell's apply check in [the Checks tab]"
     "(https://gh/o/r/pull/5/checks)._\n</details>"
@@ -2204,7 +2207,7 @@ def test_fold_drift_replaces_the_outside_changes_note_with_one_counted_line():
         "\n",
         "OpenTofu used the selected providers to generate the following execution\n",
     ]
-    assert sc.fold_drift(_DRIFT) == _DRIFT_FOLDED
+    assert sc.fold_drift(_DRIFT, _HOLDS_ALL) == _DRIFT_FOLDED
 
 
 def test_fold_drift_counts_a_has_changed_header():
@@ -2215,7 +2218,7 @@ def test_fold_drift_counts_a_has_changed_header():
         "  # local_file.b has been deleted\n", "  # local_file.b has changed\n"
     )
     assert derived != _DRIFT
-    assert sc.fold_drift(derived) == _DRIFT_FOLDED
+    assert sc.fold_drift(derived, _HOLDS_ALL) == _DRIFT_FOLDED
 
 
 @pytest.mark.parametrize("cut", ["before the rule", "inside the rule"])
@@ -2226,21 +2229,21 @@ def test_fold_drift_leaves_a_note_cut_before_its_rule_unchanged(cut):
     text = "".join(_DRIFT_LINES[:24])
     if cut == "inside the rule":
         text += _DRIFT_LINES[24][:10]
-    assert sc.fold_drift(text) == text
+    assert sc.fold_drift(text, _HOLDS_ALL) == text
 
 
 def test_fold_drift_leaves_a_plan_without_the_note_unchanged():
     """Fixture: `import-forget.plan.txt`, raw. Mutation: returning the text without its leading
     newlines on the no-note path drops its first line."""
     text = (_FIXTURES / "import-forget.plan.txt").read_text(encoding="utf-8")
-    assert sc.fold_drift(text) == text
+    assert sc.fold_drift(text, _HOLDS_ALL) == text
 
 
 def test_fold_drift_folds_only_a_note_on_the_first_non_empty_line():
     """Derived from the capture: one line of tofu's own text before the note. Mutation: folding
     the note line wherever it sits folds it."""
     derived = "\nOpenTofu used the selected providers.\n" + "".join(_DRIFT_LINES[1:])
-    assert sc.fold_drift(derived) == derived
+    assert sc.fold_drift(derived, _HOLDS_ALL) == derived
 
 
 def test_a_cr_in_author_text_cannot_forge_a_drift_note(tmp_path):
@@ -2263,7 +2266,7 @@ def test_a_cr_in_author_text_cannot_forge_a_drift_note(tmp_path):
         "Plan: 1 to add, 0 to change, 0 to destroy.\n"
     )
     _write_cell(tmp_path, _cell(), plan)
-    [(_, text)] = sc.load_cells(str(tmp_path))
+    [(_, text)] = sc.load_cells(str(tmp_path), RUN_URL)
     assert text == plan.replace("\r", "\n")
 
 
@@ -2277,17 +2280,89 @@ def _note_of_bytes(size):
     return head + wide * k + "  " + "a" * (rest - 3) + "\n" + rule
 
 
-@pytest.mark.parametrize(("size", "folded"), [(64_511, True), (64_512, False)])
-def test_fold_drift_folds_only_a_note_the_apply_check_holds_whole(size, folded):
-    """The counted line says the apply check holds the full note, which only a note within that
-    check's 65,535-byte cap less 1,024 bytes for its fence and trailer keeps true. Mutations:
-    dropping the byte check or its margin folds the 64,512-byte note; `>=` leaves the
-    64,511-byte note unfolded."""
-    tail = "\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
+_URL = "https://github.com/acme/demo/actions/runs/123456789"
+#: The apply check's cut room for a plan with no backtick run: the cap less `fence("", "```")`
+#: and the trailer naming `_URL`, both hand-written.
+_ROOM = (
+    sc.CHECK_OUTPUT_CAP
+    - len("```diff\n\n```")
+    - len(
+        "\n\n_Truncated; the plan job's raw log in [the plan run]"
+        "(https://github.com/acme/demo/actions/runs/123456789) has the full plan._"
+    )
+)
+#: ASCII lines enough to cut any plan they end.
+_LONG_TAIL = "  + padded resource line for the cut\n" * 2_000
+
+
+def _folds(tmp_path, plan, url=_URL):
+    """(`load_cells` folded the note, the apply check's summary holds the note through its rule)
+    for the one cell whose plan text is `plan`."""
+    d = tmp_path / f"t{len(list(tmp_path.iterdir()))}"
+    d.mkdir()
+    _write_cell(d, _cell(), plan)
+    [(_, text)] = sc.load_cells(str(d), url)
+    summary = pc.check_output(_cell(), plan.encode("utf-8"), url)["summary"]
+    note = plan[: plan.index("─" * 77) + 77]
+    return text.startswith("\n" + _COUNTED_1 + "\n"), note in summary
+
+
+@pytest.mark.parametrize(
+    ("size", "expected"), [(_ROOM + 1, (True, True)), (_ROOM + 2, (False, False))]
+)
+def test_the_fold_agrees_with_the_cut_apply_check_at_its_byte_boundary(tmp_path, size, expected):
+    """The counted line says the apply check holds the full note, so the note folds exactly when
+    the check `pending-checks` builds holds it through its rule. A `size`-byte note ends its rule
+    at byte `size - 1`, and the cut keeps a line whose newline is byte `_ROOM + 1`. Mutations:
+    `room` for `room + 1` in the cut; restore the 1,024-byte margin (`_CHECK_FRAME`)."""
     note = _note_of_bytes(size)
     assert len(note.encode("utf-8")) == size and len(note) < sc.SIZE_BUDGET
-    expected = "\n" + _COUNTED_1 + "\n" + tail if folded else note + tail
-    assert sc.fold_drift(note + tail) == expected
+    assert _folds(tmp_path, note + _LONG_TAIL) == expected
+
+
+def test_a_note_folds_when_the_whole_plan_fits_the_check_uncut(tmp_path):
+    """A note longer than the cut room still folds when the whole fenced plan fits the cap,
+    since that check holds every line. Mutation: measure the fold against the cut branch only
+    (an uncut plan keeps nothing)."""
+    note = _note_of_bytes(_ROOM + 40)
+    plan = note + "\nPlan: 1 to add, 0 to change, 0 to destroy.\n"
+    assert len(plan.encode("utf-8")) + len("```diff\n```") <= sc.CHECK_OUTPUT_CAP
+    assert _folds(tmp_path, plan) == (True, True)
+
+
+def test_a_backtick_run_past_the_comment_read_widens_the_check_fence(tmp_path):
+    """The check's fence is sized over its whole 65,536-character prefix; a 2,000-backtick run
+    between character 60,000 and that prefix's end takes room from the note, which `fold_drift`
+    reading only the first 60,000 characters cannot see. Mutation: size the fence over the
+    60,000-character text in `load_cells`."""
+    note = _note_of_bytes(_ROOM - 1_000)
+    pad = "  + p\n" * ((60_100 - len(note)) // 6 + 1)
+    run = "`" * 2_000 + "\n"
+    plain = note + pad + _LONG_TAIL
+    ticked = note + pad + run + _LONG_TAIL
+    assert 60_000 < ticked.index("`") < ticked.index("`") + 2_000 < sc.CHECK_OUTPUT_CAP + 1
+    assert _folds(tmp_path, plain) == (True, True)
+    assert _folds(tmp_path, ticked) == (False, False)
+
+
+def test_a_longer_run_url_moves_the_boundary_down_by_its_extra_length(tmp_path):
+    """The trailer names the run URL, so each character it adds takes a byte from the note.
+    Mutation: a trailer whose length does not depend on the URL."""
+    longer = _URL + "/attempts/1"
+    extra = len(longer) - len(_URL)
+    note = _note_of_bytes(_ROOM + 1)
+    assert _folds(tmp_path, note + _LONG_TAIL) == (True, True)
+    assert _folds(tmp_path, note + _LONG_TAIL, longer) == (False, False)
+    assert _folds(tmp_path, _note_of_bytes(_ROOM + 1 - extra) + _LONG_TAIL, longer) == (True, True)
+
+
+def test_load_cells_reads_a_long_plan_without_a_note_unchanged(tmp_path):
+    """No fold, no change: the text is the plan's first SIZE_BUDGET characters, read through
+    the check's longer prefix. Mutation: return the check's whole prefix."""
+    plan = "  + x\n" * 20_000
+    _write_cell(tmp_path, _cell(), plan)
+    [(_, text)] = sc.load_cells(str(tmp_path), RUN_URL)
+    assert text == plan[: sc.SIZE_BUDGET]
 
 
 def test_fold_drift_ignores_an_indented_note_header():
@@ -2295,7 +2370,7 @@ def test_fold_drift_ignores_an_indented_note_header():
     stripping all leading whitespace, not only newlines, folds it."""
     derived = _DRIFT.replace(_DRIFT_NOTE, "  " + _DRIFT_NOTE, 1)
     assert derived != _DRIFT
-    assert sc.fold_drift(derived) == derived
+    assert sc.fold_drift(derived, _HOLDS_ALL) == derived
 
 
 def test_load_cells_folds_the_drift_note_and_keeps_plan_txt_and_its_counts(tmp_path):
@@ -2303,7 +2378,7 @@ def test_load_cells_folds_the_drift_note_and_keeps_plan_txt_and_its_counts(tmp_p
     raw capture. Mutations: dropping the fold from `load_cells` keeps the note; writing the
     folded text back to plan.txt reddens the byte comparison."""
     _write_cell(tmp_path, _cell(), _DRIFT)
-    [(cell, text)] = sc.load_cells(str(tmp_path))
+    [(cell, text)] = sc.load_cells(str(tmp_path), RUN_URL)
     assert text == _DRIFT_FOLDED
     assert tuple(cell[k] for k in _COUNT_KEYS) == (2, 1, 0, 0, 0)
     assert (tmp_path / "cell-summary.dev-eu.x" / "plan.txt").read_bytes() == _DRIFT_BYTES
@@ -2312,7 +2387,7 @@ def test_load_cells_folds_the_drift_note_and_keeps_plan_txt_and_its_counts(tmp_p
 def test_the_counted_drift_line_renders_verbatim_inside_the_fold_out_fence():
     """`diff_map` leaves the counted line in place: it starts with no change sign. Mutation:
     a replacement starting with `~ ` is rewritten to `! `."""
-    section = sc.render_section("L", sc.fold_drift(_DRIFT), sc.SIZE_BUDGET)
+    section = sc.render_section("L", sc.fold_drift(_DRIFT, _HOLDS_ALL), sc.SIZE_BUDGET)
     lines = section.splitlines()
     start = lines.index("```diff")
     assert lines[start + 1 : start + 3] == ["", _COUNTED_2]
@@ -2326,7 +2401,7 @@ def test_a_cut_read_with_a_folded_drift_note_stays_visibly_cut(tmp_path):
     rest = "\n" + "  + resource line padded to a fixed width for this test case\n" * 1_000
     rest += "\nPlan: 7 to add, 0 to change, 0 to destroy.\n"
     _write_cell(tmp_path, _cell(), "".join(_DRIFT_LINES[:25]) + rest)
-    [(cell, text)] = sc.load_cells(str(tmp_path))
+    [(cell, text)] = sc.load_cells(str(tmp_path), RUN_URL)
     assert text == ("\n" + _COUNTED_2 + "\n" + rest)[: sc.SIZE_BUDGET]
     assert tuple(cell[k] for k in _COUNT_KEYS) == (7, 0, 0, 0, 0)
     body = sc.build_comment([(cell, text)], {}, RUN_URL, SHA)[0]
@@ -2340,7 +2415,7 @@ def test_a_fold_that_lengthens_the_read_gets_no_top_up(tmp_path):
     block = "\n" + _DRIFT_NOTE + "  # x.y has been deleted\n─\n"
     tail = "  + b\n" * 12_000
     _write_cell(tmp_path, _cell(), block + tail)
-    [(_, text)] = sc.load_cells(str(tmp_path))
+    [(_, text)] = sc.load_cells(str(tmp_path), RUN_URL)
     assert text == "\n" + _COUNTED_1 + "\n" + tail[: sc.SIZE_BUDGET - len(block)]
     assert len(text) > sc.SIZE_BUDGET
 
