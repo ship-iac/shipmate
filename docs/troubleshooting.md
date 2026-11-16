@@ -2590,19 +2590,18 @@ An `auto` cell also refuses when:
   filter. Comment `shipmate apply`, or push.
 - `shipmate plan run <m> of this pull request is <status> and newer than plan
   run <n>, which this auto apply applies`: a `shipmate plan` of this pull request
-  was dispatched after this apply run was created. `detect` refuses a newer plan
-  that was live when it read, so here it started later, or was dispatched in the
-  seconds before `detect`'s read and missing from that listing. Wait for it to
+  created after the plan run is running while the wave waits: dispatched since
+  `detect`, missing from `detect`'s listing, or re-run since. Wait for it to
   finish, review its plan, then comment `shipmate apply`.
 - `shipmate plan run <m> of this pull request planned after plan run <n>, which
   this auto apply applies`: such a plan ran and ended, its `plan / detect` job
   succeeded, while the wave waited. Review its plan, then comment `shipmate
   apply`.
-- `could not confirm no newer shipmate plan run of pull request #<pr> (<why>)`:
-  the apply run could not be read (`<why>` names the cause), or the plan runs
-  created since it could not be judged (`the listing is incomplete`, the causes
-  under ``auto apply refused: the shipmate plan runs of this pull request could
-  not all be listed`` above). Comment `shipmate apply`, or push.
+- `could not confirm no newer shipmate plan run of pull request #<pr> (the
+  listing is incomplete)`: the plan runs created since the plan run could not be
+  judged, for the causes under ``auto apply refused: the shipmate plan runs of
+  this pull request could not all be listed`` above. Comment `shipmate apply`,
+  or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs

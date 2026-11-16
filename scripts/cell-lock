@@ -46,7 +46,7 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   `STACK` in `SHIPMATE_ENV`, is open at `SHIPMATE_HEAD_SHA` and `GITHUB_RUN_ATTEMPT` is `1`.
   With `SHIPMATE_AUTO` `true` it also refuses unless the pull request is not a draft,
   `SHIPMATE_PROVENANCE_RUN` is the head's newest autoplan and the run the cell's newest plan
-  record names, no newer `shipmate plan` run of the pull request created since this apply run
+  record names, no newer `shipmate plan` run of the pull request created since that autoplan
   is live or planned, its pusher still passes `authorize.pusher_reason`, and the base tip is
   still `SHIPMATE_BASE_SHA`. A "Re-run failed jobs" of an apply re-runs its waves without
   `detect` or `acquire`, and a wave can wait hours on an environment approval, so each apply
@@ -993,20 +993,10 @@ def _plan_record(repo, head, name, run):
     return plan_run, ag.plan_actions(lines, app_id).get(name)
 
 
-def _newer_since_this_run(repo, pr, newest, run):
-    """`apply-gate.newer_plans` over the `shipmate plan` runs created since this apply run
-    (`GITHUB_RUN_ID`): `detect` judged every earlier one and refused any live one, so the window
-    covers `detect` to now and stays short."""
-    run_id = os.environ.get("GITHUB_RUN_ID", "")
-    if not is_run_id(run_id):
-        raise ValueError(f"GITHUB_RUN_ID is {run_id!r}")
-    since = gh_json(f"repos/{repo}/actions/runs/{run_id}", run)["created_at"]
-    return ag.newer_plans(repo, pr, newest, since=since, run=run)
-
-
 def _verify_auto(repo, head, provenance, env, stack, where, run, pr):
     """The auto form's provenance checks of plan run `provenance` on `head` for pull request
-    `pr`, a str, then the newer-plan check (`_newer_since_this_run`)."""
+    `pr`, a str, then the newer-plan check over the plan runs created since that autoplan: a
+    run `detect` listed can be re-run while the wave waits, keeping its `created_at`."""
     newest = _confirm(
         where,
         f"plan run {provenance} is the newest autoplan of {head}",
@@ -1023,7 +1013,11 @@ def _verify_auto(repo, head, provenance, env, stack, where, run, pr):
     reason = ag.provenance_reason(newest, provenance, head, {name: record})
     _refuse_provenance(where, head, provenance, reason)
     what = f"no newer shipmate plan run of pull request #{pr}"
-    counted, complete = _confirm(where, what, lambda: _newer_since_this_run(repo, pr, newest, run))
+    counted, complete = _confirm(
+        where,
+        what,
+        lambda: ag.newer_plans(repo, pr, newest, since=newest.get("created_at"), run=run),
+    )
     reason = ag.newer_plan(counted, complete)
     if reason is not None and reason[0] == "plan-listing":
         raise SystemExit(

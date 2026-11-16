@@ -2518,7 +2518,7 @@ and unless the pull request is open at the applied head. Under `apply_mode: auto
 it also refuses unless the run attempt is `1`, the pull request is not a draft, the plan run detect bound is
 still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action (`opened` or
-`synchronize`), no newer `shipmate plan` run of the pull request created since the apply run
+`synchronize`), no newer `shipmate plan` run of the pull request created since the plan run
 is live or planned, the plan run's pusher
 still passes detect's pusher check (§`apply_mode: auto`, same function and
 wording), and the base branch's tip, read from its ref, is still the one detect read,
@@ -2806,7 +2806,7 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
 
   Known limit: the read is a point in time; a run dispatched in the seconds
   before it can be missing from the listing. Each wave cell repeats the check
-  over the runs created since its apply run (§Wave re-check).
+  over the same window (§Wave re-check).
 - **Pusher.** The listed run's `actor`, the pusher, must equal its
   `triggering_actor` and must have write access. A re-run of the autoplan keeps
   `actor` and names the re-runner as `triggering_actor`, so it refuses:
@@ -2882,13 +2882,13 @@ cell's newest plan record names, that record names a push event action
 (`opened` or `synchronize`), the pull request is still not a draft, no newer
 `shipmate plan` run of the pull request counts (the Newer plan check above), the
 pusher still passes the pusher check above, and the base tip, read from the
-branch ref, is still the one `detect` read. The cell reads its own apply run
-(`actions/runs/<GITHUB_RUN_ID>`) and lists the plan runs created since that
-run's `created_at`, not since the plan run's: `detect` judged every earlier one
-and refused any live one, so the window covers `detect` to now and is short. In
-it a live run counts, and a completed run counts when its `plan / detect` job
-succeeded, as at `detect`: a plan dispatched after `detect` that planned and
-ended while the wave waited, with or without a record, refuses the cell. A
+branch ref, is still the one `detect` read. The cell lists the plan runs created
+since the plan run's `created_at`, the window `detect` read, not since the apply
+run's: a plan run `detect` listed as ended can be re-run while the wave waits,
+keeping its `created_at`, and one missing from `detect`'s lagging listing shows
+here. A live run counts, and a completed run counts when its `plan / detect` job
+succeeded, as at `detect`: a plan that planned and ended while the wave waited,
+with or without a record, refuses the cell. A
 counted live plan refuses with ``apply aborted for `<env>` / `<stack>`:
 shipmate plan run <m> of this pull request is <status> and newer than plan run
 <n>, which this auto apply applies; wait for it to finish, review its plan, then
@@ -2897,9 +2897,9 @@ comment `shipmate apply` ``, a completed one with ``apply aborted for `<env>` /
 <n>, which this auto apply applies; review its plan, then comment `shipmate
 apply` ``, and a check that cannot rule one out (the causes above) with
 ``could not confirm no newer shipmate plan run of pull request #<pr> (the
-listing is incomplete)``; a failed read of the apply run refuses with its own
-cause in the parentheses. Known limit: a plan dispatched after a cell's check
-does not stop that cell. The base comparison is whole-branch,
+listing is incomplete)``. Known limit: a plan dispatched after a cell's check,
+or missing from a listing read seconds after its dispatch, does not stop that
+cell. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
 environment approval refuses that wave. Update the branch from the base and
