@@ -79,6 +79,7 @@ SCENARIOS = {
     "detect-refused": (
         {
             "SHIPMATE_DETECT_REFUSAL": "apply refused: no apply check on the head",
+            "SHIPMATE_DETECT_RESULT": "failure",
             "SHIPMATE_RESULTS": "failure",
         },
         [],
@@ -116,6 +117,7 @@ def _render(monkeypatch, tmp_path, name, report_env, report=None):
         "SHIPMATE_ENVIRONMENT": "",
         "SHIPMATE_ENVLEVEL0_WAVES": json.dumps(waves),
         "SHIPMATE_RESULTS": "success",
+        "SHIPMATE_DETECT_RESULT": "success",
         "SHIPMATE_CHECKS": str(checks),
         "SHIPMATE_REPORT_PATH": str(path),
         "SHIPMATE_APP_ID": "12345",
@@ -195,7 +197,11 @@ def _complete(**fields):
 #: The red line an unread report adds under the verdict, hand-written.
 _UNREAD = "🔴 could not read the detect report; see the run"
 #: The `detect-refused` scenario's env with the refusal taken back: a run whose jobs succeeded.
-_NO_REFUSAL = {"SHIPMATE_RESULTS": "success", "SHIPMATE_DETECT_REFUSAL": ""}
+_NO_REFUSAL = {
+    "SHIPMATE_RESULTS": "success",
+    "SHIPMATE_DETECT_RESULT": "success",
+    "SHIPMATE_DETECT_REFUSAL": "",
+}
 _AT = (
     "at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) "
     "in [run #7](https://github.com/acme/repo/actions/runs/42)"
@@ -225,9 +231,6 @@ _AT = (
             id="held-cell-keys",
         ),
         pytest.param(_complete(held_cells=[{**_AE, "cause": "gone"}]), id="held-cell-cause"),
-        pytest.param(
-            _complete(held_cells=[{**_AE, "cause": "locked"}]), id="locked-cell-without-holder"
-        ),
         pytest.param(
             _complete(held_cells=[{**_AE, "cause": "locked", "holder": "7"}]),
             id="locked-cell-holder-not-a-number",
@@ -288,9 +291,9 @@ def test_an_unread_report_over_applied_rows_is_never_green(monkeypatch, tmp_path
 
 def test_a_refused_detect_reads_its_incomplete_report(monkeypatch, tmp_path):
     """A refusal leaves the report incomplete (the empty one its job wrote, or what the refusal
-    wrote); with the refusal it renders as read, no red line.
+    wrote); with the detect job failed it renders as read, no red line.
 
-    Mutation: ignore `refused` in `read_report` -- the red line appears, red."""
+    Mutation: ignore `detect_failed` in `read_report` -- the red line appears, red."""
     held = [{"stack": "stacks/a", "environment": "dev", "cause": "overlap"}]
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", {}, json.dumps({"held_cells": held}))
     assert _UNREAD not in body
@@ -332,3 +335,23 @@ def test_a_wide_environment_graph_renders_pending_not_green(monkeypatch, tmp_pat
         "",
         "Comment `shipmate help` for the available commands.",
     ]
+
+
+def test_an_incomplete_report_beside_a_detect_that_succeeded_is_unread(monkeypatch, tmp_path):
+    """Only the detect job's `failure` lets an incomplete report through; a refusal text from a
+    detect whose job did not fail is no such evidence.
+
+    Mutation: read `SHIPMATE_DETECT_REFUSAL` instead of `SHIPMATE_DETECT_RESULT` in `main` --
+    no red line, red."""
+    env = {**_NO_REFUSAL, "SHIPMATE_DETECT_REFUSAL": "apply refused: no apply check on the head"}
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", env, "{}")
+    assert _UNREAD in body
+
+
+def test_a_locked_cell_without_a_holder_reads_as_an_unknown_holder(monkeypatch, tmp_path):
+    """Mutation: default a missing `holder` to `""` in `_held` -- the report reads as unread,
+    red."""
+    report = _complete(held_cells=[{"stack": "stacks/a", "environment": "dev", "cause": "locked"}])
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, report)
+    assert _UNREAD not in body
+    assert "🔒 locked by an unknown holder: stacks/a / dev." in body

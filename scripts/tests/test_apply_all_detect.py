@@ -1470,29 +1470,3 @@ def test_the_bare_form_writes_its_nine_fields_in_one_report(tmp_path, monkeypatc
         "complete",
     }
     assert not (REPORT_FIELDS | {"report"}) & set(parsed)
-
-
-#: The two audit notices, hand-written; `apply-comment` prints the same text.
-_EXEMPT_NOTICE = (
-    ": review-exempt, permitted to apply without an approving review (review: false in "
-    ".github/shipmate-config.yml)"
-)
-_NO_REVIEW_NOTICE = (
-    ": no approving review was required, so the default review: true had nothing to enforce"
-)
-
-
-@pytest.mark.parametrize(
-    ("decision", "exempt", "notice"),
-    [("REVIEW_REQUIRED", "dev-eu", _EXEMPT_NOTICE), ("NONE", None, _NO_REVIEW_NOTICE)],
-    ids=["exempt", "no-review"],
-)
-def test_detect_prints_the_review_audit_notices(
-    tmp_path, monkeypatch, capsys, decision, exempt, notice
-):
-    """The review-exempt and no-review audit trail is printed by detect too, so a result comment
-    that cannot read the report does not lose it.
-
-    Mutation: drop the notice loops from `write_report` -- red."""
-    _run_main(tmp_path, monkeypatch, envs=["dev-eu"], cells=1, exempt=exempt, decision=decision)
-    assert f"::notice::dev-eu{notice}\n" in capsys.readouterr().out

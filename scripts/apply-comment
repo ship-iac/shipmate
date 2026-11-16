@@ -654,7 +654,7 @@ def _locked_lines(locked):
     locks as `<stack> / <env>` and the remedy."""
     by_lock = {}
     for c in locked:
-        key = (_lock_holder(c["holder"]), sc._md_escape(c["environment"]))
+        key = (_lock_holder(c.get("holder")), sc._md_escape(c["environment"]))
         by_lock.setdefault(key, []).append(f"{sc._md_name(c['stack'])} / {key[1]}")
     lines = []
     for (holder, env), cells in by_lock.items():
@@ -693,7 +693,7 @@ def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_af
     `skipped_after` gives it with `_predecessor_remedy`, or empty when it gives none. `bare`
     is the auto form's envs left for a bare apply."""
     locked, overlap = _of_cause(held_cells, "locked"), _of_cause(held_cells, "overlap")
-    holders = {(c["stack"], c["environment"]): _lock_holder(c["holder"]) for c in locked}
+    holders = {(c["stack"], c["environment"]): _lock_holder(c.get("holder")) for c in locked}
     based = {(c["stack"], c["environment"]) for c in overlap}
     cell_envs = {sc._md_escape(c["environment"]) for c in [*locked, *overlap, *waiting]}
     after = {sc._md_escape(e): _esc(preds) for e, preds in (skipped_after or {}).items()}
@@ -1025,8 +1025,8 @@ def _cells(value, keys):
 
 def _held(cell):
     """Whether held cell `cell` (string `cause` checked) is `overlap`, or `locked` with a `holder`
-    that is a pull request number or null."""
-    holder = cell.get("holder", "")
+    that is a pull request number, null or absent (an unknown holder)."""
+    holder = cell.get("holder")
     return cell["cause"] == "overlap" or (
         cell["cause"] == "locked" and (holder is None or type(holder) is int)
     )
@@ -1051,21 +1051,21 @@ def _shape_error(fields):
     return f"{bad[0]} is not the shape the comment reads" if bad else None
 
 
-def read_report(path, refused=False):
+def read_report(path, detect_failed=False):
     """(fields, unread) from apply-detect's report file at `path`. `fields` holds every
     `_REPORT_DEFAULTS` key, a missing one at its default. Only a report `write_report` finished
-    carries `"complete": true`; an incomplete one is read only when detect `refused`, whose
-    report is the empty one written before any refusal (or what the refusal wrote). `unread` is
-    True, and `fields` all defaults, when the file is missing or unreadable, is not a JSON
-    object, is incomplete without a refusal (detect died after the empty report was written),
-    or holds a field the renderer cannot read (`_shape_error`); one warning names the cause. The
-    caller then never renders a green verdict: empty fields alone would."""
+    carries `"complete": true`; an incomplete one is read only when the detect job failed, whose
+    report is the empty one written before any step (or what a refusal wrote). `unread` is True,
+    and `fields` all defaults, when the file is missing or unreadable, is not a JSON object, is
+    incomplete while detect did not fail, or holds a field the renderer cannot read
+    (`_shape_error`); one warning names the cause. The caller then never renders a green verdict:
+    empty fields alone would."""
     try:
         report = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
         if not isinstance(report, dict):
             raise ValueError("not a JSON object")
-        if report.get("complete") is not True and not refused:
-            raise ValueError("detect did not finish it and refused nothing")
+        if report.get("complete") is not True and not detect_failed:
+            raise ValueError("it is incomplete, and detect did not fail")
         fields = {k: report.get(k, d) for k, d in _REPORT_DEFAULTS.items()}
         if cause := _shape_error(fields):
             raise ValueError(cause)
@@ -1085,9 +1085,10 @@ def main():
     )
     rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "")
-    # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
-    refusal = os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
-    r, unread = read_report(os.environ.get("SHIPMATE_REPORT_PATH", ""), refused=bool(refusal))
+    r, unread = read_report(
+        os.environ.get("SHIPMATE_REPORT_PATH", ""),
+        detect_failed=os.environ.get("SHIPMATE_DETECT_RESULT") == "failure",
+    )
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
     for line in notices(rows, r["applied_exempt_envs"], r["review_not_required_envs"]):
         print(line)
@@ -1102,7 +1103,9 @@ def main():
         r["review_held_envs"],
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
         r["waiting_cells"],
-        refusal or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
+        # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
+        os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
+        or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
         r["env_order"],
         r["held_cells"],
         r["skipped_after"],

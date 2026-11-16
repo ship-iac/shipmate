@@ -28,6 +28,10 @@ inputs:
     description: "detect's `report_artifact` output: the name of the artifact holding apply-detect's report. Empty (detect never ran) reads the report as unread."
     required: false
     default: ""
+  detect-result:
+    description: "`needs.detect.result`. Only `failure` lets the comment read an incomplete report: the empty one the detect job wrote before a step refused."
+    required: false
+    default: ""
   detect-refusal:
     description: "detect's `refusal` output, setup's or else apply-detect's: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
@@ -152,6 +156,7 @@ runs:
         SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
         SHIPMATE_RESULTS: ${{ inputs.results }}
         SHIPMATE_REPORT_PATH: apply-report/report.json
+        SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
         SHIPMATE_AUTO: ${{ inputs.auto }}

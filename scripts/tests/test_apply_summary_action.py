@@ -132,6 +132,7 @@ _RENDER_ENV = {
     "SHIPMATE_ENVLEVEL3_WAVES": "${{ inputs.envlevel3-waves }}",
     "SHIPMATE_RESULTS": "${{ inputs.results }}",
     "SHIPMATE_REPORT_PATH": "apply-report/report.json",
+    "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
     "SHIPMATE_AUTO": "${{ inputs.auto }}",
@@ -265,6 +266,7 @@ def test_declared_inputs_are_exactly_these():
         "envlevel2-waves",
         "envlevel3-waves",
         "report-artifact",
+        "detect-result",
         "detect-refusal",
         "lock-refusal",
         "auto",
@@ -394,6 +396,7 @@ _APPLY_SUMMARY_WITH = {
     "envlevel2-waves": "${{ needs.detect.outputs.envlevel2_waves }}",
     "envlevel3-waves": "${{ needs.detect.outputs.envlevel3_waves }}",
     "report-artifact": "${{ needs.detect.outputs.report_artifact }}",
+    "detect-result": "${{ needs.detect.result }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "auto": "${{ inputs.auto }}",
@@ -411,6 +414,7 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: drop `environment:` from the step's `with:` -- red.
     Mutation: restore `held-cells: ${{ needs.detect.outputs.held_cells }}` -- red.
     Mutation: drop `report-artifact:` from the step's `with:` -- red.
+    Mutation: drop `detect-result:` from the step's `with:` -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
     Mutation: drop `auto:` from the step's `with:` -- red."""

@@ -4042,19 +4042,20 @@ names an error. A job that failed without an `::error::` renders no fence.
   and held cells, environment order and pusher) reach it as a file, with no size cap. The
   `detect` job writes an empty report before checkout, `apply-detect` overwrites it with the
   complete one, marked `"complete": true`, and the job uploads whichever is there, after a
-  failed step too, as the artifact `apply-report-<run attempt>-<random token>`, kept one day.
-  `detect` outputs that name and `summary` downloads exactly it, so a re-run never reads an
-  earlier attempt's report. An incomplete report is read only beside a detect refusal, so a
-  refused detect renders no such line when its report arrives. The line shows when the artifact
-  is missing (the upload or download failed, or `detect` never ran), or the file is unreadable,
-  not a JSON object, incomplete without a detect refusal (detect died without refusing), or not
-  the shape the comment reads: a field of another type, a list of environment names holding
-  something else, a waiting or held cell without its string keys, a held cell neither `locked`
-  (with a numeric or null holder) nor `overlap`, or a `skipped_after` value that is not a list
-  of names. Every field then reads empty, which alone would read `🟢 no pending applies` over
-  pending cells, so the verdict is never 🟢: a failed run reads `🔴 failed`, any other
-  `⚪ result unknown`, or with rows its counts followed by `result unknown`. `apply-detect` prints
-  the review-exempt and no-review notices too, so that audit trail survives an unread report.
+  failed step too, as the artifact `apply-report-<run attempt>-<random token>`. `detect`
+  outputs that name and `summary` downloads exactly it. "Re-run all jobs" runs `detect` again,
+  under a new name; "Re-run failed jobs" does not re-run a `detect` that succeeded, so `summary`
+  reuses its outputs and downloads the report that attempt uploaded. An incomplete report is
+  read only when the `detect` job failed, so a refused detect renders no such line when its
+  report arrives. The line shows when the artifact is missing (the upload or download failed,
+  or `detect` never ran), or the file is unreadable, not a JSON object, incomplete while
+  `detect` did not fail, or not the shape the comment reads: a field of another type, a list of
+  environment names holding something else, a waiting or held cell without its string keys, a
+  held cell neither `locked` (with a numeric, null or absent holder) nor `overlap`, or a
+  `skipped_after` value that is not a list of names. Every field then reads empty, which alone
+  would read `🟢 no pending applies` over pending cells, so the verdict is never 🟢: a failed run
+  reads `🔴 failed`, any other `⚪ result unknown`, or with rows its counts followed by
+  `result unknown`.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a
   blank line on both sides, one per environment in the plan comment's order,
