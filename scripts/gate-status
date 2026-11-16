@@ -43,9 +43,12 @@ stderr when the head moved. It reads, stopping at the first run that blocks:
 3. the jobs of each autoplan run `completed` with conclusion `success`: one that planned
    (`apply-gate.planned`) blocks. Any other completed run blocks nothing: a draft-skipped run,
    a `closed`-event run, a cancelled or failed one.
-4. When nothing blocks, the autoplan runs again every `REPLAN_POLL` seconds up to
-   `REPLAN_WAIT`, each newly listed run judged as in 1 and 3, then the live plan runs once more,
-   since the push that moved the head can take seconds to list its autoplan.
+4. When nothing blocks, the autoplan runs are listed again every `REPLAN_POLL` seconds up to
+   `REPLAN_WAIT`, since the push that moved the head can take seconds to list its autoplan.
+   Each listing is judged whole as in 1 and 3: a re-run keeps its run id and can turn queued.
+   A run attempt's jobs are read once.
+5. After the wait, the pull request is read again: a head that moved again, a closed pull
+   request or a draft dispatches nothing. Then the live plan runs are read once more.
 
 Step 2 relies on the consumer's `plan-<pr>` concurrency group, which runs one plan run of the
 pull request at a time: while this run holds it, a listed live plan run has not yet read its
@@ -53,9 +56,9 @@ head, so it plans the live head.
 
 A `<pr>` that is not a pull-request number exits 1 with `::error::` before any API call. A
 malformed `<sha>`, a failed head read, a failed or malformed listing, an autoplan run without a
-str `status` (and a str `conclusion` once `completed`), an incomplete jobs listing and a
-`plan / detect` job `planned` cannot judge exit 1 with one unannotated stderr line, after any
-retry notices and warnings: an unreadable answer dispatches nothing.
+str `status` (and a str `conclusion` once `completed`) or an int `run_attempt`, an incomplete
+jobs listing and a `plan / detect` job `planned` cannot judge exit 1 with one unannotated
+stderr line, after any retry notices and warnings: an unreadable answer dispatches nothing.
 """
 
 import functools
@@ -317,14 +320,13 @@ def _autoplans(live):
     except ValueError as exc:
         raise SystemExit(one_line(exc)) from None
     for r in runs:
-        status, conclusion = r.get("status"), r.get("conclusion")
-        if not isinstance(status, str) or (
-            status == "completed" and not isinstance(conclusion, str)
-        ):
+        try:
+            ag.status_and_conclusion(r, f"autoplan run {r['id']}")
+        except ValueError as exc:
+            raise SystemExit(one_line(exc)) from None
+        if type(r.get("run_attempt")) is not int:
             raise SystemExit(
-                one_line(
-                    f"autoplan run {r['id']} has status {status!r} and conclusion {conclusion!r}"
-                )
+                one_line(f"autoplan run {r['id']} has run attempt {r.get('run_attempt')!r}")
             )
     return sorted(runs, key=lambda r: r["id"])
 
@@ -336,18 +338,43 @@ def _unfinished(runs):
     return None
 
 
-def _succeeded(runs):
+def _planned(run_id):
+    jobs, complete = run_jobs(_repo(), run_id, run)
+    if not complete:
+        raise SystemExit(f"the jobs of autoplan run {run_id} could not be listed")
+    try:
+        return ag.planned(jobs)
+    except ValueError as exc:
+        raise SystemExit(one_line(f"autoplan run {run_id}: {exc}")) from None
+
+
+def _succeeded(runs, evidence):
+    """The block reason of the first run of `runs` that succeeded and planned, its jobs read once
+    per run attempt into `evidence`."""
     for r in runs:
         if r["conclusion"] != "success":
             continue
-        jobs, complete = run_jobs(_repo(), r["id"], run)
-        if not complete:
-            raise SystemExit(f"the jobs of autoplan run {r['id']} could not be listed")
-        try:
-            if ag.planned(jobs):
-                return f", whose autoplan run {r['id']} succeeded"
-        except ValueError as exc:
-            raise SystemExit(one_line(f"autoplan run {r['id']}: {exc}")) from None
+        key = (r["id"], r["run_attempt"])
+        if key not in evidence:
+            evidence[key] = _planned(r["id"])
+        if evidence[key]:
+            return f", whose autoplan run {r['id']} succeeded"
+    return None
+
+
+def _changed(pr, live):
+    """Why the pull request, read again after the wait, no longer wants `live` planned, or
+    None."""
+    now, draft, state = pr_head(_repo(), pr, run=run)
+    if state != "open":
+        return f"pull request #{pr} is {state}; nothing dispatched"
+    if now != live:
+        return (
+            f"pull request #{pr} moved from {live} to {now} while this run waited; "
+            "nothing dispatched"
+        )
+    if draft:
+        return f"pull request #{pr} moved to {live}, a draft; nothing dispatched"
     return None
 
 
@@ -373,16 +400,17 @@ def _replan(sha, pr):
     if draft:
         print(f"pull request #{pr} moved to {live}, a draft; nothing dispatched", file=sys.stderr)
         return
-    runs = _autoplans(live)
-    reason = _unfinished(runs) or _dispatched(pr) or _succeeded(runs)
-    seen = {r["id"] for r in runs}
+    runs, evidence = _autoplans(live), {}
+    reason = _unfinished(runs) or _dispatched(pr) or _succeeded(runs, evidence)
     for _ in range(REPLAN_WAIT // REPLAN_POLL):
         if reason:
             break
         _shipmate._sleep(REPLAN_POLL)
-        new = [r for r in _autoplans(live) if r["id"] not in seen]
-        seen |= {r["id"] for r in new}
-        reason = _unfinished(new) or _succeeded(new)
+        runs = _autoplans(live)
+        reason = _unfinished(runs) or _succeeded(runs, evidence)
+    if not reason and (changed := _changed(pr, live)):
+        print(changed, file=sys.stderr)
+        return
     reason = reason or _dispatched(pr)
     if reason:
         print(f"pull request #{pr} moved to {live}{reason}; nothing dispatched", file=sys.stderr)

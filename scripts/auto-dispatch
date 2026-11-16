@@ -21,8 +21,8 @@ from the environment:
   `apply-gate.newest_autoplan` lists in `GITHUB_REPOSITORY`, the check the `auto` run's own
   provenance check repeats: a ready-for-review run of the same head is never an `auto` source,
   yet it is the newest. Read only once every other condition holds and an `auto` environment
-  holds a change. An empty listing (the listing lagging this run) dispatches with a warning;
-  a failed or malformed listing exits 1 with `::error::`.
+  holds a change. A listing with no run as new as this one (the listing lagging this run)
+  dispatches with a warning; a failed or malformed listing exits 1 with one `::error::` line.
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
@@ -36,6 +36,7 @@ from _shipmate import (
     _run,
     cell_summaries,
     event_action,
+    is_run_id,
     json_or_none,
     one_line,
     run_annotated,
@@ -99,21 +100,25 @@ def auto_set(raw):
 
 def newer_autoplan(repo, head, run_id):
     """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
-    this run is the newest or none is listed."""
+    none is listed newer. A listing that holds no run as new as this one lags it: it warns and
+    returns None."""
+    if not is_run_id(run_id):
+        raise SystemExit(f"::error::GITHUB_RUN_ID must be a run id (got: {run_id!r})")
     try:
         newest = ag.newest_autoplan(repo, head, run=_run)
-    except ValueError as exc:
+    except (SystemExit, ValueError) as exc:
+        cause = str(exc.code).removeprefix("::error::") if isinstance(exc, SystemExit) else exc
         raise SystemExit(
-            f"::error::the autoplan runs of {head} could not be read ({one_line(exc)})"
+            f"::error::the autoplan runs of {head} could not be read ({one_line(cause)})"
         ) from None
-    if newest is None:
+    if newest is None or newest["id"] < int(run_id):
         print(
-            f"::warning::no autoplan run of {head} is listed yet; dispatching the auto apply "
-            f"from run {run_id}, whose own provenance check refuses if it is not the newest",
+            f"::warning::autoplan run {run_id} of {head} is not listed yet; dispatching the auto "
+            "apply, whose own provenance check refuses if this run is not the newest",
             file=sys.stderr,
         )
         return None
-    return None if str(newest["id"]) == run_id else newest["id"]
+    return newest["id"] if newest["id"] > int(run_id) else None
 
 
 def main():

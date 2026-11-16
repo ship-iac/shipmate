@@ -62,7 +62,7 @@ def autoplans_read(repo, head):
         ),
         "--jq",
         (
-            ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
+            ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, "
             "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
             "| tojson"
         ),

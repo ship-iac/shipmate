@@ -220,6 +220,7 @@ if [[ "$*" == *dispatches* ]]; then
   exit "$FAKE_DISPATCH_RC"
 elif [[ "$*" == *actions/workflows/shipmate.yml/runs* ]]; then
   printf '%s' "$FAKE_RUNS"
+  printf '%s' "${FAKE_RUNS_ERR:-}" >&2
   exit "${FAKE_RUNS_RC:-0}"
 elif [[ "$*" == *comments* ]]; then
   cat > "$REPLY_BODY"
@@ -241,13 +242,15 @@ def _run(
     dispatch_err="",
     runs=None,
     runs_rc=0,
+    runs_err="",
 ):
     """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
     is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default; `auto` is
     build-matrix's `auto_envs` output; `dispatch_err`, when set, is gh's stderr for a failed
     dispatch; `post_rc` makes `python3` exit with it for
     `dispatch-body` in place of running it. `runs` is the head's autoplan listing as `gh --jq`
-    prints it, this run (999) alone by default; `runs_rc` is that listing's exit code."""
+    prints it, this run (999) alone by default; `runs_rc` is that listing's exit code and
+    `runs_err` its stderr."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -276,6 +279,7 @@ def _run(
         "FAKE_DISPATCH_ERR": dispatch_err,
         "FAKE_RUNS": jsonl(_autoplan(999)) if runs is None else runs,
         "FAKE_RUNS_RC": str(runs_rc),
+        "FAKE_RUNS_ERR": runs_err,
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "GITHUB_OUTPUT": str(out),
         "GITHUB_REPOSITORY": "acme/demo",
@@ -309,6 +313,12 @@ def _paths(calls):
 _LISTING = (
     "repos/acme/demo/actions/workflows/shipmate.yml/runs"
     f"?event=pull_request_target&head_sha={HEAD_SHA}&per_page=100"
+)
+
+
+_JQ = (
+    ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, "
+    "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} | tojson"
 )
 
 
@@ -359,16 +369,38 @@ def test_a_newer_autoplan_of_the_head_decides_nothing(tmp_path):
 
 
 @bash_only
-def test_an_empty_autoplan_listing_decides_to_dispatch_and_warns(tmp_path):
-    """The listing can lag this run; the `auto` run's own provenance check still refuses if this
-    run is not the newest. Mutation: treat an empty listing as not newest."""
-    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs="")
+@pytest.mark.parametrize(
+    "runs", [pytest.param("", id="empty"), pytest.param(jsonl(_autoplan(998)), id="older")]
+)
+def test_a_listing_that_lags_this_run_decides_to_dispatch_and_warns(tmp_path, runs):
+    """The listing can lag this run, empty or showing only an older autoplan; the `auto` run's
+    own provenance check still refuses if this run is not the newest. Mutations: treat an empty
+    listing as not newest -- empty decides nothing; count any other id as newer (`!=`) -- older
+    decides nothing."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs=runs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (_paths(calls), outputs) == ([_LISTING], {"envs": "dev"})
     assert proc.stderr.splitlines() == [
         (
-            f"::warning::no autoplan run of {HEAD_SHA} is listed yet; dispatching the auto apply "
-            "from run 999, whose own provenance check refuses if it is not the newest"
+            f"::warning::autoplan run 999 of {HEAD_SHA} is not listed yet; dispatching the auto "
+            "apply, whose own provenance check refuses if this run is not the newest"
+        )
+    ]
+
+
+@bash_only
+def test_a_failed_autoplan_listing_warns_on_one_line(tmp_path):
+    """gh's multi-line stderr stays inside one warning. Mutation: let the listing's `SystemExit`
+    pass uncaught -- gh's second line prints on its own."""
+    proc, calls, outputs = _run(
+        tmp_path, DECIDE, cells=[("dev", True)], runs="", runs_rc=1, runs_err="HTTP 404\nnext"
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (_paths(calls), outputs) == ([_LISTING], {})
+    assert proc.stderr.splitlines() == [
+        (
+            f"::warning::the autoplan runs of {HEAD_SHA} could not be read (command failed (1): gh "
+            f"api --paginate {_LISTING} --jq {_JQ} | HTTP 404 | next)"
         )
     ]
 

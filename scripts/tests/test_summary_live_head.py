@@ -42,7 +42,7 @@ RUNS_LIST = [
     ),
     "--jq",
     (
-        ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
+        ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, "
         "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
         "| tojson"
     ),
@@ -58,8 +58,15 @@ DISPATCH_LISTS = [
     for status in ("queued", "in_progress", "waiting", "pending", "requested")
 ]
 #: Every read of a replan that found nothing blocking: the head, the autoplans, the live plan
-#: runs, three re-lists of the autoplans, the live plan runs again.
-REPLAN_READS = [PULL_READ, RUNS_LIST, *DISPATCH_LISTS, *[RUNS_LIST] * 3, *DISPATCH_LISTS]
+#: runs, three re-lists of the autoplans, the head and the live plan runs again.
+REPLAN_READS = [
+    PULL_READ,
+    RUNS_LIST,
+    *DISPATCH_LISTS,
+    *[RUNS_LIST] * 3,
+    PULL_READ,
+    *DISPATCH_LISTS,
+]
 JOBS_READ = ["api", "repos/acme/demo/actions/runs/7/jobs?filter=latest&per_page=100&page=1"]
 ZERO_CELL_JOBS = pathlib.Path(__file__).parent / "fixtures" / "jobs-zero-cell.json"
 DISPATCH_POST = [
@@ -150,6 +157,7 @@ def _listed(status, conclusion):
             "head_sha": LIVE,
             "status": status,
             "conclusion": conclusion,
+            "run_attempt": 1,
             "actor": {"login": "dev"},
             "triggering_actor": {"login": "dev"},
         }

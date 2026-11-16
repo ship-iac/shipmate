@@ -688,14 +688,12 @@ def _live_head(
     dispatched_fail=False,
 ):
     """`gs.run` answering the pulls read with the text `pull` (default: `_LIVE`, not a draft) and
-    the live head's autoplan listing with `runs`, or with each item of a `runs` list in turn (the
-    last repeating), raising one that is a `SystemExit`; each read fails with a multi-line gh
+    the live head's autoplan listing with `runs`; a list of either answers each item in turn,
+    the last repeating, raising one that is a `SystemExit`. Each read fails with a multi-line gh
     error on request (`runs_fail` is the HTTP status). The live dispatch listing answers each
     status with the runs of `dispatched` listed in it (a run's `listed_as`, else its `status`),
-    plus those of `dispatched_later` from
-    the second listing on, and fails on request; a jobs read of run `i` answers
-    `_captured_jobs(jobs[i])` when that is a run kind, else `jobs[i]` itself, raising a
-    `SystemExit`. Returns the calls."""
+    plus those of `dispatched_later` from the second listing on, and fails on request; a jobs
+    read of run `i` answers `_jobs_answer(jobs[i])`. Returns the calls."""
     calls = []
 
     pull_failure = SystemExit(
@@ -703,13 +701,12 @@ def _live_head(
     )
 
     def pull_read():
-        return _raised(pull_failure if pull_fails else _pull() if pull is None else pull)
+        return _raised(pull_failure if pull_fails else _pull() if pull is None else _next(pull))
 
     def runs_read():
         if runs_fail:
             raise SystemExit(f"command failed (1): gh api --paginate x\nHTTP {runs_fail}")
-        item = (runs.pop(0) if len(runs) > 1 else runs[0]) if isinstance(runs, list) else runs
-        return _raised(item)
+        return _raised(_next(runs))
 
     def dispatch_read(args):
         if dispatched_fail:
@@ -747,9 +744,17 @@ def _raised(item):
     return item
 
 
+def _next(answers):
+    """`answers` itself, or, for a list, its next item, the last repeating."""
+    if not isinstance(answers, list):
+        return answers
+    return answers.pop(0) if len(answers) > 1 else answers[0]
+
+
 def _jobs_answer(body):
-    """A jobs read's answer: the capture of run kind `body`, else `body` itself, raised when it is
-    a `SystemExit`."""
+    """A jobs read's answer: the capture of run kind `body` (or of the next of a list of them),
+    else `body` itself, raised when it is a `SystemExit`."""
+    body = _next(body)
     kinds = (_DRAFT_SKIPPED, _ZERO_CELL, _CLOSED)
     return _captured_jobs(body) if body in kinds else _raised(body)
 
@@ -764,16 +769,17 @@ def _cli(*argv):
     return 0
 
 
-def _row(run_id, status, conclusion):
-    """One listing line of an autoplan run of the live head."""
-    return json.dumps(listed_autoplan(run_id, _LIVE, status=status, conclusion=conclusion)) + "\n"
+def _row(run_id, status, conclusion, attempt=1):
+    """One listing line of an autoplan run of the live head, at run attempt `attempt`."""
+    keys = {"status": status, "conclusion": conclusion, "run_attempt": attempt}
+    return json.dumps(listed_autoplan(run_id, _LIVE, **keys)) + "\n"
 
 
 def _rows(*runs):
     """Listing lines for `(status, conclusion)` pairs; a None status omits both keys."""
     return "".join(
         json.dumps(
-            listed_autoplan(9, _LIVE)
+            listed_autoplan(9, _LIVE, run_attempt=1)
             | ({} if status is None else {"status": status, "conclusion": conclusion})
         )
         + "\n"
@@ -885,11 +891,11 @@ _DRAFT_SKIPPED, _ZERO_CELL, _CLOSED = "draft-skipped", "zero-cell", "closed"
 def _relisted(first, *later):
     """The calls of a replan that found nothing blocking in `first` (the calls after the pull
     read) and re-listed the autoplans three times (`later`, each the calls of one re-list),
-    then re-read the live plan runs."""
+    then re-read the pull request and the live plan runs."""
     calls = [_PULL_READ, *first]
     for one in later or ([_RUNS_READ],) * 3:
         calls += one
-    return calls + _DISPATCH_READS
+    return [*calls, _PULL_READ, *_DISPATCH_READS]
 
 
 @pytest.mark.parametrize(
@@ -1021,6 +1027,13 @@ _JOBS_CAUSE = "autoplan run 9: job plan / detect has status 'completed' and conc
             "autoplan run 9 has status 'completed' and conclusion None",
             [],
             id="null-conclusion",
+        ),
+        pytest.param(
+            _row(9, "completed", "failure", attempt=None),
+            {},
+            "autoplan run 9 has run attempt None",
+            [],
+            id="null-attempt",
         ),
         pytest.param(
             _row(9, "completed", "success"),
@@ -1236,6 +1249,84 @@ def test_replan_an_autoplan_listed_on_a_re_list_blocks(
     )
     first_reads = [_RUNS_READ, *_DISPATCH_READS] + ([_jobs_read(9)] if first else [])
     assert (calls, in_process) == ([_PULL_READ, *first_reads, _RUNS_READ, *reads], [5])
+
+
+def test_replan_a_re_run_listed_again_unfinished_blocks(in_process, monkeypatch, capsys):
+    """A re-run keeps its run id: a run listed failed, then queued on a re-list, plans the live
+    head. Each re-list judges every listed run. Mutation: judge only ids not listed before --
+    the head prints."""
+    runs = [_row(9, "completed", "failure"), _row(9, "queued", None, attempt=2)]
+    calls = _live_head(monkeypatch, runs=runs)
+    assert _cli("replan", SHA, "7") == 0
+    assert capsys.readouterr() == (
+        "",
+        (
+            f"pull request #7 moved to {_LIVE}, which has an autoplan run 9 in progress; "
+            "nothing dispatched\n"
+        ),
+    )
+    assert (calls, in_process) == ([_PULL_READ, _RUNS_READ, *_DISPATCH_READS, _RUNS_READ], [5])
+
+
+def test_replan_reads_a_run_attempt_s_jobs_once(in_process, monkeypatch, capsys):
+    """A run's jobs evidence is kept per run attempt: the same attempt listed again is not read
+    again, and a re-run's new attempt is. Here attempt 1 skipped as a draft and attempt 2
+    planned. Mutations: key the evidence by run id alone -- the head prints; keep no evidence
+    -- attempt 1's jobs are read on every re-list."""
+    first = _row(9, "completed", "success")
+    runs = [first, first, _row(9, "completed", "success", attempt=2)]
+    calls = _live_head(monkeypatch, runs=runs, jobs={9: [_DRAFT_SKIPPED, _ZERO_CELL]})
+    assert _cli("replan", SHA, "7") == 0
+    assert capsys.readouterr() == (
+        "",
+        f"pull request #7 moved to {_LIVE}, whose autoplan run 9 succeeded; nothing dispatched\n",
+    )
+    assert (calls, in_process) == (
+        [
+            _PULL_READ,
+            _RUNS_READ,
+            *_DISPATCH_READS,
+            _jobs_read(9),
+            _RUNS_READ,
+            _RUNS_READ,
+            _jobs_read(9),
+        ],
+        [5, 5],
+    )
+
+
+_OTHER = "c" * 40
+
+
+@pytest.mark.parametrize(
+    ("after", "log"),
+    [
+        pytest.param(
+            _pull(_OTHER),
+            f"pull request #7 moved from {_LIVE} to {_OTHER} while this run waited; "
+            "nothing dispatched\n",
+            id="moved-again",
+        ),
+        pytest.param(
+            _pull(state="closed"), "pull request #7 is closed; nothing dispatched\n", id="closed"
+        ),
+        pytest.param(
+            _pull(draft=True),
+            f"pull request #7 moved to {_LIVE}, a draft; nothing dispatched\n",
+            id="draft",
+        ),
+    ],
+)
+def test_replan_re_reads_the_pull_request_after_the_wait(
+    in_process, monkeypatch, capsys, after, log
+):
+    """The pull request can move again, close or turn draft while the run waits; the head the
+    wait judged is then not the one to plan. Mutation: drop the re-read -- each row prints the
+    head."""
+    calls = _live_head(monkeypatch, pull=[_pull(), after])
+    assert _cli("replan", SHA, "7") == 0
+    assert capsys.readouterr() == ("", log)
+    assert calls == _relisted([_RUNS_READ, *_DISPATCH_READS])[:-5]
 
 
 def test_replan_the_re_list_is_bounded(in_process, monkeypatch, capsys):
