@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import subprocess
+import types
 
 import pytest
 from _detect_fixtures import (
@@ -1578,8 +1579,8 @@ def _git(*args, cwd=None):
 @pytest.fixture
 def blobless(tmp_path, monkeypatch):
     """A `--filter=blob:none` clone of a source repository, as apply-run.yml's detect checks it
-    out, as the cwd, with this machine's git config out of the way. Returns
-    `commit(files, message)`, which commits to the source's checked-out branch."""
+    out, as the cwd, with this machine's git config out of the way. Returns `src`, the source
+    repository, and `commit(files, message)`, which commits to its checked-out branch."""
     (tmp_path / "gitconfig").write_bytes(b"")
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
@@ -1601,8 +1602,7 @@ def blobless(tmp_path, monkeypatch):
         _git("commit", "-q", "-m", message, cwd=src)
         return _git("rev-parse", "HEAD", cwd=src).strip()
 
-    commit.src = src
-    return commit
+    return types.SimpleNamespace(commit=commit, src=src)
 
 
 def _clone(tmp_path, monkeypatch, src, branch):
@@ -1639,13 +1639,13 @@ def test_a_stack_the_base_did_not_change_stays_applyable_from_a_blobless_clone(
     Mutation: hold every candidate when the base changed any stack (`changed or` for
     `c["stack"] in changed or`) -- `stacks/a` is behind, red."""
     lines = [f"line {n}\n" for n in range(10)]
-    blobless({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "".join(lines)}, "common")
+    blobless.commit({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "".join(lines)}, "common")
     _git("checkout", "-q", "-b", "pr", cwd=blobless.src)
-    blobless(
+    blobless.commit(
         {"stacks/a/main.tf": "a edit\n", "stacks/b/main.tf": "".join(["x\n", *lines[1:]])}, "pr"
     )
     _git("checkout", "-q", "main", cwd=blobless.src)
-    tip = blobless({"stacks/b/main.tf": "".join([*lines[:-1], "y\n"])}, "base")
+    tip = blobless.commit({"stacks/b/main.tf": "".join([*lines[:-1], "y\n"])}, "base")
     blob = _git("rev-parse", f"{tip}:stacks/b/main.tf", cwd=blobless.src).strip()
     _clone(tmp_path, monkeypatch, blobless.src, "pr")
     missing = _git("rev-list", "--objects", "--missing=print", tip).split()
@@ -1662,12 +1662,14 @@ def test_a_conflict_elsewhere_refuses_a_targeted_apply_of_a_clean_stack(
     merge conflicts on `stacks/a`, so an apply of `stacks/b` alone refuses with the conflict.
 
     Mutation: catch `MergeConflict` in `behind_cells` and hold nothing -- no refusal, red."""
-    blobless({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n", "stacks/b/x.tf": "x\n"}, "c")
+    blobless.commit(
+        {"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n", "stacks/b/x.tf": "x\n"}, "c"
+    )
     _git("checkout", "-q", "-b", "pr", cwd=blobless.src)
     (blobless.src / "stacks/a/main.tf").unlink()
-    head = blobless({"stacks/b/x.tf": "x edit\n"}, "pr")
+    head = blobless.commit({"stacks/b/x.tf": "x edit\n"}, "pr")
     _git("checkout", "-q", "main", cwd=blobless.src)
-    tip = blobless({"stacks/a/main.tf": "a edit\n", "stacks/b/main.tf": "b edit\n"}, "base")
+    tip = blobless.commit({"stacks/a/main.tf": "a edit\n", "stacks/b/main.tf": "b edit\n"}, "base")
     _clone(tmp_path, monkeypatch, blobless.src, "pr")
     _list_merge(monkeypatch)
     monkeypatch.setattr(ad, "_read_base", lambda repo, pr: ("main", tip))
