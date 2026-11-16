@@ -4,7 +4,9 @@ description: >-
   draft flag) for either plan trigger: from the event payload on a pull-request event, from the
   API by the dispatched pr_number otherwise. Every later job reads these outputs instead of the event
   payload, so the fork refusal, the draft skip and the checkout ref cannot read two different
-  answers to one question. Needs `pull-requests: read` on the job (the dispatch leg only).
+  answers to one question. On a pull-request event whose payload says draft, the draft flag is
+  read once more from the API, so a ready click after the push plans. Needs `pull-requests: read`
+  on the job (the dispatch leg, and that draft read).
 outputs:
   head-sha:
     description: The pull request's head commit. Name it as every checkout's `ref:` and as plan-cell's `expected-head`.
