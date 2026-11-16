@@ -175,7 +175,8 @@ def test_a_comment_quoting_the_marker_mid_body_is_not_matched(monkeypatch, tmp_p
 
 
 def test_update_only_with_no_match_writes_nothing(monkeypatch, tmp_path, capsys):
-    """Mutation: ignore `--update-only`."""
+    """Without `--head`, no head is read. Mutations: ignore `--update-only`; read the head
+    without `--head` (drop `_head_stop`'s None return)."""
     code, calls = _upsert(monkeypatch, tmp_path, [], "--update-only")
     assert code == 0
     assert calls == [LIST_ARGV]
@@ -296,12 +297,32 @@ def test_update_only_patches_the_newest_visible_comment(monkeypatch, tmp_path, c
     assert capsys.readouterr() == ("updated\n", "")
 
 
-def test_update_only_with_no_match_never_reads_the_head(monkeypatch, tmp_path, capsys):
-    """Nothing would be written, so a docs-only run makes no head read. Mutation: read the head
-    before the `skipped` exit -- a pulls call."""
-    code, calls = _upsert(monkeypatch, tmp_path, [], "--update-only", "--head", _HEAD)
-    assert (code, calls) == (0, [LIST_ARGV])
-    assert capsys.readouterr().out == "skipped\n"
+@pytest.mark.parametrize(
+    ("head", "fails", "out", "err", "pulls"),
+    [
+        pytest.param("d" * 40, False, "moved\n", "", 1, id="moved"),
+        pytest.param(
+            _HEAD,
+            True,
+            "head-failed\n",
+            2 * _NOTICE + "command failed (1): gh api | HTTP 502 | ::add-mask::x\n",
+            3,
+            id="head-failed",
+        ),
+        pytest.param(_HEAD, False, "skipped\n", "", 1, id="unmoved"),
+    ],
+)
+def test_update_only_with_no_match_still_reads_the_head(
+    monkeypatch, tmp_path, capsys, sleeps, head, fails, out, err, pulls
+):
+    """A run that writes nothing still reports a head the pull request has left, so the summary
+    replans it. Mutation: keep the `skipped` return before the head read -- moved and
+    head-failed print `skipped`, and no row reads the head."""
+    code, calls = _upsert(
+        monkeypatch, tmp_path, [], "--update-only", "--head", _HEAD, head=head, head_fails=fails
+    )
+    assert (code, calls) == (0, [LIST_ARGV] + [PULLS_ARGV] * pulls)
+    assert capsys.readouterr() == (out, err)
 
 
 @pytest.mark.parametrize("head", ["C" * 40, "c" * 39, "../x"])
@@ -581,8 +602,9 @@ def test_new_minimizes_only_this_authors_plan_comments(monkeypatch, tmp_path, ca
 
 
 def test_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_path, capsys):
-    """The newest plan comment minimized by a person, then a quiet run: nothing written, no head
-    read. Mutation: test the listed comments instead of the visible ones -- a PATCH follows."""
+    """The newest plan comment minimized by a person, then a quiet run: the unmoved head read,
+    nothing written. Mutation: test the listed comments instead of the visible ones -- a PATCH
+    follows."""
     code, calls = _upsert(
         monkeypatch,
         tmp_path,
@@ -592,7 +614,7 @@ def test_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_pa
         _HEAD,
         minimized={"IC_5"},
     )
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5")])
+    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), PULLS_ARGV])
     assert capsys.readouterr() == ("skipped\n", "")
 
 
@@ -869,10 +891,97 @@ def _run_summary(
     ],
 )
 def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
-    """Mutations: move the `hold` branch below the `upsert-comment` call; route `hold` into the
-    held render (drop its branch) -- the head read and the held write follow."""
+    """Their one call is the head read; the head is unmoved, so nothing else changes. Mutations:
+    move the `hold` branch below the `upsert-comment` call; route `hold` into the held render
+    (drop its branch) -- the listing and the held write follow; write `result=moved` whenever
+    the read succeeds -- an output is written."""
     proc, calls = _run_summary(tmp_path, mode, listing=_head(5, SUMMARY) + "\n")
-    assert (proc.returncode, proc.stdout, calls) == (0, stdout, [])
+    assert (proc.returncode, proc.stdout, calls) == (0, stdout, [_PULLS]), proc.stderr
+    output = tmp_path / "github_output"
+    assert not output.exists() or output.read_text(encoding="utf-8") == ""
+
+
+_NO_WRITE = (
+    f"::notice::pull request #7 has moved past {_SHA}; this run writes no comment, apply check "
+    "or gate on it\n"
+)
+_HOLD_STAYS = (
+    f"::notice::pull request #7 has moved past {_SHA}; this run writes no comment or apply check "
+    "on it, and its publish hold stays there\n"
+)
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("mode", "cells", "stdout"),
+    [
+        pytest.param("draft", False, _NO_WRITE, id="draft"),
+        pytest.param("hold", False, _NO_WRITE, id="hold"),
+        pytest.param("hold", True, _HOLD_STAYS, id="hold-with-cells"),
+    ],
+)
+def test_summary_draft_and_hold_report_a_moved_head(tmp_path, mode, cells, stdout):
+    """`draft` and `hold` call no `upsert-comment --head`, so the step reads the head itself: a
+    moved head writes `result=moved`, which skips the apply checks and the gate and runs the
+    live-head step. A `hold` run with cell summaries wrote a publish hold, which stays.
+    Mutations: drop the read in the `draft` branch -- draft red; drop it in the `hold` branch --
+    both hold rows red; one notice for both -- hold-with-cells red."""
+    if cells:
+        (tmp_path / "cells" / "0").mkdir(parents=True)
+        (tmp_path / "cells" / "0" / "cell.json").write_text("{}", encoding="utf-8")
+    proc, calls = _run_summary(tmp_path, mode, head="b" * 40, listing=_head(5, SUMMARY) + "\n")
+    assert (proc.returncode, proc.stdout, calls) == (0, stdout, [_PULLS]), proc.stderr
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=moved\n"
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("mode", "stdout"),
+    [
+        (
+            "draft",
+            (
+                "the pull request was a draft when this run started and was not planned; the plan "
+                "comment was left as it is\n"
+            ),
+        ),
+        (
+            "hold",
+            (
+                "::warning::the plan job was cancelled, so this run writes no final gate; the plan "
+                "comment was left as it is\n"
+            ),
+        ),
+    ],
+)
+def test_summary_draft_and_hold_degrade_on_a_failed_head_read(tmp_path, mode, stdout):
+    """These paths write no comment, so their read is the hold step's kind: a failed one warns and
+    goes on as before. Mutation: fail the step on a failed read (`exit 1` after the warning)."""
+    proc, calls = _run_summary(tmp_path, mode, head_rc=1)
+    warning = (
+        "::warning::could not read the head of pull request #7 (command failed (1): gh api "
+        f"repos/o/r/pulls/7); this run goes on for {_SHA}\n"
+    )
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (0, warning + stdout, "", [_PULLS])
+    output = tmp_path / "github_output"
+    assert not output.exists() or output.read_text(encoding="utf-8") == ""
+
+
+@bash_only
+def test_summary_skipped_head_read_failure_fails_the_step(tmp_path):
+    """A quiet run with no plan comment now reads the head too, and a failed read takes the
+    `--head` paths' policy: the job stops before any apply check or gate. Mutation: keep the
+    `skipped` return before the head read in `upsert-comment` -- `skipped`, exit 0."""
+    proc, calls = _run_summary(tmp_path, "nothing-changed", head_rc=1)
+    assert (proc.returncode, proc.stdout, calls) == (
+        1,
+        (
+            "::error::could not read the head of pull request #7, so no plan comment was "
+            "written; re-plan this pull request (comment shipmate plan or push)\n"
+        ),
+        [_LIST, _PULLS],
+    )
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=head-failed\n"
 
 
 @bash_only
@@ -988,7 +1097,7 @@ _POSTS = [_LIST, _PULLS, _post_of("comment.md")]
 @pytest.mark.parametrize(
     ("mode", "warned", "unmanaged", "lost", "on_demand", "listing", "expected", "result"),
     [
-        ("nothing-changed", "false", "false", "false", "false", "", [_LIST], "skipped"),
+        ("nothing-changed", "false", "false", "false", "false", "", [_LIST, _PULLS], "skipped"),
         ("post", "false", "false", "false", "false", "", _POSTS, "created"),
         ("nothing-changed", "true", "false", "false", "false", "", _POSTS, "created"),
         ("nothing-changed", "false", "true", "false", "false", "", _POSTS, "created"),
@@ -1033,7 +1142,7 @@ def test_summary_posts_unless_quiet_and_rewrites_a_visible_comment_when_quiet(
     `shipmate plan` command: rewrite the newest visible plan comment and post none. Any other run
     posts and minimizes the earlier comment. upsert-comment's word is output `result`.
 
-    A quiet run with no comment reads no head (`quiet`).
+    A quiet run with no comment reads the head and writes nothing (`quiet`).
     Mutations: drop `--new` from the posted write (ordinary-existing PATCHes); keep `--new` on
     the quiet write (quiet-existing posts); delete the
     `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED` clause (unmanaged red);

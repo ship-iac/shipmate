@@ -292,12 +292,13 @@ _LISTED_KEYS = ("id", "event", "head_sha", "actor", "triggering_actor")
 def autoplan_runs(repo, head, *, run):
     """Every listed run of `PLAN_WORKFLOW` started by `pull_request_target` on `head`, in listing
     order. Every page is read. Each run is the listing's object cut to `_LISTED_KEYS` plus
-    `status` and `conclusion`: its integer `id`, `event`, `head_sha`, and `actor` and
+    `status`, `conclusion` and `run_attempt`: its integer `id`, `event`, `head_sha`, and `actor` and
     `triggering_actor`, which the projection always emits as `{"login": ...}` mappings, the
     login null when GitHub gives none. A missing actor so reaches `authorize.pusher_reason`
     and refuses there, never as a malformed listing. The logins equal a single-run read's.
     A transient failure is retried (`retried`). Raises `ValueError` on a line that is not such
-    an object or whose `id` is not an integer; `status` and `conclusion` are not checked."""
+    an object or whose `id` is not an integer; `status`, `conclusion` and `run_attempt` are not
+    checked."""
     query = f"event=pull_request_target&head_sha={head}&per_page=100"
     args = [
         "gh",
@@ -306,7 +307,7 @@ def autoplan_runs(repo, head, *, run):
         f"repos/{repo}/actions/workflows/{posixpath.basename(PLAN_WORKFLOW)}/runs?{query}",
         "--jq",
         (
-            ".workflow_runs[] | {id, event, head_sha, status, conclusion, "
+            ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, "
             "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
             "| tojson"
         ),
@@ -325,6 +326,35 @@ def newest_autoplan(repo, head, *, run):
     """The `autoplan_runs` entry with the greatest `id`, or None when none is listed. Retries and
     raises as `autoplan_runs` does."""
     return max(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], default=None)
+
+
+def planned(jobs):
+    """Whether a plan run planned, from `jobs`: the complete jobs listing (`_shipmate.run_jobs`)
+    of a run attempt that has ended, every job of that attempt, which the caller checks. It
+    planned when exactly one job is named `CALLER_PREFIX + "detect"`, `completed` with conclusion
+    `success`. A draft-skipped run lists that job `skipped`, a `closed`-event run and a run
+    cancelled before `detect` list none, and a zero-cell plan lists it `success`. Raises
+    `ValueError` when it cannot tell: two such jobs, or one whose `status` is not a str or not
+    `completed`, or `completed` with a `conclusion` that is not a str."""
+    detects = [j for j in jobs if j.get("name") == CALLER_PREFIX + "detect"]
+    if len(detects) > 1:
+        raise ValueError(f"{len(detects)} jobs are named {CALLER_PREFIX}detect")
+    if not detects:
+        return False
+    status, conclusion = status_and_conclusion(detects[0], f"job {CALLER_PREFIX}detect")
+    if status != "completed":
+        raise ValueError(f"job {CALLER_PREFIX}detect is {status!r} in a run that has ended")
+    return conclusion == "success"
+
+
+def status_and_conclusion(listed, what):
+    """`(status, conclusion)` of a listed run or job `listed`: a str `status` and, once
+    `completed`, a str `conclusion`. Raises `ValueError` naming `what` otherwise: a missing or
+    mistyped value cannot say whether it ran."""
+    status, conclusion = listed.get("status"), listed.get("conclusion")
+    if not isinstance(status, str) or (status == "completed" and not isinstance(conclusion, str)):
+        raise ValueError(f"{what} has status {status!r} and conclusion {conclusion!r}")
+    return status, conclusion
 
 
 def provenance_reason(newest, plan_run, head, cells):

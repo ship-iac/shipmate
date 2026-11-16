@@ -13,7 +13,8 @@ queued apply check: an apply's refresh serialized before this write would otherw
 cells behind a `pending` nobody upgrades. The refresh only upgrades a fail-closed write, so its
 failure, a hold included, warns and the step passes.
 
-The upsert step leaves the plan comment as it is on a draft run and makes no comment API call.
+The upsert step leaves the plan comment as it is on a draft run and makes no comment API call;
+its one call reads the head.
 
 Both steps run for real: `Create/refresh gate` through `_loader.run_with_gate_gh`, the upsert step
 through `run_with_gh_recorder`.
@@ -374,17 +375,19 @@ def _run_upsert(tmp_path, mode):
 
 @bash_only
 def test_a_draft_run_makes_no_comment_call(tmp_path):
-    """Mutation: delete the upsert step's `draft` branch -> the stub records the listing call."""
+    """Its one call is the head read. Mutation: delete the upsert step's `draft` branch -> the
+    stub records the listing call."""
     proc, made = _run_upsert(tmp_path, "draft")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert made == []
+    assert made == [["api", "repos/acme/demo/pulls/7"]]
     assert "::warning::" not in proc.stdout
 
 
 @bash_only
 def test_the_upsert_stub_records_a_post_run(tmp_path):
     """Control for the draft case: the same stub sees a `post` run's listing and create calls, so
-    an empty record means the step made no call rather than that the stub was never reached."""
+    a record of the head read alone means the step made no comment call rather than that the stub
+    was never reached."""
     proc, made = _run_upsert(tmp_path, "post")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert made == [
