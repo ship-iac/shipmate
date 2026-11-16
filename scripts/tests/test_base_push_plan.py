@@ -365,7 +365,8 @@ def _notice(pr):
 @bash_only
 @pytest.mark.parametrize("rc", ["1", "3", "4"])
 def test_a_failed_dispatch_warns_and_the_next_pull_request_is_still_dispatched(tmp_path, rc):
-    """The check-mirror trap: each failure handler falls through to the next pull request.
+    """Each failure handler falls through to the next pull request, so one failed dispatch
+    never drops the later ones.
     Mutations: `exit 0` after the failed-dispatch warning -- row 1 dispatches no #2; `exit 0`
     after the may-have-started warning -- rows 3 and 4 do not; `exit 1` after the
     failed-dispatch warning -- the step fails."""

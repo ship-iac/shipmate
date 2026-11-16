@@ -101,6 +101,13 @@ def test_deploy_detect_hands_the_lock_refusal_to_the_summary():
     )
 
 
+def test_deploy_detect_hands_the_push_stacks_to_the_summary():
+    """Mutation: read the action's `push` from `steps.d` -- red."""
+    assert action_yaml("deploy-detect")["outputs"]["push"]["value"] == (
+        "${{ steps.detect.outputs.push }}"
+    )
+
+
 LOCK_RELEASE_STEPS = [
     {
         "name": "Verify the App key arrived",

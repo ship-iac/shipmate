@@ -1191,7 +1191,8 @@ than a dispatch value. Everything the guards
 decide on — the head SHA, the head repository, the draft flag — is then derived
 from that number by `actions/pr-facts`, which asks the API for the pull request.
 That derivation is deliberate: the fork refusal keys on the head repository, so
-a caller holding `actions: write` — comment-ops mints an App token to dispatch,
+a caller holding `actions: write` — comment-ops and the merge deploy's re-plan of
+open pull requests mint an App token to dispatch,
 and any workflow file may grant itself that scope — must not be able to *state*
 one. A number
 cannot lie about its own head repository, and a number naming a fork's pull

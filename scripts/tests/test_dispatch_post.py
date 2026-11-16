@@ -1,6 +1,6 @@
 """Tests for `dispatch-body`: one `workflow_dispatch` POST, retried on a transient failure
-unless a listed `shipmate.yml` run may be this dispatch's: for a comment-less dispatch any
-`workflow_dispatch` run created since `t0`, for a commented one the App's run of this command."""
+unless a listed `shipmate.yml` run may be this dispatch's: for an `auto` dispatch any
+`workflow_dispatch` run created since `t0`, for any other the App's run titled as this dispatch."""
 
 import json
 from datetime import UTC, datetime, timedelta

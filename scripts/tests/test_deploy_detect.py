@@ -901,7 +901,8 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
 def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
     """The summary writes the gate's failure on the head, and releases the pull request's locks,
     only if detect named them. Mutation: move the `head_sha` write to just before
-    `refuse_stranded_checks` -- the file stays empty. Mutation: drop `pr_number` from it."""
+    `refuse_stranded_checks` -- the file holds only `push`. Mutation: drop `pr_number` from
+    it."""
     with pytest.raises(SystemExit) as exc:
         _run_main(
             tmp_path,
@@ -1240,7 +1241,7 @@ def test_a_failed_run_graph_read_refuses_unchanged(monkeypatch):
 
 
 def test_an_inversion_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
-    """Mutation: write `head_sha` with the waves only -- the file stays empty."""
+    """Mutation: write `head_sha` with the waves only -- the file holds only `push`."""
     with pytest.raises(SystemExit) as exc:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
     assert str(exc.value).startswith("::error::needs order inverted")

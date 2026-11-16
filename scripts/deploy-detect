@@ -296,8 +296,8 @@ PUSH_CAP = 64 * 1024
 
 def push_stacks(before, changed, tag_map):
     """The `push` output: `{"stacks": sorted(changed), "outside": <bool>}`. `outside` is true when
-    `git diff --name-only before..HEAD` names a path in no stack directory of `tag_map` or
-    `changed` (`bm._inside`), and when `before` is empty or all zeros, which leaves the change
+    `git diff --name-only before..HEAD` names a path in no stack directory of `tag_map`
+    (`bm._inside`), and when `before` is empty or all zeros, which leaves the change
     unknown. Past `PUSH_CAP` serialized, `{"stacks": null, "outside": true}`. A failed diff
     warns and returns None: `push` only selects pull requests to re-plan, so it never refuses
     the deploy."""
@@ -309,7 +309,7 @@ def push_stacks(before, changed, tag_map):
             why = one_line(f"the push's changed paths could not be read: {exit_text(e)}")
             sys.stderr.write(f"::warning::{command_data(why)}\n")
             return None
-        stacks = set(tag_map) | set(changed)
+        stacks = set(tag_map)
         outside = any(
             not any(bm._inside(p, s, stacks) for s in stacks) for p in paths.split("\0") if p
         )
