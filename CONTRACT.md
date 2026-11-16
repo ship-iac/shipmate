@@ -2805,7 +2805,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
     malformed `created` filter with an empty listing, so nothing is read).
 
   Known limit: the read is a point in time; a run dispatched in the seconds
-  before it can be missing from the listing. Each wave cell repeats the check
+  before it can be missing from the listing, and a re-run of a plan run created
+  before the plan run is outside the window. Each wave cell repeats the check
   over the same window (§Wave re-check).
 - **Pusher.** The listed run's `actor`, the pusher, must equal its
   `triggering_actor` and must have write access. A re-run of the autoplan keeps
@@ -2886,9 +2887,9 @@ branch ref, is still the one `detect` read. The cell lists the plan runs created
 since the plan run's `created_at`, the window `detect` read, not since the apply
 run's: a plan run `detect` listed as ended can be re-run while the wave waits,
 keeping its `created_at`, and one missing from `detect`'s lagging listing shows
-here. A live run counts, and a completed run counts when its `plan / detect` job
-succeeded, as at `detect`: a plan that planned and ended while the wave waited,
-with or without a record, refuses the cell. A
+here. It sees the `shipmate plan` runs of the pull request created at or after the
+plan run, with a greater id: such a run refuses the cell while it is live, and
+once completed when its `plan / detect` job succeeded, as at `detect`. A
 counted live plan refuses with ``apply aborted for `<env>` / `<stack>`:
 shipmate plan run <m> of this pull request is <status> and newer than plan run
 <n>, which this auto apply applies; wait for it to finish, review its plan, then
@@ -2898,8 +2899,9 @@ comment `shipmate apply` ``, a completed one with ``apply aborted for `<env>` /
 apply` ``, and a check that cannot rule one out (the causes above) with
 ``could not confirm no newer shipmate plan run of pull request #<pr> (the
 listing is incomplete)``. Known limit: a plan dispatched after a cell's check,
-or missing from a listing read seconds after its dispatch, does not stop that
-cell. The base comparison is whole-branch,
+one missing from a listing read seconds after its dispatch, and a re-run of a
+plan run created before the plan run, at `detect` or at the cell, do not stop
+that cell. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
 environment approval refuses that wave. Update the branch from the base and
@@ -4592,9 +4594,10 @@ is not exposed to a newer autoplan: it reads the head's newest autoplan from the
 Actions runs listing, not from the records (§`apply_mode: auto`). Nor to a newer
 `shipmate plan` run of the pull request that published no apply check: `detect`
 and each wave cell refuse while such a run is live and once its `plan / detect`
-job succeeded (§`apply_mode: auto`, Newer plan; §Wave re-check). Only a plan
-dispatched after a cell's check, or missing from a listing read seconds after
-its dispatch, is not seen.
+job succeeded (§`apply_mode: auto`, Newer plan; §Wave re-check). Not seen: a
+plan dispatched after a cell's check, one missing from a listing read seconds
+after its dispatch, and a re-run of a plan run created before the plan run, at
+`detect` or at the cell.
 
 ## Consumer variables and secrets
 

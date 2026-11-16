@@ -2591,7 +2591,8 @@ An `auto` cell also refuses when:
 - `shipmate plan run <m> of this pull request is <status> and newer than plan
   run <n>, which this auto apply applies`: a `shipmate plan` of this pull request
   created after the plan run is running while the wave waits: dispatched since
-  `detect`, missing from `detect`'s listing, or re-run since. Wait for it to
+  `detect`, missing from `detect`'s listing, or created after the plan run and
+  cancelled before its `detect`, then re-run. Wait for it to
   finish, review its plan, then comment `shipmate apply`.
 - `shipmate plan run <m> of this pull request planned after plan run <n>, which
   this auto apply applies`: such a plan ran and ended, its `plan / detect` job
