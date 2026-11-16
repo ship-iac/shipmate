@@ -2191,42 +2191,49 @@ links the unlock run. Per-cell detail lands in each job's step summary, and a
 failed cell reds the run.
 
 **The unlock result reply.** Each `unlock` leg uploads a record, even when it
-failed: artifact `shipmate-unlock-<strategy.job-index>` holding its outcome and
-the probed lock id in `shipmate-unlock-<strategy.job-index>.json`. The outcome
-is `released` only when `force-unlock` succeeded, `none` when a clean probe
-found no lock, and `failed` otherwise (a failed init, probe or `force-unlock`,
-or a leg that failed before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
+failed: artifact `shipmate-unlock-<strategy.job-index>` holding
+`shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
+and environment, its outcome and the probed lock id. The outcome is `released`
+only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
+`failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
+before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
 `permissions: { pull-requests: write }`, `ubuntu-slim`, the job token) runs
 unless the run was cancelled or `detect` was skipped. It reads the pull request
 number from the command comment's `html_url`, downloads the records, and posts
 one reply through `scripts/reply-comment`: the header
 `### shipmate unlock <env>`, the verdict line, then a blank line and
 ``A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks stay until it merges or closes, and `--evict` releases another pull request's.``,
-and the footer of a §Comment-ops reply, linking the unlock run. The verdict line
-is one of:
+and the footer `[unlock run](<url>)` linking the unlock run, followed on a
+failure by the help hint. Unlike a comment-ops reply, it is posted by the
+dispatched run, so its footer links that run, and its label says so. The
+verdict line is one of:
 
 - ``⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...`` when every
   probed cell recorded `released` or `none` and at least one released.
 - ``⚪ released no state lock in <env>: no probed cell held a state lock.``
 - ``⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...``
   for an empty queue: the warning `detect` prints, whole.
-- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
-  each clause present when it names a cell: `failed` cells, then cells with no
-  usable record, then the released ones.
-- ``🔴 failed: could not read the cells' results; see the run.`` when the record
-  download failed.
+- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...; some cells' results could not be read; see the run.``,
+  each clause present when it applies: `failed` cells, then cells with no valid
+  record, then the released ones, then a failed record download, after which the
+  records that did arrive are still read.
+- ``🔴 failed: could not read the unlock queue; see the run.`` when `detect`
+  succeeded and its `cells` output is not a list of cells.
 - ``🔴 failed: the unlock run failed before probing any cell; see the run.``
-  when `detect` failed.
+  when `detect` failed; no record is read.
 
 The reply is display only and gates nothing. A record is written by a job that
-runs the pull request's HCL, so it can be forged: the reply names a cell only by
-the index in its file name (`shipmate-unlock-<n>.json`, which the engine
-chooses), into `detect`'s queue, never by a name in the record; a record whose
-own `index` differs from its file name's is ignored,
-and a lock id outside the charset `scripts/lock-info` accepts is dropped. Stack
-names are escaped. A comment not on a pull request, an unreadable comment or a
-failed post posts nothing and warns; a failed download is named in the reply.
-None of them fails `result`: the `unlock` legs' results stay the run's.
+runs the pull request's HCL, so it can be forged. The reply names a cell only as
+`detect`'s queue entry at the record's index, never by a name in the record, and
+a record counts only when the artifact directory's index, the file name's and
+the record's `index` agree, its `stack` and `environment` equal that queue
+entry's, its outcome is one of the three, and it is at most 4,096 bytes of JSON.
+`download-artifact` writes a lone matching artifact without its directory, so
+that flat layout is read only when it holds exactly one file. A lock id outside
+the charset `scripts/lock-info` accepts is dropped, and stack names are escaped.
+A comment not on a pull request, an unreadable comment or a failed post posts
+nothing and warns. None of these, nor a failed download, fails `result`: the
+`unlock` legs' results stay the run's.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan

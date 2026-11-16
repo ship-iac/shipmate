@@ -908,12 +908,15 @@ another pull request's.
 | `⚪ released no state lock in <env>: no probed cell held a state lock.` | Every cell with a pending apply check was probed and none was locked. A failing apply is held by something else: a cell lock, or a lock on a cell outside the queue (below). |
 | `⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...` | Nothing was probed. A lock on a cell whose check completed, or on a stack applied out of band, is released out of band (below). |
 | `🔴 failed: could not determine the lock of <stack>, ...` | That cell's init, probe or `force-unlock` failed; its job in the linked run has the error. Its lock may still be held. Comment `shipmate unlock <env>` again once the cause is fixed. |
-| `🔴 failed: ... <stack> did not run` | That cell's job left no result: it was skipped, or failed before its result was recorded. Its job in the linked run says which. |
-| `🔴 failed: could not read the cells' results; see the run.` | The cells ran, but their results could not be downloaded; each cell's job has its outcome. |
+| `🔴 failed: ... <stack> did not run` | That cell left no valid result: its job was skipped or failed before its result was recorded, or its record was ignored because it did not match the cell (the reply only trusts a record that names the cell's own index, stack and environment). Its job in the linked run says which. |
+| `🔴 failed: ...; some cells' results could not be read; see the run.` | Some results could not be downloaded; the cells named before it are from the results that arrived, and each cell's job has its outcome. |
+| `🔴 failed: could not read the unlock queue; see the run.` | `detect` succeeded but its queue output could not be read; nothing in the reply describes the cells, and each cell's job has its outcome. |
 | `🔴 failed: the unlock run failed before probing any cell; see the run.` | `detect` failed, for example on a missing `<env>-apply` environment; nothing was probed or released. |
 
-No reply at all means the run was cancelled, the dispatch was refused, or the
-reply could not be posted; the run's `result` job warns with the cause.
+No reply at all means the run was cancelled, its `guard` rejected the dispatch
+(a dispatching actor that is not a bot), or the command comment could not be
+read or the reply could not be posted; in those last two cases the run's
+`result` job warns with the cause.
 
 Then re-apply. Unlocking is not recovery: a cancelled apply usually advanced
 the state, so `shipmate apply <env>` may now be refused by the exact-plan
