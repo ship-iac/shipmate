@@ -160,16 +160,13 @@ jobs:
           token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
           echo "path=$path" >> "$GITHUB_OUTPUT"
           echo "name=apply-report-$GITHUB_RUN_ATTEMPT-$token" >> "$GITHUB_OUTPUT"
-      - if: ${{ !inputs.auto }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { ref: "${{ inputs.ref }}" }
-      # The auto form diffs the base tip from its merge base with the head, so it needs both
-      # histories. Two steps, not one depth expression: `0` is falsy in `&&`/`||`.
-      - if: ${{ inputs.auto }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Every form merges the base tip into the head to find the cells behind it, so it needs
+      # both histories; blob:none fetches file contents on demand.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+          filter: blob:none
       - id: setup
         uses: $/actions/setup
         with: { tofu: "false", resolve: "true" }

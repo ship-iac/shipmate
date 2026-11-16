@@ -3,19 +3,25 @@ import json
 import pytest
 from _detect_fixtures import (
     APP_ID,
+    BASE_TIP,
     MINIMAL_TABLE,
     PLAN_SHA,
     PR_NUMBER,
     _apply_check,
     _record,
     answering_run_graph,
+    base_answers,
+    behind_check,
+    behind_message,
     check_run,
     forbid_shared_runner,
     foreign_message,
     held,
     partial_message,
+    routed,
     run_graph_capture,
     spy_env_config,
+    stub_base_changed,
     stub_read_locks,
     stub_read_table,
     wave_cells,
@@ -236,6 +242,9 @@ def _run_main(
     cells=1,
     locks=None,
     lock_reads=None,
+    changed=(),
+    base_calls=None,
+    answers=None,
 ):
     """main() with an empty SHIPMATE_ENV, which is bare_main(), over the head's apply checks,
     with everything the script reaches from GitHub or Terramate stubbed. Defaults to one
@@ -250,7 +259,9 @@ def _run_main(
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
     no edges, and `tags` the tag map, which defaults to no tags for each of them. `dot`,
     run-graph text, keeps `run_graph_deps` real and answers its Terramate call instead. `locks`
-    and `lock_reads` go to `stub_read_locks`."""
+    and `lock_reads` go to `stub_read_locks`. The pull request and base tip reads answer
+    `answers` (default `base_answers`), and the overlap `changed` (`stub_base_changed`, each
+    call appended to `base_calls`)."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -276,13 +287,17 @@ def _run_main(
         checks = [_apply_check("stacks/app", e, cells=cells) for e in envs]
     jsonl = "\n".join(json.dumps(c) for c in checks)
     requested = [] if urls is None else urls
+    body = routed(dict(base_answers("o/r") if answers is None else answers), lambda: jsonl)
 
     def _run(args):
         # Every terramate call must be stubbed, because CI installs uv alone: a real
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
-        requested.append(next(a for a in args if a.startswith("repos/")))
-        return jsonl
+        url = next(a for a in args if a.startswith("repos/"))
+        requested.append(url)
+        return body(url)
+
+    stub_base_changed(monkeypatch, aad.bm, changed, base_calls)
 
     tree = tree or {e: ["stacks/app"] for e in envs}
     deps = deps or {p: set() for ps in tree.values() for p in ps}
@@ -353,13 +368,14 @@ def test_main_passes_the_whole_tree_workload_map(tmp_path, monkeypatch):
 def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monkeypatch):
     """No site keys a bare apply on a plan run's artifacts any more. Whole-list comparison
     against a hand-written constant, so any added gh api call -- an artifact listing, a
-    workflow-runs lookup, a second read of this same listing -- reddens here. One entry: the
+    workflow-runs lookup, a second read of this same listing -- reddens here. One listing: the
     workset, the done predicate and the plan runs are all read off a single fetch, so nothing
-    can disagree about a check that changed mid-run."""
+    can disagree about a check that changed mid-run; then the pull request and its base tip,
+    for the behind check."""
     urls = []
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", urls=urls)
     assert len(wave_cells(aad.wv, parsed)) == 1  # Not vacuous: a cell exists.
-    assert urls == [CHECK_RUNS_URL]
+    assert urls == [CHECK_RUNS_URL, "repos/o/r/pulls/8", "repos/o/r/git/ref/heads/main"]
 
 
 def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
@@ -1470,3 +1486,134 @@ def test_the_bare_form_writes_its_nine_fields_in_one_report(tmp_path, monkeypatc
         "complete",
     }
     assert not (REPORT_FIELDS | {"report"}) & set(parsed)
+
+
+# --- behind the base ---------------------------------------------------------------------------
+
+
+def test_a_bare_apply_refuses_a_behind_record_over_an_older_digest_before_locks_and_records(
+    tmp_path, monkeypatch
+):
+    """An older run's queued check with a digest sits under a newer behind check of the same
+    name: the whole run refuses with the behind text, before any lock read or `with_plan_runs`,
+    and the report names the cell and the base for the result comment.
+
+    Mutation: move the behind refusal after `with_plan_runs` -- the digest refusal fires, red.
+    Mutation: hold the cells per cell in the bare form, as the auto form does -- the run
+    applies `stacks/web`, red.
+    Mutation: raise before `write_report` -- no report, red."""
+    calls, lock_reads = [], []
+    real = aad.with_plan_runs
+
+    def with_plan_runs(*a, **kw):
+        calls.append("with_plan_runs")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(aad, "with_plan_runs", with_plan_runs)
+    checks = [
+        _apply_check("stacks/app", "dev-eu", plan_run="41", cells=2, id=1),
+        _apply_check("stacks/web", "dev-eu", plan_run="41", cells=2, id=2),
+        behind_check("stacks/app", "dev-eu", plan_run="42", cells=1, id=3),
+    ]
+    with pytest.raises(SystemExit) as e:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu"],
+            decision="APPROVED",
+            checks=checks,
+            tree={"dev-eu": ["stacks/app", "stacks/web"]},
+            lock_reads=lock_reads,
+        )
+    assert e.value.code == behind_message(["stacks/app / dev-eu"])
+    assert calls == []
+    assert lock_reads == []
+    assert detect_report() == {
+        "behind": [{"stack": "stacks/app", "environment": "dev-eu"}],
+        "base": "main",
+        "complete": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("changed", "checks", "refused"),
+    [
+        pytest.param(
+            {"stacks/app"},
+            [
+                _apply_check("stacks/app", "dev-eu", cells=2),
+                _apply_check("stacks/db", "prod", cells=2),
+            ],
+            ["stacks/app / dev-eu"],
+            id="overlap-refuses",
+        ),
+        pytest.param(
+            {"stacks/db"},
+            [
+                _apply_check("stacks/app", "dev-eu", cells=2),
+                _apply_check("stacks/db", "prod", cells=2),
+            ],
+            None,
+            id="unselected-overlap",
+        ),
+        pytest.param(
+            (),
+            [
+                _apply_check("stacks/app", "dev-eu", cells=2),
+                behind_check("stacks/db", "prod", plan_run="123456", cells=2),
+            ],
+            None,
+            id="unselected-record",
+        ),
+    ],
+)
+def test_a_bare_apply_checks_only_the_cells_it_would_apply(
+    tmp_path, monkeypatch, changed, checks, refused
+):
+    """`prod` is `targeted`, so the bare form selects only `dev-eu`'s cell: the overlap is asked
+    about it alone, a fresh overlap of it refuses, and a fresh overlap or behind record of
+    `prod`'s cell does not.
+
+    Mutation: answer the overlap as empty (`changed = set()` in `behind_cells`) -- the first
+    case applies, red.
+    Mutation: check every pending cell (`pending` for `candidates`) -- the other two refuse,
+    red."""
+    base_calls = []
+    kw = {
+        "envs": ["dev-eu", "prod"],
+        "targeted": ("prod",),
+        "decision": "APPROVED",
+        "checks": checks,
+        "tree": {"dev-eu": ["stacks/app"], "prod": ["stacks/db"]},
+        "changed": changed,
+        "base_calls": base_calls,
+    }
+    if refused:
+        with pytest.raises(SystemExit) as e:
+            _run_main(tmp_path, monkeypatch, **kw)
+        assert e.value.code == behind_message(refused)
+    else:
+        parsed = _run_main(tmp_path, monkeypatch, **kw)
+        assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
+        assert parsed["base_sha"] == BASE_TIP
+    assert base_calls == [(BASE_TIP, ["stacks/app"])]
+
+
+def test_a_bare_apply_with_no_cell_to_apply_reads_no_pull_request(tmp_path, monkeypatch):
+    """Every cell is applied, so nothing is selected: no pull request or tip read, no overlap,
+    and `base_sha` is empty.
+
+    Mutation: read the pull request with an empty selection -- two more reads, red."""
+    urls, base_calls = [], []
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu"],
+        decision="APPROVED",
+        checks=[check_run(name="apply / stacks/app / dev-eu", external_id=_record("1", cells=1))],
+        urls=urls,
+        base_calls=base_calls,
+    )
+    assert urls == [CHECK_RUNS_URL]
+    assert base_calls == []
+    assert parsed["base_sha"] == ""

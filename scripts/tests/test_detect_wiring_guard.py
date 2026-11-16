@@ -208,22 +208,18 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
     assert got == [{"fetch-depth": 0, "filter": "blob:none"}]
 
 
-def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
-    """Exactly one runs: the auto form computes the merge base of the base tip and the head, which
-    a one-commit checkout does not hold. Two steps, because `fetch-depth: ${{ inputs.auto && 0 ||
-    1 }}` reads `0` as falsy and always fetches one commit. PyYAML gives the int 0.
+def test_the_apply_detect_checkout_is_one_blobless_full_history_step():
+    """Every form merges the base tip into the head, which needs the merge base: one checkout
+    of the full history, blobless, with no `if:`. PyYAML gives the int 0.
 
-    Mutation: delete `fetch-depth` from the auto checkout.
-    Mutation: drop the `!` from the first checkout's `if:`, so an auto run checks out twice and
-    a bare one not at all.
-    Mutation: delete the auto checkout's `if:`."""
+    Mutation: restore the shallow `!inputs.auto` checkout -- two steps, red.
+    Mutation: drop `filter: blob:none` -- red."""
     got = [
         {k: v for k, v in s.items() if k != "uses"}
         for s in checkouts(workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"])
     ]
     assert got == [
-        {"if": "${{ !inputs.auto }}", "with": {"ref": "${{ inputs.ref }}"}},
-        {"if": "${{ inputs.auto }}", "with": {"ref": "${{ inputs.ref }}", "fetch-depth": 0}},
+        {"with": {"ref": "${{ inputs.ref }}", "fetch-depth": 0, "filter": "blob:none"}},
     ]
 
 
@@ -301,9 +297,9 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "base_sha": {
         "description": (
-            "Auto form only: the tip of the pull request's base branch, read from its ref after "
-            "the mergeability wait, that the report's overlap cells were computed on; empty "
-            "when no environment had a pending cell to consider."
+            "The tip of the pull request's base branch, read from its ref (in the auto form "
+            "after the mergeability wait), that the behind cells were computed on; empty when no "
+            "cell was selected to apply."
         ),
         "value": "${{ steps.d.outputs.base_sha }}",
     },

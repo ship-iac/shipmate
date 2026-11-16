@@ -7,8 +7,9 @@ keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 the expected-cell set (per-env-level waves JSON), the head SHA, apply-detect's report file (the
 excluded/skipped/held envs and the predecessors each skipped env waits on (bare and auto forms),
 the waiting cells and the held cells, locked (both forms) or overlap (auto form only), the envs
-left for a bare apply and the pusher (auto form only), the env order, and the review-exempt and
-no-review envs), and the detect or lock job's refusal, and writes a
+left for a bare apply and the pusher (auto form only), the env order, the review-exempt and
+no-review envs, and, when detect refused cells behind the base, those cells and the base
+branch), and the detect or lock job's refusal, and writes a
 fresh comment.md -- this comment carries no marker, so nothing edits or minimizes it. The
 review-exempt and no-review envs go to stdout, the step log, as `notices` annotations, not
 into the comment.
@@ -679,6 +680,18 @@ def _overlap_lines(overlap):
     return [line]
 
 
+def _behind_line(behind, base):
+    """The line naming every cell `behind` (detect's behind refusal) as `<stack> / <env>` and
+    the update remedy for base branch `base`; empty for none."""
+    if not behind:
+        return ""
+    cells = ", ".join(
+        f"{sc._md_name(c['stack'])} / {sc._md_escape(c['environment'])}" for c in behind
+    )
+    base = sc._md_escape(base)
+    return f"⚪ not applied, behind {base}: {cells}. Update the branch from {base} and push."
+
+
 def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_after=None, bare=()):
     """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
     `excluded`, `skipped` and `held` are all-environments sets; the caller passes them empty in
@@ -905,6 +918,8 @@ def build_comment(
     auto_dispatched=False,
     pusher="",
     report_unread=False,
+    behind=(),
+    base="",
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
     order of `order` its `sc.env_heading` (`1 cell, ` or `N cells, `, then the verdict's
@@ -914,7 +929,8 @@ def build_comment(
     and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it is header,
     verdict, footer lines and footer. A non-empty `refusal`, the first error of the `::error::`
     that failed detect or the lock job on one line, sits in `sc.reason_fence` under the
-    verdict. An `auto_dispatched` run puts `_auto_line(pusher)` directly under the verdict,
+    verdict. `behind` and `base` are detect's behind refusal: `_behind_line` sits above the
+    fence. An `auto_dispatched` run puts `_auto_line(pusher)` directly under the verdict,
     above any fence. `held_cells` is detect's: the verdict counts each cause, a cell under both once
     under `locked`, the footer lines name each locked cell's holder, and a footer line names
     the auto form's overlap cells. `skipped_after`
@@ -937,8 +953,11 @@ def build_comment(
     fence = sc.reason_fence(refusal) if refusal else ""
     auto_line = _auto_line(pusher) if auto_dispatched else ""
     unread = _REPORT_UNREAD if report_unread else ""
+    behind_line = _behind_line(behind, base)
     head = "\n\n".join(
-        p for p in (sc.header("apply", env_name), verdict, auto_line, unread, fence) if p
+        p
+        for p in (sc.header("apply", env_name), verdict, auto_line, unread, behind_line, fence)
+        if p
     )
     hint = sc.footer_hint(circle)
     notes = (
@@ -995,6 +1014,7 @@ _REPORT_UNREAD = "🔴 could not read the detect report; see the run"
 _CELL_KEYS = {
     "waiting_cells": ("stack", "environment", "after_stack", "after_environment"),
     "held_cells": ("stack", "environment", "cause"),
+    "behind": ("stack", "environment"),
 }
 
 #: Every field of apply-detect's report and the value a missing one reads as.
@@ -1010,6 +1030,8 @@ _REPORT_DEFAULTS = {
     "env_order": [],
     "pusher": "",
     "bare_envs": [],
+    "behind": [],
+    "base": "",
 }
 
 
@@ -1115,6 +1137,8 @@ def main():
         auto_dispatched=os.environ.get("SHIPMATE_AUTO") == "true",
         pusher=r["pusher"],
         report_unread=unread,
+        behind=r["behind"],
+        base=r["base"],
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

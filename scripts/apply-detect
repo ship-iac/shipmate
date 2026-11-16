@@ -18,6 +18,9 @@ An empty `SHIPMATE_ENV` selects the bare form, `bare_main`: every environment's
 pending cells, bucketed into env-levels by the entries' `needs`, after the
 exclusions its docstring names.
 
+The bare and targeted forms refuse the whole run when a cell they would apply is behind the
+base (`refuse_behind`).
+
 A named environment selects the targeted form, scoped to that ONE environment.
 It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
 which puts every cell at env-level 0 and leaves levels 1-3 empty. A cell that runs
@@ -47,6 +50,7 @@ from _shipmate import (
     check_runs,
     gh_json,
     named,
+    one_line,
     run_annotated,
     status_text,
     validate_head_sha,
@@ -584,15 +588,61 @@ def wait_mergeable(repo, pr_number, head):
     )
 
 
-def overlap_cells(candidates, changed):
+def overlap_cells(candidates, changed, behind=frozenset()):
     """`{stack, environment}` of each cell in `candidates` whose stack is in `changed`, the
     stacks the merge of the base into the branch changes, directly or through a module they
-    source, or removes files in: applying its plan would revert that change."""
+    source, or removes files in, or whose apply check name is in `behind`
+    (`apply-gate.behind_names`), its plan having found the base changed it: applying its plan
+    would revert that change. A cell under both causes is listed once."""
     return [
         {"stack": c["stack"], "environment": c["environment"]}
         for c in candidates
-        if c["stack"] in changed
+        if c["stack"] in changed or ag.check_name(c["stack"], c["environment"]) in behind
     ]
+
+
+def behind_cells(tip, cells, lines, app_id):
+    """`overlap_cells` of `cells` against base tip `tip` (`build-matrix.base_changed_stacks`)
+    and the head's behind records in check-run `lines`. A merge conflict refuses with
+    `MergeConflict`'s text, any other failed step with its own."""
+    changed = bm.base_changed_stacks(tip, {c["stack"] for c in cells})
+    return overlap_cells(cells, changed, ag.behind_names(lines, app_id))
+
+
+def _read_base(repo, pr_number):
+    """`(base branch, base tip)` of pull request `pr_number`, from one pull request read and the
+    branch ref (`apply-gate.base_tip`); a failed or malformed read refuses."""
+    try:
+        pull = gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run)
+        return pull["base"]["ref"], ag.base_tip(repo, pull, run=_run)
+    except SystemExit as e:
+        why = one_line(str(e.code).removeprefix("::error::"))
+    except (LookupError, TypeError, AttributeError, ValueError) as e:
+        why = repr(e)
+    raise SystemExit(
+        f"::error::apply refused: could not read the base tip of pull request #{pr_number} "
+        f"({why}); comment `shipmate apply` again."
+    )
+
+
+def refuse_behind(repo, pr_number, selected, lines, app_id):
+    """The base tip of pull request `pr_number`, refusing the whole run when a cell of
+    `selected`, the cells a bare or targeted apply would apply, is behind it (`behind_cells`).
+    Before refusing it writes the report `{"behind": [{stack, environment}, ...], "base":
+    <base branch>}`, which the apply result comment renders. With no selected cell it reads
+    nothing and returns ""."""
+    if not selected:
+        return ""
+    base, tip = _read_base(repo, pr_number)
+    behind = behind_cells(tip, selected, lines, app_id)
+    if behind:
+        write_report({"behind": behind, "base": base})
+        cells = named([f"{c['stack']} / {c['environment']}" for c in behind], _NAMED)
+        raise SystemExit(
+            f"::error::apply refused: {len(behind)} cell(s) behind {base} ({cells}); update the "
+            f"branch from {base} and push."
+        )
+    return tip
 
 
 def bare_main(auto=False):
@@ -635,7 +685,10 @@ def bare_main(auto=False):
 
     A pending cell another pull request locks (`locked_cells`) stays pending and applies
     nowhere, exactly like a waiting cell; it is named in `held_cells`. Locks are read only
-    in the envs neither held nor excluded as targeted.
+    in the envs neither held nor excluded as targeted. Before the locks are read, the bare form
+    refuses the whole run when one of those envs' pending cells is behind the base
+    (`refuse_behind`), and writes `base_sha`, the base tip it checked, empty when no cell was
+    selected.
 
     `auto` is the auto form, over the `apply_mode: auto` environments' pending cells.
     Every other pending environment counts as stopped in `settle`, so its `needs` successors
@@ -644,16 +697,16 @@ def bare_main(auto=False):
     pending cell in an environment not stopped, the pull request must be ready and mergeable at
     this head (`wait_mergeable`), and a cell whose stack the merge of the base into the branch
     changes, directly or through a module it sources, or removes files in
-    (`build-matrix.base_changed_stacks`) is named in `held_cells`: it stays pending and stops
-    its environment's `needs` successors, as a locked cell does. With a cell to apply, its
-    records must name one plan run that `apply-gate.provenance_reason` admits against the
-    head's newest autoplan listed, no newer `shipmate plan` run of the pull request may be live
-    or have planned (`refuse_provenance`), and that listed run's pusher must have write access
-    (`refuse_pusher`). Writes the bare outputs plus `provenance_run`, empty when no cell
-    applies, and `base_sha`, the base tip overlap was computed on, empty when no pull request
-    read was needed; its report also holds `pusher`, that run's `actor` login, empty when no
-    cell applies, and `bare_envs`, the pending environments neither `auto`, `targeted` nor held,
-    left for a bare apply.
+    (`build-matrix.base_changed_stacks`), or whose apply check records that its plan found the
+    base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
+    it stays pending and stops its environment's `needs` successors, as a locked cell does.
+    With a cell to apply, its records must name one plan run that
+    `apply-gate.provenance_reason` admits against the head's newest autoplan listed, no newer
+    `shipmate plan` run of the pull request may be live or have planned (`refuse_provenance`),
+    and that listed run's pusher must have write access (`refuse_pusher`). Writes the bare
+    outputs plus `provenance_run`, empty when no cell applies; its report also holds `pusher`,
+    that run's `actor` login, empty when no cell applies, and `bare_envs`, the pending
+    environments neither `auto`, `targeted` nor held, left for a bare apply.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -695,11 +748,12 @@ def bare_main(auto=False):
     # waiting cell's remedy names it.
     candidates = [c for c in pending if c["environment"] not in stopped]
     overlap, base_sha = [], ""
+    # One read: the wave re-check compares the base tip with the one this run checked.
     if auto and candidates:
-        # One read: the wave re-check compares the base tip with the one overlap was computed on.
         base_sha = wait_mergeable(repo, pr_number, head)
-        stacks = {c["stack"] for c in candidates}
-        overlap = overlap_cells(candidates, bm.base_changed_stacks(base_sha, stacks))
+        overlap = behind_cells(base_sha, candidates, lines, app_id)
+    elif not auto:
+        base_sha = refuse_behind(repo, pr_number, candidates, lines, app_id)
     locked = locked_cells(repo, candidates, pr_number)
     holds = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)
@@ -718,7 +772,7 @@ def bare_main(auto=False):
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
-    auto_outputs, auto_report = {}, {}
+    auto_outputs, auto_report = {"base_sha": base_sha}, {}
     if auto:
         provenance_run = pusher = ""
         if runnable:
@@ -726,7 +780,7 @@ def bare_main(auto=False):
             newest = refuse_provenance(repo, head, runnable, actions, pr_number)
             pusher = refuse_pusher(repo, newest)
             provenance_run = runnable[0]["plan_run_id"]
-        auto_outputs = {"provenance_run": provenance_run, "base_sha": base_sha}
+        auto_outputs["provenance_run"] = provenance_run
         auto_report = {"pusher": pusher, "bare_envs": sorted(unselected)}
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
@@ -831,6 +885,7 @@ def main():
 
     all_pending = pending_tuples(names, completed, wv.env_stacks(tag_map))
     pending = filter_pending(cells, completed)
+    base_sha = refuse_behind(repo, pr_number, pending, lines, app_id)
     locked = locked_cells(repo, pending, pr_number)
     run = drop_waiting(pending, locked)
     levels = wv.cell_levels(bm.ec.env_order(table), tag_map)
@@ -861,6 +916,7 @@ def main():
     write_outputs(
         **wv.env_level_outputs(per_level),
         head_sha=head,
+        base_sha=base_sha,
     )
 
 

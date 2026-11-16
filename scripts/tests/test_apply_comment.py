@@ -2815,3 +2815,39 @@ def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
         "⚪ prod: skipped, waits on dev (comment `shipmate apply`, which applies them in order)"
         "\n\n" + HINT
     )
+
+
+_BEHIND_CELLS = [
+    {"stack": "stacks/app", "environment": "dev-eu"},
+    {"stack": "stacks/web", "environment": "dev-eu"},
+]
+_BEHIND_REFUSAL = (
+    "apply refused: 2 cell(s) behind release/2 (stacks/app / dev-eu, stacks/web / dev-eu); "
+    "update the branch from release/2 and push."
+)
+
+
+@pytest.mark.parametrize("refusal", ["", _BEHIND_REFUSAL], ids=["no-refusal", "refusal"])
+def test_a_behind_refusal_renders_its_line_from_the_report_above_the_fence(
+    monkeypatch, tmp_path, refusal
+):
+    """A detect behind refusal writes only `behind` and `base`: the line names the cells and the
+    report's base branch, above the refusal fence, with or without a refusal text; every other
+    field reads empty, and the failed run is not green.
+
+    Mutation: render the line only beside a refusal text -- the first case, red.
+    Mutation: name `main` for the base -- red.
+    Mutation: read a report key with `report[k]` -- the missing fields raise, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, json.dumps({"wave0": []}), str(tmp_path / "none"))
+    _set_report(monkeypatch, tmp_path, {"behind": _BEHIND_CELLS, "base": "release/2"})
+    monkeypatch.setenv("SHIPMATE_RESULTS", "failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_REFUSAL", refusal)
+    fence = f"\n\n{ac.sc.reason_fence(refusal)}" if refusal else ""
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {_MAIN_AT}\n\n"
+        "⚪ not applied, behind release/2: stacks/app / dev-eu, stacks/web / dev-eu. Update the "
+        f"branch from release/2 and push.{fence}\n\n" + HINT
+    )

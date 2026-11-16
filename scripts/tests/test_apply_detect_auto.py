@@ -9,6 +9,7 @@ from _detect_fixtures import (
     PR_NUMBER,
     _apply_check,
     autoplans_read,
+    behind_check,
     dispatched_plan,
     forbid_shared_runner,
     held,
@@ -265,8 +266,7 @@ def test_an_unreviewed_pull_request_applies_the_review_exempt_auto_environment(
 def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     """The action passes `false` for a bare apply, whose actor is no App bot.
 
-    Mutation: route on `os.environ.get("SHIPMATE_AUTO")` being non-empty -- the actor refuses.
-    Mutation: drop `auto and` from the overlap read's condition -- the base side is read."""
+    Mutation: route on `os.environ.get("SHIPMATE_AUTO")` being non-empty -- the actor refuses."""
     reads = []
     parsed = _run_auto(
         tmp_path,
@@ -274,14 +274,13 @@ def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
         other=("stage",),
         actor="k3np",
         flag="false",
-        base_changed={"stacks/app"},
         base_reads=reads,
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
     assert detect_report()["held_cells"] == []
     assert "bare_envs" not in detect_report()
-    assert reads == []
+    assert reads == [(BASE, ["stacks/app"])]
 
 
 @pytest.mark.parametrize("actor", ["github-actions[bot]", "other-app[bot]", "shipmate-iac"])
@@ -693,9 +692,11 @@ def test_a_locked_cell_stays_pending_as_on_a_bare_apply(tmp_path, monkeypatch):
 
 
 def test_detect_grants_exactly_these_permissions():
-    """The auto form reads the pull request, and a reusable workflow's job cannot exceed it.
+    """Every form reads the pull request, and a reusable workflow's job cannot exceed it; no
+    permission grows.
 
-    Mutation: drop `pull-requests: read` from `apply-run.yml`'s `detect`."""
+    Mutation: drop `pull-requests: read` from `apply-run.yml`'s `detect`.
+    Mutation: add `contents: write` to it."""
     assert workflow_jobs("apply-run.yml")["detect"]["permissions"] == {
         "contents": "read",
         "checks": "read",
@@ -1050,3 +1051,33 @@ def test_the_auto_form_writes_its_eleven_fields_in_one_report(tmp_path, monkeypa
     }
     assert {"provenance_run", "base_sha"} <= set(parsed)
     assert not {"pusher", "bare_envs", "held_cells", "report"} & set(parsed)
+
+
+@pytest.mark.parametrize("changed", [(), ("stacks/app",)], ids=["record", "record-and-overlap"])
+def test_a_behind_record_holds_its_cell_once_and_its_sibling_applies(
+    tmp_path, monkeypatch, changed
+):
+    """`stacks/app`'s newest check is a behind record over an older run's queued check with a
+    digest: the cell is held with cause `overlap`, once when the fresh overlap also names it,
+    and `stacks/dns` applies.
+
+    Mutation: drop the behind records from the holds (`frozenset()` for `ag.behind_names(...)`)
+    -- the cell reaches `with_plan_runs` and the digest refusal fires, red.
+    Mutation: refuse the whole run as the commanded forms do -- red.
+    Mutation: list a cell under both causes twice -- red."""
+    checks = [
+        _check("stacks/app", "dev-eu", cells=2, id=1),
+        _check("stacks/dns", "dev-eu", cells=2, id=2),
+        behind_check("stacks/app", "dev-eu", plan_run="123457", cells=1, id=3, app=APP),
+    ]
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        stacks=("stacks/app", "stacks/dns"),
+        checks=checks,
+        base_changed=set(changed),
+    )
+    assert _applied(parsed) == [("stacks/dns", "dev-eu")]
+    assert detect_report()["held_cells"] == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"}
+    ]

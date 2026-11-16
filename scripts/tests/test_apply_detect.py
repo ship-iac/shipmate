@@ -2,21 +2,28 @@ import contextlib
 import json
 import os
 import pathlib
+import subprocess
 
 import pytest
 from _detect_fixtures import (
     APP_ID,
+    BASE_TIP,
     HEAD,
     PLAN_SHA,
     PR_NUMBER,
     _apply_check,
     _record,
     answering_run_graph,
+    base_answers,
+    behind_check,
+    behind_message,
     forbid_shared_runner,
     foreign_message,
     held,
     partial_message,
+    routed,
     run_graph_capture,
+    stub_base_changed,
     stub_read_locks,
 )
 from _detect_fixtures import check_run as _check
@@ -260,9 +267,22 @@ def _stub_read_table(monkeypatch, table, reads):
     monkeypatch.setattr(ad.bm.ec, "read_table", read_table)
 
 
-def _stub_apply(monkeypatch, deps, checks, dot=None, locks=None, lock_reads=None):
-    """Stub the apply path's IO: the run-graph, the check-run listing, the per-stack tag
-    query and the lock read (`stub_read_locks`). Every terramate call must be stubbed, because
+def _stub_apply(
+    monkeypatch,
+    deps,
+    checks,
+    dot=None,
+    locks=None,
+    lock_reads=None,
+    *,
+    changed=(),
+    base_calls=None,
+    answers=None,
+):
+    """Stub the apply path's IO: the run-graph, the check-run listing, the pull request and base
+    tip reads (`answers`, default `base_answers`), the overlap (`stub_base_changed` with
+    `changed` and `base_calls`), the per-stack tag query and the lock read
+    (`stub_read_locks`). Every terramate call must be stubbed, because
     CI installs uv alone -- a real invocation passes on a developer machine and fails there.
     `dot`, run-graph text, keeps `run_graph_deps` real and answers its Terramate call; `deps`
     then only keys the tag map.
@@ -270,12 +290,16 @@ def _stub_apply(monkeypatch, deps, checks, dot=None, locks=None, lock_reads=None
     Returns the list of `gh api` paths main() requested, so a re-added run lookup shows up as
     an extra entry rather than as a silent success."""
     urls = []
+    listing = "\n".join(json.dumps(c) for c in checks)
+    body = routed(dict(base_answers("acme/iac") if answers is None else answers), lambda: listing)
 
     def _run(args):
         assert args[0] == "gh", args
-        urls.append(next(a for a in args if a.startswith("repos/")))
-        return "\n".join(json.dumps(c) for c in checks)
+        url = next(a for a in args if a.startswith("repos/"))
+        urls.append(url)
+        return body(url)
 
+    stub_base_changed(monkeypatch, ad.bm, changed, base_calls)
     runner = _run
     if dot is None:
         monkeypatch.setattr(ad.bm, "run_graph_deps", lambda: deps)
@@ -350,7 +374,11 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     assert (
         len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
     )  # Not vacuous: a cell exists.
-    assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
+    assert urls == [
+        f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
+        "repos/acme/iac/pulls/8",
+        "repos/acme/iac/git/ref/heads/main",
+    ]
 
 
 def test_a_targeted_apply_reads_the_tag_metadata_once(monkeypatch, tmp_path):
@@ -857,8 +885,8 @@ def test_main_names_a_reviewed_env_applied_with_no_review_required(
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply-run.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty` and `head_sha`, and the report file holds exactly the targeted form's four
-    fields: `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a
+    `envlevelN_empty`, `head_sha` and `base_sha`, and the report file holds exactly the targeted
+    form's four fields: `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a
     targeted apply is env-level 0 alone, so levels 1-3 must say `true` or apply-run.yml runs them
     into `fromJSON('')`.
 
@@ -891,6 +919,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         f"envlevel3_waves={empty}\n"
         "envlevel3_empty=true\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        "base_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
     )
     assert detect_report() == {
         "review_not_required_envs": [],
@@ -1418,3 +1447,229 @@ def test_a_refused_detect_leaves_the_empty_report_its_job_wrote(monkeypatch, tmp
     with pytest.raises(SystemExit):
         ad.main()
     assert path.read_text(encoding="utf-8") == "{}"
+
+
+# --- behind the base ---------------------------------------------------------------------------
+
+
+def test_a_targeted_apply_refuses_a_behind_record_over_an_older_digest(monkeypatch, tmp_path):
+    """An older run's queued check with a digest sits under a newer behind check of the same
+    name: the run refuses with the behind text, never the digest refusal, and writes no wave.
+
+    Mutation: move the behind refusal after `with_plan_runs` -- the digest refusal, red."""
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/app": set()},
+        [
+            _apply_check("stacks/app", plan_run="41", cells=1, id=1),
+            behind_check("stacks/app", plan_run="42", cells=1, id=2),
+        ],
+    )
+    with pytest.raises(SystemExit) as e:
+        ad.main()
+    assert e.value.code == behind_message(["stacks/app / dev-eu"])
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("changed", "checks", "refused"),
+    [
+        pytest.param(
+            {"stacks/app"},
+            [_apply_check("stacks/app", cells=1)],
+            ["stacks/app / dev-eu"],
+            id="overlap",
+        ),
+        pytest.param(
+            (),
+            [behind_check("stacks/app", cells=1)],
+            ["stacks/app / dev-eu"],
+            id="record",
+        ),
+        pytest.param(
+            (),
+            [
+                _apply_check("stacks/app", cells=2),
+                behind_check("stacks/app", "dev-us", plan_run="123456", cells=2),
+            ],
+            None,
+            id="record-in-another-env",
+        ),
+    ],
+)
+def test_a_targeted_apply_refuses_a_behind_cell_of_its_environment(
+    monkeypatch, tmp_path, changed, checks, refused
+):
+    """A fresh overlap or a behind record of a `dev-eu` cell refuses a `shipmate apply dev-eu`;
+    a behind record of another environment's cell does not.
+
+    Mutation: check every environment's pending cells -- the third case refuses, red.
+    Mutation: answer the overlap as empty -- the first case applies, red."""
+    out = _apply_env(monkeypatch, tmp_path)
+    base_calls = []
+    _stub_apply(monkeypatch, {"stacks/app": set()}, checks, changed=changed, base_calls=base_calls)
+    tags = {"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"]}
+    monkeypatch.setattr(ad.bm, "all_tags", lambda: tags)
+    if refused:
+        with pytest.raises(SystemExit) as e:
+            ad.main()
+        assert e.value.code == behind_message(refused)
+    else:
+        ad.main()
+        parsed = github_outputs(out)
+        assert len(json.loads(parsed["envlevel0_waves"])["wave0"]) == 1
+        assert parsed["base_sha"] == BASE_TIP
+    assert base_calls == [(BASE_TIP, ["stacks/app"])]
+
+
+def test_a_targeted_apply_with_nothing_pending_reads_no_pull_request(monkeypatch, tmp_path):
+    """Mutation: read the pull request with an empty selection -- two more reads, red."""
+    out = _apply_env(monkeypatch, tmp_path)
+    done = _check(name="apply / stacks/app / dev-eu", external_id=_record("1", cells=1))
+    urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [done])
+    ad.main()
+    assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
+    assert github_outputs(out)["base_sha"] == ""
+
+
+_NOT_FOUND = SystemExit("::error::command failed (1): gh api\ngh: Not Found (HTTP 404)")
+_TREE_REF = json.dumps({"ref": "refs/heads/main", "object": {"sha": BASE_TIP, "type": "tree"}})
+
+
+@pytest.mark.parametrize(
+    ("pull", "ref", "why"),
+    [
+        pytest.param(
+            _NOT_FOUND,
+            None,
+            "command failed (1): gh api | gh: Not Found (HTTP 404)",
+            id="pull-read",
+        ),
+        pytest.param(
+            json.dumps({"base": {"ref": "main"}}),
+            _TREE_REF,
+            "refs/heads/main is not the commit ref of branch 'main'",
+            id="tip-read",
+        ),
+    ],
+)
+def test_a_failed_base_read_refuses_a_targeted_apply(monkeypatch, tmp_path, pull, ref, why):
+    """Mutation: read a failed base read as no overlap -- the cell applies, red."""
+    _apply_env(monkeypatch, tmp_path)
+    answers = {"repos/acme/iac/pulls/8": pull, "repos/acme/iac/git/ref/heads/main": ref}
+    _stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", cells=1)], answers=answers
+    )
+    with pytest.raises(SystemExit) as e:
+        ad.main()
+    assert e.value.code == (
+        f"::error::apply refused: could not read the base tip of pull request #8 ({why}); "
+        "comment `shipmate apply` again."
+    )
+
+
+def _git(*args, cwd=None):
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True, cwd=cwd
+    ).stdout
+
+
+@pytest.fixture
+def blobless(tmp_path, monkeypatch):
+    """A `--filter=blob:none` clone of a source repository, as apply-run.yml's detect checks it
+    out, as the cwd, with this machine's git config out of the way. Returns
+    `commit(files, message)`, which commits to the source's checked-out branch."""
+    (tmp_path / "gitconfig").write_bytes(b"")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    for k in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(k, "shipmate tests")
+    for k in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(k, "tests@example.invalid")
+    src = tmp_path / "src"
+    src.mkdir()
+    _git("init", "-q", "-b", "main", cwd=src)
+    _git("config", "uploadpack.allowFilter", "true", cwd=src)
+
+    def commit(files, message):
+        for path, text in files.items():
+            target = src / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(text.encode())
+        _git("add", "-A", cwd=src)
+        _git("commit", "-q", "-m", message, cwd=src)
+        return _git("rev-parse", "HEAD", cwd=src).strip()
+
+    commit.src = src
+    return commit
+
+
+def _clone(tmp_path, monkeypatch, src, branch):
+    url = src.resolve().as_uri()
+    _git("clone", "-q", "--filter=blob:none", "--no-checkout", url, str(tmp_path / "clone"))
+    clone = tmp_path / "clone"
+    _git("checkout", "-q", f"origin/{branch}", cwd=clone)
+    assert _git("config", "remote.origin.promisor", cwd=clone).strip() == "true"
+    monkeypatch.chdir(clone)
+
+
+def _list_merge(monkeypatch):
+    """Answer Terramate's `list --changed` in the merge worktree with the stack directories
+    (`stacks/<name>`) the merge commit changed against its parent, which git reads from trees
+    alone."""
+    real = ad.bm._run
+
+    def _run(args):
+        if args[0] != "terramate":
+            return real(args)
+        names = _git("diff", "--name-only", "HEAD^", "HEAD", cwd=args[2]).split()
+        return "".join(f"{s}\n" for s in sorted({"/".join(n.split("/")[:2]) for n in names}))
+
+    monkeypatch.setattr(ad.bm, "_run", _run)
+
+
+def test_a_stack_the_base_did_not_change_stays_applyable_from_a_blobless_clone(
+    blobless, tmp_path, monkeypatch
+):
+    """The branch changes `stacks/a`, the base `stacks/b`. In a blobless clone the merge fetches
+    the base's blobs under the merge environment, and only `stacks/b` is behind.
+
+    Mutation: hold every candidate when the base changed any stack (`changed or` for
+    `c["stack"] in changed or`) -- `stacks/a` is behind, red."""
+    blobless({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n"}, "common")
+    _git("checkout", "-q", "-b", "pr", cwd=blobless.src)
+    blobless({"stacks/a/main.tf": "a edit\n"}, "pr")
+    _git("checkout", "-q", "main", cwd=blobless.src)
+    tip = blobless({"stacks/b/main.tf": "b edit\n"}, "base")
+    _clone(tmp_path, monkeypatch, blobless.src, "pr")
+    _list_merge(monkeypatch)
+    cells = [{"stack": s, "environment": "dev-eu"} for s in ("stacks/a", "stacks/b")]
+    assert ad.behind_cells(tip, cells, [], APP_ID) == [cells[1]]
+
+
+def test_a_conflict_elsewhere_refuses_a_targeted_apply_of_a_clean_stack(
+    blobless, tmp_path, monkeypatch
+):
+    """The branch deletes `stacks/a/main.tf` and edits `stacks/b`; the base edits both. The
+    merge conflicts on `stacks/a`, so an apply of `stacks/b` alone refuses with the conflict.
+
+    Mutation: catch `MergeConflict` in `behind_cells` and hold nothing -- no refusal, red."""
+    blobless({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n", "stacks/b/x.tf": "x\n"}, "c")
+    _git("checkout", "-q", "-b", "pr", cwd=blobless.src)
+    (blobless.src / "stacks/a/main.tf").unlink()
+    head = blobless({"stacks/b/x.tf": "x edit\n"}, "pr")
+    _git("checkout", "-q", "main", cwd=blobless.src)
+    tip = blobless({"stacks/a/main.tf": "a edit\n", "stacks/b/main.tf": "b edit\n"}, "base")
+    _clone(tmp_path, monkeypatch, blobless.src, "pr")
+    _list_merge(monkeypatch)
+    monkeypatch.setattr(ad, "_read_base", lambda repo, pr: ("main", tip))
+    cell = {"stack": "stacks/b", "environment": "dev-eu"}
+    with pytest.raises(SystemExit) as e:
+        ad.refuse_behind("acme/iac", PR_NUMBER, [cell], [], APP_ID)
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: "
+        f"CONFLICT (modify/delete): stacks/a/main.tf deleted in {head} and modified in {tip}.  "
+        f"Version {tip} of stacks/a/main.tf left in tree. Update the branch from the base and "
+        "push."
+    )
