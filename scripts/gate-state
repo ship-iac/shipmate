@@ -19,9 +19,19 @@ the plan comment as it is. An on-demand plan never takes that branch: a
 skipped `detect` there is a failure like any other non-success.
 """
 
+import json
 import os
+import pathlib
+import re
 
-from _shipmate import _load, cell_names, run_annotated, write_outputs
+from _shipmate import (
+    BEHIND_SHAS,
+    _load,
+    cell_names,
+    is_head_sha,
+    run_annotated,
+    write_outputs,
+)
 
 ag = _load("apply-gate")
 
@@ -38,6 +48,81 @@ DRAFT_DESCRIPTION = (
     "the pull request was a draft when this run started, so nothing was planned; "
     "comment `shipmate plan`, or mark it ready"
 )
+
+
+BEHIND_UNREAD = (
+    "the behind cells were not reported, so this run's evidence is unknown; re-plan before merging"
+)
+OLDER_UNREAD = "could not read this head's apply checks; push a commit to re-plan"
+_BEHIND_KEYS = {"base", "tip", "since", "commits", "cells"}
+_ROW_KEYS = {"stack", "environment", "cause", "shas", "more"}
+#: A short commit sha as `git log`'s `%h` prints it: what a behind cell lists and the comment
+#: renders in a code span.
+_SHORT_SHA = re.compile(r"[0-9a-f]{4,40}")
+
+
+def _is_name(value):
+    return isinstance(value, str) and value != ""
+
+
+def _valid_row(row):
+    """Whether `row` is one behind cell of `build-matrix.behind_report`."""
+    if not isinstance(row, dict) or set(row) != _ROW_KEYS:
+        return False
+    shas, more = row["shas"], row["more"]
+    if not (_is_name(row["stack"]) and _is_name(row["environment"])):
+        return False
+    if row["cause"] not in ("changed", "conflict") or not isinstance(shas, list):
+        return False
+    if not isinstance(more, int) or isinstance(more, bool) or more < 0 or len(shas) > BEHIND_SHAS:
+        return False
+    if row["cause"] == "conflict" and (shas or more):
+        return False
+    return all(isinstance(s, str) and _SHORT_SHA.fullmatch(s) for s in shas)
+
+
+def behind_cells(raw):
+    """The `behind` output of `build-matrix` (`behind_report`) parsed from `raw`, or None unless
+    it is exactly that shape: a base branch name; a tip and a merge base that are commit shas
+    when a cell is behind and empty when none is; `commits` mapping exactly the short shas the
+    cells list to their subjects; each cell a stack, an environment, a cause of `changed` or
+    `conflict`, up to three listed shas (none for a conflict) and a count of the rest. The one
+    reader `pending-checks`, `summary-comment` and `decide` share."""
+    try:
+        report = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(report, dict) or set(report) != _BEHIND_KEYS:
+        return None
+    rows, commits = report["cells"], report["commits"]
+    if not _is_name(report["base"]) or not isinstance(rows, list):
+        return None
+    if not isinstance(commits, dict) or not all(isinstance(v, str) for v in commits.values()):
+        return None
+    ends = (report["tip"], report["since"])
+    if not (all(is_head_sha(e) for e in ends) if rows else ends == ("", "")):
+        return None
+    if not all(_valid_row(r) for r in rows):
+        return None
+    if set(commits) != {s for r in rows for s in r["shas"]}:
+        return None
+    return report
+
+
+def open_older(check_runs_path, bodies_path, app_id):
+    """How many of the head's App-authored apply checks, newest per name, are not done
+    (`apply-gate.done_names`), leaving out the names this run publishes in the JSONL
+    `bodies_path`; None when either file, or the App id, cannot be read. Every attempt of a plan
+    run shares its run id, so an earlier attempt's open check counts like any older run's."""
+    try:
+        lines = pathlib.Path(check_runs_path).read_text(encoding="utf-8").splitlines()
+        runs = ag.app_runs(lines, app_id)
+        text = pathlib.Path(bodies_path).read_text(encoding="utf-8")
+        mine = {json.loads(line)["name"] for line in text.splitlines() if line.strip()}
+    except (OSError, SystemExit, ValueError, LookupError, TypeError):
+        return None
+    done = ag.done_names(runs)
+    return sum(1 for name in ag.latest_by_name(runs) if name not in done | mine)
 
 
 def _as_int(value):
@@ -110,12 +195,14 @@ def _evidence_gap(*, cell_count, planned):
     return None
 
 
-def evidence_gap(*, plan_result, planned_cells, cell_count, missing=()):
+def evidence_gap(*, plan_result, planned_cells, cell_count, behind, missing=()):
     """A hold description when this plan run's evidence is not trustworthy, else None.
 
     The one predicate the gate and the apply-check publisher share: `decide` holds the gate on
     it, and `pending-checks` publishes no apply check on it. `planned_cells` is the count as
     reported (a string, possibly empty); `cell_count` is the number of cell summaries parsed.
+    `behind` is the number of behind cells `behind_cells` read, or None when it read none, which
+    is a gap: a behind cell nobody reported would have no check and no row.
     The plan-job checks run before the evidence check, so a plan job that broke or never ran is
     reported as a plan problem rather than shadowed by the evidence shortfall it also produces.
     `missing`, the planned cells with no cell summary, changes only a failed plan job's text,
@@ -127,9 +214,12 @@ def evidence_gap(*, plan_result, planned_cells, cell_count, missing=()):
             "the planned cell count was not reported, so this run's evidence is "
             "unknown; re-plan before merging"
         )
-    return _plan_gap(plan_result=plan_result, planned=planned, missing=missing) or _evidence_gap(
-        cell_count=cell_count, planned=planned
-    )
+    plan_gap = _plan_gap(plan_result=plan_result, planned=planned, missing=missing)
+    if plan_gap:
+        return plan_gap
+    if behind is None:
+        return BEHIND_UNREAD
+    return _evidence_gap(cell_count=cell_count, planned=planned)
 
 
 def _detect_gap(detect_result, refusal):
@@ -157,6 +247,9 @@ def decide(
     is_draft=False,
     on_demand=False,
     refusal="",
+    behind,
+    open_older,
+    base="",
     missing=(),
     stacked_hold="",
 ):
@@ -180,6 +273,13 @@ def decide(
     `refusal` is the first error of the `::error::` message `build-matrix` or `hcl-check` failed
     with, on one line (`_detect_gap`). `missing` goes to `evidence_gap`. `stacked_hold`, when not
     empty, is the `pending` description in place of the generic one.
+
+    `behind` (`evidence_gap`) above zero holds the gate `pending`, naming the count and `base`,
+    the base branch, ahead of the changed cells' text, with mode `post`: an all-behind run has
+    no changed cell, and its rows still need a comment. Every `success` decision (no cell, or no
+    changed cell) instead stays `pending` when `open_older` (`open_older`) is not zero, since an
+    earlier plan's apply check still open on the head blocks the merge, or None, since nothing
+    tells whether one is; the comment mode is the success one.
     """
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT
@@ -188,20 +288,37 @@ def decide(
     if plan_result == "cancelled":
         return None, "", _HOLD
     gap = evidence_gap(
-        plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count, missing=missing
+        plan_result=plan_result,
+        planned_cells=planned_cells,
+        cell_count=cell_count,
+        behind=behind,
+        missing=missing,
     )
     if gap:
         return "failure", gap, _HELD
+    if behind:
+        return "pending", f"{behind} cell(s) behind {base}; update the branch from {base}", _POST
     if pending:
         return "pending", stacked_hold or PENDING_DESCRIPTION, _POST
     # Safe only below the gap check: a None gap means `cell_count` equals the planned count,
     # so moving this branch above it would green a run nobody reported a count for.
-    if cell_count == 0:
-        return "success", "no pending applies for this PR", _NOTHING
-    return "success", "no pending applies for this PR", _POST
+    return _success(_NOTHING if cell_count == 0 else _POST, open_older)
+
+
+def _success(mode, open_older):
+    """`decide`'s answer for a run with nothing of its own to apply, in comment mode `mode`:
+    `success`, unless an earlier plan's apply check is open on the head or none could be read."""
+    if open_older is None:
+        return "pending", OLDER_UNREAD, mode
+    if open_older:
+        older = f"an earlier plan's {open_older} apply check(s) are still open on this head"
+        return "pending", f"{older}; push a commit to re-plan", mode
+    return "success", "no pending applies for this PR", mode
 
 
 def main():
+    report = behind_cells(os.environ.get("SHIPMATE_BEHIND", ""))
+    behind = None if report is None else len(report["cells"])
     state, desc, mode = decide(
         detect_result=os.environ["SHIPMATE_DETECT_RESULT"],
         plan_result=os.environ["SHIPMATE_PLAN_RESULT"],
@@ -216,11 +333,24 @@ def main():
         refusal=os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
         missing=cell_names(os.environ.get("SHIPMATE_MISSING", "")),
         stacked_hold=os.environ.get("SHIPMATE_STACKED_HOLD", ""),
+        behind=behind,
+        base="" if report is None else report["base"],
+        open_older=open_older(
+            os.environ.get("SHIPMATE_CHECK_RUNS", ""),
+            os.environ.get("SHIPMATE_BODIES", ""),
+            os.environ.get("SHIPMATE_APP_ID", ""),
+        ),
     )
     # A stack path holding CR or LF would end the `GITHUB_OUTPUT` line. `reason` is the whole
     # text, for the held comment.
     flat = desc.replace("\r", " ").replace("\n", " ")
-    write_outputs(state=state or "", description=flat[:140], reason=flat, comment_mode=mode)
+    write_outputs(
+        state=state or "",
+        description=flat[:140],
+        reason=flat,
+        comment_mode=mode,
+        behind="" if behind is None else behind,
+    )
 
 
 if __name__ == "__main__":

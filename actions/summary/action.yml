@@ -128,6 +128,16 @@ inputs:
       unreadable one warns once.
     required: false
     default: ""
+  behind:
+    description: >-
+      build-matrix's `behind` output: JSON {"base", "tip", "since", "commits", "cells"} naming the
+      changed cells whose stack the base changed since the branch left it, or a merge of the base
+      into the branch conflicts; they were not planned. Each gets a pending apply check titled
+      `Behind <base>: update the branch` and a row in the plan comment, and the gate stays pending
+      while any is listed. With detect succeeded, an empty value or one not of that shape is an
+      evidence gap: the gate holds and no apply check is published.
+    required: false
+    default: ""
 outputs:
   upsert:
     description: >-
@@ -189,6 +199,7 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
+        SHIPMATE_BEHIND: ${{ inputs.behind }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
@@ -250,7 +261,8 @@ runs:
         # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
         # mid-publish would merge the unpublished cells. A re-run that publishes nothing still
         # holds. It stands until `Create/refresh gate`; `Create apply checks` publishes after it.
-        if [ -n "$cells" ]; then
+        # A run of only behind cells has no cell summary and still publishes their checks.
+        if [ -n "$cells" ] || [ -s bodies.jsonl ]; then
           hold "Plan run $GITHUB_RUN_ID holds this while it publishes; if that run has ended, re-plan (comment shipmate plan or push)"
         fi
 
@@ -372,6 +384,7 @@ runs:
         SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
+        SHIPMATE_BEHIND: ${{ inputs.behind }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links
@@ -398,6 +411,11 @@ runs:
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
         SHIPMATE_STACKED_HOLD: ${{ steps.build.outputs.stacked_hold }}
+        SHIPMATE_BEHIND: ${{ inputs.behind }}
+        # The hold step's files: the head's apply checks and the bodies this run publishes.
+        SHIPMATE_CHECK_RUNS: apply-check-runs.jsonl
+        SHIPMATE_BODIES: bodies.jsonl
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"
 
     - name: Download cell errors
@@ -436,7 +454,8 @@ runs:
           if live=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" moved "$HEAD_SHA" "$PR" 2>moved.err); then
             cat moved.err >&2
             [ -n "$live" ] || return 0
-            if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ]; then
+            # The hold step's own test: it wrote a publish hold for a cell summary or a body.
+            if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ] || [ -s bodies.jsonl ]; then
               echo "::notice::pull request #$PR has moved past $HEAD_SHA; this run writes no comment or apply check on it, and its publish hold stays there"
             else
               echo "::notice::pull request #$PR has moved past $HEAD_SHA; this run writes no comment, apply check or gate on it"
@@ -536,6 +555,7 @@ runs:
         STATE: ${{ steps.gate.outputs.state }}
         DESCRIPTION: ${{ steps.gate.outputs.description }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
+        BEHIND: ${{ steps.gate.outputs.behind }}
         PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
@@ -570,8 +590,9 @@ runs:
         python3 "$gate_status" post "$HEAD_SHA" "$STATE" "$DESCRIPTION"
         # Degrades: the `pending` above is the fail-closed write, and the refresh only upgrades it
         # when every apply check is already done (an apply's refresh that ran before this write).
-        # Skipped when this run published a queued check, which cannot be done yet.
-        if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ -f bodies.jsonl ] \
+        # Skipped when this run published a queued check, which cannot be done yet, and over a
+        # behind cell, whose pending gate no apply check can lift.
+        if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ "$BEHIND" = "0" ] && [ -f bodies.jsonl ] \
           && ! grep -q '"status": "queued"' bodies.jsonl; then
           # `run_annotated` prints the error as one escaped command; swapping its severity keeps it
           # escaped, so the runner decodes `%0A` and no stderr line starts a command. A hold or a

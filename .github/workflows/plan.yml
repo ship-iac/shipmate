@@ -56,6 +56,7 @@ jobs:
       head-repo: ${{ steps.facts.outputs.head-repo }}
       head-ref: ${{ steps.facts.outputs.head-ref }}
       base-sha: ${{ steps.facts.outputs.base-sha }}
+      base-ref: ${{ steps.facts.outputs.base-ref }}
       pr-number: ${{ steps.facts.outputs.pr-number }}
       is-draft: ${{ steps.facts.outputs.is-draft }}
       on-demand: ${{ steps.facts.outputs.on-demand }}
@@ -84,6 +85,7 @@ jobs:
       refusal: ${{ steps.setup.outputs.refusal || steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}
       cells: ${{ steps.matrix.outputs.cells }}
       env_order: ${{ steps.matrix.outputs.env_order }}
+      behind: ${{ steps.matrix.outputs.behind }}
       tools: ${{ steps.setup.outputs.tools }}
     steps:
       # Both triggers check out something else by default -- the base branch under
@@ -105,6 +107,7 @@ jobs:
         uses: $/actions/build-matrix
         with:
           base-sha: ${{ needs.facts.outputs.base-sha }}
+          base-ref: ${{ needs.facts.outputs.base-ref }}
           head-repo: ${{ needs.facts.outputs.head-repo }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
           github-vars: ${{ toJSON(vars) }}
@@ -204,6 +207,7 @@ jobs:
           command-hints: ${{ needs.detect.outputs.command_hints }}
           auto-envs: ${{ needs.detect.outputs.auto_envs }}
           targeted-envs: ${{ needs.detect.outputs.targeted_envs }}
+          behind: ${{ needs.detect.outputs.behind }}
 
   # Holds the gate when `summary` ended `cancelled` and the run was not cancelled, for example at
   # a full gate-writer queue for the head; it writes outside the group, since a hold only closes

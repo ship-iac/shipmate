@@ -1,6 +1,7 @@
 """pending-checks: check-run POST bodies from downloaded cell summaries."""
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -41,6 +42,11 @@ def _plan_run(monkeypatch):
     # A non-github.com server, so a URL built with a hardcoded host does not match.
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://ghe.example.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("SHIPMATE_BEHIND", NO_BEHIND)
+
+
+#: build-matrix's `behind` output for a plan with no behind cell.
+NO_BEHIND = '{"base":"main","tip":"","since":"","commits":{},"cells":[]}'
 
 
 def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
@@ -261,7 +267,7 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
     """The whole `env:` of the summary step running pending-checks. Mutations: drop
     `SHIPMATE_PR_NUMBER` from it -- red; drop `SHIPMATE_APP_ID` -- red; drop
     `SHIPMATE_PLANNED_CELLS` -- red; rebind or drop `GH_TOKEN` -- red; drop `SHIPMATE_APP_SLUG`
-    or read it from `steps.plantoken` -- red."""
+    or read it from `steps.plantoken` -- red; drop `SHIPMATE_BEHIND` -- red."""
     (step,) = [
         s
         for s in action_yaml("summary")["runs"]["steps"]
@@ -274,6 +280,7 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_PLAN_RESULT": "${{ inputs.plan-result }}",
         "SHIPMATE_PLANNED_CELLS": "${{ inputs.planned-cells }}",
+        "SHIPMATE_BEHIND": "${{ inputs.behind }}",
         "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
     }
 
@@ -660,9 +667,7 @@ LINE = "a" * 99
 
 def _output(tmp_path, plan):
     """`check_output` of a changed cell whose plan.txt holds the bytes `plan`."""
-    txt = tmp_path / "plan.txt"
-    txt.write_bytes(plan)
-    return pc.check_output(CHANGED, txt, URL)
+    return pc.check_output(CHANGED, plan, URL)
 
 
 def _emit_changed(tmp_path, plan):
@@ -760,22 +765,85 @@ def test_a_first_line_of_exactly_the_room_is_kept(tmp_path):
     assert len(summary.encode()) == CAP
 
 
-def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
-    """1,000,000 bytes of ASCII lines, then the byte 0xFF: a whole strict UTF-8 text read raises
-    `UnicodeDecodeError`. `counts` reads the whole file for the tally, so a double stands in for
-    it. The digest was computed once, off the tree. Mutation: read the whole file
-    (`fh.read()`) -> red."""
-
-    def counts(path):
-        return (1, 0, 0, 0, 0)
-
-    monkeypatch.setattr(pc.sc, "counts", counts)
-    body = _emit_changed(tmp_path, ((LINE + "\n") * 10_000).encode() + b"\xff")
-    assert body["output"]["title"] == "+1 ~0 -0"
-    assert body["output"]["summary"].endswith(TRAILER)
-    assert json.loads(body["external_id"])["plan_sha256"] == (
-        "6bec3c7c34b6f1ed2f7833c8f8bcc17aa3bb6fd865587d11e0faec55362fc0ef"
+def test_each_changed_cells_plan_text_is_read_once(tmp_path, monkeypatch):
+    """The digest, the counts and the fenced prefix all come from one read of plan.txt, so the
+    three cannot describe two different files. A no-change cell's text is read once too, for its
+    digest. Mutation: re-read the file for the fenced prefix (`open(txt).read(...)` in
+    `check_output`) -- two opens, red."""
+    _write_cell(tmp_path, "dev-eu", "stacks-app", **CHANGED)
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-dns",
+        PLAN_B,
+        stack="stacks/dns",
+        environment="dev-eu",
+        changed=False,
     )
+    reads = []
+    real_read_bytes, real_open = pathlib.Path.read_bytes, open
+
+    def read_bytes(self):
+        if self.name == "plan.txt":
+            reads.append(self.parent.name)
+        return real_read_bytes(self)
+
+    def opened(file, *args, **kwargs):
+        if pathlib.Path(file).name == "plan.txt":
+            reads.append(pathlib.Path(file).parent.name)
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", read_bytes)
+    monkeypatch.setattr("builtins.open", opened)
+    assert len(_emit(tmp_path)) == 2
+    assert sorted(reads) == ["cell-summary.dev-eu.stacks-app", "cell-summary.dev-eu.stacks-dns"]
+
+
+#: sha256 of each body, serialized with sorted keys, that the engine published before
+#: `pending-checks` read each plan text once: captured off the tree, from the previous revision.
+_BODY_DIGESTS = {
+    "crlf": "5cb4770a291cdf848c0492bfce355ba9535b24f7c70a937ef03eee7af1a23505",
+    "cr": "7b34956d987f92cbe653fc43197d2cece98bb48cc26e055a6b25624a8d56a34e",
+    "big": "8ce3716ead43ee9f8d67db21941e197a0030adfd463e9a5d577ede94422b29fd",
+    "cr_tally": "62c8782e275448639f0c69d7c763de98cba7f1144b2b098c89d17b2d1e624094",
+    "edge": "ed9d3132c3f63355624b93c60f9f8bca1a5744b6b2adf3b3ce45d33e7a6ca16d",
+}
+_RIDER_TEXTS = {
+    "crlf": b"  # a will be created\r\n  + x = 1\r\n\r\n"
+    b"Plan: 1 to add, 0 to change, 0 to destroy.\r\n",
+    "cr": b'  # a will be created\r\n  + x = "a\rb"\n'
+    b"Plan: 1 to add, 0 to change, 0 to destroy.\r\n",
+    "big": (b"  + line with a cr\r\n" * (CAP // 18))
+    + b"Plan: 2 to add, 0 to change, 1 to destroy.\r\n",
+    "cr_tally": b'  + x = "a\rPlan: 1 to add, 0 to change, 0 to destroy.\nPlan: 3 to add, 0 to '
+    b"change, 0 to destroy.\n",
+    "edge": b"x" * (CAP - 1) + b"\r\n" + b"Plan: 1 to add, 0 to change, 0 to destroy.\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_RIDER_TEXTS))
+def test_a_plan_text_with_cr_line_ends_publishes_the_same_body_as_before(tmp_path, name):
+    """CRLF line ends, a lone CR inside a value, a plan cut at the cap, a CRLF straddling the
+    cap, and a tally line after a lone CR: the title counts and the fence read the text as the
+    earlier two-read form did, so the published body is byte-identical. Mutations: drop the CR
+    translation of the fenced prefix -- `crlf` red; split the counts on universal newlines
+    (`splitlines()`) -- `cr_tally` red."""
+    d = tmp_path / "cell"
+    d.mkdir()
+    (d / "plan.txt").write_bytes(_RIDER_TEXTS[name])
+    body = pc.body(
+        "apply / stacks/app / dev-eu",
+        d / "cell.json",
+        CHANGED,
+        "a" * 40,
+        "1",
+        "7",
+        1,
+        "synchronize",
+        "https://x/run",
+    )
+    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    assert digest == _BODY_DIGESTS[name]
 
 
 #: A wide record: a 20-digit run id, a 6-digit pull request, 9999 cells, the longest event
@@ -829,4 +897,163 @@ def test_a_cell_missing_a_key_fails_loud(tmp_path):
         f"::error::cell summary {cell_json} missing keys ['changed'] -- plan-cell and the "
         "summary job must run the same engine revision; re-pin every engine reference to one "
         "commit, then re-plan (comment shipmate plan or push)"
+    )
+
+
+TIP, SINCE = "c" * 40, "d" * 40
+_BEHIND = {
+    "base": "main",
+    "tip": TIP,
+    "since": SINCE,
+    "commits": {"abc1234": "edit workers (#41)"},
+    "cells": [
+        {
+            "stack": "stacks/workers",
+            "environment": "dev-eu",
+            "cause": "changed",
+            "shas": ["abc1234"],
+            "more": 0,
+        },
+        {"stack": "modules/net", "environment": "prod", "cause": "changed", "shas": [], "more": 0},
+    ],
+}
+_WORKERS_SUMMARY = (
+    "⏪ stacks/workers / dev-eu is behind main: `abc1234` edit workers (#41) changed it since "
+    "this branch left it; a plan of this branch would revert that change. Update the branch "
+    "from main.\n\nThis cell is not planned until the branch is updated from main."
+)
+
+
+def _emit_behind(tmp_path, monkeypatch, behind=_BEHIND, records=()):
+    """`main()`'s bodies for one changed cell summary and the behind report `behind`, over a
+    check-run listing of `records`."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", json.dumps(behind))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        _main(tmp_path, monkeypatch, cells=1, planned="1", records=records)
+    return [json.loads(line) for line in out.getvalue().splitlines()]
+
+
+def test_a_behind_cell_gets_a_queued_check_with_a_record_and_no_digest(tmp_path, monkeypatch):
+    """Each behind cell gets one queued body naming its base commits. Its record names this run
+    and `behind: true`, and carries neither a digest (no plan exists) nor a title (no apply
+    restores one). `cells` counts summaries and behind cells, in every record of the run.
+
+    Mutations: count only the cell summaries in `cells` -- 1, red; add `"title"` to the behind
+    record -- red."""
+    bodies = _emit_behind(tmp_path, monkeypatch)
+    assert [json.loads(b["external_id"])["cells"] for b in bodies] == [3, 3, 3]
+    workers = bodies[1]
+    assert workers == {
+        "name": "apply / stacks/workers / dev-eu",
+        "head_sha": HEAD,
+        "status": "queued",
+        "external_id": (
+            f'{{"plan_run":"{RUN_ID}","pr":"{PR}","cells":3,"action":"synchronize","behind":true}}'
+        ),
+        "output": {"title": "Behind main: update the branch", "summary": _WORKERS_SUMMARY},
+    }
+    assert bodies[2]["name"] == "apply / modules/net / prod"
+
+
+def _as_check_runs(bodies):
+    """`bodies` as the App's check runs on the head, ids in order."""
+    return [json.dumps({**b, "id": i, "app": {"id": int(APP_ID)}}) for i, b in enumerate(bodies, 1)]
+
+
+def test_the_behind_record_reads_back_through_the_apply_readers(tmp_path, monkeypatch):
+    """The record this script writes is the one `apply-gate.behind_names` reads, and the run it
+    names is complete: its published names equal every record's `cells`.
+
+    Mutations: write `"behind": "true"` -- no behind name, red; leave the behind cells out of
+    `cells` -- the run is incomplete, red."""
+    runs = _as_check_runs(_emit_behind(tmp_path, monkeypatch))
+    assert pc.ag.behind_names(runs, APP_ID) == {
+        "apply / stacks/workers / dev-eu",
+        "apply / modules/net / prod",
+    }
+    assert pc.ag.incomplete_runs(runs, APP_ID) == {}
+
+
+def test_a_published_behind_check_is_not_published_again(tmp_path, monkeypatch):
+    """A re-run of the summary skips a behind check this run already published, and a newer
+    run's record refuses with `NEWER_RUN`, as for any cell.
+
+    Mutation: publish every behind cell whatever `published` says -- two bodies, red."""
+    mine = _record_line(
+        9,
+        "apply / stacks/workers / dev-eu",
+        json.dumps({"plan_run": RUN_ID, "behind": True}),
+        status="queued",
+    )
+    bodies = _emit_behind(tmp_path, monkeypatch, records=[mine])
+    assert [b["name"] for b in bodies] == ["apply / stacks/c0 / dev", "apply / modules/net / prod"]
+    newer = _record_line(
+        10, "apply / stacks/workers / dev-eu", _ext(str(int(RUN_ID) + 1)), status="queued"
+    )
+    with pytest.raises(SystemExit) as e:
+        _emit_behind(tmp_path / "again", monkeypatch, records=[newer])
+    assert e.value.code == pc.NEWER_RUN
+
+
+def test_a_long_base_branch_keeps_the_record_under_the_cap(tmp_path, monkeypatch):
+    """The base branch goes in the check title, never the record, so a 255-character branch
+    keeps the record bounded. Mutation: add `"base"` to the behind record -- over the cap,
+    red."""
+    base = "b" * 255
+    bodies = _emit_behind(tmp_path, monkeypatch, behind={**_BEHIND, "base": base})
+    assert bodies[1]["output"]["title"] == f"Behind {base}: update the branch"
+    assert len(bodies[1]["external_id"]) <= pc.EXTERNAL_ID_CAP
+
+
+@pytest.mark.parametrize("raw", ["", "not json", json.dumps({**_BEHIND, "tip": ""})])
+def test_an_unreadable_behind_value_publishes_nothing(tmp_path, monkeypatch, capsys, raw):
+    """A behind report that does not read is an evidence gap: a behind cell nobody can see would
+    get no check. Mutation: read an unreadable value as no behind cell -- the cell summary's body
+    is printed, red."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", raw)
+    _main(tmp_path, monkeypatch, cells=1, planned="1")
+    out, err = capsys.readouterr()
+    assert (out, err) == (
+        "",
+        f"::warning::this run publishes no apply check: {pc.gs.BEHIND_UNREAD}\n",
+    )
+
+
+def test_an_earlier_attempts_plan_check_does_not_stand_for_a_behind_cell(tmp_path, monkeypatch):
+    """Every attempt of a run shares its run id. Attempt 1 published a plan check for
+    `stacks/workers` that completed; this attempt finds the cell behind, so its behind check is
+    published over it.
+
+    Mutation: skip every name this run published (`not in done`) -- no behind body, red."""
+    earlier = _record_line(
+        9,
+        "apply / stacks/workers / dev-eu",
+        json.dumps({"plan_run": RUN_ID, "plan_sha256": SHA_A, "pr": PR}),
+    )
+    bodies = _emit_behind(tmp_path, monkeypatch, records=[earlier])
+    assert [b["name"] for b in bodies] == [
+        "apply / stacks/c0 / dev",
+        "apply / stacks/workers / dev-eu",
+        "apply / modules/net / prod",
+    ]
+
+
+def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
+    """The summary decodes only a prefix of the plan text, never a second whole copy, and the
+    digest covers the whole file. 1,000,000 bytes of ASCII lines then the byte 0xFF, which a
+    whole decode refuses, show where the prefix read stops. `counts_of` reads the whole text
+    and refuses that byte, as it did before the plan text was read once, so a double stands in
+    for it. The digest was computed once, off the tree. Mutation: decode the whole text for the
+    prefix (`raw.decode("utf-8")[: CHECK_OUTPUT_CAP + 1]`) -- red."""
+
+    def counts_of(lines):
+        return (1, 0, 0, 0, 0)
+
+    monkeypatch.setattr(pc.sc, "counts_of", counts_of)
+    body = _emit_changed(tmp_path, ((LINE + "\n") * 10_000).encode() + b"\xff")
+    assert body["output"]["title"] == "+1 ~0 -0"
+    assert body["output"]["summary"].endswith(TRAILER)
+    assert json.loads(body["external_id"])["plan_sha256"] == (
+        "6bec3c7c34b6f1ed2f7833c8f8bcc17aa3bb6fd865587d11e0faec55362fc0ef"
     )

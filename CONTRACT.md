@@ -179,8 +179,9 @@ queue for the head, and is completed to success by whichever of these happens fi
 gate"):
 
 - the plan run's own `summary`, right after it writes `pending`, when it
-  published no queued apply check and every `apply / <stack> / <env>` check on
-  the PR head is already complete (an apply's refresh ran before that write);
+  published no queued apply check, found no behind cell, and every `apply / <stack> /
+  <env>` check on the PR head is already complete (an apply's refresh ran before that
+  write);
 - the pre-merge apply path (`gate-refresh`, called from the apply
   workflow's summary job) once every `apply / <stack> / <env>` check on
   the PR head is complete — a targeted `shipmate apply <env>` of only some
@@ -209,7 +210,12 @@ refuses the run before wave0.
    run's event action (`action`, empty when its payload names none, as a
    `shipmate plan` dispatch's does; §`apply_mode: auto` reads it) and the
    check's title (`title`). GitHub keeps 255 characters of an `external_id`, so
-   a record over that refuses the plan summary.
+   a record over that refuses the plan summary. A behind cell (§Plan comment,
+   Behind cells) gets a `queued` check titled `Behind <base>: update the branch`,
+   its summary naming the base commits that changed the stack; its record is
+   `{plan_run, pr, cells, action, behind: true}`, with no digest, since no plan
+   exists, and no title, which no apply restores. A run's `cells` counts its
+   planned cells and its behind cells, in every record it writes.
 2. Flipped to `in_progress` by the wave's `waveN-release` job right before the
    wave, its details link set to the apply run. The flip writes the status and
    the link only, one check at a time. Each wave needs its release, and each
@@ -664,7 +670,7 @@ a plan comment with a changed cell on a pull request that is not a draft ends
 with a folded `shipmate commands` section naming, in apply order,
 `shipmate apply <env>` for each `apply_mode: targeted` environment holding a
 changed cell and `shipmate apply` once, at the first changed environment that is
-not targeted, then `shipmate unlock <env>
+not targeted, each left out when it would apply a behind cell, then `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
 unless one of those holders is stacked on this pull request or its walk ran out of
 pages (§Comment-ops), and `shipmate help`
@@ -2356,11 +2362,14 @@ check/status/comment/issue that crosses a workflow-run boundary:
   nothing: its hold step's `refuse-newer` and `pending-checks` refuse, whatever
   its own cell count. An older run with cells that writes after a newer
   zero-cell run, which left no apply checks or hold, publishes its queued apply
-  checks and writes `pending` over that run's `success`. A plan run that plans
-  zero cells writes `success` without counting the queued apply checks an
-  older run published on the head, so the gate is green over them; the merge
-  deploy applies only the cells its own diff plans, so such a check applies,
-  refuses the deploy, or stays queued.
+  checks and writes `pending` over that run's `success`. A plan run with nothing
+  of its own to apply (zero cells, or only no-change cells) writes `pending`, not
+  `success`, while the newest App apply check of any name it does not publish is
+  not done: `an earlier plan's <n> apply check(s) are still open on this head;
+  push a commit to re-plan`, or `could not read this head's apply checks; push a
+  commit to re-plan` when its listing could not be read. Every attempt of a run
+  shares its run id, so an earlier attempt's open check counts too. The run's
+  own refresh then greens the gate once those checks are done.
 
   One race stays open. A refresh already past its status read and before its
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
@@ -3108,8 +3117,9 @@ The seven jobs:
   file reads the event payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
   about its own head repository. Its outputs are `head-sha`, `head-repo`,
-  `head-ref` (the head branch), `base-sha`, `pr-number`, `is-draft` and
-  `on-demand`. `head-ref` alone is
+  `head-ref` (the head branch), `base-sha`, `base-ref` (the base branch, which
+  `detect` reads the tip of), `pr-number`, `is-draft` and `on-demand`. A missing
+  head SHA, base SHA, base branch or number refuses. `head-ref` alone is
   optional: it only decides whether a lock holder is stacked on this pull
   request (§Plan comment), so a pull request naming no head branch emits it
   empty and nothing refuses.
@@ -3471,9 +3481,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   matrix is built over `terramate list --changed` from the merge base of the
   pull request's base and head, so a narrower diff is a smaller matrix. A
   branch behind its base plans only the stacks its own commits change, not
-  stacks only the base changed. A stack both changed still plans the head's
-  tree against state holding the base's applied change, so its plan shows
-  that change reverted: update the branch from the base before applying it.
+  stacks only the base changed. A stack both changed is not planned: it is
+  behind the base (§Plan comment), since its plan would revert the base's
+  change, until the branch is updated from the base.
   Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
@@ -3766,6 +3776,10 @@ Comment `shipmate help` for every command.
 </details>
 ```
 
+An environment holding a behind cell loses its paragraph when it is targeted
+and, when it is not, removes the bare paragraph, since every apply that would
+reach the cell refuses; the behind lines name the remedy.
+
 The targeted environments come from `detect`'s `targeted_envs` output, the
 default branch table's. An empty (detect skipped) or unreadable one names no
 targeted environment, so the section degrades to the bare paragraph as above
@@ -3805,9 +3819,11 @@ writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
 
-- **Verdict line.** `⚪ nothing planned` when the run planned no cell (an
-  autoplan posts it only under the exceptions above, a `shipmate plan` command
-  always), `🟢 no changes` when no cell changes, else `🟡 N of M cells change`, then
+- **Verdict line.** `⏪ nothing planned: <n> cell(s) behind <base>` when the run
+  planned no cell and found behind cells (Behind cells, below), `⚪ nothing
+  planned` when it planned no cell and found none (an autoplan posts it only
+  under the exceptions above, a `shipmate plan` command always), `🟢 no changes`
+  when no cell changes, else `🟡 N of M cells change`, then
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)`. `<sha7>` is the first
   seven characters of the planned head commit and `<commit url>` is
   `<server>/<owner>/<repo>/commit/<sha>`; `<n>` is the run number and
@@ -3818,6 +3834,33 @@ and `lost` outputs, which the same rule reads.
   job's check shows its name expression literally
   (`plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped), a
   platform behaviour no `if:` or `name:` change removes.
+- **Behind cells.** `detect` merges the base branch's tip into the head
+  (`git merge-tree`) and lists the stacks the merge changes, directly or through
+  a module they source. A changed cell whose stack is listed is behind: a plan
+  of it made on the branch would revert the base's change. When the merge
+  conflicts, every changed cell is behind. A behind cell is not planned: it
+  leaves the matrix, `count`, `cells` and `env_order`, and `detect`'s `behind`
+  output names it, its cause and up to three base commits under its stack's
+  directory. Under the stacked holder lines, one line per behind cell reads
+  ``⏪ <stack> / <env> is behind <base>: `<sha>` <subject>; ... and <n> more
+  commit(s) changed it since this branch left it; a plan of this branch would
+  revert that change. Update the branch from <base>.``, with ``the base changed
+  files this stack depends on in `<since7>..<tip7>` `` for a stack with no base
+  commit under its own files (a module it sources, a `watch` file, a deletion under
+  a nested stack's directory), and
+  ``the branch conflicts with <base>.`` in place of the commits and the revert
+  clause on a conflict; then ``⏪ <n> cell(s) are not planned until the branch is
+  updated from <base>.``. Subjects are cut to 72 characters. Each line yields to
+  the cell lines under the comment cap, with a warning. Each behind cell gets a
+  queued apply check (§Apply check lifecycle), and the gate stays `pending`, ``<n>
+  cell(s) behind <base>; update the branch from <base>``. An apply of the head
+  refuses or holds the cell (§`apply_mode: auto`), and the commands section offers
+  no apply that would reach one. A `behind` value that is empty or not that shape,
+  with `detect` succeeded, holds the gate (`the behind cells were not reported, so
+  this run's evidence is unknown; re-plan before merging`), publishes no apply
+  check, and renders no line, with a warning. A plan reads the tip only when a cell
+  changed. Updating the branch from the base and pushing plans the cells on the
+  merged tree.
 - **Superseded autoplan lines.** On a `shipmate plan` run only, one line per
   earlier autoplan run, ascending run id: `⚪ <n> check(s) from autoplan run
   [#<run>](<run url>) still read red on this head; this run's plan supersedes
@@ -4051,7 +4094,8 @@ step posted it before the failure. A run with no check to
 publish (held, draft, no cell planned, or every check already published by this
 run) skips the publish step without reading anything. The job's final gate write
 replaces the hold. A run whose plan job was cancelled writes no final gate, and
-keeps the hold when it downloaded any cell summary.
+keeps the hold when it downloaded any cell summary or had an apply check to
+publish, a behind cell's included.
 
 The job publishes only the apply checks its own run has not published yet,
 judged by the run id each App-authored check records. A re-run of the summary
@@ -4077,7 +4121,7 @@ first attempt that landed although it reported a failure stays written. An apply
 POST or final write that GitHub's secondary rate limit refuses waits 60 s and is retried
 the same way, at most three waits per script process (`docs/troubleshooting.md`). A final `pending` gate is followed
 by a refresh, unless this run published a queued apply check, which cannot be
-done yet: when every apply check is already done (an apply's refresh ran before
+done yet, or found a behind cell, whose gate only a new plan lifts: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh, or one
 refused by a hold, warns and leaves the `pending` standing.
 
@@ -4619,7 +4663,7 @@ Nothing was applied. Re-plan (comment shipmate plan or push), or after the
 merge open a new pull request touching the stack."
 
 The record's `cells` field binds each apply check to the rest of its plan run:
-the number of cells that run planned. The summary job publishes its apply checks
+the number of cells that run planned plus its behind cells. The summary job publishes its apply checks
 one at a time, so a job that fails partway leaves a run with fewer apply checks
 than cells. A "Re-run all jobs" attempt of the same run that plans a different
 cell set adds checks beside the first attempt's, so the run has more checks than

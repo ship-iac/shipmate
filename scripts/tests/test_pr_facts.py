@@ -79,8 +79,9 @@ def _api(pr):
 
 
 def test_payload_leg_reads_the_payload_and_makes_no_api_call(monkeypatch, tmp_path):
-    """A `pull_request` payload that is not a draft supplies all seven facts, with zero API
-    calls. Mutations: emit `base.ref` as `head_ref`; re-read the draft flag on every payload."""
+    """A `pull_request` payload that is not a draft supplies all eight facts, with zero API
+    calls. Mutations: emit `base.ref` as `head_ref`; re-read the draft flag on every payload;
+    drop `base_ref` from the facts."""
     text, calls = _main(monkeypatch, tmp_path, {"pull_request": _PAYLOAD_PR})
     assert calls == []
     assert text.splitlines() == [
@@ -88,6 +89,7 @@ def test_payload_leg_reads_the_payload_and_makes_no_api_call(monkeypatch, tmp_pa
         "head_repo=own/repo",
         "head_ref=feat-a",
         f"base_sha={'b' * 40}",
+        "base_ref=main",
         "pr_number=7",
         "is_draft=false",
         "on_demand=false",
@@ -125,6 +127,7 @@ def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatc
         "head_repo=own/repo",
         "head_ref=feat-b",
         f"base_sha={'d' * 40}",
+        "base_ref=feat-a",
         "pr_number=42",
         "is_draft=true",
         "on_demand=true",
@@ -198,14 +201,22 @@ def test_a_deleted_fork_head_is_refused_as_such():
 @pytest.mark.parametrize(
     ("patch", "named", "unnamed"),
     [
-        ({"head": {"repo": {"full_name": "own/repo"}}}, ["head_sha"], ["base_sha", "pr_number"]),
-        ({"base": {}}, ["base_sha"], ["head_sha", "pr_number"]),
-        ({"number": 0}, ["pr_number"], ["head_sha", "base_sha"]),
+        (
+            {"head": {"repo": {"full_name": "own/repo"}}},
+            ["head_sha"],
+            ["base_sha", "base_ref", "pr_number"],
+        ),
+        ({"base": {}}, ["base_sha", "base_ref"], ["head_sha", "pr_number"]),
+        ({"base": {"sha": "b" * 40}}, ["base_ref"], ["head_sha", "base_sha", "pr_number"]),
+        ({"base": {"sha": "b" * 40, "ref": 7}}, ["base_ref"], ["head_sha", "pr_number"]),
+        ({"number": 0}, ["pr_number"], ["head_sha", "base_sha", "base_ref"]),
     ],
 )
 def test_a_missing_fact_is_refused_and_named(patch, named, unnamed):
     """Each absent fact is refused by name: an empty head SHA would leave the checkout on the
-    base and green a gate over a pull request nobody planned."""
+    base and green a gate over a pull request nobody planned. An absent base branch leaves
+    `build-matrix` unable to tell which cells the base changed. Mutation: default `base_ref` to
+    `""` without refusing -- the `base_ref` rows are not refused."""
     with pytest.raises(SystemExit) as exc:
         pf._facts(dict(_PAYLOAD_PR, **patch), "false")
     message = str(exc.value)
@@ -239,7 +250,7 @@ def test_is_draft_is_the_string_the_guards_compare_against(draft, expected):
     assert isinstance(value, str)
 
 
-def test_the_actions_outputs_are_exactly_the_seven_step_outputs():
+def test_the_actions_outputs_are_exactly_the_eight_step_outputs():
     """Hand-written, whole-mapping: the action's kebab-case outputs and the script's snake_case
     GITHUB_OUTPUT keys are two spellings of one list, and a rename on either side leaves the
     other reading an empty string."""
@@ -249,6 +260,7 @@ def test_the_actions_outputs_are_exactly_the_seven_step_outputs():
         "head-repo": "${{ steps.facts.outputs.head_repo }}",
         "head-ref": "${{ steps.facts.outputs.head_ref }}",
         "base-sha": "${{ steps.facts.outputs.base_sha }}",
+        "base-ref": "${{ steps.facts.outputs.base_ref }}",
         "pr-number": "${{ steps.facts.outputs.pr_number }}",
         "is-draft": "${{ steps.facts.outputs.is_draft }}",
         "on-demand": "${{ steps.facts.outputs.on_demand }}",
@@ -279,6 +291,7 @@ def test_a_draft_payload_takes_the_draft_flag_from_one_api_read(monkeypatch, tmp
         "head_repo=own/repo",
         "head_ref=feat-a",
         f"base_sha={'b' * 40}",
+        "base_ref=main",
         "pr_number=7",
         "is_draft=false",
         "on_demand=false",

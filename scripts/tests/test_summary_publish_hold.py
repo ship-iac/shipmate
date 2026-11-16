@@ -235,6 +235,8 @@ def _run(
     planned_cells=None,
     run_id=RUN_ID,
     moved=None,
+    behind='{"base":"main","tip":"","since":"","commits":{},"cells":[]}',
+    gate_behind="0",
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
@@ -267,10 +269,12 @@ def _run(
         "SHIPMATE_APP_SLUG": "shipmate-test",
         "SHIPMATE_PLAN_RESULT": plan_result,
         "SHIPMATE_PLANNED_CELLS": planned_cells,
+        "SHIPMATE_BEHIND": behind,
         "HEAD_SHA": HEAD_SHA,
         "STATE": "pending",
         "DESCRIPTION": "waiting",
         "MODE": "post",
+        "BEHIND": gate_behind,
         "PR": "7",
         "DOCTOR_WARNED": "false",
         "UNMANAGED": "false",
@@ -822,3 +826,117 @@ def test_a_recovered_read_of_a_moved_head_passes_its_retry_notices_through(tmp_p
     assert (codes, calls, stderr, stdout) == ([0], [], RETRY_NOTICES, MOVED_NOTICE)
     output = (tmp_path / "github_output").read_text(encoding="utf-8")
     assert output == "superseded=true\nmoved=true\n"
+
+
+_ONE_BEHIND = json.dumps(
+    {
+        "base": "main",
+        "tip": "c" * 40,
+        "since": "d" * 40,
+        "commits": {},
+        "cells": [
+            {"stack": "stacks/a", "environment": "dev", "cause": "conflict", "shas": [], "more": 0}
+        ],
+    }
+)
+
+
+@bash_only
+def test_a_run_of_only_behind_cells_writes_the_publish_hold(tmp_path):
+    """No cell summary, one behind cell: its queued check is in `bodies.jsonl`, so the hold step
+    writes the publish hold before `Create apply checks` publishes it, and a job dying between
+    the two leaves a hold rather than an older green. Mutation: restore the `cell.json`-only
+    condition -- no publish hold, red."""
+    codes, calls, _, _ = _run(
+        tmp_path, steps=(HOLD,), plan_result="skipped", planned_cells="0", behind=_ONE_BEHIND
+    )
+    assert codes == [0]
+    assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+
+
+_BEHIND_POST = [
+    "api",
+    "repos/acme/demo/check-runs",
+    "--input",
+    "-",
+    json.dumps(
+        {
+            "name": "apply / stacks/a / dev",
+            "head_sha": HEAD_SHA,
+            "status": "queued",
+            "external_id": (
+                '{"plan_run":"42","pr":"7","cells":1,"action":"synchronize","behind":true}'
+            ),
+            "output": {
+                "title": "Behind main: update the branch",
+                "summary": "⏪ stacks/a / dev is behind main: the branch conflicts with main. "
+                "Update the branch from main.\n\nThis cell is not planned until the branch is "
+                "updated from main.",
+            },
+        }
+    ),
+]
+
+
+@bash_only
+def test_a_rerun_that_finds_a_cell_behind_replaces_this_runs_earlier_check(tmp_path):
+    """Attempt 1 of run 42 published a plan check for `stacks/a` that an apply completed; a
+    re-run attempt finds the cell behind and downloads no cell summary. Its behind check is
+    published over the completed one and the gate stays pending, never refreshed green over the
+    older check.
+
+    Mutation: skip a behind cell whenever this run published its name (`not in done`) -- no
+    behind check, red."""
+    codes, calls, _, _ = _run(
+        tmp_path,
+        steps=(HOLD, CREATE, GATE),
+        plan_result="skipped",
+        planned_cells="0",
+        apply_checks=_lines(_record(1, "a", RUN_ID, status="completed")),
+        refresh_checks=_lines(_record(1, "a", RUN_ID, status="completed")),
+        behind=_ONE_BEHIND,
+        gate_behind="1",
+    )
+    assert codes == [0, 0, 0]
+    assert calls == [
+        PULL_READ,
+        USER_READ,
+        STATUSES_LIST,
+        APPLY_LIST,
+        PUBLISH_HOLD_POST,
+        USER_READ,
+        STATUSES_LIST,
+        _BEHIND_POST,
+        USER_READ,
+        STATUSES_LIST,
+        _status_post("pending", "waiting"),
+    ]
+
+
+@bash_only
+def test_the_gate_is_not_refreshed_over_a_behind_cell(tmp_path):
+    """A re-run that publishes nothing (its behind check is already on the head) still writes
+    the gate pending, and does not refresh it from a listing whose checks read done.
+
+    Mutation: drop `[ "$BEHIND" = "0" ]` from the refresh condition -- the refresh lists the
+    checks, red."""
+    _write_bodies(tmp_path, "")
+    done = _lines(_record(1, "a", RUN_ID, status="completed"))
+    codes, calls, _, _ = _run(tmp_path, steps=(GATE,), refresh_checks=done, gate_behind="1")
+    assert (codes, calls) == ([0], [USER_READ, STATUSES_LIST, _status_post("pending", "waiting")])
+
+
+def test_the_gate_step_reads_the_behind_count():
+    """The refresh runs only on a `0` count, so a step that stops passing it never greens a
+    head. Mutation: drop the `BEHIND` line -- red."""
+    assert step_by("summary", name=GATE)["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "HEAD_SHA": "${{ inputs.head-sha }}",
+        "STATE": "${{ steps.gate.outputs.state }}",
+        "DESCRIPTION": "${{ steps.gate.outputs.description }}",
+        "MODE": "${{ steps.gate.outputs.comment_mode }}",
+        "BEHIND": "${{ steps.gate.outputs.behind }}",
+        "PLAN_RESULT": "${{ inputs.plan-result }}",
+        "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
+    }

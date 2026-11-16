@@ -96,6 +96,7 @@ from _shipmate import (
 
 ad = _load("auto-dispatch")
 ag = _load("apply-gate")
+gs = _load("gate-state")
 
 #: An empty read-only mapping, the default of every `stacked` and `unknown` parameter.
 _NONE = types.MappingProxyType({})
@@ -214,6 +215,30 @@ def _md_name(s):
     still renders a mention (GitHub markdown API, 2026-10-12); an empty HTML comment after `@`
     does not. Inside a code span the comment would show as written."""
     return _md_escape(s).replace("@", "@<!-- -->")
+
+
+def behind_line(row, report):
+    """The `⏪` line of the behind cell `row` of the behind report `report`
+    (`gate-state.behind_cells`): what changed its stack since the branch left the base (the
+    commits it lists, `; `-separated, and how many more; or, with none under its own files, the
+    range in which the base changed files it depends on (a module it sources, a `watch` file, a
+    deletion under a nested stack's directory);
+    or a conflict of the branch with the base) and the remedy, updating the branch from the base.
+    Author text (names, the base branch, commit subjects) is `_md_name`d."""
+    base = _md_name(report["base"])
+    where = f"{_md_name(row['stack'])} / {_md_name(row['environment'])}"
+    if row["cause"] == "conflict":
+        what = f"the branch conflicts with {base}."
+    else:
+        if row["shas"]:
+            named = "; ".join(f"`{s}` {_md_name(report['commits'][s])}" for s in row["shas"])
+            more = f" and {row['more']} more commit(s)" if row["more"] else ""
+            what = f"{named}{more} changed it"
+        else:
+            span = f"{report['since'][:7]}..{report['tip'][:7]}"
+            what = f"the base changed files this stack depends on in `{span}`"
+        what += " since this branch left it; a plan of this branch would revert that change."
+    return f"⏪ {where} is behind {base}: {what} Update the branch from {base}."
 
 
 #: Every circle a comment uses, worst first.
@@ -433,6 +458,17 @@ def stacked_hold(cells, locks, stacked, default_branch):
     )
 
 
+def _behind_lines(behind):
+    """`(line, what)` per cell of the behind report `behind` (`behind_line`), then the line
+    counting them; none for no report or no cell."""
+    rows = behind["cells"] if behind else []
+    if not rows:
+        return []
+    base = _md_name(behind["base"])
+    footer = f"⏪ {len(rows)} cell(s) are not planned until the branch is updated from {base}."
+    return [(behind_line(r, behind), "behind cell") for r in rows] + [(footer, "behind cells")]
+
+
 def _evict_line(env, holders):
     """`shipmate unlock <env> --evict` naming `holders` (known ascending, then an unknown one)
     and that applying after it may overwrite what they applied, after the known holders' apply
@@ -447,22 +483,27 @@ def _evict_line(env, holders):
     return f"{when} `shipmate unlock {env} --evict` to {release}.\n\n"
 
 
-def commands(locked, targeted=(), changed=(), blocked=()):
+def commands(locked, targeted=(), changed=(), blocked=(), behind=()):
     """The folded command section: per environment of `changed` (the changed cells'
     environments in apply order), its `shipmate apply <env>` when it is in `targeted`, and at the
     first one that is not, `shipmate apply` once, worded `to apply the other environments` when
     a targeted line renders, else `to apply this plan`; with `changed` empty, only the bare
-    line. Then per environment of `locked` (environment to the holders of its changed locked
-    cells), sorted, its `_evict_line`, unless it is in `blocked` (`blocked_envs`: a holder
+    line. `behind` names the environments holding a behind cell, which every apply of them
+    refuses: such a targeted environment gets no line, and one that is not targeted drops the
+    bare line. Then per environment of `locked` (environment to the holders of its changed
+    locked cells), sorted, its `_evict_line`, unless it is in `blocked` (`blocked_envs`: a holder
     there is one `cell-lock` decides evict refuses on); then `shipmate help`. No line starts
     with `shipmate`, so the section is not itself a command."""
-    what = "the other environments" if set(changed) & set(targeted) else "this plan"
+    offered = set(targeted) - set(behind)
+    bare_ok = set(behind) <= set(targeted)
+    what = "the other environments" if set(changed) & offered else "this plan"
     bare = f"Comment `shipmate apply` to apply {what}.\n\n"
-    lines = [] if changed else [bare]
+    lines = [] if changed or not bare_ok else [bare]
     for e in changed:
         if e in targeted:
-            lines.append(f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n")
-        elif bare not in lines:
+            if e in offered:
+                lines.append(f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n")
+        elif bare_ok and bare not in lines:
             lines.append(bare)
     evict = "".join(_evict_line(e, hs) for e, hs in sorted(locked.items()) if e not in blocked)
     return (
@@ -575,10 +616,15 @@ def render_section(line, plan_text, limit):
     return fold(line, diff_map(plan_text), limit, trailer, _head_lines)
 
 
-def verdict(cells, head_sha, run_url):
-    """The line under the header: `⚪ nothing planned` for zero cells, `🟢 no changes` when no
-    cell changes, else `🟡 N of M cells change`, then `provenance`. It reads the cells only:
-    every failed plan job holds the gate, and a held gate posts `held_comment` instead."""
+def verdict(cells, head_sha, run_url, behind=None):
+    """The line under the header: `⏪ nothing planned: N cell(s) behind <base>` for zero cells
+    and a behind cell in the behind report `behind`, `⚪ nothing planned` for zero cells,
+    `🟢 no changes` when no cell changes, else `🟡 N of M cells change`, then `provenance`. It
+    reads the cells only: every failed plan job holds the gate, and a held gate posts
+    `held_comment` instead."""
+    if not cells and behind and behind["cells"]:
+        n, base = len(behind["cells"]), _md_name(behind["base"])
+        return f"⏪ nothing planned: {n} cell(s) behind {base} {provenance(head_sha, run_url)}"
     if not cells:
         return f"⚪ nothing planned {provenance(head_sha, run_url)}"
     circle = worst(emoji(c) for c in cells)
@@ -759,9 +805,11 @@ def build_comment(
     superseded=(),
     unknown=_NONE,
     blocking=(),
+    behind=None,
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
-    `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block,
+    `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block, one
+    `behind_line` per cell of the behind report `behind` and a line counting them,
     `doctor_line` of `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of
     `lost` when each count is not zero, then per environment in `by_env` order of `order` its
     `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell
@@ -779,10 +827,11 @@ def build_comment(
     first changed cells with plan text, then what is left goes, in comment order, to every changed
     cell on its bare line or a truncated fold-out, until less than MIN_PLAN_CHARS is left. Each of
     the six blocks yields, with a warning, when the headings and bare lines leave it no room under
-    HARD_CAP. Returns `(body, unmanaged_named, lost_named)`, each flag saying whether that line is
-    in `body`."""
+    HARD_CAP; so does each behind line. `behind`'s environments also go to `commands`. Returns
+    `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
-    head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
+    rows = behind["cells"] if behind else []
+    head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url, behind)}"
     locks = locks or {}
     blocked = blocked_envs(meta, locks, blocking)
     entries = _entries(cells, order, checks, run_url, locks, stacked, default_branch)
@@ -795,6 +844,7 @@ def build_comment(
             "\n".join(stacked_lines(meta, locks, stacked, default_branch, unknown, blocked)),
             "stacked lock holders",
         ),
+        *_behind_lines(behind),
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
         (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
         (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),
@@ -820,7 +870,7 @@ def build_comment(
     for c in meta:
         if key := _lock_key(c, locks):
             locked.setdefault(c["environment"], []).append(locks[key])
-    section = commands(locked, targeted, changed, blocked)
+    section = commands(locked, targeted, changed, blocked, {r["environment"] for r in rows})
     if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
         body = f"{body}\n\n{section}"
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
@@ -840,29 +890,36 @@ _TALLY = re.compile(
     r"(?P<destroy>\d+) to destroy(?:, (?P<forget>\d+) to forget)?\."
 )
 _ZERO_COUNT = ("No changes.", "You can apply this plan to save these new output values")
+#: The order of the counts `counts_of` returns, which a cell summary also keys them by.
+COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 
 def counts(path):
-    """(add, change, destroy, import, forget) from the `tofu show` text at `path`: its one
-    column-0 `Plan:` tally line, where tofu omits a zero import or forget count (0 here), or all
-    zeros when it has none and has a line starting with the no-changes or outputs-only sentence.
-    None for a missing file, no recognised line, or two tally lines.
-    Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts.
-    The whole file is read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered
-    text."""
+    """`counts_of` the `tofu show` text at `path`; None for a missing file. The whole file is
+    read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered text."""
     if not path.exists():
         return None
-    hits, zero = [], False
-    # tofu prints a CR from author text raw; default newline handling would end a line there
-    # and put the text after it at column 0.
+    # tofu prints a CR from author text raw; only LF ends a line, or the text after the CR would
+    # sit at column 0.
     with open(path, encoding="utf-8", newline="\n") as fh:
-        for line in fh:
-            line = line.rstrip("\r\n")
-            if m := _TALLY.fullmatch(line):
-                hits.append(m)
-            zero = zero or line.startswith(_ZERO_COUNT)
+        return counts_of(fh)
+
+
+def counts_of(lines):
+    """(add, change, destroy, import, forget) from `tofu show` text read line by line from
+    `lines`, a text stream that ends lines at LF only: its one column-0 `Plan:` tally line, where
+    tofu omits a zero import or forget count (0 here), or all zeros when it has none and has a
+    line starting with the no-changes or outputs-only sentence. None for no
+    recognised line, or two tally lines.
+    Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts."""
+    hits, zero = [], False
+    for line in lines:
+        line = line.rstrip("\r\n")
+        if m := _TALLY.fullmatch(line):
+            hits.append(m)
+        zero = zero or line.startswith(_ZERO_COUNT)
     if len(hits) == 1:
-        return tuple(int(hits[0][k] or 0) for k in ("add", "change", "destroy", "import", "forget"))
+        return tuple(int(hits[0][k] or 0) for k in COUNT_KEYS)
     return (0, 0, 0, 0, 0) if not hits and zero else None
 
 
@@ -1177,6 +1234,11 @@ def main():
     unknown = unknown_marks(os.environ.get("SHIPMATE_STACKED_UNKNOWN", ""))
     blocking = blocking_marks(os.environ.get("SHIPMATE_BLOCKING", ""), stacked)
     default_branch = os.environ.get("SHIPMATE_DEFAULT_BRANCH", "")
+    # Reviewer-facing here: `gate-state` and `pending-checks` hold the gate on an unread value.
+    raw = os.environ.get("SHIPMATE_BEHIND", "")
+    behind = gs.behind_cells(raw) if raw else None
+    if raw and behind is None:
+        print("::warning::the behind cells could not be read; the plan comment names none")
     body, named, lost_named = build_comment(
         cells,
         checks,
@@ -1204,6 +1266,7 @@ def main():
         superseded=_superseded(rows),
         unknown=unknown,
         blocking=blocking,
+        behind=behind,
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

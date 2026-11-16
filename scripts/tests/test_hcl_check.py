@@ -396,6 +396,7 @@ DETECT_STEPS = [
         "uses": "$/actions/build-matrix",
         "with": {
             "base-sha": "${{ needs.facts.outputs.base-sha }}",
+            "base-ref": "${{ needs.facts.outputs.base-ref }}",
             "head-repo": "${{ needs.facts.outputs.head-repo }}",
             "head-sha": "${{ needs.facts.outputs.head-sha }}",
             "github-vars": "${{ toJSON(vars) }}",
