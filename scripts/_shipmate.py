@@ -811,7 +811,10 @@ def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest"):
     if jobs is None:
         return None
     if not all(isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs):
-        sys.stderr.write(f"::warning::run {run_id} lists a job with no string status or name\n")
+        sys.stderr.write(
+            f"::warning::run {command_data(str(run_id))} lists a job with no string status "
+            "or name\n"
+        )
         return None
     return jobs
 

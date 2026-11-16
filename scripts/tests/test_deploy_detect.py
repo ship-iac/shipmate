@@ -380,10 +380,10 @@ def _in_flight(stack, env="dev-eu", url=RUN_PAGE + HOLDER, **kw):
     return {**_apply_check(stack, env, **kw), "status": "in_progress", "details_url": url}
 
 
-def _holder(status, jobs=None, total=None):
+def _holder(status, jobs=None, total=None, attempt=1):
     """`_run_main`'s `runs`: run `HOLDER` read with `status`, and `jobs` as its one-page jobs
-    listing advertising `total` jobs (default: as many as it holds)."""
-    answers = {RUN_PATH: json.dumps({"id": int(HOLDER), "status": status})}
+    listing advertising `total` jobs (default: as many as it holds), the run on `attempt`."""
+    answers = {RUN_PATH: json.dumps({"id": int(HOLDER), "status": status, "run_attempt": attempt})}
     if jobs is not None:
         count = len(jobs) if total is None else total
         answers[JOBS_PATH] = json.dumps({"total_count": count, "jobs": jobs})
@@ -736,7 +736,15 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
             _in_flight("stacks/app", "dev-us", plan_run="42", cells=2, id=2),
         ],
         runs=_holder(
-            "completed", [{"name": "apply / run / detect", "status": "completed", "steps": []}]
+            "completed",
+            [
+                {
+                    "name": "apply / run / detect",
+                    "status": "completed",
+                    "steps": [],
+                    "run_attempt": 1,
+                }
+            ],
         ),
     )
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
@@ -1776,13 +1784,15 @@ _LIVE = (
 )
 
 
-def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed"):
-    """One listed job; `steps`, `(name, conclusion)` pairs, default to a started apply."""
+def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed", attempt=1):
+    """One listed job of run attempt `attempt`; `steps`, `(name, conclusion)` pairs, default to a
+    started apply."""
     if steps is None:
         steps = [("Set up job", "success"), ("Apply the cell", "success")]
     return {
         "name": name,
         "status": status,
+        "run_attempt": attempt,
         "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps],
     }
 
@@ -1818,12 +1828,27 @@ def test_a_check_a_live_run_holds_refuses_the_deploy(tmp_path, monkeypatch, stat
 
 
 def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkeypatch):
-    """Run 77 reads `completed`, but its listing shows the cell's job still queued, as a re-run
-    started between the two reads does: the cell is held as live.
+    """Run 77 reads `completed` on attempt 1, but its listing shows the cell's attempt-1 job not
+    `completed`: the cell is held as live.
 
     Mutation: drop the cell jobs' status check -- the cell's job lists no steps, so it deploys,
     red."""
     jobs = [_job(steps=[], status="queued")]
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert str(exc.value) == _LIVE
+
+
+def test_a_rerun_between_the_reads_holds_the_cell_live(tmp_path, monkeypatch):
+    """Run 77 reads `completed` on attempt 1; by the listing it was re-run, and attempt 2 lists
+    only a queued `detect`, not yet the cell's job. The cell's attempt-1 job never applied, but
+    attempt 2 may still apply it, so the cell is held as live.
+
+    Mutation: drop the attempt comparison -- deploys, red."""
+    jobs = [
+        _job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")]),
+        _job(name="apply / run / detect", steps=[], status="queued", attempt=2),
+    ]
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert str(exc.value) == _LIVE
@@ -1867,6 +1892,8 @@ def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
     again, so the deploy queues it and warns.
 
     Mutation: refuse on any ended run -- refuses, red.
+    Mutation: compare attempts with `>=` -- every case on the run's own attempt reads live,
+    red.
     Mutation: drop the `Pre-apply check` clause -- the two pre-apply cases refuse, red."""
     parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
@@ -1926,16 +1953,30 @@ _GH_500 = SystemExit("::error::gh api repos/acme/iac/actions/runs/77 failed\nHTT
             _holder("completed", [_job(name="apply / run / L0 / dev-eu / stacks/web")], total=2),
             (1, 1),
         ),
-        ({RUN_PATH: json.dumps({"id": 77})}, (1, 0)),
+        ({RUN_PATH: json.dumps({"id": 77, "run_attempt": 1})}, (1, 0)),
+        ({RUN_PATH: json.dumps({"id": 77, "status": "completed"})}, (1, 0)),
+        (
+            _holder("completed", [{k: v for k, v in _job().items() if k != "run_attempt"}]),
+            (1, 1),
+        ),
     ],
-    ids=["run read", "jobs listing", "empty listing", "short listing", "no status"],
+    ids=[
+        "run read",
+        "jobs listing",
+        "empty listing",
+        "short listing",
+        "no status",
+        "run with no attempt",
+        "job with no attempt",
+    ],
 )
 def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypatch, runs, reads):
     """A run read or jobs listing that fails after its retries, an empty listing, a listing
-    short of its `total_count` and a run with no status each refuse naming the run: the cell
-    may be applying. A repeat points at the by-hand section. `reads` counts the run reads and
-    the jobs listing reads. Under `filter=all`, `total_count` counts every attempt's jobs: a
-    probe of run 43649538511 listed 51 of 51 under `all` and 38 of 38 under `latest`.
+    short of its `total_count`, a run with no status or attempt, and a job with no attempt each
+    refuse naming the run: the cell may be applying. A repeat points at the by-hand section.
+    `reads` counts the run reads and the jobs listing reads. Under `filter=all`, `total_count`
+    counts every attempt's jobs: a probe of run 43649538511 listed 51 of 51 under `all` and 38
+    of 38 under `latest`.
 
     Mutation: deploy on a failed read -- deploys, red.
     Mutation: deploy on a failed listing -- deploys, red.

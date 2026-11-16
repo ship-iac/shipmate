@@ -3302,11 +3302,14 @@ it``. A later refusal of the same deploy can still stop it.
 
 ### Return an in-progress apply check by hand
 
-1. Confirm that no run may still apply the cell: open the run the check's details link
-   names and check that its page shows it completed or cancelled, or that the link
-   names no run of this repository. While that run is still running, wait for it to
-   end and re-run the deploy instead; returning its check to `queued` lets this
-   deploy apply the cell beside it.
+1. Confirm that no run may still apply the cell. Open the check's details link,
+   which GitHub redirects from an old repository name, or find the run that flipped
+   the check, and confirm that its page shows it completed or cancelled. While that
+   run is still running, wait for it to end and re-run the deploy instead: returning
+   its check to `queued` lets the re-run deploy apply the cell beside it. When no
+   run can be identified, do not return the check to `queued`: wait, and confirm in
+   the repository's Actions tab that no shipmate apply run of that pull request and
+   no deploy is running.
 2. Find out whether the cell's change was applied: read the stack's state and
    its recent apply runs.
 3. Mint an installation token of the shipmate App. Only the App that created a
