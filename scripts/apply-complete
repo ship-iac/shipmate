@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Decide each apply check's write from the state of its cell's wave job in THIS run.
 
-`apply-complete` reads the run's jobs listing on stdin and prints one row per decided cell;
+`apply-complete list` prints this run's jobs listing, one job per line;
+`apply-complete` reads that listing on stdin and prints one row per decided cell;
 `apply-complete plan <rows>` turns every attempt's rows into the `patch-checks` write plan.
 
 Evidence is `GET /actions/runs/{id}/jobs`, not the cells' own artifacts: a job
@@ -57,7 +58,7 @@ import os
 import sys
 import unicodedata
 
-from _shipmate import _load, command_data, gh_json, run_annotated
+from _shipmate import _load, command_data, gh_json, one_line, print_annotated, run, run_annotated
 
 ag = _load("apply-gate")
 
@@ -191,10 +192,38 @@ def plan(every_path):
             print(json.dumps(entry))
 
 
+def list_jobs():
+    """Print every job of this run, one JSON object per line, from one paginated `gh api` call,
+    unvalidated. A failed call prints its cause as one `::error::` and a `RETRY_PREFIX` line,
+    and an empty listing a `RETRY_PREFIX` line; both exit `UNRESOLVED_EXIT`: the listing lags a
+    finished job, and a failed or empty one is the extreme form of that lag. The caller's loop
+    is the only retry."""
+    repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
+    path = f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+    try:
+        listing = run(["gh", "api", "--paginate", "--jq", ".jobs[]", path])
+    except SystemExit as exc:
+        cause = one_line(exc.code)
+        print_annotated(f"::error::{cause}")
+        print(RETRY_PREFIX + cause, file=sys.stderr)
+        sys.exit(UNRESOLVED_EXIT)
+    if not listing.strip():
+        print(
+            RETRY_PREFIX + "the run jobs listing came back empty or unreadable; "
+            "cannot tell which wave cells succeeded",
+            file=sys.stderr,
+        )
+        sys.exit(UNRESOLVED_EXIT)
+    sys.stdout.write(listing)
+
+
 def main(argv=()):
+    if argv == ["list"]:
+        list_jobs()
+        return
     if argv:
         if argv[0] != "plan" or len(argv) != 2:
-            raise SystemExit("::error::usage: apply-complete [plan <rows>]")
+            raise SystemExit("::error::usage: apply-complete [list | plan <rows>]")
         plan(argv[1])
         return
     try:

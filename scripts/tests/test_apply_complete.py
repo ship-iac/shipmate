@@ -11,10 +11,14 @@ from _loader import (
     SCRIPTS,
     action_steps,
     bash_only,
+    fail_script,
     jsonl,
     load_script,
+    read_calls,
     run_step,
     run_with_gh_recorder,
+    write_python3_shim,
+    write_stub,
 )
 
 apply_complete = load_script("apply-complete")
@@ -475,19 +479,86 @@ def test_plan_mode_writes_the_merged_rows(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("argv", [["plan"], ["ids", "a"], ["plan", "a", "b"]])
+@pytest.mark.parametrize("argv", [["plan"], ["ids", "a"], ["plan", "a", "b"], ["list", "a"]])
 def test_a_wrong_argument_list_refuses(argv):
     """Mutation: drop the length check -> `plan` with no files raises IndexError."""
     with pytest.raises(SystemExit) as exc:
         apply_complete.main(argv)
-    assert str(exc.value) == "::error::usage: apply-complete [plan <rows>]"
+    assert str(exc.value) == "::error::usage: apply-complete [list | plan <rows>]"
+
+
+#: `apply-complete list`'s one gh call, whole.
+LIST_ARGV = [
+    "api",
+    "--paginate",
+    "--jq",
+    ".jobs[]",
+    "repos/acme/demo/actions/runs/999/jobs?per_page=100",
+]
+LIST_CMD = (
+    "command failed (1): gh api --paginate --jq .jobs[] "
+    "repos/acme/demo/actions/runs/999/jobs?per_page=100"
+)
+
+
+def _list(tmp_path, **gh):
+    env = {**os.environ, "GITHUB_REPOSITORY": "acme/demo", "GITHUB_RUN_ID": "999"}
+    body = f'python3 "{(SCRIPTS / "apply-complete").as_posix()}" list'
+    return run_with_gh_recorder(tmp_path, body, env, **gh)
+
+
+@bash_only
+def test_list_prints_the_listing_unchanged_from_one_gh_call(tmp_path):
+    """Mutations: add `filter=latest` to the path; call through `gh_json`."""
+    listing = jsonl(
+        job("L0 / dev-eu / dns", "success", jid=1), job("L0 / dev-eu / app", None, jid=2)
+    )
+    proc, calls = _list(tmp_path, listing=listing)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, listing, "")
+    assert calls == [LIST_ARGV]
+
+
+@bash_only
+def test_list_does_not_validate_the_jobs(tmp_path):
+    """The classifier reads what the listing holds, as the `jq` call did. Mutation: validate
+    the jobs as `listed_jobs` does (exit 75 on a job with no `name` or `status`)."""
+    listing = '{"id": 1}\n{"name": "L0 / dev-eu / dns"}\n'
+    proc, _ = _list(tmp_path, listing=listing)
+    assert (proc.returncode, proc.stdout) == (0, listing)
+
+
+@bash_only
+def test_a_failed_list_prints_its_cause_once_escaped_and_retries(tmp_path):
+    """gh's stderr can hold lines that would start workflow commands; the cause prints as one
+    escaped `::error::` and one `retry: ` line, raw text nowhere. Mutations: print `e.code` raw;
+    exit 1; drop the `retry: ` line; pass the cause to `print_annotated` unjoined (two
+    annotations)."""
+    stderr = "::error::boom\r\n::warning::careful 100%\nHTTP 502"
+    proc, calls = _list(tmp_path, listing="", list_rc=1, list_stderr=stderr)
+    cause = f"{LIST_CMD} | ::error::boom | ::warning::careful 100% | HTTP 502"
+    assert (proc.returncode, proc.stdout) == (apply_complete.UNRESOLVED_EXIT, "")
+    assert proc.stderr == (
+        f"::error::{cause.replace('%', '%25')}\n{apply_complete.RETRY_PREFIX}{cause}\n"
+    )
+    assert calls == [LIST_ARGV]
+
+
+@bash_only
+def test_an_empty_list_retries(tmp_path):
+    """Mutation: exit 0 on an empty listing."""
+    proc, _ = _list(tmp_path, listing="")
+    assert (proc.returncode, proc.stdout) == (apply_complete.UNRESOLVED_EXIT, "")
+    assert proc.stderr == (
+        "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells "
+        "succeeded\n"
+    )
 
 
 def test_the_app_token_is_minted_after_the_listing_and_selection_step():
     # The mint step runs after the step that can fail or abort, so the token's lifetime never
     # spans work that may not need it.
     steps = action_steps("apply-complete")
-    listing = next(i for i, s in enumerate(steps) if "actions/runs" in (s.get("run") or ""))
+    listing = next(i for i, s in enumerate(steps) if s.get("name") == LISTING_STEP)
     mint = next(
         i for i, s in enumerate(steps) if "create-github-app-token" in (s.get("uses") or "")
     )
@@ -503,10 +574,11 @@ def test_the_stranded_failure_is_reported_after_the_writes():
     assert fail > patch
 
 
+LISTING_STEP = "List run jobs and decide each apply check's write"
+
+
 def _loop_body():
-    return next(
-        s["run"] for s in action_steps("apply-complete") if "actions/runs" in s.get("run", "")
-    )
+    return next(s["run"] for s in action_steps("apply-complete") if s.get("name") == LISTING_STEP)
 
 
 def _fail_body():
@@ -548,21 +620,31 @@ def test_diagnostics_are_echoed_after_the_retry_loop():
     assert echo > done
 
 
-# `gh`, `sleep` and `python3` are bash functions, which bash resolves before PATH, so nothing
-# is installed and `sleep` only records its argument. `python3` forwards to the interpreter
-# running the suite, so the real scripts/apply-complete decides every cell.
+# `sleep` is a bash function, which bash resolves before PATH, so it only records its argument.
+# `python3` is `write_python3_shim`'s, wrapped to log each script and subcommand it runs, so the
+# real scripts decide every cell and their `gh` calls reach `GH_STUB`.
 
+SLEEP_STUB = 'sleep() { echo "$1" >> "$SLEEPS"; }\n'
+
+#: A bash `gh`: a `--paginate` listing serves `$FIXTURES/<n>.jsonl` on its nth call, the last
+#: fixture after that; one starting `FAIL` prints the rest and `$FAKE_LIST_STDERR` and exits 1.
+#: Any other call is recorded in `$CALLS` and answers an `in_progress` check.
 GH_STUB = r"""
-gh() {
+if [ "$2" = --paginate ]; then
   n=$(( $(cat "$ATTEMPT") + 1 ))
   printf '%s' "$n" > "$ATTEMPT"
   f="$FIXTURES/$n.jsonl"
   [ -f "$f" ] || f="$FIXTURES/$LAST_FIXTURE.jsonl"
-  if [ "$(head -n 1 "$f")" = FAIL ]; then tail -n +2 "$f"; return 1; fi
+  if [ "$(head -n 1 "$f")" = FAIL ]; then
+    tail -n +2 "$f"
+    printf '%s' "${FAKE_LIST_STDERR:-}" >&2
+    exit 1
+  fi
   cat "$f"
-}
-sleep() { echo "$1" >> "$SLEEPS"; }
-python3() { "$PYEXE" "$@"; }
+  exit 0
+fi
+printf '%s\n' "$@" -- >> "$CALLS"
+echo '{"status": "in_progress"}'
 """
 
 HARNESS_BY_WAVE = {
@@ -572,13 +654,38 @@ HARNESS_BY_WAVE = {
 HARNESS_RAN = {"wave0": "success", "wave1": "success"}
 
 
-def _select(tmp_path, listings, results=None):
+def _bin(tmp_path, list_rc=None):
+    """`bin/` with the python3 shim, `GH_STUB` and a `python3` that logs `<script> <subcommand>`
+    (`stdin` for none) to `script-calls`; with `list_rc`, `apply-complete list` exits it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_python3_shim(bin_dir)
+    write_stub(bin_dir, "gh", GH_STUB)
+    if list_rc is not None:
+        fail_script(bin_dir, "apply-complete", list_rc, "listing broke", subcommand="list")
+    (bin_dir / "python3").rename(bin_dir / "python3-logged")
+    log = (tmp_path / "script-calls").as_posix()
+    write_stub(
+        bin_dir,
+        "python3",
+        f'printf \'%s %s\\n\' "${{1##*/}}" "${{2:-stdin}}" >> "{log}"\n'
+        f'exec "{(bin_dir / "python3-logged").as_posix()}" "$@"',
+    )
+    return bin_dir
+
+
+def _script_calls(tmp_path):
+    path = tmp_path / "script-calls"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def _select(tmp_path, listings, results=None, *, list_stderr="", list_rc=None):
     """Execute the selection step with `listings[n]` served on attempt n; return the process,
     the `{id: entry}` write plan, the attempt count and the env.
 
-    A listing is a jsonl string, ``""`` for an empty one, or ``None`` for a
-    fetch that writes one row and then fails. The last entry is served for
-    every further attempt.
+    A listing is a jsonl string, ``""`` for an empty one, or ``None`` for a fetch that writes
+    one row and then fails with `list_stderr`. The last entry is served for every further
+    attempt. With `list_rc`, `apply-complete list` exits it instead.
     """
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -591,8 +698,10 @@ def _select(tmp_path, listings, results=None):
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
     (tmp_path / "attempt").write_text("0", encoding="utf-8")
+    bin_dir = _bin(tmp_path, list_rc)
     env = {
         **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "GH_TOKEN": "x",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_RUN_ID": "999",
@@ -605,9 +714,10 @@ def _select(tmp_path, listings, results=None):
         "LAST_FIXTURE": str(len(listings)),
         "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
         "SLEEPS": str(tmp_path / "sleeps").replace("\\", "/"),
-        "PYEXE": sys.executable.replace("\\", "/"),
+        "CALLS": (tmp_path / "gh-calls").as_posix(),
+        "FAKE_LIST_STDERR": list_stderr,
     }
-    proc = run_step(tmp_path, GH_STUB + _loop_body(), env, timeout=120)
+    proc = run_step(tmp_path, SLEEP_STUB + _loop_body(), env, timeout=120)
     writes_path = runner_temp / "writes.jsonl"
     lines = writes_path.read_text(encoding="utf-8").splitlines() if writes_path.exists() else []
     plan = {e["id"]: e for e in map(json.loads, lines)}
@@ -744,7 +854,7 @@ def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stra
     assert sleeps == ["2", "3", "5", "10", "10", "10", "10", "10", "10", "10", "10", "10", "10"]
     assert _outcomes(plan) == {11: "completed"}
 
-    fail = run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120)
+    fail = run_step(tmp_path, _fail_body(), env, timeout=120)
     assert fail.returncode == 1
     errors = [ln for ln in fail.stdout.splitlines() if "::error::" in ln]
     assert errors == [
@@ -761,7 +871,67 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
     proc, plan, _, env = _select(tmp_path, [_all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
     assert _outcomes(plan) == ALL_DONE
-    assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0
+    assert run_step(tmp_path, _fail_body(), env, timeout=120).returncode == 0
+
+
+def _write_body():
+    return next(
+        s["run"]
+        for s in action_steps("apply-complete")
+        if s.get("name") == "Write the apply checks"
+    )
+
+
+@bash_only
+def test_a_listing_failing_after_one_resolved_cell_writes_it_and_fails_naming_the_cause(tmp_path):
+    """Attempt 1 resolves dns and leaves the rest; every later listing fails. The decided write
+    still lands, and the final refusal names the listing's cause. Mutations: `|| true` on the
+    `list` call (exit 1 at attempt 2); drop the `cat` of `attempt-rows.jsonl` into `rows.jsonl`
+    (no write)."""
+    first = jsonl(job("L0 / dev-eu / dns", "success"), job("L0 / dev-eu / web", None))
+    proc, plan, attempts, env = _select(tmp_path, [first, None], list_stderr="HTTP 502")
+    assert (proc.returncode, attempts) == (0, 14), proc.stderr
+    assert _outcomes(plan) == {11: "completed"}
+    cause = f"{LIST_CMD} | HTTP 502"
+    stranded = tmp_path / "runner" / "stranded.txt"
+    assert stranded.read_text(encoding="utf-8") == cause + "\n"
+
+    env = {**env, "SHIPMATE_DEPLOY": "true", "SHIPMATE_PR_NUMBER": "", "GITHUB_RUN_ATTEMPT": "1"}
+    write = run_step(tmp_path, _write_body(), env, timeout=120)
+    assert write.returncode == 0, write.stderr
+    patched = [c[3] for c in read_calls(tmp_path / "gh-calls") if "PATCH" in c]
+    assert patched == ["repos/acme/demo/check-runs/11"]
+
+    fail = run_step(tmp_path, _fail_body(), env, timeout=120)
+    assert fail.returncode == 1
+    assert [ln for ln in fail.stdout.splitlines() if ln.startswith("::")] == [
+        f"::error::the retries were exhausted and these apply checks are left pending: {cause} "
+    ]
+
+
+@bash_only
+def test_any_other_list_exit_propagates_at_once(tmp_path):
+    """Mutation: treat every non-zero `list` exit as 75 (14 attempts)."""
+    proc, plan, _, _ = _select(tmp_path, [_all_success("dns", "app", "web")], list_rc=3)
+    assert proc.returncode == 3
+    assert plan == {}
+    assert _script_calls(tmp_path) == ["apply-complete list"]
+
+
+@bash_only
+def test_the_classifier_runs_only_on_a_listing_that_came_back(tmp_path):
+    """An empty and a failed listing are not classified. Mutation: run the classifier after
+    every `list`."""
+    proc, plan, attempts, _ = _select(tmp_path, ["", None, _all_success("dns", "app", "web")])
+    assert (proc.returncode, attempts) == (0, 3), proc.stderr
+    assert _outcomes(plan) == ALL_DONE
+    assert _script_calls(tmp_path) == [
+        "apply-complete list",
+        "apply-complete list",
+        "apply-complete list",
+        "apply-complete stdin",
+        "apply-complete plan",
+    ]
 
 
 def _step(name):
