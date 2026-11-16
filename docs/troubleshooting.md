@@ -2348,7 +2348,7 @@ requests this push may put behind` step logs why a pull request got no plan:
 | `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
 | `pull request #<n> was not re-planned: <failure>` | Its head's check runs could not be read. |
 | `the plan dispatch for pull request #<n> failed; comment shipmate plan on it to check it against the base` | The dispatch failed with no run started. |
-| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the step started, selection included, so no further dispatch began; the named pull requests were not reached. The budget limits how long the job holds the consumer's deploy concurrency group (`deploy-main` in getting-started); a dispatch begun before it ran on past it. |
+| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the dispatch step started (after the token mint), selection included, so no further dispatch began; the named pull requests were not reached. The budget bounds when a dispatch may begin, not how long the job holds the consumer's deploy concurrency group (`deploy-main` in getting-started); the job's 15-minute timeout caps that. |
 | `the plan dispatch for pull request #<n> answered with an error, so a plan may have started; check the Actions tab` | The dispatch failed with a server or network error. Look for a run titled `shipmate · plan pr=<n>` before commenting. |
 
 A draft, a pull request with no App apply check, and one whose checks name no
@@ -3281,8 +3281,8 @@ A long hold on that group makes the drop more likely. Every merge deploy whose
 `max_parallel` legs at once, each up to its 15-minute timeout, and the deploy run holds the
 group until `warm` ends, even with no cells to apply. `replan` holds it too, after
 `summary`, while it dispatches plans of the open pull requests the merge may put
-behind; its 10-minute budget stops it beginning a dispatch, and its 15-minute
-timeout caps the job.
+behind; it begins no dispatch once its 10-minute budget is spent, and its
+15-minute timeout caps the job.
 
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the

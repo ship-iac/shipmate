@@ -57,7 +57,7 @@ either plans the pull request's head. A runner clock ahead of GitHub's by more t
 seconds puts `t0` after a run that landed, for the dispatches bounded by `t0` (`auto` and a
 comment-less plan). A commented dispatch's title match takes no time bound, but its paging stops
 at the first page holding a run created before `t0`, so under that skew its run is missed too
-when it sits on a later page.
+when a page before it holds a run created before `t0`.
 """
 
 import json

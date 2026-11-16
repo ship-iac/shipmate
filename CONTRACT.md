@@ -1657,7 +1657,7 @@ seconds puts `t0` after a run that landed, with the same result, for the two
 dispatches bounded by `t0`: an `auto` dispatch and a comment-less plan. A
 commented dispatch's title match takes no time bound, but its paging still stops
 at the first page holding a run created before `t0`, so under that skew its run
-is missed too when it sits on a later page.
+is missed too when a page before it holds a run created before `t0`.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
 reads the claim as taken and does nothing. A double-started `auto` run waits:
@@ -4102,8 +4102,8 @@ selection included: before each pull request it reads the clock, and once the
 budget is spent it warns ``not re-planned: the re-plan budget of 10 minutes is
 spent; comment shipmate plan on #<n>, ...``, naming every pull request it did
 not reach, and ends successfully. The budget bounds when a
-dispatch may begin, not the job: the mint, a slow selection and a dispatch
-begun at its edge run past it. The job's 15-minute `timeout-minutes` caps the
+dispatch may begin, not the job: the mint precedes it, and a slow selection or
+a dispatch begun at its edge runs past it. The job's 15-minute `timeout-minutes` caps the
 whole job; when it stops the job, the pull requests it had not reached get no
 plan and no warning. It mints
 an App token with `actions: write`, `pull-requests: read` and `checks: read`,
