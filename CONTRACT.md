@@ -2452,8 +2452,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
   job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
   request").
 - **The waits reply** — posted by `actions/apply-waiters` in `apply-run.yml`'s
-  `review` and `summary` jobs, both bound to `shipmate-engine`, on the command
-  of each apply run waiting behind the run that holds the queue. Its
+  `review` and `summary` jobs, both bound to `shipmate-engine`, as a pull
+  request comment for each apply run waiting behind the run that holds the
+  queue. Its
   `<!-- shipmate:waits-<run id> -->` first line is read only to skip a waiting
   run already told, matched at the start of a comment by `<slug>[bot]`; nothing
   edits or minimizes it (§Comment-ops, "One apply run per pull request").

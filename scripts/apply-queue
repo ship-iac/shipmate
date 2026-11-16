@@ -204,9 +204,8 @@ def waits_marker(run_id):
 
 def waits_sentence(waiter, repo, pr, own):
     """The sentence telling run `waiter`, an `apply_runs` row, that run `own` holds the group,
-    citing the waiter's command comment on pull request `pr` of `repo`. Every link is built
-    from validated values (the row's `id` and `comment`, `is_pr_number`, `REPO_RE`), never
-    from API text."""
+    citing the waiter's command comment on pull request `pr` of `repo`. Every id in a link is
+    validated (the row's `id` and `comment`, `is_pr_number`), never API text."""
     return (
         f"[the apply run]({_link(waiter['id'])}) for "
         f"[this comment]({_comment_link(repo, pr, waiter['comment'])}) waits for "
