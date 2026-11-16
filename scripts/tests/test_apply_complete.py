@@ -530,15 +530,16 @@ def test_list_does_not_validate_the_jobs(tmp_path):
 @bash_only
 def test_a_failed_list_prints_its_cause_once_escaped_and_retries(tmp_path):
     """gh's stderr can hold lines that would start workflow commands, broken by any line end
-    `splitlines` knows; the cause prints as one escaped `::error::` and one escaped `retry: `
-    line, raw text nowhere. Mutations: print `e.code` raw; exit 1; drop the `retry: ` line; pass
-    the cause to `print_annotated` unjoined (two annotations); join `one_line` on CR and LF only
-    (two annotations); the raw cause in the `retry: ` line."""
+    `splitlines` knows; the cause prints as one escaped `::error::` and one `retry: ` line on
+    one line, raw lines nowhere. Mutations: print `e.code` raw; exit 1; drop the `retry: ` line;
+    pass the cause to `print_annotated` unjoined (two annotations); join `one_line` on CR and LF
+    only (two annotations)."""
     stderr = "::error::boom\r\n::warning::careful 100%0A\nHTTP 502\u2028::error::sep"
     proc, calls = _list(tmp_path, listing="", list_rc=1, list_stderr=stderr)
-    cause = f"{LIST_CMD} | ::error::boom | ::warning::careful 100%250A | HTTP 502 | ::error::sep"
+    cause = f"{LIST_CMD} | ::error::boom | ::warning::careful 100%0A | HTTP 502 | ::error::sep"
+    escaped = cause.replace("%", "%25")
     assert (proc.returncode, proc.stdout) == (apply_complete.UNRESOLVED_EXIT, "")
-    assert proc.stderr == f"::error::{cause}\n{apply_complete.RETRY_PREFIX}{cause}\n"
+    assert proc.stderr == f"::error::{escaped}\n{apply_complete.RETRY_PREFIX}{cause}\n"
     assert calls == [LIST_ARGV]
 
 
@@ -875,16 +876,18 @@ def _write_body():
 @bash_only
 def test_a_listing_failing_after_one_resolved_cell_writes_it_and_fails_naming_the_cause(tmp_path):
     """Attempt 1 resolves dns and leaves the rest; every later listing fails. The decided write
-    still lands, and the final refusal names the listing's cause escaped, so the runner decodes
-    gh's literal `%0A` back to itself, not to a line break. Mutations: `|| true` on the `list`
-    call (the classifier's retry line replaces the cause); drop the `cat` of
-    `attempt-rows.jsonl` into `rows.jsonl` (no write); the raw cause in `list`'s `retry: ` line
-    (`%0A`)."""
+    still lands, the diagnostics log line shows gh's text as gh wrote it, and the final refusal
+    names the listing's cause escaped, so the runner decodes gh's literal `%0A` back to itself,
+    not to a line break. Mutations: `|| true` on the `list` call (the classifier's retry line
+    replaces the cause); drop the `cat` of `attempt-rows.jsonl` into `rows.jsonl` (no write); no
+    escaping in the fail-over step (`%0A`); escape the cause in `list`'s `retry: ` line instead
+    (the log line shows `%250A`)."""
     first = jsonl(job("L0 / dev-eu / dns", "success"), job("L0 / dev-eu / web", None))
     proc, plan, attempts, env = _select(tmp_path, [first, None], list_stderr="HTTP 502 a%0Ab")
     assert (proc.returncode, attempts) == (0, 14), proc.stderr
     assert _outcomes(plan) == {11: "completed"}
-    cause = f"{LIST_CMD} | HTTP 502 a%250Ab"
+    cause = f"{LIST_CMD} | HTTP 502 a%0Ab"
+    assert f"{apply_complete.RETRY_PREFIX}{cause}" in proc.stderr.splitlines()
     stranded = tmp_path / "runner" / "stranded.txt"
     assert stranded.read_text(encoding="utf-8") == cause + "\n"
 
@@ -897,8 +900,31 @@ def test_a_listing_failing_after_one_resolved_cell_writes_it_and_fails_naming_th
     fail = run_step(tmp_path, _fail_body(), env, timeout=120)
     assert fail.returncode == 1
     assert [ln for ln in fail.stdout.splitlines() if ln.startswith("::")] == [
-        f"::error::the retries were exhausted and these apply checks are left pending: {cause} "
+        (
+            "::error::the retries were exhausted and these apply checks are left pending: "
+            f"{cause.replace('%', '%25')} "
+        )
     ]
+
+
+@bash_only
+def test_the_fail_over_escapes_a_stranded_cell_name(tmp_path):
+    """The classifier's `retry: ` line names cells raw; a stack path holding `%0A` or a CR stays
+    itself in the refusal. Mutation: no escaping in the fail-over step (`%0A`, a raw CR)."""
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    (runner_temp / "stranded.txt").write_bytes(
+        b"the jobs listing shows no conclusion for these cells of waves that ran: "
+        b"stacks/a%0Ab\r / dev-eu\nthe other\n"
+    )
+    env = {**os.environ, "RUNNER_TEMP": runner_temp.as_posix()}
+    fail = run_step(tmp_path, _fail_body(), env, timeout=120)
+    assert fail.returncode == 1
+    assert fail.stdout == (
+        "::error::the retries were exhausted and these apply checks are left pending: the jobs "
+        "listing shows no conclusion for these cells of waves that ran: stacks/a%250Ab%0D / "
+        "dev-eu the other \n"
+    )
 
 
 @bash_only
