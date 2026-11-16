@@ -10,10 +10,11 @@ This is the path with no comment, no dispatch inputs and no operator watching, s
 a pending cell whose check records no plan run refuses the whole run — a default
 would apply it from nowhere and a skip would leave its check pending with nothing
 said. Every pending cell here is also runnable: this path holds nothing back, unlike
-the bare-apply path's targeted and held envs. It refuses the whole run instead in two more
+the bare-apply path's targeted and held envs. It refuses the whole run instead in three more
 cases. A pending cell that `after` runs behind a pending cell `needs` puts on a later env-level
 has no order that meets both. A pending cell another pull request locks refuses too;
-CONTRACT.md §Cell locks gives the reason.
+CONTRACT.md §Cell locks gives the reason. A pending cell whose apply check records that its
+plan found the base changed it has no reviewed plan (`refuse_behind_checks`).
 
 It also writes `warm`, the cache warm-up matrix (`warm_rows`), which never refuses, and
 `max_parallel`, its cap.
@@ -133,26 +134,54 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
     ]
     if not stranded:
         return
-    others = sorted(f"{c['stack']} / {c['environment']}" for c in pending)
-    also = (
-        f" This deploy applies nothing, so these other cells of this merge are not applied "
-        f"either: {', '.join(others)}."
-        if others
-        else ""
-    )
     raise SystemExit(
         f"::error::deploy aborted: {', '.join(sorted(stranded))}: the stack of each lost its "
         "env/* tag after this pull request was planned, so its reviewed change was not "
-        f"applied.{also} Open a new pull request that retags each stranded stack and changes "
-        "every other listed stack (any edit that `terramate list --changed` marks, such as a "
-        "comment line). It plans the current default branch for all of them, this merged "
-        "change included, and its cells are applied before merge under a required gate "
-        "(`shipmate apply`, and `shipmate apply <env>` for a `targeted` environment), or by "
-        "its deploy otherwise. If an untag was deliberate, apply that stranded "
-        "change by hand instead of retagging; the pull request still changes every listed "
-        "stack, and with none listed no pull request is needed. Re-running this deploy checks "
-        "out the same commit and refuses again. This deploy's apply checks are never read "
-        "again and stay open on the merged pull request."
+        f"applied.{_also(pending)} Open a new pull request that retags each stranded stack and "
+        f"changes every other listed stack {_PLANS_AFRESH} If an untag was deliberate, apply "
+        "that stranded change by hand instead of retagging; the pull request still changes "
+        f"every listed stack, and with none listed no pull request is needed. {_NOT_AGAIN}"
+    )
+
+
+#: The new pull request's effect, shared by the stranded and behind refusals.
+_PLANS_AFRESH = (
+    "(any edit that `terramate list --changed` marks, such as a comment line). It plans the "
+    "current default branch for all of them, this merged change included, and its cells are "
+    "applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` "
+    "for a `targeted` environment), or by its deploy otherwise."
+)
+_NOT_AGAIN = (
+    "Re-running this deploy checks out the same commit and refuses again. This deploy's apply "
+    "checks are never read again and stay open on the merged pull request."
+)
+
+
+def _also(cells):
+    """The sentence naming `cells` as `<stack> / <env>`, which a refused deploy does not apply
+    either; empty for none."""
+    others = sorted(f"{c['stack']} / {c['environment']}" for c in cells)
+    if not others:
+        return ""
+    return (
+        " This deploy applies nothing, so these other cells of this merge are not applied "
+        f"either: {', '.join(others)}."
+    )
+
+
+def refuse_behind_checks(pending, behind):
+    """Refuse when a `pending` cell's apply check name is in `behind` (`apply-gate.behind_names`):
+    its plan found the base changed its stack after the branch left it and planned nothing, so
+    no reviewed plan exists to deploy. Names every other `pending` cell, which this deploy does
+    not apply either, and the new pull request that plans them all afresh."""
+    hit = [c for c in pending if ad.ag.check_name(c["stack"], c["environment"]) in behind]
+    if not hit:
+        return
+    cells = sorted(f"{c['stack']} / {c['environment']}" for c in hit)
+    raise SystemExit(
+        f"::error::deploy aborted: {', '.join(cells)}: each was planned behind the base, so no "
+        f"reviewed plan exists for it.{_also([c for c in pending if c not in hit])} Open a new "
+        f"pull request that changes every listed stack {_PLANS_AFRESH} {_NOT_AGAIN}"
     )
 
 
@@ -292,6 +321,8 @@ def main():
     # open apply check must still refuse. Guard test:
     # test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local.
     refuse_stranded_checks(tree, scanned, ad.apply_check_names(lines, app_id) - completed, pending)
+    # Before `with_plan_runs`, whose missing-digest refusal would name a re-plan remedy.
+    refuse_behind_checks(pending, ad.ag.behind_names(lines, app_id))
     # AFTER the pending filter, as on both pre-merge paths: an applied cell needs no record,
     # so a completed check that carries none never refuses the deploy.
     pending = ad.with_plan_runs(pending, lines, app_id, pr_number=None)
