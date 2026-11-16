@@ -206,10 +206,16 @@ def plan_records(check_run_lines, app_id):
         pr = record.get("pr")
         out[name] = (
             _plan_run(record),
-            digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
+            digest if is_plan_digest(digest) else None,
             pr if isinstance(pr, str) and is_pr_number(pr) else None,
         )
     return out
+
+
+def is_plan_digest(value):
+    """Whether `value` is a plan-text digest as the apply record carries it: a str of 64
+    lowercase hex characters."""
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
 def plan_actions(check_run_lines, app_id):

@@ -577,16 +577,8 @@ def wait_mergeable(repo, pr_number, head):
     reason = az._head_repo_reason(pr) or az._ready_reason(pr, retry=_AUTO_RETRY)
     if reason:
         raise SystemExit(f"::error::{reason}")
-    try:
-        return ag.base_tip(repo, pr, run=_run)
-    except SystemExit as e:
-        why = str(e.code).removeprefix("::error::")
-    except (LookupError, TypeError, AttributeError) as e:
-        why = repr(e)
-    raise SystemExit(
-        f"::error::auto apply refused: could not read the base tip of pull request "
-        f"#{pr_number} ({why}). " + _AUTO_REMEDY
-    )
+    tip = _base_tip(repo, pr_number, lambda: pr, "auto apply refused", f". {_AUTO_REMEDY}")
+    return tip[1]
 
 
 def overlap_cells(candidates, changed, behind=frozenset()):
@@ -610,19 +602,31 @@ def behind_cells(tip, cells, lines, app_id):
     return overlap_cells(cells, changed, ag.behind_names(lines, app_id))
 
 
-def _read_base(repo, pr_number):
-    """`(base branch, base tip)` of pull request `pr_number`, from one pull request read and the
-    branch ref (`apply-gate.base_tip`); a failed or malformed read refuses."""
+def _base_tip(repo, pr_number, read, lead, remedy):
+    """`(base branch, base tip)` of pull request `pr_number`, whose REST object `read()`
+    returns, the tip from the branch ref (`apply-gate.base_tip`). A failed or malformed read
+    refuses as `<lead>: could not read the base tip of pull request #<n> (<why>)<remedy>`."""
     try:
-        pull = gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run)
+        pull = read()
         return pull["base"]["ref"], ag.base_tip(repo, pull, run=_run)
     except SystemExit as e:
         why = one_line(str(e.code).removeprefix("::error::"))
     except (LookupError, TypeError, AttributeError, ValueError) as e:
         why = repr(e)
     raise SystemExit(
-        f"::error::apply refused: could not read the base tip of pull request #{pr_number} "
-        f"({why}); comment `shipmate apply` again."
+        f"::error::{lead}: could not read the base tip of pull request #{pr_number} ({why}){remedy}"
+    )
+
+
+def _read_base(repo, pr_number):
+    """`_base_tip` of pull request `pr_number` from one pull request read, refused with the
+    commanded forms' remedy."""
+    return _base_tip(
+        repo,
+        pr_number,
+        lambda: gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run),
+        "apply refused",
+        "; comment `shipmate apply` again.",
     )
 
 

@@ -3221,3 +3221,15 @@ def test_evict_cli_releases_no_lock_on_a_behind_cell(monkeypatch, tmp_path):
         "refused": "[]",
     }
     assert gh.drained()
+
+
+def test_verify_auto_refuses_a_wave_row_of_another_plan_run_before_any_read(monkeypatch, tmp_path):
+    """apply-cell downloads the plan of the wave row's run, so under `auto` it must be the
+    provenance run every other check judges.
+
+    Mutation: drop the row-run comparison -- the lock read runs, unexpected, red."""
+    env = {**AUTO, "SHIPMATE_PLAN_RUN_ID": "4243"}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        f"::error::{WHERE} the wave row applies plan run 4243, not plan run {RUN}, which this "
+        f"auto apply applies; {RETRY}"
+    )

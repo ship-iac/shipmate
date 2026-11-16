@@ -67,7 +67,6 @@ import functools
 import hashlib
 import json
 import os
-import re
 import sys
 import urllib.parse
 from collections.abc import Iterable
@@ -921,7 +920,6 @@ def _why(exc):
 
 
 _RETRY = "push, or comment `shipmate apply` on the pull request"
-_DIGEST = re.compile(r"[0-9a-f]{64}")
 _DEPLOY_RETRY = "re-run the failed deploy jobs"
 
 
@@ -1121,7 +1119,8 @@ def _wave_inputs(where):
     """`(head, auto, provenance, base, plan run, digest)` from the pre-apply step's environment,
     `auto` a bool, refused before any read unless each is well-formed: a commit sha for the head
     and the base, `true` or `false` for the mode, a run id and a 64-hex digest for the wave
-    row's plan, and, for the auto form, a run id for its provenance run."""
+    row's plan, and, for the auto form, a run id for its provenance run, which must be the wave
+    row's plan run."""
     head, auto, provenance, base, plan_run, digest = (
         os.environ.get(k, "")
         for k in (
@@ -1144,11 +1143,17 @@ def _wave_inputs(where):
             f"::error::apply aborted for {where}: an auto apply reached the wave without its "
             f"plan run and base tip (got: {provenance!r}, {base!r}); {_RETRY}"
         )
-    if not (is_head_sha(base) and is_run_id(plan_run) and _DIGEST.fullmatch(digest)):
+    if not (is_head_sha(base) and is_run_id(plan_run) and ag.is_plan_digest(digest)):
         raise SystemExit(
             f"::error::apply aborted for {where}: the apply reached the wave without its base "
             f"tip, plan run and plan-text digest (got: {base!r}, {plan_run!r}, {digest!r}); "
             f"{_RETRY}"
+        )
+    # apply-cell downloads the plan of the row's run, so it must be the run provenance admits.
+    if auto and plan_run != provenance:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: the wave row applies plan run {plan_run}, not "
+            f"plan run {provenance}, which this auto apply applies; {_RETRY}"
         )
     return head, auto, provenance, base, plan_run, digest
 

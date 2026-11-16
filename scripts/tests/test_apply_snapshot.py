@@ -319,10 +319,14 @@ def test_only_a_check_recording_the_rows_plan_is_collected():
         pytest.param({"plan_run": "8"}, id="other-run"),
         pytest.param({"plan_sha256": "f" * 64}, id="other-digest"),
         pytest.param({"plan_run": "8", "plan_sha256": None, "behind": True}, id="behind"),
+        pytest.param({"plan_run": "6"}, id="older-run"),
     ],
 )
 def test_a_cell_with_only_a_check_of_another_plan_refuses_before_wave0(record):
-    """Mutation: warn and skip the cell instead of refusing -- no refusal, red."""
+    """An older plan's check is collected only beside a matching one, never in its place.
+
+    Mutation: warn and skip the cell instead of refusing -- no refusal, red.
+    Mutation: let an older run's check keep the cell from refusing -- older-run, red."""
     runs = [
         check("apply / stacks/dns / dev-eu", 1),
         check("apply / stacks/app / dev-eu", 2, **record),
@@ -351,3 +355,28 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
     rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, jobs)
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1]
+
+
+def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
+    """Run 6's unfinished check of the cell is superseded by this apply of run 7, so it is
+    collected beside run 7's and completed with it; run 8's check, and run 6's behind check, are
+    not collected.
+
+    Mutation: collect none of the older checks (`_older` answers False) -- id 1 is left, red.
+    Mutation: collect a newer run's check too (`!=` for `<`) -- id 3 is collected, red."""
+    waves = {"wave0": [row("dns", "dev")]}
+    behind = {"plan_run": "6", "plan_sha256": None, "behind": True}
+    runs = [
+        check("apply / dns / dev", 1, plan_run="6", plan_sha256="f" * 64),
+        check("apply / dns / dev", 2),
+        check("apply / dns / dev", 3, plan_run="8"),
+        check("apply / dns / dev", 4, **behind),
+    ]
+    snap = apply_snapshot.snapshot(waves, runs, APP_ID)
+    assert snap == {"apply / dns / dev": [1, 2]}
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    rows, _ = apply_complete.classify(
+        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, jobs
+    )
+    writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
+    assert [w["id"] for w in writes] == [1, 2]
