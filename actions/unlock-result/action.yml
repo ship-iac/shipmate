@@ -1,0 +1,40 @@
+name: shipmate unlock-result
+description: Reply once on the pull request with the state locks an unlock run released per cell, or why it released nothing (scripts/unlock-result). Display only, written with the job token, which needs pull-requests write; a reply that cannot be posted, or records that cannot be downloaded, never fail the step.
+inputs:
+  comment-id:
+    description: The command comment's id, the dispatch's `comment_id`. The pull request is read from it.
+    required: true
+  environment:
+    description: The unlocked environment.
+    required: true
+  cells:
+    description: The `detect` job's `cells` output, the unlock queue as a JSON array.
+    required: true
+  detect-result:
+    description: The `detect` job's result; anything but `success` replies that no cell was probed.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download the cells' records
+      id: download
+      if: ${{ inputs.cells != '[]' }}
+      # Display only: the reply names a failed download, so it must not stop the reply. No
+      # `github-token`: this run's own artifacts download with no token permission.
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        pattern: shipmate-unlock-*
+        path: ${{ runner.temp }}/unlock-records
+        merge-multiple: false
+    - name: Reply with the unlock result
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        COMMENT_ID: ${{ inputs.comment-id }}
+        SHIPMATE_ENV: ${{ inputs.environment }}
+        SHIPMATE_CELLS: ${{ inputs.cells }}
+        SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
+        SHIPMATE_DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+        SHIPMATE_RECORDS: ${{ runner.temp }}/unlock-records
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-result"

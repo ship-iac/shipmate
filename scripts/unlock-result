@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Reply once on the pull request with what an unlock run released, per cell, or why it
+released nothing.
+
+Runs in `unlock.yml`'s `result` job, which checks nothing out. Reads `GITHUB_REPOSITORY`,
+`GITHUB_SERVER_URL`, `GITHUB_RUN_ID`, `COMMENT_ID` (the command comment), `SHIPMATE_ENV`,
+`SHIPMATE_CELLS` (`detect`'s `cells`), `SHIPMATE_DETECT_RESULT` (`detect`'s job result),
+`SHIPMATE_DOWNLOAD_OUTCOME` (the record download step's outcome), `SHIPMATE_RECORDS` (the
+directory the records were downloaded into) and `GH_TOKEN` (`pull-requests: write`).
+
+Each unlock leg uploads one record, artifact `shipmate-unlock-<strategy.job-index>` holding
+`unlock-record.json`: `{"index", "outcome", "lock_id"}`, `outcome` being `released`, `none` or
+`failed`. The cell is `cells[index]`, never a name from the record: a leg runs pull-request HCL,
+so a record can be forged, and the reply is display only. A record whose artifact name is not
+`shipmate-unlock-<index>` exactly, whose `index` differs from that name's, or whose `outcome`
+is unknown counts as missing; an index outside `cells` names no cell, and a cell with no
+record "did not run". A `lock_id` outside `lock-info`'s charset is dropped.
+
+The pull request is read from the comment's `html_url`. A comment not on a pull request, an
+unreadable comment or a failed POST warns and exits 0: the run's own result stays the unlock's
+outcome.
+"""
+
+import json
+import os
+import pathlib
+import re
+
+from _shipmate import (
+    _COMMENT_ID,
+    _load,
+    current_run_url,
+    gh_json,
+    is_pr_number,
+    one_line,
+    run,
+    run_annotated,
+)
+
+sc = _load("summary-comment")
+rc = _load("reply-comment")
+li = _load("lock-info")
+ud = _load("unlock-detect")
+
+_ARTIFACT = re.compile(r"shipmate-unlock-(0|[1-9][0-9]{0,2})")
+_OUTCOMES = ("released", "none", "failed")
+
+BARE = (
+    "A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks "
+    "stay until it merges or closes, and `--evict` releases another pull request's."
+)
+
+
+def records(root):
+    """{index: (outcome, lock_id)} of the valid records under `root`, one directory per
+    artifact."""
+    out = {}
+    if not root.is_dir():
+        return out
+    for d in root.iterdir():
+        m = _ARTIFACT.fullmatch(d.name)
+        if m is None:
+            continue
+        index = int(m[1])
+        try:
+            rec = json.loads((d / "unlock-record.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if (
+            not isinstance(rec, dict)
+            or type(rec.get("index")) is not int
+            or rec["index"] != index
+            or rec.get("outcome") not in _OUTCOMES
+        ):
+            continue
+        lock_id = rec.get("lock_id")
+        ok = isinstance(lock_id, str) and li._ID_RE.fullmatch(lock_id)
+        out[index] = (rec["outcome"], lock_id if ok else "")
+    return out
+
+
+def _released(env, items):
+    n = len(items)
+    return f"released {n} state lock{'s' if n > 1 else ''} in {env}: {', '.join(items)}"
+
+
+def reply(env, cells, recs, detect_result, download_outcome):
+    """(outcome, text) of the reply, before the bare-unlock sentence."""
+    env = sc._md_name(env)
+    if detect_result != "success":
+        return "failed", "the unlock run failed before probing any cell; see the run."
+    if not cells:
+        return "notice", f"released no state lock in {env}: {ud.empty_queue(env)}"
+    if download_outcome == "failure":
+        return "failed", "could not read the cells' results; see the run."
+    return _per_cell(env, cells, recs)
+
+
+def _per_cell(env, cells, recs):
+    """(outcome, text) naming each cell by its record: released, failed or did not run."""
+    named = {"released": [], "failed": [], None: []}
+    for i, c in enumerate(cells):
+        name = sc._md_name(c["stack"])
+        outcome, lock_id = recs.get(i, (None, ""))
+        if outcome == "released" and lock_id:
+            name = f"{name} ({lock_id})"
+        named.get(outcome, []).append(name)
+    released, failed, missing = named["released"], named["failed"], named[None]
+    if not failed and not missing:
+        if released:
+            return "notice", _released(env, released) + "."
+        return "notice", f"released no state lock in {env}: no probed cell held a state lock."
+    clauses = [f"could not determine the lock of {', '.join(failed)}"] if failed else []
+    if missing:
+        clauses.append(f"{', '.join(missing)} did not run")
+    if released:
+        clauses.append(_released(env, released))
+    return "failed", "; ".join(clauses) + "."
+
+
+def pr_of(repo, comment):
+    """The number of the pull request comment `comment` is on, or None with a warning printed."""
+    if _COMMENT_ID.fullmatch(comment) is None:
+        print(f"::warning::comment_id {comment!r} is not a comment id; no unlock reply posted")
+        return None
+    try:
+        url = gh_json(f"repos/{repo}/issues/comments/{comment}", run).get("html_url")
+    except (SystemExit, ValueError, AttributeError) as exc:
+        print(f"::warning::could not read the command comment: {one_line(exc)}")
+        return None
+    base = re.escape(f"{os.environ['GITHUB_SERVER_URL']}/{repo}/pull/")
+    m = re.fullmatch(rf"{base}([0-9]+)#issuecomment-{comment}", url if isinstance(url, str) else "")
+    if m is None or not is_pr_number(m[1]):
+        print(f"::warning::comment {comment} is not on a pull request; no unlock reply posted")
+        return None
+    return m[1]
+
+
+def _cells(raw):
+    """`detect`'s cells, or None when they are not a JSON list of objects with a string stack."""
+    try:
+        cells = json.loads(raw)
+    except ValueError:
+        return None
+    if isinstance(cells, list) and all(
+        isinstance(c, dict) and isinstance(c.get("stack"), str) for c in cells
+    ):
+        return cells
+    return None
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    env = os.environ.get("SHIPMATE_ENV", "")
+    pr = pr_of(repo, os.environ.get("COMMENT_ID", ""))
+    if pr is None:
+        return
+    detect = os.environ.get("SHIPMATE_DETECT_RESULT", "")
+    cells = _cells(os.environ.get("SHIPMATE_CELLS", "")) if detect == "success" else []
+    if cells is None:
+        outcome, text = "failed", "could not read the cells' results; see the run."
+    else:
+        root = os.environ.get("SHIPMATE_RECORDS", "")
+        recs = records(pathlib.Path(root)) if root else {}
+        outcome, text = reply(
+            env, cells, recs, detect, os.environ.get("SHIPMATE_DOWNLOAD_OUTCOME", "")
+        )
+    body = rc.body("unlock", env, outcome, f"{text}\n\n{BARE}", current_run_url())
+    try:
+        rc.post(pr, body)
+    except SystemExit as exc:
+        print(f"::warning::could not post the unlock reply on #{pr}: {one_line(exc.code)}")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

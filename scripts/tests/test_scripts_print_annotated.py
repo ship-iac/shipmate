@@ -56,6 +56,7 @@ SCRIPTS_EXPECTED = [
     "tofu-error",
     "tool-versions",
     "unlock-detect",
+    "unlock-result",
     "upsert-comment",
     "verify-environments",
     "waves",

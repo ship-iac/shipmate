@@ -75,8 +75,7 @@ jobs:
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
     runs-on: ${{ inputs.runs_on }}
     # No PR comment, deliberately -- do not "fix" it: this job runs the pull request's HCL, so it
-    # holds no pull-requests: write. The command's reactions acknowledge it, step summaries
-    # carry per-cell detail, and a failure reds the run and notifies the actor.
+    # holds no pull-requests: write. Each leg uploads a record and `result` replies from it.
     permissions: { contents: read, actions: read, id-token: write }
     strategy:
       # One cell that cannot determine its lock state must not stop its siblings from releasing
@@ -107,10 +106,47 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/unlock-cell
+      - id: cell
+        uses: $/actions/unlock-cell
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
+      # A leg that failed before `unlock-cell` set an outcome records `failed`. The record is
+      # written by a job that runs pull-request HCL, so `result` trusts only its index.
+      - name: Record the cell's outcome
+        if: ${{ always() }}
+        shell: bash
+        env:
+          INDEX: ${{ strategy.job-index }}
+          OUTCOME: ${{ steps.cell.outputs.outcome }}
+          LOCK_ID: ${{ steps.cell.outputs.lock_id }}
+        run: >-
+          python3 -c 'import json, os; print(json.dumps({"index": int(os.environ["INDEX"]),
+          "outcome": os.environ["OUTCOME"] or "failed", "lock_id": os.environ["LOCK_ID"]}))'
+          > "$RUNNER_TEMP/unlock-record.json"
+      - name: Upload the cell's outcome
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shipmate-unlock-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/unlock-record.json
+          # A re-run of failed jobs replaces its own record.
+          overwrite: true
+
+  # Reads only the legs' records and `detect`'s cells, and checks nothing out, so it runs no
+  # pull-request code. A cancelled run posts nothing.
+  result:
+    needs: [guard, detect, unlock]
+    if: ${{ !cancelled() && needs.detect.result != 'skipped' }}
+    runs-on: ubuntu-slim
+    permissions: { pull-requests: write }
+    steps:
+      - uses: $/actions/unlock-result
+        with:
+          comment-id: ${{ github.event.inputs.comment_id }}
+          environment: ${{ inputs.environment }}
+          cells: ${{ needs.detect.outputs.cells }}
+          detect-result: ${{ needs.detect.result }}

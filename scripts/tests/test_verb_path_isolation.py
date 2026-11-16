@@ -39,8 +39,8 @@ floor (`test_workflow_permissions_floor.py`), the bot-actor `guard` job
 (`test_apply_dispatch_actor_guard.py` covers both files), the `<env>-apply` environment binding
 (`test_apply_env_binding_guard.py`), the unlock job's whole `strategy`
 (`test_matrix_max_parallel_guard.py`), the concurrency group shared with the wave jobs
-(`test_apply_cell_concurrency_guard.py`), and each job's `needs` list (the actor guard's
-whole-list-per-job map).
+(`test_apply_cell_concurrency_guard.py`), each job's `needs` list (the actor guard's
+whole-list-per-job map), and the `result` job whole (`test_unlock_result_wiring.py`).
 
 Threat model is accidental regression -- a clause dropped in a refactor, a matrix pointed at the
 wrong output, a step re-aimed at the apply family -- not a hostile edit to files every consumer
@@ -89,7 +89,7 @@ APPLY_JOBS = {
         "summary",
     },
 }
-UNLOCK_JOBS = {"guard", "detect", "unlock"}
+UNLOCK_JOBS = {"guard", "detect", "unlock", "result"}
 
 #: Every `uses:` each unlock job declares, in order, SHA dropped: a repin must not redden this,
 #: a reordered or added step must. This is the positive form of "calls nothing from the apply
@@ -107,15 +107,18 @@ UNLOCK_STEP_ACTIONS = {
         local_action("setup"),
         "aws-actions/configure-aws-credentials",
         local_action("unlock-cell"),
+        "actions/upload-artifact",
     ],
+    "result": [local_action("unlock-result")],
 }
 
 #: `run:` steps per unlock job, hand-written. The `uses:` list above cannot see a shell step,
 #: and `tofu apply` pasted into the unlock job would run with the `<env>-apply` binding,
 #: id-token: write and an already-assumed apply role. The apply side takes no mirror of this,
 #: because `apply.yml` legitimately runs shell, so a `tofu force-unlock` pasted there stays a
-#: blind spot rather than a second selector here.
-UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
+#: blind spot rather than a second selector here. The `unlock` job's one is its outcome record,
+#: pinned whole by `test_unlock_result_wiring.py`.
+UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 1, "result": 0}
 
 UNLOCK_PERMISSIONS = {
     "detect": {"contents": "read", "checks": "read", "actions": "read"},
@@ -270,8 +273,7 @@ def test_the_unlock_workflow_applies_nothing():
     got = {j: [u.split("@")[0] for u in _uses(job)] for j, job in jobs.items()}
     assert got == UNLOCK_STEP_ACTIONS, (
         f"{UNLOCK}'s steps call {got!r}, not {UNLOCK_STEP_ACTIONS!r} -- releasing a lock "
-        "must never mutate infrastructure, complete an apply check, refresh the gate or "
-        "post a result comment"
+        "must never mutate infrastructure, complete an apply check or refresh the gate"
     )
     named = {
         job_id: [u for u in uses if any(u.endswith(f"/actions/{a}") for a in APPLY_FAMILY)]
