@@ -63,12 +63,12 @@ def test_every_page_of_every_live_status_is_read():
     got = _shipmate.apply_runs("o/r", "shipmate.yml", "7", "shipmate-iac", run=run)
     assert got == ([_row(5), _row(6, status="waiting"), _row(1100, ref=_OLD)], True)
     assert run.calls == [
-        _listing("requested"),
+        _listing("queued"),
+        _listing("in_progress"),
+        _listing("waiting"),
         _listing("pending"),
         _listing("pending", 2),
-        _listing("queued"),
-        _listing("waiting"),
-        _listing("in_progress"),
+        _listing("requested"),
     ]
 
 
@@ -168,16 +168,14 @@ def test_run_jobs_with_a_job_without_name_is_incomplete():
 
 
 def test_the_live_statuses_are_pinned_whole():
-    """`apply_runs` and `holder_dispatch_runs` both list these, one query each, in lifecycle
-    order so a run moving forward between two queries is listed by the later one. Mutations:
-    drop `requested`; restore the order queued, in_progress, waiting, pending, requested --
+    """`apply_runs` and `holder_dispatch_runs` both list these. Mutation: drop `requested` --
     red."""
     assert _shipmate.LIVE_RUN_STATUSES == (
-        "requested",
-        "pending",
         "queued",
-        "waiting",
         "in_progress",
+        "waiting",
+        "pending",
+        "requested",
     )
 
 

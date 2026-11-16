@@ -1602,11 +1602,13 @@ dispatch:
 
 - A comment's dispatch and a comment-less `plan` read every page of 100 runs,
   newest first, back to `t0`, and read again each second until 10 seconds
-  after the failed attempt. Each stops at a `workflow_dispatch` run created at
-  or after `t0` whose `actor` is the App's `<slug>[bot]` and whose title
-  (§Check names) is this dispatch's: this verb and comment id (empty for a comment-less plan), with
-  this pull request, or for `unlock` no pull request and this ref. Otherwise it
-  retries: the claim (above) leaves a second `plan` or `apply` run doing
+  after the failed attempt. Each stops at a `workflow_dispatch` run whose
+  `actor` is the App's `<slug>[bot]` and whose title (§Check names) is this
+  dispatch's: this verb and comment id, with this pull request, or for `unlock`
+  no pull request and this ref. A comment-less plan's title carries no comment
+  id and is shared by every comment-less plan of the pull request, so its run
+  must also be created at or after `t0`; a comment id makes a title unique, so a
+  commented dispatch's run needs no time bound. Otherwise it retries: the claim (above) leaves a second `plan` or `apply` run doing
   nothing, a second comment-less plan plans the head again, and a second
   `unlock` finds no lock. Without the App's slug no run can be told to be this
   dispatch's, so the dispatch is refused before it is sent. Every comment-less
@@ -4084,9 +4086,15 @@ Actions tab before commenting it; neither fails anything: this run's head is
 not the pull request's, so nothing it writes or fails to write gates the
 merge.
 
-**Re-plan after a merge.** The merge deploy's `summary` job ends with
-`actions/base-push-plan`, which runs after a failed gate write or lock release
-too (`!cancelled()`), on every run attempt, and never fails the job. It mints
+**Re-plan after a merge.** The merge deploy's `replan` job runs
+`actions/base-push-plan` after `summary`, whatever `detect` and `summary`
+concluded (`!cancelled()`), on every run attempt. It binds `shipmate-engine`,
+takes the consumer's `runs_on` runner, requests no `GITHUB_TOKEN` permission,
+and is `continue-on-error`, so it never fails the deploy run: a failure shows as
+a failed `replan` job on a run that concludes `success`. Its 30-minute timeout
+covers the rate-limit waits of the dispatches (up to three 60 s waits each); a
+job that reaches it is cancelled where it stands, so the pull requests not yet
+dispatched get no plan and no warning. It mints
 an App token with `actions: write`, `pull-requests: read` and `checks: read`,
 lists the open pull requests into the default branch, and dispatches a
 comment-less `shipmate plan` for each one that is not a draft, carries an App
@@ -4101,13 +4109,12 @@ anyone commenting.
 A pull request with a live App `apply` or `auto` run is skipped and named in a
 notice: ``pull request #<n> was not re-planned: its <verb> run <id> is live,
 and a plan now would republish the apply checks it applies from``. Every
-pull request is judged from one live run listing, which queries each run status
-in lifecycle order, so a run that moves forward between two queries is still
-listed. The skip covers only runs live when listed: an apply that starts, or
-changes status in a way the order misses, after the listing can still get a plan
-dispatched into it. That apply never completes the new plan's checks (§Apply
-check lifecycle), so they stay pending, the gate stays pending, and the pull
-request applies again. A pull request whose new head's autoplan has not yet
+pull request is judged from one live run listing, one query per run status. The
+skip covers only the runs that listing shows live: a run that starts after it,
+or changes status between two of its queries, can get a plan dispatched into
+it. That apply never completes the new plan's checks (§Apply check
+lifecycle), so they stay pending, the gate stays pending, and the pull request
+applies again. A pull request whose new head's autoplan has not yet
 published its apply checks when the merge lands has none on that head, so it is
 not re-planned; its apply still compares the base at apply time: a bare or
 targeted `detect` runs the change detection over the selected cells against the
@@ -4132,12 +4139,15 @@ App apply checks that is not a draft, and each loses its pending `auto` apply
 until it is pushed again.
 
 The re-plan is display-only, and a pull request it skips or fails on is not
-re-checked. A cell that pull request already applied has a completed apply
-check, so no apply of its head refuses the cell and its own deploy skips it. A
-base merge over that cell, after an eviction released the pull request's lock
-or with a base change that planned no change for the cell, is then re-applied by
-neither deploy, and only a new plan of the pull request (`shipmate plan`) finds
-the cell behind. The drift sweep reports the reverted state.
+re-checked until it is planned again. A cell that pull request already applied
+has a completed apply check, so its own deploy skips the cell, and no apply of
+its head checks it: every apply form checks only the cells whose apply check is
+still pending. A base merge over that cell, after an eviction released the pull
+request's lock or with a base change that planned no change for the cell, is
+then re-applied by neither deploy. The next plan of the pull request (an
+autoplan of a push, or `shipmate plan`) checks every changed cell, applied ones
+included, and finds the cell behind. The drift sweep reports the reverted
+state.
 
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
@@ -5316,7 +5326,7 @@ stack-wave by stack-wave exactly as described above (see Fan-out).
 
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
-`apply-env-level.yml` → gate completion + cell lock release + re-plan of the
+`apply-env-level.yml` → gate completion + cell lock release → re-plan of the
 open pull requests the merge may put behind (§Plan comment); beside the
 env-levels, `warm` saves the provider cache entry of each distinct lock and the
 OpenTofu cache entry (§Terramate safeguards); the

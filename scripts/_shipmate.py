@@ -561,9 +561,8 @@ SHIPMATE_WORKFLOW = "shipmate.yml"
 READ_ERRORS = (SystemExit, LookupError, TypeError, ValueError, AttributeError)
 
 
-#: The run statuses of a run that has not ended, in lifecycle order: each is listed by its own
-#: query, so a run that moves forward between two queries is listed by the later one.
-LIVE_RUN_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
+#: The run statuses of a run that has not ended.
+LIVE_RUN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
 #: GitHub's page size cap; a listing longer than `_MAX_PAGES` pages counts as incomplete.
 _PAGE = 100
 _MAX_PAGES = 10

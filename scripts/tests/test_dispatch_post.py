@@ -577,6 +577,18 @@ def test_a_comment_less_plan_stops_on_its_own_titled_run(calls, monkeypatch, cap
     assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1])
 
 
+def test_a_commented_dispatchs_run_listed_before_t0_still_stops_the_retry(
+    calls, monkeypatch, capsys
+):
+    """A comment id makes the title unique, so a run with it is this command's whatever its
+    `created_at`: a runner clock ahead of GitHub's puts `t0` after the run, and a second apply
+    must not start. Mutation: bound every title by `t0` (`at >= t0 and ...`) -> retried."""
+    sent = command(monkeypatch, calls, "apply")
+    early = run_row(COMMANDS["apply"][2], created_at="2026-11-07T11:59:50Z")
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [early])
+    assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1])
+
+
 def test_an_older_same_titled_plan_does_not_stop_a_comment_less_plan(calls, monkeypatch, capsys):
     """An earlier comment-less plan of the same pull request, dispatched by the App before
     `t0`, carries this dispatch's title but is not its run, so the transient failure is retried.

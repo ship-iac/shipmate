@@ -18,10 +18,11 @@ started a run: GitHub can start it and still answer 502. Before each retry it li
 
 - Every dispatch but `auto`: every page of the per-workflow listing (no server filter) back
   to `t0`, five seconds before the first attempt, read again each second until 10 s after the
-  failed attempt. A `workflow_dispatch` run created at or after `t0` whose actor is
-  `<SHIPMATE_APP_SLUG>[bot]` and whose title parses (`_shipmate.parse_run_title`) as this verb
-  and comment id (empty for a comment-less plan), with this pull request, or for `unlock` no
-  pull request and this ref, is this dispatch's run and stops the retry. The title is
+  failed attempt. A `workflow_dispatch` run whose actor is `<SHIPMATE_APP_SLUG>[bot]` and
+  whose title parses (`_shipmate.parse_run_title`) as this verb and comment id, with this pull
+  request, or for `unlock` no pull request and this ref, is this dispatch's run and stops the
+  retry; a comment-less plan's title carries no comment id, so its run must also be created at
+  or after `t0`. The title is
   consumer-authored, so only an App run's title counts. Such a dispatch with an empty
   `SHIPMATE_APP_SLUG` exits 1 before the first POST, since no listed run could be told to be
   its own.
@@ -189,11 +190,13 @@ def landed_since(repo: str, t0: datetime, run=run) -> bool:
 
 
 def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) -> bool:
-    """True when a listed `shipmate.yml` run in `repo` created at or after `t0` is a
-    `workflow_dispatch` whose actor is `<slug>[bot]` and whose title parses (`parse_run_title`)
-    to `want`. An older run with the same title (an earlier comment-less plan of the pull
-    request) is not this dispatch's. An empty `slug` raises `ValueError`: it would match no run
-    and let a retry start the command twice.
+    """True when a listed `shipmate.yml` run in `repo` is a `workflow_dispatch` whose actor is
+    `<slug>[bot]` and whose title parses (`parse_run_title`) to `want`, and, for a comment-less
+    title (`want["comment"]` empty), was created at or after `t0`: every comment-less plan of
+    a pull request shares one title, so an earlier one is not this dispatch's. A comment id
+    makes a title unique, so a commented match takes no time bound, which a runner clock ahead
+    of GitHub's would otherwise turn into a missed run and a second start. An empty `slug`
+    raises `ValueError`: it would match no run and let a retry start the command twice.
 
     Reads pages of 100, newest first, each through `retried`, until a page is short or holds a
     run created before `t0`. A failed read raises its `SystemExit`; a malformed row
@@ -207,7 +210,7 @@ def command_run_listed(repo: str, t0: datetime, want: dict, slug: str, run=run) 
         rows = [_listed_row(line) for line in filter(None, out.splitlines())]
         for listed, at in rows:
             if (
-                at >= t0
+                (want["comment"] or at >= t0)
                 and listed.get("event") == "workflow_dispatch"
                 and listed.get("actor") == f"{slug}[bot]"
                 and parse_run_title(listed.get("display_title")) == want

@@ -2332,11 +2332,11 @@ job.
 
 ### A merge did not re-plan an open pull request
 
-After a merge, the deploy's `summary` job dispatches `shipmate plan` for each
+After a merge, the deploy's `replan` job dispatches `shipmate plan` for each
 open pull request the push may have put behind (`CONTRACT.md` §Plan comment,
 Re-plan after a merge). It is display-only: nothing it skips or fails holds a
-gate. Its `Re-plan the open pull requests this push may put behind` step logs
-why a pull request got no plan:
+gate, and its failure leaves the deploy run green. Its `Re-plan the open pull
+requests this push may put behind` step logs why a pull request got no plan:
 
 | Line | Cause |
 | --- | --- |
@@ -2357,15 +2357,21 @@ autoplan was still running when the merge landed has no App apply check on that
 head yet, so it is not selected either; its apply compares the base at apply
 time and refuses or holds a behind cell.
 
-The live-run skip covers runs live when listed. An apply that starts after the
-listing can still get a plan dispatched into it; that apply leaves the new
-plan's apply checks pending, so the gate stays pending until the pull request
-applies again.
+The live-run skip covers the runs the listing shows live. A run that starts
+after the listing, or changes status between its queries, can get a plan
+dispatched into it; that apply leaves the new plan's apply checks pending, so
+the gate stays pending until the pull request applies again.
+
+A `replan` job that failed or timed out shows as a failed job on a green deploy
+run. A timeout cancels it where it stands: the pull requests it had not reached
+get no plan and no warning. Comment `shipmate plan` on any open pull request the
+merge may have put behind.
 
 Comment `shipmate plan` on the pull request: its plan marks each cell the base
 changed behind. Until a plan runs, a cell the pull request already applied is
-not re-checked, and a merge over it is applied by neither deploy (`CONTRACT.md`
-§Plan comment); the drift sweep reports that state.
+not re-checked, since an apply checks only cells with a pending apply check, and
+a merge over it is applied by neither deploy (`CONTRACT.md` §Plan comment); the
+drift sweep reports that state.
 
 ### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 

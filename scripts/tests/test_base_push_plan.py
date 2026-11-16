@@ -30,7 +30,7 @@ PULLS = [
     "--jq",
     ".[] | {number, draft, sha: .head.sha} | tojson",
 ]
-STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
+STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
 LIVE_LISTS = [
     [
         "gh",
@@ -108,8 +108,7 @@ def _select(
 
 
 def _gh(reads, pulls, checks, live, failing):
-    """`_select`'s `_shipmate._run` double: it appends each argv to `reads` and answers it. `live`
-    answers the first live status listing, or is called with each listed status."""
+    """`_select`'s `_shipmate._run` double: it appends each argv to `reads` and answers it."""
 
     def run(args):
         reads.append(args)
@@ -122,10 +121,10 @@ def _gh(reads, pulls, checks, live, failing):
         for n, rows in checks.items():
             if args == _checks_read(n):
                 return "".join(json.dumps(r) + "\n" for r in rows)
+        if args in LIVE_LISTS[:1]:
+            return json.dumps({"workflow_runs": list(live)})
         if args in LIVE_LISTS:
-            status = STATUSES[LIVE_LISTS.index(args)]
-            rows = live(status) if callable(live) else list(live) if status == STATUSES[0] else []
-            return json.dumps({"workflow_runs": rows})
+            return json.dumps({"workflow_runs": []})
         raise AssertionError(args)
 
     return run
@@ -206,31 +205,6 @@ def test_a_live_app_apply_run_skips_its_pull_request_and_names_it(monkeypatch, c
         "and a plan now would republish the apply checks it applies from\n"
     )
     assert reads == [PULLS, *map(_checks_read, (1, 2, 3)), *LIVE_LISTS]
-
-
-def test_an_apply_run_moving_forward_between_two_status_queries_is_still_listed(
-    monkeypatch, capsys
-):
-    """#1's apply run starts right after the `in_progress` query: pending before it, in progress
-    after it. Lifecycle order queries `pending` before `in_progress`, so the `pending` query
-    lists it. Mutation: restore `LIVE_RUN_STATUSES` to queued, in_progress, waiting, pending,
-    requested -- `in_progress` is queried while the run is pending and `pending` after it
-    started, so neither lists it and #1 prints."""
-    queried = []
-
-    def live(status):
-        now = "in_progress" if "in_progress" in queried else "pending"
-        queried.append(status)
-        return [{**_apply_run(71, 1), "status": now}] if status == now else []
-
-    printed, _, _ = _select(
-        monkeypatch,
-        capsys,
-        pulls=[_pull(1)],
-        checks={1: [_apply_check("stacks/app", cells=1)]},
-        live=live,
-    )
-    assert printed == []
 
 
 @pytest.mark.parametrize(
