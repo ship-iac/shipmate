@@ -6,12 +6,13 @@ a dispatch input, anyone holding `actions: write` could name a fork's head while
 repository, and `build-matrix`'s fork refusal, which keys on the head repository stated to it,
 would pass.
 
-So the payload leg spends no API call, the dispatch leg resolves everything from the number
-through one hand-written API path, and every partial answer is refused rather than emitted as an
-empty fact.
+So the payload leg spends no API call unless its payload says draft, the dispatch leg resolves
+everything from the number through one hand-written API path, and every partial answer is refused
+rather than emitted as an empty fact.
 """
 
 import json
+import subprocess
 import sys
 
 import pytest
@@ -59,6 +60,13 @@ def _main(monkeypatch, tmp_path, payload, gh=_no_api, repo="own/repo", module=pf
 
     # The alias binds at import, so patching `_shipmate.gh_json` would never be seen.
     monkeypatch.setattr(module, "_gh_json", fake)
+
+    # Any read that bypasses the alias (`_shipmate.pr_head`, say) reaches a subprocess.
+    def spawned(args, *_, **__):
+        calls.append(args)
+        raise RuntimeError(f"unstubbed subprocess {args!r}")
+
+    monkeypatch.setattr(subprocess, "run", spawned)
     try:
         module.main()
     finally:
@@ -71,8 +79,8 @@ def _api(pr):
 
 
 def test_payload_leg_reads_the_payload_and_makes_no_api_call(monkeypatch, tmp_path):
-    """A `pull_request` payload supplies all seven facts, with zero API calls. Mutation: emit
-    `base.ref` as `head_ref`."""
+    """A `pull_request` payload that is not a draft supplies all seven facts, with zero API
+    calls. Mutations: emit `base.ref` as `head_ref`; re-read the draft flag on every payload."""
     text, calls = _main(monkeypatch, tmp_path, {"pull_request": _PAYLOAD_PR})
     assert calls == []
     assert text.splitlines() == [
@@ -103,7 +111,8 @@ def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatc
     The inputs also state a head SHA and a head repository, as anyone holding `actions: write`
     could. Neither reaches an output: `build-matrix`'s fork refusal keys on the head repository
     this action emits, so a stated one would run fork-authored code on the consumer's
-    runners. Mutation: emit `base.ref` as `head_ref`."""
+    runners. Mutations: emit `base.ref` as `head_ref`; also read `_shipmate.pr_head` on this
+    leg, which the `_gh_json` stub does not see (the subprocess stub does)."""
     text, calls = _main(
         monkeypatch,
         tmp_path,
@@ -247,3 +256,71 @@ def test_the_actions_outputs_are_exactly_the_seven_step_outputs():
     # No inputs at all: `github.token` is available inside a composite action, so an input for
     # it would be a consumer surface with no decision behind it.
     assert "inputs" not in spec
+
+
+_DRAFT_PAYLOAD = {"pull_request": dict(_PAYLOAD_PR, draft=True)}
+_PULLS_7 = "repos/own/repo/pulls/7"
+
+
+def _facts_out(text):
+    return dict(line.split("=", 1) for line in text.splitlines())
+
+
+def test_a_draft_payload_takes_the_draft_flag_from_one_api_read(monkeypatch, tmp_path):
+    """A payload that says draft re-reads the pull request once: a ready click in the seconds
+    after the push has turned the draft off, and the run plans. Every other fact stays the
+    payload's, the head included, since the API answers with the head as it is now.
+    Mutations: drop the API read; take the API head."""
+    api = dict(_PAYLOAD_PR, draft=False, head={"sha": "f" * 40, "repo": {"full_name": "o/r"}})
+    text, calls = _main(monkeypatch, tmp_path, _DRAFT_PAYLOAD, gh=_api(api))
+    assert calls == [_PULLS_7]
+    assert text.splitlines() == [
+        f"head_sha={'a' * 40}",
+        "head_repo=own/repo",
+        "head_ref=feat-a",
+        f"base_sha={'b' * 40}",
+        "pr_number=7",
+        "is_draft=false",
+        "on_demand=false",
+    ]
+
+
+def test_a_draft_payload_still_a_draft_stays_a_draft(monkeypatch, tmp_path, capsys):
+    """Mutation: take `draft` as `false` whenever the read succeeds."""
+    text, calls = _main(
+        monkeypatch, tmp_path, _DRAFT_PAYLOAD, gh=_api(_PAYLOAD_PR | {"draft": True})
+    )
+    assert calls == [_PULLS_7]
+    assert _facts_out(text)["is_draft"] == "true"
+    assert "::warning::" not in capsys.readouterr().err
+
+
+def _fail(path):
+    raise SystemExit(f"::error::command failed (1): gh api {path}\nHTTP 502")
+
+
+@pytest.mark.parametrize(
+    ("gh", "cause"),
+    [
+        (_fail, "command failed (1): gh api repos/own/repo/pulls/7 | HTTP 502"),
+        (_api(dict(_PAYLOAD_PR, draft=None)), "draft is None"),
+        (_api(dict(_PAYLOAD_PR, draft="false")), "draft is 'false'"),
+        (_api({}), "KeyError('draft')"),
+    ],
+    ids=["failed", "null", "string", "missing"],
+)
+def test_an_unreadable_draft_flag_keeps_the_draft_skip_and_warns(
+    monkeypatch, tmp_path, capsys, gh, cause
+):
+    """The fresh read can only turn a skip into a plan: a failed read or a non-bool `draft`
+    keeps the payload's draft, with one warning naming the cause. Mutations: default to
+    `false` on failure; drop the warning."""
+    text, calls = _main(monkeypatch, tmp_path, _DRAFT_PAYLOAD, gh=gh)
+    assert calls == [_PULLS_7]
+    assert _facts_out(text)["is_draft"] == "true"
+    assert capsys.readouterr().err.splitlines() == [
+        (
+            f"::warning::could not re-read whether pull request #7 is still a draft ({cause}); "
+            "this run skips as a draft"
+        )
+    ]

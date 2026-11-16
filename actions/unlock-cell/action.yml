@@ -18,6 +18,13 @@ inputs:
     description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
+outputs:
+  outcome:
+    description: "`released` when the force-unlock succeeded, `none` when a clean probe found no lock, `failed` otherwise (a failed init, probe or force-unlock)."
+    value: ${{ steps.release.outcome == 'success' && 'released' || steps.report.outcome == 'success' && 'none' || 'failed' }}
+  lock_id:
+    description: The probed lock's id, charset-checked by scripts/lock-info; empty when no lock was found.
+    value: ${{ steps.probe.outputs.lock_id }}
 runs:
   using: composite
   steps:

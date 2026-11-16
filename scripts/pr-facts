@@ -7,11 +7,13 @@ the draft skip, the checkout ref and the plan's recorded provenance cannot read
 two different answers to the same question.
 
 Payload-preferred. Under `pull_request` / `pull_request_target` every value comes
-from GITHUB_EVENT_PATH: the autoplan path spends no API call and cannot disagree
-with the event that started it (the API answers with the head as it is NOW,
-which on a rapid re-push is a different commit). A `workflow_dispatch` payload
-carries no pull request, so the `pr_number` it does carry is resolved through the
-API instead.
+from GITHUB_EVENT_PATH, so the autoplan path cannot disagree with the event that
+started it (the API answers with the head as it is NOW, which on a rapid re-push
+is a different commit). One exception: a payload that says draft re-reads the
+draft flag once from the API, since a ready click seconds after a push leaves the
+push's run holding a stale draft payload; that read can only turn a draft skip
+into a plan. A `workflow_dispatch` payload carries no pull request, so the
+`pr_number` it does carry is resolved through the API instead.
 
 Nothing here reads a head SHA or a head repository from a dispatch input. The
 number is the only thing a dispatcher states, and a number cannot lie about its
@@ -21,8 +23,17 @@ state it.
 """
 
 import os
+import sys
 
-from _shipmate import event_payload, is_pr_number, run_annotated, write_outputs
+from _shipmate import (
+    READ_ERRORS,
+    command_data,
+    event_payload,
+    is_pr_number,
+    one_line,
+    run_annotated,
+    write_outputs,
+)
 from _shipmate import gh_json as _gh_json
 
 _DELETED_FORK = (
@@ -98,6 +109,28 @@ def from_api(number, repository):
     return _facts(_gh_json(f"repos/{repository}/pulls/{number}"), "true")
 
 
+def draft_now(repository, number):
+    """`"true"` or `"false"`: pull request `number`'s draft flag from one API read, for a payload
+    that said draft. A failed read or a `draft` that is not a bool keeps `"true"` and prints one
+    `::warning::` naming the cause, so the read never turns a plan into a skip."""
+    try:
+        draft = _gh_json(f"repos/{repository}/pulls/{number}")["draft"]
+    except READ_ERRORS as exc:
+        cause = (
+            str(exc.code).removeprefix("::error::") if isinstance(exc, SystemExit) else repr(exc)
+        )
+    else:
+        if isinstance(draft, bool):
+            return "true" if draft else "false"
+        cause = f"draft is {draft!r}"
+    print(
+        f"::warning::could not re-read whether pull request #{number} is still a draft "
+        f"({command_data(one_line(cause))}); this run skips as a draft",
+        file=sys.stderr,
+    )
+    return "true"
+
+
 def main():
     # An unreadable payload is {}: it names no pull request and no `pr_number`, so the run is
     # refused rather than planned.
@@ -105,6 +138,10 @@ def main():
     pr = payload.get("pull_request")
     if isinstance(pr, dict) and pr:
         facts = _facts(pr, "false")
+        if facts["is_draft"] == "true":
+            facts["is_draft"] = draft_now(
+                os.environ.get("GITHUB_REPOSITORY", ""), facts["pr_number"]
+            )
     else:
         number = str((payload.get("inputs") or {}).get("pr_number") or "").strip()
         if not number:

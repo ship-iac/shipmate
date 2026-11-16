@@ -21,7 +21,7 @@ inputs:
     description: PR number the dispatched run belongs to; the plan body carries it beside the verb and the comment id alone, and the unlock body not at all.
     required: true
   comment-id:
-    description: The command comment's id, sent as `comment_id` in every body. The dispatched plan or apply run claims the comment with it, so a second run of one comment does no work; the unlock run reacts on it.
+    description: The command comment's id, sent as `comment_id` in every body. The dispatched plan or apply run claims the comment with it, so a second run of one comment does no work; the unlock run reacts on it and reads its pull request from it.
     required: true
 runs:
   using: composite

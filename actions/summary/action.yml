@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the comment write leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and that head has no autoplan run that is unfinished or succeeded, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the plan comment step leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and no run of that head planned it or is about to, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment, and that is the head's newest autoplan run, dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a shipmate.yml run may have started since the first attempt or none can be ruled out.
 inputs:
   pr-number:
     description: Pull request number.
@@ -131,13 +131,15 @@ inputs:
 outputs:
   upsert:
     description: >-
-      What `Write the plan comment` did: upsert-comment's one word, or `failed` when the held
-      render or write failed. Empty when the step skipped or exited before writing.
+      What `Write the plan comment` did: upsert-comment's one word, `moved` when a `draft` or
+      `hold` run finds the pull request moved past its head, or `failed` when the held render or
+      write failed. Empty when the step skipped or exited before writing.
     value: ${{ steps.upsert.outputs.result }}
   superseded:
     description: >-
-      `true` when this run wrote nothing on the head: the pull request moved past it, or a newer
-      plan run holds its gate. Empty otherwise.
+      `true` when the hold step found the pull request moved past this run's head, or a newer
+      plan run holding its gate, and this run wrote nothing on the head. Empty otherwise. A head
+      that moves after that read reports through `upsert` as `moved`.
     value: ${{ steps.hold.outputs.superseded }}
 runs:
   using: composite
@@ -426,15 +428,37 @@ runs:
         SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
       run: |
         set -euo pipefail
+        # `draft` and `hold` call no `upsert-comment --head`, so this is their read of a head that
+        # moved after the hold step's. A moved head skips the apply checks and the gate and replans
+        # the live head. Degrades as the hold step's read does: a failed read goes on as before.
+        stop_if_moved() {
+          local live
+          if live=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" moved "$HEAD_SHA" "$PR" 2>moved.err); then
+            cat moved.err >&2
+            [ -n "$live" ] || return 0
+            if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ]; then
+              echo "::notice::pull request #$PR has moved past $HEAD_SHA; this run writes no comment or apply check on it, and its publish hold stays there"
+            else
+              echo "::notice::pull request #$PR has moved past $HEAD_SHA; this run writes no comment, apply check or gate on it"
+            fi
+            echo "result=moved" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Retry notices precede the script's one-line error.
+          sed '$d' moved.err >&2
+          echo "::warning::could not read the head of pull request #$PR ($(tail -n 1 moved.err)); this run goes on for $HEAD_SHA"
+        }
         # A draft autoplan planned nothing, so an existing comment still describes a head
         # somebody planned; it is kept, and the draft run makes no comment API call.
         if [ "$MODE" = "draft" ]; then
+          stop_if_moved
           echo "the pull request was a draft when this run started and was not planned; the plan comment was left as it is"
           exit 0
         fi
         # A cancelled plan job: this run writes no final gate, so a held body could sit over a gate
         # it never wrote. The comment is kept.
         if [ "$MODE" = "hold" ]; then
+          stop_if_moved
           echo "::warning::the plan job was cancelled, so this run writes no final gate; the plan comment was left as it is"
           exit 0
         fi
@@ -617,7 +641,7 @@ runs:
           exit 0
         fi
         [ "$rc" -eq 0 ] || not_planned "the plan dispatch"
-        echo "::notice title=dispatch::pull request #$PR_NUMBER moved to $SHIPMATE_LIVE, which has no unfinished or succeeded autoplan run; dispatched shipmate plan (on demand, so no auto apply follows it)"
+        echo "::notice title=dispatch::pull request #$PR_NUMBER moved to $SHIPMATE_LIVE, which has no autoplan run that planned it or is in progress; dispatched shipmate plan (on demand, so no auto apply follows it)"
 
     - name: Decide whether to dispatch an auto apply
       # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
@@ -627,6 +651,8 @@ runs:
       id: autodecide
       shell: bash
       env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_AUTO_ENVS_TABLE: ${{ inputs.auto-envs }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}
@@ -675,7 +701,8 @@ runs:
         # Reviewer-facing degrade only: a failed mint or dispatch, or one that may have started a
         # run, warns, replies with the remedy and exits 0.
         reply() {
-          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
+          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" \
+            SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
             python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
         }
         # not_started <what> [remedy]: a skew remedy replaces the advice to comment, which would

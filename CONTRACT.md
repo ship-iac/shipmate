@@ -1668,7 +1668,9 @@ reply, a `⚪` notice:
   fails is a warning on the comment-handling run, not a failure, and the pull
   request gets nothing.
 
-Nothing minimizes or edits the started-run reply.
+Nothing minimizes or edits the started-run reply. It says only that the run
+started; the unlock run then posts its own result reply, saying what it
+released (the unlock result reply, below).
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
@@ -1681,7 +1683,17 @@ footer carries the help hint:
 
 ``[comment run](<run url>). Comment `shipmate help` for the available commands.``
 
-A notice's footer is `[comment run](<run url>)` alone.
+A notice's footer is `[comment run](<run url>)` alone. A reply posted by a
+dispatched run has the same shape, but its footer links that run and names it:
+
+- `[plan run]` or `[apply run]`: the claim's not-started reply and the outcome
+  reply;
+- `[plan run]`: the auto apply replies an autoplan's `summary` posts;
+- `[apply run]`: the apply queue's notice;
+- `[unlock run]`: the unlock result reply.
+
+`scripts/reply-comment` holds the one rule for an empty verb: a label that is
+empty or only ` run` reads `comment run`.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
@@ -2180,13 +2192,71 @@ state lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that 
 one already requires, so a role that can apply an environment can already
 unlock it.
 
-The unlock run itself posts no comment — its `unlock` job runs the pull
-request's HCL, so that job requests no `pull-requests: write`. Only `guard`,
-which checks nothing out, requests it, to add the 🚀 reaction (§Comment-ops,
-"Reactions and the comment claim"). The comment-handling run, which holds that
-permission, is the one that may post the started-run reply; §Comment-ops says
-when it is posted and when it links the unlock run. Per-cell detail lands in
-each job's step summary, and a failure reds the run.
+The `unlock` job posts no comment: it runs the pull request's HCL, so it
+requests no `pull-requests: write`. Two jobs that check nothing out request it:
+`guard`, to add the 🚀 reaction (§Comment-ops, "Reactions and the comment
+claim"), and `result`, to post the unlock result reply. The comment-handling run
+may post the started-run reply; §Comment-ops says when it is posted and when it
+links the unlock run. Per-cell detail lands in each job's step summary, and a
+failed cell reds the run.
+
+**The unlock result reply.** Each `unlock` leg uploads a record, even when it
+failed: artifact `shipmate-unlock-<strategy.job-index>` holding
+`shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
+and environment, its outcome and the probed lock id. Before downloading the
+records, `result` uploads a `shipmate-unlock-sentinel` artifact of its own (the
+action's manifest, kept one day): `download-artifact` writes a lone matching
+artifact without a directory of its name, so whenever the sentinel uploaded,
+every record downloads into its artifact's directory. A file at the download
+root is never read. The sentinel, the download and the record reading all run
+only when `detect` succeeded. The outcome is `released`
+only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
+`failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
+before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
+`permissions: { pull-requests: write }`, `ubuntu-slim`, the job token) runs
+unless the run was cancelled or `detect` was skipped. It reads the pull request
+number from the command comment's `html_url`, downloads the records, and posts
+one reply through `scripts/reply-comment`: the header
+`### shipmate unlock <env>`, the verdict line, then a blank line and
+``A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks stay until it merges or closes, and `--evict` releases another pull request's.``,
+and the footer `[unlock run](<url>)` linking the unlock run, followed on a
+failure by the help hint. Unlike a comment-ops reply, it is posted by the
+dispatched run, so its footer links that run, and its label says so. The
+verdict line is one of:
+
+- ``⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...`` when every
+  probed cell recorded `released` or `none` and at least one released.
+- ``⚪ released no state lock in <env>: no probed cell held a state lock.``
+- ``⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...``
+  for an empty queue: the warning `detect` prints, whole.
+- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
+  each clause present when it names a cell: `failed` cells, then cells with no
+  valid record, then the released ones.
+- When the results are unreadable (the download failed, or the sentinel failed
+  and no `shipmate-unlock-<n>/` directory arrived), the records in their own
+  directories are still read, a cell without one reads
+  ``result unknown for <stack>, ...`` in place of `did not run`, and, when at
+  least one cell has a record, the reply ends ``; some cells' results could not
+  be read; see the run.``
+- ``🔴 failed: could not read the unlock queue; see the run.`` when `detect`
+  succeeded and its `cells` output is not a list of cells.
+- ``🔴 failed: the unlock run failed before probing any cell; see the run.``
+  when `detect` failed; no record is read.
+
+The reply is display only and gates nothing. A record is written by a job that
+runs the pull request's HCL, so it can be forged. The reply names a cell only as
+`detect`'s queue entry at the record's index, never by a name in the record, and
+a record counts only when it sits in an artifact directory
+`shipmate-unlock-<n>` as `shipmate-unlock-<n>.json`, its `index` is `<n>`, its
+outcome is one of the three, and at most 4,096 bytes of it are read and decoded.
+Its `stack` and `environment` must also equal that queue entry's: this catches a
+record that reached the wrong cell, not a forged one, which can copy them. A file
+at the download root, the sentinel and any other entry are ignored. A lock id
+outside the charset `scripts/lock-info` accepts is dropped, and stack names are
+escaped.
+A comment not on a pull request, an unreadable comment or a failed post posts
+nothing and warns. None of these, nor a failed download, fails `result`: the
+`unlock` legs' results stay the run's.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan
@@ -2580,7 +2650,7 @@ bare and a targeted `shipmate apply` reach an `auto` environment as they reach a
 pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 
 - the run was not superseded, and its head is still the pull request's: neither
-  the publish hold's head read nor the plan comment write found the pull
+  the publish hold's head read nor the plan comment step's found the pull
   request moved past it, and no newer plan run of the head refused it
   (§Plan comment);
 - the run is a `pull_request_target` run, an autoplan, on its first attempt: a
@@ -2592,7 +2662,18 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 - the gate is `pending` over a completely published plan with an apply check
   pending;
 - a changed cell of this run is in an `apply_mode: auto` environment of the
-  default branch's table.
+  default branch's table;
+- this run is the head's newest autoplan run, as `apply-gate.newest_autoplan`
+  lists them, the check the `auto` run's provenance check repeats: a
+  ready-for-review run of the same head is never an `auto` source, yet it is
+  the newest, and an `auto` run from the older push's plan would refuse it as
+  `newer`. A newer run logs "autoplan run <id> of <head> is newer than this run;
+  no auto apply started; comment shipmate apply to apply". A listing that holds
+  no run as new as this one lags it and dispatches with the warning "autoplan
+  run <id> of <head> is not listed yet; dispatching the auto apply, whose own
+  provenance check refuses if this run is not the newest"; a failed or
+  malformed listing dispatches nothing, with a warning. An autoplan created
+  after this read still makes the `auto` run refuse.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
 The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
@@ -2903,10 +2984,12 @@ The seven jobs:
   caller passes. `facts`, and through it every later job, runs only when the
   claim owned the comment or was skipped.
 - **`facts`** (engine, either trigger) — `actions/pr-facts` alone. It authors
-  nothing and mints no App token; it holds `pull-requests: read`, the one grant
-  on this path a pull-request event does not need, because a dispatched run's
-  payload carries no pull request and the number it was dispatched with is the
-  only thing it can look one up by. Besides `claim`, and `outcome`, which falls
+  nothing and mints no App token; it holds `pull-requests: read` for two
+  reads: a dispatched run's payload carries no pull request, and the number it
+  was dispatched with is the only thing it can look one up by; and a
+  pull-request event whose payload says draft reads the pull request's draft
+  flag once more (the draft clause below). Besides `claim`, and `outcome`, which
+  falls
   back to the dispatch's `pr_number` when `facts` failed, nothing else in the
   file reads the event payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
@@ -2951,11 +3034,11 @@ The seven jobs:
   outputs what its comment write did (`upsert`) and whether the run was
   superseded (`superseded`), which `outcome` reads. A run that
   sees its pull request moved past its head before the publish hold writes none
-  of these on it; one that sees the move at the comment write leaves any publish
-  hold it already wrote (whose text says to re-plan) and any mirrored checks,
-  and writes no comment, apply check or final gate. Either run dispatches
-  `shipmate plan` for the live head when the pull request is open and not a
-  draft and that head has no autoplan run unfinished or succeeded (§Plan
+  of these on it; one that sees the move at the plan comment step leaves any
+  publish hold it already wrote (whose text says to re-plan) and any mirrored
+  checks, and writes no comment, apply check or final gate. Either run
+  dispatches `shipmate plan` for the live head when the pull request is open and
+  not a draft and no run of that head planned it or is about to (§Plan
   comment).
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
@@ -3051,8 +3134,14 @@ a refusal rather than a pass, which is why `facts` is its own job and not
 `summary` must still be told which head to gate.
 
 The job has no draft clause, because skipping a draft is autoplan's economy
-rather than a trust decision. A draft's autoplan skips `detect` and `plan` and
-still reaches `summary`, which writes `shipmate / gate` pending with the
+rather than a trust decision. The draft flag is the pull request's when `facts`
+ran: on a payload that says draft, `actions/pr-facts` reads the pull request
+once more and takes its `draft`, so a pull request marked ready in the seconds
+after a push plans that push's head; every other fact stays the payload's. A
+failed read, or a `draft` that is not a boolean, keeps the draft with a
+warning naming the cause; the read can only turn a skip into a plan. A draft's
+autoplan skips `detect` and `plan` and still reaches `summary`, which writes
+`shipmate / gate` pending with the
 description "the pull request was a draft when this run started, so nothing
 was planned; comment `shipmate plan`, or mark it ready". Nothing greens that
 status: `gate-refresh` greens only over completed apply checks, and a draft run
@@ -3444,13 +3533,22 @@ A run of a head the pull request has left must not post over the live head's
 comment, which its post would minimize. A run that finds the pull request
 moved past its head in the publish hold's read (below) writes no comment at
 all. Every comment write, the held body included, reads the head
-again once the comment listing shows a write follows, which catches a push
-during the run, and writes nothing when the pull request has moved past the
-head this run planned, with a notice. A run that writes nothing (no visible
-plan comment, nothing changed) makes no second read. A failed second read warns and
-writes nothing for the held body, and fails the job ("could not read the head
-of pull request #<n>, so no plan comment was written") before any
-apply check or gate is written for the plan body.
+again after the comment listing, which catches a push during the run, and
+writes nothing when the pull request has moved past the head this run planned,
+with a notice. So does a run that writes nothing because nothing changed and no
+plan comment is visible. A failed second read warns and writes nothing for the
+held body, and fails the job ("could not read the head of pull request #<n>, so
+no plan comment was written") before any apply check or gate is written for
+the plan body or the run that writes nothing. A draft autoplan and a run whose
+plan job was cancelled write no comment, and read the head once more before
+they end: a moved head writes no apply check or gate, with the notice "pull
+request #<n> has moved past <sha>; this run writes no comment, apply check or
+gate on it", or, when the run already wrote its publish hold, "...; this run
+writes no comment or apply check on it, and its publish hold stays there"
+(that hold sits on a head the merge no longer gates on); a failed read warns
+("could not read the head of pull request #<n> (<why>); this run goes on for
+<sha>") and the run goes on. Each of these reads narrows the window to the
+seconds between it and the gate write; none closes it.
 
 Where the zero *does* mean no stacks changed, the run posts no new comment: it
 rewrites the newest visible plan comment with the no-changes body, because a
@@ -3767,31 +3865,62 @@ comment, apply check or gate), with the notice
 or gate on it", and ends green: the merge gates on the live head, not on this
 one. A failed read warns ("could not read the head of pull request #<n> (<why>);
 this run publishes on <sha>") and the run publishes as below. A run that skips
-its publish this way, or whose plan comment write later finds the head moved,
+its publish this way, or whose plan comment step later finds the head moved,
 then decides whether the live head needs a plan (`scripts/gate-status replan`).
 It dispatches `shipmate plan` for the pull request, with an App token minted for
 it alone with `actions: write`, when the pull request is open, the live head is
-not a draft, and that head has no autoplan run that is unfinished (any status
-but `completed`) or `completed` with conclusion `success`. A succeeded autoplan
-counts: a second plan would write newer plan records, and an auto apply waiting
-on that autoplan would then refuse. On a dispatch the run notices "pull request
-#<n> moved to <sha>, which has no unfinished or succeeded autoplan run;
-dispatched shipmate plan (on demand, so no auto apply follows it)"; otherwise it
-logs "pull request #<n> is <state>; nothing dispatched", "pull request #<n>
-moved to <sha>, a draft; nothing dispatched" or "pull request #<n> moved to <sha>, whose autoplan run has not
-finished or succeeded; nothing dispatched". The dispatched plan is on demand, so
-no auto apply follows it (§`apply_mode: auto`). It joins the consumer's
-`plan-<pr>` concurrency group, which cancels nothing in progress for a
-`workflow_dispatch`, so it queues behind this run; a later arrival replaces a
-waiting run, and the plan that runs resolves the live head from the pull
-request. The listing holds only `pull_request_target` runs, so it does not see
-an earlier dispatched plan of the live head, and a second queued plan is
-possible. The dispatch retries under the comment-less rule (§Comment-ops). On this
-path a failed head read, run listing, token mint or dispatch warns with the
-remedy `comment shipmate plan`, and a dispatch that may have started a plan
-warns to check the Actions tab before commenting it; neither fails anything: this run's
-head is not the pull request's, so nothing it writes or fails to write gates
-the merge.
+not a draft, and no run of the live head planned it or is about to. It reads,
+in this order, and stops at the first run that blocks:
+
+1. the live head's autoplan runs: one not `completed` blocks;
+2. the live `shipmate plan` runs of the pull request, by any actor, other than
+   this run: one blocks. The consumer's `plan-<pr>` group runs one plan run of
+   the pull request at a time, so while this run holds it, a listed plan run
+   has not yet read its head and plans the live head. A run titled
+   `shipmate · plan pr=<n> ` that does not parse (a hand dispatch naming a
+   `ref`) counts; any other title that does not parse is ignored;
+3. the jobs of each autoplan run `completed` with conclusion `success`: one
+   whose `plan / detect` job succeeded planned, and blocks. A succeeded
+   autoplan that planned counts, zero cells included: a second plan would write
+   newer plan records, and an auto apply waiting on that autoplan would then
+   refuse. Every other completed run blocks nothing: a draft-skipped run (its
+   `plan / detect` skipped), a `closed`-event run, a cancelled or failed one.
+4. When nothing blocks, the push that moved the head can still be seconds from
+   listing its autoplan, so the autoplan runs are listed again every 5 s for
+   15 s. Each listing is judged whole as in 1 and 3: a re-run keeps its run id
+   and can turn queued. A run attempt's jobs are read once, and kept only when
+   every job carries the listed attempt; jobs of another attempt (a re-run
+   between the two reads) are read again on the next listing, and on the last
+   one the run cannot be judged.
+5. After the wait the pull request is read again: a head that moved again, a
+   closed pull request or a draft dispatches nothing. Then the live plan runs
+   are read once more.
+
+So every dispatch waits 15 s. On a dispatch the run notices "pull request #<n>
+moved to <sha>, which has no autoplan run that planned it or is in progress;
+dispatched shipmate plan (on demand, so no auto apply follows it)"; otherwise
+it logs "pull request #<n> is <state>; nothing dispatched", "pull request #<n>
+moved to <sha>, a draft; nothing dispatched", "pull request #<n> moved from
+<sha> to <sha> while this run waited; nothing dispatched", "pull request #<n>
+moved to <sha>, which has an autoplan run <id> in progress; nothing
+dispatched", "pull request #<n> moved to <sha>; its shipmate plan run <id> is
+<status> and plans the live head; nothing dispatched" or "pull request #<n>
+moved to <sha>, whose autoplan run <id> succeeded; nothing dispatched", each
+naming the lowest such id. The dispatched plan is on demand, so no auto apply
+follows it (§`apply_mode: auto`). It joins the consumer's `plan-<pr>` concurrency group,
+which cancels nothing in progress for a `workflow_dispatch`, so it queues
+behind this run; a later arrival replaces a waiting run, and the plan that runs
+resolves the live head from the pull request. A run with a matching title
+dispatched at another ref runs outside that group and can make a replan skip;
+`shipmate plan` recovers. The dispatch retries under the comment-less rule
+(§Comment-ops). On this path a failed head read, a failed or malformed listing,
+an autoplan run without a string status (or, once `completed`, conclusion), an
+unreadable jobs listing or `plan / detect` job, and a failed token mint or
+dispatch each warn with the remedy `comment shipmate plan` and dispatch
+nothing, and a dispatch that may have started a plan warns to check the
+Actions tab before commenting it; neither fails anything: this run's head is
+not the pull request's, so nothing it writes or fails to write gates the
+merge.
 
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
@@ -4207,8 +4336,9 @@ job of `apply.yml` and of `plan.yml` posts it: bound to `shipmate-engine`,
 The reply is the header `### shipmate apply` (with `<env>` for a targeted
 apply; an `auto` run uses `apply`) or `### shipmate plan`, a blank line, the
 verdict line, a blank line, and the footer
-``[comment run](<url>). Comment `shipmate help` for the available commands.``,
-where `<url>` links the run that posts the reply. The verdict line is one of:
+``[<verb> run](<url>). Comment `shipmate help` for the available commands.``,
+where `<url>` links the run that posts the reply and `<verb>` is `apply` or
+`plan`. The verdict line is one of:
 
 - refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
 - cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
@@ -4258,8 +4388,10 @@ run posts nothing: a push cancels a dispatched plan through the fence's
 `cancel-in-progress`, and the push's autoplan answers. It runs only on an
 on-demand run, under `summary`'s fork clause, when `summary` did not output
 `superseded` as `true` and its comment write printed neither `created` nor
-`moved`. A superseded run and one whose pull request moved past its head post
-nothing. The reply is:
+`moved`. A superseded run posts nothing, and neither does a run whose pull
+request moved past its head, one whose plan job was cancelled included: the
+live head is replanned instead (§Plan comment). A run whose plan job was
+cancelled on a head that did not move replies as below. The reply is:
 
 - summary cancelled when `summary` ended `cancelled` and the run was not
   cancelled, for example at a full gate-writer queue for the head, and
@@ -4971,7 +5103,7 @@ by a plan run; passes `auto: true`, `ref` and `pr_number`) and the `unlock` job
 `SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), the
 `deploy`, `apply` and `auto` jobs grant `pull-requests: read`, and the `unlock`
 job grants `pull-requests: write`, which `unlock.yml`'s `guard` requests for the
-🚀 reaction; without it every unlock run fails at startup, and `shipmate doctor`
+🚀 reaction and its `result` job for the unlock result reply; without it every unlock run fails at startup, and `shipmate doctor`
 reports the missing grant.
 
 ## OpenTofu note

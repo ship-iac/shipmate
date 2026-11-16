@@ -1686,9 +1686,9 @@ def _auto_with_finding(doc, name, engine):
 
 def _unlock_grant_finding(doc, name, engine):
     """One finding when the `unlock` job does not grant `unlock.yml` `pull-requests: write`, which
-    its `guard` job requests to mark the command started; `write-all` grants it. A job without
-    its own `permissions:` takes the workflow's. A file without the job draws nothing here: that
-    is `_routing_finding`'s."""
+    its `guard` job requests to mark the command started and its `result` job to post the unlock
+    reply; `write-all` grants it. A job without its own `permissions:` takes the workflow's. A
+    file without the job draws nothing here: that is `_routing_finding`'s."""
     job = dict(_engine_calls(doc, engine, "unlock.yml")).get("unlock")
     if job is None:
         return []
@@ -1701,7 +1701,8 @@ def _unlock_grant_finding(doc, name, engine):
             (
                 f"`{name}`'s `unlock` job does not grant `pull-requests: write`. A called "
                 "workflow's jobs are capped by the calling job's permissions, and `unlock.yml`'s "
-                "`guard` requests it, so every unlock run dies at startup with no job and no log. "
+                "`guard` (the 🚀 reaction) and `result` (the unlock reply) request it, so every "
+                "unlock run dies at startup with no job and no log. "
                 "Copy the published `permissions:` block whole (docs/getting-started.md)."
             ),
         )

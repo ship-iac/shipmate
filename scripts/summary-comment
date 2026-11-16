@@ -302,11 +302,11 @@ def provenance(sha, run_url):
     return f"at [{sha[:7]}]({commit}) {run}"
 
 
-def footer(run_url, hint=True):
-    """`[comment run](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint`: the footer of a
-    comment whose verdict carries no `provenance`. `hint` is off for the help reply, which is the
-    command list, and for a notice."""
-    return f"[comment run]({run_url}). {FOOTER_HINT}" if hint else f"[comment run]({run_url})"
+def footer(run_url, hint=True, label="comment run"):
+    """`[<label>](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint`: the footer of a comment
+    whose verdict carries no `provenance`. `hint` is off for the help reply, which is the command
+    list, and for a notice. `label` names the run `run_url` links."""
+    return f"[{label}]({run_url}). {FOOTER_HINT}" if hint else f"[{label}]({run_url})"
 
 
 def footer_hint(circle):
