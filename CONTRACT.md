@@ -250,7 +250,7 @@ A completion job runs only for a wave that ended `success` or `failure`;
 `complete` runs after every release, wave and completion job, rewrites the whole
 snapshot with the same writes, and is the only writer on a cancelled run. A
 completion job's failure never fails the level (job-level
-`continue-on-error: true`): `complete` handles every check of the level again.
+`continue-on-error: true`): `complete` handles every snapshot check of the level again.
 `complete` fails the level, and leaves a cell's check as it was (`in_progress`
 when it was flipped), when the jobs listing never shows that cell's job in a wave
 that ran, or in a cancelled wave whose other cells it lists; the gate stays pending, and the next run's `snapshot` writes it again.
