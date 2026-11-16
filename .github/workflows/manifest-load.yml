@@ -83,6 +83,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/unlock-detect@main
       - if: false
+        uses: ship-iac/shipmate/actions/unlock-result@main
+      - if: false
         uses: ship-iac/shipmate/actions/unlock-rocket@main
       - if: false
         uses: ship-iac/shipmate/actions/verify-app-key@main

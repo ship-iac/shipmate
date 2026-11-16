@@ -1668,7 +1668,9 @@ reply, a `⚪` notice:
   fails is a warning on the comment-handling run, not a failure, and the pull
   request gets nothing.
 
-Nothing minimizes or edits the started-run reply.
+Nothing minimizes or edits the started-run reply. It says only that the run
+started; the unlock run then posts its own result reply, saying what it
+released (the unlock result reply, below).
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
@@ -1681,7 +1683,17 @@ footer carries the help hint:
 
 ``[comment run](<run url>). Comment `shipmate help` for the available commands.``
 
-A notice's footer is `[comment run](<run url>)` alone.
+A notice's footer is `[comment run](<run url>)` alone. A reply posted by a
+dispatched run has the same shape, but its footer links that run and names it:
+
+- `[plan run]` or `[apply run]`: the claim's not-started reply and the outcome
+  reply;
+- `[plan run]`: the auto apply replies an autoplan's `summary` posts;
+- `[apply run]`: the apply queue's notice;
+- `[unlock run]`: the unlock result reply.
+
+`scripts/reply-comment` holds the one rule for an empty verb: a label that is
+empty or only ` run` reads `comment run`.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
@@ -2180,13 +2192,71 @@ state lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that 
 one already requires, so a role that can apply an environment can already
 unlock it.
 
-The unlock run itself posts no comment — its `unlock` job runs the pull
-request's HCL, so that job requests no `pull-requests: write`. Only `guard`,
-which checks nothing out, requests it, to add the 🚀 reaction (§Comment-ops,
-"Reactions and the comment claim"). The comment-handling run, which holds that
-permission, is the one that may post the started-run reply; §Comment-ops says
-when it is posted and when it links the unlock run. Per-cell detail lands in
-each job's step summary, and a failure reds the run.
+The `unlock` job posts no comment: it runs the pull request's HCL, so it
+requests no `pull-requests: write`. Two jobs that check nothing out request it:
+`guard`, to add the 🚀 reaction (§Comment-ops, "Reactions and the comment
+claim"), and `result`, to post the unlock result reply. The comment-handling run
+may post the started-run reply; §Comment-ops says when it is posted and when it
+links the unlock run. Per-cell detail lands in each job's step summary, and a
+failed cell reds the run.
+
+**The unlock result reply.** Each `unlock` leg uploads a record, even when it
+failed: artifact `shipmate-unlock-<strategy.job-index>` holding
+`shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
+and environment, its outcome and the probed lock id. Before downloading the
+records, `result` uploads a `shipmate-unlock-sentinel` artifact of its own (the
+action's manifest, kept one day): `download-artifact` writes a lone matching
+artifact without a directory of its name, so whenever the sentinel uploaded,
+every record downloads into its artifact's directory. A file at the download
+root is never read. The sentinel, the download and the record reading all run
+only when `detect` succeeded. The outcome is `released`
+only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
+`failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
+before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
+`permissions: { pull-requests: write }`, `ubuntu-slim`, the job token) runs
+unless the run was cancelled or `detect` was skipped. It reads the pull request
+number from the command comment's `html_url`, downloads the records, and posts
+one reply through `scripts/reply-comment`: the header
+`### shipmate unlock <env>`, the verdict line, then a blank line and
+``A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks stay until it merges or closes, and `--evict` releases another pull request's.``,
+and the footer `[unlock run](<url>)` linking the unlock run, followed on a
+failure by the help hint. Unlike a comment-ops reply, it is posted by the
+dispatched run, so its footer links that run, and its label says so. The
+verdict line is one of:
+
+- ``⚪ released <n> state lock(s) in <env>: <stack> (<id>), ...`` when every
+  probed cell recorded `released` or `none` and at least one released.
+- ``⚪ released no state lock in <env>: no probed cell held a state lock.``
+- ``⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...``
+  for an empty queue: the warning `detect` prints, whole.
+- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
+  each clause present when it names a cell: `failed` cells, then cells with no
+  valid record, then the released ones.
+- When the results are unreadable (the download failed, or the sentinel failed
+  and no `shipmate-unlock-<n>/` directory arrived), the records in their own
+  directories are still read, a cell without one reads
+  ``result unknown for <stack>, ...`` in place of `did not run`, and, when at
+  least one cell has a record, the reply ends ``; some cells' results could not
+  be read; see the run.``
+- ``🔴 failed: could not read the unlock queue; see the run.`` when `detect`
+  succeeded and its `cells` output is not a list of cells.
+- ``🔴 failed: the unlock run failed before probing any cell; see the run.``
+  when `detect` failed; no record is read.
+
+The reply is display only and gates nothing. A record is written by a job that
+runs the pull request's HCL, so it can be forged. The reply names a cell only as
+`detect`'s queue entry at the record's index, never by a name in the record, and
+a record counts only when it sits in an artifact directory
+`shipmate-unlock-<n>` as `shipmate-unlock-<n>.json`, its `index` is `<n>`, its
+outcome is one of the three, and at most 4,096 bytes of it are read and decoded.
+Its `stack` and `environment` must also equal that queue entry's: this catches a
+record that reached the wrong cell, not a forged one, which can copy them. A file
+at the download root, the sentinel and any other entry are ignored. A lock id
+outside the charset `scripts/lock-info` accepts is dropped, and stack names are
+escaped.
+A comment not on a pull request, an unreadable comment or a failed post posts
+nothing and warns. None of these, nor a failed download, fails `result`: the
+`unlock` legs' results stay the run's.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan
@@ -4189,8 +4259,9 @@ job of `apply.yml` and of `plan.yml` posts it: bound to `shipmate-engine`,
 The reply is the header `### shipmate apply` (with `<env>` for a targeted
 apply; an `auto` run uses `apply`) or `### shipmate plan`, a blank line, the
 verdict line, a blank line, and the footer
-``[comment run](<url>). Comment `shipmate help` for the available commands.``,
-where `<url>` links the run that posts the reply. The verdict line is one of:
+``[<verb> run](<url>). Comment `shipmate help` for the available commands.``,
+where `<url>` links the run that posts the reply and `<verb>` is `apply` or
+`plan`. The verdict line is one of:
 
 - refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
 - cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
@@ -4953,7 +5024,7 @@ by a plan run; passes `auto: true`, `ref` and `pr_number`) and the `unlock` job
 `SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), the
 `deploy`, `apply` and `auto` jobs grant `pull-requests: read`, and the `unlock`
 job grants `pull-requests: write`, which `unlock.yml`'s `guard` requests for the
-🚀 reaction; without it every unlock run fails at startup, and `shipmate doctor`
+🚀 reaction and its `result` job for the unlock result reply; without it every unlock run fails at startup, and `shipmate doctor`
 reports the missing grant.
 
 ## OpenTofu note

@@ -56,6 +56,7 @@ EXPECTED = {
     ("unlock.yml", "guard"): SLIM,
     ("unlock.yml", "detect"): INPUT,
     ("unlock.yml", "unlock"): INPUT,
+    ("unlock.yml", "result"): SLIM,
 }
 
 
