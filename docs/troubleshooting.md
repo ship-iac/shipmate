@@ -2330,6 +2330,35 @@ When the first recurs, check the App's `actions: write` permission and reconcile
 §The workflow file, which offers `auto` as a `verb` option and holds the `auto`
 job.
 
+### A merge did not re-plan an open pull request
+
+After a merge, the deploy's `summary` job dispatches `shipmate plan` for each
+open pull request the push may have put behind (`CONTRACT.md` §Plan comment,
+Re-plan after a merge). It is display-only: nothing it skips or fails holds a
+gate. Its `Re-plan the open pull requests this push may put behind` step logs
+why a pull request got no plan:
+
+| Line | Cause |
+| --- | --- |
+| `pull request #<n> was not re-planned: its <verb> run <id> is live, and a plan now would republish the apply checks it applies from` | That pull request was applying. A plan now would replace the checks the run completes. |
+| `the live shipmate.yml run listing is incomplete, so no open pull request was re-planned after this push` | A page of the live run listing failed, or an App run's title does not parse, so a live apply could not be ruled out. |
+| `deploy detect reported no changed stacks, so no open pull request was re-planned after this push` | `detect` failed or refused before it read the changed stacks, or its `git diff` failed (`the push's changed paths could not be read` in its log). |
+| `the App id or slug is empty, so no open pull request was re-planned after this push` | `SHIPMATE_APP_ID` is unset, or the token mint returned no slug. |
+| `the re-plan token mint failed, so no open pull request was re-planned after this push` | The App mint (`actions: write`, `pull-requests: read`, `checks: read`) failed; see the mint step's error. |
+| `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
+| `pull request #<n> was not re-planned: <failure>` | Its head's check runs could not be read. |
+| `the plan dispatch for pull request #<n> failed; comment shipmate plan on it to check it against the base` | The dispatch failed with no run started. |
+| `the plan dispatch for pull request #<n> answered with an error, so a plan may have started; check the Actions tab` | The dispatch failed with a server or network error. Look for a run titled `shipmate · plan pr=<n>` before commenting. |
+
+A draft, a pull request with no App apply check, and one whose checks name no
+stack the push changed (when the push changed nothing outside every stack) are
+not selected, and nothing is logged for them.
+
+Comment `shipmate plan` on the pull request: its plan marks each cell the base
+changed behind. Until a plan runs, a cell the pull request already applied is
+not re-checked, and a merge over it is applied by neither deploy (`CONTRACT.md`
+§Plan comment); the drift sweep reports that state.
+
 ### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 
 The `guard` job of `apply.yml` refused the dispatch before the run joined any

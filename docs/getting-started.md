@@ -435,7 +435,8 @@ which need `<env>-plan`, `shipmate-engine` and the App key and nothing else
 merged or not, and releases the cell locks its applies took. `deploy` runs from the
 start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
-`<env>`). The other three, `apply`, `auto` and `unlock`, wait for the
+`<env>`), then dispatches `shipmate plan` for each open pull request the push may
+have put behind. The other three, `apply`, `auto` and `unlock`, wait for the
 environments and secrets the apply tier creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push

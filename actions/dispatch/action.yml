@@ -93,7 +93,7 @@ runs:
           plan|apply|unlock) ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
-        # dispatch-body takes an empty id on a plan as the comment-less replan, which no comment sends.
+        # dispatch-body takes an empty id on a plan as a comment-less plan, which no comment sends.
         if [ -z "${COMMENT_ID:-}" ]; then
           echo "::error::The engine's comment-ops.yml passed no comment-id to shipmate/actions/dispatch, so the dispatched run could not claim its comment; nothing was dispatched. This is an engine defect: report it."
           say_no_run_started

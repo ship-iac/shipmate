@@ -1530,9 +1530,10 @@ warns.
 
 A dispatch from a comment carries the comment's id as `comment_id`. The
 `claim` job of `plan.yml`, and of `apply.yml` after `guard` succeeds, runs when
-the run is a `workflow_dispatch` with a non-empty `comment_id`. An autoplan, the
-plan `summary`'s comment-less replan and an `auto` run carry none: `claim` is
-skipped and the run proceeds. `apply.yml`'s `guard` refuses a `verb: apply`
+the run is a `workflow_dispatch` with a non-empty `comment_id`. An autoplan, a
+comment-less plan (the plan `summary`'s replan, the merge deploy's re-plan of
+open pull requests) and an `auto` run carry none: `claim` is skipped and the run
+proceeds. `apply.yml`'s `guard` refuses a `verb: apply`
 dispatch without one. `claim` binds `shipmate-engine`, checks nothing out,
 mints an App token granting `pull-requests: write` and `actions: read`, and posts the App's
 🚀 on the comment once, never retried. GitHub answers the first creation of a
@@ -1599,21 +1600,24 @@ dispatch's own App token, each read retried on a transient failure. `t0` is
 five seconds before the first attempt. What stops the retry depends on the
 dispatch:
 
-- A comment's dispatch reads every page of 100 runs, newest first, back to
-  `t0`, and reads again each second until 10 seconds after the failed attempt.
-  It stops at a `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`
-  and whose title (§Check names) is this command's: this verb and comment id,
-  with this pull request, or for `unlock` no pull request and this ref.
-  Otherwise it retries: the claim (above) leaves a second `plan` or `apply` run
-  doing nothing, and a second `unlock` finds no lock. Without the App's slug no
-  run can be told to be this command's, so the outcome is undetermined and the
-  dispatch is not retried.
-- A comment-less dispatch (`auto`, and the plan `summary`'s replan) reads one
-  page of 100 `workflow_dispatch` runs and stops when any was created at or
-  after `t0`, whatever its title, since nothing marks such a run as this
-  dispatch's. A concurrent dispatch of another command landing in that window
-  stops the retry too; a wrong stop costs a comment, a wrong retry a double
-  start.
+- A comment's dispatch and a comment-less `plan` read every page of 100 runs,
+  newest first, back to `t0`, and read again each second until 10 seconds
+  after the failed attempt. Each stops at a `workflow_dispatch` run whose
+  `actor` is the App's `<slug>[bot]` and whose title (§Check names) is this
+  dispatch's: this verb and comment id (empty for a comment-less plan), with
+  this pull request, or for `unlock` no pull request and this ref. Otherwise it
+  retries: the claim (above) leaves a second `plan` or `apply` run doing
+  nothing, a second comment-less plan plans the head again, and a second
+  `unlock` finds no lock. Without the App's slug no run can be told to be this
+  dispatch's, so the dispatch is refused before it is sent. Every comment-less
+  plan of one pull request has the same title, so the plan `summary`'s replan
+  and the merge deploy's re-plan landing in one window stop each other's
+  retries; either plans the head.
+- An `auto` dispatch reads one page of 100 `workflow_dispatch` runs and stops
+  when any was created at or after `t0`, whatever its title, since nothing
+  marks such a run as this dispatch's. A concurrent dispatch of another command
+  landing in that window stops the retry too; a wrong stop costs a comment, a
+  wrong retry a double start.
 
 A listing that fails, is malformed or runs past ten pages leaves the outcome
 undetermined. A failed comment dispatch posts one of three replies:
@@ -1645,7 +1649,7 @@ undetermined. A failed comment dispatch posts one of three replies:
 
 Two ceilings remain. A run that landed but is not listed by the engine's last
 read (10 seconds after the failed attempt for a comment's dispatch, the one
-read for a comment-less one) is not seen, so that attempt is retried and the
+read for an `auto` one) is not seen, so that attempt is retried and the
 command can start twice. A runner clock ahead of GitHub's by more than five
 seconds puts `t0` after a run that landed, with the same result.
 
@@ -2706,7 +2710,7 @@ dispatch warns on the plan run and posts one reply, ``🔴 failed: auto apply no
 started: the dispatch failed; comment `shipmate apply` ``, or, when gh's answer
 shows a `shipmate.yml` older than the engine, ``🔴 failed: auto apply not
 started: the dispatch failed. <remedy>`` with the remedy §Comment-ops quotes for
-a failed dispatch. The dispatch retries under the comment-less rule
+a failed dispatch. The dispatch retries under the `auto` rule
 (§Comment-ops); one that may have started a run warns and
 posts ``auto apply may have started: the dispatch answered with an error; check
 the Actions tab before commenting `shipmate apply` `` instead, a `⚪` notice
@@ -3194,8 +3198,9 @@ The seven jobs:
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (claiming the command comment, reading the review decision, acquiring cell
   locks, proving before any wave that the App key authenticates (`snapshot`), completing apply checks, refreshing the gate, posting the apply result
-  comment or the outcome reply, releasing a merged pull request's cell locks) are likewise bound to
-  `shipmate-engine`.
+  comment or the outcome reply, releasing a merged pull request's cell locks,
+  re-planning the open pull requests a merge may put behind) are likewise bound
+  to `shipmate-engine`.
 - **`release.yml`**'s `release` job (engine, reached through the consumer's
   `release` job on `pull_request_target` `closed`) — binds `shipmate-engine` to
   release the closed pull request's cell locks (§Cell locks). It checks nothing
@@ -4069,8 +4074,8 @@ which cancels nothing in progress for a `workflow_dispatch`, so it queues
 behind this run; a later arrival replaces a waiting run, and the plan that runs
 resolves the live head from the pull request. A run with a matching title
 dispatched at another ref runs outside that group and can make a replan skip;
-`shipmate plan` recovers. The dispatch retries under the comment-less rule
-(§Comment-ops). On this path a failed head read, a failed or malformed listing,
+`shipmate plan` recovers. The dispatch finds its run by title, as a comment's
+does (§Comment-ops). On this path a failed head read, a failed or malformed listing,
 an autoplan run without a string status (or, once `completed`, conclusion), an
 unreadable jobs listing or `plan / detect` job, and a failed token mint or
 dispatch each warn with the remedy `comment shipmate plan` and dispatch
@@ -4078,6 +4083,49 @@ nothing, and a dispatch that may have started a plan warns to check the
 Actions tab before commenting it; neither fails anything: this run's head is
 not the pull request's, so nothing it writes or fails to write gates the
 merge.
+
+**Re-plan after a merge.** The merge deploy's `summary` job ends with
+`actions/base-push-plan`, which runs after a failed gate write or lock release
+too (`!cancelled()`), on every run attempt, and never fails the job. It mints
+an App token with `actions: write`, `pull-requests: read` and `checks: read`,
+lists the open pull requests into the default branch, and dispatches a
+comment-less `shipmate plan` for each one that is not a draft, carries an App
+apply check in any state, and has a check naming a stack the push changed, or
+any check when the push changed a path outside every stack. `deploy-detect`'s
+`push` output carries the changed stacks (module dependents included) and that
+`outside` flag, which is also true when the previous tip is unknown or the stack
+list passes 64 KiB. The new plan marks each cell the push changed behind
+(Behind cells, above), so the pull request learns the base moved without
+anyone commenting.
+
+A pull request with a live App `apply` or `auto` run is skipped and named in a
+notice: ``pull request #<n> was not re-planned: its <verb> run <id> is live,
+and a plan now would republish the apply checks it applies from``. Every
+pull request is judged from one live run listing. An incomplete listing, an App
+run whose title does not parse, an empty App id or slug, an empty or malformed
+`push`, a failed pull request listing and a failed token mint each warn and
+dispatch nothing; a pull request whose checks cannot be read is skipped with a
+warning. Each dispatch notices ``dispatched shipmate plan for pull request
+#<n>: this push may have changed a stack it plans``, or warns and goes on to the
+next pull request. The dispatch finds its run by title (§Comment-ops).
+
+The dispatched plan is on demand: it posts a new plan comment and republishes
+the head's apply checks under its run id with an empty `action`, and no auto
+apply follows it. An `auto` apply of the older autoplan then refuses: its
+records name the dispatched run, so its plan run is not the newest autoplan of
+the head, or the newer `shipmate plan` run refuses it (§`apply_mode: auto`).
+Each merge costs one plan run per selected pull request. A push that changes a
+file outside every stack, the common case, selects every open pull request with
+App apply checks that is not a draft, and each loses its pending `auto` apply
+until it is pushed again.
+
+The re-plan is display-only, and a pull request it skips or fails on is not
+re-checked. A cell that pull request already applied has a completed apply
+check, so no apply of its head refuses the cell and its own deploy skips it. A
+base merge over that cell, after an eviction released the pull request's lock
+or with a base change that planned no change for the cell, is then re-applied by
+neither deploy, and only a new plan of the pull request (`shipmate plan`) finds
+the cell behind. The drift sweep reports the reverted state.
 
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
@@ -5256,7 +5304,8 @@ stack-wave by stack-wave exactly as described above (see Fan-out).
 
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
-`apply-env-level.yml` → gate completion + cell lock release; beside the
+`apply-env-level.yml` → gate completion + cell lock release + re-plan of the
+open pull requests the merge may put behind (§Plan comment); beside the
 env-levels, `warm` saves the provider cache entry of each distinct lock and the
 OpenTofu cache entry (§Terramate safeguards); the
 run waits for it, but no job, the gate, the cells or the lock release read it), the

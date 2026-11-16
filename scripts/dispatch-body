@@ -25,7 +25,7 @@ started a run: GitHub can start it and still answer 502. Before each retry it li
   title counts. Such a dispatch with an empty `SHIPMATE_APP_SLUG` exits 1 before the first POST,
   since no listed run could be told to be its own.
 - `auto`: one page of 100 `workflow_dispatch` runs, newest first; any created since `t0` stops
-  the retry. No title is read, because an `auto` title names a head, not this dispatch. A
+  the retry. No title is read, because nothing marks such a run as this dispatch's. A
   concurrent dispatch landing in the window therefore stops the retry too; a wrong stop costs a
   comment, a wrong retry a double start.
 
