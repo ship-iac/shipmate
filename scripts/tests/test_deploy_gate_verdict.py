@@ -53,7 +53,7 @@ EXPECTED_REPLAN = {
     "needs": ["detect", "summary"],
     "if": "${{ !cancelled() }}",
     "runs-on": "${{ inputs.runs_on }}",
-    "timeout-minutes": 20,
+    "timeout-minutes": 15,
     "continue-on-error": True,
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},

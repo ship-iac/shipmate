@@ -2348,7 +2348,7 @@ requests this push may put behind` step logs why a pull request got no plan:
 | `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
 | `pull request #<n> was not re-planned: <failure>` | Its head's check runs could not be read. |
 | `the plan dispatch for pull request #<n> failed; comment shipmate plan on it to check it against the base` | The dispatch failed with no run started. |
-| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | The dispatches ran for 10 minutes, the most the job spends holding `deploy-main`; the named pull requests were not reached. |
+| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the step started, selection included, so no further dispatch began; the named pull requests were not reached. The budget limits how long the job holds the consumer's deploy concurrency group (`deploy-main` in getting-started); a dispatch begun before it ran on past it. |
 | `the plan dispatch for pull request #<n> answered with an error, so a plan may have started; check the Actions tab` | The dispatch failed with a server or network error. Look for a run titled `shipmate · plan pr=<n>` before commenting. |
 
 A draft, a pull request with no App apply check, and one whose checks name no
@@ -2364,9 +2364,8 @@ dispatched into it; that apply leaves the new plan's apply checks pending, so
 the gate stays pending until the pull request applies again.
 
 A failed `replan` job stays off the deploy run's conclusion, as a failed `warm`
-job does. A `replan` job that reaches its 20-minute timeout, a backstop for a
-hang, ends cancelled: the pull requests it had not reached get no plan and no
-warning. Comment `shipmate plan` on any open pull request the merge may have put
+job does. Its 15-minute timeout is a backstop for a hang: it stops the job, and
+the pull requests it had not reached get no plan and no warning. Comment `shipmate plan` on any open pull request the merge may have put
 behind.
 
 Comment `shipmate plan` on the pull request: its plan marks each cell the base
@@ -3282,7 +3281,8 @@ A long hold on that group makes the drop more likely. Every merge deploy whose
 `max_parallel` legs at once, each up to its 15-minute timeout, and the deploy run holds the
 group until `warm` ends, even with no cells to apply. `replan` holds it too, after
 `summary`, while it dispatches plans of the open pull requests the merge may put
-behind; its 10-minute budget bounds that share.
+behind; its 10-minute budget stops it beginning a dispatch after that, so its
+share is the budget plus one dispatch, or its 15-minute timeout on a hang.
 
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the

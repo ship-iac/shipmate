@@ -55,7 +55,9 @@ finds no lock. Every comment-less plan of one pull request has the same title, s
 landing in the window (the summary's replan beside the deploy's re-plan) stops the retry too;
 either plans the pull request's head. A runner clock ahead of GitHub's by more than five
 seconds puts `t0` after a run that landed, for the dispatches bounded by `t0` (`auto` and a
-comment-less plan); a commented dispatch's run is found by its title alone.
+comment-less plan). A commented dispatch's title match takes no time bound, but its paging stops
+at the first page holding a run created before `t0`, so under that skew a run pushed past page 1
+by more than 100 newer runs is missed too.
 """
 
 import json

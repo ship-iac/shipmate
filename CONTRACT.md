@@ -1655,7 +1655,9 @@ read for an `auto` one) is not seen, so that attempt is retried and the
 command can start twice. A runner clock ahead of GitHub's by more than five
 seconds puts `t0` after a run that landed, with the same result, for the two
 dispatches bounded by `t0`: an `auto` dispatch and a comment-less plan. A
-commented dispatch's run is found by its title alone.
+commented dispatch's title match takes no time bound, but its paging still stops
+at the first page holding a run created before `t0`, so under that skew a run
+pushed past page 1 by more than 100 newer runs is missed too.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
 reads the claim as taken and does nothing. A double-started `auto` run waits:
@@ -4093,14 +4095,16 @@ merge.
 concluded (`!cancelled()`), on every run attempt. It binds `shipmate-engine`,
 takes the consumer's `runs_on` runner, requests no `GITHUB_TOKEN` permission,
 and is `continue-on-error`, as `warm` is, so a failed `replan` job stays off the
-run's conclusion. It dispatches for at most 10 minutes, since it holds the
-consumer's `deploy-main` concurrency group while it runs: before each pull
-request it reads the time since it began dispatching, and once 10 minutes
-have passed it warns ``not re-planned: the re-plan budget of 10 minutes is
-spent; comment shipmate plan on #<n>, ...``, naming every pull request it did not
-reach, and ends successfully. Its 20-minute `timeout-minutes` is a backstop for
-a hang only; a job that reaches it ends cancelled, and the pull requests not yet
-dispatched get no plan and no warning. It mints
+run's conclusion. It holds the consumer's deploy concurrency group
+(`deploy-main` in getting-started) while it runs, so it begins no dispatch once
+10 minutes have passed since its step started, selection included: before each pull request it reads the clock,
+and once the budget is spent it warns ``not re-planned: the re-plan budget of 10
+minutes is spent; comment shipmate plan on #<n>, ...``, naming every pull
+request it did not reach, and ends successfully. The budget bounds when a
+dispatch may begin, not the job: one dispatch begun at its edge runs past it,
+and a hung call is bounded only by the job's 15-minute `timeout-minutes`, a
+backstop for a hang. The timeout stops the job, and the pull requests it had
+not reached get no plan and no warning. It mints
 an App token with `actions: write`, `pull-requests: read` and `checks: read`,
 lists the open pull requests into the default branch, and dispatches a
 comment-less `shipmate plan` for each one that is not a draft, carries an App

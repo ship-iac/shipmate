@@ -189,15 +189,17 @@ jobs:
   # Re-plans the open pull requests this push may put behind. Display-only: it runs after a failed
   # gate write or lock release, and `continue-on-error` keeps its failure off the run's
   # conclusion. Its work grows with the open pull requests, so it takes the consumer's runner, not
-  # `ubuntu-slim` (15-minute cap). The action stops dispatching after a 10-minute budget; this
-  # timeout is a backstop for a hang only: 10 budget + 4 for one dispatch begun at its edge
-  # (three 60 s rate-limit waits, the 2 s and 5 s retries and the 10 s listing windows, about
-  # 215 s) + 6 for the selection, whose own duration is not measured = 20.
+  # `ubuntu-slim` (15-minute cap). The action begins no dispatch once its 10-minute budget, which
+  # covers selection too, is spent; this timeout is a backstop for a hang only. One dispatch begun
+  # at the budget's edge sleeps and waits at most 167 s in `dispatch-body`: `RETRY_DELAYS` 2 + 5 s
+  # on the POST, and before each of its two retries the `_LIST_WINDOW` of 10 s plus one last
+  # listing of up to `_MAX_PAGES` 10 pages, each retried with 2 + 5 s (70 s). 10 + 3 for that
+  # dispatch + 2 for the mint, the setup and the calls' own time = 15.
   replan:
     needs: [detect, summary]
     if: ${{ !cancelled() }}
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 20
+    timeout-minutes: 15
     continue-on-error: true
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}

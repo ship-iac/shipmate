@@ -47,6 +47,11 @@ runs:
         DISPATCH_REF: ${{ github.event.repository.default_branch }}
       run: |
         set -euo pipefail
+        # 10 minutes, selection included: this display-only work holds the consumer's deploy
+        # concurrency group, and a longer hold makes a second merge drop a pending deploy more
+        # likely. It bounds when a dispatch may begin, not the step.
+        budget=600
+        start=$(date +%s)
         # Display-only: every failure warns and the step exits 0. A failed dispatch continues to
         # the next pull request, so one failure never drops the later ones.
         if [ -z "${GH_TOKEN:-}" ]; then
@@ -65,10 +70,6 @@ runs:
         fi
         cat "$err" >&2
         read -r -a selected <<< "${prs//$'\n'/ }"
-        # 10 minutes: this display-only work holds the consumer's `deploy-main` concurrency group,
-        # and a longer hold makes a second merge drop a pending deploy more likely.
-        budget=600
-        start=$(date +%s)
         for i in "${!selected[@]}"; do
           pr=${selected[$i]}
           if [ $(($(date +%s) - start)) -ge "$budget" ]; then

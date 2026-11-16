@@ -324,10 +324,12 @@ _PYTHON3 = """\
 if [[ "$1" == */base-push-plan ]]; then
   printf '%s' "${FAKE_PRS:-}"
   printf '%s' "${FAKE_SELECT_ERR:-}" >&2
+  [ -z "${CLOCK:-}" ] || echo $(( $(cat "$CLOCK") + ${FAKE_SELECT_SECONDS:-0} )) > "$CLOCK"
   exit "${FAKE_SELECT_RC:-0}"
 elif [[ "$1" == */dispatch-body ]]; then
   echo "$PR_NUMBER $VERB $DISPATCH_REF $SHIPMATE_APP_SLUG $GH_TOKEN ${COMMENT_ID-unset}" >> "$CALLS"
   printf '%b' "${FAKE_DISPATCH_ERR:-}" >&2
+  [ -z "${CLOCK:-}" ] || echo $(( $(cat "$CLOCK") + ${FAKE_DISPATCH_SECONDS:-0} )) > "$CLOCK"
   rc_var="FAKE_RC_$PR_NUMBER"
   exit "${!rc_var:-0}"
 fi
@@ -335,27 +337,23 @@ exit 9
 """
 
 
-#: `date`: the next of the space-separated `$FAKE_CLOCK` epoch seconds per call, the last one
-#: once they run out; the step reads the clock only through `date +%s`.
-_DATE = """\
-n=$(cat "$CLOCK_CALLS" 2>/dev/null || echo 0)
-echo $((n + 1)) > "$CLOCK_CALLS"
-read -r -a ticks <<< "$FAKE_CLOCK"
-i=$(( n < ${#ticks[@]} ? n : ${#ticks[@]} - 1 ))
-echo "${ticks[$i]}"
-"""
+#: `date`: the epoch seconds in `$CLOCK`, which only the `python3` stub advances, by
+#: `$FAKE_SELECT_SECONDS` per selection and `$FAKE_DISPATCH_SECONDS` per dispatch. The step reads
+#: the clock only through `date +%s`.
+_DATE = 'cat "$CLOCK"'
 
 
-def _step(tmp_path, token="replan-token", clock=None, **fake):  # noqa: S107 - a stub token
+def _step(tmp_path, token="replan-token", clock=False, **fake):  # noqa: S107 - a stub token
     """Run the dispatch step as the runner would: its parsed `env:` resolved from
-    `EXPRESSIONS`. `clock`, epoch seconds, stubs `date` (`_DATE`); without it the real clock
+    `EXPRESSIONS`. With `clock`, `date` is stubbed (`_DATE`) from 0; otherwise the real clock
     runs. Returns `(exit code, stdout, stderr, dispatch-body calls)`."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_stub(bin_dir, "python3", _PYTHON3)
-    if clock is not None:
+    if clock:
         write_stub(bin_dir, "date", _DATE)
-        fake |= {"FAKE_CLOCK": " ".join(map(str, clock)), "CLOCK_CALLS": str(tmp_path / "ticks")}
+        (tmp_path / "clock").write_text("0\n", encoding="utf-8", newline="\n")
+        fake["CLOCK"] = str(tmp_path / "clock")
     calls = tmp_path / "calls"
     expressions = {**EXPRESSIONS, "${{ steps.token.outputs.token }}": token}
     step = step_by("base-push-plan", name=STEP)
@@ -420,11 +418,13 @@ def test_a_failed_dispatchs_errors_are_downgraded_to_warnings(tmp_path):
 
 @bash_only
 def test_a_spent_budget_names_every_pull_request_not_reached_and_exits_0(tmp_path):
-    """The clock reads 0 at the loop's start and before #1, then 600, the 10-minute budget,
-    before #2: #1 is dispatched, #2 and #3 are not, and one warning names both. Mutations: drop
-    the budget check -- #2 and #3 are dispatched; check the budget after the dispatch -- #2 is
-    dispatched before the warning."""
-    code, out, _, calls = _step(tmp_path, clock=[0, 0, 600], FAKE_PRS="1\n2\n3\n")
+    """Selection takes no time and #1's dispatch takes 600 s, the 10-minute budget: #1 is
+    dispatched, #2 and #3 are not, and one warning names both. Mutations: drop the budget check
+    -- #2 and #3 are dispatched; check the budget after the dispatch -- the warning names #1
+    too."""
+    code, out, _, calls = _step(
+        tmp_path, clock=True, FAKE_DISPATCH_SECONDS="600", FAKE_PRS="1\n2\n3\n"
+    )
     assert (code, calls) == (0, [f"1 plan main {SLUG} replan-token unset"])
     assert out.splitlines() == [
         _notice(1),
@@ -433,6 +433,35 @@ def test_a_spent_budget_names_every_pull_request_not_reached_and_exits_0(tmp_pat
             "shipmate plan on #2, #3"
         ),
     ]
+
+
+@bash_only
+def test_a_budget_spent_during_selection_dispatches_nothing(tmp_path):
+    """The budget starts at the step's top, so it covers selection: selection takes 600 s, so
+    no dispatch begins and the warning names both. Mutation: take `start` after the selection --
+    #1 and #2 are dispatched."""
+    code, out, _, calls = _step(tmp_path, clock=True, FAKE_SELECT_SECONDS="600", FAKE_PRS="1\n2\n")
+    assert (code, calls) == (0, [])
+    assert out.splitlines() == [
+        (
+            "::warning::not re-planned: the re-plan budget of 10 minutes is spent; comment "
+            "shipmate plan on #1, #2"
+        ),
+    ]
+
+
+@bash_only
+def test_the_selection_log_is_written_under_runner_temp(tmp_path):
+    """The step's cwd is the consumer's workspace, so the log goes to `RUNNER_TEMP`. Mutation:
+    `err=select.err` -- the log lands in the cwd."""
+    temp = tmp_path / "runner-temp"
+    temp.mkdir()
+    code, _, _, _ = _step(tmp_path, FAKE_PRS="", RUNNER_TEMP=str(temp))
+    assert (code, (temp / "select.err").is_file(), (tmp_path / "select.err").exists()) == (
+        0,
+        True,
+        False,
+    )
 
 
 @bash_only
