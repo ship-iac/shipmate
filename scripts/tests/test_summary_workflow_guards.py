@@ -207,15 +207,18 @@ def test_a_moved_head_skips_the_apply_checks_and_the_gate():
 EXPECTED_ACTION_OUTPUTS = {
     "upsert": {
         "description": (
-            "What `Write the plan comment` did: upsert-comment's one word, or `failed` when the "
-            "held render or write failed. Empty when the step skipped or exited before writing."
+            "What `Write the plan comment` did: upsert-comment's one word, `moved` when a "
+            "`draft` or `hold` run finds the pull request moved past its head, or `failed` when "
+            "the held render or write failed. Empty when the step skipped or exited before "
+            "writing."
         ),
         "value": "${{ steps.upsert.outputs.result }}",
     },
     "superseded": {
         "description": (
-            "`true` when this run wrote nothing on the head: the pull request moved past it, or a "
-            "newer plan run holds its gate. Empty otherwise."
+            "`true` when the hold step found the pull request moved past this run's head, or a "
+            "newer plan run holding its gate, and this run wrote nothing on the head. Empty "
+            "otherwise. A head that moves after that read reports through `upsert` as `moved`."
         ),
         "value": "${{ steps.hold.outputs.superseded }}",
     },

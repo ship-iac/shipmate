@@ -36,16 +36,17 @@ newest comment is the one to bring up to date either way. Each failed minimize p
 and the run goes on. Every warning goes to stderr on one line; one quoting an unexpected answer
 quotes its first 200 characters.
 
-With `--head`, the pull request's current head is read once a write is due, and nothing is
-written unless it is that SHA, so a run for an older head never writes over the newer head's
-comment.
+With `--head`, the pull request's current head is read after the visibility read, before any
+write and before `skipped`, and nothing is written unless it is that SHA, so a run for an older
+head never writes over the newer head's comment, and a run that writes nothing still reports a
+moved head.
 
 Prints exactly one word and exits 0:
 
 - `updated`: a marker comment was PATCHed (only with `--update-only`).
 - `created`: the body was POSTed.
-- `skipped`: `--update-only` and no visible marker comment; nothing written, and the head is
-  not read.
+- `skipped`: `--update-only`, no visible marker comment, and with `--head` the head unmoved;
+  nothing written.
 - `moved`: the pull request's head is not `--head`; nothing written.
 - `head-failed`: the head read failed or gave no head SHA; nothing written.
 - `list-failed`: the listing failed on any page, or printed a line that is not an
@@ -261,12 +262,12 @@ def main():
         print("list-failed")
         return
     visible, read = _visible(found, pr)
-    if not visible and mode == "--update-only":
-        print("skipped")
-        return
     stop = _head_stop(repo, pr, head)
     if stop:
         print(stop)
+        return
+    if not visible and mode == "--update-only":
+        print("skipped")
         return
     cid, earlier = _targets(mode, visible, read)
     response, word = _write(repo, pr, path, cid)
