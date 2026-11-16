@@ -37,9 +37,9 @@ runs:
         SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
         SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
         SHIPMATE_JOB_ID: ${{ inputs.job-id }}
-      # `--paginate --jq` because a 256-cell level exceeds the 100-per-page cap. Unlike
-      # apply-summary's cosmetic listing, this one decides which checks complete, so it never
-      # degrades to no data: that would silently strand every applied check pending.
+      # `apply-complete list` paginates because a 256-cell level exceeds the 100-per-page cap.
+      # Unlike apply-summary's cosmetic listing, this one decides which checks complete, so it
+      # never degrades to no data: that would silently strand every applied check pending.
       run: |
         set -euo pipefail
         : > "$RUNNER_TEMP/rows.jsonl"
@@ -56,20 +56,16 @@ runs:
         for n in $(seq "$attempts"); do
           rc=0
           : > "$RUNNER_TEMP/attempt-rows.jsonl"
-          if gh api --paginate --jq '.jobs[]' \
-               "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
-               > "$RUNNER_TEMP/jobs.jsonl" && [ -s "$RUNNER_TEMP/jobs.jsonl" ]; then
+          # A failed or empty listing exits 75 and is never classified: a truncated listing
+          # would write `Not run` over the cells of a skipped wave it lost.
+          if python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" list \
+               > "$RUNNER_TEMP/jobs.jsonl" 2> "$RUNNER_TEMP/diagnostics.txt"; then
             python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
               < "$RUNNER_TEMP/jobs.jsonl" \
               > "$RUNNER_TEMP/attempt-rows.jsonl" \
               2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
           else
-            # An empty or failed fetch is the extreme form of that lag, so it retries. The
-            # half-written file stays unread: a truncated listing would write `Not run` over
-            # the cells of a skipped wave it lost.
-            rc=75
-            echo "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells succeeded" \
-              > "$RUNNER_TEMP/diagnostics.txt"
+            rc=$?
           fi
           # Rows accumulate for the merge after the loop: replicas differ, so a later attempt
           # can land on a staler one and lose a row an earlier attempt saw.
@@ -128,6 +124,6 @@ runs:
       run: |
         set -euo pipefail
         if [ -s "$RUNNER_TEMP/stranded.txt" ]; then
-          echo "::error::the retries were exhausted and these apply checks are left pending: $(tr '\n' ' ' < "$RUNNER_TEMP/stranded.txt")"
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" stranded "$RUNNER_TEMP/stranded.txt"
           exit 1
         fi

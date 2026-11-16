@@ -27,6 +27,7 @@ from _shipmate import (
     named,
     plan_runs_since,
     pr_head,
+    print_annotated,
     retried,
     review_count,
     run,
@@ -838,6 +839,13 @@ def test_run_annotated_writes_no_refusal_output_without_the_switch(monkeypatch, 
     """Mutation: write the output whatever `refusal_output` says -- red."""
     main = _raising("::error::first")
     assert _refusal_output(monkeypatch, tmp_path, main) == (1, b"")
+
+
+def test_print_annotated_prints_each_error_escaped_and_returns_its_lines(capsys):
+    """`run_annotated`'s printer, called directly. Mutation: drop `command_data` -- red."""
+    errors = print_annotated("::error::first\nmore 100%\n::error::second\n")
+    assert capsys.readouterr().err == "::error::first%0Amore 100%25\n::error::second\n"
+    assert errors == [["first", "more 100%"], ["second"]]
 
 
 def test_event_payload_degrades_to_empty_dict(tmp_path):

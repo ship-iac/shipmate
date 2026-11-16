@@ -295,17 +295,38 @@ REASON_CAP = 4000
 CHECK_OUTPUT_CAP = 65_535
 
 
-def run_annotated(main, *args, refusal_output=False):
-    """Call `main(*args)`; print an `::error::` exit as one escaped workflow command per error.
+def print_annotated(code):
+    """Print `code`, a message starting `::error::`, to stderr as one escaped `::error::`
+    workflow command per error; return the errors, each a list of its lines, prefix removed.
 
-    The runner parses workflow commands per line, so a raw multi-line refusal annotates only its
+    The runner parses workflow commands per line, so a raw multi-line message annotates only its
     first line. The code splits into lines with `splitlines`, so CR, LF and CRLF each end a
-    line on both surfaces: the annotation and the `refusal` output. A new
-    error starts at each line starting `::error::` (joined refusals keep one annotation each),
-    every other line stays with the error above it, trailing empty lines are dropped, and each
-    error prints through `command_data`, which also keeps a literal `%0A` or `%25` in a stack
-    path verbatim. Exits 1 after printing. Any other `SystemExit` passes through unchanged.
-    Producers stay raw: this is the one print site of an annotated script's refusal.
+    line. A new error starts at each line starting `::error::` (joined refusals keep one
+    annotation each), every other line stays with the error above it, trailing empty lines are
+    dropped, and each error prints through `command_data`, which also keeps a literal `%0A` or
+    `%25` in a stack path verbatim. A caller printing one cause whose lines can start
+    `::error::`, such as gh's stderr, passes it on one line (`one_line`).
+
+    Producers stay raw: this is the one print site of an annotated message.
+    """
+    errors = []
+    for line in code.splitlines():
+        if line.startswith("::error::"):
+            errors.append([line.removeprefix("::error::")])
+        else:
+            errors[-1].append(line)
+    for lines in errors:
+        message = "\n".join(lines).rstrip("\n")
+        sys.stderr.write(f"::error::{command_data(message)}\n")
+    sys.stderr.flush()
+    return errors
+
+
+def run_annotated(main, *args, refusal_output=False):
+    """Call `main(*args)`; print an `::error::` exit through `print_annotated`, then exit 1.
+
+    The annotation and the `refusal` output split lines with the same `splitlines`, so the two
+    surfaces agree on where a line ends. Any other `SystemExit` passes through unchanged.
 
     With `refusal_output`, a refusal also writes the step output `refusal`: the first error on
     one line, each of its lines stripped and joined by a space, unescaped and cut at `REASON_CAP`
@@ -319,16 +340,7 @@ def run_annotated(main, *args, refusal_output=False):
         code = exc.code
         if not (isinstance(code, str) and code.startswith("::error::")):
             raise
-        errors = []
-        for line in code.splitlines():
-            if line.startswith("::error::"):
-                errors.append([line.removeprefix("::error::")])
-            else:
-                errors[-1].append(line)
-        for lines in errors:
-            message = "\n".join(lines).rstrip("\n")
-            sys.stderr.write(f"::error::{command_data(message)}\n")
-        sys.stderr.flush()
+        errors = print_annotated(code)
         if refusal_output:
             # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
             write_outputs(refusal=" ".join(filter(None, map(str.strip, errors[0])))[:REASON_CAP])
@@ -828,9 +840,10 @@ def exit_text(exc):
 
 
 def one_line(text):
-    """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
-    command in the log."""
-    return " | ".join(part for part in re.split(r"[\r\n]+", str(text)) if part)
+    """`text` with every run of line breaks `str.splitlines` ends a line at as ` | `, so no line
+    of gh's output can start a workflow command in the log, and `print_annotated` reads it as one
+    line."""
+    return " | ".join(part for part in str(text).splitlines() if part)
 
 
 def status_text(status):
