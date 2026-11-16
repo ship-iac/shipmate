@@ -53,12 +53,13 @@ _QUEUE = {"name": "apply / queue", "status": "completed"}
 @pytest.fixture
 def gh(monkeypatch):
     """Run `main` against recorded reads; returns the recorder. Set `runs`, `complete`, `jobs`
-    ({id: (jobs, complete)}) and `heads` (one per read) before calling `go`."""
+    ({id: (jobs, complete)}) and `heads` (one per read) before calling `go`. With
+    `GITHUB_WORKFLOW_REF` unset, the `apply_runs` stub asserts `shipmate.yml` whole. Mutation:
+    list `"ship.yml"` -- red."""
     for k, v in {
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_RUN_ID": "50",
-        "GITHUB_WORKFLOW_REF": "o/r/.github/workflows/shipmate.yml@refs/heads/main",
         "PR_NUMBER": "7",
         "SHIPMATE_ENV": "",
         "SHIPMATE_AUTO": "false",
@@ -67,6 +68,7 @@ def gh(monkeypatch):
         "SHIPMATE_TRIGGERING_ACTOR": "shipmate-iac[bot]",
     }.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.delenv("GITHUB_WORKFLOW_REF", raising=False)
 
     class Rec:
         runs, complete, jobs, heads, own_ref, own_row = [], True, {}, [_HEAD, _HEAD], _HEAD, True
@@ -268,30 +270,6 @@ def test_a_failed_cancel_keeps_the_run(gh, monkeypatch):
     gh.jobs = {40: (_j("waiting"), True)}
     gh.go()
     assert gh.posts == _reply(_WAITS.format(40))
-
-
-@pytest.mark.parametrize(
-    "ref",
-    [
-        "o/r/.github/workflows/../x.yml@refs/heads/main",
-        "o/other/.github/workflows/shipmate.yml@refs/heads/main",
-        "o/r/.github/workflows/sub/shipmate.yml@refs/heads/main",
-        "o/r/.github/workflows/shipmate.yml?x=1@refs/heads/main",
-        "shipmate.yml@refs/heads/main",
-        "",
-    ],
-)
-def test_a_workflow_ref_outside_this_repository_is_refused(ref):
-    """Mutations: `_WORKFLOW_FILE.search` for `fullmatch` -- red; drop `name == path` -- red
-    (a bare file name with no repository)."""
-    with pytest.raises(SystemExit):
-        aq.workflow_file("o/r", ref)
-
-
-def test_the_workflow_file_is_read_from_the_ref():
-    assert aq.workflow_file("o/r", "o/r/.github/workflows/ship.yaml@refs/pull/1/merge") == (
-        "ship.yaml"
-    )
 
 
 def test_contract_states_each_reply_sentence_as_the_script_renders_it(monkeypatch):

@@ -2,11 +2,10 @@
 """Cancel this pull request's stale apply runs, then say which run this one waits behind.
 
 Runs in `apply.yml`'s `queue` job, before this run's call joins `shipmate-apply-<pr_number>`.
-Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` (in a called workflow, the
-consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's environment),
-`SHIPMATE_AUTO` (`true` posts no reply), `SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`,
-`SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with `actions: write` and
-`pull-requests: write`).
+Lists the runs of `SHIPMATE_WORKFLOW`. Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`,
+`SHIPMATE_ENV` (the reply header's environment), `SHIPMATE_AUTO` (`true` posts no reply),
+`SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App
+token with `actions: write` and `pull-requests: write`).
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
 run, read the head again. A trusted run whose title names another head is stale, and is
@@ -30,6 +29,7 @@ import sys
 
 from _shipmate import (
     REPO_RE,
+    SHIPMATE_WORKFLOW,
     _load,
     _run,
     apply_runs,
@@ -45,23 +45,12 @@ from _shipmate import (
 
 rc = _load("reply-comment")
 
-_WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
 #: A wave cell of the call is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments;
 #: a caller job name containing ` / ` never matches, so such a run is kept.
 _LEVEL = re.compile(r"L[0-9]+")
-
-
-def workflow_file(repo, ref):
-    """The file name in `GITHUB_WORKFLOW_REF` (`<repo>/.github/workflows/<file>@<ref>`), refused
-    unless it lies in `repo` and is a plain YAML file name: it is bound into an API path."""
-    path = ref.partition("@")[0]
-    name = path.removeprefix(f"{repo}/.github/workflows/")
-    if name == path or _WORKFLOW_FILE.fullmatch(name) is None:
-        raise SystemExit(f"::error::GITHUB_WORKFLOW_REF is not a workflow of {repo}: {ref!r}")
-    return name
 
 
 def in_call(jobs):
@@ -169,10 +158,10 @@ def cancel(repo, run_id):
     return True
 
 
-def queue(repo, wf, pr, own, slug, self_by_app):
+def queue(repo, pr, own, slug, self_by_app):
     """The reply's sentences, after cancelling each stale run when `self_by_app` and this run's
     own listed `ref` is the live head."""
-    runs, complete = apply_runs(repo, wf, pr, slug)
+    runs, complete = apply_runs(repo, SHIPMATE_WORKFLOW, pr, slug)
     own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
@@ -204,7 +193,6 @@ def main():
         sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr!r})")
     if not is_run_id(own):
         sys.exit(f"::error::GITHUB_RUN_ID must be a run id (got: {own!r})")
-    wf = workflow_file(repo, os.environ["GITHUB_WORKFLOW_REF"])
     slug = os.environ.get("SHIPMATE_APP_SLUG", "")
     bot = f"{slug}[bot]" if slug else None
     self_by_app = bot is not None and (
@@ -212,7 +200,7 @@ def main():
     )
     if not self_by_app:
         print("::notice::this run was not dispatched by the shipmate App; it writes nothing")
-    said = queue(repo, wf, pr, int(own), slug, self_by_app)
+    said = queue(repo, pr, int(own), slug, self_by_app)
     for line in said:
         print(line)
     if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
