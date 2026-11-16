@@ -1802,8 +1802,9 @@ def _normalize_expr(value):
 
 def _run_name_finding(doc, name):
     """One finding when the file's `run-name` is missing or is not `RUN_NAME` once
-    `_normalize_expr`ed: `scripts/apply-queue`, the `cell-lock` evict live-run check and
-    `scripts/dispatch-body`'s retry identify runs by the title it renders."""
+    `_normalize_expr`ed: `scripts/apply-queue` (both its modes), the `cell-lock` evict
+    live-run check and `scripts/dispatch-body`'s retry identify runs by the title it
+    renders."""
     found = doc.get("run-name")
     if isinstance(found, str) and _normalize_expr(found) == _normalize_expr(RUN_NAME):
         return []

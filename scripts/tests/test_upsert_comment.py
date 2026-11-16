@@ -208,7 +208,8 @@ def test_a_listing_failure_prints_list_failed_and_writes_nothing(
 
 
 def test_marker_comments_retries_a_transient_listing_failure(monkeypatch):
-    """Mutation: call `run([...])` without `retried` -- the 502 raises."""
+    """The row carries the listed line's `head`. Mutations: call `run([...])` without `retried`
+    -- the 502 raises; drop `head` from the row -- red."""
     slept, calls = [], []
 
     def fake_run(args):
@@ -220,7 +221,7 @@ def test_marker_comments_retries_a_transient_listing_failure(monkeypatch):
     monkeypatch.setattr(uc, "run", fake_run)
     monkeypatch.setattr("_shipmate._sleep", slept.append)
     assert uc.marker_comments("o/r", "7", SUMMARY) == [
-        {"id": 5, "node_id": "IC_5", "login": "shipmate[bot]"}
+        {"id": 5, "node_id": "IC_5", "login": "shipmate[bot]", "head": SUMMARY}
     ]
     assert (calls, slept) == ([LIST_ARGV, LIST_ARGV], [2])
 

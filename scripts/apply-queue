@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Cancel this pull request's stale apply runs, then say which run this one waits behind.
+"""Cancel this pull request's stale apply runs and say which run this one waits behind; with
+`waiters`, tell the runs waiting behind this one.
 
-Runs in `apply.yml`'s `queue` job, before this run's call joins `shipmate-apply-<pr_number>`.
-Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` (in a called workflow, the
-consumer's dispatching file), `PR_NUMBER`, `SHIPMATE_ENV` (the reply header's environment),
-`SHIPMATE_AUTO` (`true` posts no reply), `SHIPMATE_APP_SLUG`, `SHIPMATE_ACTOR`,
-`SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with `actions: write` and
-`pull-requests: write`).
+Without an argument it runs in `apply.yml`'s `queue` job, before this run's call joins
+`shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `review` and `summary`, while
+this run holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
+Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`, `SHIPMATE_ENV` (the queue reply
+header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_APP_SLUG`,
+`SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
+`pull-requests: write`, and `actions: write` for the queue or `actions: read` for `waiters`).
 
 Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
 run, read the head again. A trusted run whose title names another head is stale, and is
@@ -16,11 +18,15 @@ an environment's approval. An incomplete runs listing or a failed head read canc
 a failed first head read skips the jobs reads. Only a run whose own listed `ref` is the live
 head cancels: a run not at the live head is stale itself and leaves stale runs to a run at the
 live head; a run missing from its own listing cancels nothing. An untrusted run is never
-cancelled.
+cancelled. A queue reply naming the holder starts with this run's `waits_marker`.
 
-Writes, a cancel or the reply, happen only when this run's `actor` and `triggering_actor` are
-both `<slug>[bot]`; the reply's sentences print to the log either way. The queue only reports
-and tidies, so a failed cancel or reply warns and exits 0; the replies are in CONTRACT.md
+`waiters` tells each App-dispatched run with a command comment whose call waits for the group,
+once per run across `queue`, `review` and `summary`: a run whose `waits_marker` starts a comment
+of `<slug>[bot]` is skipped.
+
+Writes, a cancel or a reply, happen only when this run's `actor` and `triggering_actor` are
+both `<slug>[bot]`; the replies' sentences print to the log either way. Both modes only report
+and tidy, so a failed read, cancel or reply warns and exits 0; the replies are in CONTRACT.md
 §Comment-ops, "One apply run per pull request".
 """
 
@@ -44,24 +50,14 @@ from _shipmate import (
 )
 
 rc = _load("reply-comment")
+uc = _load("upsert-comment")
 
-_WORKFLOW_FILE = re.compile(r"[A-Za-z0-9_.-]+\.ya?ml")
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
 #: A wave cell of the call is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments;
 #: a caller job name containing ` / ` never matches, so such a run is kept.
 _LEVEL = re.compile(r"L[0-9]+")
-
-
-def workflow_file(repo, ref):
-    """The file name in `GITHUB_WORKFLOW_REF` (`<repo>/.github/workflows/<file>@<ref>`), refused
-    unless it lies in `repo` and is a plain YAML file name: it is bound into an API path."""
-    path = ref.partition("@")[0]
-    name = path.removeprefix(f"{repo}/.github/workflows/")
-    if name == path or _WORKFLOW_FILE.fullmatch(name) is None:
-        raise SystemExit(f"::error::GITHUB_WORKFLOW_REF is not a workflow of {repo}: {ref!r}")
-    return name
 
 
 def in_call(jobs):
@@ -169,19 +165,20 @@ def cancel(repo, run_id):
     return True
 
 
-def queue(repo, wf, pr, own, slug, self_by_app):
-    """The reply's sentences, after cancelling each stale run when `self_by_app` and this run's
-    own listed `ref` is the live head."""
-    runs, complete = apply_runs(repo, wf, pr, slug)
+def queue(repo, pr, own, slug, self_by_app):
+    """`(sentences, named)`: the reply's sentences, after cancelling each stale run when
+    `self_by_app` and this run's own listed `ref` is the live head; `named` when they name the
+    run this one waits for."""
+    runs, complete = apply_runs(repo, pr, slug)
     own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
     if not complete:
-        return sentences(own, None, None, [], False)
+        return sentences(own, None, None, [], False), False
     app_runs = [r for r in others if r["by_app"]]
     foreign = [r for r in others if not r["by_app"]]
     if head is None:
-        return sentences(own, None, (foreign or [None])[0], [], True)
+        return sentences(own, None, (foreign or [None])[0], [], True), False
     jobs = {r["id"]: run_jobs(repo, r["id"]) for r in app_runs}
     stale = [
         r for r in app_runs if r["ref"] != head and jobs[r["id"]][1] and idle(jobs[r["id"]][0])
@@ -192,10 +189,89 @@ def queue(repo, wf, pr, own, slug, self_by_app):
     kept = [r for r in app_runs if r not in cancelled]
     holding = [r for r in kept if holds(jobs[r["id"]][0])]
     earlier = holding or [r for r in kept if r["id"] < own and _unfinished(jobs[r["id"]][0])]
-    return sentences(own, (earlier or [None])[0], (foreign or [None])[0], cancelled, True)
+    holder = (earlier or [None])[0]
+    return sentences(own, holder, (foreign or [None])[0], cancelled, True), holder is not None
+
+
+def _comment_link(repo, pr, comment_id):
+    return f"{os.environ['GITHUB_SERVER_URL']}/{repo}/pull/{pr}#issuecomment-{comment_id}"
+
+
+def waits_marker(run_id):
+    """The first line of a reply telling run `run_id` which run it waits behind."""
+    return f"<!-- shipmate:waits-{run_id} -->"
+
+
+def waits_sentence(waiter, repo, pr, own):
+    """The sentence telling run `waiter`, an `apply_runs` row, that run `own` holds the group,
+    citing the waiter's command comment on pull request `pr` of `repo`. Every id in a link is
+    validated (the row's `id` and `comment`, `is_pr_number`, `is_run_id`), never raw API text."""
+    return (
+        f"[the apply run]({_link(waiter['id'])}) for "
+        f"[this comment]({_comment_link(repo, pr, waiter['comment'])}) waits for "
+        f"[the apply run]({_link(own)}) of this pull request to finish."
+    )
+
+
+def waiting_runs(repo, pr, own, slug):
+    """The App-dispatched runs of pull request `pr` other than `own`, each with a command
+    comment, whose call waits for `shipmate-apply-<pr_number>` (`_in_group_wait` over a complete
+    jobs listing). Jobs are read only for such runs. An incomplete runs listing finds none; a
+    run whose jobs are not all listed is skipped; each warns."""
+    runs, complete = apply_runs(repo, pr, slug)
+    if not complete:
+        print(f"::warning::the apply runs of #{pr} could not all be listed; no waiting run is told")
+        return []
+    found = []
+    for r in runs:
+        if not r["by_app"] or r["id"] == own or not r["comment"]:
+            continue
+        jobs, listed = run_jobs(repo, r["id"])
+        if not listed:
+            print(f"::warning::the jobs of run {r['id']} could not all be listed; it is not told")
+        elif _in_group_wait(jobs):
+            found.append(r)
+    return found
+
+
+def waiters(repo, pr, own, slug, self_by_app):
+    """Tell each of `waiting_runs` that this run holds the group, once: a run whose
+    `waits_marker` starts a comment of `<slug>[bot]` is skipped. One comments listing, only when
+    a waiting run exists. Display only: every failure warns and the run goes on."""
+    found = waiting_runs(repo, pr, own, slug)
+    if not found:
+        return
+    try:
+        listed = uc.marker_comments(repo, pr, "<!-- shipmate:waits-")
+    except SystemExit as exc:
+        print(
+            f"::warning::could not list the comments of #{pr}; no waiting run is told: "
+            f"{one_line(exc.code)}"
+        )
+        return
+    told = [c["head"] for c in listed if c["login"] == f"{slug}[bot]"]
+    for r in found:
+        marker = waits_marker(r["id"])
+        if any(head.startswith(marker) for head in told):
+            continue
+        text = waits_sentence(r, repo, pr, own)
+        print(text)
+        if not self_by_app:
+            continue
+        body = rc.body("apply", "", "notice", text, current_run_url(), "apply run")
+        try:
+            rc.post(pr, f"{marker}\n{body}")
+        except SystemExit as exc:
+            print(
+                f"::warning::could not tell run {r['id']} on #{pr} what it waits behind: "
+                f"{one_line(exc.code)}"
+            )
 
 
 def main():
+    mode = sys.argv[1:]
+    if mode not in ([], ["waiters"]):
+        sys.exit("::error::usage: apply-queue [waiters]")
     repo = os.environ["GITHUB_REPOSITORY"]
     if REPO_RE.fullmatch(repo) is None:
         sys.exit(f"::error::GITHUB_REPOSITORY is not a repository slug: {repo!r}")
@@ -204,7 +280,6 @@ def main():
         sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr!r})")
     if not is_run_id(own):
         sys.exit(f"::error::GITHUB_RUN_ID must be a run id (got: {own!r})")
-    wf = workflow_file(repo, os.environ["GITHUB_WORKFLOW_REF"])
     slug = os.environ.get("SHIPMATE_APP_SLUG", "")
     bot = f"{slug}[bot]" if slug else None
     self_by_app = bot is not None and (
@@ -212,12 +287,22 @@ def main():
     )
     if not self_by_app:
         print("::notice::this run was not dispatched by the shipmate App; it writes nothing")
-    said = queue(repo, wf, pr, int(own), slug, self_by_app)
+    if mode:
+        waiters(repo, pr, int(own), slug, self_by_app)
+    else:
+        reply(repo, pr, own, slug, self_by_app)
+
+
+def reply(repo, pr, own, slug, self_by_app):
+    """`queue`, then its reply on pull request `pr`, under this run's `waits_marker` when it
+    names the run this one waits for."""
+    said, named = queue(repo, pr, int(own), slug, self_by_app)
     for line in said:
         print(line)
     if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
         return
-    body = rc.body(
+    marker = f"{waits_marker(own)}\n" if named else ""
+    body = marker + rc.body(
         "apply",
         os.environ.get("SHIPMATE_ENV", ""),
         "notice",

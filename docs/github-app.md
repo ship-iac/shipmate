@@ -286,7 +286,8 @@ as above, and step 5 runs in every consumer repository.
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome
   reply of a plan or apply run that ends without its result, the queue reply
-  of an apply run, and drift issues. It cancels a pull request's stale apply
+  of an apply run, the reply telling an apply run which run it waits behind,
+  and drift issues. It cancels a pull request's stale apply
   runs ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops, "One apply run per pull
   request"). With the same `pull_requests: write` token it minimizes its earlier
   plan comments as outdated (GraphQL `minimizeComment`) after posting a new

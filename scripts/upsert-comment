@@ -86,7 +86,7 @@ ANSWER_CAP = 200
 
 def marker_comments(repo, pr, marker):
     """Each Bot comment whose body starts with `marker`, in listing order, as
-    `{id, node_id, login}`.
+    `{id, node_id, login, head}`, `head` the body's first 64 characters.
 
     A transient failure is retried (`retried`). Raises SystemExit when the listing fails: `run`
     returns stdout only on exit 0, so a failure on a later page yields no comments at all rather
@@ -107,7 +107,7 @@ def marker_comments(repo, pr, marker):
         if line.strip():
             try:
                 row = json.loads(line)
-                comment = {k: row[k] for k in ("id", "node_id", "login")}
+                comment = {k: row[k] for k in ("id", "node_id", "login", "head")}
                 matched = row["head"].startswith(marker)
             except (ValueError, LookupError, TypeError, AttributeError) as exc:
                 raise SystemExit(f"unparseable comment listing line: {line!r}") from exc

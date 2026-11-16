@@ -26,6 +26,8 @@ section below names the SHA the release tags.
 
 ### Fixed
 
+- **An apply run waiting behind another of its pull request is told which one, even when both commands arrive together.** The run holding the queue posts a pull request comment for each waiting run started by a `shipmate apply` comment from its `review` and `summary` jobs through `actions/apply-waiters`, which mints an App token with `actions: read` and `pull-requests: write`: ``[the apply run](<url>) for [this comment](<url>) waits for [the apply run](<url>) of this pull request to finish.`` It tells each waiting run once, best effort: `CONTRACT.md` lists when a waiting run is told more than once or not at all. Both steps are display only (`continue-on-error`, `timeout-minutes: 1`). Each comment starts with `<!-- shipmate:waits-<run id> -->`, and so does the `queue` reply that names the run it waits for. `queue` lists the runs of `shipmate.yml` (`CONTRACT.md` §Comment-ops, `docs/troubleshooting.md`).
+
 - **A plan with nothing of its own to apply no longer greens the gate over an earlier plan's open apply checks.** A zero-cell or no-change plan writes `pending` (`an earlier plan's <n> apply check(s) are still open on this head; push a commit to re-plan`) while the newest App apply check of a name it does not publish is not done, and a refresh greens it once they are.
 
 - **A reply posted by a dispatched run names that run in its footer.** The claim's not-started reply and the outcome reply read `[plan run]` or `[apply run]`, the auto apply replies from an autoplan's summary `[plan run]`, and the apply queue's notice `[apply run]`, where they read `[comment run]` while linking the plan or apply run (`CONTRACT.md` §Comment-ops).

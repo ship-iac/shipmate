@@ -2963,6 +2963,16 @@ it waits behind. That run may itself wait on an `<env>-apply` environment's
 approval: approve or reject it there, or cancel it from its run page, to let
 this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 
+### `waits for the apply run of this pull request to finish`
+
+The run holding this pull request's apply queue posted this comment on the
+pull request. It links the waiting run, the apply command comment that started
+it, and the holding run. It comes from the holding run's `review` or `summary` job, so
+it can arrive after the command's own run has started waiting. The remedy is the
+one above: the waiting run starts once the holding run ends, and an
+`<env>-apply` approval the holding run waits on is approved, rejected or
+cancelled from that run's page.
+
 ### `may wait for an apply run of this pull request that shipmate did not dispatch`
 
 A live run of `shipmate.yml` is titled as an apply of this pull request, but it
