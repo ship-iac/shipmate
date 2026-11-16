@@ -29,8 +29,8 @@ pin and table, so the edits take effect together at merge.
    python <engine>/scripts/repin <consumer> vX.Y.Z [--write-fence]
    ```
 
-   It fetches `main` into `origin/main`, the whole history when the clone is shallow, and
-   checks, before it writes anything:
+   It fetches the whole history of `main` into `origin/main` and checks, before it writes
+   anything:
 
    - the tag has the `vX.Y.Z` form and resolves as a tag, never as a branch of that name;
    - when `origin` holds the tag, it names the same commit as the local tag. A stale local
@@ -234,7 +234,7 @@ the release commit, from `repo-example-stacks-aws`:
    [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
      { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
      test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
-     git -C ../repo-example-stacks-aws fetch origin main && \
+     git -C ../repo-example-stacks-aws fetch origin +refs/heads/main:refs/remotes/origin/main && \
      git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z origin/main && \
      python scripts/repin ../repo-example-stacks-aws vX.Y.Z
    ```
@@ -388,7 +388,8 @@ commit: smoke again, starting with that cleanup. When only
 
 ```bash
 [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
-  git fetch origin main && test "$(git rev-parse origin/main)" = <release-sha> && \
+  git fetch origin +refs/heads/main:refs/remotes/origin/main && \
+  test "$(git rev-parse origin/main)" = <release-sha> && \
   { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
   test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
   git push origin vX.Y.Z && \

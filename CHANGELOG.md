@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **`scripts/repin` resolves the tag from any engine clone that holds it, shallow or single-branch.** It fetches `main` into `origin/main` by an explicit refspec, with `--unshallow` from a shallow clone, so a `git clone --depth 1 --branch <tag>` clone no longer fails with `Not a valid object name origin/main`, and a tag below a shallow `main`'s tip is no longer refused as not on `origin/main` (`docs/releasing.md` §Re-pin a consumer).
+- **`scripts/repin` resolves the tag from any engine clone that holds it, shallow or single-branch.** It fetches the whole history of `main` into `origin/main` by an explicit refspec, so a `git clone --depth 1 --branch <tag>` clone no longer fails with `Not a valid object name origin/main`, and a tag below a shallow `main`'s tip is no longer refused as not on `origin/main`. The release runbook's `main` fetches name the same destination (`docs/releasing.md`).
 
 ## [0.56.0] — 2026-11-15
 
