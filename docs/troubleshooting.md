@@ -1888,8 +1888,8 @@ alone a check an apply completed or is completing. It refuses before writing
 anything when its hold step finds the pull request moved past its head, or
 when a newer plan run holds the gate or published apply checks on the head, and
 ends green with that refusal as a notice; a moved run then plans the live head
-when the pull request is open, the live head is not a draft, and it has no
-autoplan run unfinished or succeeded (§A cancelled autoplan left red checks on
+when the pull request is open, the live head is not a draft, and no run of the
+live head planned it or is about to (§A cancelled autoplan left red checks on
 the pull request). A re-run of a plan job whose artifact upload succeeded fails,
 because the uploads are not `overwrite:` and 409.
 
@@ -2226,7 +2226,10 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    start it (its event action is not `opened` or `synchronize`: the pull request
    was marked ready for review or reopened), it is a
    re-run, the pull request is a draft, the gate is not pending over a complete
-   plan, or no changed cell is in an `auto` environment. When it cannot decide
+   plan, or no changed cell is in an `auto` environment. When another autoplan
+   run of the head is newer, typically the run that marking the pull request
+   ready started on the same head, it logs `autoplan run <id> of <head> is newer
+   than this run; no auto apply started; comment shipmate apply to apply`. When it cannot decide
    (`detect`'s `auto_envs` output missing or malformed, a cell summary
    unparseable) it warns `could not decide whether to dispatch an auto apply; no
    auto apply started` and posts no reply. Separately, when an autoplan of a
@@ -2239,12 +2242,15 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    The next step, `Dispatch an auto apply`, logs `dispatched an auto apply of
    <envs> for PR #<n> (ref <sha>)`. Both steps are skipped when a newer plan
    run of the head refused this one, or when the pull request moved past this
-   run's head (the publish hold's or the plan comment write's read). A moved
+   run's head (the publish hold's or the plan comment step's read). A moved
    run's step `Check whether the live head needs a plan` then dispatches
    `shipmate plan` for the live head, or logs why not (`pull request #<n> is
    <state>; nothing dispatched`, `pull request #<n> moved to <sha>, a draft;
-   nothing dispatched`, or `pull request #<n> moved to <sha>, whose autoplan run
-   has not finished or succeeded; nothing dispatched`). A
+   nothing dispatched`, `pull request #<n> moved to <sha>, which has an autoplan
+   run <id> in progress; nothing dispatched`, `pull request #<n> moved to <sha>;
+   its shipmate plan run <id> is <status> and plans the live head; nothing
+   dispatched`, or `pull request #<n> moved to <sha>, whose autoplan run <id>
+   succeeded; nothing dispatched`). A
    dispatched plan is on demand, so no auto apply follows it: comment `shipmate
    apply` once it finishes.
 2. The pull request's comments: the `auto apply not started` or `auto apply may have started` reply (below), or
@@ -2794,8 +2800,9 @@ or `shipmate · auto` (`CONTRACT.md` §Check names) to see the others.
 
 A newer plan run of the same pull request (a push, open or reopen, or a re-run
 of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
-`plan / summary`, `plan / gate-hold`, the `plan / <env> / <stack>` matrix
-check) stay red or cancelled on its head.
+`plan / summary`, the `plan / <env> / <stack>` matrix check) stay red or
+cancelled on its head. `plan / gate-hold` shows skipped: it runs only when
+`summary` was cancelled and the run was not.
 
 While that head is still the pull request's, a `shipmate plan` comment plans it
 again. Its plan comment names an autoplan run under the verdict only when the
@@ -2814,14 +2821,14 @@ of it writes nothing on its head and ends green at its hold step, with the
 notice "pull request #<n> has moved past <sha>; this run writes no comment,
 apply check or gate on it". When that re-run cancelled the live head's autoplan
 in flight (below), it dispatches `shipmate plan` for the live head, whose
-autoplan run is then neither unfinished nor succeeded; that plan is on demand,
-so no auto apply follows it.
+cancelled autoplan run blocks no replan; that plan is on demand, so no auto
+apply follows it.
 
 A push, open or reopen run of an older head that arrives while the live head's
 autoplan runs cancels that autoplan. When that older run's summary finds the
 head moved, it dispatches `shipmate plan` for the live head if the pull request
-is open, is not a draft, and the live head has no autoplan run unfinished or
-succeeded; it logs why otherwise, and warns to check the Actions tab when that
+is open, is not a draft, and no run of the live head planned it or is about to;
+it logs why otherwise, and warns to check the Actions tab when that
 dispatch may have started a plan. In every case, once no plan run is in flight,
 comment `shipmate plan` if the plan comment does not show the live head, then
 `shipmate apply` for an environment that applies automatically: an on-demand

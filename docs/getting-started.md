@@ -443,7 +443,9 @@ default — `pull_request_target` runs at the *base* ref, a dispatched run at th
 dispatch ref — and a dispatched run carries no pull request in its event payload
 at all. The engine's `facts` job resolves the pull request once, from the event
 payload on a pull-request event and from the API by the dispatched `pr_number`
-otherwise, and every job below it plans the head SHA that job reports.
+otherwise, and every job below it plans the head SHA that job reports. A
+payload that says draft costs one more API read of the draft flag, so a pull
+request marked ready seconds after a push plans that push.
 
 A draft pull request's autoplan plans nothing, and `shipmate / gate` goes
 pending with the draft reason. Mark the pull request ready, or comment
