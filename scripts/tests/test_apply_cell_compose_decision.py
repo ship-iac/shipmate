@@ -111,14 +111,14 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "download",
-            "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or "
-            "push, or after the merge open a new pull request touching the stack",
+            "reviewed plan artifact missing or expired; re-plan (comment shipmate plan or "
+            "push), or after the merge open a new pull request touching the stack",
             id="download",
         ),
         pytest.param(
             "planned_head",
-            "reviewed plan records no commit or was produced from a different one; re-plan: "
-            "comment shipmate plan or push, or after the merge open a new pull request touching "
+            "reviewed plan records no commit or was produced from a different one; re-plan "
+            "(comment shipmate plan or push), or after the merge open a new pull request touching "
             "the stack",
             id="planned_head",
         ),
@@ -129,8 +129,8 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "fingerprint",
-            "environment does not match the reviewed plan's fingerprint; re-plan: comment "
-            "shipmate plan or push, or after the merge open a new pull request touching the stack",
+            "environment does not match the reviewed plan's fingerprint; re-plan (comment "
+            "shipmate plan or push), or after the merge open a new pull request touching the stack",
             id="fingerprint",
         ),
         pytest.param(
@@ -152,7 +152,7 @@ _ALL_SUCCESS = {
         pytest.param(
             "plan_digest",
             "the stored plan cannot be rendered, or does not render to the plan text that was "
-            "reviewed; re-plan: comment shipmate plan or push, or after the merge open a new pull "
+            "reviewed; re-plan (comment shipmate plan or push), or after the merge open a new pull "
             "request touching the stack",
             id="plan_digest",
         ),
@@ -321,6 +321,6 @@ def test_a_pre_apply_refusal_does_not_name_another_failsafe(monkeypatch, tmp_pat
         download="failure",
     )
     assert cell["reason"] == (
-        "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or push, or "
+        "reviewed plan artifact missing or expired; re-plan (comment shipmate plan or push), or "
         "after the merge open a new pull request touching the stack"
     )

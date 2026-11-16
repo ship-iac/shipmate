@@ -1,4 +1,5 @@
-"""actions/apply-cell's fingerprint and digest-input refusals, each pinned as a whole message.
+"""actions/apply-cell's download, fingerprint and digest-input refusals, each pinned as a whole
+message.
 
 The remedy must hold after the merge too, where a `shipmate plan` comment re-plans nothing, so
 each test compares the entire annotation to a hand-written constant.
@@ -20,6 +21,21 @@ def _env(tmp_path, **extra):
         "STACK": "stacks/app",
         **extra,
     }
+
+
+@bash_only
+def test_a_missing_plan_artifact_refuses_with_the_two_branch_remedy(tmp_path):
+    """Mutation: restore the colon form `Re-plan: comment shipmate plan or push, ...`."""
+    harness = "gh() { return 1; }\n" + step_by("apply-cell", id="download")["run"]
+    r = run_step(tmp_path, harness, _env(tmp_path, RUN_ID="123", ART="plan.dev-eu.x"))
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert [ln for ln in r.stdout.splitlines() if ln.startswith("::error::")] == [
+        (
+            "::error::reviewed plan artifact 'plan.dev-eu.x' missing/expired; cannot apply"
+            " dev-eu/stacks/app without re-planning (fail-safe). Re-plan (comment shipmate plan"
+            " or push), or after the merge open a new pull request touching the stack."
+        )
+    ]
 
 
 @bash_only
