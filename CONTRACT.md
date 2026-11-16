@@ -4101,21 +4101,20 @@ run's conclusion. It holds the consumer's deploy concurrency group
 selection included: before each pull request it reads the clock, and once the
 budget is spent it warns ``not re-planned: the re-plan budget of 10 minutes is
 spent; comment shipmate plan on #<n>, ...``, naming every pull request it did
-not reach, and ends successfully. The budget bounds when a
-dispatch may begin, not the job: the mint precedes it, and a slow selection or
-a dispatch begun at its edge runs past it. The job's 15-minute `timeout-minutes` caps the
-whole job; when it stops the job, the pull requests it had not reached get no
-plan and no warning. It mints
-an App token with `actions: write`, `pull-requests: read` and `checks: read`,
-lists the open pull requests into the default branch, and dispatches a
-comment-less `shipmate plan` for each one that is not a draft, carries an App
-apply check in any state, and has a check naming a stack the push changed, or
-any check when the push changed a path outside every stack. `deploy-detect`'s
-`push` output carries the changed stacks (module dependents included) and that
-`outside` flag, which is also true when the previous tip is unknown or the stack
-list passes 64 KiB. The new plan marks each cell the push changed behind
-(Behind cells, above), so the pull request learns the base moved without
-anyone commenting.
+not reach, and ends successfully. The budget bounds when a dispatch may begin,
+not the job: the steps before it (the mint included) precede it, and a slow
+selection or a dispatch begun at its edge runs past it. The job's 15-minute
+`timeout-minutes` caps the job's runtime once it starts; when it stops the job,
+the pull requests it had not reached get no plan and no warning. It mints an App
+token with `actions: write`, `pull-requests: read` and `checks: read`, lists the
+open pull requests into the default branch, and dispatches a comment-less
+`shipmate plan` for each one that is not a draft, carries an App apply check in
+any state, and has a check naming a stack the push changed, or any check when
+the push changed a path outside every stack. `deploy-detect`'s `push` output
+carries the changed stacks (module dependents included) and that `outside` flag,
+which is also true when the previous tip is unknown or the stack list passes 64
+KiB. The new plan marks each cell the push changed behind (Behind cells, above),
+so the pull request learns the base moved without anyone commenting.
 
 A pull request with a live App `apply` or `auto` run is skipped and named in a
 notice: ``pull request #<n> was not re-planned: its <verb> run <id> is live,
