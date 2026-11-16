@@ -1683,7 +1683,11 @@ footer carries the help hint:
 
 ``[comment run](<run url>). Comment `shipmate help` for the available commands.``
 
-A notice's footer is `[comment run](<run url>)` alone.
+A notice's footer is `[comment run](<run url>)` alone. A reply posted by a
+dispatched run has the same shape, but its footer links that run and names it:
+`[plan run]` or `[apply run]` for the claim's not-started reply and the outcome
+reply, `[apply run]` for the apply queue's notice, and `[unlock run]` for the
+unlock result reply.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
@@ -2193,7 +2197,11 @@ failed cell reds the run.
 **The unlock result reply.** Each `unlock` leg uploads a record, even when it
 failed: artifact `shipmate-unlock-<strategy.job-index>` holding
 `shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
-and environment, its outcome and the probed lock id. The outcome is `released`
+and environment, its outcome and the probed lock id. Before downloading the
+records, `result` uploads a one-byte `shipmate-unlock-sentinel` artifact of its
+own, so the download always matches two or more artifacts and
+`download-artifact` writes each into a directory of its name; a lone match would
+be written without one. The outcome is `released`
 only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
 `failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
 before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
@@ -2213,10 +2221,13 @@ verdict line is one of:
 - ``⚪ released no state lock in <env>: no probed cell held a state lock.``
 - ``⚪ released no state lock in <env>: no cell in <env> has a pending apply check, ...``
   for an empty queue: the warning `detect` prints, whole.
-- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...; some cells' results could not be read; see the run.``,
-  each clause present when it applies: `failed` cells, then cells with no valid
-  record, then the released ones, then a failed record download, after which the
-  records that did arrive are still read.
+- ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
+  each clause present when it names a cell: `failed` cells, then cells with no
+  valid record, then the released ones.
+- When the record download failed, the records that arrived are still read, a
+  cell without one reads ``result unknown for <stack>, ...`` in place of
+  `did not run`, and the reply ends ``; some cells' results could not be read;
+  see the run.``
 - ``🔴 failed: could not read the unlock queue; see the run.`` when `detect`
   succeeded and its `cells` output is not a list of cells.
 - ``🔴 failed: the unlock run failed before probing any cell; see the run.``
@@ -2225,12 +2236,14 @@ verdict line is one of:
 The reply is display only and gates nothing. A record is written by a job that
 runs the pull request's HCL, so it can be forged. The reply names a cell only as
 `detect`'s queue entry at the record's index, never by a name in the record, and
-a record counts only when the artifact directory's index, the file name's and
-the record's `index` agree, its `stack` and `environment` equal that queue
-entry's, its outcome is one of the three, and it is at most 4,096 bytes of JSON.
-`download-artifact` writes a lone matching artifact without its directory, so
-that flat layout is read only when it holds exactly one file. A lock id outside
-the charset `scripts/lock-info` accepts is dropped, and stack names are escaped.
+a record counts only when it sits in an artifact directory
+`shipmate-unlock-<n>` as `shipmate-unlock-<n>.json`, its `index` is `<n>`, its
+outcome is one of the three, and at most 4,096 bytes of it are read and decoded.
+Its `stack` and `environment` must also equal that queue entry's: this catches a
+record that reached the wrong cell, not a forged one, which can copy them. A file
+at the download root, the sentinel and any other entry are ignored. A lock id
+outside the charset `scripts/lock-info` accepts is dropped, and stack names are
+escaped.
 A comment not on a pull request, an unreadable comment or a failed post posts
 nothing and warns. None of these, nor a failed download, fails `result`: the
 `unlock` legs' results stay the run's.
@@ -4236,8 +4249,9 @@ job of `apply.yml` and of `plan.yml` posts it: bound to `shipmate-engine`,
 The reply is the header `### shipmate apply` (with `<env>` for a targeted
 apply; an `auto` run uses `apply`) or `### shipmate plan`, a blank line, the
 verdict line, a blank line, and the footer
-``[comment run](<url>). Comment `shipmate help` for the available commands.``,
-where `<url>` links the run that posts the reply. The verdict line is one of:
+``[<verb> run](<url>). Comment `shipmate help` for the available commands.``,
+where `<url>` links the run that posts the reply and `<verb>` is `apply` or
+`plan`. The verdict line is one of:
 
 - refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
 - cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
