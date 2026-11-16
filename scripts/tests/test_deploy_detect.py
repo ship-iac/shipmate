@@ -1771,8 +1771,8 @@ _OTHERS = (
 )
 _LIVE = (
     "::error::deploy refused: stacks/app / dev-eu are held in progress by run 77, which is still "
-    "running. Re-run this deploy once it ends: the re-run deploys a cell that run never applied, "
-    "and refuses one whose apply may have started." + _OTHERS
+    "running. Once it ends, re-run this deploy: a cell whose check that run left in progress "
+    "deploys if the run never applied it and is refused otherwise." + _OTHERS
 )
 
 
@@ -1817,16 +1817,30 @@ def test_a_check_a_live_run_holds_refuses_the_deploy(tmp_path, monkeypatch, stat
     assert "wave0" not in github_outputs(tmp_path / "out.txt")
 
 
-def test_a_completed_run_listing_a_live_job_is_live(tmp_path, monkeypatch):
-    """Run 77 reads `completed`, but its listing shows a job still running, as a re-run started
-    between the two reads does: the cell is held as live.
+def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkeypatch):
+    """Run 77 reads `completed`, but its listing shows the cell's job still queued, as a re-run
+    started between the two reads does: the cell is held as live.
 
-    Mutation: drop the listed jobs' status check -- the cell's job lists no steps, so it deploys,
+    Mutation: drop the cell jobs' status check -- the cell's job lists no steps, so it deploys,
     red."""
     jobs = [_job(steps=[], status="queued")]
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert str(exc.value) == _LIVE
+
+
+def test_a_stuck_job_of_another_cell_does_not_hold_the_cell(tmp_path, monkeypatch, capsys):
+    """Run 77 reads `completed` and lists a job of another cell still `in_progress`; the cell's
+    own job never applied, so the cell deploys with the warning.
+
+    Mutation: count every listed job's status -- held as live, red."""
+    jobs = [
+        _job(name="apply / run / L0 / dev-eu / stacks/web", steps=[], status="in_progress"),
+        _job(steps=[]),
+    ]
+    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert "run 77 ended before applying this cell" in capsys.readouterr().err
 
 
 _NOT_STARTED = {
@@ -1920,7 +1934,8 @@ def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypa
     """A run read or jobs listing that fails after its retries, an empty listing, a listing
     short of its `total_count` and a run with no status each refuse naming the run: the cell
     may be applying. A repeat points at the by-hand section. `reads` counts the run reads and
-    the jobs listing reads.
+    the jobs listing reads. Under `filter=all`, `total_count` counts every attempt's jobs: a
+    probe of run 43649538511 listed 51 of 51 under `all` and 38 of 38 under `latest`.
 
     Mutation: deploy on a failed read -- deploys, red.
     Mutation: deploy on a failed listing -- deploys, red.

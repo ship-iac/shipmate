@@ -804,13 +804,14 @@ def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest"):
     """Every job of run `run_id`'s latest attempt, or of every attempt with `job_filter="all"`, each
     as the API returns it, possibly none; or None when a page fails or is malformed or a job has
     no string `status` or `name`, so no caller sees a partial listing, or, with `counted`, when
-    `_pages` finds the count short."""
+    `_pages` finds the count short. Each None prints its cause as one warning."""
     jobs = _pages(
         f"repos/{repo}/actions/runs/{run_id}/jobs?filter={job_filter}", "jobs", run, counted=counted
     )
-    if jobs is None or not all(
-        isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs
-    ):
+    if jobs is None:
+        return None
+    if not all(isinstance(j.get("status"), str) and isinstance(j.get("name"), str) for j in jobs):
+        sys.stderr.write(f"::warning::run {run_id} lists a job with no string status or name\n")
         return None
     return jobs
 
