@@ -3191,3 +3191,33 @@ def test_verify_auto_refuses_a_plan_created_before_the_apply_run_and_re_run_in_t
     if jobs is not None:
         gh.on(NEWER_JOBS, jobs)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == f"::error::{WHERE} {refusal}"
+
+
+def test_evict_cli_releases_no_lock_on_a_behind_cell(monkeypatch, tmp_path):
+    """auth's newest check is a behind record over an older queued one: this pull request
+    cannot apply it, so #12's lock there stays and only app's lock is evicted.
+
+    Mutation: drop the behind exclusion -- auth's lock is deleted too (an unexpected update),
+    red."""
+    behind = {"plan_run": "5", "pr": "7", "cells": 2, "behind": True}
+    gh = Gh().on(
+        CHECK_RUNS_READ,
+        jsonl(
+            _check("apply / stacks/auth / dev", "queued", None),
+            {
+                **_check("apply / stacks/auth / dev", "queued", None, run_id=4),
+                "external_id": json.dumps(behind),
+            },
+            _check("apply / stacks/app / dev", "queued", None, run_id=3),
+        ),
+    )
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, NEW)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(NEW), commit(NEW, message(12, "dev", "stacks/app")))
+    quiet(gh.on(pull_read(12), pull("main")), 12)
+    gh.on(REPO_ID_READ, REPO_ID).on(update(APP_REF, NEW, ZERO, False), "{}")
+    assert _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV) == {
+        "evicted": json.dumps([{"stack": "stacks/app", "environment": "dev", "holder": 12}]),
+        "refused": "[]",
+    }
+    assert gh.drained()

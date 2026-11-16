@@ -2676,7 +2676,7 @@ _ARTIFACTS = {
 }
 
 
-def _download_cells(monkeypatch, tmp_path, undownloadable=()):
+def _download_cells(monkeypatch, tmp_path, undownloadable=(), extra=()):
     """(surviving summaries, plan_run_ids) after check-ids mode, with `gh run download` faked to
     extract `_ARTIFACTS[rid]` into `-D`, or to fail for a run in `undownloadable`.
 
@@ -2694,8 +2694,9 @@ def _download_cells(monkeypatch, tmp_path, undownloadable=()):
             )
         return ""
 
+    planned = [*_PLANNED, *extra]
     rows = [
-        {**_apply_check(cid, name, "0"), "external_id": record} for name, cid, record in _PLANNED
+        {**_apply_check(cid, name, "0"), "external_id": record} for name, cid, record in planned
     ]
     _run_check_ids(
         monkeypatch,
@@ -2703,7 +2704,7 @@ def _download_cells(monkeypatch, tmp_path, undownloadable=()):
         {
             _HEAD_ARGV: _HEAD + "\n",
             _LISTING_ARGV: jsonl(*rows),
-            **{_ann_argv(cid): "[]" for _, cid, _ in _PLANNED},
+            **{_ann_argv(cid): "[]" for _, cid, _ in planned},
             **{_download_argv(rid): download for rid in _ARTIFACTS},
         },
     )
@@ -7530,3 +7531,17 @@ def test_the_shipmate_yml_probe_reports_the_run_name_with_and_without_the_engine
             ),
         ),
     ]
+
+
+def test_a_run_named_only_by_a_behind_record_is_not_downloaded(monkeypatch, tmp_path):
+    """Run 1300 is named only by `stacks/web`'s behind record and may have planned no cell; run
+    1290 is named by a behind record and by a planned one, so it is still downloaded.
+
+    Mutation: drop the behind filter -- 1300 is downloaded, red."""
+    behind = {"pr": "8", "cells": 2, "behind": True}
+    extra = (
+        ("apply / stacks/web / dev-eu", 5, json.dumps({"plan_run": "1300", **behind})),
+        ("apply / stacks/api / dev-eu", 6, json.dumps({"plan_run": "1290", **behind})),
+    )
+    _, run_ids = _download_cells(monkeypatch, tmp_path, extra=extra)
+    assert run_ids == "plan_run_ids=1281 1290"
