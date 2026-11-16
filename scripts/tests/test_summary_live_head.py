@@ -88,8 +88,9 @@ def test_the_live_head_steps_are_wired_exactly():
     """Mutations: drop either alternative of the livehead `if:`; bind the livehead `GH_TOKEN` to
     `steps.plantoken.outputs.token`; add `permission-pull-requests: write` to the mint; drop the
     mint's `continue-on-error`; dispatch with `steps.token.outputs.token`; drop `VERB: plan`;
-    add `SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}` to the livehead step: the
-    replan reads no slug."""
+    add `SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}` to the livehead step, which
+    reads no slug; drop it from the dispatch step, whose comment-less plan finds its run by
+    title."""
     livehead = step_by("summary", name=LIVEHEAD)
     assert (livehead["id"], livehead["if"]) == ("livehead", MOVED)
     assert livehead["env"] == {
@@ -114,6 +115,7 @@ def test_the_live_head_steps_are_wired_exactly():
         "VERB": "plan",
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
+        "SHIPMATE_APP_SLUG": "${{ steps.plantoken.outputs.app-slug }}",
         "SHIPMATE_LIVE": "${{ steps.livehead.outputs.live }}",
     }
 
@@ -224,6 +226,7 @@ def _run(
     expressions = {
         "${{ steps.token.outputs.token }}": "main-token",
         "${{ steps.plantoken.outputs.token }}": plan_token,
+        "${{ steps.plantoken.outputs.app-slug }}": "shipmate-app",
         "${{ inputs.head-sha }}": HEAD_SHA,
         "${{ inputs.pr-number }}": "42",
         "${{ github.event.repository.default_branch }}": "main",

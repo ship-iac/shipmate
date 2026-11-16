@@ -640,20 +640,26 @@ def _live_dispatch_runs(repo, workflow_file, run=None):
     return [runs[k] for k in sorted(runs)], complete
 
 
+def dispatched_by_app(r, app_slug):
+    """Whether listed run `r` is a `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a
+    re-run changes only `triggering_actor`); an empty slug trusts nothing."""
+    return (
+        bool(app_slug)
+        and r["event"] == "workflow_dispatch"
+        and _login(r.get("actor")) == f"{app_slug}[bot]"
+    )
+
+
 def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
     """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
     `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, by_app}`.
 
-    Listed by `_live_dispatch_runs`: no other event can be trusted. `by_app` is true when the
-    run is a `workflow_dispatch` whose `actor` is `<app_slug>[bot]` (a re-run changes only
-    `triggering_actor`); an empty slug trusts nothing. `complete` is also false when a
-    trusted-shaped run's title does not parse: such a run is unknown, never absent."""
-    bot = f"{app_slug}[bot]" if app_slug else None
+    Listed by `_live_dispatch_runs`: no other event can be trusted. `by_app` is
+    `dispatched_by_app`. `complete` is also false when a trusted-shaped run's title does not
+    parse: such a run is unknown, never absent."""
 
     def by_app(r):
-        return (
-            bot is not None and r["event"] == "workflow_dispatch" and _login(r.get("actor")) == bot
-        )
+        return dispatched_by_app(r, app_slug)
 
     listed, complete = _live_dispatch_runs(repo, workflow_file, run)
     matched, unparsed = titled_runs(listed, ("apply", "auto"), pr_number)

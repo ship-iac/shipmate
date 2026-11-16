@@ -16,8 +16,9 @@ has no order that meets both. A pending cell another pull request locks refuses 
 CONTRACT.md §Cell locks gives the reason. A pending cell whose apply check records that its
 plan found the base changed it has no reviewed plan (`refuse_behind_checks`).
 
-It also writes `warm`, the cache warm-up matrix (`warm_rows`), which never refuses, and
-`max_parallel`, its cap.
+It also writes `warm`, the cache warm-up matrix (`warm_rows`), which never refuses,
+`max_parallel`, its cap, and `push`, the stacks the push changed (`push_stacks`), which the
+`summary` job's re-plan of open pull requests reads.
 """
 
 import json
@@ -31,7 +32,9 @@ from _shipmate import (
     _load,
     command_data,
     deploy_lock_remedy,
+    exit_text,
     lock_who,
+    one_line,
     run_annotated,
     validate_head_sha,
     write_outputs,
@@ -287,6 +290,33 @@ def warm_rows(tag_map, table):
     return rows or [TOOLS_ROW]
 
 
+#: The largest serialized `push`: it reaches a step `env:` string, capped at 128 KiB.
+PUSH_CAP = 64 * 1024
+
+
+def push_stacks(before, changed, tag_map):
+    """The `push` output: `{"stacks": sorted(changed), "outside": <bool>}`. `outside` is true when
+    `git diff --name-only before..HEAD` names a path in no stack directory of `tag_map`
+    (`bm._inside`), and when `before` is empty or all zeros, which leaves the change
+    unknown. Past `PUSH_CAP` serialized, `{"stacks": null, "outside": true}`. A failed diff
+    warns and returns None: `push` only selects pull requests to re-plan, so it never refuses
+    the deploy."""
+    outside = True
+    if before.strip("0"):
+        try:
+            paths = bm._run(["git", "diff", "-z", "--name-only", "--no-renames", before, "HEAD"])
+        except SystemExit as e:
+            why = one_line(f"the push's changed paths could not be read: {exit_text(e)}")
+            sys.stderr.write(f"::warning::{command_data(why)}\n")
+            return None
+        stacks = set(tag_map)
+        outside = any(
+            not any(bm._inside(p, s, stacks) for s in stacks) for p in paths.split("\0") if p
+        )
+    value = json.dumps({"stacks": sorted(changed), "outside": outside})
+    return value if len(value) <= PUSH_CAP else json.dumps({"stacks": None, "outside": True})
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
@@ -304,9 +334,12 @@ def main():
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
     tag_map = bm.all_tags()
-    _, cells, tree, scanned, _ = bm.compute_cells(
-        all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""), tag_map=tag_map
-    )
+    before = os.environ.get("SHIPMATE_BASE_SHA", "")
+    _, cells, tree, scanned, _ = bm.compute_cells(all_stacks=False, base=before, tag_map=tag_map)
+    # Before any refusal: a refused deploy's push still changed stacks open pull requests plan.
+    push = push_stacks(before, {c["stack"] for c in tree} | set(scanned), tag_map)
+    if push is not None:
+        write_outputs(push=push)
     table = bm.env_config(cells)
     cells = bm.stamp_rows(cells, table, "apply")
     app_id = os.environ["SHIPMATE_APP_ID"]

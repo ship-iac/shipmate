@@ -19,11 +19,14 @@ two halves need opposite techniques, and using either alone leaves a hole:
   pass whatever they say, and a substring would survive both a comment and an
   inverted test.
 
-`comment-ops` is the one file that mints and carries no precondition, and that is asserted rather
-than skipped. All four of its mints are `continue-on-error: true`, each paired with a fallback
-that posts the diagnosis as a pull request comment. Aborting the action first would replace a
-visible answer with a red run and a log annotation, and would take `shipmate help`, which needs
-no App token at all, down with it.
+`comment-ops` is one of two files that mint and carry no precondition, and that is asserted
+rather than skipped. All four of its mints are `continue-on-error: true`, each paired with a
+fallback that posts the diagnosis as a pull request comment. Aborting the action first would
+replace a visible answer with a red run and a log annotation, and would take `shipmate help`,
+which needs no App token at all, down with it. The other is `base-push-plan`, the merge deploy's
+display-only re-plan of open pull requests: its mint is `continue-on-error: true`, its next step
+warns on an empty token, and an aborting check would fail the deploy's `summary` job over a
+step that must never fail it.
 """
 
 from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
@@ -94,6 +97,7 @@ _SITES = {
     ACTIONS / "claim" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     WORKFLOWS / "apply-run.yml": (("jobs", "review", "steps"), _WORKFLOW_WITH),
     ACTIONS / "comment-ops" / "action.yml": None,
+    ACTIONS / "base-push-plan" / "action.yml": None,
 }
 
 
@@ -218,3 +222,12 @@ def test_comment_ops_answers_instead_of_aborting():
         "with no PR-visible answer -- either restore continue-on-error and a "
         "fallback, or move this file into the precondition set"
     )
+
+
+def test_the_deploy_re_plan_never_aborts_on_the_key():
+    """`base-push-plan` must not gain the precondition, which would fail the deploy's `summary`
+    job; its mint degrades instead (`test_base_push_plan.py` pins the mint and the empty-token
+    warning). Mutation: open the action with the `verify-app-key` call -- red."""
+    steps = action_yaml("base-push-plan")["runs"]["steps"]
+    assert [s.get("uses") for s in steps if "verify-app-key" in (s.get("uses") or "")] == []
+    assert [s.get("name") for s in steps if s.get("name") == _NAME] == []

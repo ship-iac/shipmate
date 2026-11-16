@@ -1,0 +1,93 @@
+name: shipmate base-push-plan
+description: >-
+  Dispatch shipmate plan for each open pull request a push to the default branch may have put
+  behind (scripts/base-push-plan selects them), so its plan shows the cells the push changed.
+  A pull request with an App apply or auto run listed live is skipped; a run that starts, or
+  changes status between or after the status listings, can still get a plan dispatched into it,
+  and then leaves the new apply checks pending, so the gate stays pending until the pull request
+  applies again.
+  Display-only: every failure warns and the action succeeds. Mints its own App token with actions
+  write, pull-requests read and checks read.
+inputs:
+  push:
+    description: deploy-detect's `push` output; empty or malformed re-plans nothing.
+    required: true
+  app-id:
+    description: shipmate App id (repo/org variable).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Mint the re-plan token
+      id: token
+      # Display-only: a failed mint leaves the token empty, which the next step reports.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-pull-requests: read
+        permission-checks: read
+    - name: Dispatch a plan of each selected pull request
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        SHIPMATE_PUSH: ${{ inputs.push }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # dispatch-body's inputs, beside PR_NUMBER per pull request.
+        VERB: plan
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        # 10 minutes, selection included: this display-only work holds the consumer's deploy
+        # concurrency group, and a longer hold makes a second merge drop a pending deploy more
+        # likely. It bounds when a dispatch may begin, not the step.
+        budget=600
+        start=$(date +%s)
+        # Display-only: every failure warns and the step exits 0. A failed dispatch continues to
+        # the next pull request, so one failure never drops the later ones.
+        if [ -z "${GH_TOKEN:-}" ]; then
+          echo "::warning::the re-plan token mint failed, so no open pull request was re-planned after this push"
+          exit 0
+        fi
+        # Reads stdin and writes each line to stderr as it arrives, `::error::` turned into
+        # `::warning::`. The runner trims leading whitespace before it parses a command, so an
+        # indented `::error::` is one too.
+        downgrade() { awk '{ sub(/^[[:space:]]*::error::/, "::warning::"); print; fflush() }' >&2; }
+        err="$RUNNER_TEMP/select.err"
+        if ! prs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/base-push-plan" 2>"$err"); then
+          downgrade < "$err"
+          echo "::warning::could not select the open pull requests to re-plan, so none was re-planned after this push"
+          exit 0
+        fi
+        cat "$err" >&2
+        read -r -a selected <<< "${prs//$'\n'/ }"
+        for i in "${!selected[@]}"; do
+          pr=${selected[$i]}
+          if [ $(($(date +%s) - start)) -ge "$budget" ]; then
+            rest=$(printf '#%s, ' "${selected[@]:$i}")
+            echo "::warning::not re-planned: the re-plan budget of $((budget / 60)) minutes is spent; comment shipmate plan on ${rest%, }"
+            exit 0
+          fi
+          # Exit codes are documented in scripts/dispatch-body. Its stderr streams through
+          # `downgrade`.
+          set +e
+          PR_NUMBER=$pr python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" 2>&1 >/dev/null | downgrade
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice title=re-plan::dispatched shipmate plan for pull request #$pr: this push may have changed a stack it plans"
+          elif [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
+            echo "::warning::the plan dispatch for pull request #$pr answered with an error, so a plan may have started; check the Actions tab"
+          else
+            echo "::warning::the plan dispatch for pull request #$pr failed; comment shipmate plan on it to check it against the base"
+          fi
+        done

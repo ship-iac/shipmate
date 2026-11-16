@@ -19,9 +19,9 @@ permissions: {}
 cache-mode: read
 jobs:
   # A commented plan claims its comment before any work: a second run of the same comment (a
-  # retried dispatch whose first landed) reads `taken` and does nothing. An autoplan and the
-  # comment-less replan carry no `comment_id`: this job skips, and the gates below admit a run by
-  # that empty input, never by the claim's result.
+  # retried dispatch whose first landed) reads `taken` and does nothing. An autoplan and a
+  # comment-less plan (the summary's replan, the deploy's re-plan) carry no `comment_id`: this job
+  # skips, and the gates below admit a run by that empty input, never by the claim's result.
   claim:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.comment_id != '' }}
     runs-on: ubuntu-slim

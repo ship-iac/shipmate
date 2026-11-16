@@ -8,8 +8,9 @@ on:
       # and no environment supplies it (the waves bind the env's apply environment). Without it
       # every env-level apply refuses at its decrypt.
       SHIPMATE_ENCRYPTION_KEY: { required: false }
-      # Feeds the `summary` job's App-token mints for the gate write and the lock release. An
-      # empty key fails loud in each one's `Verify the App key arrived`, before the mint.
+      # Feeds the `summary` job's App-token mints for the gate write and the lock release, and the
+      # `replan` job's. An empty key fails loud in each `summary` mint's `Verify the App key
+      # arrived`, before the mint; the re-plan only warns.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
 jobs:
@@ -31,6 +32,7 @@ jobs:
       tools: ${{ steps.setup.outputs.tools }}
       warm: ${{ steps.d.outputs.warm }}
       max_parallel: ${{ steps.d.outputs.max_parallel }}
+      push: ${{ steps.d.outputs.push }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
@@ -181,5 +183,26 @@ jobs:
           head-sha: ${{ needs.detect.outputs.head_sha }}
           merged: "true"
           release-pending: ${{ needs.detect.outputs.refused_locked == 'true' }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  # Re-plans the open pull requests this push may put behind. Display-only: it runs after a failed
+  # gate write or lock release, and `continue-on-error` keeps its failure off the run's
+  # conclusion. Its work grows with the open pull requests, so it takes the consumer's runner. The
+  # action begins no dispatch once its 10-minute budget is spent; this timeout caps the whole job,
+  # including a selection or a call too slow for the budget to stop.
+  replan:
+    needs: [detect, summary]
+    if: ${{ !cancelled() }}
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 15
+    continue-on-error: true
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    steps:
+      - name: Re-plan the open pull requests this push may put behind
+        uses: $/actions/base-push-plan
+        with:
+          push: ${{ needs.detect.outputs.push }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

@@ -1,5 +1,7 @@
 import functools
 import json
+import pathlib
+import subprocess
 
 import _shipmate
 import pytest
@@ -899,7 +901,8 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
 def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
     """The summary writes the gate's failure on the head, and releases the pull request's locks,
     only if detect named them. Mutation: move the `head_sha` write to just before
-    `refuse_stranded_checks` -- the file stays empty. Mutation: drop `pr_number` from it."""
+    `refuse_stranded_checks` -- the file holds only `push`. Mutation: drop `pr_number` from
+    it."""
     with pytest.raises(SystemExit) as exc:
         _run_main(
             tmp_path,
@@ -912,7 +915,11 @@ def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
             order={"a": ["b"], "b": ["a"]},
         )
     assert str(exc.value).startswith("::error::needs is cyclic")
-    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "7"}
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": '{"stacks": ["stacks/app"], "outside": true}',
+    }
 
 
 #: The refusal's fixed remedy, hand-written.
@@ -1012,8 +1019,10 @@ _PARTIAL_UNTAG_MESSAGE = (
 
 def test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local(tmp_path, monkeypatch):
     """A stack retagged from `env/dev-eu` to `shipmate/local` after planning strands its check
-    like any untagged stack. Mutation: pass `compute_cells`' fifth element,
-    `reported_unmanaged`, to `refuse_stranded_checks` in `main` -- the deploy writes waves."""
+    like any untagged stack, and `push` written before the refusal names it. Mutations: pass
+    `compute_cells`' fifth element, `reported_unmanaged`, to `refuse_stranded_checks` in `main`
+    -- the deploy writes waves; drop `scanned` from `push` -- `stacks` is empty; write `push`
+    after `refuse_behind_checks` -- it is missing."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -1028,6 +1037,11 @@ def test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local(tmp_path, 
         "env/* tag after this pull request was planned, so its reviewed change was not "
         "applied. " + _REMEDY
     )
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": '{"stacks": ["stacks/gone"], "outside": true}',
+    }
 
 
 def test_main_refuses_an_open_check_for_an_env_the_stack_no_longer_tags(tmp_path, monkeypatch):
@@ -1227,11 +1241,15 @@ def test_a_failed_run_graph_read_refuses_unchanged(monkeypatch):
 
 
 def test_an_inversion_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
-    """Mutation: write `head_sha` with the waves only -- the file stays empty."""
+    """Mutation: write `head_sha` with the waves only -- the file holds only `push`."""
     with pytest.raises(SystemExit) as exc:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
     assert str(exc.value).startswith("::error::needs order inverted")
-    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "7"}
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": '{"stacks": ["dns", "edge", "gr", "platform", "workers"], "outside": true}',
+    }
 
 
 def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
@@ -1261,6 +1279,10 @@ _STEP_7 = _evict("#7", "holds", "#7", "#7")
 LOCK_REMEDY = f"Open a pull request that changes these stacks. {_STEP_7} Then apply it."
 
 
+#: `_locked_run`'s `push`: no previous tip in its env, so `outside` is true.
+LOCKED_PUSH = '{"stacks": ["stacks/app", "stacks/dns"], "outside": true}'
+
+
 def _locked_run(tmp_path, monkeypatch, locks, pr_number="12"):
     """`_run_main` over two pending dev-eu cells, stacks/app and stacks/dns, under `locks`."""
     return _run_main(
@@ -1288,6 +1310,7 @@ def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkey
     assert github_outputs(tmp_path / "out.txt") == {
         "head_sha": HEAD,
         "pr_number": "12",
+        "push": LOCKED_PUSH,
         "refused_locked": "true",
     }
 
@@ -1404,7 +1427,11 @@ def test_a_failed_lock_read_refuses_and_writes_no_refused_locked(tmp_path, monke
     with pytest.raises(SystemExit) as exc:
         _locked_run(tmp_path, monkeypatch, SystemExit("::error::gh api exited 1: boom"))
     assert str(exc.value) == "::error::gh api exited 1: boom"
-    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "12"}
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "12",
+        "push": LOCKED_PUSH,
+    }
 
 
 #: A lock naming one provider; `_LOCK_B` another, so the two digest differently.
@@ -1554,7 +1581,11 @@ def test_main_refuses_a_cell_planned_behind_the_base(tmp_path, monkeypatch):
         "reviewed plan exists for it. This deploy applies nothing, so these other cells of this "
         "merge are not applied either: stacks/web / dev-eu. " + _BEHIND_REMEDY
     )
-    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "7"}
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": '{"stacks": ["stacks/app", "stacks/web"], "outside": true}',
+    }
 
 
 def test_a_stranded_check_refuses_before_a_behind_one(tmp_path, monkeypatch):
@@ -1581,3 +1612,114 @@ def test_a_stranded_check_refuses_before_a_behind_one(tmp_path, monkeypatch):
         "applied. This deploy applies nothing, so these other cells of this merge are not "
         "applied either: stacks/app / dev-eu. " + _REMEDY
     )
+
+
+@pytest.fixture
+def git_repo(tmp_path, monkeypatch):
+    """An empty repository in `tmp_path` as the cwd, with this machine's git config out of the
+    way and an identity CI runners lack."""
+    (tmp_path / "gitconfig").write_bytes(b"")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    for k in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(k, "shipmate tests")
+    for k in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(k, "tests@example.invalid")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    _git("init", "-q", "-b", "main")
+    return repo
+
+
+def _git(*args):
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+
+
+def _commit(files):
+    """Writes `files` (`{path: text}`) and commits them, returning the SHA."""
+    for path, text in files.items():
+        target = pathlib.Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode())
+    _git("add", "-A")
+    _git("commit", "-q", "-m", "c")
+    return _git("rev-parse", "HEAD").strip()
+
+
+#: The merged tree's stacks, as `all_tags` keys them.
+PUSH_TAGS = {"stacks/app": ["env/dev-eu"], "stacks/dns": ["env/dev-eu"]}
+PUSH_BASE = {
+    "stacks/app/main.tf": "a",
+    "stacks/dns/main.tf": "a",
+    "modules/net/main.tf": "a",
+    "README.md": "a",
+}
+
+
+@pytest.mark.parametrize(
+    ("files", "changed", "want"),
+    [
+        pytest.param(
+            {"stacks/app/main.tf": "b"},
+            {"stacks/app"},
+            '{"stacks": ["stacks/app"], "outside": false}',
+            id="one-stack",
+        ),
+        pytest.param(
+            {"modules/net/main.tf": "b"},
+            {"stacks/dns", "stacks/app"},
+            '{"stacks": ["stacks/app", "stacks/dns"], "outside": true}',
+            id="module-only",
+        ),
+        pytest.param(
+            {"README.md": "b", "stacks/app/sub/x.tf": "b"},
+            {"stacks/app"},
+            '{"stacks": ["stacks/app"], "outside": true}',
+            id="non-stack-file",
+        ),
+    ],
+)
+def test_push_names_the_changed_stacks_and_a_path_outside_every_stack(
+    git_repo, files, changed, want
+):
+    """Real git. A module change lists its dependents (`changed`, `compute_cells`') and is
+    outside every stack. Mutations: `outside = False` after the diff -- the module and non-stack
+    rows redden; `outside = bool(paths)` -- the one-stack row reddens."""
+    before = _commit(PUSH_BASE)
+    _commit(files)
+    assert dd.push_stacks(before, changed, PUSH_TAGS) == want
+
+
+@pytest.mark.parametrize("before", ["", "0" * 40])
+def test_push_with_no_previous_tip_is_outside_and_runs_no_git(monkeypatch, before):
+    """An empty or all-zero `before` (a new branch) leaves the change unknown: the widest
+    answer, with no diff. Mutation: `if before:` for `if before.strip("0"):` -- the zero row
+    diffs, and the stub raises."""
+
+    def no_git(args):
+        raise AssertionError(args)
+
+    monkeypatch.setattr(dd.bm, "_run", no_git)
+    assert dd.push_stacks(before, {"stacks/app"}, PUSH_TAGS) == (
+        '{"stacks": ["stacks/app"], "outside": true}'
+    )
+
+
+def test_push_past_the_cap_names_no_stack():
+    """700 stacks of 100 characters serialize past 64 KiB. Mutation: drop the cap -- the full
+    list is returned."""
+    changed = {f"stacks/{i:03d}/" + "x" * 89 for i in range(700)}
+    assert dd.push_stacks("", changed, {}) == '{"stacks": null, "outside": true}'
+
+
+def test_a_failed_diff_warns_and_writes_no_push(git_repo, capsys):
+    """`push` only selects pull requests to re-plan, so a diff failure never refuses the deploy.
+    Mutation: drop the `except SystemExit` -- the failure raises."""
+    _commit(PUSH_BASE)
+    assert dd.push_stacks("1" * 40, {"stacks/app"}, PUSH_TAGS) is None
+    err = capsys.readouterr().err
+    assert err.startswith(
+        "::warning::the push's changed paths could not be read: command failed (128): git diff "
+    )
+    assert len(err.splitlines()) == 1

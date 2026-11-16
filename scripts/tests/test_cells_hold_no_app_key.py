@@ -140,6 +140,7 @@ ENGINE_BOUND_JOBS = {
     ("apply.yml", "outcome"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),
+    ("deploy.yml", "replan"),
     ("drift.yml", "issues"),
     ("plan.yml", "claim"),
     ("plan.yml", "summary"),

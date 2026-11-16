@@ -48,8 +48,39 @@ EXPECTED_SUMMARY = {
     ],
 }
 
+#: The whole `replan` job, hand-written.
+EXPECTED_REPLAN = {
+    "needs": ["detect", "summary"],
+    "if": "${{ !cancelled() }}",
+    "runs-on": "${{ inputs.runs_on }}",
+    "timeout-minutes": 15,
+    "continue-on-error": True,
+    "environment": ENGINE_ENVIRONMENT,
+    "permissions": {},
+    "steps": [
+        {
+            "name": "Re-plan the open pull requests this push may put behind",
+            "uses": "$/actions/base-push-plan",
+            "with": {
+                "push": "${{ needs.detect.outputs.push }}",
+                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+            },
+        },
+    ],
+}
+
 
 def test_the_deploy_gate_step_hands_gate_refresh_every_result():
     """Mutations: drop `deploy-results` or `detect-result`; add back a mint step;
     `head_sha` -> `head-sha`; drop `queue: max`."""
     assert workflow_jobs("deploy.yml")["summary"] == EXPECTED_SUMMARY
+
+
+def test_the_re_plan_job_never_fails_the_deploy_and_grants_nothing():
+    """Display-only: it runs after `summary` whatever `detect` and `summary` concluded, and
+    `continue-on-error` keeps its failure off the run's conclusion. A permission the caller's
+    `deploy` job does not grant would startup-fail every consumer, and the App mint carries what
+    it needs. Mutations: drop `continue-on-error`; `if: always()`; drop `summary` from `needs`;
+    add `actions: write` to `permissions`; `runs-on: ubuntu-slim`; `timeout-minutes: 5`."""
+    assert workflow_jobs("deploy.yml")["replan"] == EXPECTED_REPLAN

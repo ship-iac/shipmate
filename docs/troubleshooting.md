@@ -2330,6 +2330,50 @@ When the first recurs, check the App's `actions: write` permission and reconcile
 §The workflow file, which offers `auto` as a `verb` option and holds the `auto`
 job.
 
+### A merge did not re-plan an open pull request
+
+After a merge, the deploy's `replan` job dispatches `shipmate plan` for each
+open pull request the push may have put behind (`CONTRACT.md` §Plan comment,
+Re-plan after a merge). It is display-only: nothing it skips or fails holds a
+gate, and its failure leaves the deploy run green. Its `Re-plan the open pull
+requests this push may put behind` step logs why a pull request got no plan:
+
+| Line | Cause |
+| --- | --- |
+| `pull request #<n> was not re-planned: its <verb> run <id> is live, and a plan now would republish the apply checks it applies from` | That pull request was applying. A plan now would replace the checks the run completes. |
+| `the live shipmate.yml run listing is incomplete, so no open pull request was re-planned after this push` | A page of the live run listing failed, or an App run's title does not parse, so a live apply could not be ruled out. |
+| `deploy detect did not report the changed stacks, so no open pull request was re-planned after this push` | `detect` failed or refused before it read the changed stacks, or its `git diff` failed (`the push's changed paths could not be read` in its log). |
+| `the App id or slug is empty, so no open pull request was re-planned after this push` | `SHIPMATE_APP_ID` is unset, or the token mint returned no slug. |
+| `the re-plan token mint failed, so no open pull request was re-planned after this push` | The App mint (`actions: write`, `pull-requests: read`, `checks: read`) failed; see the mint step's error. |
+| `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
+| `pull request #<n> was not re-planned: <failure>` | Its head's check runs could not be read. |
+| `the plan dispatch for pull request #<n> failed; comment shipmate plan on it to check it against the base` | The dispatch failed with no run started. |
+| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the dispatch step started (after the token mint), selection included, so no further dispatch began; the named pull requests were not reached. The budget shortens the job's hold on the consumer's deploy concurrency group (`deploy-main` in getting-started). It bounds when a dispatch may begin, not the hold: the job's 15-minute timeout caps its runtime once it starts, and time queued for a runner is not counted. |
+| `the plan dispatch for pull request #<n> answered with an error, so a plan may have started; check the Actions tab` | The dispatch failed with a server or network error. Look for a run titled `shipmate · plan pr=<n>` before commenting. |
+
+A draft, a pull request with no App apply check, and one whose checks name no
+stack the push changed (when the push changed nothing outside every stack) are
+not selected, and nothing is logged for them. A pull request whose new head's
+autoplan was still running when the merge landed has no App apply check on that
+head yet, so it is not selected either; its apply compares the base at apply
+time and refuses or holds a behind cell.
+
+The live-run skip covers the runs the listing shows live. A run that starts
+after the listing, or changes status between its queries, can get a plan
+dispatched into it; that apply leaves the new plan's apply checks pending, so
+the gate stays pending until the pull request applies again.
+
+A failed `replan` job stays off the deploy run's conclusion, as a failed `warm`
+job does. Its 15-minute timeout caps the whole job: when it stops the job, the
+pull requests it had not reached get no plan and no warning. Comment `shipmate
+plan` on any open pull request the merge may have put behind.
+
+Comment `shipmate plan` on the pull request: its plan marks each cell the base
+changed behind. Until a plan runs, a cell the pull request already applied is
+not re-checked, since an apply checks only cells with a pending apply check, and
+a merge over it is applied by neither deploy (`CONTRACT.md` §Plan comment); the
+drift sweep reports that state.
+
 ### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 
 The `guard` job of `apply.yml` refused the dispatch before the run joined any
@@ -3235,7 +3279,10 @@ already applied is skipped.
 A long hold on that group makes the drop more likely. Every merge deploy whose
 `detect` passes runs `warm`, one leg per distinct provider lock, at most
 `max_parallel` legs at once, each up to its 15-minute timeout, and the deploy run holds the
-group until `warm` ends, even with no cells to apply.
+group until `warm` ends, even with no cells to apply. `replan` holds it too, after
+`summary`, while it dispatches plans of the open pull requests the merge may put
+behind; it begins no dispatch once its 10-minute budget is spent, and its
+15-minute timeout caps the job.
 
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the

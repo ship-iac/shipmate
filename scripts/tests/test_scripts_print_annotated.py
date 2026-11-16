@@ -21,6 +21,7 @@ SCRIPTS_EXPECTED = [
     "apply-snapshot",
     "authorize",
     "auto-dispatch",
+    "base-push-plan",
     "build-matrix",
     "cell-lock",
     "claim",
