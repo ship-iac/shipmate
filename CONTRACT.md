@@ -1685,9 +1685,15 @@ footer carries the help hint:
 
 A notice's footer is `[comment run](<run url>)` alone. A reply posted by a
 dispatched run has the same shape, but its footer links that run and names it:
-`[plan run]` or `[apply run]` for the claim's not-started reply and the outcome
-reply, `[apply run]` for the apply queue's notice, and `[unlock run]` for the
-unlock result reply.
+
+- `[plan run]` or `[apply run]`: the claim's not-started reply and the outcome
+  reply;
+- `[plan run]`: the auto apply replies an autoplan's `summary` posts;
+- `[apply run]`: the apply queue's notice;
+- `[unlock run]`: the unlock result reply.
+
+`scripts/reply-comment` holds the one rule for an empty verb: a label that is
+empty or only ` run` reads `comment run`.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
@@ -2198,10 +2204,12 @@ failed cell reds the run.
 failed: artifact `shipmate-unlock-<strategy.job-index>` holding
 `shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
 and environment, its outcome and the probed lock id. Before downloading the
-records, `result` uploads a one-byte `shipmate-unlock-sentinel` artifact of its
-own, so the download always matches two or more artifacts and
-`download-artifact` writes each into a directory of its name; a lone match would
-be written without one. The outcome is `released`
+records, `result` uploads a `shipmate-unlock-sentinel` artifact of its own (the
+action's manifest, kept one day): `download-artifact` writes a lone matching
+artifact without a directory of its name, so whenever the sentinel uploaded,
+every record downloads into its artifact's directory. A file at the download
+root is never read. The sentinel, the download and the record reading all run
+only when `detect` succeeded. The outcome is `released`
 only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
 `failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
 before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
@@ -2224,10 +2232,12 @@ verdict line is one of:
 - ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
   each clause present when it names a cell: `failed` cells, then cells with no
   valid record, then the released ones.
-- When the record download failed, the records that arrived are still read, a
-  cell without one reads ``result unknown for <stack>, ...`` in place of
-  `did not run`, and the reply ends ``; some cells' results could not be read;
-  see the run.``
+- When the results are unreadable (the download failed, or the sentinel failed
+  and no `shipmate-unlock-<n>/` directory arrived), the records in their own
+  directories are still read, a cell without one reads
+  ``result unknown for <stack>, ...`` in place of `did not run`, and, when at
+  least one cell has a record, the reply ends ``; some cells' results could not
+  be read; see the run.``
 - ``🔴 failed: could not read the unlock queue; see the run.`` when `detect`
   succeeded and its `cells` output is not a list of cells.
 - ``🔴 failed: the unlock run failed before probing any cell; see the run.``
