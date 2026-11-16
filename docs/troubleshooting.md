@@ -2745,6 +2745,31 @@ documentation says such a policy allows the events; shipmate has not yet
 observed a run under the block with the policy in place, and the 2026-11-16
 brownout is the first chance.
 
+### A cell is behind the base
+
+The plan comment reads ``⏪ <stack> / <env> is behind <base>: ... changed it
+since this branch left it; a plan of this branch would revert that change.
+Update the branch from <base>.`` (or ``... the branch conflicts with <base>.``),
+the cell's apply check is queued as `Behind <base>: update the branch`, and the
+gate is `pending`, `<n> cell(s) behind <base>; update the branch from <base>`.
+With every changed cell behind, the verdict is `⏪ nothing planned: <n> cell(s)
+behind <base>`. The base changed the stack, or a module it sources, after the
+branch left it, or the merge of the base into the branch conflicts, so the cell
+was not planned and no apply of the head reaches it. Update the branch from the
+base and push: the push plans the cell on the merged tree. A plan whose behind
+report could not be read holds the gate with `the behind cells were not
+reported, so this run's evidence is unknown; re-plan before merging`; re-plan.
+
+### The gate is pending over an earlier plan's apply checks
+
+`an earlier plan's <n> apply check(s) are still open on this head; push a commit
+to re-plan`: this plan run had nothing of its own to apply (zero cells, or only
+no-change cells), but an apply check an earlier plan run of the head published
+is still open, so the gate would green over a change nobody applies. A later
+refresh greens it once those checks are done; otherwise push a commit, whose plan
+publishes the head's checks afresh. `could not read this head's apply
+checks; push a commit to re-plan` is the same hold when the listing failed.
+
 ### A pull request planned zero cells
 
 No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
@@ -2753,7 +2778,8 @@ raised a warning on that run outside the repository-settings probes, the
 pull request changes a stack with no `env/*` tag that is not local, it removes
 one `env/*` tag from a stack that keeps another (the lost pairs line), or a
 `shipmate plan` command started the run, any of which still posts one,
-headlined `⚪ nothing planned` — and the gate goes green over no work.
+headlined `⚪ nothing planned` — and the gate goes green over no work, unless an
+earlier plan's apply check is still open on the head (below).
 The skipped plan job's one check shows its name expression literally,
 `plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped; GitHub
 renders a skipped matrix job that way.

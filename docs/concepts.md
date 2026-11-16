@@ -61,7 +61,8 @@ With `command_hints: true` in `.github/shipmate-config.yml`, a plan comment with
 a changed cell on a pull request that is not a draft shows them too, in a folded
 `shipmate commands` section: in apply order, `shipmate apply <env>` for each
 changed `apply_mode: targeted` environment, and the bare `shipmate apply` once,
-at the first changed environment that is not targeted.
+at the first changed environment that is not targeted, each left out when it
+would apply a cell the base changed since the branch left it.
 
 ## Dynamic environments
 
