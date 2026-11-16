@@ -25,6 +25,23 @@ _WITH_KEY = {
 }
 
 
+#: The one step list every completion job and `complete` run; each job's waves reach it only
+#: through its own `env.WAVE_RESULTS`.
+COMPLETION_STEPS = [
+    {
+        "uses": "$/actions/apply-complete",
+        "with": {
+            "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
+            "wave-results": "${{ env.WAVE_RESULTS }}",
+            "job-id": "${{ job.check_run_id }}",
+            "deploy": "${{ inputs.deploy }}",
+            "pr-number": "${{ inputs.pr_number }}",
+            **_WITH_KEY,
+        },
+    }
+]
+
+
 def _completion(n):
     return {
         "needs": ["snapshot", f"wave{n}"],
@@ -36,19 +53,8 @@ def _completion(n):
         "continue-on-error": True,
         "permissions": {"actions": "read", "checks": "read"},
         "environment": {"name": "shipmate-engine", "deployment": False},
-        "steps": [
-            {
-                "uses": "$/actions/apply-complete",
-                "with": {
-                    "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
-                    "wave-results": f'{{"wave{n}": "${{{{ needs.wave{n}.result }}}}"}}',
-                    "job-id": "${{ job.check_run_id }}",
-                    "deploy": "${{ inputs.deploy }}",
-                    "pr-number": "${{ inputs.pr_number }}",
-                    **_WITH_KEY,
-                },
-            }
-        ],
+        "env": {"WAVE_RESULTS": f'{{"wave{n}": "${{{{ needs.wave{n}.result }}}}"}}'},
+        "steps": COMPLETION_STEPS,
     }
 
 
@@ -63,12 +69,13 @@ WAVE3_COMPLETE = {
     "continue-on-error": True,
     "permissions": {"actions": "read", "checks": "read"},
     "environment": {"name": "shipmate-engine", "deployment": False},
+    "env": {"WAVE_RESULTS": '{"wave3": "${{ needs.wave3.result }}"}'},
     "steps": [
         {
             "uses": "$/actions/apply-complete",
             "with": {
                 "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
-                "wave-results": '{"wave3": "${{ needs.wave3.result }}"}',
+                "wave-results": "${{ env.WAVE_RESULTS }}",
                 "job-id": "${{ job.check_run_id }}",
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
@@ -111,29 +118,19 @@ COMPLETE = {
     "runs-on": "ubuntu-slim",
     "permissions": {"actions": "read", "checks": "read"},
     "environment": {"name": "shipmate-engine", "deployment": False},
-    "steps": [
-        {
-            "uses": "$/actions/apply-complete",
-            "with": {
-                "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
-                "wave-results": (
-                    '{"wave0": "${{ needs.wave0.result }}", '
-                    '"wave1": "${{ needs.wave1.result }}", '
-                    '"wave2": "${{ needs.wave2.result }}", '
-                    '"wave3": "${{ needs.wave3.result }}", '
-                    '"wave4": "${{ needs.wave4.result }}", '
-                    '"wave5": "${{ needs.wave5.result }}", '
-                    '"wave6": "${{ needs.wave6.result }}", '
-                    '"wave7": "${{ needs.wave7.result }}"}'
-                ),
-                "job-id": "${{ job.check_run_id }}",
-                "deploy": "${{ inputs.deploy }}",
-                "pr-number": "${{ inputs.pr_number }}",
-                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-            },
-        }
-    ],
+    "env": {
+        "WAVE_RESULTS": (
+            '{"wave0": "${{ needs.wave0.result }}", '
+            '"wave1": "${{ needs.wave1.result }}", '
+            '"wave2": "${{ needs.wave2.result }}", '
+            '"wave3": "${{ needs.wave3.result }}", '
+            '"wave4": "${{ needs.wave4.result }}", '
+            '"wave5": "${{ needs.wave5.result }}", '
+            '"wave6": "${{ needs.wave6.result }}", '
+            '"wave7": "${{ needs.wave7.result }}"}'
+        )
+    },
+    "steps": COMPLETION_STEPS,
 }
 
 JOB_IDS = sorted(
@@ -257,7 +254,7 @@ WAVE2_RELEASE = {
 @pytest.mark.parametrize("n", range(8))
 def test_each_wave_completion_job_is_exactly(n):
     """Mutations: drop the `result` clause from `wave2-complete`'s `if:`; `.wave1` in
-    `wave2-complete`'s `wave-results`; `needs: [snapshot]` on `wave5-complete`; add `checks: write`
+    `wave2-complete`'s `env`; `needs: [snapshot]` on `wave5-complete`; add `checks: write`
     to `wave5-complete`'s permissions; drop `continue-on-error` from `wave3-complete`."""
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-complete"] == _completion(n)
 
@@ -273,8 +270,15 @@ def test_complete_waits_for_every_release_wave_and_completion():
 
     Mutations: drop `wave7-complete` from `complete.needs`; add `continue-on-error: true` to
     `complete`; drop `wave4-release` from `complete.needs`; `wave5` under `"wave6"` in its
-    `wave-results`."""
+    `env`."""
     assert workflow_jobs("apply-env-level.yml")["complete"] == COMPLETE
+
+
+@pytest.mark.parametrize("job", [*(f"wave{n}-complete" for n in range(8)), "complete"])
+def test_every_completion_runs_the_one_shared_step_list(job):
+    """Mutations: `${{ env.WAVE_RESULT }}` in the anchored `with:`; `complete`'s steps written
+    out with a different `job-id`."""
+    assert workflow_jobs("apply-env-level.yml")[job]["steps"] == COMPLETION_STEPS
 
 
 def test_each_wave_needs_its_release_and_no_completion():

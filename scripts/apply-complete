@@ -197,9 +197,15 @@ def main(argv=()):
             raise SystemExit("::error::usage: apply-complete [plan <rows>]")
         plan(argv[1])
         return
+    try:
+        results = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
+    except ValueError:
+        results = None
+    if not isinstance(results, dict) or not results:
+        raise SystemExit("::error::wave-results must be a non-empty JSON object of wave results")
     rows, unresolved = classify(
         json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"]),
-        json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"]),
+        results,
         ag.parse_jsonl(sys.stdin),
         os.environ["SHIPMATE_JOB_ID"],
     )

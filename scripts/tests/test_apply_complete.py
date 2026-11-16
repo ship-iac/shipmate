@@ -400,6 +400,27 @@ def _run(by_wave, results, jobs):
     )
 
 
+@pytest.mark.parametrize("results", ["", "[]", "{}"])
+def test_main_refuses_wave_results_that_are_no_non_empty_object(results):
+    """An empty `wave-results` would trace back, and `{}` would decide no cell and exit 0.
+    Mutation: drop the check (a traceback for `""`, exit 0 for `[]` and `{}`)."""
+    done = subprocess.run(
+        [sys.executable, str(SCRIPTS / "apply-complete")],
+        input=jsonl(job("L0 / dev-eu / stacks/dns", "success")),
+        env={
+            **os.environ,
+            "SHIPMATE_BY_WAVE_JSON": json.dumps(BY_WAVE),
+            "SHIPMATE_WAVE_RESULTS_JSON": results,
+            "SHIPMATE_JOB_ID": "900",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == "::error::wave-results must be a non-empty JSON object of wave results\n"
+
+
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
     """A missing cell of a wave that ran retries like a lagging one. Mutation: exit 0 when a
     cell is unresolved -> returncode 0."""
