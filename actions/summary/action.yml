@@ -627,6 +627,8 @@ runs:
       id: autodecide
       shell: bash
       env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_AUTO_ENVS_TABLE: ${{ inputs.auto-envs }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}

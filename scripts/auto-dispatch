@@ -17,6 +17,12 @@ from the environment:
 - `SHIPMATE_IS_DRAFT` is not `true`.
 - gate-state's `SHIPMATE_GATE_STATE` and `SHIPMATE_COMMENT_MODE` are `pending` and `post`: the
   plan published completely and nothing holds the gate, and an apply check is pending.
+- this run (`GITHUB_RUN_ID`) is the newest autoplan run of `SHIPMATE_HEAD_SHA` that
+  `apply-gate.newest_autoplan` lists in `GITHUB_REPOSITORY`, the check the `auto` run's own
+  provenance check repeats: a ready-for-review run of the same head is never an `auto` source,
+  yet it is the newest. Read only once every other condition holds and an `auto` environment
+  holds a change. An empty listing (the listing lagging this run) dispatches with a warning;
+  a failed or malformed listing exits 1 with `::error::`.
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
@@ -25,7 +31,16 @@ The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto
 import os
 import sys
 
-from _shipmate import _load, cell_summaries, event_action, json_or_none, run_annotated
+from _shipmate import (
+    _load,
+    _run,
+    cell_summaries,
+    event_action,
+    json_or_none,
+    one_line,
+    run_annotated,
+    validate_head_sha,
+)
 
 ag = _load("apply-gate")
 
@@ -82,6 +97,25 @@ def auto_set(raw):
     return None
 
 
+def newer_autoplan(repo, head, run_id):
+    """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
+    this run is the newest or none is listed."""
+    try:
+        newest = ag.newest_autoplan(repo, head, run=_run)
+    except ValueError as exc:
+        raise SystemExit(
+            f"::error::the autoplan runs of {head} could not be read ({one_line(exc)})"
+        ) from None
+    if newest is None:
+        print(
+            f"::warning::no autoplan run of {head} is listed yet; dispatching the auto apply "
+            f"from run {run_id}, whose own provenance check refuses if it is not the newest",
+            file=sys.stderr,
+        )
+        return None
+    return None if str(newest["id"]) == run_id else newest["id"]
+
+
 def main():
     reason = skip_reason(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
@@ -106,6 +140,18 @@ def main():
     if not envs:
         print(
             "no auto apply dispatched: no changed cell is in an apply_mode auto environment",
+            file=sys.stderr,
+        )
+        return
+    head = os.environ.get("SHIPMATE_HEAD_SHA", "")
+    validate_head_sha(head)
+    newer = newer_autoplan(
+        os.environ.get("GITHUB_REPOSITORY", ""), head, os.environ.get("GITHUB_RUN_ID", "")
+    )
+    if newer is not None:
+        print(
+            f"::notice::autoplan run {newer} of {head} is newer than this run; no auto apply "
+            "started; comment shipmate apply to apply",
             file=sys.stderr,
         )
         return

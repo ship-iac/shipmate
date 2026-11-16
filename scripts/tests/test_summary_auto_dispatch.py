@@ -15,6 +15,7 @@ from _loader import (
     bash_only,
     fail_script,
     github_outputs,
+    jsonl,
     load_script,
     read_calls,
     run_step,
@@ -167,7 +168,8 @@ def test_the_dispatch_steps_are_wired_exactly():
     dispatch-body adds that key when it is set, and `auto` takes none.
 
     Mutations: drop `&& steps.upsert.outputs.result != 'moved'`; add `ENVIRONMENT: x` to the
-    dispatch step; drop `SHIPMATE_AUTO_ENVS_TABLE` from the decision; drop the mint's `if:`; add
+    dispatch step; drop `SHIPMATE_AUTO_ENVS_TABLE` from the decision; drop the decision's
+    `GH_TOKEN`; drop the mint's `if:`; add
     `permission-pull-requests: write` to the mint; dispatch with `steps.token.outputs.token`;
     reply with `steps.autotoken.outputs.token`."""
     decide = step_by("summary", name=DECIDE)
@@ -176,6 +178,8 @@ def test_the_dispatch_steps_are_wired_exactly():
         "${{ steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
     )
     assert decide["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_AUTO_ENVS_TABLE": "${{ inputs.auto-envs }}",
         "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
         "SHIPMATE_GATE_STATE": "${{ steps.gate.outputs.state }}",
@@ -214,6 +218,9 @@ if [[ "$*" == *dispatches* ]]; then
   cat > "$DISPATCH_BODY"
   [ "$FAKE_DISPATCH_RC" = 0 ] || echo "${FAKE_DISPATCH_ERR:-gh: Validation Failed (HTTP 422)}" >&2
   exit "$FAKE_DISPATCH_RC"
+elif [[ "$*" == *actions/workflows/shipmate.yml/runs* ]]; then
+  printf '%s' "$FAKE_RUNS"
+  exit "${FAKE_RUNS_RC:-0}"
 elif [[ "$*" == *comments* ]]; then
   cat > "$REPLY_BODY"
   printf '%s' "$GH_TOKEN" > "$REPLY_BODY.token"
@@ -232,12 +239,15 @@ def _run(
     event=None,
     auto='["dev"]',
     dispatch_err="",
+    runs=None,
+    runs_rc=0,
 ):
     """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
     is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default; `auto` is
     build-matrix's `auto_envs` output; `dispatch_err`, when set, is gh's stderr for a failed
     dispatch; `post_rc` makes `python3` exit with it for
-    `dispatch-body` in place of running it."""
+    `dispatch-body` in place of running it. `runs` is the head's autoplan listing as `gh --jq`
+    prints it, this run (999) alone by default; `runs_rc` is that listing's exit code."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -264,6 +274,8 @@ def _run(
         "REPLY_BODY": str(tmp_path / "reply.md"),
         "FAKE_DISPATCH_RC": str(dispatch_rc),
         "FAKE_DISPATCH_ERR": dispatch_err,
+        "FAKE_RUNS": jsonl(_autoplan(999)) if runs is None else runs,
+        "FAKE_RUNS_RC": str(runs_rc),
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "GITHUB_OUTPUT": str(out),
         "GITHUB_REPOSITORY": "acme/demo",
@@ -281,6 +293,7 @@ def _run(
         "SHIPMATE_AUTO_ENVS": "dev",
         "VERB": "auto",
         "REF": HEAD_SHA,
+        "SHIPMATE_HEAD_SHA": HEAD_SHA,
         "PR_NUMBER": "42",
         "DISPATCH_REF": "main",
     }
@@ -293,15 +306,94 @@ def _paths(calls):
     return [next(a for a in c if a.startswith("repos/")) for c in calls]
 
 
+_LISTING = (
+    "repos/acme/demo/actions/workflows/shipmate.yml/runs"
+    f"?event=pull_request_target&head_sha={HEAD_SHA}&per_page=100"
+)
+
+
+def _autoplan(run_id):
+    """One autoplan run of the head as `apply-gate.autoplan_runs`' `--jq` projection prints it:
+    an int `id`, while `GITHUB_RUN_ID` is a str."""
+    return {
+        "id": run_id,
+        "event": "pull_request_target",
+        "head_sha": HEAD_SHA,
+        "status": "in_progress",
+        "conclusion": None,
+        "actor": {"login": "dev"},
+        "triggering_actor": {"login": "dev"},
+    }
+
+
 @bash_only
 def test_a_changed_auto_cell_decides_to_dispatch(tmp_path):
-    """The auto set comes from `SHIPMATE_AUTO_ENVS_TABLE`; the decision makes no API call.
+    """The auto set comes from `SHIPMATE_AUTO_ENVS_TABLE`; the decision's one API call is the
+    head's autoplan listing, where this run (998 listed before it) is the newest.
 
     Mutations: write `envs=` with no value; restore `ec.mode_envs(ec.read_table(), "auto")` (the
-    stub answers the contents read with nothing, the read fails and a call is recorded)."""
-    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True), ("prod", True)])
+    stub answers the contents read with nothing, the read fails and a call is recorded); compare
+    the listed int id with `GITHUB_RUN_ID` unconverted; compare with `!=`."""
+    runs = jsonl(_autoplan(998), _autoplan(999))
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True), ("prod", True)], runs=runs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert (calls, outputs) == ([], {"envs": "dev"})
+    assert (_paths(calls), outputs) == ([_LISTING], {"envs": "dev"})
+    assert proc.stderr == ""
+
+
+@bash_only
+def test_a_newer_autoplan_of_the_head_decides_nothing(tmp_path):
+    """A ready-for-review run of the same head is never an auto source, yet it becomes the
+    head's newest autoplan, and the `auto` run would refuse this run's plan as older.
+    Mutations: drop the newest check; compare with `!=`."""
+    runs = jsonl(_autoplan(999), _autoplan(1000))
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs=runs)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (_paths(calls), outputs) == ([_LISTING], {"envs": ""})
+    assert proc.stderr.splitlines() == [
+        (
+            f"::notice::autoplan run 1000 of {HEAD_SHA} is newer than this run; no auto apply "
+            "started; comment shipmate apply to apply"
+        )
+    ]
+
+
+@bash_only
+def test_an_empty_autoplan_listing_decides_to_dispatch_and_warns(tmp_path):
+    """The listing can lag this run; the `auto` run's own provenance check still refuses if this
+    run is not the newest. Mutation: treat an empty listing as not newest."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs="")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (_paths(calls), outputs) == ([_LISTING], {"envs": "dev"})
+    assert proc.stderr.splitlines() == [
+        (
+            f"::warning::no autoplan run of {HEAD_SHA} is listed yet; dispatching the auto apply "
+            "from run 999, whose own provenance check refuses if it is not the newest"
+        )
+    ]
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("runs", "rc"),
+    [
+        ("", 1),
+        ("not json\n", 0),
+        (json.dumps(_autoplan(999) | {"id": "999"}) + "\n", 0),
+        (json.dumps({"id": 999}) + "\n", 0),
+    ],
+    ids=["failed", "not-json", "str-id", "missing-keys"],
+)
+def test_an_unreadable_autoplan_listing_decides_nothing_and_warns(tmp_path, runs, rc):
+    """Toward no apply: the step's degrade, a warning and no `envs`. Mutations: treat a failed
+    read as newest (the `failed` row dispatches); catch `ValueError` as newest (the malformed
+    rows dispatch)."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs=runs, runs_rc=rc)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (_paths(calls), outputs) == ([_LISTING], {})
+    assert proc.stdout.splitlines() == [
+        "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+    ]
 
 
 @bash_only
@@ -321,10 +413,11 @@ def test_a_missing_or_malformed_auto_set_decides_nothing_and_warns(tmp_path, aut
 
 @bash_only
 def test_no_changed_auto_cell_decides_nothing(tmp_path):
-    """Mutation: drop `if c["changed"]` (the output names `dev`)."""
-    proc, _, outputs = _run(tmp_path, DECIDE, cells=[("dev", False), ("prod", True)])
+    """No changed auto cell reads no listing. Mutations: drop `if c["changed"]` (the output names
+    `dev`); read the listing before the auto environments are known."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", False), ("prod", True)])
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert outputs == {"envs": ""}
+    assert (calls, outputs) == ([], {"envs": ""})
 
 
 @bash_only
@@ -347,7 +440,8 @@ def test_an_autoplan_not_started_by_a_push_decides_nothing(tmp_path, event, reas
     makes no API call. Mutation: return `{"action": "synchronize"}` from
     `_shipmate.event_payload`'s `except` (the unparseable row dispatches) or its non-object
     fallback (the not-an-object row dispatches). Mutation: pass `GITHUB_EVENT_NAME` as the
-    action (every row names the `pull_request_target` event)."""
+    action (every row names the `pull_request_target` event). Mutation: read the autoplan
+    listing before `skip_reason` (a call is recorded)."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], event=event)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (calls, outputs) == ([], {"envs": ""})
