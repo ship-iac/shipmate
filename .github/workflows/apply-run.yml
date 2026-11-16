@@ -197,6 +197,7 @@ jobs:
           name: ${{ steps.report.outputs.name }}
           path: ${{ steps.report.outputs.path }}
           if-no-files-found: ignore
+          retention-days: 7
 
   # Holds every cell the waves apply before the first one starts. A cell another pull request
   # took after `detect` read the locks refuses the whole run here. A new `shipmate apply` or

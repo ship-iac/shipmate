@@ -293,7 +293,7 @@ def test_a_refused_detect_reads_its_incomplete_report(monkeypatch, tmp_path):
     """A refusal leaves the report incomplete (the empty one its job wrote, or what the refusal
     wrote); with the detect job failed it renders as read, no red line.
 
-    Mutation: ignore `detect_failed` in `read_report` -- the red line appears, red."""
+    Mutation: ignore `refused` in `read_report` -- the red line appears, red."""
     held = [{"stack": "stacks/a", "environment": "dev", "cause": "overlap"}]
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", {}, json.dumps({"held_cells": held}))
     assert _UNREAD not in body
@@ -341,8 +341,7 @@ def test_an_incomplete_report_beside_a_detect_that_succeeded_is_unread(monkeypat
     """Only the detect job's `failure` lets an incomplete report through; a refusal text from a
     detect whose job did not fail is no such evidence.
 
-    Mutation: read `SHIPMATE_DETECT_REFUSAL` instead of `SHIPMATE_DETECT_RESULT` in `main` --
-    no red line, red."""
+    Mutation: drop the `SHIPMATE_DETECT_RESULT` comparison from `main` -- no red line, red."""
     env = {**_NO_REFUSAL, "SHIPMATE_DETECT_REFUSAL": "apply refused: no apply check on the head"}
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", env, "{}")
     assert _UNREAD in body
@@ -355,3 +354,15 @@ def test_a_locked_cell_without_a_holder_reads_as_an_unknown_holder(monkeypatch, 
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, report)
     assert _UNREAD not in body
     assert "🔒 locked by an unknown holder: stacks/a / dev." in body
+
+
+def test_an_incomplete_report_of_a_detect_that_failed_without_a_refusal_is_unread(
+    monkeypatch, tmp_path
+):
+    """A crash, or a checkout that failed naming no error, leaves the empty report and no
+    refusal: that is no evidence the report is the refusal's, so it reads as unread.
+
+    Mutation: drop the refusal-text condition from `main` -- no red line, red."""
+    env = {"SHIPMATE_DETECT_RESULT": "failure", "SHIPMATE_DETECT_REFUSAL": ""}
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", env, "{}")
+    assert _UNREAD in body

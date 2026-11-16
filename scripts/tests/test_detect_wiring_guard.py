@@ -352,6 +352,7 @@ _REPORT_UPLOAD = {
         "name": "${{ steps.report.outputs.name }}",
         "path": "${{ steps.report.outputs.path }}",
         "if-no-files-found": "ignore",
+        "retention-days": 7,
     },
 }
 
@@ -363,6 +364,7 @@ def test_the_detect_job_seeds_its_report_first_and_uploads_it_last():
     another's.
 
     Mutations: move the seed step after `setup`; drop the attempt from the name; drop the random
-    token; drop the upload's `if:`, so a refusal uploads nothing; upload from another path."""
+    token; drop the upload's `if:`, so a refusal uploads nothing; upload from another path; drop
+    `retention-days`."""
     steps = workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"]
     assert (steps[0], steps[-1]) == (_REPORT_SEED, _REPORT_UPLOAD)
