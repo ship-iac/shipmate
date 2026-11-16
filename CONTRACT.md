@@ -2085,12 +2085,12 @@ These limits are accepted:
   cancelled nor named.
 - A waiting run whose call joins the group after the holder's `summary` listed
   the runs is not told by that holder.
-- A failed runs, jobs or comments listing in `summary`, the last site, leaves
-  untold each waiting run that `queue` and `review` did not tell.
+- A failed or incomplete read, or a failed post, in `summary`, the last site,
+  can leave untold a waiting run that `queue` and `review` did not tell.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
-- A waiting run can be told twice when the comments listing does not yet show
-  the earlier reply.
+- A waiting run can be told more than once, by `queue`, `review` and
+  `summary`, when the comments listing does not yet show an earlier reply.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
