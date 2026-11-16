@@ -11,7 +11,8 @@ belongs to this run when `apply / <path> / <env>` is among the App-authored
 checks on the head, and the plan run it applies from is the one that check
 records. Cells whose apply check already completed are dropped (idempotent
 no-op), and the rest wave-ordered. Both write the env-level output contract
-deploy-detect writes (`waves.env_level_outputs`).
+deploy-detect writes (`waves.env_level_outputs`), and the apply result comment's fields to a
+report file (`write_report`).
 
 An empty `SHIPMATE_ENV` selects the bare form, `bare_main`: every environment's
 pending cells, bucketed into env-levels by the entries' `needs`, after the
@@ -37,6 +38,7 @@ branch changes.
 
 import json
 import os
+import pathlib
 import time
 
 from _shipmate import (
@@ -65,6 +67,19 @@ _sleep = time.sleep
 _AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
 # An auto run has no comment to repeat: its draft and mergeability refusals name the comment.
 _AUTO_RETRY = "comment `shipmate apply`"
+
+
+def write_report(report):
+    """Write the complete `report`, marked `"complete": true`, as JSON to `SHIPMATE_REPORT_PATH`,
+    which the caller uploads as an artifact for the apply result comment; nothing else reads it.
+    Its fields: `excluded_envs`, `skipped_envs`, `skipped_after`, `review_held_envs` and
+    `applied_exempt_envs` (bare and auto forms), `review_not_required_envs`, `waiting_cells`,
+    `held_cells` and `env_order` (every form), `pusher` and `bare_envs` (auto form), as each
+    form's docstring describes them. A file, not a job output: the report has no size cap, and
+    GitHub drops a whole job output when any substring of it is masked."""
+    path = pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({**report, "complete": True}), encoding="utf-8")
 
 
 def paths_with_checks(env, candidate_paths, check_names):
@@ -606,11 +621,11 @@ def bare_main(auto=False):
     its environment's `needs` successors, as a locked cell does. With a cell to apply, its
     records must name one plan run that `apply-gate.provenance_reason` admits against the
     head's newest autoplan listed (`refuse_provenance`), and that listed run's pusher must have
-    write access (`refuse_pusher`). Writes the bare outputs plus
-    `provenance_run` and `pusher`, that run's `actor` login, both empty when no cell applies,
-    `base_sha`, the base tip overlap was computed
-    on, empty when no pull request read was needed, and `bare_envs`, the
-    pending environments neither `auto`, `targeted` nor held, left for a bare apply.
+    write access (`refuse_pusher`). Writes the bare outputs plus `provenance_run`, empty when no
+    cell applies, and `base_sha`, the base tip overlap was computed on, empty when no pull request
+    read was needed; its report also holds `pusher`, that run's `actor` login, empty when no
+    cell applies, and `bare_envs`, the pending environments neither `auto`, `targeted` nor held,
+    left for a bare apply.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -675,7 +690,7 @@ def bare_main(auto=False):
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
-    auto_outputs = {}
+    auto_outputs, auto_report = {}, {}
     if auto:
         provenance_run = pusher = ""
         if runnable:
@@ -683,12 +698,8 @@ def bare_main(auto=False):
             newest = refuse_provenance(repo, head, runnable, actions)
             pusher = refuse_pusher(repo, newest)
             provenance_run = runnable[0]["plan_run_id"]
-        auto_outputs = {
-            "provenance_run": provenance_run,
-            "pusher": pusher,
-            "base_sha": base_sha,
-            "bare_envs": json.dumps(sorted(unselected)),
-        }
+        auto_outputs = {"provenance_run": provenance_run, "base_sha": base_sha}
+        auto_report = {"pusher": pusher, "bare_envs": sorted(unselected)}
     # From `runnable`, never from `pending & exempt`: an exempt env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_exempt = sorted(
@@ -724,19 +735,25 @@ def bare_main(auto=False):
         # review job) renders visibly as ''.
         f"review_decision={decision!r}"
     )
+    write_report(
+        {
+            "excluded_envs": excluded,
+            "skipped_envs": skipped,
+            "skipped_after": skipped_after,
+            "review_held_envs": held,
+            "applied_exempt_envs": applied_exempt,
+            "review_not_required_envs": no_review_required,
+            "waiting_cells": waiting,
+            "held_cells": held_cells(locked, overlap),
+            # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and
+            # locked cells.
+            "env_order": wv.env_sequence(order, {c["environment"] for c in cells}),
+            **auto_report,
+        }
+    )
     write_outputs(
         **wv.env_level_outputs(per_level),
         head_sha=head,
-        excluded_envs=json.dumps(excluded),
-        skipped_envs=json.dumps(skipped),
-        skipped_after=json.dumps(skipped_after),
-        review_held_envs=json.dumps(held),
-        applied_exempt_envs=json.dumps(applied_exempt),
-        review_not_required_envs=json.dumps(no_review_required),
-        waiting_cells=json.dumps(waiting),
-        held_cells=json.dumps(held_cells(locked, overlap)),
-        # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and locked cells.
-        env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
         **auto_outputs,
     )
 
@@ -805,13 +822,17 @@ def main():
         f"waiting={len(waiting)} locked={len(locked)} "
         f"waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
     )
+    write_report(
+        {
+            "review_not_required_envs": no_review_required,
+            "waiting_cells": waiting,
+            "held_cells": held_cells(locked),
+            "env_order": [env],
+        }
+    )
     write_outputs(
         **wv.env_level_outputs(per_level),
         head_sha=head,
-        review_not_required_envs=json.dumps(no_review_required),
-        waiting_cells=json.dumps(waiting),
-        held_cells=json.dumps(held_cells(locked)),
-        env_order=json.dumps([env]),
     )
 
 

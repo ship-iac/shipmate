@@ -1,0 +1,2 @@
+::notice::qa: review-exempt, permitted to apply without an approving review (review: false in .github/shipmate-config.yml)
+::notice::lck: no approving review was required, so the default review: true had nothing to enforce
