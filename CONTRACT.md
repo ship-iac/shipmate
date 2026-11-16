@@ -2085,8 +2085,9 @@ These limits are accepted:
   cancelled nor named.
 - A waiting run whose call joins the group after the holder's `summary` listed
   the runs is not told by that holder.
-- A failed or incomplete read, or a failed post, in `summary`, the last site,
-  can leave untold a waiting run that `queue` and `review` did not tell.
+- The reply is display only: a failure, refusal or cancellation of the
+  holder's `review` or `summary`, or any failure inside its step, can leave
+  untold a waiting run that `queue` did not tell.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
 - A waiting run can be told more than once, by `queue`, `review` and
