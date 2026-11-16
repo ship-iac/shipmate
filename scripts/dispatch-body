@@ -54,7 +54,8 @@ claim and does no work, a second comment-less `plan` plans the head again, and a
 finds no lock. Every comment-less plan of one pull request has the same title, so another one
 landing in the window (the summary's replan beside the deploy's re-plan) stops the retry too;
 either plans the pull request's head. A runner clock ahead of GitHub's by more than five
-seconds puts `t0` after a run that landed.
+seconds puts `t0` after a run that landed, for the dispatches bounded by `t0` (`auto` and a
+comment-less plan); a commented dispatch's run is found by its title alone.
 """
 
 import json

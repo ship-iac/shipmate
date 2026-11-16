@@ -57,15 +57,27 @@ runs:
         # `::warning::`. The runner trims leading whitespace before it parses a command, so an
         # indented `::error::` is one too.
         downgrade() { awk '{ sub(/^[[:space:]]*::error::/, "::warning::"); print; fflush() }' >&2; }
-        if ! prs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/base-push-plan" 2>select.err); then
-          downgrade < select.err
+        err="$RUNNER_TEMP/select.err"
+        if ! prs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/base-push-plan" 2>"$err"); then
+          downgrade < "$err"
           echo "::warning::could not select the open pull requests to re-plan, so none was re-planned after this push"
           exit 0
         fi
-        cat select.err >&2
-        for pr in $prs; do
+        cat "$err" >&2
+        read -r -a selected <<< "${prs//$'\n'/ }"
+        # 10 minutes: this display-only work holds the consumer's `deploy-main` concurrency group,
+        # and a longer hold makes a second merge drop a pending deploy more likely.
+        budget=600
+        start=$(date +%s)
+        for i in "${!selected[@]}"; do
+          pr=${selected[$i]}
+          if [ $(($(date +%s) - start)) -ge "$budget" ]; then
+            rest=$(printf '#%s, ' "${selected[@]:$i}")
+            echo "::warning::not re-planned: the re-plan budget of $((budget / 60)) minutes is spent; comment shipmate plan on ${rest%, }"
+            exit 0
+          fi
           # Exit codes are documented in scripts/dispatch-body. Its stderr streams through
-          # `downgrade`; stdout is dropped.
+          # `downgrade`.
           set +e
           PR_NUMBER=$pr python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" 2>&1 >/dev/null | downgrade
           rc=${PIPESTATUS[0]}

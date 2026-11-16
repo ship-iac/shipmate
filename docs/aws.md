@@ -269,7 +269,8 @@ engine job but thirty:
 - `drift.yml`: `detect`, `drift` and `issues`.
 - `apply-run.yml` and `deploy.yml`: `detect`, the apply cells in
   `apply-env-level.yml`, to which both pass `runs_on` (`apply.yml` passes it
-  to `apply-run.yml`), `lock` in `apply-run.yml` and `warm` in `deploy.yml`.
+  to `apply-run.yml`), `lock` in `apply-run.yml`, and `warm` and `replan` in
+  `deploy.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
 - `release.yml`: `release`.
@@ -280,12 +281,12 @@ The input does not reach thirty jobs, which run on `ubuntu-slim` and run neither
 `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete` in `apply-env-level.yml`; and
 `guard` in `unlock.yml`.
 
-`issues` in `drift.yml`, `lock` in `apply-run.yml` and `release` in `release.yml`
-run neither tool too, yet stay on the `runs_on` runner because an `ubuntu-slim`
+`issues` in `drift.yml`, `lock` in `apply-run.yml`, `release` in `release.yml` and
+`replan` in `deploy.yml` run neither tool too, yet stay on the `runs_on` runner because an `ubuntu-slim`
 job stops at 15 minutes and their work is not fixed: that of `issues` grows with
 the sweep's drifted cells and with the repository's open drift Issues, that of
-`lock` with the cells the apply runs, and that of `release` with the cells the
-pull request holds locked.
+`lock` with the cells the apply runs, that of `release` with the cells the
+pull request holds locked, and that of `replan` with the open pull requests.
 
 The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
 workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on

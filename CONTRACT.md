@@ -506,7 +506,7 @@ Accepted limits:
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
   `claim`, `queue` and `outcome`, `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
   `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete`,
-  `deploy.yml`'s `summary`). No consumer file names it: the consumer's `shipmate.yml`
+  `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
   engine jobs runs at a ref the environment's default-branch policy admits —
@@ -1608,9 +1608,9 @@ dispatch:
   no pull request and this ref. A comment-less plan's title carries no comment
   id and is shared by every comment-less plan of the pull request, so its run
   must also be created at or after `t0`; a comment id makes a title unique, so a
-  commented dispatch's run needs no time bound. Otherwise it retries: the claim (above) leaves a second `plan` or `apply` run doing
-  nothing, a second comment-less plan plans the head again, and a second
-  `unlock` finds no lock. Without the App's slug no run can be told to be this
+  commented dispatch's run needs no time bound. Otherwise it retries: the claim
+  (above) leaves a second `plan` or `apply` run doing nothing, a second
+  comment-less plan plans the head again, and a second `unlock` finds no lock. Without the App's slug no run can be told to be this
   dispatch's, so the dispatch is refused before it is sent. Every comment-less
   plan of one pull request has the same title, so the plan `summary`'s replan
   and the merge deploy's re-plan landing in one window stop each other's
@@ -1653,7 +1653,9 @@ Two ceilings remain. A run that landed but is not listed by the engine's last
 read (10 seconds after the failed attempt for a comment's dispatch, the one
 read for an `auto` one) is not seen, so that attempt is retried and the
 command can start twice. A runner clock ahead of GitHub's by more than five
-seconds puts `t0` after a run that landed, with the same result.
+seconds puts `t0` after a run that landed, with the same result, for the two
+dispatches bounded by `t0`: an `auto` dispatch and a comment-less plan. A
+commented dispatch's run is found by its title alone.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
 reads the claim as taken and does nothing. A double-started `auto` run waits:
@@ -4090,10 +4092,14 @@ merge.
 `actions/base-push-plan` after `summary`, whatever `detect` and `summary`
 concluded (`!cancelled()`), on every run attempt. It binds `shipmate-engine`,
 takes the consumer's `runs_on` runner, requests no `GITHUB_TOKEN` permission,
-and is `continue-on-error`, so it never fails the deploy run: a failure shows as
-a failed `replan` job on a run that concludes `success`. Its 30-minute timeout
-covers the rate-limit waits of the dispatches (up to three 60 s waits each); a
-job that reaches it is cancelled where it stands, so the pull requests not yet
+and is `continue-on-error`, as `warm` is, so a failed `replan` job stays off the
+run's conclusion. It dispatches for at most 10 minutes, since it holds the
+consumer's `deploy-main` concurrency group while it runs: before each pull
+request it reads the time since it began dispatching, and once 10 minutes
+have passed it warns ``not re-planned: the re-plan budget of 10 minutes is
+spent; comment shipmate plan on #<n>, ...``, naming every pull request it did not
+reach, and ends successfully. Its 20-minute `timeout-minutes` is a backstop for
+a hang only; a job that reaches it ends cancelled, and the pull requests not yet
 dispatched get no plan and no warning. It mints
 an App token with `actions: write`, `pull-requests: read` and `checks: read`,
 lists the open pull requests into the default branch, and dispatches a

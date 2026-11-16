@@ -335,12 +335,27 @@ exit 9
 """
 
 
-def _step(tmp_path, token="replan-token", **fake):  # noqa: S107 - a stub token
+#: `date`: the next of the space-separated `$FAKE_CLOCK` epoch seconds per call, the last one
+#: once they run out; the step reads the clock only through `date +%s`.
+_DATE = """\
+n=$(cat "$CLOCK_CALLS" 2>/dev/null || echo 0)
+echo $((n + 1)) > "$CLOCK_CALLS"
+read -r -a ticks <<< "$FAKE_CLOCK"
+i=$(( n < ${#ticks[@]} ? n : ${#ticks[@]} - 1 ))
+echo "${ticks[$i]}"
+"""
+
+
+def _step(tmp_path, token="replan-token", clock=None, **fake):  # noqa: S107 - a stub token
     """Run the dispatch step as the runner would: its parsed `env:` resolved from
-    `EXPRESSIONS`. Returns `(exit code, stdout, stderr, dispatch-body calls)`."""
+    `EXPRESSIONS`. `clock`, epoch seconds, stubs `date` (`_DATE`); without it the real clock
+    runs. Returns `(exit code, stdout, stderr, dispatch-body calls)`."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_stub(bin_dir, "python3", _PYTHON3)
+    if clock is not None:
+        write_stub(bin_dir, "date", _DATE)
+        fake |= {"FAKE_CLOCK": " ".join(map(str, clock)), "CLOCK_CALLS": str(tmp_path / "ticks")}
     calls = tmp_path / "calls"
     expressions = {**EXPRESSIONS, "${{ steps.token.outputs.token }}": token}
     step = step_by("base-push-plan", name=STEP)
@@ -350,6 +365,7 @@ def _step(tmp_path, token="replan-token", **fake):  # noqa: S107 - a stub token
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "CALLS": str(calls),
         "GITHUB_ACTION_PATH": str(ACTIONS / "base-push-plan"),
+        "RUNNER_TEMP": str(tmp_path),
         **fake,
     }
     proc = run_step(tmp_path, step["run"], env)
@@ -400,6 +416,23 @@ def test_a_failed_dispatchs_errors_are_downgraded_to_warnings(tmp_path):
         FAKE_DISPATCH_ERR="::error::gh failed\\n  ::error::indented\\n",
     )
     assert (code, err) == (0, "::warning::gh failed\n::warning::indented\n")
+
+
+@bash_only
+def test_a_spent_budget_names_every_pull_request_not_reached_and_exits_0(tmp_path):
+    """The clock reads 0 at the loop's start and before #1, then 600, the 10-minute budget,
+    before #2: #1 is dispatched, #2 and #3 are not, and one warning names both. Mutations: drop
+    the budget check -- #2 and #3 are dispatched; check the budget after the dispatch -- #2 is
+    dispatched before the warning."""
+    code, out, _, calls = _step(tmp_path, clock=[0, 0, 600], FAKE_PRS="1\n2\n3\n")
+    assert (code, calls) == (0, [f"1 plan main {SLUG} replan-token unset"])
+    assert out.splitlines() == [
+        _notice(1),
+        (
+            "::warning::not re-planned: the re-plan budget of 10 minutes is spent; comment "
+            "shipmate plan on #2, #3"
+        ),
+    ]
 
 
 @bash_only
