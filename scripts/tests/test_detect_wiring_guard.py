@@ -122,6 +122,7 @@ _DEPLOY_DETECT_OUTPUTS = {
     "tools": "${{ steps.setup.outputs.tools }}",
     "warm": "${{ steps.d.outputs.warm }}",
     "max_parallel": "${{ steps.d.outputs.max_parallel }}",
+    "push": "${{ steps.d.outputs.push }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
@@ -235,7 +236,8 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
 
 
 def test_the_deploy_detect_job_outputs_exactly_these_expressions():
-    """Mutations: delete `tools`, so every wave cell refuses; read it from `steps.d`."""
+    """Mutations: delete `tools`, so every wave cell refuses; read it from `steps.d`; delete
+    `push`, so the summary re-plans no open pull request."""
     assert workflow_yaml("deploy.yml")["jobs"]["detect"]["outputs"] == _DEPLOY_DETECT_OUTPUTS
 
 

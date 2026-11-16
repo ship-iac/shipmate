@@ -53,6 +53,13 @@ outputs:
   max_parallel:
     description: The `warm` matrix's `max-parallel`, the table's validated `max_parallel`.
     value: "${{ steps.detect.outputs.max_parallel }}"
+  push:
+    description: >-
+      JSON `{"stacks": [...], "outside": <bool>}`: the stacks the push changed, module dependents
+      included, and whether it changed a path outside every stack (also true when the previous
+      tip is unknown). `{"stacks": null, "outside": true}` past 64 KiB; empty when the diff
+      failed or detect refused before reading the changed stacks.
+    value: "${{ steps.detect.outputs.push }}"
   refused_locked:
     description: >-
       `true` when detect refused because another pull request holds a lock on a pending cell;

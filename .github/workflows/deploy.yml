@@ -31,6 +31,7 @@ jobs:
       tools: ${{ steps.setup.outputs.tools }}
       warm: ${{ steps.d.outputs.warm }}
       max_parallel: ${{ steps.d.outputs.max_parallel }}
+      push: ${{ steps.d.outputs.push }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
