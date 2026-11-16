@@ -33,12 +33,29 @@ with the command and gh's stderr after any retry notices: a caller that degrades
 warning, and a fail-closed caller prints its own `::error::`.
 
 `moved` and `replan` read the pull request through `_shipmate.pr_head`. `replan` prints the
-live head when it is not `<sha>`, the pull request is open and not a draft, and no autoplan run of
-the live head is unfinished (any status but `completed`, a missing one included) or `completed` with
-conclusion `success`; otherwise it prints nothing, with a log line on stderr when the head moved.
+live head when it is not `<sha>`, the pull request is open and not a draft, and no run of the
+live head planned or is about to plan it; otherwise it prints nothing, with one log line on
+stderr when the head moved. It reads, stopping at the first run that blocks:
+
+1. the live head's autoplan runs (`apply-gate.autoplan_runs`): one not `completed` blocks;
+2. the live `shipmate plan` runs of `<pr>`, any actor (`_shipmate.live_plan_runs`), other than
+   this run (`GITHUB_RUN_ID`): one blocks;
+3. the jobs of each autoplan run `completed` with conclusion `success`: one that planned
+   (`apply-gate.planned`) blocks. Any other completed run blocks nothing: a draft-skipped run,
+   a `closed`-event run, a cancelled or failed one.
+4. When nothing blocks, the autoplan runs again every `REPLAN_POLL` seconds up to
+   `REPLAN_WAIT`, each newly listed run judged as in 1 and 3, then the live plan runs once more,
+   since the push that moved the head can take seconds to list its autoplan.
+
+Step 2 relies on the consumer's `plan-<pr>` concurrency group, which runs one plan run of the
+pull request at a time: while this run holds it, a listed live plan run has not yet read its
+head, so it plans the live head.
+
 A `<pr>` that is not a pull-request number exits 1 with `::error::` before any API call. A
-malformed `<sha>`, a failed head read and a failed or malformed run listing exit 1 with one
-unannotated stderr line, after any retry notices.
+malformed `<sha>`, a failed head read, a failed or malformed listing, an autoplan run without a
+str `status` (and a str `conclusion` once `completed`), an incomplete jobs listing and a
+`plan / detect` job `planned` cannot judge exit 1 with one unannotated stderr line, after any
+retry notices and warnings: an unreadable answer dispatches nothing.
 """
 
 import functools
@@ -48,6 +65,7 @@ import re
 import sys
 from urllib.parse import quote
 
+import _shipmate
 from _shipmate import (
     GATE_CONTEXT,
     _load,
@@ -57,11 +75,13 @@ from _shipmate import (
     gh_json,
     is_pr_number,
     is_run_id,
+    live_plan_runs,
     one_line,
     pr_head,
     retried,
     run,
     run_annotated,
+    run_jobs,
     validate_head_sha,
     write_retried,
 )
@@ -75,6 +95,11 @@ _STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
 _GOOD_RESULTS = {"success", "skipped"}
 HELD = 3
 NEWER = 4
+#: How long `replan` waits for the push that moved the head to list its autoplan run: a push, a
+#: ready click and a reopen each listed theirs within 7.8 s of the pull request showing it, over
+#: five trials each on a sample repository in November 2026.
+REPLAN_WAIT = 15
+REPLAN_POLL = 5
 
 
 def _repo():
@@ -282,8 +307,60 @@ def _moved(sha, pr):
         print(live)
 
 
-def _blocks_replan(listed):
-    return listed.get("status") != "completed" or listed.get("conclusion") == "success"
+def _autoplans(live):
+    """`live`'s autoplan runs, ascending by id, each with a str `status` and, once `completed`,
+    a str `conclusion`."""
+    try:
+        runs = ag.autoplan_runs(_repo(), live, run=run)
+    except SystemExit as exc:
+        raise SystemExit(one_line(exc.code)) from None
+    except ValueError as exc:
+        raise SystemExit(one_line(exc)) from None
+    for r in runs:
+        status, conclusion = r.get("status"), r.get("conclusion")
+        if not isinstance(status, str) or (
+            status == "completed" and not isinstance(conclusion, str)
+        ):
+            raise SystemExit(
+                one_line(
+                    f"autoplan run {r['id']} has status {status!r} and conclusion {conclusion!r}"
+                )
+            )
+    return sorted(runs, key=lambda r: r["id"])
+
+
+def _unfinished(runs):
+    for r in runs:
+        if r["status"] != "completed":
+            return f", which has an autoplan run {r['id']} in progress"
+    return None
+
+
+def _succeeded(runs):
+    for r in runs:
+        if r["conclusion"] != "success":
+            continue
+        jobs, complete = run_jobs(_repo(), r["id"], run)
+        if not complete:
+            raise SystemExit(f"the jobs of autoplan run {r['id']} could not be listed")
+        try:
+            if ag.planned(jobs):
+                return f", whose autoplan run {r['id']} succeeded"
+        except ValueError as exc:
+            raise SystemExit(one_line(f"autoplan run {r['id']}: {exc}")) from None
+    return None
+
+
+def _dispatched(pr):
+    runs, complete = live_plan_runs(_repo(), pr, run)
+    if not complete:
+        raise SystemExit(f"the live shipmate plan runs of pull request #{pr} could not be listed")
+    own = os.environ.get("GITHUB_RUN_ID", "")
+    for r in runs:
+        if str(r["id"]) != own:
+            status = one_line(r.get("status")).replace("_", " ")
+            return f"; its shipmate plan run {r['id']} is {status} and plans the live head"
+    return None
 
 
 def _replan(sha, pr):
@@ -296,18 +373,19 @@ def _replan(sha, pr):
     if draft:
         print(f"pull request #{pr} moved to {live}, a draft; nothing dispatched", file=sys.stderr)
         return
-    try:
-        runs = ag.autoplan_runs(_repo(), live, run=run)
-    except SystemExit as exc:
-        raise SystemExit(one_line(exc.code)) from None
-    except ValueError as exc:
-        raise SystemExit(one_line(exc)) from None
-    if any(map(_blocks_replan, runs)):
-        print(
-            f"pull request #{pr} moved to {live}, whose autoplan run has not finished or "
-            "succeeded; nothing dispatched",
-            file=sys.stderr,
-        )
+    runs = _autoplans(live)
+    reason = _unfinished(runs) or _dispatched(pr) or _succeeded(runs)
+    seen = {r["id"] for r in runs}
+    for _ in range(REPLAN_WAIT // REPLAN_POLL):
+        if reason:
+            break
+        _shipmate._sleep(REPLAN_POLL)
+        new = [r for r in _autoplans(live) if r["id"] not in seen]
+        seen |= {r["id"] for r in new}
+        reason = _unfinished(new) or _succeeded(new)
+    reason = reason or _dispatched(pr)
+    if reason:
+        print(f"pull request #{pr} moved to {live}{reason}; nothing dispatched", file=sys.stderr)
         return
     print(live)
 

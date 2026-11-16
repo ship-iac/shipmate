@@ -637,27 +637,54 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
     `triggering_actor`); an empty slug trusts nothing. `complete` is also false when a
     trusted-shaped run's title does not parse: such a run is unknown, never absent."""
     bot = f"{app_slug}[bot]" if app_slug else None
-    listed, complete = _live_dispatch_runs(repo, workflow_file, run)
-    runs = []
-    for r in listed:
-        by_app = (
+
+    def by_app(r):
+        return (
             bot is not None and r["event"] == "workflow_dispatch" and _login(r.get("actor")) == bot
         )
+
+    listed, complete = _live_dispatch_runs(repo, workflow_file, run)
+    matched, unparsed = titled_runs(listed, ("apply", "auto"), pr_number)
+    runs = [
+        {
+            "id": r["id"],
+            "ref": parsed["ref"],
+            "verb": parsed["verb"],
+            "status": r.get("status"),
+            "by_app": by_app(r),
+        }
+        for r, parsed in matched
+    ]
+    return runs, complete and not any(map(by_app, unparsed))
+
+
+def titled_runs(listed, verbs, pr_number):
+    """`(matched, unparsed)` over listed dispatch runs `listed`, in their order: each run whose
+    title parses (`parse_run_title`) as a verb in `verbs` for pull request `pr_number`, a str,
+    as `(run, parse)`; and each run whose title does not parse."""
+    matched, unparsed = [], []
+    for r in listed:
         parsed = parse_run_title(r["display_title"])
         if parsed is None:
-            complete = complete and not by_app
-            continue
-        if parsed["verb"] in ("apply", "auto") and parsed["pr"] == pr_number:
-            runs.append(
-                {
-                    "id": r["id"],
-                    "ref": parsed["ref"],
-                    "verb": parsed["verb"],
-                    "status": r.get("status"),
-                    "by_app": by_app,
-                }
-            )
-    return runs, complete
+            unparsed.append(r)
+        elif parsed["verb"] in verbs and parsed["pr"] == pr_number:
+            matched.append((r, parsed))
+    return matched, unparsed
+
+
+def live_plan_runs(repo, pr_number, run=None):
+    """`(runs, complete)`: each live run of `SHIPMATE_WORKFLOW` that plans pull request
+    `pr_number`, a str, any actor, as listed, ascending by id: titled `plan pr=<pr_number>`, or
+    titled `shipmate · plan pr=<pr_number> ` and more that does not parse (a hand dispatch that
+    names a `ref`, say). Any other unparsed title is ignored: with every actor counted, it says
+    nothing about this pull request. A run listed `completed` has ended. `complete` is
+    `_live_dispatch_runs`'."""
+    listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW, run)
+    listed = [r for r in listed if r.get("status") != "completed"]
+    matched, unparsed = titled_runs(listed, ("plan",), pr_number)
+    prefix = re.compile(rf"shipmate \u00b7 plan pr={re.escape(pr_number)} ")
+    runs = [r for r, _ in matched] + [r for r in unparsed if prefix.match(r["display_title"])]
+    return sorted(runs, key=lambda r: r["id"]), complete
 
 
 def holder_dispatch_runs(repo, holders, run=None):

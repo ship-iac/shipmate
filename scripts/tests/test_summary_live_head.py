@@ -1,5 +1,7 @@
 """A plan run whose pull request moved past its head dispatches `shipmate plan` for the live head
-when that head is not a draft and has no autoplan run that is unfinished or succeeded.
+when that head is not a draft and no run of it planned or is about to: no autoplan run that is
+unfinished or succeeded with its `plan / detect` succeeded, and no other live `shipmate plan` run
+of the pull request. The re-lists' sleeps are skipped (`PYTHON3_SHIM_NO_SLEEP`).
 
 The steps run for real with `_loader.write_python3_shim`'s `python3` running the real
 `gate-status replan` and `dispatch-body`. Each step's environment is its parsed `env:` mapping
@@ -9,6 +11,7 @@ unset variable. The `gh` stub refuses a call without `GH_TOKEN`.
 
 import json
 import os
+import pathlib
 
 import pytest
 from _loader import (
@@ -44,6 +47,21 @@ RUNS_LIST = [
         "| tojson"
     ),
 ]
+DISPATCH_LISTS = [
+    [
+        "api",
+        (
+            "repos/acme/demo/actions/workflows/shipmate.yml/runs"
+            f"?event=workflow_dispatch&status={status}&per_page=100&page=1"
+        ),
+    ]
+    for status in ("queued", "in_progress", "waiting", "pending", "requested")
+]
+#: Every read of a replan that found nothing blocking: the head, the autoplans, the live plan
+#: runs, three re-lists of the autoplans, the live plan runs again.
+REPLAN_READS = [PULL_READ, RUNS_LIST, *DISPATCH_LISTS, *[RUNS_LIST] * 3, *DISPATCH_LISTS]
+JOBS_READ = ["api", "repos/acme/demo/actions/runs/7/jobs?filter=latest&per_page=100&page=1"]
+ZERO_CELL_JOBS = pathlib.Path(__file__).parent / "fixtures" / "jobs-zero-cell.json"
 DISPATCH_POST = [
     "api",
     "-X",
@@ -53,15 +71,18 @@ DISPATCH_POST = [
     "-",
 ]
 NOTICE = (
-    f"::notice title=dispatch::pull request #42 moved to {LIVE}, which has no unfinished or "
-    "succeeded autoplan run; dispatched shipmate plan (on demand, so no auto apply follows it)"
+    f"::notice title=dispatch::pull request #42 moved to {LIVE}, which has no autoplan run that "
+    "planned it or is in progress; dispatched shipmate plan (on demand, so no auto apply follows "
+    "it)"
 )
 
 
 def test_the_live_head_steps_are_wired_exactly():
     """Mutations: drop either alternative of the livehead `if:`; bind the livehead `GH_TOKEN` to
     `steps.plantoken.outputs.token`; add `permission-pull-requests: write` to the mint; drop the
-    mint's `continue-on-error`; dispatch with `steps.token.outputs.token`; drop `VERB: plan`."""
+    mint's `continue-on-error`; dispatch with `steps.token.outputs.token`; drop `VERB: plan`;
+    add `SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}` to the livehead step: the
+    replan reads no slug."""
     livehead = step_by("summary", name=LIVEHEAD)
     assert (livehead["id"], livehead["if"]) == ("livehead", MOVED)
     assert livehead["env"] == {
@@ -103,6 +124,10 @@ if [[ "$*" == *dispatches* ]]; then
   printf '%s' "$GH_TOKEN" > "$DISPATCH_BODY.token"
   [ "$FAKE_DISPATCH_RC" = 0 ] || echo "gh: Validation Failed (HTTP 422)" >&2
   exit "$FAKE_DISPATCH_RC"
+elif [[ "$2" == *event=workflow_dispatch* ]]; then
+  printf '{"workflow_runs": %s}\\n' "${FAKE_DISPATCHED:-[]}"
+elif [[ "$2" == */jobs\\?* ]]; then
+  cat "$FAKE_JOBS"
 elif [ "$2" = "--paginate" ]; then
   printf '%s' "$FAKE_RUNS"
   exit "$FAKE_RUNS_RC"
@@ -151,11 +176,13 @@ def _run(
     dispatch_rc=0,
     post_rc=None,
     replan_stderr=None,
+    dispatched="[]",
 ):
     """Run the livehead step, then the dispatch step when it set `live`, as the runner would.
     `post_rc` makes `python3` exit with it for `dispatch-body` in place of running it;
-    `replan_stderr` makes `gate-status replan` print it to stderr and exit 1.
-    Return (stdout, stderr, gh calls, livehead outputs)."""
+    `replan_stderr` makes `gate-status replan` print it to stderr and exit 1; `dispatched` is
+    the JSON list every live `workflow_dispatch` listing answers; a jobs read answers the
+    zero-cell capture. Return (stdout, stderr, gh calls, livehead outputs)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -181,6 +208,10 @@ def _run(
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "GITHUB_OUTPUT": str(out),
         "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_RUN_ID": "999",
+        "FAKE_DISPATCHED": dispatched,
+        "FAKE_JOBS": str(ZERO_CELL_JOBS),
+        "PYTHON3_SHIM_NO_SLEEP": "1",
     }
     expressions = {
         "${{ steps.token.outputs.token }}": "main-token",
@@ -222,12 +253,12 @@ def _sent_body(tmp_path):
 def test_a_live_head_without_a_live_autoplan_is_planned_on_demand(tmp_path, runs):
     """The live head's own autoplan was cancelled or failed after its hold (the stub answers a
     gate read with `failure`), or never ran: one dispatch, of the exact plan body, with the plan
-    token, and nothing else read. Mutations: invert the in-flight check in `_replan` (`if not
-    any(...)`) -- no-run dispatches nothing; skip when any run is listed (`if runs:`) -- the
-    cancelled and failure rows dispatch nothing; decide on the gate (list `statuses` instead) --
-    the call list differs."""
+    token, after the replan's reads and nothing else. Mutations: count every listed run as
+    unfinished in `_unfinished` (`if True:`) -- the cancelled and failure rows dispatch nothing;
+    block whenever a run is listed, before judging it -- the same rows dispatch nothing; decide
+    on the gate (list `statuses` instead) -- the call list differs."""
     stdout, stderr, calls, outputs = _run(tmp_path, runs=runs)
-    assert (calls, outputs) == ([PULL_READ, RUNS_LIST, DISPATCH_POST], {"live": LIVE})
+    assert (calls, outputs) == ([*REPLAN_READS, DISPATCH_POST], {"live": LIVE})
     assert _sent_body(tmp_path) == {
         "ref": "main",
         "inputs": {"verb": "plan", "pr_number": "42"},
@@ -239,22 +270,50 @@ def test_a_live_head_without_a_live_autoplan_is_planned_on_demand(tmp_path, runs
 
 @bash_only
 @pytest.mark.parametrize(
-    "run",
+    ("run", "reads", "log"),
     [
-        pytest.param(("completed", "success"), id="succeeded"),
-        pytest.param(("in_progress", None), id="in-progress"),
-        pytest.param(("queued", None), id="queued"),
+        pytest.param(
+            ("completed", "success"),
+            [*DISPATCH_LISTS, JOBS_READ],
+            "whose autoplan run 7 succeeded",
+            id="succeeded",
+        ),
+        pytest.param(
+            ("in_progress", None), [], "which has an autoplan run 7 in progress", id="in-progress"
+        ),
+        pytest.param(("queued", None), [], "which has an autoplan run 7 in progress", id="queued"),
     ],
 )
-def test_a_live_head_with_a_live_or_succeeded_autoplan_is_not_planned(tmp_path, run):
-    """A duplicate plan would write newer plan records under a waiting auto apply. Mutation: drop
-    `or listed.get("conclusion") == "success"` from `_blocks_replan` -- succeeded dispatches."""
+def test_a_live_head_with_a_live_or_planned_autoplan_is_not_planned(tmp_path, run, reads, log):
+    """A duplicate plan would write newer plan records under a waiting auto apply. The
+    succeeded run's jobs are the zero-cell capture: its `plan / detect` succeeded. Mutation:
+    never block a completed run -- succeeded dispatches."""
     stdout, stderr, calls, outputs = _run(tmp_path, runs=(run,))
-    assert (calls, outputs, stdout) == ([PULL_READ, RUNS_LIST], {}, "")
+    assert (calls, outputs, stdout) == ([PULL_READ, RUNS_LIST, *reads], {}, "")
+    assert stderr.splitlines() == [f"pull request #42 moved to {LIVE}, {log}; nothing dispatched"]
+
+
+@bash_only
+def test_a_live_dispatched_plan_of_the_pull_request_is_not_planned_again(tmp_path):
+    """The step runs no second plan behind one already queued. Mutation: drop the live plan
+    runs read from `_replan` -- a plan is dispatched."""
+    queued = json.dumps(
+        [
+            {
+                "id": 30,
+                "display_title": "shipmate \u00b7 plan pr=42 ref= comment=",
+                "event": "workflow_dispatch",
+                "status": "queued",
+                "actor": {"login": "dev"},
+            }
+        ]
+    )
+    stdout, stderr, calls, outputs = _run(tmp_path, dispatched=queued)
+    assert (calls, outputs, stdout) == ([PULL_READ, RUNS_LIST, *DISPATCH_LISTS], {}, "")
     assert stderr.splitlines() == [
         (
-            f"pull request #42 moved to {LIVE}, whose autoplan run has not finished or succeeded; "
-            "nothing dispatched"
+            f"pull request #42 moved to {LIVE}; its shipmate plan run 30 is queued and plans the "
+            "live head; nothing dispatched"
         )
     ]
 
@@ -330,7 +389,7 @@ def test_the_head_read_uses_the_main_token(tmp_path):
 def test_a_failed_mint_warns_and_dispatches_nothing(tmp_path):
     """Mutation: drop the empty-token check -- the dispatch is attempted."""
     stdout, stderr, calls, _ = _run(tmp_path, plan_token="")
-    assert (calls, stderr) == ([PULL_READ, RUNS_LIST], "")
+    assert (calls, stderr) == (REPLAN_READS, "")
     assert stdout.splitlines() == [
         (
             f"::warning::the plan dispatch token mint failed, so {LIVE} has no plan; "
@@ -346,7 +405,7 @@ def test_a_failed_dispatch_warns_with_the_remedy(tmp_path):
     failed POST; treat every nonzero exit of `dispatch-body` as a run that may have
     started -- the may-have-started warning prints instead."""
     stdout, stderr, calls, _ = _run(tmp_path, dispatch_rc=1)
-    assert calls == [PULL_READ, RUNS_LIST, DISPATCH_POST]
+    assert calls == [*REPLAN_READS, DISPATCH_POST]
     assert stdout.splitlines() == [
         (
             f"::warning::the plan dispatch failed, so {LIVE} has no plan; "
@@ -363,7 +422,7 @@ def test_a_dispatch_that_may_have_started_a_run_warns_to_check_the_actions_tab(t
     cannot tell: either way "has no plan" would be false. Mutation: send exit 3 to `not_planned`
     -- the 3 row prints the no-plan warning."""
     stdout, stderr, calls, _ = _run(tmp_path, post_rc=post_rc)
-    assert (calls, stderr) == ([PULL_READ, RUNS_LIST], "")
+    assert (calls, stderr) == (REPLAN_READS, "")
     assert stdout.splitlines() == [
         (
             f"::warning::the plan dispatch answered with an error, so a plan of {LIVE} may have "

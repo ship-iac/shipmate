@@ -327,6 +327,26 @@ def newest_autoplan(repo, head, *, run):
     return max(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], default=None)
 
 
+def planned(jobs):
+    """Whether a plan run whose latest attempt lists `jobs` (`_shipmate.run_jobs`' complete
+    answer) planned: exactly one job is named `CALLER_PREFIX + "detect"`, `completed` with
+    conclusion `success`. A draft-skipped run lists that job `skipped`, a `closed`-event run and a
+    run cancelled before `detect` list none, and a zero-cell plan lists it `success`. Raises
+    `ValueError` when it cannot tell: two such jobs, or one whose `status` is not a str, or
+    `completed` with a `conclusion` that is not a str."""
+    detects = [j for j in jobs if j.get("name") == CALLER_PREFIX + "detect"]
+    if len(detects) > 1:
+        raise ValueError(f"{len(detects)} jobs are named {CALLER_PREFIX}detect")
+    if not detects:
+        return False
+    status, conclusion = detects[0].get("status"), detects[0].get("conclusion")
+    if not isinstance(status, str) or (status == "completed" and not isinstance(conclusion, str)):
+        raise ValueError(
+            f"job {CALLER_PREFIX}detect has status {status!r} and conclusion {conclusion!r}"
+        )
+    return (status, conclusion) == ("completed", "success")
+
+
 def provenance_reason(newest, plan_run, head, cells):
     """The first provenance check the auto apply of `plan_run`, a decimal run id, on `head`
     fails, as `(cause, detail)`, or None when every check passes. Pure: each caller words the

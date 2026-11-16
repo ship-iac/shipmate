@@ -323,6 +323,10 @@ def _gh_through_bash(args, *rest, **kwargs):
 
 
 subprocess.run = _gh_through_bash
+if os.environ.get("PYTHON3_SHIM_NO_SLEEP"):
+    import time
+
+    time.sleep = lambda seconds: None
 script = sys.argv[1]
 sys.argv = [script, *sys.argv[2:]]
 sys.path[0] = os.path.dirname(os.path.abspath(script))
@@ -339,7 +343,9 @@ def write_python3_shim(bin_dir):
     ``gh.EXE`` past it, and an extensionless stub run by full path raises FileNotFoundError.
     ``sys.argv`` and ``sys.path[0]`` are set as ``python3 script`` sets them, so the script reads
     only its own arguments and imports its siblings with no PYTHONPATH. ``python3 -c <code>
-    args...`` runs on the real interpreter, unshimmed; ``python3 -`` does not run.
+    args...`` runs on the real interpreter, unshimmed; ``python3 -`` does not run. With
+    ``PYTHON3_SHIM_NO_SLEEP`` set, ``time.sleep`` returns at once, so a script's polling
+    waits cost no wall time.
     """
     bash = usable_bash()
     assert bash is not None, "callers are bash_only-gated"
