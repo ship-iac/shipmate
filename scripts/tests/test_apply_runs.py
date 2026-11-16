@@ -44,8 +44,15 @@ def _call(pages, fail=()):
     return _shipmate.apply_runs("o/r", "shipmate.yml", "7", "shipmate-iac", run=_gh(pages, fail))
 
 
-def _row(id_, ref=_SHA, verb="apply", status="pending", by_app=True):
-    return {"id": id_, "ref": ref, "verb": verb, "status": status, "by_app": by_app}
+def _row(id_, ref=_SHA, verb="apply", status="pending", by_app=True, comment="11"):
+    return {
+        "id": id_,
+        "ref": ref,
+        "verb": verb,
+        "status": status,
+        "by_app": by_app,
+        "comment": comment,
+    }
 
 
 def test_every_page_of_every_live_status_is_read():
@@ -126,6 +133,17 @@ def test_the_current_run_is_listed_for_the_caller_to_exclude():
     (`test_this_run_is_neither_named_nor_cancelled`). Pins the row shape for a live run."""
     got = _call({_listing("in_progress"): {"workflow_runs": [_apply(42, status="in_progress")]}})
     assert got == ([_row(42, status="in_progress")], True)
+
+
+def test_each_row_carries_its_titles_comment_and_an_auto_row_none():
+    """Mutations: drop the `comment` key -- red; read `ref` into `comment` -- red; hard-code
+    `comment` as `""` -- red (run 1)."""
+    runs = [
+        _run(1, f"shipmate · apply pr=7 ref={_SHA} comment=6902658567"),
+        _run(2, f"shipmate · auto pr=7 ref={_SHA} comment="),
+    ]
+    got = _call({_listing("queued"): {"workflow_runs": runs}})
+    assert got == ([_row(1, comment="6902658567"), _row(2, verb="auto", comment="")], True)
 
 
 _JOBS = "repos/o/r/actions/runs/5/jobs?filter=latest"
