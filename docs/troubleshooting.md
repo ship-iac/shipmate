@@ -3273,6 +3273,60 @@ A gate reading `deploy gate got no detect result; see the run` means the deploy
 workflow passed no `detect` result to its `summary`; the engine's `deploy.yml`
 always passes one.
 
+### A merge deploy refused an apply check another run holds in progress
+
+The annotation starts `deploy refused:` and names, per cause, the cells whose
+newest apply check is `in_progress` under a run other than this deploy. It ends
+naming every other pending cell of the merge, which the refused deploy does not
+apply either. A release job flips a cell's check to `in_progress` with a link to
+its run, and that run's completion writes it again. A gate-bypassing merge while
+that run is live, or a run that ended before its completion wrote the check,
+leaves the check `in_progress` on the merged head. The deploy reads the linked
+run before it applies the cell (`CONTRACT.md` §Apply check lifecycle, In-progress
+checks on a merge deploy).
+
+| The annotation says | Do |
+| --- | --- |
+| `are held in progress by run <id>, which is still running` | Wait for run `<id>` to end, then re-run this deploy. |
+| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | The cell's job in run `<id>` started its `Apply the cell` step, or lists steps without one, so it may have changed infrastructure, and its check was never completed. Read that run's cell job log. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return the check to `queued`, or complete it when the change is applied and its state saved, as in steps 2 and 3 of [An apply check is in progress with no run named](#an-apply-check-is-in-progress-with-no-run-named), and re-run this deploy. |
+| `could not read run <id> (<why>)` | The run read or its jobs listing failed after its retries, or returned an empty listing. Re-run this deploy; if it fails the same way, `<why>` is the cause. |
+| `apply check <check id> is in progress with no run named` | See [An apply check is in progress with no run named](#an-apply-check-is-in-progress-with-no-run-named). |
+
+A cell whose holding run ended before its job started `Apply the cell` (its job
+lists no steps or that step `skipped`, or the run lists no job of the cell) is
+not refused. The deploy applies it and prints
+``::warning::<stack> / <env>: run <id> ended before applying this cell and left
+its apply check in progress; deploying it``.
+
+### An apply check is in progress with no run named
+
+The deploy refused an apply check whose details link is not exactly a run page
+of this repository, `<server>/<owner>/<repo>/actions/runs/<id>`. Only the
+shipmate App writes these checks, and it always links a run, so the deploy
+cannot tell which run holds the cell or whether that run applied it.
+
+1. Find out whether the cell's change was applied: read the stack's state and
+   recent apply runs.
+2. Mint an installation token of the shipmate App. Only the App that created a
+   check run can update it, so neither `GITHUB_TOKEN` nor a personal token can.
+   GitHub's flow signs a JWT with the App's private key and calls
+   `POST /app/installations/<installation id>/access_tokens`.
+3. With that token as `GH_TOKEN`, either return the check to `queued`, so the
+   re-run deploy applies it:
+
+   ```bash
+   gh api -X PATCH repos/<owner>/<repo>/check-runs/<check id> -f status=queued
+   ```
+
+   or, only when the reviewed change is already applied, complete it:
+
+   ```bash
+   gh api -X PATCH repos/<owner>/<repo>/check-runs/<check id> \
+     -f status=completed -f conclusion=success
+   ```
+
+4. Re-run this deploy.
+
 ### The post-merge deploy was dropped as superseded
 
 A pull request merged, the `deploy` job for that merge was cancelled before it

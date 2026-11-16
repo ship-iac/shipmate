@@ -294,10 +294,31 @@ and `complete` write its outcome.
 `unlock-detect` and the gate read any check that is not `completed` as pending,
 `in_progress` included. A run that dies after a flip (a lost runner, a second
 cancel that also stops `complete`) leaves its checks `in_progress`; the gate
-stays pending, and the next apply run's `snapshot`, or the merge deploy, takes
-them as pending and writes them again. Apply runs of one pull request run one at
-a time, so an `in_progress` check that a pre-merge `snapshot` sees belongs to a
-dead run.
+stays pending, and the next apply run's `snapshot` takes them as pending and
+writes them again. Apply runs of one pull request run one at a time, so an
+`in_progress` check that a pre-merge `snapshot` sees belongs to a dead run.
+
+**In-progress checks on a merge deploy.** The merge deploy refuses the whole run
+over a pending cell whose newest App apply check is `in_progress` under another
+run, after its stranded-check and behind-check refusals and before it reads any
+plan run. The check's details link names the holding run only when it is exactly
+`<server>/<owner>/<repo>/actions/runs/<id>` of this repository. A link to the
+deploy's own run passes, so a re-run of the deploy proceeds over its own flips.
+`detect` reads the holding run once, and once it has ended, that run's jobs
+listing across every attempt, through the job token's `actions: read`:
+
+| Holding run | Deploy |
+| --- | --- |
+| not `completed` | refuses: ``<cells> are held in progress by run <id>, which is still running; wait for it to end, then re-run this deploy.`` |
+| `completed`, and a job of the cell lists its `Apply the cell` step with a conclusion other than `skipped`, or lists steps but none of that name | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` |
+| `completed`, and every job of the cell lists no steps or `Apply the cell` `skipped`, or no job of the cell is listed | deploys the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; deploying it``: the run that holds the check has ended and writes nothing more to it |
+| a run read or jobs listing that fails after its retries, a run with no status, or an empty listing | refuses: ``<cells>: could not read run <id> (<why>); re-run this deploy.`` |
+| the link names no run of this repository | refuses: ``<stack> / <env>: apply check <check id> is in progress with no run named; follow docs/troubleshooting.md section An apply check is in progress with no run named to return it to queued or complete it by hand, then re-run this deploy.`` |
+
+Each refusal starts `deploy refused:`, applies nothing, and names every other
+pending cell of the merge, which stays unapplied too
+([`docs/troubleshooting.md`](docs/troubleshooting.md) §A merge deploy refused an
+apply check another run holds in progress).
 
 Accepted limits:
 
