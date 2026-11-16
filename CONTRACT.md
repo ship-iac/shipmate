@@ -1988,7 +1988,7 @@ waits behind. It runs after `guard` and `claim` and before `run`, outside the gr
 `shipmate-engine` and holds no job-token permission: it writes with an App token
 granting `actions: write` and `pull-requests: write`. It lists the live
 `workflow_dispatch` runs (`queued`, `in_progress`, `waiting`, `pending`,
-`requested`) of the consumer's dispatching workflow whose title (§Check names) is an `apply` or `auto` of this
+`requested`) of `shipmate.yml` whose title (§Check names) is an `apply` or `auto` of this
 pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 `actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
 Then `queue` reads the pull request's live head, the jobs of each trusted run's
@@ -2033,6 +2033,34 @@ built from run ids; an `auto` run posts none:
 - ``[the apply run](<url>) may wait for an earlier apply run of this pull request; its apply runs could not all be listed.``
   Alone, when the runs listing is incomplete.
 
+A reply holding the first sentence starts with the line
+``<!-- shipmate:waits-<run id> -->``, `<run id>` this run's; no other reply carries it.
+
+The run holding the group tells each waiting run too: a run's `queue` can end
+before the run it then waits behind holds the group, and so names no holder, as
+when two commands arrive together. `apply-run.yml`'s `review`, as its last
+step, and its `summary`, after the apply comment, run `actions/apply-waiters`
+(`scripts/apply-queue waiters`). It lists the same runs, then reads the jobs of
+each App-dispatched run other than its own whose title carries a comment; a run
+whose `<caller> / run / review` is `pending` waits for this one. Only when one
+waits does it list the pull request's comments, once. Each waiting run not yet
+told gets one ⚪ reply:
+
+- ``[the apply run](<url>) for [this comment](<url>) waits for [the apply run](<url>) of this pull request to finish.``
+  The links are the waiting run, its command comment and this run, built from
+  run, comment and pull request ids.
+
+The reply's first line is ``<!-- shipmate:waits-<run id> -->``, `<run id>` the
+waiting run's. A waiting run counts as told when a comment by `<slug>[bot]`
+starts with that whole line, so `queue`'s holder reply and the holder's
+`review` and `summary` replies count as one. The step writes under `queue`'s
+`actor` rule, so a holder the App did not dispatch, or that a person re-ran,
+posts nothing; an `auto` holder replies. An `auto` waiting run has no comment and
+a run the App did not dispatch is not trusted; neither is told. The step is
+display only: a failed listing or POST warns and the step exits 0, and it holds
+`continue-on-error: true` and `timeout-minutes: 1`, so neither it nor a hung
+call fails `review` or `summary`.
+
 A cancelled stale run writes, by where it waited:
 
 - In the group, before its call started (a): no job of `apply-run.yml` ran, so its
@@ -2046,12 +2074,22 @@ A cancelled stale run writes, by where it waited:
   successful `review`, refreshes the old head's gate and posts the apply comment,
   so `outcome` stays silent.
 
-Two limits are accepted. A stale run's job can start between `queue`'s jobs read
-and its cancel, and the cancel then stops it mid-run; only a cell whose `ref` is
-the live head passes `pre-apply`, so that window needs a force-push back to the
-stale head. A run that changes status between two of the per-status listings,
-or within one listing between its page reads, can be missed, and is then
-neither cancelled nor named.
+These limits are accepted:
+
+- A stale run's job can start between `queue`'s jobs read and its cancel, and
+  the cancel then stops it mid-run; only a cell whose `ref` is the live head
+  passes `pre-apply`, so that window needs a force-push back to the stale head.
+- A run that changes status between two of the per-status listings, or within
+  one listing between its page reads, can be missed, and is then neither
+  cancelled nor named.
+- A waiting run whose call joins the group after the holder's `summary` listed
+  the runs is not told by that holder.
+- A failed runs, jobs or comments listing in `summary`, the last site, leaves
+  untold each waiting run that `queue` and `review` did not tell.
+- A waiting run is told once, naming the run that held the group when it was
+  seen; it is not told again when it then waits behind another run.
+- A waiting run can be told twice when the comments listing does not yet show
+  the earlier reply.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
