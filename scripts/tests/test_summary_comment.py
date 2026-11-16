@@ -3355,7 +3355,7 @@ def test_an_unreadable_autoplan_listing_warns_once_and_changes_nothing_else(
     assert (tmp_path / "on" / "comment.md").read_text(encoding="utf-8") == plain_body
 
 
-_BEHIND_REPORT = {
+_BEHIND_REPORT: dict = {
     "base": "main",
     "tip": "c" * 40,
     "since": "d" * 40,
