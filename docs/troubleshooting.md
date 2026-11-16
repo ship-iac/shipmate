@@ -2364,9 +2364,9 @@ dispatched into it; that apply leaves the new plan's apply checks pending, so
 the gate stays pending until the pull request applies again.
 
 A failed `replan` job stays off the deploy run's conclusion, as a failed `warm`
-job does. Its 15-minute timeout is a backstop for a hang: it stops the job, and
-the pull requests it had not reached get no plan and no warning. Comment `shipmate plan` on any open pull request the merge may have put
-behind.
+job does. Its 15-minute timeout caps the whole job: when it stops the job, the
+pull requests it had not reached get no plan and no warning. Comment `shipmate
+plan` on any open pull request the merge may have put behind.
 
 Comment `shipmate plan` on the pull request: its plan marks each cell the base
 changed behind. Until a plan runs, a cell the pull request already applied is
@@ -3281,8 +3281,8 @@ A long hold on that group makes the drop more likely. Every merge deploy whose
 `max_parallel` legs at once, each up to its 15-minute timeout, and the deploy run holds the
 group until `warm` ends, even with no cells to apply. `replan` holds it too, after
 `summary`, while it dispatches plans of the open pull requests the merge may put
-behind; its 10-minute budget stops it beginning a dispatch after that, so its
-share is the budget plus one dispatch, or its 15-minute timeout on a hang.
+behind; its 10-minute budget stops it beginning a dispatch, and its 15-minute
+timeout caps the job.
 
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the

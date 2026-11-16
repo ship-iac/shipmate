@@ -1656,8 +1656,8 @@ command can start twice. A runner clock ahead of GitHub's by more than five
 seconds puts `t0` after a run that landed, with the same result, for the two
 dispatches bounded by `t0`: an `auto` dispatch and a comment-less plan. A
 commented dispatch's title match takes no time bound, but its paging still stops
-at the first page holding a run created before `t0`, so under that skew a run
-pushed past page 1 by more than 100 newer runs is missed too.
+at the first page holding a run created before `t0`, so under that skew its run
+is missed too when it sits on a later page.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
 reads the claim as taken and does nothing. A double-started `auto` run waits:
@@ -4097,14 +4097,15 @@ takes the consumer's `runs_on` runner, requests no `GITHUB_TOKEN` permission,
 and is `continue-on-error`, as `warm` is, so a failed `replan` job stays off the
 run's conclusion. It holds the consumer's deploy concurrency group
 (`deploy-main` in getting-started) while it runs, so it begins no dispatch once
-10 minutes have passed since its step started, selection included: before each pull request it reads the clock,
-and once the budget is spent it warns ``not re-planned: the re-plan budget of 10
-minutes is spent; comment shipmate plan on #<n>, ...``, naming every pull
-request it did not reach, and ends successfully. The budget bounds when a
-dispatch may begin, not the job: one dispatch begun at its edge runs past it,
-and a hung call is bounded only by the job's 15-minute `timeout-minutes`, a
-backstop for a hang. The timeout stops the job, and the pull requests it had
-not reached get no plan and no warning. It mints
+10 minutes have passed since its dispatch step started (after the token mint),
+selection included: before each pull request it reads the clock, and once the
+budget is spent it warns ``not re-planned: the re-plan budget of 10 minutes is
+spent; comment shipmate plan on #<n>, ...``, naming every pull request it did
+not reach, and ends successfully. The budget bounds when a
+dispatch may begin, not the job: the mint, a slow selection and a dispatch
+begun at its edge run past it. The job's 15-minute `timeout-minutes` caps the
+whole job; when it stops the job, the pull requests it had not reached get no
+plan and no warning. It mints
 an App token with `actions: write`, `pull-requests: read` and `checks: read`,
 lists the open pull requests into the default branch, and dispatches a
 comment-less `shipmate plan` for each one that is not a draft, carries an App
