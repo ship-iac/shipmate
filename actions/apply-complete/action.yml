@@ -59,8 +59,7 @@ runs:
           # A failed or empty listing exits 75 and is never classified: a truncated listing
           # would write `Not run` over the cells of a skipped wave it lost.
           if python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" list \
-               > "$RUNNER_TEMP/jobs.jsonl" 2> "$RUNNER_TEMP/diagnostics.txt" &&
-             [ -s "$RUNNER_TEMP/jobs.jsonl" ]; then
+               > "$RUNNER_TEMP/jobs.jsonl" 2> "$RUNNER_TEMP/diagnostics.txt"; then
             python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
               < "$RUNNER_TEMP/jobs.jsonl" \
               > "$RUNNER_TEMP/attempt-rows.jsonl" \

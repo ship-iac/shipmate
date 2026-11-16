@@ -295,8 +295,8 @@ REASON_CAP = 4000
 CHECK_OUTPUT_CAP = 65_535
 
 
-def print_annotated(code, severity="error"):
-    """Print `code`, a message starting `::error::`, to stderr as one escaped `::<severity>::`
+def print_annotated(code):
+    """Print `code`, a message starting `::error::`, to stderr as one escaped `::error::`
     workflow command per error; return the errors, each a list of its lines, prefix removed.
 
     The runner parses workflow commands per line, so a raw multi-line message annotates only its
@@ -307,8 +307,7 @@ def print_annotated(code, severity="error"):
     `%25` in a stack path verbatim. A caller printing one cause whose lines can start
     `::error::`, such as gh's stderr, passes it on one line (`one_line`).
 
-    Producers stay raw: this is the one print site of an annotated message. `run_annotated`
-    calls it for a script's refusal; a script that must exit with its own code calls it itself.
+    Producers stay raw: this is the one print site of an annotated message.
     """
     errors = []
     for line in code.splitlines():
@@ -318,7 +317,7 @@ def print_annotated(code, severity="error"):
             errors[-1].append(line)
     for lines in errors:
         message = "\n".join(lines).rstrip("\n")
-        sys.stderr.write(f"::{severity}::{command_data(message)}\n")
+        sys.stderr.write(f"::error::{command_data(message)}\n")
     sys.stderr.flush()
     return errors
 
@@ -841,9 +840,10 @@ def exit_text(exc):
 
 
 def one_line(text):
-    """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
-    command in the log."""
-    return " | ".join(part for part in re.split(r"[\r\n]+", str(text)) if part)
+    """`text` with every run of line breaks `str.splitlines` ends a line at as ` | `, so no line
+    of gh's output can start a workflow command in the log, and `print_annotated` reads it as one
+    line."""
+    return " | ".join(part for part in str(text).splitlines() if part)
 
 
 def status_text(status):

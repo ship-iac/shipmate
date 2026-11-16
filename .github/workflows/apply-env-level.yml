@@ -339,8 +339,7 @@ jobs:
     environment: &complete-environment { name: shipmate-engine, deployment: false }
     env:
       WAVE_RESULTS: '{"wave0": "${{ needs.wave0.result }}"}'
-    # wave1-complete..wave7-complete and `complete` alias this list. Per-job values stay in each
-    # job's `env`, `needs` and `if:`, never in this list.
+    # Per-job values stay in each job's `env`, `needs` and `if:`, never in this shared list.
     steps: &complete-steps
       - uses: $/actions/apply-complete
         with:

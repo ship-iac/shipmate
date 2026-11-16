@@ -529,17 +529,16 @@ def test_list_does_not_validate_the_jobs(tmp_path):
 
 @bash_only
 def test_a_failed_list_prints_its_cause_once_escaped_and_retries(tmp_path):
-    """gh's stderr can hold lines that would start workflow commands; the cause prints as one
-    escaped `::error::` and one `retry: ` line, raw text nowhere. Mutations: print `e.code` raw;
-    exit 1; drop the `retry: ` line; pass the cause to `print_annotated` unjoined (two
-    annotations)."""
-    stderr = "::error::boom\r\n::warning::careful 100%\nHTTP 502"
+    """gh's stderr can hold lines that would start workflow commands, broken by any line end
+    `splitlines` knows; the cause prints as one escaped `::error::` and one escaped `retry: `
+    line, raw text nowhere. Mutations: print `e.code` raw; exit 1; drop the `retry: ` line; pass
+    the cause to `print_annotated` unjoined (two annotations); join `one_line` on CR and LF only
+    (two annotations); the raw cause in the `retry: ` line."""
+    stderr = "::error::boom\r\n::warning::careful 100%0A\nHTTP 502\u2028::error::sep"
     proc, calls = _list(tmp_path, listing="", list_rc=1, list_stderr=stderr)
-    cause = f"{LIST_CMD} | ::error::boom | ::warning::careful 100% | HTTP 502"
+    cause = f"{LIST_CMD} | ::error::boom | ::warning::careful 100%250A | HTTP 502 | ::error::sep"
     assert (proc.returncode, proc.stdout) == (apply_complete.UNRESOLVED_EXIT, "")
-    assert proc.stderr == (
-        f"::error::{cause.replace('%', '%25')}\n{apply_complete.RETRY_PREFIX}{cause}\n"
-    )
+    assert proc.stderr == f"::error::{cause}\n{apply_complete.RETRY_PREFIX}{cause}\n"
     assert calls == [LIST_ARGV]
 
 
@@ -549,8 +548,7 @@ def test_an_empty_list_retries(tmp_path):
     proc, _ = _list(tmp_path, listing="")
     assert (proc.returncode, proc.stdout) == (apply_complete.UNRESOLVED_EXIT, "")
     assert proc.stderr == (
-        "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells "
-        "succeeded\n"
+        "retry: the run jobs listing came back empty; cannot tell which wave cells succeeded\n"
     )
 
 
@@ -578,15 +576,11 @@ LISTING_STEP = "List run jobs and decide each apply check's write"
 
 
 def _loop_body():
-    return next(s["run"] for s in action_steps("apply-complete") if s.get("name") == LISTING_STEP)
+    return _step(LISTING_STEP)["run"]
 
 
 def _fail_body():
-    return next(
-        s["run"]
-        for s in action_steps("apply-complete")
-        if s.get("name", "").startswith("Fail over")
-    )
+    return _step("Fail over any cell the jobs listing never resolved")["run"]
 
 
 def _case_arms(body):
@@ -875,24 +869,22 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
 
 
 def _write_body():
-    return next(
-        s["run"]
-        for s in action_steps("apply-complete")
-        if s.get("name") == "Write the apply checks"
-    )
+    return _step("Write the apply checks")["run"]
 
 
 @bash_only
 def test_a_listing_failing_after_one_resolved_cell_writes_it_and_fails_naming_the_cause(tmp_path):
     """Attempt 1 resolves dns and leaves the rest; every later listing fails. The decided write
-    still lands, and the final refusal names the listing's cause. Mutations: `|| true` on the
-    `list` call (exit 1 at attempt 2); drop the `cat` of `attempt-rows.jsonl` into `rows.jsonl`
-    (no write)."""
+    still lands, and the final refusal names the listing's cause escaped, so the runner decodes
+    gh's literal `%0A` back to itself, not to a line break. Mutations: `|| true` on the `list`
+    call (the classifier's retry line replaces the cause); drop the `cat` of
+    `attempt-rows.jsonl` into `rows.jsonl` (no write); the raw cause in `list`'s `retry: ` line
+    (`%0A`)."""
     first = jsonl(job("L0 / dev-eu / dns", "success"), job("L0 / dev-eu / web", None))
-    proc, plan, attempts, env = _select(tmp_path, [first, None], list_stderr="HTTP 502")
+    proc, plan, attempts, env = _select(tmp_path, [first, None], list_stderr="HTTP 502 a%0Ab")
     assert (proc.returncode, attempts) == (0, 14), proc.stderr
     assert _outcomes(plan) == {11: "completed"}
-    cause = f"{LIST_CMD} | HTTP 502"
+    cause = f"{LIST_CMD} | HTTP 502 a%250Ab"
     stranded = tmp_path / "runner" / "stranded.txt"
     assert stranded.read_text(encoding="utf-8") == cause + "\n"
 
