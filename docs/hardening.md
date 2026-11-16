@@ -31,8 +31,10 @@ cancelled. Both the flood and the single held run need write access to the
 repository. `apply.yml`'s `queue` job never cancels such a run: it cancels only
 runs whose `actor` is the shipmate App's bot login, and it writes nothing, no
 cancel and no reply, unless its own run's `actor` and `triggering_actor` are both
-that login; its reply names such a run as one shipmate did not dispatch
-(`CONTRACT.md` §Comment-ops, "One apply run per pull request"). The unlock dispatch is not bound: it takes
+that login; its reply names such a run as one shipmate did not dispatch.
+The run holding the queue replies only to a waiting run whose `actor` is that
+login, and writes under the same rule for its own run (`CONTRACT.md`
+§Comment-ops, "One apply run per pull request"). The unlock dispatch is not bound: it takes
 `{environment, ref}` and runs `tofu init` over that ref inside `<env>-apply`
 with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
 needs only write access and runs the same init over a pull request head; write

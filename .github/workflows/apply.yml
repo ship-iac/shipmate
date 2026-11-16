@@ -96,7 +96,8 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   # Outside the group, before this run joins it: cancels this pull request's apply runs that wait
-  # at an older head and replies naming the run this one waits behind (scripts/apply-queue).
+  # at an older head and replies naming the run this one waits behind (scripts/apply-queue). The
+  # run holding the group tells the runs waiting behind it from apply-run.yml.
   queue:
     needs: [guard, claim]
     # `!cancelled()` drops the implicit success of `guard`, so it is stated.

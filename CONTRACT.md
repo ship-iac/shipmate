@@ -153,8 +153,9 @@ inputs, so it identifies a run only when the App dispatched it: anyone who can
 dispatch the workflow chooses the inputs. The engine reads a title only for a
 `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
 `queue` lists a pull request's apply runs by it to cancel the stale ones and
-name the one a run waits behind (§Comment-ops, "One apply run per pull
-request"), and `scripts/dispatch-body` looks for a comment's run by it before
+name the one a run waits behind, and `apply-run.yml`'s `review` and `summary`
+list them to tell the runs waiting behind theirs (§Comment-ops, "One apply run
+per pull request"), and `scripts/dispatch-body` looks for a comment's run by it before
 it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name`
 that differs from the published one outside its quoted literals. A run of any
 other event is titled `shipmate · plan`, `shipmate · release`,
@@ -2338,7 +2339,9 @@ token for comment-ops (a dispatch needs `actions: write`; the `ops` job in
 `actions/dispatch` mints the App token with `actions: write` in a step that runs
 only once the command is authorized), cancelling a pull request's stale apply
 runs (`actions/apply-queue`, also `actions: write`; §Comment-ops, "One apply run
-per pull request") and reading the apply checks that name the
+per pull request"), listing the apply runs that wait behind an apply run
+(`actions/apply-waiters`, `actions: read` and `pull-requests: write`; same
+section) and reading the apply checks that name the
 reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
@@ -2448,6 +2451,12 @@ check/status/comment/issue that crosses a workflow-run boundary:
 - **The queue reply** — posted by `actions/apply-queue` in `apply.yml`'s `queue`
   job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
   request").
+- **The waits reply** — posted by `actions/apply-waiters` in `apply-run.yml`'s
+  `review` and `summary` jobs, both bound to `shipmate-engine`, on the command
+  of each apply run waiting behind the run that holds the queue. Its
+  `<!-- shipmate:waits-<run id> -->` first line is read only to skip a waiting
+  run already told, matched at the start of a comment by `<slug>[bot]`; nothing
+  edits or minimizes it (§Comment-ops, "One apply run per pull request").
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
   artifact. A separate `issues` job, bound to `shipmate-engine`, calls
@@ -3240,8 +3249,8 @@ The seven jobs:
 - **`apply.yml` / `apply-run.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
-  jobs that mint an App token (claiming the command comment, reading the review decision, acquiring cell
-  locks, proving before any wave that the App key authenticates (`snapshot`), completing apply checks, refreshing the gate, posting the apply result
+  jobs that mint an App token (claiming the command comment, reading the review decision, telling the
+  apply runs waiting behind this one, acquiring cell locks, proving before any wave that the App key authenticates (`snapshot`), completing apply checks, refreshing the gate, posting the apply result
   comment or the outcome reply, releasing a merged pull request's cell locks,
   re-planning the open pull requests a merge may put behind) are likewise bound
   to `shipmate-engine`.
