@@ -2858,3 +2858,54 @@ def test_a_behind_refusal_renders_its_line_from_the_report_above_the_fence(
         "⚪ not applied, behind release/2: stacks/app / dev-eu, stacks/web / dev-eu. Update the "
         f"branch from release/2 and push.{fence}\n\n" + HINT
     )
+
+
+_STALE_REMEDY = (
+    "The cell's state changed after this plan; comment `shipmate plan`, review the new plan, "
+    "then apply."
+)
+
+
+def _stale_row(tmp_path, status="failed"):
+    """A row loaded through `load_cells` from `apply-stale-1.13.1.txt`, OpenTofu 1.13.1's raw
+    piped output for a stale saved plan, colour codes included."""
+    d = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(result="failed"))
+    raw = (pathlib.Path(__file__).parent / "fixtures" / "apply-stale-1.13.1.txt").read_bytes()
+    (d / "apply.txt").write_bytes(raw)
+    _, text = ac.load_cells(str(tmp_path))[0]
+    return _row(status=status, stack="stacks/app", environment="dev-eu", apply_text=text)
+
+
+def test_stale_note_names_a_cell_tofu_refused_as_stale(tmp_path):
+    """The raw capture carries colour codes around `Error:`; `load_cells` strips them before
+    the note matches the line.
+
+    Mutation: drop the ANSI strip from `load_cells` -- no note, red."""
+    assert ac._stale_note([_stale_row(tmp_path)]) == (
+        f"stale plan: **stacks/app (dev-eu)**. {_STALE_REMEDY}"
+    )
+
+
+def test_stale_note_skips_other_failures_and_applied_rows(tmp_path):
+    """A lock error is another failure, and an applied row holding the line did not fail.
+
+    Mutation: name every failed row -- the lock row is named, red.
+    Mutation: drop the `failed` condition -- the applied row is named, red."""
+    lock = _row(
+        status="failed",
+        stack="stacks/db",
+        environment="dev-eu",
+        apply_text=_fixture_text("lock_error_s3.txt"),
+    )
+    assert ac._stale_note([lock, _stale_row(tmp_path, status="applied")]) == ""
+
+
+def test_stale_note_names_five_and_counts_the_rest(tmp_path):
+    """Mutation: name every hit (`named(hits, len(hits))`) -- eleven names, red."""
+    text = _stale_row(tmp_path)["apply_text"]
+    rows = [
+        _row(status="failed", stack=f"s{n}", environment="dev-eu", apply_text=text)
+        for n in range(11)
+    ]
+    named = ", ".join(f"**s{n} (dev-eu)**" for n in range(5))
+    assert ac._stale_note(rows) == f"stale plan: {named}, and 6 more. {_STALE_REMEDY}"

@@ -198,6 +198,27 @@ def _lock_note(rows, env_name):
     )
 
 
+#: OpenTofu's stale-plan error line once `load_cells` strips its colour, whole: the diagnostic
+#: box prefixes `│ `. Captured raw from OpenTofu 1.13.1 (`fixtures/apply-stale-1.13.1.txt`).
+_STALE_LINE = "│ Error: Saved plan is stale"
+
+
+def _stale_note(rows):
+    """The 'stale plan' note, naming every failed cell whose apply output holds `_STALE_LINE`
+    (`_bold_cell`, capped at `_NAMED`) and the remedy: a fresh plan of the changed state."""
+    hits = [
+        _bold_cell(r)
+        for r in rows
+        if r["status"] == "failed" and _STALE_LINE in (r["apply_text"] or "").splitlines()
+    ]
+    if not hits:
+        return ""
+    return (
+        f"stale plan: {named(hits, _NAMED)}. The cell's state changed after this plan; comment "
+        "`shipmate plan`, review the new plan, then apply."
+    )
+
+
 # Digits-only captures, so look-alike author text cannot inject into the cell line. Whole-line
 # anchored (^...$, re.M): tofu prints `Outputs:` after this line, and an output value holding
 # the literal would otherwise win last. tofu omits a zero import or forget count.
@@ -962,6 +983,7 @@ def build_comment(
     hint = sc.footer_hint(circle)
     notes = (
         _lock_note(rows, env_name),
+        _stale_note(rows),
         _state_lost_note(rows),
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
