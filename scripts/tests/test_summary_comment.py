@@ -1620,7 +1620,8 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # named stacked. Mutation: bind `SHIPMATE_STACKED_UNKNOWN` to `steps.marks.outputs.stacked`
     # -- no holder is ever named unknown. Mutation: bind `SHIPMATE_BLOCKING` to
     # `steps.marks.outputs.stacked` -- no eviction is ever suppressed. Mutation: dropping
-    # `SHIPMATE_ON_DEMAND` -- no superseded autoplan line.
+    # `SHIPMATE_ON_DEMAND` -- no superseded autoplan line. Mutation: dropping `SHIPMATE_BEHIND` --
+    # no behind row.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -1641,6 +1642,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_ON_DEMAND": "${{ inputs.on-demand }}",
+        "SHIPMATE_BEHIND": "${{ inputs.behind }}",
     }
     # Mutation: `required: true` on any of the seven (GitHub does not enforce it, but it
     # misdocuments a draft run).
@@ -3351,3 +3353,110 @@ def test_an_unreadable_autoplan_listing_warns_once_and_changes_nothing_else(
     )
     assert text == plain
     assert (tmp_path / "on" / "comment.md").read_text(encoding="utf-8") == plain_body
+
+
+_BEHIND_REPORT = {
+    "base": "main",
+    "tip": "c" * 40,
+    "since": "d" * 40,
+    "commits": {"abc1234": "edit workers (#41)", "def5678": "tune @team"},
+    "cells": [
+        {
+            "stack": "stacks/workers",
+            "environment": "dev-eu",
+            "cause": "changed",
+            "shas": ["abc1234", "def5678"],
+            "more": 4,
+        },
+        {"stack": "stacks/net", "environment": "prod", "cause": "changed", "shas": [], "more": 0},
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "cause": "conflict",
+            "shas": [],
+            "more": 0,
+        },
+    ],
+}
+_ROW_COMMITS = (
+    "⏪ stacks/workers / dev-eu is behind main: `abc1234` edit workers (#41); `def5678` tune "
+    "@<!-- -->team and 4 more commit(s) changed it since this branch left it; a plan of this "
+    "branch would revert that change. Update the branch from main."
+)
+_ROW_MODULE = (
+    "⏪ stacks/net / prod is behind main: a module it sources changed in `ddddddd..ccccccc` "
+    "since this branch left it; a plan of this branch would revert that change. Update the "
+    "branch from main."
+)
+_ROW_CONFLICT = (
+    "⏪ stacks/app / dev-eu is behind main: the branch conflicts with main. Update the branch "
+    "from main."
+)
+_BEHIND_FOOTER = "⏪ 3 cell(s) are not planned until the branch is updated from main."
+
+
+@pytest.mark.parametrize(
+    ("i", "row"),
+    [(0, _ROW_COMMITS), (1, _ROW_MODULE), (2, _ROW_CONFLICT)],
+    ids=["commits", "module", "conflict"],
+)
+def test_each_behind_cell_gets_its_row(i, row):
+    """Mutations: change one word of each text -- red; render a subject raw -- the mention
+    fires, `commits` red; keep the revert clause on a conflict -- `conflict` red."""
+    assert sc.behind_line(_BEHIND_REPORT["cells"][i], _BEHIND_REPORT) == row
+
+
+def test_an_all_behind_plan_says_nothing_was_planned_and_why():
+    """Rows follow the verdict, then the footer counting them. Mutations: keep `⚪ nothing
+    planned` for an all-behind run -- red; drop the footer -- red."""
+    assert sc.build_comment([], {}, RUN_URL, SHA, behind=_BEHIND_REPORT)[0] == (
+        HEAD
+        + f"⏪ nothing planned: 3 cell(s) behind main {AT}\n\n"
+        + "\n\n".join([_ROW_COMMITS, _ROW_MODULE, _ROW_CONFLICT, _BEHIND_FOOTER])
+    )
+
+
+def test_a_behind_row_yields_to_cell_lines_near_the_hard_cap(capsys):
+    """Mutation: leave the behind lines out of the HARD_CAP pre-check -- the refusal raises."""
+    cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    capsys.readouterr()
+    one = {**_BEHIND_REPORT, "cells": _BEHIND_REPORT["cells"][2:]}
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, behind=one) == (without, False, False)
+    assert capsys.readouterr().out.count("::warning::") == 2
+
+
+def test_a_behind_cell_drops_the_apply_commands_that_would_refuse():
+    """`dev-eu` (not targeted) holds a behind cell, so the bare `shipmate apply` goes; targeted
+    `prod` holds one and loses its line; targeted `qa` is clean and keeps it.
+
+    Mutations: keep the bare line -- red; keep `prod`'s line -- red."""
+    cells = [(_cell(environment=e), None) for e in ("dev-eu", "prod", "qa")]
+    behind = {**_BEHIND_REPORT, "cells": _BEHIND_REPORT["cells"][:2]}
+    got = _section(cells, targeted=["prod", "qa"], order=["dev-eu", "prod", "qa"], behind=behind)
+    assert got == (
+        "<details><summary>shipmate commands</summary>\n\n"
+        "Comment `shipmate apply qa` to apply qa.\n\n"
+        "Comment `shipmate help` for every command.\n\n"
+        "</details>"
+    )
+
+
+def test_main_renders_no_row_for_an_unreadable_behind_value(tmp_path, monkeypatch, capsys):
+    """The gate holds through `gate-state`; the comment warns and names no behind cell.
+    Mutation: raise on an unreadable value -- red."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", "{")
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert "⏪" not in (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert "::warning::the behind cells could not be read; the plan comment names none" in (
+        capsys.readouterr().out
+    )
+
+
+def test_main_renders_the_behind_rows(tmp_path, monkeypatch):
+    """Mutation: drop `behind=` from `main`'s `build_comment` call -- no row, red."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", json.dumps(_BEHIND_REPORT))
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert _ROW_CONFLICT in (tmp_path / "comment.md").read_text(encoding="utf-8").splitlines()
