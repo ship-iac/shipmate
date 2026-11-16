@@ -6,6 +6,7 @@ wrong cell, a stack name rendered raw, a failure that reds the run or posts noth
 """
 
 import json
+from typing import Any
 
 import pytest
 from _loader import load_script
@@ -38,7 +39,8 @@ def gh(monkeypatch, tmp_path):
     monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "success")
     monkeypatch.setenv("SHIPMATE_CELLS", json.dumps(_CELLS))
     monkeypatch.setenv("SHIPMATE_RECORDS", str(tmp_path / "records"))
-    posts, state = [], {"comment": _COMMENT, "post": None}
+    posts = []
+    state: dict[str, Any] = {"comment": _COMMENT, "post": None}
 
     def read(argv, secrets=(), stdin=None, *, env=None):
         assert argv == ["gh", "api", "repos/org/repo/issues/comments/555"]
