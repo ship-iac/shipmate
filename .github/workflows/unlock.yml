@@ -114,19 +114,21 @@ jobs:
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
-      # A leg that failed before `unlock-cell` set an outcome records `failed`. The record is
-      # written by a job that runs pull-request HCL, so `result` trusts only its index.
+      # A leg that failed before `unlock-cell` set an outcome records `failed`. This job runs
+      # pull-request HCL, so `result` checks the record against `detect`'s queue.
       - name: Record the cell's outcome
         if: ${{ always() }}
         shell: bash
         env:
           INDEX: ${{ strategy.job-index }}
+          STACK: ${{ matrix.stack }}
+          ENVIRONMENT: ${{ matrix.environment }}
           OUTCOME: ${{ steps.cell.outputs.outcome }}
           LOCK_ID: ${{ steps.cell.outputs.lock_id }}
         run: >-
-          python3 -c 'import json, os; print(json.dumps({"index": int(os.environ["INDEX"]),
-          "outcome": os.environ["OUTCOME"] or "failed", "lock_id": os.environ["LOCK_ID"]}))'
-          > "$RUNNER_TEMP/shipmate-unlock-$INDEX.json"
+          python3 -c 'import json, os; e = os.environ; print(json.dumps({"index": int(e["INDEX"]),
+          "stack": e["STACK"], "environment": e["ENVIRONMENT"], "outcome": e["OUTCOME"] or "failed",
+          "lock_id": e["LOCK_ID"]}))' > "$RUNNER_TEMP/shipmate-unlock-$INDEX.json"
       - name: Upload the cell's outcome
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

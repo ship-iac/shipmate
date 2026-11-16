@@ -52,9 +52,10 @@ def started_text(verb, run_id):
     return f"started the {sc._md_escape(verb)} run; it is listed in this repository's Actions tab"
 
 
-def body(verb, env, outcome, text, run_url):
-    """The whole comment body for `outcome`, which must be a key of `VERDICTS`."""
-    foot = sc.footer(run_url, hint=outcome in ("refused", "failed"))
+def body(verb, env, outcome, text, run_url, label="comment run"):
+    """The whole comment body for `outcome`, which must be a key of `VERDICTS`; the footer links
+    `run_url` as `label`."""
+    foot = sc.footer(run_url, hint=outcome in ("refused", "failed"), label=label)
     return f"{sc.header(verb, env)}\n\n{VERDICTS[outcome]}{text}\n\n{foot}"
 
 

@@ -14,8 +14,8 @@ from _loader import load_script
 ur = load_script("unlock-result")
 
 _RUN = "https://github.com/org/repo/actions/runs/7777"
-_FOOT = f"[comment run]({_RUN})"
-_HINT_FOOT = f"[comment run]({_RUN}). Comment `shipmate help` for the available commands."
+_FOOT = f"[unlock run]({_RUN})"
+_HINT_FOOT = f"[unlock run]({_RUN}). Comment `shipmate help` for the available commands."
 _BARE = (
     "A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks "
     "stay until it merges or closes, and `--evict` releases another pull request's."
@@ -59,19 +59,34 @@ def gh(monkeypatch, tmp_path):
     return posts, state
 
 
-def _record(tmp_path, name, **rec):
-    """Write record `rec` as `<name>.json`, where `download-artifact` merges every record."""
+def _write(tmp_path, name, text, *, folder=None, flat=False):
+    """Write `text` as `<name>.json` in the artifact directory `folder` (default `name`), or
+    straight into the download path when `flat`, as `download-artifact` writes a lone match."""
     d = tmp_path / "records"
-    d.mkdir(exist_ok=True)
-    (d / f"{name}.json").write_text(json.dumps(rec), encoding="utf-8")
+    if not flat:
+        d = d / (folder or name)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.json").write_text(text, encoding="utf-8")
 
 
-def _records(tmp_path, *outcomes):
-    """One well-formed record per cell index; None leaves that index without a record."""
+def _rec(leg, outcome, /, cells=_CELLS, **over):
+    """The record leg `leg` writes for `cells[leg]`, with `over` replacing fields."""
+    rec = {
+        "index": leg,
+        "stack": cells[leg]["stack"],
+        "environment": cells[leg]["environment"],
+        "outcome": outcome,
+        "lock_id": _ID if outcome == "released" else "",
+    }
+    return {**rec, **over}
+
+
+def _records(tmp_path, *outcomes, cells=_CELLS):
+    """One well-formed record per cell index, each in its artifact directory; None leaves that
+    index without a record."""
     for i, outcome in enumerate(outcomes):
         if outcome is not None:
-            lock_id = _ID if outcome == "released" else ""
-            _record(tmp_path, f"shipmate-unlock-{i}", index=i, outcome=outcome, lock_id=lock_id)
+            _write(tmp_path, f"shipmate-unlock-{i}", json.dumps(_rec(i, outcome, cells)))
 
 
 def _body(outcome, text):
@@ -85,7 +100,8 @@ def _post(outcome, text):
 
 
 def test_released_cells_are_listed_with_their_lock_ids(gh, tmp_path):
-    """Mutations: read `none` as released (all three listed); drop the lock id."""
+    """The footer names the unlock run it links. Mutations: read `none` as released (all three
+    listed); drop the lock id; drop the `unlock run` label (the footer reads `comment run`)."""
     posts, _ = gh
     _records(tmp_path, "released", "none", "released")
     ur.main()
@@ -142,53 +158,121 @@ def test_no_records_at_all_reads_every_cell_as_not_run(gh, tmp_path):
     assert posts == _post("failed", "stacks/app, stacks/db, stacks/dns did not run.")
 
 
-def test_a_failed_detect_says_no_cell_was_probed(gh, monkeypatch, tmp_path):
+def test_a_failed_detect_says_no_cell_was_probed_and_reads_no_record(gh, monkeypatch, tmp_path):
     """A failed `detect` hands over no `cells`. Mutations: delete the `detect_result` check;
-    parse `cells` whatever `detect`'s result (`''` is not JSON, so the reply names the download)."""
+    parse `cells` and read the records before checking `detect` (`records` is called)."""
     posts, _ = gh
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")
-    monkeypatch.setenv("SHIPMATE_CELLS", "")
+    monkeypatch.setenv("SHIPMATE_CELLS", json.dumps(_CELLS))
     _records(tmp_path, "released", "released", "released")
+
+    def records(*args):
+        raise AssertionError("records read after a failed detect")
+
+    monkeypatch.setattr(ur, "records", records)
     ur.main()
     assert posts == _post("failed", "the unlock run failed before probing any cell; see the run.")
 
 
-def test_a_failed_download_is_reported_not_read_as_cells_that_did_not_run(gh, monkeypatch):
-    """Mutation: drop the `download_outcome == "failure"` branch (every cell reads `did not
-    run`)."""
+@pytest.mark.parametrize(
+    "raw",
+    ["not json", '{"stack": "a"}', '[{"stack": 1, "environment": "dev-eu"}]', '[{"stack": "a"}]'],
+)
+def test_an_unreadable_queue_says_so(gh, monkeypatch, raw):
+    """Mutations: return the download text for an unparsable queue; drop the `environment`
+    check (`[{"stack": "a"}]` reads as a queue whose cell did not run)."""
+    posts, _ = gh
+    monkeypatch.setenv("SHIPMATE_CELLS", raw)
+    ur.main()
+    assert posts == _post("failed", "could not read the unlock queue; see the run.")
+
+
+def test_a_failed_download_still_reads_the_records_that_arrived(gh, monkeypatch, tmp_path):
+    """Mutations: return early on a failed download (the arrived records are lost); drop the
+    `could not be read` clause."""
     posts, _ = gh
     monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "failure")
+    _records(tmp_path, "released", None, "none")
     ur.main()
-    assert posts == _post("failed", "could not read the cells' results; see the run.")
+    assert posts == _post(
+        "failed",
+        f"stacks/db did not run; released 1 state lock(s) in dev-eu: stacks/app ({_ID}); some "
+        "cells' results could not be read; see the run.",
+    )
 
 
-@pytest.mark.parametrize(
-    "name, rec",
-    [
-        ("shipmate-unlock-1", {"index": 0, "outcome": "released", "lock_id": _ID}),
-        ("shipmate-unlock-3", {"index": 3, "outcome": "released", "lock_id": _ID}),
-        ("shipmate-unlock-1", {"index": True, "outcome": "released", "lock_id": _ID}),
-        ("shipmate-unlock-1", {"index": 1, "outcome": "cleared", "lock_id": _ID}),
-        ("shipmate-unlock-01", {"index": 1, "outcome": "released", "lock_id": _ID}),
-        ("shipmate-unlock-1-x", {"index": 1, "outcome": "released", "lock_id": _ID}),
-    ],
-)
+def test_a_failed_download_fails_the_reply_even_with_every_record(gh, monkeypatch, tmp_path):
+    """Mutation: drop `and not unread` (a notice says no lock was held)."""
+    posts, _ = gh
+    monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "failure")
+    _records(tmp_path, "none", "none", "none")
+    ur.main()
+    assert posts == _post("failed", "some cells' results could not be read; see the run.")
+
+
+_BAD = [
+    ("shipmate-unlock-1", _rec(1, "released", index=0)),
+    ("shipmate-unlock-3", {**_rec(1, "released"), "index": 3}),
+    ("shipmate-unlock-1", _rec(1, "released", index=True)),
+    ("shipmate-unlock-1", _rec(1, "cleared")),
+    ("shipmate-unlock-1", _rec(1, "released", stack="stacks/app")),
+    ("shipmate-unlock-1", _rec(1, "released", environment="prod")),
+    ("shipmate-unlock-01", _rec(1, "released")),
+    ("shipmate-unlock-1-x", _rec(1, "released")),
+]
+
+
+@pytest.mark.parametrize("name, rec", _BAD)
 def test_a_record_that_fails_a_check_reads_as_did_not_run(gh, tmp_path, name, rec):
-    """A record's cell is its file name's index, which must match the record's `index`; an
-    index outside `cells` names no cell, since only `cells` is iterated. Mutations, one per case
-    but the out-of-range one: drop `rec["index"] != index`; `type(...) is not int` to
+    """A record's cell is its artifact name's index, which its file name and `index` must match,
+    and its `stack` and `environment` must be that cell's. Mutations, one per case: drop
+    `rec["index"] != index`; drop the `len(cells)` bound (IndexError); `type(...) is not int` to
     `not isinstance(..., int)` (`true` reads as 1); drop the outcome check (`cleared` reads as no
-    lock held); a name pattern of `([0-9]+)` (`shipmate-unlock-01` reads as 1); `fullmatch` to
-    `match` (`shipmate-unlock-1-x` reads as 1)."""
+    lock held); drop the `stack` check; drop the `environment` check; a name pattern of
+    `([0-9]+)` (`shipmate-unlock-01` reads as 1); `fullmatch` to `match` (`shipmate-unlock-1-x`
+    reads as 1)."""
     posts, _ = gh
     _records(tmp_path, "none", None, "none")
-    _record(tmp_path, name, **rec)
+    _write(tmp_path, name, json.dumps(rec))
     ur.main()
     assert posts == _post("failed", "stacks/db did not run.")
 
 
+def test_an_artifact_holding_a_siblings_file_name_is_ignored(gh, tmp_path):
+    """Artifact `shipmate-unlock-1` is read only as `shipmate-unlock-1.json`. Mutation: read any
+    `.json` in the directory (`next(d.glob("*.json"))`)."""
+    posts, _ = gh
+    _records(tmp_path, "none", None, "none")
+    _write(tmp_path, "shipmate-unlock-0", json.dumps(_rec(1, "none")), folder="shipmate-unlock-1")
+    ur.main()
+    assert posts == _post("failed", "stacks/db did not run.")
+
+
+def test_a_lone_artifact_downloaded_flat_counts(gh, tmp_path):
+    """`download-artifact` writes a pattern's only match straight into `path`. Mutation: drop the
+    flat branch of `_found` (the record reads `did not run`)."""
+    posts, _ = gh
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released")), flat=True)
+    ur.main()
+    assert posts == _post(
+        "failed",
+        "stacks/app, stacks/dns did not run; released 1 state lock(s) in dev-eu: "
+        f"stacks/db ({_ID}).",
+    )
+
+
+def test_a_flat_download_holding_two_files_is_rejected(gh, tmp_path):
+    """Flat is one artifact's layout, and an artifact holds one record. Mutation: `len(entries)
+    == 1` to `>= 1` (the first file reads as a record)."""
+    posts, _ = gh
+    for i in (0, 1):
+        _write(tmp_path, f"shipmate-unlock-{i}", json.dumps(_rec(i, "none")), flat=True)
+    ur.main()
+    assert posts == _post("failed", "stacks/app, stacks/db, stacks/dns did not run.")
+
+
 def test_three_records_all_count(gh, tmp_path):
-    """Mutation: read only the first record found (`break` after `out[index] = ...`)."""
+    """Mutation: read only the first record found (`break` after `out[...] = rec`)."""
     posts, _ = gh
     _records(tmp_path, "released", "released", "released")
     ur.main()
@@ -199,11 +283,42 @@ def test_three_records_all_count(gh, tmp_path):
     )
 
 
+def test_an_oversized_record_is_never_decoded(gh, tmp_path):
+    """Mutation: drop the `RECORD_MAX` bound (the padded record counts)."""
+    posts, _ = gh
+    _records(tmp_path, "none", None, "none")
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "none", pad="a" * ur.RECORD_MAX)))
+    ur.main()
+    assert posts == _post("failed", "stacks/db did not run.")
+
+
+def test_a_deeply_nested_record_reads_as_did_not_run(gh, tmp_path):
+    """Regression: the reply still posts and `main` returns. Mutation: drop both the bound and
+    `RecursionError` from the `except` (the decoder's `RecursionError` escapes)."""
+    posts, _ = gh
+    _records(tmp_path, "none", None, "none")
+    _write(tmp_path, "shipmate-unlock-1", "[" * 100_000 + "]" * 100_000)
+    ur.main()
+    assert posts == _post("failed", "stacks/db did not run.")
+
+
+def test_a_record_the_decoder_cannot_nest_reads_as_did_not_run(gh, monkeypatch, tmp_path):
+    """Within the bound on some Python versions, a nested record exhausts the decoder's
+    recursion (3.12 at a depth of about 1,000). Bound lifted here to reach the decoder.
+    Mutation: drop `RecursionError` from the `except`."""
+    posts, _ = gh
+    monkeypatch.setattr(ur, "RECORD_MAX", 10**6)
+    _records(tmp_path, "none", None, "none")
+    _write(tmp_path, "shipmate-unlock-1", "[" * 100_000 + "]" * 100_000)
+    ur.main()
+    assert posts == _post("failed", "stacks/db did not run.")
+
+
 def test_a_lock_id_outside_the_charset_is_dropped(gh, tmp_path):
     """Mutation: drop the `_ID_RE` check (the forged id renders as a link)."""
     posts, _ = gh
     _records(tmp_path, "none", None, "none")
-    _record(tmp_path, "shipmate-unlock-1", index=1, outcome="released", lock_id="[x](https://e)")
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released", lock_id="[x](https://e)")))
     ur.main()
     assert posts == _post("notice", "released 1 state lock(s) in dev-eu: stacks/db.")
 
@@ -212,9 +327,10 @@ def test_a_hostile_stack_name_renders_escaped(gh, monkeypatch, tmp_path):
     """Stack names come from the pull request's tree. Mutation: render `c["stack"]` without
     `_md_name` (a link and a team mention)."""
     posts, _ = gh
-    cells = [{"stack": "[x](https://e)"}, {"stack": "@org/team"}]
+    cells = [{"stack": "[x](https://e)", "environment": "dev-eu"}]
+    cells.append({"stack": "@org/team", "environment": "dev-eu"})
     monkeypatch.setenv("SHIPMATE_CELLS", json.dumps(cells))
-    _records(tmp_path, "released", "failed")
+    _records(tmp_path, "released", "failed", cells=cells)
     ur.main()
     assert posts == _post(
         "failed",

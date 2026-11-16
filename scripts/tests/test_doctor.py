@@ -4441,8 +4441,9 @@ def test_an_auto_job_without_auto_true_is_reported(monkeypatch):
 
 _UNLOCK_GRANT_TEXT = (
     "`shipmate.yml`'s `unlock` job does not grant `pull-requests: write`. A called workflow's "
-    "jobs are capped by the calling job's permissions, and `unlock.yml`'s `guard` requests it, "
-    "so every unlock run dies at startup with no job and no log. Copy the published "
+    "jobs are capped by the calling job's permissions, and `unlock.yml`'s `guard` (the 🚀 "
+    "reaction) and `result` (the unlock reply) request it, so every unlock run dies at startup "
+    "with no job and no log. Copy the published "
     "`permissions:` block whole (docs/getting-started.md)."
 )
 
