@@ -2783,8 +2783,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   failed plan run may have planned and published no record:
   ``auto apply refused: shipmate plan run <m> of this pull request planned
   after plan run <n>. Review its plan, then comment `shipmate apply`.`` A
-  completed run that never reached `detect`, skipped it, or listed no job does
-  not count. A listing page or jobs read that fails or is malformed, a
+  completed run that never reached `detect` or skipped it does not count. A
+  listing page or jobs read that fails, is malformed or lists no job, a
   `created_at` that is not a whole-second UTC time (GitHub answers a malformed
   `created` filter with an empty listing), and jobs of another run attempt
   refuse with ``auto apply refused: the shipmate plan runs of this pull request
@@ -2874,8 +2874,9 @@ apply applies; wait for it to finish, review its plan, then comment `shipmate
 apply` ``, an incomplete listing with ``could not confirm no newer shipmate plan
 run of pull request #<pr> (the listing is incomplete)``. A cell reads no jobs,
 which would cost a listing and a jobs read per cell: a newer plan that completed
-before `detect` is `detect`'s to refuse, and one that starts and finishes
-between two cells' checks is not seen. The base comparison is whole-branch,
+before `detect` is `detect`'s to refuse, one that starts and finishes
+between two cells' checks is not seen, and one dispatched after a cell's check
+does not stop that cell. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
 environment approval refuses that wave. Update the branch from the base and

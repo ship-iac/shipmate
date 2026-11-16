@@ -2412,9 +2412,10 @@ comment `shipmate apply`.
 
 `detect` could not rule out a newer `shipmate plan` run: a page of the
 `event=workflow_dispatch&created=>=<time>` listing failed or was malformed, a
-newer completed run's jobs could not be read or belong to another run attempt,
-or the autoplan's `created_at` is not a whole-second UTC time. The run's log
-carries a warning naming the failed read. Comment `shipmate apply`.
+newer completed run's jobs could not be read, listed no job or belong to another
+run attempt,
+or the autoplan's `created_at` is not a whole-second UTC time. A failed or
+malformed listing page logs a warning naming it. Comment `shipmate apply`.
 
 ### ``not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...``
 

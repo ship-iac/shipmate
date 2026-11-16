@@ -35,10 +35,10 @@ from _shipmate import (
     is_head_sha,
     is_pr_number,
     is_run_id,
-    listed_jobs,
     plan_runs_since,
     retried,
     run_annotated,
+    run_jobs,
 )
 
 APPLY_PREFIX = "apply / "
@@ -398,11 +398,11 @@ def newer_plans(repo, pr_number, newest, *, jobs, run):
     auto apply applies), that count against that apply, ascending by id. Listed by
     `plan_runs_since` from `newest["created_at"]`: a run created in the same second can be newer,
     so ids decide. A run not listed `completed` counts. With `jobs`, a completed run counts when
-    its jobs (`listed_jobs`) show it `planned`, whatever its conclusion: a failed plan run whose
+    its jobs (`run_jobs`) show it `planned`, whatever its conclusion: a failed plan run whose
     `detect` succeeded may have rewritten the head's records. Without `jobs`, a completed run is
     ignored and no jobs are read. `complete` is false when the listing is, or a completed run's
-    jobs cannot be listed, carry another run attempt than the listed one, or cannot tell
-    (`planned` raises). Raises `ValueError` on an int `pr_number`."""
+    jobs cannot be listed or list none, carry another run attempt than the listed one, or cannot
+    tell (`planned` raises). Raises `ValueError` on an int `pr_number`."""
     runs, complete = plan_runs_since(repo, pr_number, newest.get("created_at"), run)
     counted = []
     for listed in runs:
@@ -413,11 +413,10 @@ def newer_plans(repo, pr_number, newest, *, jobs, run):
             continue
         if not jobs:
             continue
-        # Not `run_jobs`: a run cancelled while queued ended with no job, so it did not plan.
-        listing = listed_jobs(repo, listed["id"], run)
+        listing, read = run_jobs(repo, listed["id"], run)
         attempt = listed.get("run_attempt")
         if (
-            listing is None
+            not read
             or type(attempt) is not int
             or any(j.get("run_attempt") != attempt for j in listing)
         ):

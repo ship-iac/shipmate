@@ -936,8 +936,8 @@ def _dispatched(run_id, title, status="completed", login="shipmate-iac[bot]"):
     }
 
 
-def _since(rows, pr="7", since=_SINCE):
-    argv = []
+def _since(rows, pr="7", since=_SINCE, argv=None):
+    argv = [] if argv is None else argv
 
     def gh(args):
         argv.append(args)
@@ -972,10 +972,13 @@ def test_plan_runs_since_lists_every_status_and_actor_of_this_pull_requests_plan
 
 def test_plan_runs_since_refuses_an_int_pull_request_number_before_any_read():
     """`cell-lock` holds the number as an int, and a parsed title's is a str: an int matches no
-    run and the read fails open. Mutation: drop the boundary check (the read is made and the int
-    reaches `re.escape`, a `TypeError`)."""
+    run and the read fails open. Mutations: drop the boundary check (the read is made and the int
+    reaches `re.escape`, a `TypeError`); drop only `plan_runs_since`'s call of it (the read is
+    made before `_plans_of` raises)."""
+    argv = []
     with pytest.raises(ValueError, match=r"pull request number 7 is not a decimal str"):
-        _since([_dispatched(2, "shipmate · plan pr=7 ref= comment=")], pr=7)
+        _since([_dispatched(2, "shipmate · plan pr=7 ref= comment=")], pr=7, argv=argv)
+    assert argv == []
 
 
 @pytest.mark.parametrize(
