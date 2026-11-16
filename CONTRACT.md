@@ -2453,8 +2453,8 @@ check/status/comment/issue that crosses a workflow-run boundary:
   request").
 - **The waits reply** — posted by `actions/apply-waiters` in `apply-run.yml`'s
   `review` and `summary` jobs, both bound to `shipmate-engine`, as a pull
-  request comment for each apply run waiting behind the run that holds the
-  queue. Its
+  request comment for each App-dispatched apply run with a command comment
+  waiting behind the run that holds the queue. Its
   `<!-- shipmate:waits-<run id> -->` first line is read only to skip a waiting
   run already told, matched at the start of a comment by `<slug>[bot]`; nothing
   edits or minimizes it (§Comment-ops, "One apply run per pull request").

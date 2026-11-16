@@ -1,5 +1,5 @@
 name: shipmate apply-waiters
-description: Post a pull request comment for each apply run of the pull request that waits behind this one, naming this run, once per waiting run (scripts/apply-queue waiters). Mints a shipmate App installation token with actions read and pull-requests write; writes only when the run's actor and triggering actor are both the App's bot login. Display only, so a failed read or reply only warns.
+description: Post a pull request comment for each App-dispatched apply run with a command comment that waits behind this one, naming this run, once per waiting run (scripts/apply-queue waiters). Mints a shipmate App installation token with actions read and pull-requests write; writes only when the run's actor and triggering actor are both the App's bot login. Display only, so a failed read or post only warns.
 inputs:
   pr-number:
     description: Pull request whose apply runs are read.
