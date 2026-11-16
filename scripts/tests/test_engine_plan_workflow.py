@@ -58,7 +58,7 @@ def test_every_job_declares_its_own_permissions():
 def test_facts_is_the_single_producer_of_every_pull_request_fact():
     """One producer, or two producers of one fact disagree eventually. Mutation: add a second
     `actions/pr-facts` step to `detect`. Mutation: drop the `head-ref` line from `facts`'s
-    outputs."""
+    outputs. Mutation: drop the `base-ref` line from `facts`'s outputs."""
     producers = [
         job_id
         for job_id, job in workflow_jobs(WF).items()
@@ -71,6 +71,7 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
         "head-repo": "${{ steps.facts.outputs.head-repo }}",
         "head-ref": "${{ steps.facts.outputs.head-ref }}",
         "base-sha": "${{ steps.facts.outputs.base-sha }}",
+        "base-ref": "${{ steps.facts.outputs.base-ref }}",
         "pr-number": "${{ steps.facts.outputs.pr-number }}",
         "is-draft": "${{ steps.facts.outputs.is-draft }}",
         "on-demand": "${{ steps.facts.outputs.on-demand }}",
@@ -79,9 +80,11 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
 
 def test_build_matrix_reads_the_facts_job_and_states_no_constant():
     """The half that matters more than the summary call's: a wrong value here passes the fork
-    refusal itself. Mutation: `head-repo: ${{ github.repository }}`."""
+    refusal itself. Mutation: `head-repo: ${{ github.repository }}`. Mutation: drop the
+    `base-ref` line -- build-matrix refuses every plan."""
     assert step_using(WF, "detect", "actions/build-matrix")["with"] == {
         "base-sha": "${{ needs.facts.outputs.base-sha }}",
+        "base-ref": "${{ needs.facts.outputs.base-ref }}",
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
         "github-vars": "${{ toJSON(vars) }}",

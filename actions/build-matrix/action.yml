@@ -7,6 +7,13 @@ inputs:
       checked-out head. A sweep leaves it empty.
     required: false
     default: ""
+  base-ref:
+    description: >-
+      The pull request's base branch name. Outside a sweep, detect reads its tip and marks each
+      changed cell whose stack the merge of that tip into the head changes behind; empty refuses.
+      A sweep leaves it empty.
+    required: false
+    default: ""
   sweep:
     description: >-
       Set to 'true' only in a drift sweep: every stack is enumerated, the head-repository and
@@ -56,13 +63,13 @@ inputs:
     default: ""
 outputs:
   matrix:
-    description: 'JSON {"include":[{stack,environment,workload,role_arn,cred_region,tf_vars,config_path,env_binding},...]} for the plan matrix.'
+    description: 'JSON {"include":[{stack,environment,workload,role_arn,cred_region,tf_vars,config_path,env_binding},...]} for the plan matrix; a behind cell (`behind`) is not in it.'
     value: ${{ steps.build.outputs.matrix }}
   empty:
-    description: '"true" when no stack changed in any environment.'
+    description: '"true" when the plan matrix has no cell: no stack changed in any environment, or every changed cell is behind.'
     value: ${{ steps.build.outputs.empty }}
   count:
-    description: How many cells the plan matrix has. Read by the trusted summary job to check that every planned cell produced a summary.
+    description: How many cells the plan matrix has, behind cells excluded. Read by the trusted summary job to check that every planned cell produced a summary.
     value: ${{ steps.build.outputs.count }}
   max_parallel:
     description: The plan or sweep matrix's `max-parallel`, a whole number from 1 to 256 -- the table's `max_parallel` (10 when unset), the most cell jobs the matrix runs at once. Unset when the step refuses.
@@ -77,7 +84,7 @@ outputs:
     description: 'JSON [env, ...]: the default branch table''s `apply_mode: targeted` environments, sorted; `[]` when none. Read by the plan summary to name `shipmate apply <env>` in the plan comment''s command section for each one holding a changed cell.'
     value: ${{ steps.build.outputs.targeted_envs }}
   cells:
-    description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells, and by the plan summary to name the planned cells that left no cell summary; on a plan, where a `tags` filter is refused, it names exactly the matrix''s cells. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` job fails at its "Upsert / close drift issues" step before the script starts, after every cell has planned.'
+    description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells, and by the plan summary to name the planned cells that left no cell summary; on a plan, where a `tags` filter is refused, it names exactly the matrix''s cells, so no behind cell. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` job fails at its "Upsert / close drift issues" step before the script starts, after every cell has planned.'
     value: ${{ steps.build.outputs.cells }}
   unmanaged:
     description: 'JSON {"count": N, "paths": [...]}: how many scanned stacks carry no `env/*` tag and no `shipmate/local` tag, and the first ten of their paths, sorted; {"count": 0, "paths": []} when none. Shipmate plans, applies and sweeps none of them or of the `shipmate/local` stacks, but the plan''s repo-wide fmt and stale-codegen checks still cover both. Read by the plan summary for its comment line.'
@@ -89,8 +96,22 @@ outputs:
     description: The first error of the `::error::` message that failed `Compute plan matrix` or `Verify changed tools` (a refusal, a failed tool or API call, or a tool release that did not verify), without the prefix, its lines joined into one; empty when neither raised one. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
     value: ${{ steps.build.outputs.refusal || steps.tools-verify.outputs.refusal }}
   env_order:
-    description: 'JSON [env, ...]: every environment the matrix''s cells name, in apply order (the env-levels of the table''s `needs`, ties by name). Read by the plan summary to order the comment''s environment headings.'
+    description: 'JSON [env, ...]: every environment the matrix''s cells name, behind cells excluded, in apply order (the env-levels of the table''s `needs`, ties by name). Read by the plan summary to order the comment''s environment headings.'
     value: ${{ steps.build.outputs.env_order }}
+  behind:
+    description: >-
+      Outside a sweep, JSON {"base": <base branch>, "tip": <its tip>, "since": <merge base of the
+      tip and the head>, "commits": {<short sha>: <subject cut to 72 characters>}, "cells":
+      [{"stack", "environment", "cause", "shas", "more"}]}: each changed cell whose stack the merge
+      of the base tip into the head changes, directly or through a module it sources (cause
+      `changed`), or every changed cell when that merge conflicts (cause `conflict`). These cells
+      are left out of `matrix`, `count`, `cells` and `env_order`; a plan of them would revert the
+      base's change. `shas` lists up to three base commits under the stack's directory, newest
+      first, `more` counts the rest, and `commits` holds exactly the listed ones; `shas` is empty
+      for a conflict and for a stack held only through a module. With no behind cell, `tip` and
+      `since` are empty and `commits` and `cells` are too; a plan with no changed cell reads no
+      tip. A value over 100 KiB refuses. Empty on a sweep.
+    value: ${{ steps.build.outputs.behind }}
 runs:
   using: composite
   steps:
@@ -99,10 +120,11 @@ runs:
       id: build
       shell: bash
       env:
-        # The environment table is read from the default branch through the contents
-        # API; no permission beyond the job's own contents: read.
+        # The environment table is read from the default branch through the contents API, and
+        # the base tip from its ref; no permission beyond the job's own contents: read.
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
+        SHIPMATE_BASE_REF: ${{ inputs.base-ref }}
         SHIPMATE_HEAD_REPO: ${{ inputs.head-repo }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_SWEEP: ${{ inputs.sweep }}

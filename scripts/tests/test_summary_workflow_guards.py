@@ -52,6 +52,7 @@ EXPECTED_SUMMARY_WITH = {
     "command-hints": "${{ needs.detect.outputs.command_hints }}",
     "auto-envs": "${{ needs.detect.outputs.auto_envs }}",
     "targeted-envs": "${{ needs.detect.outputs.targeted_envs }}",
+    "behind": "${{ needs.detect.outputs.behind }}",
 }
 #: `detect`'s whole outputs map: `unmanaged`, `refusal` and `cells` are what the `with:` above
 #: passes on; `tools` is the version pair the plan cells install.
@@ -71,6 +72,7 @@ EXPECTED_DETECT_OUTPUTS = {
     ),
     "cells": "${{ steps.matrix.outputs.cells }}",
     "env_order": "${{ steps.matrix.outputs.env_order }}",
+    "behind": "${{ steps.matrix.outputs.behind }}",
     "tools": "${{ steps.setup.outputs.tools }}",
 }
 EXPECTED_JOB_IDS = ["claim", "facts", "detect", "plan", "summary", "gate-hold", "outcome"]
@@ -138,7 +140,9 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     ever found stacked on the pull request.
     Mutation: drop the `targeted-envs:` line, `detect`'s `targeted_envs` output or the action's
     `targeted-envs` input -> the commands section offers only the bare `shipmate apply`.
-    Mutation: drop `detect`'s `tools` output -> every plan cell's setup refuses."""
+    Mutation: drop `detect`'s `tools` output -> every plan cell's setup refuses.
+    Mutation: drop `detect`'s `behind` output, or the `behind:` line -> the summary reads no
+    behind cell and holds every gate as an evidence gap."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

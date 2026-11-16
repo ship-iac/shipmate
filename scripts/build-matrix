@@ -399,6 +399,82 @@ def _merge_stacks(base_ref, candidates):
     )
 
 
+#: The most bytes the serialized `behind` output may take: the summary job hands it to three
+#: step `env:` values, each capped at 128 KiB by Linux.
+BEHIND_CAP = 100 * 1024
+#: How many base commits a behind cell names; its `more` counts the rest.
+BEHIND_SHAS = 3
+SUBJECT_CAP = 72
+
+
+def _stack_commits(since, tip, stack, stacks):
+    """`(short sha, subject)` per commit of `since..tip` that touches `stack`'s directory, newest
+    first. Path limiting compares trees, so the blobless clone fetches no blob for it. The root
+    stack `.` holds the paths no other stack of `stacks` holds, as `_inside` reads them."""
+    paths = [f"{stack}/"]
+    if stack == ".":
+        paths = [".", *(f":(exclude){s}/" for s in sorted(stacks) if s != ".")]
+    out = _run(["git", "log", "--format=%h%x00%s", f"{since}..{tip}", "--", *paths])
+    return [tuple(line.split("\0", 1)) for line in out.split("\n") if "\0" in line]
+
+
+def behind_report(base_ref, cells, stacks):
+    """The `behind` output for the changed `cells` of a plan against the tip of branch
+    `base_ref` (`apply-gate.branch_tip`): `{base, tip, since, commits, cells}`. A cell is behind,
+    cause `changed`, when `base_changed_stacks` returns its stack; when the merge of the tip into
+    the head conflicts (`MergeConflict`), every cell is, cause `conflict`. Any other failure
+    refuses. Each behind cell lists `shas`, up to `BEHIND_SHAS` commits of `since..tip` under
+    its stack's directory (`_stack_commits`, over `stacks`, every stack path), newest first, and
+    `more`, the count of the rest; `commits` maps exactly the listed shas to their subjects cut
+    to `SUBJECT_CAP` characters. `shas` is empty for a conflict and for a stack held only
+    through a module it sources. With no behind cell `tip` and `since` are empty; no `cells`
+    reads no tip."""
+    report = {"base": base_ref, "tip": "", "since": "", "commits": {}, "cells": []}
+    if not cells:
+        return report
+    tip = ag.branch_tip(os.environ.get("GITHUB_REPOSITORY", ""), base_ref, run=_run)
+    try:
+        changed = base_changed_stacks(tip, {c["stack"] for c in cells})
+        held, cause = [c for c in cells if c["stack"] in changed], "changed"
+    except MergeConflict:
+        held, cause = list(cells), "conflict"
+    if not held:
+        return report
+    since = merge_base(tip, retry=_BASE_REMEDY)
+    found = {}
+    if cause == "changed":
+        found = {s: _stack_commits(since, tip, s, stacks) for s in {c["stack"] for c in held}}
+    commits, rows = {}, []
+    for c in held:
+        listed = found.get(c["stack"], [])
+        shown = listed[:BEHIND_SHAS]
+        commits.update((sha, subject[:SUBJECT_CAP]) for sha, subject in shown)
+        rows.append(
+            {
+                "stack": c["stack"],
+                "environment": c["environment"],
+                "cause": cause,
+                "shas": [sha for sha, _ in shown],
+                "more": len(listed) - len(shown),
+            }
+        )
+    return {"base": base_ref, "tip": tip, "since": since, "commits": commits, "cells": rows}
+
+
+def behind_output(report):
+    """`report` (`behind_report`) serialized for the `behind` output. Over `BEHIND_CAP` bytes it
+    refuses, naming the count and the remedy: the summary job could not read it."""
+    text = json.dumps(report, separators=(",", ":"))
+    size = len(text.encode("utf-8"))
+    if size > BEHIND_CAP:
+        raise SystemExit(
+            f"::error::{len(report['cells'])} cell(s) are behind {report['base']}, and the "
+            f"report naming them is {size} bytes, over the {BEHIND_CAP}-byte limit the summary "
+            f"job reads. Update the branch from {report['base']} and push."
+        )
+    return text
+
+
 def _remove_worktree(tree):
     """Remove the merge worktree at `tree`; a failure prints one `::warning::` naming it."""
     try:
@@ -926,6 +1002,18 @@ def plan_workflow_error(event_name):
     )
 
 
+def base_ref_error(base_ref, sweep: bool):
+    """The `::error::` line refusing an empty base branch outside a sweep, or "" when there is
+    one or this is a sweep: a plan with no base branch cannot tell which cells are behind it."""
+    if sweep is True or base_ref:
+        return ""
+    return (
+        "::error::build-matrix's base-ref input is empty, so this plan cannot tell which changed "
+        "stacks the base changed since the branch left it. Wire "
+        "`base-ref: ${{ needs.facts.outputs.base-ref }}` into the build-matrix step."
+    )
+
+
 def tag_filter_error(tags, sweep: bool):
     """The `::error::` line refusing a `tags` filter outside a run with no pull
     request, or "" when it may be honoured.
@@ -1019,6 +1107,7 @@ def main():
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
     tags = os.environ.get("SHIPMATE_TAGS", "")
+    base_ref = os.environ.get("SHIPMATE_BASE_REF", "")
     # `or`, so the fork refusal precedes the two consumer-wiring checks: a fork
     # head must be turned away before this script shells out or reads its tree.
     rejection = (
@@ -1030,6 +1119,7 @@ def main():
         or head_checkout_error(os.environ.get("SHIPMATE_HEAD_SHA", ""), sweep)
         or plan_workflow_error(event_name)
         or tag_filter_error(tags, sweep)
+        or base_ref_error(base_ref, sweep)
     )
     if rejection:
         raise SystemExit(rejection)
@@ -1053,6 +1143,13 @@ def main():
         deps = run_graph_deps()
         present = {(c["stack"], c["environment"]) for c in cells}
         wv.refuse_inversions(cells, present, deps, tag_map, order)
+    behind, held = "", set()
+    if not sweep:
+        # After the inversion check, which reads every changed cell, behind ones included.
+        report = behind_report(base_ref, cells if base and base != _ZERO_SHA else [], tag_map)
+        behind = behind_output(report)
+        held = {(c["stack"], c["environment"]) for c in report["cells"]}
+    planned = [c for c in cells if (c["stack"], c["environment"]) not in held]
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     # Before the write: a refusal after `matrix=` would leave a matrix with no cap.
     cap = ec.max_parallel(table)
@@ -1062,21 +1159,25 @@ def main():
     if pairs is not None:
         lost = json.dumps({"count": len(pairs), "pairs": pairs[:UNMANAGED_NAMES]})
     write_outputs(
-        matrix=json.dumps({"include": cells}),
-        empty=not cells,
-        count=len(cells),
+        matrix=json.dumps({"include": planned}),
+        empty=not planned,
+        count=len(planned),
         max_parallel=cap,
         command_hints=hints,
         auto_envs=json.dumps(ec.mode_envs(table, "auto")),
         targeted_envs=json.dumps(ec.mode_envs(table, "targeted")),
-        cells=json.dumps(tree),
+        cells=json.dumps([t for t in tree if (t["stack"], t["environment"]) not in held]),
         unmanaged=json.dumps(named),
         lost=lost,
-        env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
+        env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in planned})),
         verify=json.dumps(verify, separators=(",", ":")),
+        behind=behind,
     )
-    listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
-    print(f"{len(cells)} cell(s): {listing}")
+    listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in planned) or "(none)"
+    print(f"{len(planned)} cell(s): {listing}")
+    if held:
+        names = ", ".join(f"{e}/{s}" for s, e in sorted(held))
+        print(f"{len(held)} cell(s) behind {base_ref}, not planned: {names}")
 
 
 if __name__ == "__main__":

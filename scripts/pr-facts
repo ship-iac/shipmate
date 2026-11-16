@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Resolve the pull-request facts the plan path decides on, for either trigger.
 
-One producer for seven values -- head SHA, head repository, head branch, base SHA,
-pull-request number, draft flag, and whether a human named this run -- so the fork refusal,
-the draft skip, the checkout ref and the plan's recorded provenance cannot read
-two different answers to the same question.
+One producer for eight values -- head SHA, head repository, head branch, base SHA, base
+branch, pull-request number, draft flag, and whether a human named this run -- so the fork
+refusal, the draft skip, the checkout ref, the behind check and the plan's recorded provenance
+cannot read two different answers to the same question.
 
 Payload-preferred. Under `pull_request` / `pull_request_target` every value comes
 from GITHUB_EVENT_PATH, so the autoplan path cannot disagree with the event that
@@ -45,7 +45,7 @@ _DELETED_FORK = (
 
 
 def _facts(pr, on_demand):
-    """The seven facts from a pull-request object -- payload or API, same shape.
+    """The eight facts from a pull-request object -- payload or API, same shape.
 
     Refuses rather than emitting an empty value for anything nothing else can
     supply: an absent head SHA leaves the checkout on the base and the matrix
@@ -63,18 +63,21 @@ def _facts(pr, on_demand):
     head = pr.get("head") or {}
     repo = head.get("repo") or {}
     ref = head.get("ref")
+    base = pr.get("base") or {}
+    base_ref = base.get("ref")
     facts = {
         "head_sha": head.get("sha") or "",
         "head_repo": repo.get("full_name") or "",
         "head_ref": ref if isinstance(ref, str) else "",
-        "base_sha": (pr.get("base") or {}).get("sha") or "",
+        "base_sha": base.get("sha") or "",
+        "base_ref": base_ref if isinstance(base_ref, str) else "",
         "pr_number": str(pr.get("number") or ""),
         "is_draft": "true" if pr.get("draft") is True else "false",
         "on_demand": on_demand,
     }
     if not facts["head_repo"]:
         raise SystemExit(_DELETED_FORK)
-    missing = [key for key in ("head_sha", "base_sha", "pr_number") if not facts[key]]
+    missing = [key for key in ("head_sha", "base_sha", "base_ref", "pr_number") if not facts[key]]
     if missing:
         raise SystemExit(
             "::error::this run's pull request is missing " + ", ".join(missing) + ". Every "

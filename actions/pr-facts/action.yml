@@ -1,7 +1,7 @@
 name: shipmate pr-facts
 description: >-
-  Resolve the pull request's facts (head SHA, head repository, head branch, base SHA, number,
-  draft flag) for either plan trigger: from the event payload on a pull-request event, from the
+  Resolve the pull request's facts (head SHA, head repository, head branch, base SHA, base
+  branch, number, draft flag) for either plan trigger: from the event payload on a pull-request event, from the
   API by the dispatched pr_number otherwise. Every later job reads these outputs instead of the event
   payload, so the fork refusal, the draft skip and the checkout ref cannot read two different
   answers to one question. On a pull-request event whose payload says draft, the draft flag is
@@ -20,6 +20,9 @@ outputs:
   base-sha:
     description: The pull request's base commit; detect diffs from its merge base with the head.
     value: ${{ steps.facts.outputs.base_sha }}
+  base-ref:
+    description: The pull request's base branch name. Detect reads its tip to find the cells the base changed since the branch left it.
+    value: ${{ steps.facts.outputs.base_ref }}
   pr-number:
     description: The pull request's number.
     value: ${{ steps.facts.outputs.pr_number }}

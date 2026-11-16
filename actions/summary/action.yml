@@ -128,6 +128,16 @@ inputs:
       unreadable one warns once.
     required: false
     default: ""
+  behind:
+    description: >-
+      build-matrix's `behind` output: JSON {"base", "tip", "since", "commits", "cells"} naming the
+      changed cells whose stack the base changed since the branch left it, or a merge of the base
+      into the branch conflicts; they were not planned. Each gets a pending apply check titled
+      `Behind <base>: update the branch` and a row in the plan comment, and the gate stays pending
+      while any is listed. With detect succeeded, an empty value or one not of that shape is an
+      evidence gap: the gate holds and no apply check is published.
+    required: false
+    default: ""
 outputs:
   upsert:
     description: >-

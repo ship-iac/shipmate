@@ -667,6 +667,18 @@ def _pinned_tools():
     return json.dumps({tool: pins[tool] for tool in bm.ec.TOOLS})
 
 
+def _stub_overlap(monkeypatch, overlap, tip_reads):
+    """`_run_main`'s base tip read and overlap doubles."""
+    reads = [] if tip_reads is None else tip_reads
+
+    def branch_tip(repo, branch, *, run):
+        reads.append((repo, branch))
+        return "t" * 40
+
+    monkeypatch.setattr(bm.ag, "branch_tip", branch_tip)
+    monkeypatch.setattr(bm, "base_changed_stacks", overlap or (lambda base_ref, candidates: set()))
+
+
 def _run_main(
     monkeypatch,
     tmp_path,
@@ -688,6 +700,8 @@ def _run_main(
     dot=None,
     merge_base=None,
     list_calls=None,
+    overlap=None,
+    tip_reads=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -716,7 +730,11 @@ def _run_main(
     `merge_base` replaces the merge-base resolution, by default the identity, so a stated
     base reaches `compute_cells` and the `git diff` unchanged. `list_calls`, with `stacks`,
     keeps `_list_stacks` real: its `terramate list` argv is appended there and answered with
-    `stacks`' paths."""
+    `stacks`' paths.
+
+    `SHIPMATE_BASE_REF` is `main` unless `env` sets it. The base tip read answers `"t" * 40` and
+    appends `(repo, branch)` to `tip_reads` when given; `overlap`, by default answering no
+    stack, replaces `base_changed_stacks`."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -739,6 +757,8 @@ def _run_main(
         "SHIPMATE_TOOLS",
     ):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SHIPMATE_BASE_REF", "main")
+    _stub_overlap(monkeypatch, overlap, tip_reads)
     # The default branch's resolution equal to the pins, which a head without the file resolves
     # to: nothing to verify unless a test writes the head's file or sets its own `tools`.
     monkeypatch.setenv("SHIPMATE_TOOLS", _pinned_tools())
@@ -1477,12 +1497,13 @@ def test_build_matrix_action_declares_its_inputs():
     forgotten input refuses (plan wrapper) or reddens the sweep (drift), never plans a fork.
 
     Hand-written, name -> default; descriptions are prose and not pinned. Mutation: restore
-    `no-pull-request` as a second input."""
+    `no-pull-request` as a second input. Mutation: drop the `base-ref` input."""
     from _loader import action_yaml
 
     doc = action_yaml("build-matrix")
     assert {name: spec.get("default") for name, spec in doc["inputs"].items()} == {
         "base-sha": "",
+        "base-ref": "",
         "sweep": "false",
         "head-repo": "",
         "head-sha": "",
@@ -1501,6 +1522,7 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
     (step,) = [s for s in action_steps("build-matrix") if s.get("id") == "build"]
     assert step["env"] == {
         "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
+        "SHIPMATE_BASE_REF": "${{ inputs.base-ref }}",
         "SHIPMATE_HEAD_REPO": "${{ inputs.head-repo }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_SWEEP": "${{ inputs.sweep }}",
@@ -1519,7 +1541,8 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     Mutation: delete the `command_hints` output -- the plan comment never shows its commands.
     Mutation: delete or rename the `auto_envs` output -- no auto apply is ever dispatched.
     Mutation: delete the `targeted_envs` output -- the commands section offers only the bare
-    `shipmate apply`."""
+    `shipmate apply`.
+    Mutation: delete the `behind` output -- the summary job reads no behind cell."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
@@ -1537,6 +1560,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "lost": "${{ steps.build.outputs.lost }}",
         "refusal": "${{ steps.build.outputs.refusal || steps.tools-verify.outputs.refusal }}",
         "env_order": "${{ steps.build.outputs.env_order }}",
+        "behind": "${{ steps.build.outputs.behind }}",
     }
 
 
@@ -2609,6 +2633,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "lost": "",
         "env_order": '["dev-eu"]',
         "verify": "{}",
+        "behind": '{"base":"main","tip":"","since":"","commits":{},"cells":[]}',
     }
 
 
@@ -4353,3 +4378,286 @@ def test_a_sweep_reads_no_head_and_passes_no_tools(monkeypatch, tmp_path):
     (tmp_path / ".github" / "shipmate-config.yml").mkdir(parents=True)
     # "" is the input's default, which is what a sweep's step receives.
     assert _head_check(monkeypatch, tmp_path, tools="", sweep=True)["verify"] == "{}"
+
+
+def _terramate_changed(sources=None):
+    """A Terramate `list --changed` double for `_merge_stub`: the stacks under `stacks/` holding a
+    file the merge worktree's commit changes against its parent, plus each stack of `sources`
+    (`{module dir: [stacks sourcing it]}`) for a changed file under that module."""
+    sources = sources or {}
+
+    def listing(tree):
+        files = _git("-C", str(tree), "diff", "--name-only", "HEAD^", "HEAD").split()
+        hit = {"/".join(f.split("/")[:2]) for f in files if f.startswith("stacks/")}
+        for module, stacks in sources.items():
+            if any(f.startswith(f"{module}/") for f in files):
+                hit.update(stacks)
+        return "".join(f"{s}\n" for s in sorted(hit))
+
+    return listing
+
+
+def _short(sha):
+    return _git("rev-parse", "--short", sha).strip()
+
+
+def _cells(*pairs):
+    return [{"stack": s, "environment": e} for s, e in pairs]
+
+
+def _report_at(monkeypatch, tip, cells, stacks=("stacks/a", "stacks/b")):
+    """`behind_report` of `cells` against base `main`, whose tip read answers `tip`."""
+    monkeypatch.setattr(bm.ag, "branch_tip", lambda repo, branch, *, run: tip)
+    return bm.behind_report("main", cells, list(stacks))
+
+
+def test_behind_report_marks_the_stacks_the_base_changed_since_the_branch(git_repo, monkeypatch):
+    """Base and head both change `stacks/a`: behind. Only the head changes `stacks/b`: not. The
+    base changes `modules/m`, which `stacks/c` sources: behind, with no commit under its own
+    path. The base changed `stacks/d` before the branch merged it in: not behind. Real git; only
+    Terramate's listing is a double.
+
+    Mutation: drop the `base_changed_stacks` call (no stack changed) -- no cell, red.
+    Mutation: intersect with the stacks the base's own diff `since..tip` touches instead of the
+    merge listing -- `stacks/c` is missing, red."""
+    _commit(
+        {f"stacks/{s}/main.tf": f"{s}\n" for s in "abcd"} | {"modules/m/main.tf": "m\n"},
+        "common",
+    )
+    _commit({"stacks/d/main.tf": "d base\n"}, "base d")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({f"stacks/{s}/head.tf": "head\n" for s in "abcd"}, "head edits")
+    _git("checkout", "-q", "main")
+    since = _git("rev-parse", "HEAD").strip()
+    a = _commit({"stacks/a/base.tf": "base\n"}, "base edits a")
+    tip = _commit({"modules/m/main.tf": "m2\n"}, "base edits m")
+    _git("checkout", "-q", "pr")
+    _merge_stub(monkeypatch, _terramate_changed({"modules/m": ["stacks/c"]}))
+    cells = _cells(*((f"stacks/{s}", "dev") for s in "abcd"))
+    stacks = [f"stacks/{s}" for s in "abcd"]
+    changed = {"cause": "changed", "more": 0}
+    assert _report_at(monkeypatch, tip, cells, stacks) == {
+        "base": "main",
+        "tip": tip,
+        "since": since,
+        "commits": {_short(a): "base edits a"},
+        "cells": [
+            {"stack": "stacks/a", "environment": "dev", **changed, "shas": [_short(a)]},
+            {"stack": "stacks/c", "environment": "dev", **changed, "shas": []},
+        ],
+    }
+
+
+def test_behind_report_lists_each_commit_once_and_counts_the_rest(git_repo, monkeypatch):
+    """Five base commits touch `stacks/a`, the newest also `stacks/b`; `stacks/a` plans in two
+    environments. Each cell names its three newest commits under its own path and counts the
+    rest, and `commits` maps exactly the listed shas, once each, subject cut to 72 characters.
+
+    Mutation: swap `since` and `tip` in the log range -- no commit, red.
+    Mutation: drop the path limit -- `stacks/b` lists `stacks/a`'s commits, red.
+    Mutation: map every commit of the range into `commits`, independently of the cells -- the
+    two older commits are keys, red.
+    Mutation: map only the last cell's shas into `commits` -- two listed shas are missing, red."""
+    _commit({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n"}, "common")
+    since = _git("rev-parse", "HEAD").strip()
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/a/head.tf": "h\n", "stacks/b/head.tf": "h\n"}, "head")
+    _git("checkout", "-q", "main")
+    shas = [_commit({"stacks/a/main.tf": f"a{i}\n"}, f"a {i}") for i in range(4)]
+    shas.append(_commit({"stacks/a/main.tf": "a4\n", "stacks/b/main.tf": "b4\n"}, "x" * 80))
+    tip = shas[-1]
+    _git("checkout", "-q", "pr")
+    _merge_stub(monkeypatch, _terramate_changed())
+    cells = _cells(("stacks/a", "dev"), ("stacks/a", "prod"), ("stacks/b", "dev"))
+    newest = [_short(s) for s in reversed(shas)]
+    a_row = {"cause": "changed", "shas": newest[:3], "more": 2}
+    b_row = {"cause": "changed", "shas": newest[:1], "more": 0}
+    assert _report_at(monkeypatch, tip, cells) == {
+        "base": "main",
+        "tip": tip,
+        "since": since,
+        "commits": {newest[0]: "x" * 72, newest[1]: "a 3", newest[2]: "a 2"},
+        "cells": [
+            {"stack": "stacks/a", "environment": "dev", **a_row},
+            {"stack": "stacks/a", "environment": "prod", **a_row},
+            {"stack": "stacks/b", "environment": "dev", **b_row},
+        ],
+    }
+
+
+def test_behind_report_marks_every_changed_cell_on_a_conflict(git_repo, monkeypatch):
+    """The merge of the base into the branch conflicts in `stacks/a`; every changed cell is
+    behind, `stacks/b` included, cause `conflict`, naming no commit.
+
+    Mutation: on a conflict mark only the cells whose stack is named in the conflict text --
+    `stacks/b` is missing, red."""
+    head, tip = _conflicted(git_repo)
+    since = _git("merge-base", tip, head).strip()
+    cells = _cells(("stacks/a", "dev"), ("stacks/b", "dev"))
+    row = {"cause": "conflict", "shas": [], "more": 0}
+    assert _report_at(monkeypatch, tip, cells) == {
+        "base": "main",
+        "tip": tip,
+        "since": since,
+        "commits": {},
+        "cells": [{**c, **row} for c in cells],
+    }
+
+
+def test_behind_report_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
+    """A failed fetch is not a conflict: it refuses, so the gate holds rather than marking
+    every cell behind.
+
+    Mutation: catch every `SystemExit` as a conflict -- a report, no refusal, red."""
+    _commit({"stacks/a/main.tf": "a\n"}, "common")
+    with pytest.raises(SystemExit) as e:
+        _report_at(monkeypatch, "f" * 40, _cells(("stacks/a", "dev")))
+    assert type(e.value) is SystemExit
+    assert str(e.value.code).startswith(f"::error::could not fetch the base tip {'f' * 40} (")
+
+
+def test_a_plan_with_no_changed_cell_reads_no_tip(monkeypatch, tmp_path):
+    """A docs-only plan reads neither the tip nor the merge, and writes the no-behind value.
+
+    Mutation: read the tip before the empty check in `behind_report` -- a read, red."""
+    tips, overlaps = [], []
+
+    def overlap(base_ref, candidates):
+        overlaps.append(candidates)
+        return set()
+
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_PLAN_ENV, "SHIPMATE_BASE_SHA": "b" * 40},
+        cells=(),
+        head_sha="cafe1234",
+        tip_reads=tips,
+        overlap=overlap,
+    )
+    assert (tips, overlaps) == ([], [])
+    assert outputs["behind"] == '{"base":"main","tip":"","since":"","commits":{},"cells":[]}'
+
+
+_BEHIND_CELLS = (("stacks/app", "dev-eu"), ("stacks/db", "dev-eu"), ("stacks/app", "prod-eu"))
+
+
+def _behind_main(monkeypatch, tmp_path, cells=_BEHIND_CELLS, tips=None):
+    """`_run_main` of a plan whose overlap names `stacks/app`."""
+    return _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_PLAN_ENV, "SHIPMATE_BASE_SHA": "b" * 40},
+        cells=cells,
+        head_sha="cafe1234",
+        tip_reads=tips,
+        overlap=lambda base_ref, candidates: {"stacks/app"},
+        merge_base=lambda base, retry=None: "s" * 40,
+    )
+
+
+def test_behind_cells_leave_the_plan_outputs_but_not_the_inversion_check(monkeypatch, tmp_path):
+    """`stacks/app` is behind in both its environments. It leaves `matrix`, `count`, `empty`,
+    `cells` and `env_order`, which then names only `dev-eu`; `refuse_inversions` still reads
+    all three cells, since a `needs`/`after` contradiction is a fact of the tree.
+
+    Mutation: write `cells` from the whole tree -- `stacks/app` is named, red.
+    Mutation: drop the behind cells before `refuse_inversions` -- it reads one cell, red.
+    Mutation: compute `env_order` over every changed cell -- `prod-eu` is named, red."""
+    seen, tips = [], []
+    monkeypatch.setattr(bm.wv, "refuse_inversions", lambda cells, *a: seen.append(list(cells)))
+    outputs, _ = _behind_main(monkeypatch, tmp_path, tips=tips)
+    assert tips == [("acme/iac", "main")]
+    assert [(c["stack"], c["environment"]) for c in seen[0]] == list(_BEHIND_CELLS)
+    assert [c["stack"] for c in json.loads(outputs["matrix"])["include"]] == ["stacks/db"]
+    assert (outputs["count"], outputs["empty"]) == ("1", "false")
+    assert json.loads(outputs["cells"]) == [{"environment": "dev-eu", "stack": "stacks/db"}]
+    assert json.loads(outputs["env_order"]) == ["dev-eu"]
+    row = {"cause": "changed", "shas": [], "more": 0}
+    assert json.loads(outputs["behind"]) == {
+        "base": "main",
+        "tip": "t" * 40,
+        "since": "s" * 40,
+        "commits": {},
+        "cells": [
+            {"stack": "stacks/app", "environment": "dev-eu", **row},
+            {"stack": "stacks/app", "environment": "prod-eu", **row},
+        ],
+    }
+
+
+def test_an_all_behind_plan_is_empty(monkeypatch, tmp_path):
+    """Mutation: write `empty` from the changed cells -- `false`, red."""
+    outputs, _ = _behind_main(monkeypatch, tmp_path, cells=(("stacks/app", "dev-eu"),))
+    assert (outputs["empty"], outputs["count"], outputs["cells"]) == ("true", "0", "[]")
+    assert outputs["matrix"] == '{"include": []}'
+
+
+def test_a_sweep_writes_no_behind_value_and_needs_no_base_branch(monkeypatch, tmp_path):
+    """Mutation: refuse an empty base branch in a sweep too -- the sweep refuses, red."""
+    tips = []
+    outputs, _ = _run_main(
+        monkeypatch, tmp_path, {**_DRIFT_ENV, "SHIPMATE_BASE_REF": ""}, tip_reads=tips
+    )
+    assert (outputs["behind"], tips) == ("", [])
+
+
+def test_a_plan_with_no_base_branch_refuses_before_any_read(monkeypatch, tmp_path):
+    """An empty base branch cannot be checked for behind cells, so the plan refuses instead of
+    treating every cell as current.
+
+    Mutation: return "" from `base_ref_error`, so the overlap is skipped -- the plan writes a
+    matrix, red."""
+    called = []
+    with pytest.raises(SystemExit) as e:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {**_PLAN_ENV, "SHIPMATE_BASE_SHA": "b" * 40, "SHIPMATE_BASE_REF": ""},
+            head_sha="cafe1234",
+            called=called,
+        )
+    assert e.value.code == (
+        "::error::build-matrix's base-ref input is empty, so this plan cannot tell which changed "
+        "stacks the base changed since the branch left it. Wire "
+        "`base-ref: ${{ needs.facts.outputs.base-ref }}` into the build-matrix step."
+    )
+    assert called == []
+
+
+def _sized_report(cells=256, path=100, env=30):
+    """A behind report of `cells` cells with `path`-character stack paths and `env`-character
+    environments, each naming the same three base commits with 72-character subjects."""
+    shas = ["abcdef1", "abcdef2", "abcdef3"]
+    row = {"cause": "changed", "shas": shas, "more": 9}
+    return {
+        "base": "main",
+        "tip": "t" * 40,
+        "since": "s" * 40,
+        "commits": dict.fromkeys(shas, "x" * 72),
+        "cells": [
+            {"stack": f"{i:03d}".ljust(path, "s"), "environment": "e" * env, **row}
+            for i in range(cells)
+        ],
+    }
+
+
+def test_the_largest_plan_of_behind_cells_fits_under_the_cap():
+    """256 behind cells with 100-character paths serialize under 100 KiB (58,248 bytes).
+
+    Mutation: set `BEHIND_CAP` to 50 KiB -- the report refuses, red."""
+    text = bm.behind_output(_sized_report())
+    assert json.loads(text) == _sized_report()
+    assert len(text.encode()) <= 100 * 1024 == bm.BEHIND_CAP
+
+
+def test_a_behind_value_over_the_cap_refuses_and_writes_none(monkeypatch, tmp_path):
+    """Mutation: write the oversized value instead of refusing -- a matrix, red."""
+    monkeypatch.setattr(bm, "BEHIND_CAP", 100)
+    with pytest.raises(SystemExit) as e:
+        _behind_main(monkeypatch, tmp_path)
+    assert e.value.code == (
+        "::error::2 cell(s) are behind main, and the report naming them is 305 bytes, over "
+        "the 100-byte limit the summary job reads. Update the branch from main and push."
+    )
+    assert github_outputs(tmp_path / "out.txt") == {}
