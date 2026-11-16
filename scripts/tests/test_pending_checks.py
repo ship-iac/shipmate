@@ -1,6 +1,7 @@
 """pending-checks: check-run POST bodies from downloaded cell summaries."""
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -660,9 +661,7 @@ LINE = "a" * 99
 
 def _output(tmp_path, plan):
     """`check_output` of a changed cell whose plan.txt holds the bytes `plan`."""
-    txt = tmp_path / "plan.txt"
-    txt.write_bytes(plan)
-    return pc.check_output(CHANGED, txt, URL)
+    return pc.check_output(CHANGED, plan.decode("utf-8"), URL)
 
 
 def _emit_changed(tmp_path, plan):
@@ -760,22 +759,85 @@ def test_a_first_line_of_exactly_the_room_is_kept(tmp_path):
     assert len(summary.encode()) == CAP
 
 
-def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
-    """1,000,000 bytes of ASCII lines, then the byte 0xFF: a whole strict UTF-8 text read raises
-    `UnicodeDecodeError`. `counts` reads the whole file for the tally, so a double stands in for
-    it. The digest was computed once, off the tree. Mutation: read the whole file
-    (`fh.read()`) -> red."""
-
-    def counts(path):
-        return (1, 0, 0, 0, 0)
-
-    monkeypatch.setattr(pc.sc, "counts", counts)
-    body = _emit_changed(tmp_path, ((LINE + "\n") * 10_000).encode() + b"\xff")
-    assert body["output"]["title"] == "+1 ~0 -0"
-    assert body["output"]["summary"].endswith(TRAILER)
-    assert json.loads(body["external_id"])["plan_sha256"] == (
-        "6bec3c7c34b6f1ed2f7833c8f8bcc17aa3bb6fd865587d11e0faec55362fc0ef"
+def test_each_changed_cells_plan_text_is_read_once(tmp_path, monkeypatch):
+    """The digest, the counts and the fenced prefix all come from one read of plan.txt, so the
+    three cannot describe two different files. A no-change cell's text is read once too, for its
+    digest. Mutation: re-read the file for the fenced prefix (`open(txt).read(...)` in
+    `check_output`) -- two opens, red."""
+    _write_cell(tmp_path, "dev-eu", "stacks-app", **CHANGED)
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-dns",
+        PLAN_B,
+        stack="stacks/dns",
+        environment="dev-eu",
+        changed=False,
     )
+    reads = []
+    real_read_bytes, real_open = pathlib.Path.read_bytes, open
+
+    def read_bytes(self):
+        if self.name == "plan.txt":
+            reads.append(self.parent.name)
+        return real_read_bytes(self)
+
+    def opened(file, *args, **kwargs):
+        if pathlib.Path(file).name == "plan.txt":
+            reads.append(pathlib.Path(file).parent.name)
+        return real_open(file, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", read_bytes)
+    monkeypatch.setattr("builtins.open", opened)
+    assert len(_emit(tmp_path)) == 2
+    assert sorted(reads) == ["cell-summary.dev-eu.stacks-app", "cell-summary.dev-eu.stacks-dns"]
+
+
+#: sha256 of each body, serialized with sorted keys, that the engine published before
+#: `pending-checks` read each plan text once: captured off the tree, from the previous revision.
+_BODY_DIGESTS = {
+    "crlf": "5cb4770a291cdf848c0492bfce355ba9535b24f7c70a937ef03eee7af1a23505",
+    "cr": "7b34956d987f92cbe653fc43197d2cece98bb48cc26e055a6b25624a8d56a34e",
+    "big": "8ce3716ead43ee9f8d67db21941e197a0030adfd463e9a5d577ede94422b29fd",
+    "cr_tally": "62c8782e275448639f0c69d7c763de98cba7f1144b2b098c89d17b2d1e624094",
+    "edge": "ed9d3132c3f63355624b93c60f9f8bca1a5744b6b2adf3b3ce45d33e7a6ca16d",
+}
+_RIDER_TEXTS = {
+    "crlf": b"  # a will be created\r\n  + x = 1\r\n\r\n"
+    b"Plan: 1 to add, 0 to change, 0 to destroy.\r\n",
+    "cr": b'  # a will be created\r\n  + x = "a\rb"\n'
+    b"Plan: 1 to add, 0 to change, 0 to destroy.\r\n",
+    "big": (b"  + line with a cr\r\n" * (CAP // 18))
+    + b"Plan: 2 to add, 0 to change, 1 to destroy.\r\n",
+    "cr_tally": b'  + x = "a\rPlan: 1 to add, 0 to change, 0 to destroy.\nPlan: 3 to add, 0 to '
+    b"change, 0 to destroy.\n",
+    "edge": b"x" * (CAP - 1) + b"\r\n" + b"Plan: 1 to add, 0 to change, 0 to destroy.\n",
+}
+
+
+@pytest.mark.parametrize("name", sorted(_RIDER_TEXTS))
+def test_a_plan_text_with_cr_line_ends_publishes_the_same_body_as_before(tmp_path, name):
+    """CRLF line ends, a lone CR inside a value, a plan cut at the cap, a CRLF straddling the
+    cap, and a tally line after a lone CR: the title counts and the fence read the text as the
+    earlier two-read form did, so the published body is byte-identical. Mutations: drop the CR
+    translation of the fenced prefix -- `crlf` red; split the counts on universal newlines
+    (`splitlines()`) -- `cr_tally` red."""
+    d = tmp_path / "cell"
+    d.mkdir()
+    (d / "plan.txt").write_bytes(_RIDER_TEXTS[name])
+    body = pc.body(
+        "apply / stacks/app / dev-eu",
+        d / "cell.json",
+        CHANGED,
+        "a" * 40,
+        "1",
+        "7",
+        1,
+        "synchronize",
+        "https://x/run",
+    )
+    digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+    assert digest == _BODY_DIGESTS[name]
 
 
 #: A wide record: a 20-digit run id, a 6-digit pull request, 9999 cells, the longest event

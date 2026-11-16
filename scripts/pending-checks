@@ -56,7 +56,6 @@ gs = _load("gate-state")
 sc = _load("summary-comment")
 NEWER_RUN = 3
 EXTERNAL_ID_CAP = 255
-_COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 
 _KEYS = ("stack", "environment", "changed")
@@ -81,18 +80,17 @@ def _utf8_len(text):
     return len(text.encode("utf-8"))
 
 
-def check_output(cell, txt, url):
-    """The check `output` of the changed cell `cell` whose plan text is the file `txt`: its counts
-    as the title (`+? ~? -?` when underivable) and the plan in a `diff` fence as the summary,
-    at most `CHECK_OUTPUT_CAP` UTF-8 bytes. A cut plan keeps whole lines and ends with a link to
-    `url`, the plan run's page, whose plan job's raw log has the full plan; when no whole line
-    fits, the summary is that link alone. Only a prefix of `txt` is read."""
-    tally = sc.counts(txt) or ("?",) * 5
-    title = sc.state({**cell, **dict(zip(_COUNT_KEYS, tally, strict=True))})
+def check_output(cell, text, url):
+    """The check `output` of the changed cell `cell` whose plan text is `text`: its counts as the
+    title (`+? ~? -?` when underivable) and the plan in a `diff` fence as the summary, at most
+    `CHECK_OUTPUT_CAP` UTF-8 bytes, with CRLF and CR read as line ends. A cut plan keeps whole
+    lines and ends with a link to `url`, the plan run's page, whose plan job's raw log has the
+    full plan; when no whole line fits, the summary is that link alone."""
+    tally = sc.counts_of(text) or ("?",) * 5
+    title = sc.state({**cell, **dict(zip(sc.COUNT_KEYS, tally, strict=True))})
     # No prefix longer than the cap can fit. The fence is sized over the whole prefix, a
     # superset of any cut, so the cut text cannot close it.
-    with open(txt, encoding="utf-8") as fh:
-        prefix = fh.read(CHECK_OUTPUT_CAP + 1)
+    prefix = text.replace("\r\n", "\n").replace("\r", "\n")[: CHECK_OUTPUT_CAP + 1]
     mapped = sc.diff_map(prefix)
     f = sc._fence_of(mapped)
     whole = sc.fence(mapped, f)
@@ -113,8 +111,8 @@ def check_output(cell, txt, url):
 
 def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
     """The POST body for the cell summary `cell` at `cell_json`, whose apply check is `name`,
-    hashing the plan.txt beside it. `cells` is the number of cells the run planned, `action`
-    its event action, `url` the run page a cut plan links."""
+    hashing the plan.txt beside it, which it reads once. `cells` is the number of cells the run
+    planned, `action` its event action, `url` the run page a cut plan links."""
     txt = pathlib.Path(cell_json).with_name("plan.txt")
     if not txt.is_file():
         raise SystemExit(
@@ -123,9 +121,10 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
             "summary are from mismatched engine revisions; re-pin every engine reference to "
             "one commit, then re-plan (comment shipmate plan or push)."
         )
-    plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
+    raw = txt.read_bytes()
+    plan_sha256 = hashlib.sha256(raw).hexdigest()
     if cell["changed"]:
-        status, output = {"status": "queued"}, check_output(cell, txt, url)
+        status, output = {"status": "queued"}, check_output(cell, raw.decode("utf-8"), url)
     else:
         status = {"status": "completed", "conclusion": "neutral"}
         output = {

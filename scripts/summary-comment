@@ -840,29 +840,34 @@ _TALLY = re.compile(
     r"(?P<destroy>\d+) to destroy(?:, (?P<forget>\d+) to forget)?\."
 )
 _ZERO_COUNT = ("No changes.", "You can apply this plan to save these new output values")
+#: The order of the counts `counts_of` returns, which a cell summary also keys them by.
+COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 
 def counts(path):
-    """(add, change, destroy, import, forget) from the `tofu show` text at `path`: its one
-    column-0 `Plan:` tally line, where tofu omits a zero import or forget count (0 here), or all
-    zeros when it has none and has a line starting with the no-changes or outputs-only sentence.
-    None for a missing file, no recognised line, or two tally lines.
-    Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts.
-    The whole file is read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered
-    text."""
+    """`counts_of` the `tofu show` text at `path`; None for a missing file. The whole file is
+    read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered text."""
     if not path.exists():
         return None
+    return counts_of(path.read_bytes().decode("utf-8"))
+
+
+def counts_of(text):
+    """(add, change, destroy, import, forget) from `tofu show` text: its one column-0 `Plan:`
+    tally line, where tofu omits a zero import or forget count (0 here), or all zeros when it has
+    none and has a line starting with the no-changes or outputs-only sentence. None for no
+    recognised line, or two tally lines.
+    Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts."""
     hits, zero = [], False
-    # tofu prints a CR from author text raw; default newline handling would end a line there
-    # and put the text after it at column 0.
-    with open(path, encoding="utf-8", newline="\n") as fh:
-        for line in fh:
-            line = line.rstrip("\r\n")
-            if m := _TALLY.fullmatch(line):
-                hits.append(m)
-            zero = zero or line.startswith(_ZERO_COUNT)
+    # tofu prints a CR from author text raw; only LF ends a line, or the text after the CR would
+    # sit at column 0.
+    for line in text.split("\n"):
+        line = line.rstrip("\r")
+        if m := _TALLY.fullmatch(line):
+            hits.append(m)
+        zero = zero or line.startswith(_ZERO_COUNT)
     if len(hits) == 1:
-        return tuple(int(hits[0][k] or 0) for k in ("add", "change", "destroy", "import", "forget"))
+        return tuple(int(hits[0][k] or 0) for k in COUNT_KEYS)
     return (0, 0, 0, 0, 0) if not hits and zero else None
 
 
