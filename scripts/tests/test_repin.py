@@ -481,8 +481,8 @@ def _clone(tmp_path, monkeypatch, shallow, *args):
 def test_a_clone_of_the_tag_alone_resolves(engine, tmp_path, monkeypatch, capsys, shallow, args):
     """A clone of the tag alone fetches no branch, so `origin/main` exists only once the fetch
     names its destination. Mutations, each red with `merge-base` failing on the missing
-    `origin/main`: fetch `origin main` without the destination refspec (both); do that only on a
-    clone that is not shallow (single-branch)."""
+    `origin/main`: fetch `origin main` without the destination refspec (both); drop the destination
+    refspec only when the clone is not shallow (single-branch alone)."""
     _commit(engine.path, {"next.txt": "x\n"}, "next")
     _git(engine.path, "push", "-q", "origin", "main")
     _clone(tmp_path, monkeypatch, shallow, *args, "--branch", TAG)
