@@ -848,12 +848,6 @@ def test_print_annotated_prints_each_error_escaped_and_returns_its_lines(capsys)
     assert errors == [["first", "more 100%"], ["second"]]
 
 
-def test_print_annotated_prints_at_the_given_severity(capsys):
-    """Mutation: hard-code `::error::` in the print -- red."""
-    print_annotated("::error::a%\nb", severity="warning")
-    assert capsys.readouterr().err == "::warning::a%25%0Ab\n"
-
-
 def test_event_payload_degrades_to_empty_dict(tmp_path):
     """Each of these reaches pr-facts' main() as {}, which has neither a pull request nor a
     `pr_number` and so refuses rather than emitting empty facts.

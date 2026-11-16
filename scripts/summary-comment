@@ -966,18 +966,23 @@ def _bytes(text):
     return len(text.encode("utf-8"))
 
 
+def starts_with_drift_note(text):
+    """Whether `text`'s first non-empty line is OpenTofu's outside-changes note line."""
+    return text.lstrip("\n").startswith(_DRIFT_NOTE + "\n")
+
+
 def fold_drift(text, kept_bytes):
     """`text` with OpenTofu's outside-changes note, from the note line to the first following
     line made only of `─`, replaced by one line counting the note's `has changed` and
     `has been deleted` headers. Unchanged unless the note line is the first non-empty line,
     where tofu prints it (author text, even split at a CR by the text-mode read, cannot reach
     it there), the rule line is complete (a cut read can stop inside it), and the text through
-    the rule, its final newline excluded, lies within the first `kept_bytes` UTF-8 bytes of
-    the plan text the apply check holds (`check_frame`), so the check the counted line names
-    holds the whole note. `diff_map` keeps each line's byte length."""
-    body = text.lstrip("\n")
-    if not body.startswith(_DRIFT_NOTE + "\n"):
+    the rule, its final newline excluded and mapped as `diff_map` maps the check's text, fits
+    the first `kept_bytes` UTF-8 bytes of the plan text the apply check holds (`check_frame`),
+    so the check the counted line names holds the whole note."""
+    if not starts_with_drift_note(text):
         return text
+    body = text.lstrip("\n")
     lead = len(text) - len(body)
     lines = body.split("\n")
     n = 0
@@ -985,8 +990,8 @@ def fold_drift(text, kept_bytes):
     for end in range(1, len(lines) - 1):
         line = lines[end]
         if line and not line.strip("─"):
-            note = "\n".join(lines[: end + 1])
-            if lead + _bytes(note) > kept_bytes:
+            note = text[:lead] + "\n".join(lines[: end + 1])
+            if _bytes(diff_map(note)) > kept_bytes:
                 return text
             return "\n".join([text[:lead] + _DRIFT_LINE.format(n), *lines[end + 1 :]])
         n += bool(_DRIFT_HEADER.match(line))
@@ -1012,10 +1017,10 @@ def load_cells(cells_dir, url):
     pin skew, not a state to render around. Each cell's `add`, `change`,
     `destroy`, `import` and `forget` are set here from `counts` over its
     `plan.txt`, whatever cell.json holds; underivable counts become "?" each,
-    with one warning. `plan_text` is `fold_drift` of the file's first SIZE_BUDGET characters,
-    measured against the apply check `check_frame` builds with the plan run `url`, topped up to
-    SIZE_BUDGET when the fold shrank it; a fold that lengthens it leaves it over SIZE_BUDGET by
-    that much."""
+    with one warning. `plan_text` is `fold_drift` of the file's first `CHECK_OUTPUT_CAP + 1`
+    characters, the apply check's own prefix, measured against the check `check_frame` builds
+    with the plan run `url` when the note opens the plan, then cut or topped up from the file to
+    SIZE_BUDGET characters."""
     out = []
     skew = "(plan-cell and summary must be pinned at the same engine SHA)"
     for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
@@ -1033,13 +1038,14 @@ def load_cells(cells_dir, url):
         text = None
         if txt.exists():
             # A SIZE_BUDGET text exceeds every section limit, so a cut one renders truncated; the
-            # top-up refills what `fold_drift` shrank (`max`: a negative size reads the whole file).
+            # top-up refills what `fold_drift` shrank.
             with open(txt, encoding="utf-8") as fh:
                 prefix = fh.read(CHECK_OUTPUT_CAP + 1)
-                kept = check_frame(prefix, url)[1]
-                text = fold_drift(prefix[:SIZE_BUDGET], _bytes(kept))
-                text += prefix[SIZE_BUDGET:][: max(0, SIZE_BUDGET - len(text))]
-                text += fh.read(max(0, SIZE_BUDGET - len(text)))
+                kept = 0
+                if starts_with_drift_note(prefix):
+                    kept = _bytes(check_frame(prefix, url)[1])
+                text = fold_drift(prefix, kept)[:SIZE_BUDGET]
+                text += fh.read(SIZE_BUDGET - len(text))
         out.append((cell, text))
     out.sort(key=lambda ct: (ct[0]["environment"], ct[0]["stack"]))
     return out

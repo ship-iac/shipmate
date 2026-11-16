@@ -83,10 +83,6 @@ def _plan_run():
     return plan_run
 
 
-def _utf8_len(text):
-    return len(text.encode("utf-8"))
-
-
 def _text(raw, newline=None):
     """The UTF-8 bytes `raw` as a text stream decoded as it is read, with `open`'s `newline`."""
     return io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8", newline=newline)

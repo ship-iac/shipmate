@@ -196,8 +196,9 @@ def decrypt(path):
         "",
         unreadable=(
             f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
-            f"downloaded without stack.otplan needs a re-plan {_REPLAN} For a disk failure on "
-            "the runner, the refusal comes before any apply step, so a re-run of the job is safe."
+            f"downloaded without stack.otplan needs a re-plan. Re-plan {_REPLAN} For a disk "
+            "failure on the runner, the refusal comes before any apply step, so a re-run of the "
+            "job is safe."
         ),
         unauthenticated=(
             f"::error::plan artifact `{path}` failed authentication: it was encrypted with "

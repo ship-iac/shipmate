@@ -2304,7 +2304,7 @@ def _folds(tmp_path, plan, url=_URL):
     [(_, text)] = sc.load_cells(str(d), url)
     summary = pc.check_output(_cell(), plan.encode("utf-8"), url)["summary"]
     note = plan[: plan.index("─" * 77) + 77]
-    return text.startswith("\n" + _COUNTED_1 + "\n"), note in summary
+    return text.startswith("\n" + _COUNTED_1 + "\n"), sc.diff_map(note) in summary
 
 
 @pytest.mark.parametrize(
@@ -2408,16 +2408,61 @@ def test_a_cut_read_with_a_folded_drift_note_stays_visibly_cut(tmp_path):
     assert body.endswith(_TRAILER)
 
 
-def test_a_fold_that_lengthens_the_read_gets_no_top_up(tmp_path):
+def test_a_fold_that_lengthens_the_read_is_cut_to_the_budget(tmp_path):
     """Derived from the capture: a one-character rule and a single drift header, a block shorter
-    than the counted line (tofu's own 77-character rule never is). Mutation: dropping the `max`
-    passes `fh.read` a negative size, which reads the whole rest of the file."""
+    than the counted line (tofu's own 77-character rule never is). Mutation: drop the cut to
+    SIZE_BUDGET after the fold."""
     block = "\n" + _DRIFT_NOTE + "  # x.y has been deleted\n─\n"
     tail = "  + b\n" * 12_000
     _write_cell(tmp_path, _cell(), block + tail)
     [(_, text)] = sc.load_cells(str(tmp_path), RUN_URL)
-    assert text == "\n" + _COUNTED_1 + "\n" + tail[: sc.SIZE_BUDGET - len(block)]
-    assert len(text) > sc.SIZE_BUDGET
+    assert text == ("\n" + _COUNTED_1 + "\n" + tail)[: sc.SIZE_BUDGET]
+
+
+def test_a_note_ending_past_the_comment_budget_folds_when_the_check_holds_it(tmp_path):
+    """The fold reads the check's whole prefix, so a note ending between character 60,000 and
+    the end of what the check keeps folds too. Mutation: fold only the first SIZE_BUDGET
+    characters (the rule is past them)."""
+    head = "\n" + _DRIFT_NOTE + "  # x.y has been deleted\n"
+    note = head + "  " + "a" * 61_000 + "\n" + "─" * 77 + "\n"
+    assert note.index("─") > sc.SIZE_BUDGET and len(note.encode("utf-8")) < _ROOM
+    assert _folds(tmp_path, note + _LONG_TAIL) == (True, True)
+
+
+def test_a_fold_shrinking_the_check_prefix_below_the_budget_is_topped_up_from_the_file(tmp_path):
+    """A 20,000-character note folds out of the check's prefix, leaving it under SIZE_BUDGET; the
+    rest comes from the file, continuing where the prefix ended. Mutation: drop the top-up read
+    (the text ends short)."""
+    head = "\n" + _DRIFT_NOTE + "  # x.y has been deleted\n"
+    note = head + "  " + "a" * 20_000 + "\n" + "─" * 77 + "\n"
+    tail = "".join(f"  + line {i:06d}\n" for i in range(6_000))
+    assert len(note + tail) > sc.CHECK_OUTPUT_CAP + 1
+    _write_cell(tmp_path, _cell(), note + tail)
+    [(_, text)] = sc.load_cells(str(tmp_path), RUN_URL)
+    assert text == ("\n" + _COUNTED_1 + "\n" + tail)[: sc.SIZE_BUDGET]
+
+
+def test_a_line_separator_in_the_note_is_measured_as_the_check_maps_it(tmp_path):
+    """`diff_map` ends a line at U+2028 and writes one byte for its three, so a note over the cut
+    room in raw bytes and within it mapped is held whole and folds. Mutation: measure the raw
+    note against `kept_bytes`."""
+    seps = 50
+    base = _note_of_bytes(_ROOM + 1 - seps)
+    note = base.replace("  é", "  é" + "\u2028" * seps, 1)
+    assert len(note.encode("utf-8")) > _ROOM + 1 == len(sc.diff_map(note).encode("utf-8")) + 1
+    assert _folds(tmp_path, note + _LONG_TAIL) == (True, True)
+
+
+def test_a_plan_without_the_note_builds_no_check_frame(tmp_path, monkeypatch):
+    """An unchanged cell pays nothing for the fold. Mutation: call `check_frame` for every plan."""
+
+    def refuse(*_):
+        raise AssertionError("check_frame called")
+
+    monkeypatch.setattr(sc, "check_frame", refuse)
+    _write_cell(tmp_path, _cell(), "  + x\n" * 100)
+    [(_, text)] = sc.load_cells(str(tmp_path), RUN_URL)
+    assert text == "  + x\n" * 100
 
 
 #: The Build step's check-runs projection, hand-written.

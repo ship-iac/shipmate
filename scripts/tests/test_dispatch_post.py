@@ -152,14 +152,15 @@ def test_a_failure_after_a_transient_one_prints_it_escaped(calls, monkeypatch, c
 
 
 def test_a_failed_listing_prints_its_failure_escaped(calls, monkeypatch, capsys):
-    """Mutations: print the listing failure raw; raise it to `run_annotated` (exit 1)."""
+    """gh's own `::error::` prefix stays inside the one warning line. Mutations: print the
+    listing failure raw; raise it to `run_annotated` (exit 1)."""
     answering(
         monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit("::error::" + FORGED)]
     )
     code, out, err = post(capsys)
     assert (code, out) == (db.UNDETERMINED, "")
     assert err.endswith(
-        "%0Agh: Bad Gateway (HTTP 502)\n::warning::listing shipmate.yml runs failed: "
+        "%0Agh: Bad Gateway (HTTP 502)\n::warning::listing shipmate.yml runs failed: ::error::"
         + FORGED_WARNING.removeprefix("::warning::")
     )
 
