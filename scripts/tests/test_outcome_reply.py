@@ -49,7 +49,7 @@ SELECTIONS = {
             "### shipmate apply dev-eu\n\n"
             f"🔴 refused: its review check stopped [the apply run]({URL}) before any cell applied; "
             "the reason is in that run's log.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[apply run]({URL}). {HINT}"
         ),
     ),
     "refused over a cancelled run": (
@@ -64,7 +64,7 @@ SELECTIONS = {
             "### shipmate apply dev-eu\n\n"
             f"🔴 refused: its review check stopped [the apply run]({URL}) before any cell applied; "
             "the reason is in that run's log.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[apply run]({URL}). {HINT}"
         ),
     ),
     "run cancelled over a cancelled summary": (
@@ -78,7 +78,7 @@ SELECTIONS = {
         (
             "### shipmate apply dev-eu\n\n"
             f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[apply run]({URL}). {HINT}"
         ),
     ),
     "apply summary cancelled": (
@@ -93,7 +93,7 @@ SELECTIONS = {
             "### shipmate apply dev-eu\n\n"
             f"🔴 failed: [the apply run]({URL}) posted no result: its summary was cancelled "
             "before it posted a result. Its cells' results are on their apply checks.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[apply run]({URL}). {HINT}"
         ),
     ),
     "apply call ended before review": (
@@ -107,7 +107,7 @@ SELECTIONS = {
         (
             "### shipmate apply dev-eu\n\n"
             f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[apply run]({URL}). {HINT}"
         ),
     ),
     "plan summary cancelled": (
@@ -116,7 +116,7 @@ SELECTIONS = {
             "### shipmate plan\n\n"
             f"🔴 failed: [the plan run]({URL}) posted no result: its summary was cancelled "
             "before it posted a result.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[plan run]({URL}). {HINT}"
         ),
     ),
     "apply ended": (
@@ -131,7 +131,7 @@ SELECTIONS = {
             "### shipmate apply dev-eu\n\n"
             f"🔴 failed: [the apply run]({URL}) ended before it posted a result; the reason is in "
             "that run's log.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[apply run]({URL}). {HINT}"
         ),
     ),
     "plan ended": (
@@ -140,7 +140,7 @@ SELECTIONS = {
             "### shipmate plan\n\n"
             f"🔴 failed: [the plan run]({URL}) ended before it posted a result; the reason is in "
             "that run's log.\n\n"
-            f"[comment run]({URL}). {HINT}"
+            f"[plan run]({URL}). {HINT}"
         ),
     ),
 }
@@ -195,7 +195,9 @@ def test_each_case_posts_its_whole_body(tmp_path, case):
     run-cancelled and summary-cancelled conditions; drop the run-cancelled branch (a cancelled run
     whose summary was cancelled reads as a summary cancel, and the call that ended before
     review reads as ended); drop the `verb` check from the
-    summary-cancelled text; post with `github.token` in place of the minted token."""
+    summary-cancelled text; post with `github.token` in place of the minted token; drop
+    `SHIPMATE_REPLY_LABEL` from the step (the footer reads `comment run`); read the label as a
+    constant `comment run` in `reply-comment`."""
     inputs, body = SELECTIONS[case]
     proc, calls = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -247,6 +249,7 @@ def test_the_composite_mints_only_a_pull_request_write_token():
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_REPLY_VERB": "${{ inputs.verb }}",
         "SHIPMATE_REPLY_ENV": "${{ inputs.environment }}",
+        "SHIPMATE_REPLY_LABEL": "${{ inputs.verb }} run",
         "REVIEW_RESULT": "${{ inputs.review-result }}",
         "RUN_CANCELLED": "${{ inputs.run-cancelled }}",
         "SUMMARY_RESULT": "${{ inputs.summary-result }}",

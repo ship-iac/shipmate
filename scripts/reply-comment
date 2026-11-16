@@ -22,8 +22,9 @@ The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBE
 before any `gh` call; a failed POST exits 1 unannotated, naming the pull request and gh's
 stderr, never the body.
 
-The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
-a notice or a started run carries no hint.
+The footer links this run (`current_run_url()`) as `SHIPMATE_REPLY_LABEL`, `comment run` when
+it is unset or empty, then `FOOTER_HINT` on a refusal or a failure; a notice or a started run
+carries no hint.
 """
 
 import os
@@ -88,7 +89,14 @@ def main():
         verdict = started_text(verb, os.environ.get("SHIPMATE_REPLY_RUN_ID", ""))
     else:
         verdict = os.environ.get("SHIPMATE_REPLY_TEXT", "")
-    text = body(verb, os.environ.get("SHIPMATE_REPLY_ENV", ""), outcome, verdict, current_run_url())
+    text = body(
+        verb,
+        os.environ.get("SHIPMATE_REPLY_ENV", ""),
+        outcome,
+        verdict,
+        current_run_url(),
+        os.environ.get("SHIPMATE_REPLY_LABEL") or "comment run",
+    )
     try:
         post(pr, text)
     except SystemExit as exc:

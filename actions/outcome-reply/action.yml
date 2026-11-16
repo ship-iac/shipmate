@@ -52,6 +52,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_REPLY_VERB: ${{ inputs.verb }}
         SHIPMATE_REPLY_ENV: ${{ inputs.environment }}
+        SHIPMATE_REPLY_LABEL: ${{ inputs.verb }} run
         REVIEW_RESULT: ${{ inputs.review-result }}
         RUN_CANCELLED: ${{ inputs.run-cancelled }}
         SUMMARY_RESULT: ${{ inputs.summary-result }}

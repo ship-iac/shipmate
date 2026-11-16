@@ -5,6 +5,7 @@ Threat model: accidental regression -- an outcome rendered as another, a record 
 wrong cell, a stack name rendered raw, a failure that reds the run or posts nothing.
 """
 
+import io
 import json
 from typing import Any
 
@@ -61,7 +62,7 @@ def gh(monkeypatch, tmp_path):
 
 def _write(tmp_path, name, text, *, folder=None, flat=False):
     """Write `text` as `<name>.json` in the artifact directory `folder` (default `name`), or
-    straight into the download path when `flat`, as `download-artifact` writes a lone match."""
+    straight into the download path when `flat`."""
     d = tmp_path / "records"
     if not flat:
         d = d / (folder or name)
@@ -188,16 +189,18 @@ def test_an_unreadable_queue_says_so(gh, monkeypatch, raw):
 
 
 def test_a_failed_download_still_reads_the_records_that_arrived(gh, monkeypatch, tmp_path):
-    """Mutations: return early on a failed download (the arrived records are lost); drop the
-    `could not be read` clause."""
+    """A cell with no record has its result unknown, not "did not run": its record may be among
+    those that failed to download. Mutations: return early on a failed download (the arrived
+    records are lost); drop the `could not be read` clause; render `did not run` whatever the
+    download did."""
     posts, _ = gh
     monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "failure")
     _records(tmp_path, "released", None, "none")
     ur.main()
     assert posts == _post(
         "failed",
-        f"stacks/db did not run; released 1 state lock(s) in dev-eu: stacks/app ({_ID}); some "
-        "cells' results could not be read; see the run.",
+        f"result unknown for stacks/db; released 1 state lock(s) in dev-eu: stacks/app ({_ID}); "
+        "some cells' results could not be read; see the run.",
     )
 
 
@@ -248,27 +251,61 @@ def test_an_artifact_holding_a_siblings_file_name_is_ignored(gh, tmp_path):
     assert posts == _post("failed", "stacks/db did not run.")
 
 
-def test_a_lone_artifact_downloaded_flat_counts(gh, tmp_path):
-    """`download-artifact` writes a pattern's only match straight into `path`. Mutation: drop the
-    flat branch of `_found` (the record reads `did not run`)."""
+@pytest.mark.parametrize("flat", [1, 2])
+def test_a_record_file_outside_an_artifact_directory_is_ignored(gh, tmp_path, flat):
+    """The sentinel artifact makes every download two or more artifacts, so each gets its own
+    directory; a file at the download root is never a record. Mutation: read a root
+    `shipmate-unlock-<n>.json` as the record of `<n>` (match on its stem, read the file itself)."""
     posts, _ = gh
-    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released")), flat=True)
-    ur.main()
-    assert posts == _post(
-        "failed",
-        "stacks/app, stacks/dns did not run; released 1 state lock(s) in dev-eu: "
-        f"stacks/db ({_ID}).",
-    )
-
-
-def test_a_flat_download_holding_two_files_is_rejected(gh, tmp_path):
-    """Flat is one artifact's layout, and an artifact holds one record. Mutation: `len(entries)
-    == 1` to `>= 1` (the first file reads as a record)."""
-    posts, _ = gh
-    for i in (0, 1):
+    for i in range(flat):
         _write(tmp_path, f"shipmate-unlock-{i}", json.dumps(_rec(i, "none")), flat=True)
     ur.main()
     assert posts == _post("failed", "stacks/app, stacks/db, stacks/dns did not run.")
+
+
+def test_an_artifact_holding_only_subdirectories_claims_nothing(gh, tmp_path):
+    """Artifact `shipmate-unlock-1` whose `shipmate-unlock-1.json` is a directory holding a valid
+    record. Mutation: walk the artifact directory for the first `.json` file in it."""
+    posts, _ = gh
+    _records(tmp_path, "none", None, "none")
+    nested = tmp_path / "records" / "shipmate-unlock-1" / "shipmate-unlock-1.json"
+    nested.mkdir(parents=True)
+    (nested / "shipmate-unlock-1.json").write_text(json.dumps(_rec(1, "none")), encoding="utf-8")
+    ur.main()
+    assert posts == _post("failed", "stacks/db did not run.")
+
+
+class _Spy:
+    """A stand-in record path whose file records every `read` size, or raises `fail`."""
+
+    def __init__(self, data, fail=None):
+        self.data, self.fail, self.reads = data, fail, []
+
+    def open(self, mode):
+        assert mode == "rb"
+        spy = self
+
+        class File(io.BytesIO):
+            def read(self, size=-1):
+                spy.reads.append(size)
+                if spy.fail is not None:
+                    raise spy.fail
+                return super().read(size)
+
+        return File(self.data)
+
+
+def test_the_reader_never_reads_past_the_bound():
+    """Mutation: `fh.read()` (the whole file is read before the size check)."""
+    spy = _Spy(b"x" * (ur.RECORD_MAX * 4))
+    assert ur._record(spy, 1, _CELLS[1]) is None
+    assert spy.reads == [ur.RECORD_MAX + 1]
+
+
+@pytest.mark.parametrize("fail", [MemoryError(), OSError("I/O error")])
+def test_a_record_that_cannot_be_read_is_invalid(fail):
+    """Mutations: drop `MemoryError` from the `except`; drop `OSError` from it."""
+    assert ur._record(_Spy(b"", fail), 1, _CELLS[1]) is None
 
 
 def test_three_records_all_count(gh, tmp_path):
@@ -284,17 +321,19 @@ def test_three_records_all_count(gh, tmp_path):
 
 
 def test_an_oversized_record_is_never_decoded(gh, tmp_path):
-    """Mutation: drop the `RECORD_MAX` bound (the padded record counts)."""
+    """A valid record padded with whitespace past the bound: its first `RECORD_MAX + 1` bytes
+    still decode. Mutation: drop the `RECORD_MAX` bound (the padded record counts)."""
     posts, _ = gh
     _records(tmp_path, "none", None, "none")
-    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "none", pad="a" * ur.RECORD_MAX)))
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "none")) + " " * ur.RECORD_MAX)
     ur.main()
     assert posts == _post("failed", "stacks/db did not run.")
 
 
 def test_a_deeply_nested_record_reads_as_did_not_run(gh, tmp_path):
-    """Regression: the reply still posts and `main` returns. Mutation: drop both the bound and
-    `RecursionError` from the `except` (the decoder's `RecursionError` escapes)."""
+    """Regression: the reply still posts and `main` returns. Mutation: read the whole file, drop
+    the bound and drop `RecursionError` from the `except` (the decoder's `RecursionError`
+    escapes)."""
     posts, _ = gh
     _records(tmp_path, "none", None, "none")
     _write(tmp_path, "shipmate-unlock-1", "[" * 100_000 + "]" * 100_000)

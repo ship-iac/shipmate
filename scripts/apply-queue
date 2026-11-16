@@ -218,7 +218,12 @@ def main():
     if not said or not self_by_app or os.environ.get("SHIPMATE_AUTO") == "true":
         return
     body = rc.body(
-        "apply", os.environ.get("SHIPMATE_ENV", ""), "notice", " ".join(said), current_run_url()
+        "apply",
+        os.environ.get("SHIPMATE_ENV", ""),
+        "notice",
+        " ".join(said),
+        current_run_url(),
+        "apply run",
     )
     try:
         rc.post(pr, body)

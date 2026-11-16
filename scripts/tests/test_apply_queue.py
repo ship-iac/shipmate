@@ -24,7 +24,7 @@ _INCOMPLETE = (
     f"{_ME} may wait for an earlier apply run of this pull request; its apply runs could not all "
     "be listed."
 )
-_FOOT = f"[comment run]({_URL}50)"
+_FOOT = f"[apply run]({_URL}50)"
 
 
 def _r(id_, ref=_OLD, by_app=True, status="pending"):
@@ -129,7 +129,7 @@ def test_a_stale_run_with_a_queued_job_is_kept_and_named(gh):
 
 
 def test_a_run_at_the_live_head_is_kept_and_named(gh):
-    """Mutation: drop `r["ref"] != head` -- red (cancelled)."""
+    """Mutations: drop `r["ref"] != head` -- red (cancelled); drop the `apply run` footer label."""
     gh.runs = [_r(40, ref=_HEAD)]
     gh.jobs = {40: (_j("pending"), True)}
     gh.go()
