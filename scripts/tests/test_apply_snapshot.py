@@ -8,9 +8,18 @@ from _loader import ACTIONS, bash_only, load_script, run_with_gate_gh, step_by
 apply_snapshot = load_script("apply-snapshot")
 apply_complete = load_script("apply-complete")
 
+PLAN_RUN = "7"
+DIGEST = "e" * 64
+
+
+def row(stack, env):
+    """A wave row as detect writes it, applying plan run `PLAN_RUN` with digest `DIGEST`."""
+    return {"stack": stack, "environment": env, "plan_run_id": PLAN_RUN, "plan_sha256": DIGEST}
+
+
 WAVES = {
-    "wave0": [{"stack": "stacks/dns", "environment": "dev-eu"}],
-    "wave1": [{"stack": "stacks/app", "environment": "dev-eu"}],
+    "wave0": [row("stacks/dns", "dev-eu")],
+    "wave1": [row("stacks/app", "dev-eu")],
     "wave2": [],
 }
 
@@ -19,8 +28,10 @@ APP_ID = 111222  # arbitrary: the engine repo is public, no real ids in fixtures
 OTHER_APP_ID = 333444
 
 
-def check(name, cid, app_id=APP_ID):
-    return {"name": name, "id": cid, "app": {"id": app_id}}
+def check(name, cid, app_id=APP_ID, **record):
+    """An App check run whose record names `PLAN_RUN` and `DIGEST`, `record` over them."""
+    body = {"plan_run": PLAN_RUN, "plan_sha256": DIGEST, **record}
+    return {"name": name, "id": cid, "app": {"id": app_id}, "external_id": json.dumps(body)}
 
 
 def test_maps_each_cell_to_its_app_authored_check_ids():
@@ -56,6 +67,15 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
     assert out["apply / stacks/dns / dev-eu"] == [1, 5]
 
 
+#: The refusal for `stacks/app` with no matching unfinished check, hand-written.
+_NONE_APP = (
+    "::error::no App-authored apply check named 'apply / stacks/app / dev-eu' that is not yet "
+    f"completed and records plan run {PLAN_RUN} with its plan-text digest on the head SHA before "
+    "apply; this cell would apply with nothing to complete afterwards, stranding its check "
+    "pending. Re-plan."
+)
+
+
 def test_a_completed_duplicate_is_dropped_and_the_open_one_kept():
     """A later write would relink or retitle a completed check; an `in_progress` one, a dead
     run's flip, is still pending. Mutations: keep every id, whatever its status -> dns maps to
@@ -79,11 +99,7 @@ def test_a_cell_whose_only_check_is_completed_fails_the_whole_run():
     ]
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.snapshot(WAVES, runs, APP_ID)
-    assert str(exc.value) == (
-        "::error::no App-authored apply check named 'apply / stacks/app / dev-eu' that is not "
-        "yet completed on the head SHA before apply; this cell would apply with nothing to "
-        "complete afterwards, stranding its check pending. Re-plan."
-    )
+    assert str(exc.value) == _NONE_APP
 
 
 def test_a_single_cell_with_no_apply_check_fails_the_whole_run():
@@ -205,8 +221,8 @@ def test_a_failed_listing_fails_the_snapshot_step(
 
 
 _EIGHT_WAVES = {
-    "wave0": [{"stack": "dns", "environment": "dev"}],
-    "wave1": [{"stack": "app", "environment": "dev"}, {"stack": "web", "environment": "dev"}],
+    "wave0": [row("dns", "dev")],
+    "wave1": [row("app", "dev"), row("web", "dev")],
     **{f"wave{n}": [] for n in range(2, 8)},
 }
 _EIGHT_SNAPSHOT = {
@@ -253,7 +269,7 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
 
 def test_main_writes_the_snapshot_and_its_slices(monkeypatch, tmp_path, capsys):
     """Mutation: write the snapshot unsliced as `by_wave` -> its line holds the whole snapshot."""
-    waves = {"wave0": [{"stack": "dns", "environment": "dev"}], "wave1": []}
+    waves = {"wave0": [row("dns", "dev")], "wave1": []}
     out = tmp_path / "out.txt"
     monkeypatch.setenv("SHIPMATE_APP_ID", str(APP_ID))
     monkeypatch.setenv("SHIPMATE_WAVES_JSON", json.dumps(waves))
@@ -275,3 +291,63 @@ def test_an_unknown_argument_list_refuses(argv):
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.main(argv)
     assert str(exc.value) == "::error::usage: apply-snapshot"
+
+
+def test_only_a_check_recording_the_rows_plan_is_collected():
+    """An older unfinished check records the row's plan; a newer unfinished behind check of the
+    same name, published after detect, records another run and no digest: only the older id is
+    collected, so the wave's success never completes the behind check.
+
+    Mutation: collect by name only -- `[1, 2]`, red.
+    Mutation: collect a check whose record carries no `behind` -- the other-run row's id is
+    collected, red."""
+    runs = [
+        check("apply / stacks/dns / dev-eu", 1),
+        check("apply / stacks/dns / dev-eu", 2, plan_run="8", plan_sha256=None, behind=True),
+        check("apply / stacks/app / dev-eu", 3),
+        check("apply / stacks/app / dev-eu", 4, plan_run="8"),
+    ]
+    assert apply_snapshot.snapshot(WAVES, runs, APP_ID) == {
+        "apply / stacks/dns / dev-eu": [1],
+        "apply / stacks/app / dev-eu": [3],
+    }
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        pytest.param({"plan_run": "8"}, id="other-run"),
+        pytest.param({"plan_sha256": "f" * 64}, id="other-digest"),
+        pytest.param({"plan_run": "8", "plan_sha256": None, "behind": True}, id="behind"),
+    ],
+)
+def test_a_cell_with_only_a_check_of_another_plan_refuses_before_wave0(record):
+    """Mutation: warn and skip the cell instead of refusing -- no refusal, red."""
+    runs = [
+        check("apply / stacks/dns / dev-eu", 1),
+        check("apply / stacks/app / dev-eu", 2, **record),
+    ]
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.snapshot(WAVES, runs, APP_ID)
+    assert str(exc.value) == _NONE_APP
+
+
+@pytest.mark.parametrize("newer", ["behind", "newer-plan"])
+def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(newer):
+    """Detect bound plan run `PLAN_RUN`; a behind check, or a newer plan's check, of the same
+    name lands before the snapshot. The wave succeeds and `apply-complete` writes only to the
+    bound check's id.
+
+    Mutation: collect by name only -- the newer check's id is written `success`, red."""
+    waves = {"wave0": [row("dns", "dev")]}
+    extra = (
+        {"plan_run": "8", "plan_sha256": None, "behind": True}
+        if newer == "behind"
+        else {"plan_run": "8"}
+    )
+    runs = [check("apply / dns / dev", 1), check("apply / dns / dev", 2, **extra)]
+    by_wave = apply_snapshot.by_wave(waves, apply_snapshot.snapshot(waves, runs, APP_ID))
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, jobs)
+    writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
+    assert [w["id"] for w in writes] == [1]

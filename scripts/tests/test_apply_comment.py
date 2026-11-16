@@ -1530,8 +1530,15 @@ def test_check_name_grammar_matches_apply_cells_construction():
     swap stack and environment in apply_check_state's `ag.check_name` call (the row stays
     `applied`) -- red."""
     snap = load_script("apply-snapshot")
-    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]}
-    run = {"id": 7, "name": "apply / stacks/app / dev-eu", "app": {"id": int(APP_ID)}}
+    plan = {"plan_run_id": "5", "plan_sha256": "e" * 64}
+    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu", **plan}]}
+    record = json.dumps({"plan_run": "5", "plan_sha256": "e" * 64})
+    run = {
+        "id": 7,
+        "name": "apply / stacks/app / dev-eu",
+        "app": {"id": int(APP_ID)},
+        "external_id": record,
+    }
     assert snap.snapshot(waves, [run], APP_ID) == {"apply / stacks/app / dev-eu": [7]}
     rows = [_row(environment="dev-eu", stack="stacks/app")]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())

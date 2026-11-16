@@ -1,15 +1,17 @@
 name: shipmate pre-apply
 description: >-
   The pre-apply check, read-only through scripts/cell-lock verify. Refuses unless the run attempt
-  is 1 and the pull request holds the cell's lock and is open at the applied head; with auto true,
-  also unless the pull request is not a draft, the provenance run is still the head's newest
-  autoplan and the run the cell's newest plan record names, that record names a push event
-  action (opened or synchronize), no newer shipmate plan run of the pull request, by any actor,
-  created since the provenance run is live or planned (its plan / detect job succeeded), its pusher still has write access, and the base tip is still
-  the one detect read. With deploy true (a merge deploy's wave) it runs none of those and refuses
-  only when a pull request other than pr-number, the merged one (empty on a push), holds the
-  cell's lock. A read that fails refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read and pull-requests:read, and, with auto true,
-  actions:read and checks:read.
+  is 1, the pull request holds the cell's lock and is open at the applied head, the base tip is
+  still the one detect read, and the cell's newest apply check records the wave row's plan run
+  and plan-text digest and is no behind record; with auto true, also unless the pull request is
+  not a draft, the provenance run is still the head's newest autoplan and the run the cell's
+  newest plan record names, that record names a push event action (opened or synchronize), no
+  newer shipmate plan run of the pull request, by any actor, created since the provenance run is
+  live or planned (its plan / detect job succeeded), and its pusher still has write access. With
+  deploy true (a merge deploy's wave) it runs none of those and refuses only when a pull request
+  other than pr-number, the merged one (empty on a push), holds the cell's lock. A read that
+  fails refuses too. Reads the job's GITHUB_TOKEN, which needs contents:read,
+  pull-requests:read and checks:read, and, with auto true, actions:read.
 inputs:
   pr-number:
     description: The pull request that must hold the lock; with deploy true, the merged pull request, empty on a push.
@@ -31,7 +33,15 @@ inputs:
     required: false
     default: ""
   base-sha:
-    description: The base tip detect read. Empty refuses when auto is true.
+    description: The base tip detect read. Empty refuses unless deploy is true.
+    required: false
+    default: ""
+  plan-run-id:
+    description: The plan run the wave row applies, from detect. Empty refuses unless deploy is true.
+    required: false
+    default: ""
+  plan-sha256:
+    description: The plan-text digest the wave row applies, from detect. Empty refuses unless deploy is true.
     required: false
     default: ""
   app-id:
@@ -61,6 +71,8 @@ runs:
         SHIPMATE_AUTO: ${{ inputs.auto }}
         SHIPMATE_PROVENANCE_RUN: ${{ inputs.provenance-run }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
+        SHIPMATE_PLAN_RUN_ID: ${{ inputs.plan-run-id }}
+        SHIPMATE_PLAN_SHA256: ${{ inputs.plan-sha256 }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_DEPLOY: ${{ inputs.deploy }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify
