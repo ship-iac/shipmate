@@ -3908,10 +3908,19 @@ names an error. A job that failed without an `::error::` renders no fence.
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
+- **Unread report.** `🔴 could not read the detect report; see the run`, under the verdict
+  (and under the auto line when there is one). `apply-detect` writes the comment's fields
+  (the dispositions, waiting and held cells, environment order and pusher) to a file and
+  uploads it as the run's `apply-report` artifact, with no size cap; it writes an empty report
+  before any refusal, so a refused detect renders no such line. The line shows when the
+  artifact is missing (detect died before writing it, or the upload or download failed) or the
+  file is unreadable, not a JSON object, holds a field of the wrong type or an `env_order` that
+  is not a list of names. Every field then reads empty, and the verdict is `🔴 failed`, never
+  🟢: empty fields alone would read `🟢 no pending applies` over pending cells.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a
   blank line on both sides, one per environment in the plan comment's order,
-  from the `env_order` field of `apply-detect`'s `report` output (a bare apply orders every
+  from the report's `env_order` (a bare apply orders every
   environment with an apply check on the head, a targeted one names its
   environment).
 - **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per
@@ -3945,9 +3954,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   pointer to the lost-save section.
 - **Footer lines**, one per line: the bare and `auto` forms' environment
   dispositions, then, in every form, one line per lock holder and environment,
-  then, in the `auto` form, the overlap line, then one line per waiting cell, then the trimmed
-  counts (below). The comment states no gate line: the `shipmate / gate` status shows the gate's
-  state.
+  then, in the `auto` form, the overlap line, then one line per waiting cell. The comment
+  states no gate line: the `shipmate / gate` status shows the gate's state.
 
 There is no separate "nothing pending" input: the expected cell set is the
 same waves JSON both `apply-detect` forms already compute, and a
@@ -3975,7 +3983,7 @@ actionable warning cannot be lost on either path. In the order they render:
   it does not apply this run; see its line below` for one holding a locked,
   overlap or waiting cell, and otherwise, an `auto` apply's environment that is
   not `auto`, `` comment `shipmate apply`, which applies them in order ``. A detect
-  that wrote no `skipped_after` renders the cause-agnostic `⚪ <env>: skipped,
+  report whose `skipped_after` names nothing for it renders the cause-agnostic `⚪ <env>: skipped,
   ordered after an environment not fully applying this run`.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
   environment that is also `targeted` is listed once, here and not on a targeted
@@ -3993,14 +4001,14 @@ actionable warning cannot be lost on either path. In the order they render:
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
   then re-plan. If #<n> has already merged or closed, comment `shipmate unlock
   <env> --evict` once #<n>'s apply, auto and deploy runs have ended.``, one per pull
-  request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
+  request `#<n>` holding a cell lock on pending cells of `<env>` (the report's `held_cells`
   with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
   unknown renders ``🔒 locked by an unknown holder: <cells>. Comment
   `shipmate unlock <env> --evict`.`` Every form renders these lines.
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
   it, so their plans would revert that change: <cells>. Update the branch from
   the base and push.``, one line naming each of an `auto` apply's overlap cells
-  (`held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
+  (the report's `held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
   `<stack> / <env>` comma-separated. Only the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
@@ -4026,13 +4034,6 @@ actionable warning cannot be lost on either path. In the order they render:
   environment. The targeted form has no held or skipped environments to
   consult, so its remedy names the lock's or `shipmate apply <env>`, even for a
   blocker that waits on a review or on `needs`.
-- **trimmed** — `⚪ and <n> more waiting cell(s); see the run`, `⚪ and <n> more held
-  cell(s); see the run`, and `⚪ and <n> more environment name(s); see the run`, each only
-  when `apply-detect` trimmed that many entries from its `report` to keep it within 96 KiB
-  (the render step receives it as one environment string, which Linux caps at 128 KiB). It
-  trims the waiting cells first, then the held cells, then the environment lists, each from
-  the end. The verdict counts and the other lines cover only the entries it kept. Nothing
-  else reads `report`, so trimming changes no apply.
 
 Two audit facts are not comment lines. The render step prints each as one
 `::notice::` workflow annotation in its own log, environment names escaped as
