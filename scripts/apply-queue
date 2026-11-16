@@ -4,7 +4,7 @@
 
 Without an argument it runs in `apply.yml`'s `queue` job, before this run's call joins
 `shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `review` and `summary`, while
-this run holds the group. Any other argument exits 1. Lists the runs of `SHIPMATE_WORKFLOW`.
+this run holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
 Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`, `SHIPMATE_ENV` (the queue reply
 header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_APP_SLUG`,
 `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
@@ -36,7 +36,6 @@ import sys
 
 from _shipmate import (
     REPO_RE,
-    SHIPMATE_WORKFLOW,
     _load,
     _run,
     apply_runs,
@@ -170,7 +169,7 @@ def queue(repo, pr, own, slug, self_by_app):
     """`(sentences, named)`: the reply's sentences, after cancelling each stale run when
     `self_by_app` and this run's own listed `ref` is the live head; `named` when they name the
     run this one waits for."""
-    runs, complete = apply_runs(repo, SHIPMATE_WORKFLOW, pr, slug)
+    runs, complete = apply_runs(repo, pr, slug)
     own_ref = next((r["ref"] for r in runs if r["id"] == own), None)
     others = [r for r in runs if r["id"] != own]
     head = _head(repo, pr)
@@ -194,9 +193,8 @@ def queue(repo, pr, own, slug, self_by_app):
     return sentences(own, holder, (foreign or [None])[0], cancelled, True), holder is not None
 
 
-def _comment_link(pr, comment_id):
-    server, repo = os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"]
-    return f"{server}/{repo}/pull/{pr}#issuecomment-{comment_id}"
+def _comment_link(repo, pr, comment_id):
+    return f"{os.environ['GITHUB_SERVER_URL']}/{repo}/pull/{pr}#issuecomment-{comment_id}"
 
 
 def waits_marker(run_id):
@@ -204,13 +202,14 @@ def waits_marker(run_id):
     return f"<!-- shipmate:waits-{run_id} -->"
 
 
-def waits_sentence(waiter, pr, own):
+def waits_sentence(waiter, repo, pr, own):
     """The sentence telling run `waiter`, an `apply_runs` row, that run `own` holds the group,
-    citing the waiter's command comment on pull request `pr`. Every link is built from a
-    validated id (the row's `id` and `comment`, `is_pr_number`), never from API text."""
+    citing the waiter's command comment on pull request `pr` of `repo`. Every link is built
+    from validated values (the row's `id` and `comment`, `is_pr_number`, `REPO_RE`), never
+    from API text."""
     return (
         f"[the apply run]({_link(waiter['id'])}) for "
-        f"[this comment]({_comment_link(pr, waiter['comment'])}) waits for "
+        f"[this comment]({_comment_link(repo, pr, waiter['comment'])}) waits for "
         f"[the apply run]({_link(own)}) of this pull request to finish."
     )
 
@@ -220,7 +219,7 @@ def waiting_runs(repo, pr, own, slug):
     comment, whose call waits for `shipmate-apply-<pr_number>` (`_in_group_wait` over a complete
     jobs listing). Jobs are read only for such runs. An incomplete runs listing finds none; a
     run whose jobs are not all listed is skipped; each warns."""
-    runs, complete = apply_runs(repo, SHIPMATE_WORKFLOW, pr, slug)
+    runs, complete = apply_runs(repo, pr, slug)
     if not complete:
         print(f"::warning::the apply runs of #{pr} could not all be listed; no waiting run is told")
         return []
@@ -256,7 +255,7 @@ def waiters(repo, pr, own, slug, self_by_app):
         marker = waits_marker(r["id"])
         if any(head.startswith(marker) for head in told):
             continue
-        text = waits_sentence(r, pr, own)
+        text = waits_sentence(r, repo, pr, own)
         print(text)
         if not self_by_app:
             continue

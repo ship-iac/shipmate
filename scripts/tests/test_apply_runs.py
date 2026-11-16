@@ -41,7 +41,7 @@ def _listing(status, page=1):
 
 
 def _call(pages, fail=()):
-    return _shipmate.apply_runs("o/r", "shipmate.yml", "7", "shipmate-iac", run=_gh(pages, fail))
+    return _shipmate.apply_runs("o/r", "7", "shipmate-iac", run=_gh(pages, fail))
 
 
 def _row(id_, ref=_SHA, verb="apply", status="pending", by_app=True, comment="11"):
@@ -58,7 +58,7 @@ def _row(id_, ref=_SHA, verb="apply", status="pending", by_app=True, comment="11
 def test_every_page_of_every_live_status_is_read():
     """Mutations: stop after the first page -- red (run 1100 lost); drop `waiting` from
     `LIVE_RUN_STATUSES` -- red; drop `requested` -- red (the call list differs); drop the
-    `event=workflow_dispatch` filter -- red."""
+    `event=workflow_dispatch` filter -- red; list a file other than `shipmate.yml` -- red."""
     first = [_apply(1000 + i, pr="8") for i in range(99)] + [_apply(5)]
     run = _gh(
         {
@@ -67,7 +67,7 @@ def test_every_page_of_every_live_status_is_read():
             _listing("waiting"): {"workflow_runs": [_apply(6, status="waiting")]},
         }
     )
-    got = _shipmate.apply_runs("o/r", "shipmate.yml", "7", "shipmate-iac", run=run)
+    got = _shipmate.apply_runs("o/r", "7", "shipmate-iac", run=run)
     assert got == ([_row(5), _row(6, status="waiting"), _row(1100, ref=_OLD)], True)
     assert run.calls == [
         _listing("queued"),
@@ -124,7 +124,7 @@ def test_an_unparseable_title_on_an_app_dispatched_run_makes_the_listing_incompl
 def test_an_empty_slug_marks_no_run_by_app():
     """Mutation: build the bot login without the empty-slug check -- red (`[bot]` trusted)."""
     run = _gh({_listing("queued"): {"workflow_runs": [_apply(1, actor={"login": "[bot]"})]}})
-    got = _shipmate.apply_runs("o/r", "shipmate.yml", "7", "", run=run)
+    got = _shipmate.apply_runs("o/r", "7", "", run=run)
     assert got == ([_row(1, status="pending", by_app=False)], True)
 
 

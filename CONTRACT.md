@@ -2035,7 +2035,7 @@ built from run ids; an `auto` run posts none:
   Alone, when the runs listing is incomplete.
 
 A reply holding the first sentence starts with the line
-``<!-- shipmate:waits-<run id> -->``, `<run id>` this run's; no other reply carries it.
+``<!-- shipmate:waits-<run id> -->``, `<run id>` this run's; no other queue reply carries it.
 
 The run holding the group tells each waiting run too: a run's `queue` can end
 before the run it then waits behind holds the group, and so names no holder, as

@@ -70,9 +70,7 @@ def _marked(comments, marker):
 @pytest.fixture
 def gh(monkeypatch):
     """Run `main` against recorded reads; returns the recorder. Set `runs`, `complete`, `jobs`
-    ({id: (jobs, complete)}) and `heads` (one per read) before calling `go`. With
-    `GITHUB_WORKFLOW_REF` unset, the `apply_runs` stub asserts `shipmate.yml` whole. Mutation:
-    list `"ship.yml"` -- red."""
+    ({id: (jobs, complete)}) and `heads` (one per read) before calling `go`."""
     for k, v in {
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "o/r",
@@ -85,7 +83,6 @@ def gh(monkeypatch):
         "SHIPMATE_TRIGGERING_ACTOR": "shipmate-iac[bot]",
     }.items():
         monkeypatch.setenv(k, v)
-    monkeypatch.delenv("GITHUB_WORKFLOW_REF", raising=False)
     monkeypatch.setattr(aq.sys, "argv", ["apply-queue"])
 
     class Rec:
@@ -97,8 +94,8 @@ def gh(monkeypatch):
 
     rec = Rec()
 
-    def apply_runs(repo, wf, pr, slug):
-        assert (repo, wf, pr, slug) == ("o/r", "shipmate.yml", "7", "shipmate-iac")
+    def apply_runs(repo, pr, slug):
+        assert (repo, pr, slug) == ("o/r", "7", "shipmate-iac")
         own = [_r(50, ref=rec.own_ref, status="in_progress")] if rec.own_row else []
         return [*rec.runs, *own], rec.complete
 
@@ -322,10 +319,10 @@ def test_contract_states_each_reply_sentence_as_the_script_renders_it(monkeypatc
     from _loader import ENGINE
 
     monkeypatch.setattr(aq, "_link", lambda run_id: "<url>")
-    monkeypatch.setattr(aq, "_comment_link", lambda pr, comment_id: "<url>")
+    monkeypatch.setattr(aq, "_comment_link", lambda repo, pr, comment_id: "<url>")
     run = {"id": 1, "ref": "0123456" + "a" * 33, "comment": "2"}
     said = aq.sentences(9, run, run, [run], True) + aq.sentences(9, None, None, [], False)
-    said += [aq.waits_sentence(run, "7", 9), aq.waits_marker("<run id>")]
+    said += [aq.waits_sentence(run, "o/r", "7", 9), aq.waits_marker("<run id>")]
     contract = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
     missing = [s for s in said if f"``{s.replace('0123456', '<short sha>')}``" not in contract]
     assert len(said) == 6
@@ -732,3 +729,15 @@ def test_only_a_queue_reply_naming_the_holder_carries_the_waits_marker(gh):
         "<!-- shipmate:waits-50 -->",
         "### shipmate apply",
     ]
+
+
+def test_the_comment_link_names_the_repository_main_validated(monkeypatch):
+    """Mutation: read `GITHUB_REPOSITORY` again in `_comment_link` -- red."""
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/env")
+    monkeypatch.setattr(aq, "_link", lambda run_id: "<url>")
+    said = aq.waits_sentence({"id": 40, "comment": "11"}, "o/r", "7", 50)
+    assert said == (
+        "[the apply run](<url>) for [this comment](https://github.com/o/r/pull/7#issuecomment-11)"
+        " waits for [the apply run](<url>) of this pull request to finish."
+    )

@@ -650,8 +650,8 @@ def dispatched_by_app(r, app_slug):
     )
 
 
-def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
-    """`(runs, complete)`: the live runs of workflow `workflow_file` whose title parses as an
+def apply_runs(repo, pr_number, app_slug, run=None):
+    """`(runs, complete)`: the live runs of `SHIPMATE_WORKFLOW` whose title parses as an
     `apply` or `auto` of pull request `pr_number`, each `{id, ref, verb, status, by_app, comment}`,
     `comment` the title's (`parse_run_title`): empty or a comment id, always empty for `auto`.
 
@@ -662,7 +662,7 @@ def apply_runs(repo, workflow_file, pr_number, app_slug, run=None):
     def by_app(r):
         return dispatched_by_app(r, app_slug)
 
-    listed, complete = _live_dispatch_runs(repo, workflow_file, run)
+    listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW, run)
     matched, unparsed = titled_runs(listed, ("apply", "auto"), pr_number)
     runs = [
         {
