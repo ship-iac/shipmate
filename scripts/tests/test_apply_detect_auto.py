@@ -214,8 +214,8 @@ def test_only_the_auto_environments_pending_cells_apply(tmp_path, monkeypatch):
         tmp_path, monkeypatch, auto=("dev-eu", "prod"), other=("stage",), order={"prod": ["stage"]}
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu")]
-    assert detect_report(parsed)["skipped_envs"] == ["prod"]
-    assert detect_report(parsed)["applied_exempt_envs"] == []
+    assert detect_report()["skipped_envs"] == ["prod"]
+    assert detect_report()["applied_exempt_envs"] == []
     assert parsed["provenance_run"] == RUN
     assert parsed["base_sha"] == BASE
 
@@ -229,8 +229,8 @@ def test_an_unreviewed_pull_request_applies_the_review_exempt_auto_environment(
     Mutation: drop `exempt` from the `held` line's `_review_reason` call -- `dev-eu` holds."""
     parsed = _run_auto(tmp_path, monkeypatch, other=("stage",), decision="REVIEW_REQUIRED")
     assert _applied(parsed) == [("stacks/app", "dev-eu")]
-    assert detect_report(parsed)["review_held_envs"] == ["stage"]
-    assert detect_report(parsed)["applied_exempt_envs"] == ["dev-eu"]
+    assert detect_report()["review_held_envs"] == ["stage"]
+    assert detect_report()["applied_exempt_envs"] == ["dev-eu"]
 
 
 def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
@@ -250,8 +250,8 @@ def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
-    assert detect_report(parsed)["held_cells"] == []
-    assert "bare_envs" not in detect_report(parsed)
+    assert detect_report()["held_cells"] == []
+    assert "bare_envs" not in detect_report()
     assert reads == []
 
 
@@ -401,12 +401,12 @@ def test_changes_requested_holds_every_environment(tmp_path, monkeypatch):
     parsed = _run_auto(
         tmp_path, monkeypatch, auto=("dev-eu", "prod"), decision="CHANGES_REQUESTED", calls=calls
     )
-    assert detect_report(parsed)["review_held_envs"] == ["dev-eu", "prod"]
+    assert detect_report()["review_held_envs"] == ["dev-eu", "prod"]
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", "")
-    assert detect_report(parsed)["pusher"] == ""
+    assert detect_report()["pusher"] == ""
     assert calls == [f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"]
-    assert detect_report(parsed)["held_cells"] == []
+    assert detect_report()["held_cells"] == []
 
 
 def test_a_pusher_with_read_permission_refuses(tmp_path, monkeypatch):
@@ -442,8 +442,8 @@ def test_the_pusher_output_is_the_admitted_autoplans_actor_not_this_runs(tmp_pat
     the pusher the permission check admitted, is `k3np`.
 
     Mutation: write `os.environ["GITHUB_ACTOR"]` as `pusher` -- red."""
-    parsed = _run_auto(tmp_path, monkeypatch, actor=BOT, triggering=BOT)
-    assert detect_report(parsed)["pusher"] == "k3np"
+    _run_auto(tmp_path, monkeypatch, actor=BOT, triggering=BOT)
+    assert detect_report()["pusher"] == "k3np"
 
 
 def test_mergeability_null_on_every_read_refuses_after_the_bound(tmp_path, monkeypatch):
@@ -653,7 +653,7 @@ def test_a_locked_cell_stays_pending_as_on_a_bare_apply(tmp_path, monkeypatch):
     """Mutation: pass `frozenset()` for `locked` to `settle` -- the cell applies."""
     parsed = _run_auto(tmp_path, monkeypatch, locks=held(aad.cl, "stacks/app", "dev-eu", 7))
     assert _applied(parsed) == []
-    assert detect_report(parsed)["held_cells"] == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
 
@@ -695,11 +695,11 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
         base_reads=reads,
     )
     assert _applied(parsed) == [("stacks/dns", "dev-eu")]
-    assert detect_report(parsed)["held_cells"] == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"},
         {"stack": "stacks/app", "environment": "prod", "cause": "overlap"},
     ]
-    assert detect_report(parsed)["skipped_envs"] == ["prod"]
+    assert detect_report()["skipped_envs"] == ["prod"]
     assert reads == [(BASE, ["stacks/app", "stacks/dns"])]
     assert parsed["base_sha"] == BASE
     assert (
@@ -718,7 +718,7 @@ def test_a_run_the_base_changed_nothing_of_applies_every_cell(tmp_path, monkeypa
         base_changed={"stacks/other"},
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/dns", "dev-eu")]
-    assert detect_report(parsed)["held_cells"] == []
+    assert detect_report()["held_cells"] == []
 
 
 def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeypatch):
@@ -731,7 +731,7 @@ def test_an_all_overlapping_run_names_no_plan_run_but_its_base(tmp_path, monkeyp
     parsed = _run_auto(tmp_path, monkeypatch, base_changed={"stacks/app"}, calls=calls)
     assert _applied(parsed) == []
     assert (parsed["provenance_run"], parsed["base_sha"]) == ("", BASE)
-    assert detect_report(parsed)["held_cells"] == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"}
     ]
     assert [c for c in calls if c.startswith("repos/o/r/actions/")] == []
@@ -762,9 +762,9 @@ def test_a_skipped_auto_environment_names_the_bare_environment_it_waits_on(tmp_p
         order={"stg": ["dev"], "prod": ["stg"]},
     )
     assert _applied(parsed) == []
-    assert detect_report(parsed)["skipped_envs"] == ["prod", "stg"]
-    assert detect_report(parsed)["skipped_after"] == {"prod": ["dev"], "stg": ["dev"]}
-    assert detect_report(parsed)["bare_envs"] == ["dev"]
+    assert detect_report()["skipped_envs"] == ["prod", "stg"]
+    assert detect_report()["skipped_after"] == {"prod": ["dev"], "stg": ["dev"]}
+    assert detect_report()["bare_envs"] == ["dev"]
 
 
 def test_a_held_bare_environment_is_named_held_not_left_for_a_bare_apply(tmp_path, monkeypatch):
@@ -772,10 +772,10 @@ def test_a_held_bare_environment_is_named_held_not_left_for_a_bare_apply(tmp_pat
     named on the held line alone; the auto `dev-eu` applies.
 
     Mutation: leave `stopped` out of the `bare_envs` subtraction -- `stage` is named, red."""
-    parsed = _run_auto(tmp_path, monkeypatch, other=("stage",), decision="REVIEW_REQUIRED")
-    assert detect_report(parsed)["review_held_envs"] == ["stage"]
-    assert detect_report(parsed)["bare_envs"] == []
-    assert detect_report(parsed)["skipped_after"] == {}
+    _run_auto(tmp_path, monkeypatch, other=("stage",), decision="REVIEW_REQUIRED")
+    assert detect_report()["review_held_envs"] == ["stage"]
+    assert detect_report()["bare_envs"] == []
+    assert detect_report()["skipped_after"] == {}
 
 
 def test_a_cell_both_locked_and_overlapping_is_held_once_per_cause():
@@ -794,7 +794,7 @@ def test_the_auto_form_writes_its_eleven_fields_in_one_report(tmp_path, monkeypa
 
     Mutation: write `pusher` as an output instead of a report field -- red."""
     parsed = _run_auto(tmp_path, monkeypatch, actor=BOT, triggering=BOT)
-    assert set(detect_report(parsed)) == {
+    assert set(detect_report()) == {
         "excluded_envs",
         "skipped_envs",
         "skipped_after",
@@ -808,4 +808,4 @@ def test_the_auto_form_writes_its_eleven_fields_in_one_report(tmp_path, monkeypa
         "bare_envs",
     }
     assert {"provenance_run", "base_sha"} <= set(parsed)
-    assert not {"pusher", "bare_envs", "held_cells"} & set(parsed)
+    assert not {"pusher", "bare_envs", "held_cells", "report"} & set(parsed)

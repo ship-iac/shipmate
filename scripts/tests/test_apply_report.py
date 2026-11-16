@@ -8,6 +8,7 @@ import pytest
 from _loader import load_script
 
 ac = load_script("apply-comment")
+ad = load_script("apply-detect")
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "apply-report"
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -86,10 +87,14 @@ SCENARIOS = {
 }
 
 
-def _render(monkeypatch, tmp_path, name, report_env):
-    """`apply-comment.main`'s (comment, stdout) for scenario `name`, the report fields given by
-    `report_env`, a dict of render step env vars."""
+def _render(monkeypatch, tmp_path, name, report_env, report=None):
+    """`apply-comment.main`'s (comment, stdout) for scenario `name`: `report_env` holds render step
+    env vars, and `report`, when not None, is the text of the downloaded `report.json`."""
     extra, applied, _ = SCENARIOS[name]
+    path = tmp_path / "apply-report" / "report.json"
+    if report is not None:
+        path.parent.mkdir()
+        path.write_text(report, encoding="utf-8")
     cells = tmp_path / "cells"
     cells.mkdir()
     for stack, env in applied:
@@ -112,6 +117,7 @@ def _render(monkeypatch, tmp_path, name, report_env):
         "SHIPMATE_ENVLEVEL0_WAVES": json.dumps(waves),
         "SHIPMATE_RESULTS": "success",
         "SHIPMATE_CHECKS": str(checks),
+        "SHIPMATE_REPORT_PATH": str(path),
         "SHIPMATE_APP_ID": "12345",
         "SHIPMATE_HEAD_SHA": SHA,
         "GITHUB_SERVER_URL": "https://github.com",
@@ -135,20 +141,17 @@ def _render(monkeypatch, tmp_path, name, report_env):
 def test_the_report_renders_the_comment_the_eleven_inputs_rendered(monkeypatch, tmp_path, name):
     """`fixtures/apply-report/<name>.md` and `.out` are the comment and stdout `apply-comment.main`
     rendered from the same fields as eleven separate env vars, captured raw at engine commit
-    `27dab46f`, before they became one `report`; the report renders them byte for byte.
+    `27dab46f`, before they became one report file; the file renders them byte for byte. A refused
+    detect writes `{}`, which renders as every field empty.
 
     Mutation: default `skipped_after` to `[]` in `_REPORT_DEFAULTS` -- every scenario that omits
-    it fails the type check, red. Mutation: drop `pusher` from `main`'s `build_comment` call --
+    it reads as unread, red. Mutation: drop `pusher` from `main`'s `build_comment` call --
     `auto`, red."""
-    report = SCENARIOS[name][2]
-    body, out = _render(
-        monkeypatch, tmp_path, name, {"SHIPMATE_REPORT": json.dumps(report) if report else ""}
-    )
+    report = json.dumps(SCENARIOS[name][2])
+    body, out = _render(monkeypatch, tmp_path, name, {}, report)
     assert body == (FIXTURES / f"{name}.md").read_text(encoding="utf-8")
     assert out == (FIXTURES / f"{name}.out").read_text(encoding="utf-8")
 
-
-ad = load_script("apply-detect")
 
 #: Every report field at the value a missing one reads as, hand-written.
 _DEFAULTS = {
@@ -166,190 +169,90 @@ _DEFAULTS = {
 }
 
 
-def test_an_empty_report_reads_as_every_field_empty():
-    """Detect refused or never ran, so the render step passes an empty `report`.
-
-    Mutation: `json.loads(raw)` without the `if raw` guard -- JSONDecodeError, red."""
-    assert ac.read_report("") == (_DEFAULTS, {})
-
-
-def test_a_missing_field_reads_as_its_default():
+def test_a_missing_field_reads_as_its_default(tmp_path):
     """The targeted form writes four fields; the other seven read empty.
 
-    Mutation: `report[key]` for `report.get(key, default)` in `read_report` -- KeyError, red."""
-    fields, omitted = ac.read_report('{"held_cells": [{"stack": "a", "environment": "e"}]}')
+    Mutation: `report[k]` for `report.get(k, d)` in `read_report` -- KeyError, red."""
+    path = tmp_path / "report.json"
+    path.write_text('{"held_cells": [{"stack": "a", "environment": "e"}]}', encoding="utf-8")
+    fields, unread = ac.read_report(str(path))
     assert fields == {**_DEFAULTS, "held_cells": [{"stack": "a", "environment": "e"}]}
-    assert omitted == {}
+    assert unread is False
+
+
+#: The red line an unread report adds under the verdict, hand-written.
+_UNREAD = "🔴 could not read the detect report; see the run"
+#: The `detect-refused` scenario's env with the refusal taken back: a run whose jobs succeeded.
+_NO_REFUSAL = {"SHIPMATE_RESULTS": "success", "SHIPMATE_DETECT_REFUSAL": ""}
+_AT = (
+    "at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) "
+    "in [run #7](https://github.com/acme/repo/actions/runs/42)"
+)
 
 
 @pytest.mark.parametrize(
-    ("raw", "error"),
+    "report",
     [
-        ("[]", "::error::the apply-detect report is not a JSON object"),
-        ('{"held_cells": {}}', "::error::the apply-detect report's held_cells is not a JSON list"),
-        ('{"pusher": null}', "::error::the apply-detect report's pusher is not a JSON str"),
-        (
-            '{"waiting_cells_more": "3"}',
-            "::error::the apply-detect report holds a count that is not an integer",
-        ),
+        pytest.param(None, id="missing"),
+        pytest.param("", id="empty"),
+        pytest.param("{", id="not-json"),
+        pytest.param("[]", id="not-an-object"),
+        pytest.param('{"held_cells": {}}', id="held-cells-not-a-list"),
+        pytest.param('{"pusher": null}', id="pusher-not-a-string"),
+        pytest.param('{"env_order": ["dev", 1]}', id="env-order-not-names"),
     ],
 )
-def test_a_malformed_report_fails_the_render(raw, error):
-    """Mutation: drop the type check from `read_report`'s field loop -- `held_cells` and `pusher`
-    pass, red. Mutation: drop the `isinstance(report, dict)` check -- `[]` raises AttributeError,
-    not this SystemExit, red. Mutation: drop the integer check on the counts -- `"3"` passes,
-    red."""
-    with pytest.raises(SystemExit) as exc:
-        ac.read_report(raw)
-    assert str(exc.value) == error
+def test_an_unread_report_renders_the_red_line_and_never_green(monkeypatch, tmp_path, report):
+    """Detect never uploaded the report (it died before writing it, or the upload or download
+    failed), or the file is not the report's shape: every field reads empty, which alone would
+    render `🟢 no pending applies` over pending cells, so the verdict is 🔴 and the red line names
+    the cause. The render does not fail.
+
+    Mutation: return the defaults without the unread flag when the file is missing -- `missing`
+    renders green, red. Mutation: drop the `except` around `json.loads` -- `empty` and `not-json`
+    raise, red. Mutation: drop the type check -- the wrong-typed cases render green or raise, red.
+    Mutation: drop the env order's name check -- `env-order-not-names` renders green, red.
+    Mutation: leave `report_unread` out of `failed` in `build_comment` -- 🟢 verdict, red."""
+    body, out = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, report)
+    assert body == (
+        f"### shipmate apply\n\n🔴 failed {_AT}\n\n{_UNREAD}\n\n"
+        "Comment `shipmate help` for the available commands."
+    )
+    assert out.startswith("::warning::could not read the detect report (")
 
 
-def _worst_case():
-    """The largest report one run can write: 256 waiting and 256 held cells with 100-character
-    stack paths and 30-character environment names, four environments in every list."""
-    envs = [f"e{i}".ljust(30, "x") for i in range(4)]
+def test_a_wide_environment_graph_renders_pending_not_green(monkeypatch, tmp_path):
+    """54 targeted environments left pending and 54 skipped after them, each waiting on all 54:
+    the report holds every one (156,131 bytes, past the 128 KiB one env string can carry), and
+    the comment names them pending instead of reading green.
 
-    def stack(i):
-        return f"s{i:03d}".ljust(100, "p")
-
-    return {
-        "excluded_envs": envs,
-        "skipped_envs": envs,
-        "skipped_after": {e: envs for e in envs},
-        "review_held_envs": envs,
-        "applied_exempt_envs": envs,
-        "review_not_required_envs": envs,
-        "waiting_cells": [
-            {
-                "stack": stack(i),
-                "environment": envs[i % 4],
-                "after_stack": stack(255 - i),
-                "after_environment": envs[(i + 1) % 4],
-            }
-            for i in range(256)
-        ],
-        "held_cells": [
-            {"stack": stack(i), "environment": envs[i % 4], "holder": 999999, "cause": "locked"}
-            for i in range(256)
-        ],
-        "env_order": envs,
-        "pusher": "x" * 39,
-        "bare_envs": envs,
-    }
-
-
-def test_the_worst_case_report_is_trimmed_within_its_budget():
-    """Untrimmed, the worst case serializes to 139,875 bytes, past the 128 KiB env string cap.
-    Trimmed, it fits 96 KiB: the waiting cells lose 124 entries from the end (338 bytes each; 123
-    leave 98,328 bytes, 24 over), the held cells none, and the count names them.
-
-    Mutation: drop the trim loop from `report_json` -- 139,875 bytes, red."""
-    report = _worst_case()
-    assert len(json.dumps(report)) == 139_875
-    text = ad.report_json(report)
-    assert len(text) <= ad.REPORT_BUDGET == 96 * 1024
-    trimmed = json.loads(text)
-    assert trimmed == {
-        **report,
-        "waiting_cells": report["waiting_cells"][:132],
-        "waiting_cells_more": 124,
-    }
-
-
-def test_a_report_within_budget_is_written_whole():
-    """Mutation: write `waiting_cells_more` as 0 on every report -- red."""
-    report = SCENARIOS["auto"][2]
-    assert ad.report_json(report) == json.dumps(report)
-
-
-def test_trimmed_lists_render_how_many_entries_detect_left_out(monkeypatch, tmp_path):
-    """Mutation: drop `more` from the footer parts in `build_comment` -- no count lines, red."""
+    Mutation: write the report through `json.dumps(report)[:131072]` in `apply-detect`'s
+    `write_report` -- the file is cut to 131,072 bytes, red."""
+    targeted = [f"targeted-environment-{i:03}-eu-west-1-production" for i in range(54)]
+    skipped = [f"skipped-environment-{i:03}-eu-west-1-production" for i in range(54)]
     report = {
-        **SCENARIOS["targeted"][2],
-        "waiting_cells_more": 126,
-        "held_cells_more": 2,
-        "env_order_more": 1,
+        "excluded_envs": targeted,
+        "skipped_envs": skipped,
+        "skipped_after": {e: targeted for e in skipped},
+        "env_order": targeted + skipped,
     }
-    body, _ = _render(monkeypatch, tmp_path, "targeted", {"SHIPMATE_REPORT": json.dumps(report)})
-    expected = (
-        (FIXTURES / "targeted.md")
-        .read_text(encoding="utf-8")
-        .replace(
-            "\n\nComment `shipmate help`",
-            "\n⚪ and 126 more waiting cell(s); see the run"
-            "\n⚪ and 2 more held cell(s); see the run"
-            "\n⚪ and 1 more environment name(s); see the run"
-            "\n\nComment `shipmate help`",
-        )
+    path = tmp_path / "written.json"
+    monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
+    ad.write_report(report)
+    text = path.read_text(encoding="utf-8")
+    assert len(text) == 156_131
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, text)
+    lines = body.split("\n")
+    assert lines[2] == (
+        f"⚪ nothing applied, the pending environments wait on the lines below {_AT}"
     )
-    assert body == expected
-
-
-def test_the_held_cells_are_trimmed_once_the_waiting_cells_are_gone():
-    """The worst case with every held cell both locked and overlapping (512 held entries)
-    serializes to 186,979 bytes. Dropping all 256 waiting cells leaves it over 96 KiB, so the held
-    cells lose 12 from the end too, and each list names its own count.
-
-    Mutation: trim only `waiting_cells` in `report_json` (`for key in _TRIM_FIRST[:1]`) -- over
-    budget, red."""
-    report = _worst_case()
-    locked = report["held_cells"]
-    overlap = [{**c, "cause": "overlap"} for c in locked]
-    for c in overlap:
-        del c["holder"]
-    report["held_cells"] = locked + overlap
-    assert len(json.dumps(report)) == 186_979
-    text = ad.report_json(report)
-    assert len(text) <= ad.REPORT_BUDGET
-    assert json.loads(text) == {
-        **report,
-        "waiting_cells": [],
-        "held_cells": report["held_cells"][:500],
-        "waiting_cells_more": 256,
-        "held_cells_more": 12,
-    }
-
-
-def test_the_compact_form_also_ends_with_the_trimmed_counts(monkeypatch):
-    """256 blocked rows with long reasons overflow HARD_CAP, so the comment falls back to the
-    compact form, which keeps the trimmed-count line.
-
-    Mutation: drop `+ more` from the compact form's footer parts in `build_comment` -- red."""
-    for k, v in {
-        "GITHUB_SERVER_URL": "https://gh",
-        "GITHUB_REPOSITORY": "o/r",
-        "GITHUB_RUN_ID": "1",
-        "GITHUB_RUN_NUMBER": "7",
-    }.items():
-        monkeypatch.setenv(k, v)
-    rows = [
-        {
-            "environment": "production-eu-west-1",
-            "stack": f"stacks/platform/shared-services/eu-west-1/backend/service-{i:03}",
-            "status": "blocked",
-            "reason": "r" * 400,
-            "state_lost": False,
-            "apply_text": None,
-        }
-        for i in range(256)
-    ]
-    body = ac.build_comment(
-        rows,
-        [],
-        "https://gh/run/1",
-        [],
-        [],
-        "production-eu-west-1",
-        "failure",
-        head_sha=SHA,
-        omitted={"waiting_cells": 3},
-    )
-    assert len(body) <= ac.sc.HARD_CAP
-    assert body.split("\n")[-6:] == [
-        "",
-        "blocked: each blocked cell's reason is in its logs.",
-        "",
-        "⚪ and 3 more waiting cell(s); see the run",
+    assert _UNREAD not in body
+    # Past HARD_CAP, so the compact form groups each disposition on one line.
+    for_each = "comment `shipmate apply <env>` for each"
+    waits = "; ".join(f"{e} (apply it first with `shipmate apply {e}`)" for e in targeted)
+    assert lines[4:] == [
+        f"🟡 left pending (targeted): {', '.join(targeted)}; {for_each}",
+        f"⚪ skipped, waits on {waits}: {', '.join(skipped)}",
         "",
         "Comment `shipmate help` for the available commands.",
     ]

@@ -141,7 +141,6 @@ jobs:
       envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
       envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
-      report: ${{ steps.d.outputs.report }}
       provenance_run: ${{ steps.d.outputs.provenance_run }}
       base_sha: ${{ steps.d.outputs.base_sha }}
       refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
@@ -321,7 +320,6 @@ jobs:
           envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
           envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
           envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
-          report: ${{ needs.detect.outputs.report }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
           auto: ${{ inputs.auto }}

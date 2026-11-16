@@ -895,7 +895,7 @@ def build_comment(
     *,
     auto_dispatched=False,
     pusher="",
-    omitted=None,
+    report_unread=False,
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
     order of `order` its `sc.env_heading` (`1 cell, ` or `N cells, `, then the verdict's
@@ -911,20 +911,24 @@ def build_comment(
     the auto form's overlap cells. `skipped_after`
     and `bare` are detect's: the skipped lines name each predecessor, and a line names each
     environment left for a bare apply. A run that applied nothing and left a `bare`, `targeted`
-    or skipped environment is never 🟢. `omitted` is `read_report`'s: the footer lines end with
-    how many entries detect trimmed from each list, which the verdict's counts leave out.
+    or skipped environment is never 🟢. A `report_unread` run (`read_report`) is 🔴, with
+    `_REPORT_UNREAD` under the verdict.
 
     Every row is guaranteed its bare line: the space all headings and remaining rows' bare lines
     need is reserved up front, together, so an early giant apply.txt cannot starve a later row.
     When even the bare lines overflow HARD_CAP, `_compact` renders them without headings or the
     blocked reasons and with one footer line per disposition, the lock lines, and one per waiting
     blocker; past that a SystemExit names the cause."""
-    failed = _results_failed(results_csv)
+    # Every field reads empty when the report is unread, which alone would read green.
+    failed = _results_failed(results_csv) or report_unread
     left = [*bare, *excluded, *skipped]
     circle, verdict = _verdict(rows, failed, held, head_sha, run_url, waiting, held_cells, left)
     fence = sc.reason_fence(refusal) if refusal else ""
     auto_line = _auto_line(pusher) if auto_dispatched else ""
-    head = "\n\n".join(p for p in (sc.header("apply", env_name), verdict, auto_line, fence) if p)
+    unread = _REPORT_UNREAD if report_unread else ""
+    head = "\n\n".join(
+        p for p in (sc.header("apply", env_name), verdict, auto_line, unread, fence) if p
+    )
     hint = sc.footer_hint(circle)
     notes = (
         _lock_note(rows, env_name),
@@ -934,8 +938,7 @@ def build_comment(
     )
     dispositions = (excluded, skipped, held, waiting, held_cells)
     named_after = {"skipped_after": skipped_after, "bare": bare}
-    more = _omitted_lines(omitted or {})
-    parts = _footer_parts(*dispositions, **named_after) + more
+    parts = _footer_parts(*dispositions, **named_after)
     tail = _tail(notes, parts, hint)
     # Each entry is a bare line, its row and its url; a heading's row and url are None.
     entries = []
@@ -962,7 +965,7 @@ def build_comment(
     body = "\n\n".join(p for p in (head, sc._join(sections), tail) if p)
     # Past SIZE_BUDGET every row is already its bare line; only the compact form is smaller.
     if len(body) > sc.HARD_CAP:
-        parts = _footer_parts(*dispositions, compact=True, **named_after) + more
+        parts = _footer_parts(*dispositions, compact=True, **named_after)
         body = _compact(head, rows, urls, notes, parts, hint)
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
@@ -974,7 +977,10 @@ def build_comment(
     return body
 
 
-#: Every field of apply-detect's `report` and the value a missing one reads as.
+#: The line under the verdict when apply-detect's report could not be read.
+_REPORT_UNREAD = "🔴 could not read the detect report; see the run"
+
+#: Every field of apply-detect's report and the value a missing one reads as.
 _REPORT_DEFAULTS = {
     "excluded_envs": [],
     "skipped_envs": [],
@@ -990,40 +996,27 @@ _REPORT_DEFAULTS = {
 }
 
 
-def read_report(raw):
-    """(fields, omitted) from apply-detect's `report`, the JSON object `raw`. `fields` holds every
-    `_REPORT_DEFAULTS` key, a missing one at its default, so an empty `raw` (detect refused or
-    never ran) reads as all defaults. `omitted` maps each list `report_json` trimmed to the count
-    of entries it lost. A `raw` that is not a JSON object, a field of another type than its
-    default, or a count that is not an integer raises SystemExit."""
-    report = json.loads(raw) if raw else {}
-    if not isinstance(report, dict):
-        raise SystemExit("::error::the apply-detect report is not a JSON object")
-    fields = {}
-    for key, default in _REPORT_DEFAULTS.items():
-        fields[key] = report.get(key, default)
-        if type(fields[key]) is not type(default):
-            raise SystemExit(
-                f"::error::the apply-detect report's {key} is not a JSON {type(default).__name__}"
-            )
-    omitted = {k.removesuffix("_more"): v for k, v in report.items() if k.endswith("_more")}
-    if any(type(v) is not int for v in omitted.values()):
-        raise SystemExit("::error::the apply-detect report holds a count that is not an integer")
-    return fields, omitted
-
-
-def _omitted_lines(omitted):
-    """One line per trimmed cell list, then one for the trimmed environment lists together,
-    naming how many entries apply-detect left out of its `report` to fit its size cap."""
-    lines = [
-        f"⚪ and {omitted[k]} more {word} cell(s); see the run"
-        for k, word in (("waiting_cells", "waiting"), ("held_cells", "held"))
-        if omitted.get(k)
-    ]
-    envs = sum(n for k, n in omitted.items() if k not in ("waiting_cells", "held_cells"))
-    if envs:
-        lines.append(f"⚪ and {envs} more environment name(s); see the run")
-    return lines
+def read_report(path):
+    """(fields, unread) from apply-detect's report file at `path`. `fields` holds every
+    `_REPORT_DEFAULTS` key, a missing one at its default. `unread` is True, and `fields` all
+    defaults, when the file is missing or unreadable, is not a JSON object, holds a field of
+    another type than its default, or an `env_order` that is not a list of names; one warning
+    names the cause. The caller then never renders a green verdict: empty fields alone would."""
+    try:
+        report = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("not a JSON object")
+        fields = {k: report.get(k, d) for k, d in _REPORT_DEFAULTS.items()}
+        wrong = [k for k, d in _REPORT_DEFAULTS.items() if type(fields[k]) is not type(d)]
+        if wrong:
+            name = type(_REPORT_DEFAULTS[wrong[0]]).__name__
+            raise ValueError(f"{wrong[0]} is not a JSON {name}")
+        if not all(isinstance(e, str) for e in fields["env_order"]):
+            raise ValueError("env_order is not a list of environment names")
+    except (OSError, ValueError) as exc:
+        print(f"::warning::could not read the detect report ({command_data(str(exc))})")
+        return dict(_REPORT_DEFAULTS), True
+    return fields, False
 
 
 def main():
@@ -1036,11 +1029,10 @@ def main():
     )
     rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "")
-    r, omitted = read_report(os.environ.get("SHIPMATE_REPORT", ""))
+    r, unread = read_report(os.environ.get("SHIPMATE_REPORT_PATH", ""))
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
     for line in notices(rows, r["applied_exempt_envs"], r["review_not_required_envs"]):
         print(line)
-    order = json.dumps(r["env_order"]) if r["env_order"] else ""
     body = build_comment(
         rows,
         jobs,
@@ -1055,13 +1047,13 @@ def main():
         # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
         os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
         or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
-        sc.env_names(order, "the report's env_order", sc.ENV_ORDER_UNREAD),
+        r["env_order"],
         r["held_cells"],
         r["skipped_after"],
         r["bare_envs"],
         auto_dispatched=os.environ.get("SHIPMATE_AUTO") == "true",
         pusher=r["pusher"],
-        omitted=omitted,
+        report_unread=unread,
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

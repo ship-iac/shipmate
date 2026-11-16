@@ -1,10 +1,16 @@
 """Suite-wide hooks: the `bash_only` marker, whose bash probe runs only when a marked test does,
-a `_shipmate._sleep` that fails any test reaching a retry without patching it, and a fresh
-rate-limit wait budget per test."""
+a `_shipmate._sleep` that fails any test reaching a retry without patching it, a fresh
+rate-limit wait budget per test, and a per-test path for `apply-detect`'s report."""
 
 import _shipmate
 import pytest
 from _loader import usable_bash
+
+
+@pytest.fixture(autouse=True)
+def _apply_report_path(monkeypatch, tmp_path):
+    """`apply-detect` writes its report to `SHIPMATE_REPORT_PATH`, which its action sets."""
+    monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(tmp_path / "apply-report.json"))
 
 
 @pytest.fixture(autouse=True)

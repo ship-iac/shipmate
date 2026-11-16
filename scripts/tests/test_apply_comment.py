@@ -1593,6 +1593,13 @@ def test_wave_job_name_matches_the_cell_job_grammar():
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
+def _set_report(monkeypatch, tmp_path, report):
+    """`report` as the downloaded apply report the render step reads."""
+    path = tmp_path / "apply-report.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
+
+
 def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it: `waves_json`
     in env-level 0, the other levels and every env set empty."""
@@ -1601,7 +1608,7 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
     for i in range(1, wv.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
-    monkeypatch.setenv("SHIPMATE_REPORT", "")
+    _set_report(monkeypatch, tmp_path, {})
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
@@ -1876,7 +1883,7 @@ def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
         }
     )
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
-    monkeypatch.setenv("SHIPMATE_REPORT", json.dumps({"env_order": ["staging", "live"]}))
+    _set_report(monkeypatch, tmp_path, {"env_order": ["staging", "live"]})
     body = _main_body(tmp_path)
     assert [line for line in body.splitlines() if line.startswith("#### ")] == [
         "#### staging: 1 cell, 1 not attempted",
@@ -1901,7 +1908,7 @@ def _all_envs_main_env(monkeypatch, tmp_path, row_env, exempt, no_review):
         "applied_exempt_envs": exempt,
         "review_not_required_envs": no_review,
     }
-    monkeypatch.setenv("SHIPMATE_REPORT", json.dumps(report))
+    _set_report(monkeypatch, tmp_path, report)
 
 
 def _all_envs_body(row_env):
@@ -2192,7 +2199,7 @@ def test_main_renders_the_auto_line_from_the_render_step_env(monkeypatch, tmp_pa
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
     monkeypatch.setenv("SHIPMATE_AUTO", "true")
-    monkeypatch.setenv("SHIPMATE_REPORT", json.dumps({"pusher": "k3np"}))
+    _set_report(monkeypatch, tmp_path, {"pusher": "k3np"})
     assert _main_body(tmp_path) == (
         f"### shipmate apply\n\n🟢 no pending applies {_MAIN_AT}\n\n"
         "dispatched as an `apply_mode: auto` apply, after an autoplan triggered by @<!-- -->`k3np`"
@@ -2387,7 +2394,7 @@ def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     held = [_locked("stacks/app", "dev-eu", 12)]
-    monkeypatch.setenv("SHIPMATE_REPORT", json.dumps({"held_cells": held}))
+    _set_report(monkeypatch, tmp_path, {"held_cells": held})
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
@@ -2581,7 +2588,7 @@ def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tm
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
-    monkeypatch.setenv("SHIPMATE_REPORT", json.dumps({"held_cells": overlap}))
+    _set_report(monkeypatch, tmp_path, {"held_cells": overlap})
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the base also changed the pending "
         f"cells' stacks {_MAIN_AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
@@ -2800,7 +2807,7 @@ def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     report = {"skipped_envs": ["prod"], "skipped_after": {"prod": ["dev"]}, "bare_envs": ["dev"]}
-    monkeypatch.setenv("SHIPMATE_REPORT", json.dumps(report))
+    _set_report(monkeypatch, tmp_path, report)
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the pending environments wait on the "
         f"lines below {_MAIN_AT}\n\n"

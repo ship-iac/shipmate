@@ -131,7 +131,7 @@ _RENDER_ENV = {
     "SHIPMATE_ENVLEVEL2_WAVES": "${{ inputs.envlevel2-waves }}",
     "SHIPMATE_ENVLEVEL3_WAVES": "${{ inputs.envlevel3-waves }}",
     "SHIPMATE_RESULTS": "${{ inputs.results }}",
-    "SHIPMATE_REPORT": "${{ inputs.report }}",
+    "SHIPMATE_REPORT_PATH": "apply-report/report.json",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
     "SHIPMATE_AUTO": "${{ inputs.auto }}",
@@ -149,8 +149,8 @@ def test_render_step_env_block_matches_the_expected_mapping():
 
     Mutation: drop `SHIPMATE_HEAD_SHA` from the render step, so every verdict reads `at an
     unknown commit` -- red.
-    Mutation: drop `SHIPMATE_REPORT` from the render step, so a fully waiting run reads
-    `🟢 no pending applies` -- red.
+    Mutation: drop `SHIPMATE_REPORT_PATH` from the render step, so every comment reads the
+    report unread -- red.
     Mutation: restore `SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}` beside it -- red.
     Mutation: drop `SHIPMATE_DETECT_REFUSAL` from the render step, so a refused apply's comment
     never names the refusal -- red.
@@ -255,8 +255,8 @@ def test_head_sha_is_a_required_input():
 
 def test_declared_inputs_are_exactly_these():
     """The render step's `env:` reads `inputs.<name>`, and an undeclared name evaluates to empty
-    without error. Mutation: rename `report` under `inputs:` alone -> the declared set differs.
-    Mutation: restore the `held-cells` input beside `report` -> the declared set differs."""
+    without error. Mutation: rename `detect-refusal` under `inputs:` alone -> the declared set
+    differs. Mutation: restore a `report` input -> the declared set differs."""
     assert set(action_yaml("apply-summary")["inputs"]) == {
         "pr-number",
         "environment",
@@ -264,7 +264,6 @@ def test_declared_inputs_are_exactly_these():
         "envlevel1-waves",
         "envlevel2-waves",
         "envlevel3-waves",
-        "report",
         "detect-refusal",
         "lock-refusal",
         "auto",
@@ -393,7 +392,6 @@ _APPLY_SUMMARY_WITH = {
     "envlevel1-waves": "${{ needs.detect.outputs.envlevel1_waves }}",
     "envlevel2-waves": "${{ needs.detect.outputs.envlevel2_waves }}",
     "envlevel3-waves": "${{ needs.detect.outputs.envlevel3_waves }}",
-    "report": "${{ needs.detect.outputs.report }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "auto": "${{ inputs.auto }}",
@@ -404,12 +402,11 @@ _APPLY_SUMMARY_WITH = {
 
 
 def test_apply_passes_apply_summary_exactly_this_with():
-    """A dropped `environment` renders a targeted apply as the all-environments form, and a
-    dropped `report` renders every disposition as empty. The detect outputs these read are pinned
-    whole in `test_detect_wiring_guard.py`.
+    """A dropped `environment` renders a targeted apply as the all-environments form. The detect
+    outputs these read are pinned whole in `test_detect_wiring_guard.py`; the comment's fields
+    come from the `apply-report` artifact, not from `with:`.
 
     Mutation: drop `environment:` from the step's `with:` -- red.
-    Mutation: drop `report:` from the step's `with:` -- red.
     Mutation: restore `held-cells: ${{ needs.detect.outputs.held_cells }}` -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
@@ -419,14 +416,24 @@ def test_apply_passes_apply_summary_exactly_this_with():
     assert step["with"] == _APPLY_SUMMARY_WITH
 
 
-def test_the_report_input_is_optional_and_empty_by_default():
-    """`deploy.yml` posts no apply comment, and an empty value reads as every field empty.
-    Mutation: set the input `required: true` -- red. Mutation: default it to `{}` -- red."""
-    declared = action_yaml("apply-summary")["inputs"]["report"]
-    assert {k: v for k, v in declared.items() if k != "description"} == {
-        "required": False,
-        "default": "",
-    }
+#: apply-summary's report download step, hand-written.
+_REPORT_DOWNLOAD = {
+    "name": "Download the apply report",
+    "continue-on-error": True,
+    "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "with": {"name": "apply-report", "path": "apply-report"},
+}
+
+
+def test_the_report_is_downloaded_by_exact_name_where_the_render_reads_it():
+    """By `name`, not `pattern`, and to the directory the render step's `SHIPMATE_REPORT_PATH`
+    names (pinned in `_RENDER_ENV`). A failed download degrades: the render reads the report as
+    unread, renders the red line and never a green verdict.
+
+    Mutations: rename the artifact; download to another path; drop `continue-on-error`, so a
+    missing report skips the comment; download by `pattern`."""
+    steps = action_yaml("apply-summary")["runs"]["steps"]
+    assert next(s for s in steps if s.get("name") == _REPORT_DOWNLOAD["name"]) == _REPORT_DOWNLOAD
 
 
 def test_the_detect_refusal_input_is_optional_and_empty_by_default():

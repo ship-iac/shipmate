@@ -542,9 +542,9 @@ def github_outputs(path):
     return dict(ln.split("=", 1) for ln in path.read_text(encoding="utf-8").splitlines())
 
 
-def detect_report(outputs):
-    """The ``report`` object apply-detect wrote among ``outputs`` (``github_outputs``' dict)."""
-    return json.loads(outputs["report"])
+def detect_report():
+    """The report object apply-detect wrote to ``SHIPMATE_REPORT_PATH``."""
+    return json.loads(pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"]).read_text(encoding="utf-8"))
 
 
 def jsonl(*rows):

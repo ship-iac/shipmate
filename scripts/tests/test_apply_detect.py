@@ -844,21 +844,21 @@ def test_main_names_a_reviewed_env_applied_with_no_review_required(
     Mutation: compare `review_decision != "NONE"` in `authorize._review_not_required` -- the
     NONE/reviewed and APPROVED cases swap and go red.
     Mutation: drop its exempt check -- the NONE/exempt case names dev-eu and goes red."""
-    out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
+    _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
     _stub_apply(
         monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
     )
     ad.main()
-    assert detect_report(github_outputs(out))["review_not_required_envs"] == expected
+    assert detect_report()["review_not_required_envs"] == expected
 
 
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply-run.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty`, `head_sha` and `report`, whose keys are exactly the targeted form's
-    four: `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a targeted
-    apply is env-level 0 alone, so levels 1-3 must say `true` or apply-run.yml runs them into
-    `fromJSON('')`.
+    `envlevelN_empty` and `head_sha`, and the report file holds exactly the targeted form's four
+    fields: `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a
+    targeted apply is env-level 0 alone, so levels 1-3 must say `true` or apply-run.yml runs them
+    into `fromJSON('')`.
 
     Mutation: drop `held_cells` from `main`'s report -- red.
     Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
@@ -889,9 +889,13 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         f"envlevel3_waves={empty}\n"
         "envlevel3_empty=true\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-        'report={"review_not_required_envs": [], "waiting_cells": [], "held_cells": [], '
-        '"env_order": ["dev-eu"]}\n'
     )
+    assert detect_report() == {
+        "review_not_required_envs": [],
+        "waiting_cells": [],
+        "held_cells": [],
+        "env_order": ["dev-eu"],
+    }
 
 
 def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
@@ -1261,7 +1265,7 @@ def _zigzag(monkeypatch, tmp_path, checks, table=None):
     ad.main()
     parsed = github_outputs(out)
     waves = json.loads(parsed["envlevel0_waves"])
-    return [c["stack"] for w in waves.values() for c in w], detect_report(parsed)["waiting_cells"]
+    return [c["stack"] for w in waves.values() for c in w], detect_report()["waiting_cells"]
 
 
 def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, tmp_path):
@@ -1349,10 +1353,10 @@ def test_a_cell_another_pull_request_holds_stays_pending_and_its_dependent_waits
     Mutation: print `0` for the notice's `locked=` -- `locked=1` is absent."""
     parsed, applied = _locked_run(monkeypatch, tmp_path, held(ad.cl, "stacks/dns", "dev-eu", 7))
     assert applied == ["stacks/workers"]
-    assert detect_report(parsed)["held_cells"] == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
-    assert detect_report(parsed)["waiting_cells"] == [
+    assert detect_report()["waiting_cells"] == [
         {
             "stack": "stacks/platform",
             "environment": "dev-eu",
@@ -1373,7 +1377,7 @@ def test_a_cell_the_applying_pull_request_holds_applies(monkeypatch, tmp_path):
     lock = held(ad.cl, "stacks/dns", "dev-eu", int(PR_NUMBER))
     parsed, applied = _locked_run(monkeypatch, tmp_path, lock)
     assert applied == ["stacks/dns", "stacks/workers", "stacks/platform"]
-    assert detect_report(parsed)["held_cells"] == []
+    assert detect_report()["held_cells"] == []
 
 
 def test_a_failed_lock_read_refuses_the_targeted_apply(monkeypatch, tmp_path):
@@ -1396,3 +1400,15 @@ def test_a_targeted_apply_reads_the_locks_of_its_pending_cells_environment(monke
     _, applied = _locked_run(monkeypatch, tmp_path, lock, reads, checks, tags)
     assert reads == [("acme/iac", {"dev-eu"})]
     assert applied == ["stacks/workers"]
+
+
+@pytest.mark.parametrize("env", ["", "dev-eu"], ids=["bare", "targeted"])
+def test_a_refused_detect_still_writes_an_empty_report(monkeypatch, tmp_path, env):
+    """The report is written before any refusal, so the result comment of a refused run reads
+    every field empty rather than as an unread report.
+
+    Mutation: drop the `write_report({})` at the top of `main` -- no file, red."""
+    _apply_env(monkeypatch, tmp_path, SHIPMATE_ENV=env, SHIPMATE_HEAD_SHA="not-a-sha")
+    with pytest.raises(SystemExit):
+        ad.main()
+    assert detect_report() == {}

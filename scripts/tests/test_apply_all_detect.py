@@ -169,10 +169,10 @@ def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, exp
     """`None` is the unset variable. Mutations: drop `exempt` from the `_review_reason` call
     -- REVIEW_REQUIRED holds dev-eu and dev-us too; `if not az._review_reason(...)` --
     every row inverts; `sorted(..., reverse=True)` -- the multi-env rows reorder."""
-    parsed = _run_main(
+    _run_main(
         tmp_path, monkeypatch, envs=ALL_PENDING, cells=3, exempt="dev-eu,dev-us", decision=decision
     )
-    assert detect_report(parsed)["review_held_envs"] == expected
+    assert detect_report()["review_held_envs"] == expected
 
 
 @pytest.mark.parametrize(
@@ -195,8 +195,8 @@ def test_main_holds_everything_unreviewed_when_no_env_is_exempt(
 ):
     """Mutations: `if not az._review_reason(...)` -- every row inverts;
     `sorted(..., reverse=True)` -- the multi-env rows reorder."""
-    parsed = _run_main(tmp_path, monkeypatch, envs=ALL_PENDING, cells=3, decision=decision)
-    assert detect_report(parsed)["review_held_envs"] == expected
+    _run_main(tmp_path, monkeypatch, envs=ALL_PENDING, cells=3, decision=decision)
+    assert detect_report()["review_held_envs"] == expected
 
 
 def _membership_double(tree, tags, calls):
@@ -540,7 +540,7 @@ def test_main_lets_a_record_less_check_in_an_excluded_env_through(tmp_path, monk
         ],
     )
     assert _wave_envs(parsed) == ["dev-eu"]
-    assert detect_report(parsed)["excluded_envs"] == ["prod-eu"]
+    assert detect_report()["excluded_envs"] == ["prod-eu"]
 
 
 def test_main_keeps_a_failed_apply_check_re_appliable(tmp_path, monkeypatch):
@@ -583,11 +583,11 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu"]
-    assert detect_report(parsed)["review_held_envs"] == ["prod-eu"]
-    assert detect_report(parsed)["applied_exempt_envs"] == ["dev-eu"]
-    assert detect_report(parsed)["excluded_envs"] == []
-    assert detect_report(parsed)["skipped_envs"] == ["dev-us"]
-    assert detect_report(parsed)["env_order"] == ["dev-eu", "prod-eu", "dev-us"]
+    assert detect_report()["review_held_envs"] == ["prod-eu"]
+    assert detect_report()["applied_exempt_envs"] == ["dev-eu"]
+    assert detect_report()["excluded_envs"] == []
+    assert detect_report()["skipped_envs"] == ["dev-us"]
+    assert detect_report()["env_order"] == ["dev-eu", "prod-eu", "dev-us"]
 
 
 def test_main_skips_only_the_successors_of_a_pending_targeted_env(tmp_path, monkeypatch):
@@ -607,9 +607,9 @@ def test_main_skips_only_the_successors_of_a_pending_targeted_env(tmp_path, monk
         targeted=["sbx-eu", "stage-eu"],
         decision="APPROVED",
     )
-    assert detect_report(parsed)["excluded_envs"] == ["stage-eu"]
-    assert detect_report(parsed)["skipped_envs"] == ["prod-eu"]
-    assert detect_report(parsed)["skipped_after"] == {"prod-eu": ["stage-eu"]}
+    assert detect_report()["excluded_envs"] == ["stage-eu"]
+    assert detect_report()["skipped_envs"] == ["prod-eu"]
+    assert detect_report()["skipped_after"] == {"prod-eu": ["stage-eu"]}
     assert _wave_envs(parsed) == ["after-sbx", "dev-eu"]
 
 
@@ -620,7 +620,7 @@ def test_main_reports_a_held_targeted_env_as_excluded_too(tmp_path, monkeypatch)
     Mutation: subtract `held` from `excluded` -- prod-eu leaves `excluded_envs`, red.
     Mutation: take `excluded` from `sorted(stopped)`, the targeted and held envs -- dev-eu
     enters `excluded_envs`, red."""
-    parsed = _run_main(
+    _run_main(
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
@@ -628,8 +628,8 @@ def test_main_reports_a_held_targeted_env_as_excluded_too(tmp_path, monkeypatch)
         targeted=["prod-eu"],
         decision="REVIEW_REQUIRED",
     )
-    assert detect_report(parsed)["excluded_envs"] == ["prod-eu"]
-    assert detect_report(parsed)["review_held_envs"] == ["dev-eu", "prod-eu"]
+    assert detect_report()["excluded_envs"] == ["prod-eu"]
+    assert detect_report()["review_held_envs"] == ["dev-eu", "prod-eu"]
 
 
 def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
@@ -647,8 +647,8 @@ def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu"]
-    assert detect_report(parsed)["review_held_envs"] == ["prod-eu"]
-    assert detect_report(parsed)["applied_exempt_envs"] == ["dev-eu"]
+    assert detect_report()["review_held_envs"] == ["prod-eu"]
+    assert detect_report()["applied_exempt_envs"] == ["dev-eu"]
 
 
 def test_a_targeted_env_is_held_back_from_a_bare_apply(tmp_path, monkeypatch):
@@ -666,7 +666,7 @@ def test_a_targeted_env_is_held_back_from_a_bare_apply(tmp_path, monkeypatch):
         decision="APPROVED",
     )
     assert _wave_envs(parsed) == ["dev-eu"]
-    assert detect_report(parsed)["excluded_envs"] == ["prod"]
+    assert detect_report()["excluded_envs"] == ["prod"]
 
 
 def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, monkeypatch):
@@ -679,8 +679,8 @@ def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, mo
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
-    assert detect_report(parsed)["review_held_envs"] == []
-    assert detect_report(parsed)["applied_exempt_envs"] == ["dev-eu", "prod-eu"]
+    assert detect_report()["review_held_envs"] == []
+    assert detect_report()["applied_exempt_envs"] == ["dev-eu", "prod-eu"]
 
 
 def test_main_omits_a_listed_targeted_env_from_the_applied_report(tmp_path, monkeypatch):
@@ -695,8 +695,8 @@ def test_main_omits_a_listed_targeted_env_from_the_applied_report(tmp_path, monk
         exempt="dev-eu,dev-us",
         decision="REVIEW_REQUIRED",
     )
-    assert detect_report(parsed)["excluded_envs"] == ["dev-us"]
-    assert detect_report(parsed)["applied_exempt_envs"] == ["dev-eu"]
+    assert detect_report()["excluded_envs"] == ["dev-us"]
+    assert detect_report()["applied_exempt_envs"] == ["dev-eu"]
     assert _wave_envs(parsed) == ["dev-eu"]
 
 
@@ -722,7 +722,7 @@ def test_main_names_the_reviewed_envs_applied_with_no_review_required(
         decision=decision,
     )
     assert _wave_envs(parsed) == ["dev-eu", "dev-us"]
-    assert detect_report(parsed)["review_not_required_envs"] == expected
+    assert detect_report()["review_not_required_envs"] == expected
 
 
 def test_main_labels_only_the_exempt_envs_applied_unreviewed(tmp_path, monkeypatch):
@@ -741,7 +741,7 @@ def test_main_labels_only_the_exempt_envs_applied_unreviewed(tmp_path, monkeypat
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == ["dev-eu", "dev-us"]
-    assert detect_report(parsed)["applied_exempt_envs"] == ["dev-us"]
+    assert detect_report()["applied_exempt_envs"] == ["dev-us"]
 
 
 def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkeypatch):
@@ -755,8 +755,8 @@ def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkey
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == []
-    assert detect_report(parsed)["review_held_envs"] == ["dev-eu", "prod-eu"]
-    assert detect_report(parsed)["applied_exempt_envs"] == []
+    assert detect_report()["review_held_envs"] == ["dev-eu", "prod-eu"]
+    assert detect_report()["applied_exempt_envs"] == []
 
 
 def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, monkeypatch):
@@ -772,7 +772,7 @@ def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, mon
         decision=None,
     )
     assert _wave_envs(parsed) == []
-    assert detect_report(parsed)["review_held_envs"] == ["dev-eu", "prod-eu"]
+    assert detect_report()["review_held_envs"] == ["dev-eu", "prod-eu"]
 
 
 def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, monkeypatch):
@@ -787,7 +787,7 @@ def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, mon
         decision="APPROVED",
     )
     assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
-    assert detect_report(parsed)["review_held_envs"] == []
+    assert detect_report()["review_held_envs"] == []
 
 
 def test_main_claims_nothing_applied_exempt_on_a_reviewed_pull_request(tmp_path, monkeypatch):
@@ -803,8 +803,8 @@ def test_main_claims_nothing_applied_exempt_on_a_reviewed_pull_request(tmp_path,
         decision="APPROVED",
     )
     assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
-    assert detect_report(parsed)["review_held_envs"] == []
-    assert detect_report(parsed)["applied_exempt_envs"] == []
+    assert detect_report()["review_held_envs"] == []
+    assert detect_report()["applied_exempt_envs"] == []
 
 
 def test_main_without_the_variable_holds_every_env_on_changes_requested(tmp_path, monkeypatch):
@@ -817,12 +817,12 @@ def test_main_without_the_variable_holds_every_env_on_changes_requested(tmp_path
         decision="CHANGES_REQUESTED",
     )
     assert _wave_envs(parsed) == []
-    assert detect_report(parsed)["review_held_envs"] == ["dev-eu", "dev-us", "prod-eu"]
-    assert detect_report(parsed)["applied_exempt_envs"] == []
+    assert detect_report()["review_held_envs"] == ["dev-eu", "dev-us", "prod-eu"]
+    assert detect_report()["applied_exempt_envs"] == []
     # Held, not excluded and not skipped: the remedy is "get a review", and the comment must
     # not tell the developer to run `shipmate apply <env>` instead.
-    assert detect_report(parsed)["excluded_envs"] == []
-    assert detect_report(parsed)["skipped_envs"] == []
+    assert detect_report()["excluded_envs"] == []
+    assert detect_report()["skipped_envs"] == []
 
 
 def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monkeypatch):
@@ -843,7 +843,7 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
         targeted=["prod-eu"],
         decision="APPROVED",
     )
-    assert detect_report(parsed)["excluded_envs"] == ["prod-eu"]
+    assert detect_report()["excluded_envs"] == ["prod-eu"]
     assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
     assert [c["environment"] for c in json.loads(parsed["envlevel1_waves"])["wave0"]] == ["dev-us"]
 
@@ -986,8 +986,8 @@ def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
     assert [(c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed)] == [
         ("stacks/app", "dev-eu")
     ]
-    assert detect_report(parsed)["review_held_envs"] == ["dev-us", "prod-eu"]
-    assert detect_report(parsed)["excluded_envs"] == ["prod-eu"]
+    assert detect_report()["review_held_envs"] == ["dev-us", "prod-eu"]
+    assert detect_report()["excluded_envs"] == ["prod-eu"]
 
 
 #: `platform` (dev-eu) runs after `dns`, tagged in dev-us only; `workers` and `box` stand alone.
@@ -1053,9 +1053,9 @@ def test_main_holds_only_the_cell_whose_upstream_is_held(tmp_path, monkeypatch):
         decision="REVIEW_REQUIRED",
     )
     assert _applied(parsed) == [("stacks/workers", "dev-eu")]
-    assert detect_report(parsed)["waiting_cells"] == _PLATFORM_WAITS
-    assert detect_report(parsed)["skipped_envs"] == []
-    assert detect_report(parsed)["review_held_envs"] == ["dev-us"]
+    assert detect_report()["waiting_cells"] == _PLATFORM_WAITS
+    assert detect_report()["skipped_envs"] == []
+    assert detect_report()["review_held_envs"] == ["dev-us"]
 
 
 def test_main_skips_the_needs_successor_of_an_env_with_a_waiting_cell(tmp_path, monkeypatch):
@@ -1079,10 +1079,10 @@ def test_main_skips_the_needs_successor_of_an_env_with_a_waiting_cell(tmp_path, 
         decision="APPROVED",
     )
     assert _applied(parsed) == []
-    assert detect_report(parsed)["skipped_envs"] == ["prod-eu"]
-    assert detect_report(parsed)["skipped_after"] == {"prod-eu": ["dev-eu"]}
-    assert detect_report(parsed)["waiting_cells"] == _PLATFORM_WAITS
-    assert detect_report(parsed)["excluded_envs"] == ["dev-us"]
+    assert detect_report()["skipped_envs"] == ["prod-eu"]
+    assert detect_report()["skipped_after"] == {"prod-eu": ["dev-eu"]}
+    assert detect_report()["waiting_cells"] == _PLATFORM_WAITS
+    assert detect_report()["excluded_envs"] == ["dev-us"]
 
 
 def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path, monkeypatch):
@@ -1160,7 +1160,7 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
         decision="APPROVED",
     )
     assert _applied(parsed) == [("stacks/workers", "dev-eu"), ("stacks/dns", "dev-us")]
-    assert detect_report(parsed)["waiting_cells"] == []
+    assert detect_report()["waiting_cells"] == []
 
 
 def test_main_never_refuses_over_a_completed_upstream(tmp_path, monkeypatch):
@@ -1180,7 +1180,7 @@ def test_main_never_refuses_over_a_completed_upstream(tmp_path, monkeypatch):
         decision="APPROVED",
     )
     assert _applied(parsed) == [("stacks/platform", "dev-eu")]
-    assert detect_report(parsed)["waiting_cells"] == []
+    assert detect_report()["waiting_cells"] == []
 
 
 def test_main_never_refuses_over_a_cell_of_an_env_settle_skips(tmp_path, monkeypatch):
@@ -1215,9 +1215,9 @@ def test_main_never_refuses_over_a_cell_of_an_env_settle_skips(tmp_path, monkeyp
         decision="APPROVED",
     )
     assert _applied(parsed) == [("stacks/workers", "dev-eu")]
-    assert detect_report(parsed)["waiting_cells"] == _PLATFORM_WAITS
-    assert detect_report(parsed)["skipped_envs"] == ["prd-eu", "stg-eu"]
-    assert detect_report(parsed)["excluded_envs"] == ["dev-us"]
+    assert detect_report()["waiting_cells"] == _PLATFORM_WAITS
+    assert detect_report()["skipped_envs"] == ["prd-eu", "stg-eu"]
+    assert detect_report()["excluded_envs"] == ["dev-us"]
 
 
 def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
@@ -1252,12 +1252,12 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
         decision="APPROVED",
     )
     assert _applied(parsed) == []
-    assert detect_report(parsed)["waiting_cells"] == [
+    assert detect_report()["waiting_cells"] == [
         {"stack": "b", "environment": "e0", "after_stack": "c", "after_environment": "ex"},
         {"stack": "r", "environment": "e1", "after_stack": "c", "after_environment": "ex"},
     ]
-    assert detect_report(parsed)["skipped_envs"] == []
-    assert detect_report(parsed)["excluded_envs"] == ["ex"]
+    assert detect_report()["skipped_envs"] == []
+    assert detect_report()["excluded_envs"] == ["ex"]
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 envlevels=[0, 0, 0, 0] "
         "excluded_targeted=['ex'] skipped_after_targeted=[] review_held=[] waiting=2 locked=0 "
@@ -1302,10 +1302,10 @@ def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
     write `held_cells=[]` -- red. Mutation: print `0` for `locked=` -- red."""
     parsed = _locked(tmp_path, monkeypatch, held(aad.cl, "stacks/dns", "dev-eu", 7))
     assert _applied(parsed) == [("stacks/workers", "dev-eu")]
-    assert detect_report(parsed)["held_cells"] == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
-    assert detect_report(parsed)["waiting_cells"] == [
+    assert detect_report()["waiting_cells"] == [
         {
             "stack": "stacks/platform",
             "environment": "dev-eu",
@@ -1313,7 +1313,7 @@ def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
             "after_environment": "dev-eu",
         }
     ]
-    assert detect_report(parsed)["skipped_envs"] == ["prod-eu"]
+    assert detect_report()["skipped_envs"] == ["prod-eu"]
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
         "excluded_targeted=[] skipped_after_targeted=['prod-eu'] review_held=[] waiting=1 "
@@ -1331,9 +1331,9 @@ def test_main_skips_the_needs_successor_of_an_env_holding_a_locked_cell(tmp_path
     none, red."""
     parsed = _locked(tmp_path, monkeypatch, held(aad.cl, "stacks/workers", "dev-eu", 7))
     assert _applied(parsed) == [("stacks/dns", "dev-eu"), ("stacks/platform", "dev-eu")]
-    assert detect_report(parsed)["waiting_cells"] == []
-    assert detect_report(parsed)["skipped_envs"] == ["prod-eu"]
-    assert detect_report(parsed)["skipped_after"] == {"prod-eu": ["dev-eu"]}
+    assert detect_report()["waiting_cells"] == []
+    assert detect_report()["skipped_envs"] == ["prod-eu"]
+    assert detect_report()["skipped_after"] == {"prod-eu": ["dev-eu"]}
 
 
 def test_a_skipped_env_names_every_transitive_predecessor_with_a_cause_of_its_own(
@@ -1356,8 +1356,8 @@ def test_a_skipped_env_names_every_transitive_predecessor_with_a_cause_of_its_ow
         locks=held(aad.cl, "stacks/app", "stg", 7),
     )
     assert _wave_envs(parsed) == []
-    assert detect_report(parsed)["skipped_envs"] == ["prod", "stg"]
-    assert detect_report(parsed)["skipped_after"] == {"prod": ["dev", "stg"], "stg": ["dev"]}
+    assert detect_report()["skipped_envs"] == ["prod", "stg"]
+    assert detect_report()["skipped_after"] == {"prod": ["dev", "stg"], "stg": ["dev"]}
 
 
 def test_main_applies_a_cell_the_applying_pull_request_holds(tmp_path, monkeypatch):
@@ -1371,7 +1371,7 @@ def test_main_applies_a_cell_the_applying_pull_request_holds(tmp_path, monkeypat
         ("stacks/platform", "dev-eu"),
         ("stacks/workers", "dev-eu"),
     ]
-    assert detect_report(parsed)["held_cells"] == []
+    assert detect_report()["held_cells"] == []
 
 
 def test_main_reads_the_locks_of_the_pending_cells_environments_only(tmp_path, monkeypatch):
@@ -1404,7 +1404,7 @@ def test_main_reads_no_locks_in_an_env_that_does_not_apply(tmp_path, monkeypatch
 
     Mutation: read the locks of every pending cell's env in `bare_main` (prod-eu is read)."""
     reads = []
-    parsed = _run_main(
+    _run_main(
         tmp_path,
         monkeypatch,
         envs=[],
@@ -1418,7 +1418,7 @@ def test_main_reads_no_locks_in_an_env_that_does_not_apply(tmp_path, monkeypatch
         **{"decision": "APPROVED", **stop},
     )
     assert reads == [("o/r", {"dev-eu"})]
-    assert detect_report(parsed)["held_cells"] == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
 
@@ -1448,13 +1448,15 @@ REPORT_FIELDS = {
 
 
 def test_the_bare_form_writes_its_nine_fields_in_one_report(tmp_path, monkeypatch):
-    """The bare form's report holds exactly the nine fields it writes (no `pusher`, no
-    `bare_envs`), and no field is also an output of its own.
+    """The bare form's report file holds exactly the nine fields it writes (no `pusher`, no
+    `bare_envs`), and neither a field nor the report is a job output: the report reaches the
+    comment as an artifact.
 
     Mutation: drop `skipped_after` from `bare_main`'s report -- red. Mutation: also write
-    a `held_cells` output beside `report` -- red."""
+    a `held_cells` output -- red. Mutation: also write `report=json.dumps(...)` as an output --
+    red."""
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], cells=1, decision="APPROVED")
-    assert set(detect_report(parsed)) == {
+    assert set(detect_report()) == {
         "excluded_envs",
         "skipped_envs",
         "skipped_after",
@@ -1465,4 +1467,4 @@ def test_the_bare_form_writes_its_nine_fields_in_one_report(tmp_path, monkeypatc
         "held_cells",
         "env_order",
     }
-    assert not REPORT_FIELDS & set(parsed)
+    assert not (REPORT_FIELDS | {"report"}) & set(parsed)

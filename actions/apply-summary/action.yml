@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
+description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts and apply-detect's `apply-report` artifact, the comment's dispositions, waiting and held cells, environment order and pusher (a missing or unreadable one renders a red line and never a green verdict), mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -22,10 +22,6 @@ inputs:
     default: ""
   envlevel3-waves:
     description: Env-level 3 waves JSON; a padded empty map when level 3 has no cell, as in every targeted apply. Empty when detect did not succeed.
-    required: false
-    default: ""
-  report:
-    description: "apply-detect's `report` output, a JSON object: the excluded, skipped, review-held, applied-exempt, no-review and left-for-a-bare-apply environments, what each skipped environment waits on, the waiting and held cells, the environment order and the pusher, with a count of the entries detect trimmed from each list to fit its size cap. The comment names each disposition with its remedy, puts one heading per environment in the order's sequence and any environment it does not name after them by name, names the pusher on the auto line and ends the footer with the trimmed counts; the review-exempt and no-review environments become notices, not comment lines. A missing field reads empty, and an empty report (detect refused or never ran) reads as every field empty. A report that is not a JSON object, a field of the wrong type or a count that is not an integer fails the render."
     required: false
     default: ""
   detect-refusal:
@@ -76,6 +72,15 @@ runs:
         path: cells
         github-token: ${{ github.token }}
         merge-multiple: false
+
+    - name: Download the apply report
+      # Reviewer-facing only (continue-on-error): the render reads a missing report as unread,
+      # renders a red line and never a green verdict.
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: apply-report
+        path: apply-report
 
     - name: Warn on apply cell summaries download failure
       if: ${{ steps.download.outcome == 'failure' }}
@@ -140,7 +145,7 @@ runs:
         SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
         SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
         SHIPMATE_RESULTS: ${{ inputs.results }}
-        SHIPMATE_REPORT: ${{ inputs.report }}
+        SHIPMATE_REPORT_PATH: apply-report/report.json
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
         SHIPMATE_AUTO: ${{ inputs.auto }}
