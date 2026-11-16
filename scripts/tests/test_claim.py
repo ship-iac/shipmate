@@ -21,7 +21,7 @@ _POST = [
 ]
 _REPLY = (
     "### shipmate apply dev-eu\n\n🔴 failed: could not claim this command for its run, so the "
-    "command was not started. Comment it again.\n\n[comment run](https://github.com/o/r/actions/"
+    "command was not started. Comment it again.\n\n[apply run](https://github.com/o/r/actions/"
     "runs/50). Comment `shipmate help` for the available commands."
 )
 
@@ -126,13 +126,26 @@ def test_a_200_is_taken_and_writes_nothing_on_the_pull_request(env):
 def test_any_other_answer_replies_and_fails(env, capsys, answer, fail, why):
     """Anything but 201 or 200 starts nothing and says to comment again, sent once: a retried POST
     that had landed reads 200 and would leave the comment claimed by a run doing nothing.
-    Mutations: return on an unknown status; drop the reply; wrap the POST in `retried`."""
+    Mutations: return on an unknown status; drop the reply; wrap the POST in `retried`; drop the
+    `{verb} run` footer label (the reply links this apply run as `comment run`)."""
     env.answer, env.fail = answer, fail
     assert env.go() == 1
     assert env.posts == [_POST]
     assert env.outputs() == ""
     assert env.replies == [("7", _REPLY)]
     assert capsys.readouterr().err == f"::error::claiming comment 123 failed: {why}\n"
+
+
+def test_an_empty_verb_labels_the_footer_as_the_comment_run(env, monkeypatch):
+    """The label goes through `reply-comment`'s one rule. Mutation: pass `f"{verb} run"` without
+    `rc.label` (the footer reads `[ run]`)."""
+    monkeypatch.setenv("SHIPMATE_REPLY_VERB", "")
+    env.answer = "HTTP/2.0 202 Accepted\n\r\n{}"
+    assert env.go() == 1
+    assert env.replies[0][1].endswith(
+        "\n\n[comment run](https://github.com/o/r/actions/runs/50). Comment `shipmate help` for "
+        "the available commands."
+    )
 
 
 def test_a_status_line_below_the_first_is_not_the_status(env):

@@ -701,7 +701,8 @@ runs:
         # Reviewer-facing degrade only: a failed mint or dispatch, or one that may have started a
         # run, warns, replies with the remedy and exits 0.
         reply() {
-          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
+          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" \
+            SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
             python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
         }
         # not_started <what> [remedy]: a skew remedy replaces the advice to comment, which would

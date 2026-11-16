@@ -503,8 +503,10 @@ _REPLY_HEAD = [
 
 @bash_only
 def test_a_failed_mint_replies_with_the_main_token_and_dispatches_nothing(tmp_path):
-    """Mutations: drop the empty-token check (the dispatch is attempted); reply with `GH_TOKEN`,
-    the empty dispatch token, in place of `REPLY_TOKEN`."""
+    """The reply is posted by the plan run, and its footer names that run. Mutations: drop the
+    empty-token check (the dispatch is attempted); reply with `GH_TOKEN`, the empty dispatch
+    token, in place of `REPLY_TOKEN`; drop `SHIPMATE_REPLY_LABEL` from `reply` (the footer reads
+    `comment run`)."""
     proc, calls, _ = _run(tmp_path, DISPATCH, token="")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == ["repos/acme/demo/issues/42/comments"]
@@ -514,6 +516,10 @@ def test_a_failed_mint_replies_with_the_main_token_and_dispatches_nothing(tmp_pa
     )
     assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "main-token"
     assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == _REPLY_HEAD
+    assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[-1] == (
+        "[plan run](https://example.invalid/acme/demo/actions/runs/999). Comment `shipmate help` "
+        "for the available commands."
+    )
 
 
 @bash_only

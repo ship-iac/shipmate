@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Reply once on the pull request with what an unlock run released, per cell, or why it
+released nothing.
+
+Runs in `unlock.yml`'s `result` job, which checks nothing out. Reads `GITHUB_REPOSITORY`,
+`GITHUB_SERVER_URL`, `GITHUB_RUN_ID`, `COMMENT_ID` (the command comment), `SHIPMATE_ENV`,
+`SHIPMATE_CELLS` (`detect`'s `cells`), `SHIPMATE_DETECT_RESULT` (`detect`'s job result),
+`SHIPMATE_DOWNLOAD_OUTCOME` (the record download step's outcome), `SHIPMATE_SENTINEL_OUTCOME`
+(the sentinel upload's outcome), `SHIPMATE_RECORDS` (the directory the records were downloaded
+into) and `GH_TOKEN` (`pull-requests: write`).
+
+Each unlock leg uploads one record, artifact `shipmate-unlock-<strategy.job-index>` holding
+`shipmate-unlock-<strategy.job-index>.json`: `{"index", "stack", "environment", "outcome",
+"lock_id"}`, `outcome` being `released`, `none` or `failed`. `download-artifact` writes a lone
+matching artifact without a directory of its name, so the action first uploads a sentinel
+artifact; whenever that upload succeeded, every record downloads into its artifact's directory.
+Only those directories are read, never a file at the download root. The results are unreadable
+when the download failed, or when the sentinel failed and no record directory arrived. A leg
+runs pull-request HCL, so a record can be forged, and the reply is display only: the cell is
+`cells[index]`, and a record counts only when its directory, file name and `index` agree, its
+`stack` and `environment` equal that cell's (a check against a mismatched record, not a forged
+one), its `outcome` is known, and it is at most `RECORD_MAX` bytes of JSON. A cell with no
+such record "did not run", or has its result unknown when the results are unreadable. A
+`lock_id` outside `lock-info`'s charset is dropped.
+
+The pull request is read from the comment's `html_url`. A comment not on a pull request, an
+unreadable comment or a failed POST warns and exits 0: the run's own result stays the unlock's
+outcome.
+"""
+
+import json
+import os
+import pathlib
+import re
+
+from _shipmate import (
+    _COMMENT_ID,
+    _load,
+    current_run_url,
+    gh_json,
+    is_pr_number,
+    one_line,
+    run,
+    run_annotated,
+)
+
+sc = _load("summary-comment")
+rc = _load("reply-comment")
+li = _load("lock-info")
+ud = _load("unlock-detect")
+
+_ARTIFACT = re.compile(r"shipmate-unlock-(0|[1-9][0-9]{0,2})")
+_OUTCOMES = ("released", "none", "failed")
+#: A record is about 200 bytes; anything far larger is not one, and is never decoded.
+RECORD_MAX = 4096
+
+BARE = (
+    "A bare `shipmate unlock` releases OpenTofu state locks only; this pull request's cell locks "
+    "stay until it merges or closes, and `--evict` releases another pull request's."
+)
+
+
+def _record(path, index, cell):
+    """(outcome, lock_id) of the record at `path` for `cell`, `cells[index]`, or None when it is
+    not a valid record of that cell."""
+    try:
+        with path.open("rb") as fh:
+            raw = fh.read(RECORD_MAX + 1)
+        rec = json.loads(raw) if len(raw) <= RECORD_MAX else None
+    except (OSError, ValueError, RecursionError):
+        return None
+    if (
+        not isinstance(rec, dict)
+        or type(rec.get("index")) is not int
+        or rec["index"] != index
+        or rec.get("stack") != cell["stack"]
+        or rec.get("environment") != cell["environment"]
+        or rec.get("outcome") not in _OUTCOMES
+    ):
+        return None
+    lock_id = rec.get("lock_id")
+    ok = isinstance(lock_id, str) and li._ID_RE.fullmatch(lock_id)
+    return rec["outcome"], lock_id if ok else ""
+
+
+def _record_dirs(root):
+    """The `shipmate-unlock-<index>` artifact directories under `root`, with their indexes."""
+    for d in root.iterdir() if root.is_dir() else ():
+        m = _ARTIFACT.fullmatch(d.name)
+        if m is not None and d.is_dir():
+            yield d, int(m[1])
+
+
+def records(root, cells):
+    """{index: (outcome, lock_id)} of the valid records under `root`, one per artifact directory
+    named `shipmate-unlock-<index>`; anything else there is ignored."""
+    out = {}
+    for d, index in _record_dirs(root):
+        if index >= len(cells):
+            continue
+        rec = _record(d / f"{d.name}.json", index, cells[index])
+        if rec is not None:
+            out[index] = rec
+    return out
+
+
+def _released(env, items):
+    return f"released {len(items)} state lock(s) in {env}: {', '.join(items)}"
+
+
+def reply(env, detect_result, raw_cells, root, download_outcome, sentinel_outcome):
+    """(outcome, text) of the reply, before the bare-unlock sentence. Records are read only once
+    `detect` succeeded and its queue parsed."""
+    env = sc._md_name(env)
+    if detect_result != "success":
+        return "failed", "the unlock run failed before probing any cell; see the run."
+    cells = _cells(raw_cells)
+    if cells is None:
+        return "failed", "could not read the unlock queue; see the run."
+    if not cells:
+        return "notice", f"released no state lock in {env}: {ud.empty_queue(env)}"
+    path = pathlib.Path(root) if root else None
+    recs = records(path, cells) if path else {}
+    lone = sentinel_outcome != "success" and not (path and any(_record_dirs(path)))
+    return _per_cell(env, cells, recs, download_outcome == "failure" or lone)
+
+
+def _per_cell(env, cells, recs, unread):
+    """(outcome, text) naming each cell by its record: released, failed, or with no record
+    `did not run`. `unread`: the results are unreadable, so some records may not have arrived; a
+    cell with no record then reads `result unknown`, and the reply says some results could not be
+    read unless every cell already reads so."""
+    named = {"released": [], "failed": [], None: []}
+    for i, c in enumerate(cells):
+        name = sc._md_name(c["stack"])
+        outcome, lock_id = recs.get(i, (None, ""))
+        if outcome == "released" and lock_id:
+            name = f"{name} ({lock_id})"
+        named.get(outcome, []).append(name)
+    released, failed, missing = named["released"], named["failed"], named[None]
+    if not failed and not missing and not unread:
+        if released:
+            return "notice", _released(env, released) + "."
+        return "notice", f"released no state lock in {env}: no probed cell held a state lock."
+    clauses = [f"could not determine the lock of {', '.join(failed)}"] if failed else []
+    if missing:
+        unrun = "result unknown for {}" if unread else "{} did not run"
+        clauses.append(unrun.format(", ".join(missing)))
+    if released:
+        clauses.append(_released(env, released))
+    if unread and len(missing) < len(cells):
+        clauses.append("some cells' results could not be read; see the run")
+    return "failed", "; ".join(clauses) + "."
+
+
+def pr_of(repo, comment):
+    """The number of the pull request comment `comment` is on, or None with a warning printed."""
+    if _COMMENT_ID.fullmatch(comment) is None:
+        print(f"::warning::comment_id {comment!r} is not a comment id; no unlock reply posted")
+        return None
+    try:
+        url = gh_json(f"repos/{repo}/issues/comments/{comment}", run).get("html_url")
+    except (SystemExit, ValueError, AttributeError) as exc:
+        print(f"::warning::could not read the command comment: {one_line(exc)}")
+        return None
+    base = re.escape(f"{os.environ['GITHUB_SERVER_URL']}/{repo}/pull/")
+    m = re.fullmatch(rf"{base}([0-9]+)#issuecomment-{comment}", url if isinstance(url, str) else "")
+    if m is None or not is_pr_number(m[1]):
+        print(f"::warning::comment {comment} is not on a pull request; no unlock reply posted")
+        return None
+    return m[1]
+
+
+def _cells(raw):
+    """`detect`'s cells, or None when they are not a JSON list of objects with a string stack and
+    environment."""
+    try:
+        cells = json.loads(raw)
+    except ValueError:
+        return None
+    if isinstance(cells, list) and all(
+        isinstance(c, dict)
+        and isinstance(c.get("stack"), str)
+        and isinstance(c.get("environment"), str)
+        for c in cells
+    ):
+        return cells
+    return None
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    env = os.environ.get("SHIPMATE_ENV", "")
+    pr = pr_of(repo, os.environ.get("COMMENT_ID", ""))
+    if pr is None:
+        return
+    outcome, text = reply(
+        env,
+        os.environ.get("SHIPMATE_DETECT_RESULT", ""),
+        os.environ.get("SHIPMATE_CELLS", ""),
+        os.environ.get("SHIPMATE_RECORDS", ""),
+        os.environ.get("SHIPMATE_DOWNLOAD_OUTCOME", ""),
+        os.environ.get("SHIPMATE_SENTINEL_OUTCOME", ""),
+    )
+    body = rc.body("unlock", env, outcome, f"{text}\n\n{BARE}", current_run_url(), "unlock run")
+    try:
+        rc.post(pr, body)
+    except SystemExit as exc:
+        print(f"::warning::could not post the unlock reply on #{pr}: {one_line(exc.code)}")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

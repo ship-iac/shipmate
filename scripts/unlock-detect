@@ -51,6 +51,17 @@ bm = ad.bm
 ag = ad.ag
 
 
+def empty_queue(env):
+    """Why an unlock of `env` probed no cell: its queue is empty. Also the unlock result reply's
+    reason (`unlock-result`)."""
+    return (
+        f"no cell in {env} has a pending apply check, so no lock was "
+        "probed; a lock on a cell whose check already completed, or on a stack "
+        "applied out of band, is released out of band; see the state-lock "
+        "section of docs/troubleshooting.md."
+    )
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     env = os.environ["SHIPMATE_ENV"]
@@ -75,12 +86,7 @@ def main():
         f"cells={len(in_env)} pending={len(pending)}"
     )
     if not pending:
-        print(
-            f"::warning::no cell in {env} has a pending apply check, so no lock was "
-            "probed; a lock on a cell whose check already completed, or on a stack "
-            "applied out of band, is released out of band; see the state-lock "
-            "section of docs/troubleshooting.md."
-        )
+        print(f"::warning::{empty_queue(env)}")
     write_outputs(cells=json.dumps(pending))
 
 

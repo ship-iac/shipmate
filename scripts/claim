@@ -134,12 +134,14 @@ def refuse_unless_app(comment, pr):
 
 def not_started(comment, pr, why):
     """Reply that the command was not started, then exit 1."""
+    verb = os.environ.get("SHIPMATE_REPLY_VERB", "")
     body = rc.body(
-        os.environ.get("SHIPMATE_REPLY_VERB", ""),
+        verb,
         os.environ.get("SHIPMATE_REPLY_ENV", ""),
         "failed",
         NOT_STARTED,
         current_run_url(),
+        rc.label(f"{verb} run"),
     )
     try:
         rc.post(pr, body)

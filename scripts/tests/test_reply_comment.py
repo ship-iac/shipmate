@@ -56,6 +56,21 @@ def test_a_notice_carries_the_white_circle_and_no_hint():
     )
 
 
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [
+        ("", "comment run"),
+        (" run", "comment run"),
+        ("  ", "comment run"),
+        ("apply run", "apply run"),
+    ],
+)
+def test_a_label_that_names_no_run_is_the_comment_run(value, want):
+    """A dispatched run's caller builds `<verb> run`; an empty verb leaves ` run`. Mutations: test
+    `value` for empty only (` run` is a label); drop `.strip()`."""
+    assert rc.label(value) == want
+
+
 def test_an_empty_verb_drops_the_env_from_the_header():
     """Mutation: keep the env in `header` when the verb is empty."""
     assert rc.body("", "dev-eu", "refused", "x", _RUN_URL) == (

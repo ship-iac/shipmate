@@ -161,9 +161,9 @@ DOWNSTREAM_NEEDS = {
             "envlevel3",
         ],
     },
-    # No `summary` job at all: an unlock posts no comment and refreshes no gate, which is why
-    # nothing here mints the App key.
-    "unlock.yml": {"unlock": ["guard", "detect"]},
+    # No `summary` job: an unlock refreshes no gate and `result` replies with the job token, so
+    # nothing here mints the App key. `result` needs `guard` so a rejected dispatch skips it.
+    "unlock.yml": {"unlock": ["guard", "detect"], "result": ["guard", "detect", "unlock"]},
 }
 SUMMARY_IF = "${{ always() && needs.review.result == 'success' }}"
 #: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
