@@ -754,6 +754,12 @@ def validate_head_sha(value, source="SHIPMATE_HEAD_SHA", *, annotate=True):
         raise SystemExit(f"::error::{message}" if annotate else message)
 
 
+def exit_text(exc):
+    """The text a failed call's `SystemExit` `exc` carries, `::error::` stripped, or `gh failed`
+    when its code is not text (None or an exit status)."""
+    return exc.code.removeprefix("::error::") if isinstance(exc.code, str) else "gh failed"
+
+
 def one_line(text):
     """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
     command in the log."""

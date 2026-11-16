@@ -2235,8 +2235,9 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    listing that does not show this run yet dispatches, warning `autoplan run
    <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
-   head's autoplan runs not listed or malformed) it warns `could not decide whether to dispatch an auto apply; no
-   auto apply started` and posts no reply. Separately, when an autoplan of a
+   head's autoplan runs not listed or malformed) it warns `could not decide
+   whether to dispatch an auto apply; no auto apply started` and posts no
+   reply. Separately, when an autoplan of a
    pull request that is not a draft was not started by a push (marking it
    ready, reopening it or another non-push event started it, or its event could
    not be read) and a changed cell of an `auto` environment is not locked by
@@ -2252,12 +2253,12 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    <state>; nothing dispatched`, `pull request #<n> moved to <sha>, a draft;
    nothing dispatched`, `pull request #<n> moved from <sha> to <sha> while this
    run waited; nothing dispatched`, `pull request #<n> moved to <sha>, which
-   has an autoplan run <id> in progress; nothing dispatched`, `pull request #<n> moved to <sha>;
-   its shipmate plan run <id> is <status> and plans the live head; nothing
-   dispatched`, or `pull request #<n> moved to <sha>, whose autoplan run <id>
-   succeeded; nothing dispatched`). A
-   dispatched plan is on demand, so no auto apply follows it: comment `shipmate
-   apply` once it finishes.
+   has an autoplan run <id> in progress; nothing dispatched`, `pull request
+   #<n> moved to <sha>; its shipmate plan run <id> is <status> and plans the
+   live head; nothing dispatched`, or `pull request #<n> moved to <sha>, whose
+   autoplan run <id> succeeded; nothing dispatched`). A dispatched plan is on
+   demand, so no auto apply follows it: comment `shipmate apply` once it
+   finishes.
 2. The pull request's comments: the `auto apply not started` or `auto apply may have started` reply (below), or
    the `auto` run's apply result comment. A `detect` refusal sits in that
    comment's error fence; the entries below quote each one.

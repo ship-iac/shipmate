@@ -332,16 +332,19 @@ def planned(jobs):
     """Whether a plan run whose latest attempt lists `jobs` (`_shipmate.run_jobs`' complete
     answer) planned: exactly one job is named `CALLER_PREFIX + "detect"`, `completed` with
     conclusion `success`. A draft-skipped run lists that job `skipped`, a `closed`-event run and a
-    run cancelled before `detect` list none, and a zero-cell plan lists it `success`. Raises
-    `ValueError` when it cannot tell: two such jobs, or one whose `status` is not a str, or
-    `completed` with a `conclusion` that is not a str."""
+    run cancelled before `detect` list none, and a zero-cell plan lists it `success`. Read only
+    for a run that has ended. Raises `ValueError` when it cannot tell: two such jobs, or one
+    whose `status` is not a str or not `completed`, or `completed` with a `conclusion` that is
+    not a str."""
     detects = [j for j in jobs if j.get("name") == CALLER_PREFIX + "detect"]
     if len(detects) > 1:
         raise ValueError(f"{len(detects)} jobs are named {CALLER_PREFIX}detect")
     if not detects:
         return False
     status, conclusion = status_and_conclusion(detects[0], f"job {CALLER_PREFIX}detect")
-    return (status, conclusion) == ("completed", "success")
+    if status != "completed":
+        raise ValueError(f"job {CALLER_PREFIX}detect is {status!r} in a run that has ended")
+    return conclusion == "success"
 
 
 def status_and_conclusion(listed, what):

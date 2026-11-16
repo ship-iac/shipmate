@@ -2601,9 +2601,9 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   no auto apply started; comment shipmate apply to apply". A listing that holds
   no run as new as this one lags it and dispatches with the warning "autoplan
   run <id> of <head> is not listed yet; dispatching the auto apply, whose own
-  provenance check refuses if this run is not the newest"; a failed or malformed listing dispatches nothing,
-  with a warning. An autoplan created after this read still makes the `auto`
-  run refuse.
+  provenance check refuses if this run is not the newest"; a failed or
+  malformed listing dispatches nothing, with a warning. An autoplan created
+  after this read still makes the `auto` run refuse.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
 The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
@@ -3818,7 +3818,10 @@ in this order, and stops at the first run that blocks:
 4. When nothing blocks, the push that moved the head can still be seconds from
    listing its autoplan, so the autoplan runs are listed again every 5 s for
    15 s. Each listing is judged whole as in 1 and 3: a re-run keeps its run id
-   and can turn queued. A run attempt's jobs are read once.
+   and can turn queued. A run attempt's jobs are read once, and kept only when
+   every job carries the listed attempt; jobs of another attempt (a re-run
+   between the two reads) are read again on the next listing, and on the last
+   one the run cannot be judged.
 5. After the wait the pull request is read again: a head that moved again, a
    closed pull request or a draft dispatches nothing. Then the live plan runs
    are read once more.
@@ -3830,12 +3833,11 @@ it logs "pull request #<n> is <state>; nothing dispatched", "pull request #<n>
 moved to <sha>, a draft; nothing dispatched", "pull request #<n> moved from
 <sha> to <sha> while this run waited; nothing dispatched", "pull request #<n>
 moved to <sha>, which has an autoplan run <id> in progress; nothing
-dispatched", "pull
-request #<n> moved to <sha>; its shipmate plan run <id> is <status> and plans
-the live head; nothing dispatched" or "pull request #<n> moved to <sha>, whose
-autoplan run <id> succeeded; nothing dispatched", each naming the lowest such
-id. The dispatched plan is on demand, so no auto apply follows it
-(§`apply_mode: auto`). It joins the consumer's `plan-<pr>` concurrency group,
+dispatched", "pull request #<n> moved to <sha>; its shipmate plan run <id> is
+<status> and plans the live head; nothing dispatched" or "pull request #<n>
+moved to <sha>, whose autoplan run <id> succeeded; nothing dispatched", each
+naming the lowest such id. The dispatched plan is on demand, so no auto apply
+follows it (§`apply_mode: auto`). It joins the consumer's `plan-<pr>` concurrency group,
 which cancels nothing in progress for a `workflow_dispatch`, so it queues
 behind this run; a later arrival replaces a waiting run, and the plan that runs
 resolves the live head from the pull request. A run with a matching title

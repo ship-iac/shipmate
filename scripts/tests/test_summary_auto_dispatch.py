@@ -595,3 +595,19 @@ def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab
             "the Actions tab before commenting `shipmate apply`"
         ),
     ]
+
+
+@pytest.mark.parametrize("code", [None, 1], ids=["none", "int"])
+def test_a_listing_exit_without_text_names_a_fixed_cause(monkeypatch, code):
+    """A `SystemExit` with no text names `gh failed`, not `None` or `1`. Mutation: print
+    `str(exc.code)`."""
+
+    def fail(*_, **__):
+        raise SystemExit(code)
+
+    monkeypatch.setattr(ad.ag, "newest_autoplan", fail)
+    with pytest.raises(SystemExit) as exc:
+        ad.newer_autoplan("acme/demo", HEAD_SHA, "999")
+    assert exc.value.code == (
+        f"::error::the autoplan runs of {HEAD_SHA} could not be read (gh failed)"
+    )

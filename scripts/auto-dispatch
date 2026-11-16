@@ -36,6 +36,7 @@ from _shipmate import (
     _run,
     cell_summaries,
     event_action,
+    exit_text,
     is_run_id,
     json_or_none,
     one_line,
@@ -107,7 +108,7 @@ def newer_autoplan(repo, head, run_id):
     try:
         newest = ag.newest_autoplan(repo, head, run=_run)
     except (SystemExit, ValueError) as exc:
-        cause = str(exc.code).removeprefix("::error::") if isinstance(exc, SystemExit) else exc
+        cause = exit_text(exc) if isinstance(exc, SystemExit) else exc
         raise SystemExit(
             f"::error::the autoplan runs of {head} could not be read ({one_line(cause)})"
         ) from None

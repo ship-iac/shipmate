@@ -990,11 +990,12 @@ def test_replan_a_succeeded_autoplan_that_planned_blocks(in_process, monkeypatch
     )
 
 
-def _with_detect(drop=(), **detect):
+def _with_detect(drop=(), attempt=1, **detect):
     """The zero-cell capture with its `plan / detect` job's fields replaced by `detect` and the
-    keys in `drop` removed."""
+    keys in `drop` removed, every job at run attempt `attempt`."""
     body = json.loads(_captured_jobs(_ZERO_CELL))
     for job in body["jobs"]:
+        job["run_attempt"] = attempt
         if job["name"] == "plan / detect":
             job.update(detect)
             for key in drop:
@@ -1069,6 +1070,13 @@ _JOBS_CAUSE = "autoplan run 9: job plan / detect has status 'completed' and conc
             _JOBS_CAUSE + "0",
             [*_DISPATCH_READS, _jobs_read(9)],
             id="detect-int-conclusion",
+        ),
+        pytest.param(
+            _row(9, "completed", "success"),
+            {9: _with_detect(status="in_progress", conclusion=None)},
+            "autoplan run 9: job plan / detect is 'in_progress' in a run that has ended",
+            [*_DISPATCH_READS, _jobs_read(9)],
+            id="detect-unfinished",
         ),
         pytest.param(
             _row(9, "completed", "success"),
@@ -1275,7 +1283,8 @@ def test_replan_reads_a_run_attempt_s_jobs_once(in_process, monkeypatch, capsys)
     -- attempt 1's jobs are read on every re-list."""
     first = _row(9, "completed", "success")
     runs = [first, first, _row(9, "completed", "success", attempt=2)]
-    calls = _live_head(monkeypatch, runs=runs, jobs={9: [_DRAFT_SKIPPED, _ZERO_CELL]})
+    jobs = {9: [_DRAFT_SKIPPED, _with_detect(attempt=2)]}
+    calls = _live_head(monkeypatch, runs=runs, jobs=jobs)
     assert _cli("replan", SHA, "7") == 0
     assert capsys.readouterr() == (
         "",
@@ -1293,6 +1302,56 @@ def test_replan_reads_a_run_attempt_s_jobs_once(in_process, monkeypatch, capsys)
         ],
         [5, 5],
     )
+
+
+def test_replan_jobs_of_another_attempt_are_never_kept(in_process, monkeypatch, capsys):
+    """Jobs listed at another attempt than the run (a re-run started between the two reads) say
+    nothing about the listed attempt: they are read again on each re-list, and the last re-list
+    exits 1. Mutations: keep the evidence whatever the jobs' attempt -- one jobs read, and the
+    head prints; never refuse on the last re-list -- the head prints."""
+    calls = _live_head(
+        monkeypatch, runs=_row(9, "completed", "success", attempt=2), jobs={9: _DRAFT_SKIPPED}
+    )
+    assert _cli("replan", SHA, "7") == (
+        "autoplan run 9 is listed at run attempt 2 and its jobs at [1]"
+    )
+    assert capsys.readouterr().out == ""
+    assert (calls, in_process) == (
+        [
+            _PULL_READ,
+            _RUNS_READ,
+            *_DISPATCH_READS,
+            _jobs_read(9),
+            *[_RUNS_READ, _jobs_read(9)] * 3,
+        ],
+        [5, 5, 5],
+    )
+
+
+def test_replan_jobs_of_another_attempt_are_read_again(in_process, monkeypatch, capsys):
+    """Attempt 2 listed, its jobs first read at attempt 1, then at 2, where it planned.
+    Mutation: keep the first read's evidence -- the head prints."""
+    calls = _live_head(
+        monkeypatch,
+        runs=_row(9, "completed", "success", attempt=2),
+        jobs={9: [_DRAFT_SKIPPED, _with_detect(attempt=2)]},
+    )
+    assert _cli("replan", SHA, "7") == 0
+    assert capsys.readouterr() == (
+        "",
+        f"pull request #7 moved to {_LIVE}, whose autoplan run 9 succeeded; nothing dispatched\n",
+    )
+    assert calls[-2:] == [_RUNS_READ, _jobs_read(9)]
+
+
+@pytest.mark.parametrize("code", [None, 1], ids=["none", "int"])
+def test_replan_a_listing_exit_without_text_names_a_fixed_cause(
+    in_process, monkeypatch, capsys, code
+):
+    """A `SystemExit` with no text prints `gh failed`, not `None` or `1`. Mutation: print
+    `str(exc.code)`."""
+    _live_head(monkeypatch, runs=[SystemExit(code)])
+    assert _cli("replan", SHA, "7") == "gh failed"
 
 
 _OTHER = "c" * 40
@@ -1326,7 +1385,7 @@ def test_replan_re_reads_the_pull_request_after_the_wait(
     calls = _live_head(monkeypatch, pull=[_pull(), after])
     assert _cli("replan", SHA, "7") == 0
     assert capsys.readouterr() == ("", log)
-    assert calls == _relisted([_RUNS_READ, *_DISPATCH_READS])[:-5]
+    assert calls == _relisted([_RUNS_READ, *_DISPATCH_READS])[: -len(_DISPATCH_READS)]
 
 
 def test_replan_the_re_list_is_bounded(in_process, monkeypatch, capsys):
