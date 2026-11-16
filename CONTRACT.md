@@ -2518,7 +2518,8 @@ and unless the pull request is open at the applied head. Under `apply_mode: auto
 it also refuses unless the run attempt is `1`, the pull request is not a draft, the plan run detect bound is
 still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action (`opened` or
-`synchronize`), the plan run's pusher still passes detect's pusher check (§`apply_mode: auto`, same function and
+`synchronize`), no newer `shipmate plan` run of the pull request is live, the plan run's pusher
+still passes detect's pusher check (§`apply_mode: auto`, same function and
 wording), and the base branch's tip, read from its ref, is still the one detect read,
 whatever the stack. Mergeability is not re-read: a base move refuses already. A read that fails refuses with
 `` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
@@ -2717,8 +2718,8 @@ left for a bare apply (`bare_envs`) and named in the result comment. Review
 holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
 
 `detect` refuses the run before any wave in these cases. Each refusal reading
-`auto apply refused:`, except the moved head's, ends ``Comment `shipmate apply`
-on the pull request to apply it.``
+`auto apply refused:`, except the moved head's and a counted newer plan's, ends
+``Comment `shipmate apply` on the pull request to apply it.``
 
 - **Actor.** The run's `github.actor` and `github.triggering_actor` must each
   equal `<slug>[bot]`, compared whole, where `<slug>` is the shipmate App's
@@ -2749,7 +2750,7 @@ on the pull request to apply it.``
   `actions/workflows/shipmate.yml/runs?event=pull_request_target&head_sha=<head>`,
   every page read; that listed run's `event` must also be `pull_request_target`
   and its `head_sha` the head. A `shipmate plan` run is a `workflow_dispatch`,
-  never listed, so a cell whose newest plan record names one refuses the run as
+  never in this listing, so a cell whose newest plan record names one refuses the run as
   ``plan run <n> is not the newest autoplan of the head (run <m> is)`` or, with
   no autoplan of the head listed, ``plan run <n> is not listed, and no autoplan
   run of the head is listed``; `shipmate
@@ -2763,6 +2764,34 @@ on the pull request to apply it.``
   ``auto apply refused: the plan records of <cells> name no push event action
   (opened or synchronize), so no push started that plan.`` The wave pre-apply
   check repeats this on the cell's newest record.
+- **Newer plan.** Once provenance passes, `detect` lists
+  `actions/workflows/shipmate.yml/runs?event=workflow_dispatch&created=>=<created_at>`,
+  `>=` URL-encoded, from the plan run's `created_at`, every page and status, and
+  counts each run of this pull request's `shipmate plan`, by any actor, whose id
+  is greater than the plan run's. Ids decide, not times: two runs can share a
+  second. A run's title must parse as `shipmate · plan pr=<n> ref= comment=<comment>`
+  or, failing the parse, start `shipmate · plan pr=<n> ` (a hand dispatch that
+  names a ref). Any actor counts because `plan.yml` checks no dispatcher: a
+  human's `verb: plan` dispatch plans and publishes records as the App's does,
+  so applying the older plan under it would apply what the reviewer no longer
+  sees. A live run refuses:
+  ``auto apply refused: shipmate plan run <m> of this pull request is <status>
+  and newer than plan run <n>. Wait for it to finish, review its plan, then
+  comment `shipmate apply`.`` `<status>` is the listed status with `_` as a
+  space. A completed run refuses when its latest attempt lists one `plan /
+  detect` job concluded `success`, whatever the run's conclusion, since a
+  failed plan run may have planned and published no record:
+  ``auto apply refused: shipmate plan run <m> of this pull request planned
+  after plan run <n>. Review its plan, then comment `shipmate apply`.`` A
+  completed run that never reached `detect`, skipped it, or listed no job does
+  not count. A listing page or jobs read that fails or is malformed, a
+  `created_at` that is not a whole-second UTC time (GitHub answers a malformed
+  `created` filter with an empty listing), and jobs of another run attempt
+  refuse with ``auto apply refused: the shipmate plan runs of this pull request
+  could not all be listed, so a newer one may exist. Comment `shipmate apply` on
+  the pull request to apply it.`` Known limit: the read is a point in time; a
+  run dispatched in the seconds before it can be missing from the listing. Each
+  wave cell repeats the read for live runs only (§Wave re-check).
 - **Pusher.** The listed run's `actor`, the pusher, must equal its
   `triggering_actor` and must have write access. A re-run of the autoplan keeps
   `actor` and names the re-runner as `triggering_actor`, so it refuses:
@@ -2835,9 +2864,18 @@ cell, and `shipmate apply` otherwise (§Apply result comment).
 refuses unless the run attempt is `1`, the plan run `detect` bound is still the
 head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action
-(`opened` or `synchronize`), the pull request is still not a draft, the pusher
-still passes the pusher check above, and the base tip, read from the branch
-ref, is still the one `detect` read. The base comparison is whole-branch,
+(`opened` or `synchronize`), the pull request is still not a draft, no newer
+`shipmate plan` run of the pull request is live (the Newer plan check above,
+without the jobs read), the pusher still passes the pusher check above, and the
+base tip, read from the branch ref, is still the one `detect` read. A live newer
+plan refuses with ``apply aborted for `<env>` / `<stack>`: shipmate plan run <m>
+of this pull request is <status> and newer than plan run <n>, which this auto
+apply applies; wait for it to finish, review its plan, then comment `shipmate
+apply` ``, an incomplete listing with ``could not confirm no newer shipmate plan
+run of pull request #<pr> (the listing is incomplete)``. A cell reads no jobs,
+which would cost a listing and a jobs read per cell: a newer plan that completed
+before `detect` is `detect`'s to refuse, and one that starts and finishes
+between two cells' checks is not seen. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so a base that moves while a wave waits on an
 environment approval refuses that wave. Update the branch from the base and
@@ -4506,9 +4544,10 @@ evidence withheld every check. The newest-run test then sees the older complete
 run, and a bare or targeted apply applies that run's cells before the merge;
 the gate holds and names the newer run, but no apply reads the gate. An `auto` apply
 is not exposed to a newer autoplan: it reads the head's newest autoplan from the
-Actions runs listing, not from the records (§`apply_mode: auto`). A newer
-`shipmate plan` run of the head that published no apply check is not an autoplan
-and is not listed, so the older autoplan's cells still apply.
+Actions runs listing, not from the records (§`apply_mode: auto`). Nor to a newer
+`shipmate plan` run of the pull request that published no apply check: `detect`
+refuses while such a run is live and once its `plan / detect` job succeeded
+(§`apply_mode: auto`, Newer plan).
 
 ## Consumer variables and secrets
 
