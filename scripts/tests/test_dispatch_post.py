@@ -577,6 +577,16 @@ def test_a_comment_less_plan_stops_on_its_own_titled_run(calls, monkeypatch, cap
     assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1])
 
 
+def test_an_older_same_titled_plan_does_not_stop_a_comment_less_plan(calls, monkeypatch, capsys):
+    """An earlier comment-less plan of the same pull request, dispatched by the App before
+    `t0`, carries this dispatch's title but is not its run, so the transient failure is retried.
+    Mutation: drop the `at >= t0` bound in `command_run_listed` -> the retry stops."""
+    sent = comment_less_plan(monkeypatch, calls)
+    older = run_row(PLAN_TITLE, created_at="2026-11-07T11:59:54Z")
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [older] * 9)
+    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
+
+
 @pytest.mark.parametrize(
     "listed",
     [

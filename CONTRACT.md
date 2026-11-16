@@ -1602,9 +1602,9 @@ dispatch:
 
 - A comment's dispatch and a comment-less `plan` read every page of 100 runs,
   newest first, back to `t0`, and read again each second until 10 seconds
-  after the failed attempt. Each stops at a `workflow_dispatch` run whose
-  `actor` is the App's `<slug>[bot]` and whose title (§Check names) is this
-  dispatch's: this verb and comment id (empty for a comment-less plan), with
+  after the failed attempt. Each stops at a `workflow_dispatch` run created at
+  or after `t0` whose `actor` is the App's `<slug>[bot]` and whose title
+  (§Check names) is this dispatch's: this verb and comment id (empty for a comment-less plan), with
   this pull request, or for `unlock` no pull request and this ref. Otherwise it
   retries: the claim (above) leaves a second `plan` or `apply` run doing
   nothing, a second comment-less plan plans the head again, and a second
@@ -4101,7 +4101,19 @@ anyone commenting.
 A pull request with a live App `apply` or `auto` run is skipped and named in a
 notice: ``pull request #<n> was not re-planned: its <verb> run <id> is live,
 and a plan now would republish the apply checks it applies from``. Every
-pull request is judged from one live run listing. An incomplete listing, an App
+pull request is judged from one live run listing, which queries each run status
+in lifecycle order, so a run that moves forward between two queries is still
+listed. The skip covers only runs live when listed: an apply that starts, or
+changes status in a way the order misses, after the listing can still get a plan
+dispatched into it. That apply never completes the new plan's checks (§Apply
+check lifecycle), so they stay pending, the gate stays pending, and the pull
+request applies again. A pull request whose new head's autoplan has not yet
+published its apply checks when the merge lands has none on that head, so it is
+not re-planned; its apply still compares the base at apply time: a bare or
+targeted `detect` runs the change detection over the selected cells against the
+current base tip and refuses a behind cell, an `auto` `detect` holds one, and
+each wave cell refuses when the base tip moved since `detect` (§`apply_mode:
+auto`, Wave re-check). An incomplete listing, an App
 run whose title does not parse, an empty App id or slug, an empty or malformed
 `push`, a failed pull request listing and a failed token mint each warn and
 dispatch nothing; a pull request whose checks cannot be read is skipped with a

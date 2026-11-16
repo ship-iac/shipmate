@@ -2,6 +2,9 @@ name: shipmate base-push-plan
 description: >-
   Dispatch shipmate plan for each open pull request a push to the default branch may have put
   behind (scripts/base-push-plan selects them), so its plan shows the cells the push changed.
+  A pull request with an App apply or auto run live when the runs are listed is skipped; an
+  apply that starts or moves status after that listing can still get a plan, and it then leaves
+  the new apply check pending, so the gate stays pending until the pull request applies again.
   Display-only: every failure warns and the action succeeds. Mints its own App token with actions
   write, pull-requests read and checks read.
 inputs:
@@ -49,8 +52,11 @@ runs:
           echo "::warning::the re-plan token mint failed, so no open pull request was re-planned after this push"
           exit 0
         fi
+        # The runner trims leading whitespace before it parses a command, so an indented
+        # `::error::` is one too.
+        downgrade() { sed -E 's/^[[:space:]]*::error::/::warning::/' "$1" >&2; }
         if ! prs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/base-push-plan" 2>select.err); then
-          sed 's/^::error::/::warning::/' select.err >&2
+          downgrade select.err
           echo "::warning::could not select the open pull requests to re-plan, so none was re-planned after this push"
           exit 0
         fi
@@ -58,7 +64,8 @@ runs:
         for pr in $prs; do
           rc=0
           # Exit codes are documented in scripts/dispatch-body.
-          PR_NUMBER=$pr python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" >/dev/null || rc=$?
+          PR_NUMBER=$pr python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" >/dev/null 2>dispatch.err || rc=$?
+          downgrade dispatch.err
           if [ "$rc" -eq 0 ]; then
             echo "::notice title=re-plan::dispatched shipmate plan for pull request #$pr: this push may have changed a stack it plans"
           elif [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then

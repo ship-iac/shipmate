@@ -2342,7 +2342,7 @@ why a pull request got no plan:
 | --- | --- |
 | `pull request #<n> was not re-planned: its <verb> run <id> is live, and a plan now would republish the apply checks it applies from` | That pull request was applying. A plan now would replace the checks the run completes. |
 | `the live shipmate.yml run listing is incomplete, so no open pull request was re-planned after this push` | A page of the live run listing failed, or an App run's title does not parse, so a live apply could not be ruled out. |
-| `deploy detect reported no changed stacks, so no open pull request was re-planned after this push` | `detect` failed or refused before it read the changed stacks, or its `git diff` failed (`the push's changed paths could not be read` in its log). |
+| `deploy detect did not report the changed stacks, so no open pull request was re-planned after this push` | `detect` failed or refused before it read the changed stacks, or its `git diff` failed (`the push's changed paths could not be read` in its log). |
 | `the App id or slug is empty, so no open pull request was re-planned after this push` | `SHIPMATE_APP_ID` is unset, or the token mint returned no slug. |
 | `the re-plan token mint failed, so no open pull request was re-planned after this push` | The App mint (`actions: write`, `pull-requests: read`, `checks: read`) failed; see the mint step's error. |
 | `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
@@ -2352,7 +2352,15 @@ why a pull request got no plan:
 
 A draft, a pull request with no App apply check, and one whose checks name no
 stack the push changed (when the push changed nothing outside every stack) are
-not selected, and nothing is logged for them.
+not selected, and nothing is logged for them. A pull request whose new head's
+autoplan was still running when the merge landed has no App apply check on that
+head yet, so it is not selected either; its apply compares the base at apply
+time and refuses or holds a behind cell.
+
+The live-run skip covers runs live when listed. An apply that starts after the
+listing can still get a plan dispatched into it; that apply leaves the new
+plan's apply checks pending, so the gate stays pending until the pull request
+applies again.
 
 Comment `shipmate plan` on the pull request: its plan marks each cell the base
 changed behind. Until a plan runs, a cell the pull request already applied is

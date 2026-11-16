@@ -185,9 +185,12 @@ jobs:
           release-pending: ${{ needs.detect.outputs.refused_locked == 'true' }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      # Display-only: runs after a failed gate write or lock release, and never fails the job.
+      # Display-only: runs after a failed gate write or lock release, and never fails the job. The
+      # timeout keeps it inside `ubuntu-slim`'s 15-minute job cap behind the two steps above.
       - name: Re-plan the open pull requests this push may put behind
         if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 5
         uses: $/actions/base-push-plan
         with:
           push: ${{ needs.detect.outputs.push }}

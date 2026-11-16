@@ -48,6 +48,8 @@ EXPECTED_SUMMARY = {
         {
             "name": "Re-plan the open pull requests this push may put behind",
             "if": "${{ !cancelled() }}",
+            "continue-on-error": True,
+            "timeout-minutes": 5,
             "uses": "$/actions/base-push-plan",
             "with": {
                 "push": "${{ needs.detect.outputs.push }}",
@@ -64,5 +66,5 @@ def test_the_deploy_gate_step_hands_gate_refresh_every_result():
     `head_sha` -> `head-sha`; drop `queue: max`. The re-plan is display-only, so it is the last
     step and runs after a failed gate write or lock release: its `if:` to `always()`; move it
     before the gate write; add `actions: write` to the job's `permissions` (the App mint
-    carries it)."""
+    carries it); drop its `continue-on-error`; raise its `timeout-minutes` to 15."""
     assert workflow_jobs("deploy.yml")["summary"] == EXPECTED_SUMMARY

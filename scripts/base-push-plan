@@ -147,7 +147,7 @@ def main():
     app_id, slug = os.environ.get("SHIPMATE_APP_ID", ""), os.environ.get("SHIPMATE_APP_SLUG", "")
     push = read_push(os.environ.get("SHIPMATE_PUSH", ""))
     if push is None:
-        _warn(f"deploy detect reported no changed stacks, {_NONE}")
+        _warn(f"deploy detect did not report the changed stacks, {_NONE}")
         return
     if not (app_id and slug):
         _warn(f"the App id or slug is empty, {_NONE}")

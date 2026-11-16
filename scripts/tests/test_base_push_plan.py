@@ -30,7 +30,7 @@ PULLS = [
     "--jq",
     ".[] | {number, draft, sha: .head.sha} | tojson",
 ]
-STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 LIVE_LISTS = [
     [
         "gh",
@@ -108,7 +108,8 @@ def _select(
 
 
 def _gh(reads, pulls, checks, live, failing):
-    """`_select`'s `_shipmate._run` double: it appends each argv to `reads` and answers it."""
+    """`_select`'s `_shipmate._run` double: it appends each argv to `reads` and answers it. `live`
+    answers the first live status listing, or is called with each listed status."""
 
     def run(args):
         reads.append(args)
@@ -121,10 +122,10 @@ def _gh(reads, pulls, checks, live, failing):
         for n, rows in checks.items():
             if args == _checks_read(n):
                 return "".join(json.dumps(r) + "\n" for r in rows)
-        if args in LIVE_LISTS[:1]:
-            return json.dumps({"workflow_runs": list(live)})
         if args in LIVE_LISTS:
-            return json.dumps({"workflow_runs": []})
+            status = STATUSES[LIVE_LISTS.index(args)]
+            rows = live(status) if callable(live) else list(live) if status == STATUSES[0] else []
+            return json.dumps({"workflow_runs": rows})
         raise AssertionError(args)
 
     return run
@@ -207,6 +208,31 @@ def test_a_live_app_apply_run_skips_its_pull_request_and_names_it(monkeypatch, c
     assert reads == [PULLS, *map(_checks_read, (1, 2, 3)), *LIVE_LISTS]
 
 
+def test_an_apply_run_moving_forward_between_two_status_queries_is_still_listed(
+    monkeypatch, capsys
+):
+    """#1's apply run starts right after the `in_progress` query: pending before it, in progress
+    after it. Lifecycle order queries `pending` before `in_progress`, so the `pending` query
+    lists it. Mutation: restore `LIVE_RUN_STATUSES` to queued, in_progress, waiting, pending,
+    requested -- `in_progress` is queried while the run is pending and `pending` after it
+    started, so neither lists it and #1 prints."""
+    queried = []
+
+    def live(status):
+        now = "in_progress" if "in_progress" in queried else "pending"
+        queried.append(status)
+        return [{**_apply_run(71, 1), "status": now}] if status == now else []
+
+    printed, _, _ = _select(
+        monkeypatch,
+        capsys,
+        pulls=[_pull(1)],
+        checks={1: [_apply_check("stacks/app", cells=1)]},
+        live=live,
+    )
+    assert printed == []
+
+
 @pytest.mark.parametrize(
     ("live", "failing"),
     [
@@ -270,8 +296,8 @@ def test_an_empty_or_malformed_push_selects_nothing_and_reads_nothing(monkeypatc
     )
     assert (printed, reads) == ([], [])
     assert err == (
-        "::warning::deploy detect reported no changed stacks, so no open pull request was "
-        "re-planned after this push\n"
+        "::warning::deploy detect did not report the changed stacks, so no open pull request "
+        "was re-planned after this push\n"
     )
 
 
@@ -318,7 +344,8 @@ EXPRESSIONS = {
     "${{ github.event.repository.default_branch }}": "main",
 }
 #: `python3`: `base-push-plan` prints `$FAKE_PRS` and `$FAKE_SELECT_ERR` and exits
-#: `$FAKE_SELECT_RC`; `dispatch-body` records its env and exits `$FAKE_RC_<pr>` (0 by default).
+#: `$FAKE_SELECT_RC`; `dispatch-body` records its env, prints `$FAKE_DISPATCH_ERR` to stderr and
+#: exits `$FAKE_RC_<pr>` (0 by default).
 _PYTHON3 = """\
 if [[ "$1" == */base-push-plan ]]; then
   printf '%s' "${FAKE_PRS:-}"
@@ -326,6 +353,7 @@ if [[ "$1" == */base-push-plan ]]; then
   exit "${FAKE_SELECT_RC:-0}"
 elif [[ "$1" == */dispatch-body ]]; then
   echo "$PR_NUMBER $VERB $DISPATCH_REF $SHIPMATE_APP_SLUG $GH_TOKEN ${COMMENT_ID-unset}" >> "$CALLS"
+  printf '%b' "${FAKE_DISPATCH_ERR:-}" >&2
   rc_var="FAKE_RC_$PR_NUMBER"
   exit "${!rc_var:-0}"
 fi
@@ -383,6 +411,21 @@ def test_a_failed_dispatch_warns_and_the_next_pull_request_is_still_dispatched(t
         "may have started; check the Actions tab"
     )
     assert out.splitlines() == [warning, _notice(2)]
+
+
+@bash_only
+def test_a_failed_dispatchs_errors_are_downgraded_to_warnings(tmp_path):
+    """The re-plan never fails the deploy, so `dispatch-body`'s `::error::` lines reach the log
+    as warnings, an indented one too: the runner trims leading whitespace before it parses a
+    command. Mutations: `cat dispatch.err >&2` in place of the downgrade -- both lines stay
+    errors; drop `[[:space:]]*` from the pattern -- the indented one stays an error."""
+    code, _, err, _ = _step(
+        tmp_path,
+        FAKE_PRS="1\n",
+        FAKE_RC_1="1",
+        FAKE_DISPATCH_ERR="::error::gh failed\\n  ::error::indented\\n",
+    )
+    assert (code, err) == (0, "::warning::gh failed\n::warning::indented\n")
 
 
 @bash_only
