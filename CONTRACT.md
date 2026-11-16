@@ -2086,9 +2086,9 @@ These limits are accepted:
 - A waiting run whose call joins the group after the holder's `summary` listed
   the runs is not told by that holder.
 - The reply is display only: a waiting run that `queue` did not tell stays
-  untold whenever the holder's waits steps do not run or do not finish, for
-  example after a failed or refused `review` (which also skips `summary`), a
-  cancelled `summary` or run, or a failure inside a waits step.
+  untold when neither of the holder's two waits steps tells it. A failed or
+  refused `review` skips both; a cancelled `summary` or run skips the later
+  one; either can fail inside its step.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
 - A waiting run can be told more than once, by `queue`, `review` and
