@@ -3909,14 +3909,23 @@ names an error. A job that failed without an `::error::` renders no fence.
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
 - **Unread report.** `🔴 could not read the detect report; see the run`, under the verdict
-  (and under the auto line when there is one). `apply-detect` writes the comment's fields
-  (the dispositions, waiting and held cells, environment order and pusher) to a file and
-  uploads it as the run's `apply-report` artifact, with no size cap; it writes an empty report
-  before any refusal, so a refused detect renders no such line. The line shows when the
-  artifact is missing (detect died before writing it, or the upload or download failed) or the
-  file is unreadable, not a JSON object, holds a field of the wrong type or an `env_order` that
-  is not a list of names. Every field then reads empty, and the verdict is `🔴 failed`, never
-  🟢: empty fields alone would read `🟢 no pending applies` over pending cells.
+  (and under the auto line when there is one). The comment's fields (the dispositions, waiting
+  and held cells, environment order and pusher) reach it as a file, with no size cap. The
+  `detect` job writes an empty report before checkout, `apply-detect` overwrites it with the
+  complete one, marked `"complete": true`, and the job uploads whichever is there, after a
+  failed step too, as the artifact `apply-report-<run attempt>-<random token>`, kept one day.
+  `detect` outputs that name and `summary` downloads exactly it, so a re-run never reads an
+  earlier attempt's report. An incomplete report is read only beside a detect refusal, so a
+  refused detect renders no such line when its report arrives. The line shows when the artifact
+  is missing (the upload or download failed, or `detect` never ran), or the file is unreadable,
+  not a JSON object, incomplete without a detect refusal (detect died without refusing), or not
+  the shape the comment reads: a field of another type, a list of environment names holding
+  something else, a waiting or held cell without its string keys, a held cell neither `locked`
+  (with a numeric or null holder) nor `overlap`, or a `skipped_after` value that is not a list
+  of names. Every field then reads empty, which alone would read `🟢 no pending applies` over
+  pending cells, so the verdict is never 🟢: a failed run reads `🔴 failed`, any other
+  `⚪ result unknown`, or with rows its counts followed by `result unknown`. `apply-detect` prints
+  the review-exempt and no-review notices too, so that audit trail survives an unread report.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a
   blank line on both sides, one per environment in the plan comment's order,
@@ -4054,7 +4063,7 @@ log text holds every line:
 - **no review required** — `<env>: no approving review was required, so the
   default review: true had nothing to enforce`, one per `review: true`
   environment a `NONE` decision authorized. It has its own cause, so it has its
-  own `report` field (`review_not_required_envs`, from both detects) rather than
+  own report field (`review_not_required_envs`, from both detects) rather than
   widening `applied_exempt_envs`. It prints in the targeted and the
   all-environments form, and names only environments with an applied, failed
   or not-recorded row — apply ran there, so infrastructure may have changed —

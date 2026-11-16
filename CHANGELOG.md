@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **`apply-detect` hands the apply result comment its fields as one `apply-report` artifact.** The eleven fields the comment renders (the environment dispositions, waiting and held cells, environment order, pusher and environments left for a bare apply) travel as one JSON file instead of eleven job outputs and action inputs, so no size or masking limit of a job output applies to them. A missing or unreadable report renders `🔴 could not read the detect report; see the run` and a `failed` verdict, never `🟢 no pending applies`.
+- **`apply-detect` hands the apply result comment its fields as one artifact.** The eleven fields the comment renders (the environment dispositions, waiting and held cells, environment order, pusher and environments left for a bare apply) travel as one JSON file instead of eleven job outputs and action inputs, so no size or masking limit of a job output applies to them. The artifact name is unique to the call and run attempt. A missing, unreadable or unfinished report renders `🔴 could not read the detect report; see the run` and a `⚪ result unknown` verdict (`🔴 failed` when the run failed), never `🟢 no pending applies`.
 
 ### Fixed
 
