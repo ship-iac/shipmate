@@ -131,20 +131,10 @@ _RENDER_ENV = {
     "SHIPMATE_ENVLEVEL2_WAVES": "${{ inputs.envlevel2-waves }}",
     "SHIPMATE_ENVLEVEL3_WAVES": "${{ inputs.envlevel3-waves }}",
     "SHIPMATE_RESULTS": "${{ inputs.results }}",
-    "SHIPMATE_EXCLUDED_ENVS": "${{ inputs.excluded-envs }}",
-    "SHIPMATE_SKIPPED_ENVS": "${{ inputs.skipped-envs }}",
-    "SHIPMATE_SKIPPED_AFTER": "${{ inputs.skipped-after }}",
-    "SHIPMATE_REVIEW_HELD_ENVS": "${{ inputs.review-held-envs }}",
-    "SHIPMATE_APPLIED_EXEMPT_ENVS": "${{ inputs.applied-exempt-envs }}",
-    "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
-    "SHIPMATE_WAITING_CELLS": "${{ inputs.waiting-cells }}",
-    "SHIPMATE_HELD_CELLS": "${{ inputs.held-cells }}",
-    "SHIPMATE_BARE_ENVS": "${{ inputs.bare-envs }}",
+    "SHIPMATE_REPORT": "${{ inputs.report }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
-    "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
     "SHIPMATE_AUTO": "${{ inputs.auto }}",
-    "SHIPMATE_PUSHER": "${{ inputs.pusher }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
@@ -154,30 +144,20 @@ _RENDER_ENV = {
 def test_render_step_env_block_matches_the_expected_mapping():
     """One whole-value comparison of the render step's `env:` block against a hand-written
     mapping, never one derived from the file, per the repo's assert-the-whole rule. The read-set
-    guard above compares env: keys only, so it cannot see two values swapped between two keys,
-    and every SHIPMATE_*_ENVS input is a JSON array of env names -- a swap type-checks, renders,
-    and names the wrong environments under the wrong sentence, "held" naming what applied
-    unreviewed and the reverse. A second selector for two of the keys would relocate the hole
-    rather than close it.
+    guard above compares env: keys only, so it cannot see two values swapped between two keys.
+    A second selector for two of the keys would relocate the hole rather than close it.
 
     Mutation: drop `SHIPMATE_HEAD_SHA` from the render step, so every verdict reads `at an
     unknown commit` -- red.
-    Mutation: drop `SHIPMATE_WAITING_CELLS` from the render step, so a fully waiting run
-    reads `🟢 no pending applies` -- red.
+    Mutation: drop `SHIPMATE_REPORT` from the render step, so a fully waiting run reads
+    `🟢 no pending applies` -- red.
+    Mutation: restore `SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}` beside it -- red.
     Mutation: drop `SHIPMATE_DETECT_REFUSAL` from the render step, so a refused apply's comment
     never names the refusal -- red.
-    Mutation: drop `SHIPMATE_ENV_ORDER` from the render step, so the comment orders environments
-    by name -- red.
-    Mutation: drop `SHIPMATE_HELD_CELLS` from the render step, so an all-locked or all-overlap
-    run reads `🟢 no pending applies` -- red.
     Mutation: drop `SHIPMATE_LOCK_REFUSAL` from the render step, so a refused lock job's comment
     never names the refusal -- red.
-    Mutation: drop `SHIPMATE_SKIPPED_AFTER` from the render step, so a skipped line names no
-    predecessor -- red.
-    Mutation: drop `SHIPMATE_BARE_ENVS` from the render step -- red.
     Mutation: drop `SHIPMATE_AUTO` from the render step, so an auto run's comment never says
-    so -- red.
-    Mutation: drop `SHIPMATE_PUSHER` from the render step -- red."""
+    so -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -275,8 +255,8 @@ def test_head_sha_is_a_required_input():
 
 def test_declared_inputs_are_exactly_these():
     """The render step's `env:` reads `inputs.<name>`, and an undeclared name evaluates to empty
-    without error. Mutation: rename `applied-exempt-envs` under `inputs:` alone -> the declared
-    set differs."""
+    without error. Mutation: rename `report` under `inputs:` alone -> the declared set differs.
+    Mutation: restore the `held-cells` input beside `report` -> the declared set differs."""
     assert set(action_yaml("apply-summary")["inputs"]) == {
         "pr-number",
         "environment",
@@ -284,20 +264,10 @@ def test_declared_inputs_are_exactly_these():
         "envlevel1-waves",
         "envlevel2-waves",
         "envlevel3-waves",
-        "excluded-envs",
-        "skipped-envs",
-        "skipped-after",
-        "review-held-envs",
-        "applied-exempt-envs",
-        "review-not-required-envs",
-        "waiting-cells",
-        "held-cells",
-        "bare-envs",
+        "report",
         "detect-refusal",
         "lock-refusal",
-        "env-order",
         "auto",
-        "pusher",
         "results",
         "head-sha",
         "app-id",
@@ -423,20 +393,10 @@ _APPLY_SUMMARY_WITH = {
     "envlevel1-waves": "${{ needs.detect.outputs.envlevel1_waves }}",
     "envlevel2-waves": "${{ needs.detect.outputs.envlevel2_waves }}",
     "envlevel3-waves": "${{ needs.detect.outputs.envlevel3_waves }}",
-    "excluded-envs": "${{ needs.detect.outputs.excluded_envs }}",
-    "skipped-envs": "${{ needs.detect.outputs.skipped_envs }}",
-    "skipped-after": "${{ needs.detect.outputs.skipped_after }}",
-    "review-held-envs": "${{ needs.detect.outputs.review_held_envs }}",
-    "applied-exempt-envs": "${{ needs.detect.outputs.applied_exempt_envs }}",
-    "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
-    "waiting-cells": "${{ needs.detect.outputs.waiting_cells }}",
-    "held-cells": "${{ needs.detect.outputs.held_cells }}",
-    "bare-envs": "${{ needs.detect.outputs.bare_envs }}",
+    "report": "${{ needs.detect.outputs.report }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
-    "env-order": "${{ needs.detect.outputs.env_order }}",
     "auto": "${{ inputs.auto }}",
-    "pusher": "${{ needs.detect.outputs.pusher }}",
     "results": "${{ join(needs.*.result, ',') }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
@@ -444,32 +404,25 @@ _APPLY_SUMMARY_WITH = {
 
 
 def test_apply_passes_apply_summary_exactly_this_with():
-    """Five detect outputs are JSON arrays of env names with identical shape, so a crossed wire
-    renders a plausible comment naming the wrong environments for the wrong reason, and a dropped
-    `environment` renders a targeted apply as the all-environments form. The detect outputs these
-    read are pinned whole in `test_detect_wiring_guard.py`.
+    """A dropped `environment` renders a targeted apply as the all-environments form, and a
+    dropped `report` renders every disposition as empty. The detect outputs these read are pinned
+    whole in `test_detect_wiring_guard.py`.
 
     Mutation: drop `environment:` from the step's `with:` -- red.
-    Mutation: wire `applied_exempt_envs` into `review-not-required-envs` -- red.
-    Mutation: drop `waiting-cells:` from the step's `with:`, so the input defaults to `[]`
-    -- red.
+    Mutation: drop `report:` from the step's `with:` -- red.
+    Mutation: restore `held-cells: ${{ needs.detect.outputs.held_cells }}` -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
-    Mutation: drop `env-order:` from the step's `with:` -- red.
-    Mutation: drop `held-cells:` from the step's `with:` -- red.
-    Mutation: drop `skipped-after:` from the step's `with:` -- red.
-    Mutation: drop `bare-envs:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
-    Mutation: drop `auto:` from the step's `with:` -- red.
-    Mutation: drop `pusher:` from the step's `with:` -- red."""
+    Mutation: drop `auto:` from the step's `with:` -- red."""
     steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
 
 
-def test_the_env_order_input_is_optional_and_empty_by_default():
-    """`deploy.yml` posts no apply comment, and an empty value orders environments by name.
-    Mutation: set the input `required: true` -- red."""
-    declared = action_yaml("apply-summary")["inputs"]["env-order"]
+def test_the_report_input_is_optional_and_empty_by_default():
+    """`deploy.yml` posts no apply comment, and an empty value reads as every field empty.
+    Mutation: set the input `required: true` -- red. Mutation: default it to `{}` -- red."""
+    declared = action_yaml("apply-summary")["inputs"]["report"]
     assert {k: v for k, v in declared.items() if k != "description"} == {
         "required": False,
         "default": "",
@@ -495,22 +448,14 @@ def test_the_detect_refusal_input_is_optional_and_empty_by_default():
 def test_the_lock_inputs_are_optional_with_empty_defaults():
     """`deploy.yml` posts no apply comment; an empty value renders no lock line and no fence.
     Mutation: set `lock-refusal` `required: true` -- red.
-    Mutation: default `held-cells` to `""` -- red.
-    Mutation: default `skipped-after` to `[]` -- red.
-    Mutation: default `bare-envs` to `""` -- red.
-    Mutation: default `auto` to `"true"` -- red.
-    Mutation: set `pusher` `required: true` -- red."""
+    Mutation: default `auto` to `"true"` -- red."""
     inputs = action_yaml("apply-summary")["inputs"]
     assert {
         name: {k: v for k, v in inputs[name].items() if k != "description"}
-        for name in ("held-cells", "skipped-after", "bare-envs", "lock-refusal", "auto", "pusher")
+        for name in ("lock-refusal", "auto")
     } == {
-        "held-cells": {"required": False, "default": "[]"},
-        "skipped-after": {"required": False, "default": "{}"},
-        "bare-envs": {"required": False, "default": "[]"},
         "lock-refusal": {"required": False, "default": ""},
         "auto": {"required": False, "default": "false"},
-        "pusher": {"required": False, "default": ""},
     }
 
 

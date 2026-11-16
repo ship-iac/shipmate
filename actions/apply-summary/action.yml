@@ -24,42 +24,10 @@ inputs:
     description: Env-level 3 waves JSON; a padded empty map when level 3 has no cell, as in every targeted apply. Empty when detect did not succeed.
     required: false
     default: ""
-  excluded-envs:
-    description: "JSON array of targeted environments left pending, including held ones; the comment lists a held one under the hold (all-environments form only). Empty = []."
+  report:
+    description: "apply-detect's `report` output, a JSON object: the excluded, skipped, review-held, applied-exempt, no-review and left-for-a-bare-apply environments, what each skipped environment waits on, the waiting and held cells, the environment order and the pusher, with a count of the entries detect trimmed from each list to fit its size cap. The comment names each disposition with its remedy, puts one heading per environment in the order's sequence and any environment it does not name after them by name, names the pusher on the auto line and ends the footer with the trimmed counts; the review-exempt and no-review environments become notices, not comment lines. A missing field reads empty, and an empty report (detect refused or never ran) reads as every field empty. A report that is not a JSON object, a field of the wrong type or a count that is not an integer fails the render."
     required: false
     default: ""
-  skipped-envs:
-    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, holding a waiting cell, holding a cell another pull request locks, or, under the auto form, holding a cell the base also changed or not `apply_mode: auto`); all-environments form only. Empty = []."
-    required: false
-    default: ""
-  skipped-after:
-    description: "JSON object mapping each skipped environment to the predecessors it waits on (all-environments form only); the comment names each with the remedy of its kind. Empty = {}."
-    required: false
-    default: "{}"
-  review-held-envs:
-    description: JSON array of environments held until an approving review lands (all-environments form only). Empty = [].
-    required: false
-    default: ""
-  applied-exempt-envs:
-    description: "JSON array of environments applied without an approving review, per `review: false` on their entries (all-environments form only); the render step annotates each with a notice, not a comment line. Empty = []."
-    required: false
-    default: ""
-  review-not-required-envs:
-    description: "JSON array of `review: true` environments authorized under a null review decision, because the pull request's review state required none (both forms). The render step annotates each with an applied, failed or unrecorded row with a notice, not a comment line. Empty = []."
-    required: false
-    default: ""
-  waiting-cells:
-    description: "JSON list of cells left pending because a cell they run after is pending and not applying this run, each with that cell (both forms); the comment names each cell's blocker and its remedy."
-    required: false
-    default: "[]"
-  held-cells:
-    description: "JSON list of pending cells left pending for a cause of their own, each `{stack, environment, cause}`. `cause` is `locked` when another pull request holds the cell's lock, with `holder` its pull request number, null when unknown (both forms); the comment names each holder and the remedy. `cause` is `overlap` when the auto form left the cell pending because the merge of the base into the branch changes its stack, directly or through a module it sources, or removes files in it; the comment names them and the remedy, updating the branch from the base. Empty = []."
-    required: false
-    default: "[]"
-  bare-envs:
-    description: "JSON array of pending environments the auto form left for a bare `shipmate apply`, neither `apply_mode: auto`, targeted nor held; the comment names each. Empty = []."
-    required: false
-    default: "[]"
   detect-refusal:
     description: "detect's `refusal` output, setup's or else apply-detect's: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
@@ -68,18 +36,10 @@ inputs:
     description: "The lock job's `refusal` output: the first error of the `::error::` message that failed lock acquisition (a refusal or a failed API call) on one line, empty when it raised none. Non-empty, the comment shows it in a code fence under the verdict line, as it does detect-refusal; empty leaves the comment unchanged."
     required: false
     default: ""
-  env-order:
-    description: "apply-detect's `env_order` output: JSON [env, ...] in apply order. The comment puts one heading per environment in this order, and any environment it does not name after them by name. Empty (detect refused) orders every environment by name; a value that is not a list of names does too, and warns."
-    required: false
-    default: ""
   auto:
     description: "'true' for an `apply_mode: auto` run: the comment says so under the verdict line, refused or not."
     required: false
     default: "false"
-  pusher:
-    description: "apply-detect's `pusher` output: the login the auto form admitted as the pusher, which the auto line names as the login that triggered the autoplan. Empty renders the line without it."
-    required: false
-    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
@@ -180,20 +140,10 @@ runs:
         SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
         SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
         SHIPMATE_RESULTS: ${{ inputs.results }}
-        SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
-        SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
-        SHIPMATE_SKIPPED_AFTER: ${{ inputs.skipped-after }}
-        SHIPMATE_REVIEW_HELD_ENVS: ${{ inputs.review-held-envs }}
-        SHIPMATE_APPLIED_EXEMPT_ENVS: ${{ inputs.applied-exempt-envs }}
-        SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
-        SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
-        SHIPMATE_HELD_CELLS: ${{ inputs.held-cells }}
-        SHIPMATE_BARE_ENVS: ${{ inputs.bare-envs }}
+        SHIPMATE_REPORT: ${{ inputs.report }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
-        SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_AUTO: ${{ inputs.auto }}
-        SHIPMATE_PUSHER: ${{ inputs.pusher }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
