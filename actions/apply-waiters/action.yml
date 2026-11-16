@@ -1,0 +1,40 @@
+name: shipmate apply-waiters
+description: Reply on the command of each apply run of the pull request that waits behind this one, naming this run, once per waiting run (scripts/apply-queue waiters). Mints a shipmate App installation token with actions read and pull-requests write; writes only when the run's actor and triggering actor are both the App's bot login. Display only, so a failed read or reply only warns.
+inputs:
+  pr-number:
+    description: Pull request whose apply runs are read.
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: read
+        permission-pull-requests: write
+    # A called workflow's `github` context is its caller's, so these name the dispatch itself.
+    - name: Tell the apply runs waiting behind this one
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        SHIPMATE_ACTOR: ${{ github.actor }}
+        SHIPMATE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-queue" waiters
