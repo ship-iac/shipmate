@@ -206,10 +206,16 @@ def plan_records(check_run_lines, app_id):
         pr = record.get("pr")
         out[name] = (
             _plan_run(record),
-            digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
+            digest if is_plan_digest(digest) else None,
             pr if isinstance(pr, str) and is_pr_number(pr) else None,
         )
     return out
+
+
+def is_plan_digest(value):
+    """Whether `value` is a plan-text digest as the apply record carries it: a str of 64
+    lowercase hex characters."""
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
 def plan_actions(check_run_lines, app_id):
@@ -226,6 +232,17 @@ def _newest_records(check_run_lines, app_id):
         record = decoded(run)
         if record is not None:
             yield name, record
+
+
+def behind_names(check_run_lines, app_id):
+    """The App-authored apply check names whose newest run's record holds `behind` exactly
+    `True`: the plan found that the base changed the cell's stack after the branch left it, so
+    no plan of the cell exists to apply until the branch is updated from the base."""
+    return {
+        name
+        for name, record in _newest_records(check_run_lines, app_id)
+        if record.get("behind") is True
+    }
 
 
 #: The event actions of an autoplan a push started: only its plan applies automatically.
@@ -444,12 +461,16 @@ def newer_plan(counted, complete):
 
 
 def base_tip(repo, pull, *, run):
-    """The tip commit of the REST pull request `pull`'s base branch, read from the branch ref.
-    Not `pull["base"]["sha"]`: probed on a sample pull request, it kept the old tip for 20 s
-    and more after a push to the base, while the branch ref answered the new tip at once.
-    Raises `SystemExit` on a failed read or an answer that is not that branch's commit, and
-    `LookupError` or `TypeError` on a malformed pull request."""
-    branch = pull["base"]["ref"]
+    """The tip commit of the REST pull request `pull`'s base branch (`branch_tip`). Not
+    `pull["base"]["sha"]`: probed on a sample pull request, it kept the old tip for 20 s and more
+    after a push to the base, while the branch ref answered the new tip at once. Raises as
+    `branch_tip` does, and `LookupError` or `TypeError` on a malformed pull request."""
+    return branch_tip(repo, pull["base"]["ref"], run=run)
+
+
+def branch_tip(repo, branch, *, run):
+    """The tip commit of `branch`, read from its ref. Raises `SystemExit` on a failed read or an
+    answer that is not that branch's commit."""
     path = urllib.parse.quote(branch, safe="/")
     ref = gh_json(f"repos/{repo}/git/ref/heads/{path}", run)
     sha = ref["object"]["sha"]

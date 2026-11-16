@@ -23,6 +23,7 @@ from _shipmate import (
     _run,
     command_data,
     named,
+    one_line,
     run,
     run_annotated,
     write_outputs,
@@ -278,7 +279,6 @@ def merge_base(base, retry="Re-run the workflow"):
     raise SystemExit("::error::" + message)
 
 
-# Not a bare `shipmate apply`, which runs no overlap check: the push re-plans and re-dispatches.
 _BASE_REMEDY = "Update the branch from the base and push"
 # Pinned against repository config so it cannot change which stacks are held. Empty
 # `core.attributesFile` also drops XDG attributes; `safe.directory=*` disables the ownership check
@@ -342,11 +342,20 @@ def base_changed_stacks(base_ref, candidates):
     return _merge_stacks(base_ref, candidates) if _diff_records(since, base_ref) else set()
 
 
+class MergeConflict(SystemExit):
+    """`base_changed_stacks`' refusal when the merge of the base into the branch conflicts. A
+    `SystemExit`, so a caller that does not catch it refuses as on any other failure."""
+
+
 def _merge_stacks(base_ref, candidates):
     """`base_changed_stacks`' listing and its removed-file stacks: the merge of `base_ref` into
     `HEAD`, committed on `HEAD`, checked out in a detached worktree and listed against `HEAD`.
-    A merge conflict refuses with git's conflict lines before the worktree is added, any other
-    failure with its error."""
+    A merge conflict refuses with git's conflict lines before the worktree is added, as
+    `MergeConflict`; any other failure refuses with its error as a plain `SystemExit`. The
+    worktree checkout skips Git LFS smudging (`GIT_LFS_SKIP_SMUDGE`): the listing reads no LFS
+    content, and a smudge would download it. A failed worktree removal warns and leaves the
+    listing's result or refusal standing."""
+    conflict = False
     try:
         head = run(["git", "rev-parse", "HEAD"]).strip()
         # Not `run`: git prints a conflict on stdout.
@@ -359,7 +368,7 @@ def _merge_stacks(base_ref, candidates):
             errors="replace",
             env=_merge_env(),
         )
-        cause = _merge_tree_failure(p)
+        cause, conflict = _merge_tree_failure(p)
         if cause is None:
             merged = p.stdout.split()[0]
             if merged == run(["git", "rev-parse", f"{head}^{{tree}}"]).strip():
@@ -371,32 +380,44 @@ def _merge_stacks(base_ref, candidates):
             gone = {s for s in candidates if any(_inside(x, s, candidates) for x in moved)}
             tree = tempfile.mkdtemp(prefix="shipmate-merge-")
             try:
-                run(["git", "worktree", "add", "--quiet", "--detach", tree, sha])
+                add = ["git", "worktree", "add", "--quiet", "--detach", tree, sha]
+                run(add, env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"})
             except SystemExit:
                 shutil.rmtree(tree, ignore_errors=True)
                 raise
             try:
                 return set(_list_stacks(False, head, tree)) | gone
             finally:
-                run(["git", "worktree", "remove", "--force", tree])
+                _remove_worktree(tree)
     except (SystemExit, OSError) as e:
         message = str(e.code if isinstance(e, SystemExit) else e).removeprefix("::error::")
         cause = _joined(message.splitlines()[1:]) or message
-    raise SystemExit(
+    refusal = MergeConflict if conflict else SystemExit
+    raise refusal(
         "::error::change detection on the merge of the base into the branch failed: "
         f"{cause.removesuffix('.')}. {_BASE_REMEDY}."
     )
 
 
+def _remove_worktree(tree):
+    """Remove the merge worktree at `tree`; a failure prints one `::warning::` naming it."""
+    try:
+        run(["git", "worktree", "remove", "--force", tree])
+    except SystemExit as e:
+        why = one_line(str(e.code).removeprefix("::error::"))
+        print(f"::warning::{command_data(f'could not remove the merge worktree {tree} ({why})')}")
+
+
 def _merge_tree_failure(p):
-    """The refusal cause of the finished `git merge-tree --write-tree` `p`, or None when it
-    printed a tree: its `CONFLICT` lines on exit 1, else its stderr."""
+    """`(cause, conflict)` of the finished `git merge-tree --write-tree` `p`: the refusal cause,
+    or None when it printed a tree, and whether the cause is its `CONFLICT` lines (on exit 1)
+    rather than its stderr."""
     if not p.returncode:
-        return None if p.stdout.split() else "git merge-tree printed no tree"
+        return (None if p.stdout.split() else "git merge-tree printed no tree"), False
     lines = [x for x in p.stdout.splitlines() if x.startswith("CONFLICT")]
-    if p.returncode != 1 or not lines:
-        lines = p.stderr.splitlines()
-    return _joined(lines) or f"git merge-tree exited {p.returncode}"
+    if p.returncode == 1 and lines:
+        return _joined(lines), True
+    return _joined(p.stderr.splitlines()) or f"git merge-tree exited {p.returncode}", False
 
 
 def _inside(path, stack, stacks):

@@ -170,11 +170,13 @@ _DEFAULTS = {
     "env_order": [],
     "pusher": "",
     "bare_envs": [],
+    "behind": [],
+    "base": "",
 }
 
 
 def test_a_missing_field_reads_as_its_default(tmp_path):
-    """The targeted form writes four fields; the other seven read empty.
+    """The targeted form writes four fields; the other nine read empty.
 
     Mutation: `report[k]` for `report.get(k, d)` in `read_report` -- KeyError, red."""
     path = tmp_path / "report.json"

@@ -343,6 +343,26 @@ def test_plan_records_newest_app_run_supplies_the_record():
     }
 
 
+def test_behind_names_reads_only_a_newest_app_record_whose_behind_is_true():
+    """`a` is behind on its newest run; `b`'s behind record sits under a newer plain one; `c`
+    and `d` hold `"true"` and `1`; `e`'s newest behind record is another App's, over ours.
+
+    Mutation: read every App run, not the newest per name -- `b` is listed, red.
+    Mutation: test `record.get("behind")` for truth -- `c` and `d` are listed, red.
+    Mutation: parse the lines without `from_app` -- `e` is listed, red."""
+    behind = _record(behind=True, cells=1)
+    lines = [
+        _ext("apply / a / dev-eu", 1, behind),
+        _ext("apply / b / dev-eu", 2, behind),
+        _ext("apply / b / dev-eu", 3, _record(plan_sha256="a" * 64)),
+        _ext("apply / c / dev-eu", 4, _record(behind="true")),
+        _ext("apply / d / dev-eu", 5, _record(behind=1)),
+        _ext("apply / e / dev-eu", 6, _record(plan_sha256="a" * 64)),
+        _ext("apply / e / dev-eu", 7, behind, app_id=15368),
+    ]
+    assert ag.behind_names(lines, "999") == {"apply / a / dev-eu"}
+
+
 def test_plan_records_ignores_foreign_app_even_when_newest():
     """Mutation: iterate `parse_jsonl(check_run_lines)` instead of `app_runs(...)`."""
     ours = _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="111", plan_sha256="a" * 64))

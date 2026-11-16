@@ -2609,18 +2609,26 @@ def _harvest(repo, head, app_id):
 def _download_cells(repo, lines, app_id):
     """The decimal plan run ids this head's apply checks record, each one's cell summaries
     downloaded into `doctor-cells/<run id>/`. Read from the listing, so a renamed plan
-    workflow cannot silently empty the environment probes."""
+    workflow cannot silently empty the environment probes. A behind record is skipped: its run
+    may have planned no cell, and a run that did is named by its planned cells' records."""
     try:
         records = ag.plan_records(lines, app_id)
+        behind = ag.behind_names(lines, app_id)
     except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor skips the environment probes
         _degrade(
             e,
             "the plan records on this commit's apply checks could not be read; "
             "doctor skips the environment probes",
         )
-        records = {}
+        records, behind = {}, set()
     # The id reaches a `gh` argv and a directory name, so only a decimal string passes.
-    run_ids = sorted({r for r, _, _ in records.values() if isinstance(r, str) and is_run_id(r)})
+    run_ids = sorted(
+        {
+            r
+            for name, (r, _, _) in records.items()
+            if name not in behind and isinstance(r, str) and is_run_id(r)
+        }
+    )
     pathlib.Path("doctor-cells").mkdir(exist_ok=True)
     for rid in run_ids:
         # -R: this job checks out nothing, so gh has no remote to infer the repo from. One

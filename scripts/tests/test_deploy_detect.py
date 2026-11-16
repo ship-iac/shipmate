@@ -8,6 +8,7 @@ from _detect_fixtures import (
     RUN_GRAPH_ARGV,
     _apply_check,
     answering_run_graph,
+    behind_check,
     forbid_shared_runner,
     partial_message,
     run_graph_capture,
@@ -1516,4 +1517,67 @@ def test_main_writes_the_warm_list(tmp_path, monkeypatch):
             '"tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}}]'
         ),
         "4",
+    )
+
+
+#: The behind refusal's fixed remedy, hand-written.
+_BEHIND_REMEDY = (
+    "Open a new pull request that changes every listed stack (any edit that `terramate list "
+    "--changed` marks, such as a comment line). It plans the current default branch for all of "
+    "them, this merged change included, and its cells are applied before merge under a required "
+    "gate (`shipmate apply`, and `shipmate apply <env>` for a `targeted` environment), or by its "
+    "deploy otherwise. Re-running this deploy checks out the same commit and refuses again. This "
+    "deploy's apply checks are never read again and stay open on the merged pull request."
+)
+
+
+def test_main_refuses_a_cell_planned_behind_the_base(tmp_path, monkeypatch):
+    """`stacks/app`'s newest check is a behind record over an older run's queued check with a
+    digest: the deploy refuses naming it and the other pending cell, never with the digest
+    refusal, and writes no wave.
+
+    Mutation: drop the `refuse_behind_checks` call -- the digest refusal, red.
+    Mutation: call it after `with_plan_runs` -- the digest refusal, red."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app"), _cell("stacks/web")],
+            checks=[
+                _apply_check("stacks/app", plan_run="41", cells=2, id=1),
+                _apply_check("stacks/web", plan_run="41", cells=2, id=2),
+                behind_check("stacks/app", plan_run="42", cells=1, id=3),
+            ],
+        )
+    assert str(exc.value) == (
+        "::error::deploy aborted: stacks/app / dev-eu: each was planned behind the base, so no "
+        "reviewed plan exists for it. This deploy applies nothing, so these other cells of this "
+        "merge are not applied either: stacks/web / dev-eu. " + _BEHIND_REMEDY
+    )
+    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD, "pr_number": "7"}
+
+
+def test_a_stranded_check_refuses_before_a_behind_one(tmp_path, monkeypatch):
+    """`stacks/gone` lost its tags and its check is a behind record; `stacks/app`'s is one too.
+    The stranded refusal names it first.
+
+    Mutation: call `refuse_behind_checks` before `refuse_stranded_checks` -- the behind text,
+    red."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[],
+            checks=[
+                behind_check("stacks/app", cells=2),
+                behind_check("stacks/gone", cells=2),
+            ],
+            stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
+            deps={"stacks/app": set(), "stacks/gone": set()},
+        )
+    assert str(exc.value) == (
+        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "env/* tag after this pull request was planned, so its reviewed change was not "
+        "applied. This deploy applies nothing, so these other cells of this merge are not "
+        "applied either: stacks/app / dev-eu. " + _REMEDY
     )

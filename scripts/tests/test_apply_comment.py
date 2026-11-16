@@ -1530,8 +1530,15 @@ def test_check_name_grammar_matches_apply_cells_construction():
     swap stack and environment in apply_check_state's `ag.check_name` call (the row stays
     `applied`) -- red."""
     snap = load_script("apply-snapshot")
-    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]}
-    run = {"id": 7, "name": "apply / stacks/app / dev-eu", "app": {"id": int(APP_ID)}}
+    plan = {"plan_run_id": "5", "plan_sha256": "e" * 64}
+    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu", **plan}]}
+    record = json.dumps({"plan_run": "5", "plan_sha256": "e" * 64})
+    run = {
+        "id": 7,
+        "name": "apply / stacks/app / dev-eu",
+        "app": {"id": int(APP_ID)},
+        "external_id": record,
+    }
     assert snap.snapshot(waves, [run], APP_ID) == {"apply / stacks/app / dev-eu": [7]}
     rows = [_row(environment="dev-eu", stack="stacks/app")]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
@@ -2815,3 +2822,90 @@ def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
         "⚪ prod: skipped, waits on dev (comment `shipmate apply`, which applies them in order)"
         "\n\n" + HINT
     )
+
+
+_BEHIND_CELLS = [
+    {"stack": "stacks/app", "environment": "dev-eu"},
+    {"stack": "stacks/web", "environment": "dev-eu"},
+]
+_BEHIND_REFUSAL = (
+    "apply refused: 2 cell(s) behind release/2 (stacks/app / dev-eu, stacks/web / dev-eu); "
+    "update the branch from release/2 and push."
+)
+
+
+@pytest.mark.parametrize("refusal", ["", _BEHIND_REFUSAL], ids=["no-refusal", "refusal"])
+def test_a_behind_refusal_renders_its_line_from_the_report_above_the_fence(
+    monkeypatch, tmp_path, refusal
+):
+    """A detect behind refusal writes only `behind` and `base`: the line names the cells and the
+    report's base branch, above the refusal fence, with or without a refusal text; every other
+    field reads empty, and the failed run is not green.
+
+    Mutation: render the line only beside a refusal text -- the first case, red.
+    Mutation: name `main` for the base -- red.
+    Mutation: read a report key with `report[k]` -- the missing fields raise, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, json.dumps({"wave0": []}), str(tmp_path / "none"))
+    _set_report(monkeypatch, tmp_path, {"behind": _BEHIND_CELLS, "base": "release/2"})
+    monkeypatch.setenv("SHIPMATE_RESULTS", "failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_REFUSAL", refusal)
+    fence = f"\n\n{ac.sc.reason_fence(refusal)}" if refusal else ""
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {_MAIN_AT}\n\n"
+        "⚪ not applied, behind release/2: stacks/app / dev-eu, stacks/web / dev-eu. Update the "
+        f"branch from release/2 and push.{fence}\n\n" + HINT
+    )
+
+
+_STALE_REMEDY = (
+    "The cell's state changed after this plan; comment `shipmate plan`, review the new plan, "
+    "then apply."
+)
+
+
+def _stale_row(tmp_path, status="failed"):
+    """A row loaded through `load_cells` from `apply-stale-1.13.1.txt`, OpenTofu 1.13.1's raw
+    piped output for a stale saved plan, colour codes included."""
+    d = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(result="failed"))
+    raw = (pathlib.Path(__file__).parent / "fixtures" / "apply-stale-1.13.1.txt").read_bytes()
+    (d / "apply.txt").write_bytes(raw)
+    _, text = ac.load_cells(str(tmp_path))[0]
+    return _row(status=status, stack="stacks/app", environment="dev-eu", apply_text=text)
+
+
+def test_stale_note_names_a_cell_tofu_refused_as_stale(tmp_path):
+    """The raw capture carries colour codes around `Error:`; `load_cells` strips them before
+    the note matches the line.
+
+    Mutation: drop the ANSI strip from `load_cells` -- no note, red."""
+    assert ac._stale_note([_stale_row(tmp_path)]) == (
+        f"stale plan: **stacks/app (dev-eu)**. {_STALE_REMEDY}"
+    )
+
+
+def test_stale_note_skips_other_failures_and_applied_rows(tmp_path):
+    """A lock error is another failure, and an applied row holding the line did not fail.
+
+    Mutation: name every failed row -- the lock row is named, red.
+    Mutation: drop the `failed` condition -- the applied row is named, red."""
+    lock = _row(
+        status="failed",
+        stack="stacks/db",
+        environment="dev-eu",
+        apply_text=_fixture_text("lock_error_s3.txt"),
+    )
+    assert ac._stale_note([lock, _stale_row(tmp_path, status="applied")]) == ""
+
+
+def test_stale_note_names_five_and_counts_the_rest(tmp_path):
+    """Mutation: name every hit (`named(hits, len(hits))`) -- eleven names, red."""
+    text = _stale_row(tmp_path)["apply_text"]
+    rows = [
+        _row(status="failed", stack=f"s{n}", environment="dev-eu", apply_text=text)
+        for n in range(11)
+    ]
+    named = ", ".join(f"**s{n} (dev-eu)**" for n in range(5))
+    assert ac._stale_note(rows) == f"stale plan: {named}, and 6 more. {_STALE_REMEDY}"

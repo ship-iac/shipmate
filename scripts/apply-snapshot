@@ -4,8 +4,12 @@
 Runs BEFORE wave0: the trailing completer marks only these ids done, so an apply check
 created mid-run by a fresh plan is left pending (its plan was never applied here) instead of
 being greened. Only checks authored by the shipmate App are eligible — a forged same-name
-check from any other identity is never completed — and only those not yet `completed`: a
-completed same-head duplicate is left alone, since a later write would relink or retitle it.
+check from any other identity is never completed — only those not yet `completed`: a
+completed same-head duplicate is left alone, since a later write would relink or retitle it —
+and only those whose record names the wave row's plan run and plan-text digest, or an older
+plan run: a check a newer plan, or a plan that found the cell behind the base, published after
+detect is not this run's to complete, while an older plan's unfinished duplicate is superseded
+by this apply.
 The `snapshot` job holds the App key and checks out no repository content, so no branch content
 runs beside the key. `by_wave` slices the snapshot per wave, so each wave's checks are flipped
 right before that wave and completed right after it.
@@ -15,14 +19,16 @@ import json
 import os
 import sys
 
-from _shipmate import _load, run_annotated, write_outputs
+from _shipmate import _load, decoded, is_run_id, run_annotated, write_outputs
 
 ag = _load("apply-gate")
 
 
 def snapshot(waves, check_runs, app_id):
     """{apply check name: [check id, ...]} for every cell in this run's waves, each id a check
-    not yet `completed`.
+    not yet `completed` whose decoded record's `plan_run` and `plan_sha256` equal the wave row's
+    `plan_run_id` and `plan_sha256` (`_records`), or whose record names an older plan run and is
+    no behind record (`_older`). Only a matching check keeps the cell from refusing below.
 
     Every wanted cell must have one. A cell that has none fails the run here,
     before wave0 and so before anything applies. Skipping it would let that
@@ -34,21 +40,43 @@ def snapshot(waves, check_runs, app_id):
     leaves nothing half-applied, the recoverable direction.
     """
     runs = ag.from_app(check_runs, app_id)
-    wanted = [
-        (cell["stack"], cell["environment"]) for name in sorted(waves) for cell in waves[name] or []
-    ]
+    wanted = [cell for name in sorted(waves) for cell in waves[name] or []]
     out = {}
-    for stack, env in wanted:
-        name = ag.check_name(stack, env)
-        ids = [c["id"] for c in runs if c.get("name") == name and c.get("status") != "completed"]
-        if not ids:
+    for cell in wanted:
+        name = ag.check_name(cell["stack"], cell["environment"])
+        plan = (cell.get("plan_run_id"), cell.get("plan_sha256"))
+        unfinished = [c for c in runs if c.get("name") == name and c.get("status") != "completed"]
+        if not any(_records(c, plan) for c in unfinished):
             raise SystemExit(
                 f"::error::no App-authored apply check named '{name}' that is not yet "
-                "completed on the head SHA before apply; this cell would apply with nothing "
-                "to complete afterwards, stranding its check pending. Re-plan."
+                f"completed and records plan run {plan[0]} with its plan-text digest on the head "
+                "SHA before apply; this cell would apply with nothing to complete afterwards, "
+                "stranding its check pending. Re-plan."
             )
-        out[name] = ids
+        out[name] = [c["id"] for c in unfinished if _records(c, plan) or _older(c, plan[0])]
     return out
+
+
+def _records(check, plan):
+    """Whether `check`'s decoded record names `plan`, a `(plan run, plan-text digest)` pair of
+    non-empty strings."""
+    record = decoded(check) or {}
+    return all(plan) and (record.get("plan_run"), record.get("plan_sha256")) == plan
+
+
+def _older(check, plan_run):
+    """Whether `check`'s decoded record names a plan run with a lower id than `plan_run` and is
+    no behind record (`behind` exactly `True`)."""
+    record = decoded(check) or {}
+    recorded = record.get("plan_run")
+    return (
+        isinstance(recorded, str)
+        and is_run_id(recorded)
+        and isinstance(plan_run, str)
+        and is_run_id(plan_run)
+        and int(recorded) < int(plan_run)
+        and record.get("behind") is not True
+    )
 
 
 def by_wave(waves, snap):

@@ -2319,7 +2319,10 @@ BASE = "f" * 40
 RUN = "4242"
 PULL_READ = ["gh", "api", f"repos/{REPO}/pulls/{PR}"]
 AUTOPLANS_READ = autoplans_read(REPO, HEAD)
-AUTO = {"SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN, "SHIPMATE_BASE_SHA": BASE}
+DIGEST = "e" * 64
+#: The wave row's plan run and digest, and the base tip detect read: a commanded wave's inputs.
+COMMANDED = {"SHIPMATE_BASE_SHA": BASE, "SHIPMATE_PLAN_RUN_ID": RUN, "SHIPMATE_PLAN_SHA256": DIGEST}
+AUTO = {**COMMANDED, "SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN}
 RETRY = "push, or comment `shipmate apply` on the pull request"
 WHERE = "apply aborted for `dev` / `stacks/auth`:"
 
@@ -2373,8 +2376,10 @@ def _tip(sha=BASE):
     return json.dumps({"ref": "refs/heads/main", "object": {"sha": sha, "type": "commit"}})
 
 
-def _record(plan_run, run_id=1, action="synchronize"):
+def _record(plan_run, run_id=1, action="synchronize", plan_sha256=DIGEST, behind=False):
     record = {"plan_run": plan_run} | ({} if action is None else {"action": action})
+    record |= {} if plan_sha256 is None else {"plan_sha256": plan_sha256}
+    record |= {"behind": True} if behind else {}
     return {
         **_check("apply / stacks/auth / dev", "queued", None, run_id=run_id),
         "external_id": json.dumps(record),
@@ -2392,7 +2397,7 @@ def _held():
 
 
 def _verify(monkeypatch, tmp_path, gh, env=None):
-    base = {"SHIPMATE_ENV": "dev", "STACK": "stacks/auth", "SHIPMATE_AUTO": "false"}
+    base = {"SHIPMATE_ENV": "dev", "STACK": "stacks/auth", "SHIPMATE_AUTO": "false", **COMMANDED}
     return _main(monkeypatch, tmp_path, "verify", gh, {**base, **(env or {})})
 
 
@@ -2404,10 +2409,11 @@ def _verify_refusal(monkeypatch, tmp_path, gh, env=None):
 
 
 def test_verify_passes_a_cell_our_pull_request_holds_at_the_head(monkeypatch, tmp_path):
-    """Outside the auto form the base tip is not read (the strict double refuses an extra read).
-    Mutation: refuse when the holder is our pull request (`held.pr != pr` for `==`). Mutation:
-    return before the pull request read (its queued answer is left unconsumed)."""
-    gh = _held().on(PULL_READ, _pull())
+    """Outside the auto form the base tip and the cell's record are read, and nothing else (the
+    strict double refuses an extra read). Mutation: refuse when the holder is our pull request
+    (`held.pr != pr` for `==`). Mutation: return before the pull request read (its queued answer
+    is left unconsumed)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(RECORD_READ, _records(RUN))
     assert _verify(monkeypatch, tmp_path, gh) == {}
     assert gh.drained()
 
@@ -2546,7 +2552,7 @@ def test_verify_refuses_a_later_run_attempt_before_any_read(monkeypatch, tmp_pat
 
 def test_verify_passes_the_first_run_attempt(monkeypatch, tmp_path):
     """Mutation: refuse attempt 1 too (`attempt != "0"`; refuses)."""
-    gh = _held().on(PULL_READ, _pull())
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(RECORD_READ, _records(RUN))
     assert _verify(monkeypatch, tmp_path, gh, {"GITHUB_RUN_ATTEMPT": "1"}) == {}
 
 
@@ -2575,7 +2581,8 @@ def test_verify_auto_refuses_a_draft_state_that_is_not_a_boolean(monkeypatch, tm
 def test_verify_outside_auto_reads_no_draft_state(monkeypatch, tmp_path):
     """Mutation: return only for a non-draft (`auto == "false" and not pull["draft"]`; the
     draft refuses)."""
-    gh = _held().on(PULL_READ, _pull(draft=True))
+    gh = _held().on(PULL_READ, _pull(draft=True)).on(TIP_READ, _tip())
+    gh.on(RECORD_READ, _records(RUN))
     assert _verify(monkeypatch, tmp_path, gh) == {}
 
 
@@ -2625,16 +2632,21 @@ def test_verify_auto_rereads_the_pushers_permission(
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == f"::error::{WHERE} {reason}"
 
 
+#: The base-moved refusal, every form's, hand-written.
+MOVED = (
+    f"::error::{WHERE} the base branch moved from {BASE} to {OTHER} since this apply was "
+    "detected; this cell and every later wave and environment level of this run are not "
+    "applied. Update the branch from the base and push, then apply again"
+)
+
+
 def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
     """The tip is the branch ref's; `base.sha` would read stale (`_pull`). Mutation: drop the
     base comparison (the cell passes). Mutation: return `pull["base"]["sha"]` from `base_tip`
-    (the stale sha refuses as the moved tip). Mutation: end with `_RETRY`, which offers a bare
-    `shipmate apply` that skips the overlap check -- red."""
+    (the stale sha refuses as the moved tip). Mutation: end with `_RETRY`, whose `shipmate
+    apply` would refuse at detect over the same base -- red."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip(OTHER))
-    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the base branch moved from {BASE} to {OTHER} since this auto apply "
-        "was detected; update the branch from the base and push"
-    )
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == MOVED
 
 
 @pytest.mark.parametrize(
@@ -2762,6 +2774,99 @@ def test_verify_auto_refuses_without_its_plan_run_or_base_before_any_read(
     assert _verify_refusal(monkeypatch, tmp_path, Gh(), got) == (
         f"::error::{WHERE} an auto apply reached the wave without its plan run and base tip "
         f"(got: {got['SHIPMATE_PROVENANCE_RUN']!r}, {got['SHIPMATE_BASE_SHA']!r}); {RETRY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("form", "env"),
+    [
+        pytest.param({}, {"SHIPMATE_BASE_SHA": ""}, id="commanded-no-base"),
+        pytest.param({}, {"SHIPMATE_PLAN_RUN_ID": ""}, id="commanded-no-plan-run"),
+        pytest.param({}, {"SHIPMATE_PLAN_SHA256": ""}, id="commanded-no-digest"),
+        pytest.param({}, {"SHIPMATE_PLAN_SHA256": "E" * 64}, id="commanded-bad-digest"),
+        pytest.param(AUTO, {"SHIPMATE_PLAN_RUN_ID": ""}, id="auto-no-plan-run"),
+        pytest.param(AUTO, {"SHIPMATE_PLAN_SHA256": ""}, id="auto-no-digest"),
+    ],
+)
+def test_verify_refuses_without_its_base_plan_run_or_digest_before_any_read(
+    monkeypatch, tmp_path, form, env
+):
+    """Every pre-merge form needs detect's base tip and the wave row's plan run and digest; the
+    auto form's own check refuses its empty base first.
+
+    Mutation: skip the check when a value is empty (`if all((base, plan_run, digest)) and not
+    ...`) -- the empty rows reach the lock read, red."""
+    got = {**COMMANDED, **form, **env}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), got) == (
+        f"::error::{WHERE} the apply reached the wave without its base tip, plan run and "
+        f"plan-text digest (got: {got['SHIPMATE_BASE_SHA']!r}, "
+        f"{got['SHIPMATE_PLAN_RUN_ID']!r}, {got['SHIPMATE_PLAN_SHA256']!r}); {RETRY}"
+    )
+
+
+def test_verify_refuses_a_commanded_cell_whose_base_moved(monkeypatch, tmp_path):
+    """A bare or targeted wave waited on its approval while a base merge, whatever it changed,
+    landed: the cell refuses. Also the shape of a lock this run acquired after another pull
+    request's deploy released it: that deploy's merge moved the base.
+
+    Mutation: keep the tip comparison `auto`-only -- the cell passes, red."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip(OTHER))
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == MOVED
+
+
+def test_verify_passes_a_commanded_cell_with_one_pull_request_read(monkeypatch, tmp_path):
+    """An unmoved tip and an unchanged record pass: one pull request read, then the base tip
+    and the record (the strict double counts each answer once).
+
+    Mutation: read the pull request again for the base tip -- an unexpected call, red."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(RECORD_READ, _records(RUN))
+    assert _verify(monkeypatch, tmp_path, gh) == {}
+    assert gh.drained()
+
+
+@pytest.mark.parametrize(
+    ("record", "records"),
+    [
+        pytest.param(_record("4243"), "plan run 4243", id="other-run"),
+        pytest.param(
+            _record(RUN, plan_sha256="f" * 64),
+            f"plan run {RUN} with another plan-text digest",
+            id="other-digest",
+        ),
+        pytest.param(
+            _record(RUN, plan_sha256=None),
+            f"plan run {RUN} with another plan-text digest",
+            id="no-digest",
+        ),
+    ],
+)
+def test_verify_refuses_a_commanded_cell_whose_record_changed(
+    monkeypatch, tmp_path, record, records
+):
+    """A newer plan republished the cell's check while the wave waited.
+
+    Mutation: compare the plan run only -- other-digest and no-digest pass, red.
+    Mutation: skip the record check on the commanded forms -- every row passes, red."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(RECORD_READ, jsonl(record))
+    assert _verify_refusal(monkeypatch, tmp_path, gh) == (
+        f"::error::{WHERE} the cell's newest apply check no longer records plan run {RUN} (it "
+        f"records {records}); comment `shipmate plan`, review, then apply"
+    )
+
+
+@pytest.mark.parametrize("form", [{}, AUTO], ids=["commanded", "auto"])
+def test_verify_refuses_a_cell_whose_newest_check_is_behind(monkeypatch, tmp_path, form):
+    """A plan that found the cell behind the base republished its check while the wave waited:
+    the remedy is the branch update, never a re-plan.
+
+    Mutation: read the behind record as another plan run -- the re-plan remedy, red."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
+    if form:
+        gh.on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, jsonl(_record("4243", plan_sha256=None, behind=True)))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, form) == (
+        f"::error::{WHERE} the cell's newest apply check no longer records plan run {RUN} (it "
+        "records a behind check); update the branch from the base and push"
     )
 
 
@@ -3086,3 +3191,45 @@ def test_verify_auto_refuses_a_plan_created_before_the_apply_run_and_re_run_in_t
     if jobs is not None:
         gh.on(NEWER_JOBS, jobs)
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == f"::error::{WHERE} {refusal}"
+
+
+def test_evict_cli_releases_no_lock_on_a_behind_cell(monkeypatch, tmp_path):
+    """auth's newest check is a behind record over an older queued one: this pull request
+    cannot apply it, so #12's lock there stays and only app's lock is evicted.
+
+    Mutation: drop the behind exclusion -- auth's lock is deleted too (an unexpected update),
+    red."""
+    behind = {"plan_run": "5", "pr": "7", "cells": 2, "behind": True}
+    gh = Gh().on(
+        CHECK_RUNS_READ,
+        jsonl(
+            _check("apply / stacks/auth / dev", "queued", None),
+            {
+                **_check("apply / stacks/auth / dev", "queued", None, run_id=4),
+                "external_id": json.dumps(behind),
+            },
+            _check("apply / stacks/app / dev", "queued", None, run_id=3),
+        ),
+    )
+    gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, NEW)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(commit_read(NEW), commit(NEW, message(12, "dev", "stacks/app")))
+    quiet(gh.on(pull_read(12), pull("main")), 12)
+    gh.on(REPO_ID_READ, REPO_ID).on(update(APP_REF, NEW, ZERO, False), "{}")
+    assert _main(monkeypatch, tmp_path, "evict", gh, EVICT_ENV) == {
+        "evicted": json.dumps([{"stack": "stacks/app", "environment": "dev", "holder": 12}]),
+        "refused": "[]",
+    }
+    assert gh.drained()
+
+
+def test_verify_auto_refuses_a_wave_row_of_another_plan_run_before_any_read(monkeypatch, tmp_path):
+    """apply-cell downloads the plan of the wave row's run, so under `auto` it must be the
+    provenance run every other check judges.
+
+    Mutation: drop the row-run comparison -- the lock read runs, unexpected, red."""
+    env = {**AUTO, "SHIPMATE_PLAN_RUN_ID": "4243"}
+    assert _verify_refusal(monkeypatch, tmp_path, Gh(), env) == (
+        f"::error::{WHERE} the wave row applies plan run 4243, not plan run {RUN}, which this "
+        f"auto apply applies; {RETRY}"
+    )

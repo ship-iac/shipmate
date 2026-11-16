@@ -1,5 +1,5 @@
 name: shipmate apply-detect
-description: A targeted apply computes one environment's work set from the head's apply checks and wave-orders it at env-level 0. A bare apply (empty environment) computes the work set of every environment not `targeted`, buckets it into env-levels and wave-orders each level. Every form skips already-applied cells. The auto form (`auto`) is the bare form over the environments whose `apply_mode` is `auto`, with the refusals the `auto` input names. Writes the apply result comment's fields to `report-path` (`scripts/apply-detect` `write_report`). Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read, and pull-requests:read for the auto form.
+description: A targeted apply computes one environment's work set from the head's apply checks and wave-orders it at env-level 0. A bare apply (empty environment) computes the work set of every environment not `targeted`, buckets it into env-levels and wave-orders each level. Every form skips already-applied cells. The bare and targeted forms refuse the whole run when a cell they would apply is behind the base (the merge of the base into the branch changes its stack, or its apply check records that its plan found the base changed it). The auto form (`auto`) is the bare form over the environments whose `apply_mode` is `auto`, with the refusals the `auto` input names, and holds such a cell instead. Writes the apply result comment's fields to `report-path` (`scripts/apply-detect` `write_report`). Needs a full-history checkout of the head. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read, contents:read and pull-requests:read.
 inputs:
   environment:
     description: Target environment, e.g. dev-eu. Empty runs the bare form over every pending environment.
@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ''
   auto:
-    description: "'true' runs the auto form, the bare form over the `apply_mode: auto` environments, dispatched by the App after an autoplan: it refuses unless the actor is the App's bot, the plan is the head's newest autoplan, no newer shipmate plan run of the pull request is live or planned, its pusher has write access and the pull request is mergeable at this head, and holds a cell whose stack the merge of the base into the branch changes, directly or through a module it sources, or removes files in. Needs a full-history checkout of the head."
+    description: "'true' runs the auto form, the bare form over the `apply_mode: auto` environments, dispatched by the App after an autoplan: it refuses unless the actor is the App's bot, the plan is the head's newest autoplan, no newer shipmate plan run of the pull request is live or planned, its pusher has write access and the pull request is mergeable at this head, and holds a cell whose stack the merge of the base into the branch changes, directly or through a module it sources, or removes files in, or whose apply check records that its plan found the base changed it."
     required: false
     default: "false"
   report-path:
@@ -42,7 +42,7 @@ outputs:
   envlevel3_empty: { description: "'true' when env-level 3 has no cell in any wave.", value: "${{ steps.d.outputs.envlevel3_empty }}" }
   head_sha: { description: "The echoed head SHA.", value: "${{ steps.d.outputs.head_sha }}" }
   provenance_run: { description: "Auto form only: the autoplan run every applied cell's record names; empty when no cell applies.", value: "${{ steps.d.outputs.provenance_run }}" }
-  base_sha: { description: "Auto form only: the tip of the pull request's base branch, read from its ref after the mergeability wait, that the report's overlap cells were computed on; empty when no environment had a pending cell to consider.", value: "${{ steps.d.outputs.base_sha }}" }
+  base_sha: { description: "The tip of the pull request's base branch, read from its ref (in the auto form after the mergeability wait), that the behind cells were computed on; empty when no cell was selected to apply.", value: "${{ steps.d.outputs.base_sha }}" }
   refusal: { description: "The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the apply result comment. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.", value: "${{ steps.d.outputs.refusal }}" }
 runs:
   using: composite

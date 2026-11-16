@@ -79,6 +79,48 @@ def autoplans_read(repo, head):
     ]
 
 
+#: The base tip `base_answers` gives a commanded detect.
+BASE_TIP = "b" * 40
+
+
+def base_answers(repo, base="main", tip=BASE_TIP):
+    """`(path, body)` pairs answering a commanded detect's pull request read and base branch ref
+    read in `repo`: pull request `PR_NUMBER` on base branch `base`, whose tip is `tip`."""
+    ref = {"ref": f"refs/heads/{base}", "object": {"sha": tip, "type": "commit"}}
+    return [
+        (f"repos/{repo}/pulls/{PR_NUMBER}", json.dumps({"base": {"ref": base}})),
+        (f"repos/{repo}/git/ref/heads/{base}", json.dumps(ref)),
+    ]
+
+
+def routed(answers, default):
+    """A `gh api` body source: the body `answers` maps a request's `repos/` path to (raised when
+    it is an exception), else `default()`."""
+
+    def body(url):
+        if url not in answers:
+            return default()
+        if isinstance(answers[url], BaseException):
+            raise answers[url]
+        return answers[url]
+
+    return body
+
+
+def stub_base_changed(monkeypatch, bm, changed=(), calls=None):
+    """Stub `build-matrix` module `bm`'s `base_changed_stacks` to answer `changed` (raised when
+    it is an exception), appending each `(base tip, sorted candidate stacks)` to `calls`."""
+
+    def base_changed(base_ref, candidates):
+        if calls is not None:
+            calls.append((base_ref, sorted(candidates)))
+        if isinstance(changed, BaseException):
+            raise changed
+        return set(changed)
+
+    monkeypatch.setattr(bm, "base_changed_stacks", base_changed)
+
+
 def check_run(**kw):
     """One check-run object as the detects' `--jq` projection emits it."""
     base = {
@@ -127,6 +169,29 @@ def _apply_check(
         conclusion=None,
         external_id=_record(plan_run, plan_sha256, pr, cells=cells, action=action),
         **kw,
+    )
+
+
+def behind_check(stack, env="dev-eu", plan_run="123457", *, cells, **kw):
+    """A queued App-authored apply check carrying a behind record, as pending-checks writes it
+    for a cell whose stack the base changed after the branch left it: no digest, `behind`
+    true."""
+    record = {"plan_run": plan_run, "pr": PR_NUMBER, "cells": cells, "action": "synchronize"}
+    return check_run(
+        name=f"apply / {stack} / {env}",
+        status="queued",
+        conclusion=None,
+        external_id=json.dumps({**record, "behind": True}),
+        **kw,
+    )
+
+
+def behind_message(cells, base="main"):
+    """The refusal a bare or targeted detect raises when `cells`, `<stack> / <env>` strings,
+    are behind base branch `base`, hand-written."""
+    return (
+        f"::error::apply refused: {len(cells)} cell(s) behind {base} ({', '.join(cells)}); "
+        f"update the branch from {base} and push."
     )
 
 

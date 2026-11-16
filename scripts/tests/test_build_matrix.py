@@ -3646,6 +3646,135 @@ def test_base_changed_stacks_refuses_a_merge_conflict_before_any_worktree(git_re
     assert [a for a in seen if "worktree" in a] == []
 
 
+def _conflicted(git_repo):
+    """`pr` deletes `stacks/a/main.tf`, `main` edits it: the merge conflicts. Returns (head,
+    base tip), with `pr` checked out."""
+    _commit({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n"}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    head = _commit({"stacks/a/main.tf": None}, "delete a")
+    _git("checkout", "-q", "main")
+    tip = _commit({"stacks/a/main.tf": "a edit\n"}, "base edit")
+    _git("checkout", "-q", "pr")
+    return head, tip
+
+
+def test_base_changed_stacks_raises_a_merge_conflict_as_its_own_type(git_repo, monkeypatch):
+    """A conflict raises `MergeConflict` with the merge refusal's whole text.
+
+    Mutation: raise a plain `SystemExit` on a conflict -- the type, red."""
+    head, tip = _conflicted(git_repo)
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/b"})
+    assert type(e.value) is bm.MergeConflict
+    assert e.value.code == (
+        "::error::change detection on the merge of the base into the branch failed: "
+        f"CONFLICT (modify/delete): stacks/a/main.tf deleted in {head} and modified in {tip}.  "
+        f"Version {tip} of stacks/a/main.tf left in tree. Update the branch from the base and "
+        "push."
+    )
+
+
+@pytest.mark.parametrize("step", ["diff", "worktree"])
+def test_base_changed_stacks_raises_any_other_merge_failure_as_a_plain_system_exit(
+    git_repo, monkeypatch, step
+):
+    """A failed diff of the merge from `HEAD`, and a failed worktree add, refuse as a plain
+    `SystemExit`: only a conflict is a `MergeConflict`.
+
+    Mutation: raise `MergeConflict` for every merge failure -- the type, red."""
+    _, tip = _base_moved_a_module(git_repo)
+    real_run, real_bare, diffs = bm.run, bm._run, []
+
+    def fail(args, real, **kw):
+        if step == "diff" and args[1] == "diff":
+            diffs.append(args)
+            if len(diffs) == 2:
+                raise SystemExit("::error::command failed (128): git diff\nfatal: bad diff")
+        if step == "worktree" and args[1:3] == ["worktree", "add"]:
+            raise SystemExit("::error::command failed (128): git worktree add\nfatal: no add")
+        return real(args, **kw)
+
+    monkeypatch.setattr(bm, "run", lambda args, **kw: fail(args, real_run, **kw))
+    monkeypatch.setattr(bm, "_run", lambda args: fail(args, real_bare))
+    with pytest.raises(SystemExit) as e:
+        bm.base_changed_stacks(tip, {"stacks/app"})
+    assert type(e.value) is SystemExit
+    cause = "fatal: bad diff" if step == "diff" else "fatal: no add"
+    assert e.value.code == (
+        f"::error::change detection on the merge of the base into the branch failed: {cause}. "
+        "Update the branch from the base and push."
+    )
+
+
+def test_base_changed_stacks_checks_the_merge_out_without_an_lfs_smudge(
+    git_repo, monkeypatch, tmp_path
+):
+    """`*.bin` routes to a required filter whose smudge exits 1 unless `GIT_LFS_SKIP_SMUDGE=1`
+    is in its environment, as the git-lfs binary reads it (CI installs no git-lfs). The worktree
+    add succeeds and holds the file.
+
+    Mutation: add the worktree with the runner's environment alone -- the smudge fails the add,
+    red."""
+    _commit({".gitattributes": "*.bin filter=fake\n", "stacks/app/blob.bin": "blob\n"}, "attrs")
+    _, tip = _base_moved_a_module(git_repo)
+    smudge = tmp_path / "smudge.sh"
+    smudge.write_bytes(b'[ "$GIT_LFS_SKIP_SMUDGE" = 1 ] || exit 1\nexec cat\n')
+    _git("config", "filter.fake.smudge", f"sh '{smudge.as_posix()}'")
+    _git("config", "filter.fake.clean", "cat")
+    _git("config", "filter.fake.required", "true")
+    monkeypatch.delenv("GIT_LFS_SKIP_SMUDGE", raising=False)
+
+    def listing(tree):
+        assert (tree / "stacks/app/blob.bin").read_bytes() == b"blob\n"
+        return "stacks/app\n"
+
+    seen = _merge_stub(monkeypatch, listing)
+    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+    assert len(seen) == 1  # Not vacuous: the worktree was listed.
+
+
+@pytest.mark.parametrize("listed", ["stacks/app\n", SystemExit("::error::x\nError: no list")])
+def test_base_changed_stacks_warns_on_a_failed_worktree_removal(
+    git_repo, monkeypatch, capsys, listed
+):
+    """A failed `git worktree remove` prints one `::warning::` naming the worktree and leaves
+    the listing's result, or its refusal, standing.
+
+    Mutation: let the removal's `SystemExit` escape -- the removal's error replaces the result
+    and the listing's cause, red.
+    Mutation: catch the listing's `SystemExit` and return the removed-file stacks -- the
+    listing's refusal is swallowed, red."""
+    _, tip = _base_moved_a_module(git_repo)
+    trees, real = [], bm.run
+
+    def run(args, **kw):
+        if args[1:3] == ["worktree", "remove"]:
+            trees.append(args[-1])
+            raise SystemExit("::error::command failed (1): git worktree remove\nfatal: busy")
+        return real(args, **kw)
+
+    def listing(tree):
+        if isinstance(listed, BaseException):
+            raise listed
+        return listed
+
+    monkeypatch.setattr(bm, "run", run)
+    _merge_stub(monkeypatch, listing)
+    if isinstance(listed, BaseException):
+        with pytest.raises(SystemExit) as e:
+            bm.base_changed_stacks(tip, {"stacks/app"})
+        assert e.value.code == (
+            "::error::change detection on the merge of the base into the branch failed: Error: "
+            "no list. Update the branch from the base and push."
+        )
+    else:
+        assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+    assert capsys.readouterr().out == (
+        f"::warning::could not remove the merge worktree {trees[0]} (command failed (1): git "
+        "worktree remove | fatal: busy)\n"
+    )
+
+
 _LINES = "".join(f"line {n}\n" for n in range(8))
 _EXACT = ({"modules/m/main.tf": "m\n"}, None)
 # Four renames past a limit of 1, each with an appended line so no exact match pairs them.
@@ -3946,8 +4075,7 @@ def test_base_changed_stacks_lists_nothing_when_the_base_changed_nothing(git_rep
 
 
 def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
-    """The remedy is a push from the updated branch, never a bare `shipmate apply`, which runs
-    no overlap check.
+    """The remedy is a push from the updated branch.
 
     Mutation: skip the fetch's exit status -- `merge_base` refuses instead, red. Mutation: end
     with "Push again, or comment `shipmate apply`." -- red."""

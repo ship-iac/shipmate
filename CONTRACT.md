@@ -193,8 +193,13 @@ gate"):
 `apply-env-level.yml` writes an `apply / <stack> / <env>` check only through the
 check-run ids `actions/apply-snapshot` recorded for that name in the `snapshot`
 job, before the first wave, and only ids whose check was not yet `completed`: a
-completed same-head duplicate is never relinked or retitled. A cell with no such
-id refuses the run before wave0.
+completed same-head duplicate is never relinked or retitled. An id is also
+recorded only when its check's record names the wave row's plan run and
+plan-text digest, or an older plan run and no behind record: a check a newer
+plan, or a plan that found the cell behind the base, published after `detect`
+is never completed by this run, while an older plan's unfinished duplicate is
+completed with the cell. A cell with no check recording the wave row's plan
+refuses the run before wave0.
 
 1. Created `queued` by `actions/summary`, titled with the plan's counts, its
    summary the plan. Its `external_id` is a compact JSON record of the id of
@@ -2463,14 +2468,14 @@ not this deleter's lock, and done; still on the same commit refuses.
 
 | Event | Job | Effect |
 | --- | --- | --- |
-| `shipmate apply`, bare or targeted | `apply-run.yml` `detect` | Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
+| `shipmate apply`, bare or targeted | `apply-run.yml` `detect` | Refuses the whole run first when a cell it would apply is behind the base (§`apply_mode: auto`, Behind the base, bare and targeted). Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
 | the same run | `apply-run.yml` `lock`, after `detect` and before the first env-level | Locks every cell the env-levels will apply. A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
-| merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff |
+| merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it |
 | merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below) |
 | merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
 | close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
-| `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head; refuses, deleting none and naming every such holder in the run log (the reply may summarise past 4,000 characters), when a holder is stacked on this pull request at any depth, its walk is cut short or it cannot be read, or while a run that may still apply a holder's cells is live or the runs cannot all be read (§Comment-ops) |
+| `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head and is no behind record, a cell this pull request cannot apply; refuses, deleting none and naming every such holder in the run log (the reply may summarise past 4,000 characters), when a holder is stacked on this pull request at any depth, its walk is cut short or it cannot be read, or while a run that may still apply a holder's cells is live or the runs cannot all be read (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder names its chain and says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`; a holder whose walk is cut short gets a `could not tell` line instead and leaves the gate alone (§Plan comment) |
 
 **Acquisition.** For each cell, `lock` creates the ref. When the create fails,
@@ -2514,18 +2519,21 @@ credentials. It refuses unless the pull request holds the cell's lock (an evicti
 or a release after a close, takes it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
 cell lock (<why>); comment `shipmate apply` again to lock it or name its holder ``,
-and unless the pull request is open at the applied head. Under `apply_mode: auto`
-it also refuses unless the run attempt is `1`, the pull request is not a draft, the plan run detect bound is
+unless the pull request is open at the applied head, unless the run attempt is
+`1`, unless the base branch's tip,
+read from its ref, is still the one detect read, whatever the stack, and unless the
+cell's newest apply check still records the wave row's plan run and plan-text digest
+and is no behind record (§`apply_mode: auto`, Wave re-check, for the texts). Under
+`apply_mode: auto` it also refuses unless the wave row's plan run is the plan run detect bound, the pull request is not a draft, the plan run detect bound is
 still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action (`opened` or
 `synchronize`), no newer `shipmate plan` run of the pull request created since the plan run
-is live or planned, the plan run's pusher
+is live or planned, and the plan run's pusher
 still passes detect's pusher check (§`apply_mode: auto`, same function and
-wording), and the base branch's tip, read from its ref, is still the one detect read,
-whatever the stack. Mergeability is not re-read: a base move refuses already. A read that fails refuses with
+wording). Mergeability is not re-read: a base move refuses already. A read that fails refuses with
 `` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
-or comment `shipmate apply` on the pull request ``, and every other mismatch names
-itself with the same remedy; a closed pull request refuses with `nothing applies`. A refused cell assumes no cloud role, and the apply
+or comment `shipmate apply` on the pull request ``, and every other `auto`
+mismatch names itself with the same remedy; a closed pull request refuses with `nothing applies`. A refused cell assumes no cloud role, and the apply
 result comment gives it the refusal, less its `apply aborted for` prefix, as the
 blocked reason, or `could not confirm the pull request still allows this apply (see
 the job log)` when no refusal arrived. A merge deploy's cell runs the check in its
@@ -2841,7 +2849,10 @@ and system and XDG attributes, and pins `merge.renames=true`,
 against repository config; `safe.directory=*` disables the ownership check for
 this step, because the isolation drops the runner's exemption. The merge step's
 own `commit-tree`, `git diff` and `git worktree add`, and the listing's git and
-Terramate calls, run with normal config. The engine checkout's `.git/config` and
+Terramate calls, run with normal config; `git worktree add` sets
+`GIT_LFS_SKIP_SMUDGE=1`, so Git LFS content is not downloaded, and a worktree
+that cannot be removed afterwards draws a `::warning::` naming it, never a
+refusal. The engine checkout's `.git/config` and
 `.git/info/attributes` and the consumer's tracked `.gitattributes` (for example
 `merge=union`) still shape the merge, as the consumer chose. Detection is
 skipped when the base changed no file since the merge base of the base tip and
@@ -2866,7 +2877,32 @@ applied: its apply check and the gate stay pending, it stops its environment's
 the result comment names it with ``⚪ held, the base changed these stacks after
 this branch left it, so their plans would revert that change: <cells>. Update
 the branch from the base and push.`` The push re-plans, and its autoplan
-dispatches again. The bare and targeted forms run no overlap check.
+dispatches again. A cell whose newest apply check is a behind record (its plan
+found that the base changed its stack after the branch left it) is held the same
+way and named on the same line.
+
+**Behind the base, bare and targeted.** A bare or targeted `shipmate apply`
+selects the cells it would apply: a bare apply's pending cells in environments
+neither held for review nor `targeted`, a targeted apply's pending cells of its
+environment. With a selected cell, `detect` reads the pull request once and the
+base tip from the branch ref, and runs the change detection above over the
+selected cells' stacks, before any lock read. When it holds a selected cell, or
+a selected cell's newest apply check is a behind record, the whole run refuses
+with ``apply refused: <n> cell(s) behind <base> (<stack> / <env>, ...); update
+the branch from <base> and push.``, and nothing applies; the result comment
+names the cells on ``⚪ not applied, behind <base>: <cells>. Update the branch
+from <base> and push.`` (§Apply result comment). A merge conflict refuses as
+above. A pull request or tip read that fails refuses with ``apply refused: could
+not read the base tip of pull request #<n> (<why>); comment `shipmate apply`
+again.`` A cell that is not selected is not checked. `detect` writes the tip it
+checked as `base_sha` for the wave re-check, and checks out the head's full
+history, blobless, on every form. The merge deploy refuses a pending cell whose
+newest apply check is a behind record, after its stranded-check refusal and
+before it reads any plan run: ``deploy aborted: <stack> / <env>, ...: each was
+planned behind the base, so no reviewed plan exists for it.``, followed by the
+cells of the merge it leaves unapplied and the new pull request that plans them
+all afresh ([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy
+refused a cell planned behind the base).
 
 **`needs` predecessors.** An `auto` environment whose `needs` predecessor does
 not fully apply this run is skipped, its checks pending, and the result comment
@@ -2876,14 +2912,17 @@ names the predecessor with its remedy by kind: `` `shipmate apply <pred>` `` for
 apply this run; see its line below` for one holding a locked, overlap or waiting
 cell, and `shipmate apply` otherwise (§Apply result comment).
 
-**Wave re-check.** Each `auto` wave cell's pre-apply check (§Cell locks) also
-refuses unless the run attempt is `1`, the plan run `detect` bound is still the
+**Wave re-check.** Every pre-merge wave cell's pre-apply check (§Cell locks)
+refuses unless the run attempt is `1`, the base tip, read from the branch ref,
+is still the one `detect` read, and the cell's newest apply check still records
+the wave row's plan run and plan-text digest and is no behind record. Each
+`auto` wave cell also refuses unless the wave row's plan run is the plan run
+`detect` bound, which apply-cell downloads, the plan run `detect` bound is still the
 head's newest autoplan, a `pull_request_target` run of the head, and the run the
 cell's newest plan record names, that record names a push event action
 (`opened` or `synchronize`), the pull request is still not a draft, no newer
-`shipmate plan` run of the pull request counts (the Newer plan check above), the
-pusher still passes the pusher check above, and the base tip, read from the
-branch ref, is still the one `detect` read. The cell lists the plan runs created
+`shipmate plan` run of the pull request counts (the Newer plan check above), and
+the pusher still passes the pusher check above. The cell lists the plan runs created
 since the plan run's `created_at`, the window `detect` read, not since the apply
 run's: a plan run `detect` listed as ended can be re-run while the wave waits,
 keeping its `created_at`, and one missing from `detect`'s lagging listing shows
@@ -2903,9 +2942,20 @@ one missing from a listing read seconds after its dispatch, and a re-run of a
 plan run created before the plan run, at `detect` or at the cell, do not stop
 that cell. The base comparison is whole-branch,
 whatever the stack: a wave cannot run Terramate's change detection before its
-credentials. It fails closed, so a base that moves while a wave waits on an
-environment approval refuses that wave. Update the branch from the base and
-push: a bare `shipmate apply` runs no overlap check.
+credentials. It fails closed, so any base merge, whatever stack it changed,
+refuses a wave still waiting on its approval, with ``apply aborted for `<env>` /
+`<stack>`: the base branch moved from <a> to <b> since this apply was detected;
+this cell and every later wave and environment level of this run are not
+applied. Update the branch from the base and push, then apply again``. A base
+merge during a running bare apply so refuses every later wave and environment
+level, and leaves the run half-applied until the branch is updated and applied
+again, whose `detect` runs the per-stack check. A changed record refuses with
+``apply aborted for `<env>` / `<stack>`: the cell's newest apply check no longer
+records plan run <n> (it records <plan run m, no plan run, or plan run n with
+another plan-text digest>); comment `shipmate plan`, review, then apply``, and a
+behind record with ``... (it records a behind check); update the branch from the
+base and push``. An empty base tip, plan run or digest refuses the cell before
+any read.
 
 **Visibility.** An `auto` run posts the apply result comment as a bare apply
 does, under `### shipmate apply`, also when it applies nothing: its verdict and
@@ -3274,7 +3324,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
-  PyYAML ≥ 6 importable by it), `git` ≥ 2.38 (the `auto` overlap check runs
+  PyYAML ≥ 6 importable by it), `git` ≥ 2.38 (every apply `detect`'s change detection runs
   `git merge-tree --write-tree`), `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
   coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate and OpenTofu
   downloads with it; `apply-cell` hashes the rendered plan from stdin and reads the first
@@ -4059,12 +4109,16 @@ posts the outcome reply, which links the run (§Outcome reply).
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, an `auto` run's line
-(§`apply_mode: auto`), the error fence, one line or fold-out per row, the notes,
+(§`apply_mode: auto`), the behind line, the error fence, one line or fold-out per row, the notes,
 the footer lines, and, under any verdict but 🟢, the help hint
 ``Comment `shipmate help` for the available commands.`` A 🟢 comment has no
 footer. A run with no rows to render is the header, the verdict line, an `auto`
-run's line, the error fence, the footer lines and, under any verdict but 🟢,
-the hint. The error fence shows when `detect` or the `lock` job failed with an
+run's line, the behind line, the error fence, the footer lines and, under any verdict but 🟢,
+the hint. The behind line, ``⚪ not applied, behind <base>: <cells>. Update the
+branch from <base> and push.``, shows when a bare or targeted `detect` refused
+cells behind the base (§`apply_mode: auto`, Behind the base, bare and
+targeted): it names each as `<stack> / <env>` comma-separated and the base
+branch, from the report that refusal wrote, with or without a refusal text. The error fence shows when `detect` or the `lock` job failed with an
 `::error::` (a refusal or a failed tool or API call): its first error on one
 line, in a plain code fence, cut at 4,000 characters and fenced longer than any
 backtick run in it. A failed `detect` skips `lock`, so at most one of them
@@ -4150,7 +4204,11 @@ names an error. A job that failed without an `::error::` renders no fence.
   apply check is already done (see the derivation rules below).
 - **Notes**, each on its own line when it has content: `state lock held:`,
   naming each cell whose apply could not acquire the lock, the lock id, when it
-  was taken, and the `shipmate unlock` command; `state not saved:`, naming
+  was taken, and the `shipmate unlock` command; ``stale plan: <cells>. The
+  cell's state changed after this plan; comment `shipmate plan`, review the new
+  plan, then apply.``, naming each failed cell whose apply output holds
+  OpenTofu's `│ Error: Saved plan is stale` line once its colour is stripped,
+  at most five then `and <n> more`; `state not saved:`, naming
   the cells whose state was not saved; `not recorded:`, naming the
   not-recorded cells; and ``not attempted: the apply checks stay pending;
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
@@ -4213,7 +4271,8 @@ actionable warning cannot be lost on either path. In the order they render:
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
   it, so their plans would revert that change: <cells>. Update the branch from
   the base and push.``, one line naming each of an `auto` apply's overlap cells
-  (the report's `held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
+  (the report's `held_cells` with `cause` `overlap`, §`apply_mode: auto`: a
+  stack the base changed, or a behind record) as
   `<stack> / <env>` comma-separated. Only the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
@@ -5139,7 +5198,7 @@ re-comment applies it again (`docs/troubleshooting.md`
 An `auto` apply is the bare form over the `apply_mode: auto` environments
 (§`apply_mode: auto`), with two more causes of not fully applying: every pending
 environment that is not `auto`, and an `auto` environment holding a cell the
-base also changed (an overlap cell). Both skip the environments ordered after
+base also changed, or whose apply check is a behind record (an overlap cell). Both skip the environments ordered after
 them, and a cell that runs after an overlap cell, or after a pending cell of an
 environment that is not `auto`, waits. The apply-all-detect notice counts the
 overlap cells as `overlap=<n>` and names every skipped environment

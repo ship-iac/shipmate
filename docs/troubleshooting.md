@@ -455,6 +455,10 @@ reference names included ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
 fingerprint). That error names the current variable names only; it never
 prints a value.
 
+The apply result comment names each cell OpenTofu refused this way in a note:
+``stale plan: <cells>. The cell's state changed after this plan; comment `shipmate
+plan`, review the new plan, then apply.``
+
 The fix is a re-plan and an apply of the fresh plan. On an open pull request,
 comment `shipmate plan` or push; re-running the old run's plan jobs does not
 re-plan, because their artifact uploads 409. After the merge, open a new pull
@@ -2507,7 +2511,8 @@ run with no cell result rows that holds a locked cell reads `⚪ nothing applied
 pending cells are locked or the base also changed their stacks`.
 
 The merge of the base into the branch changes those stacks, directly or
-through a module they source, or removes files in them. A stack is not held for
+through a module they source, or removes files in them, or a cell's apply check
+records that its plan found the base changed its stack. A stack is not held for
 a base change the branch already holds. When the base edited a file in a stack
 the branch renamed, the stack is held, or refused as a conflict when git does
 not pair the rename; a base delete of that file, or a base rename of it to
@@ -2520,9 +2525,8 @@ branch from the base and push`), and the environments ordered after their enviro
 entry). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
-its autoplan dispatches again. Do not comment `shipmate apply` instead: the bare
-and targeted forms run no overlap check, so they apply the plan as reviewed and
-revert the base's change.
+its autoplan dispatches again. Commenting `shipmate apply` instead refuses over
+the same cells (§`apply refused: <n> cell(s) behind <base>`).
 
 ### A bare or `auto` apply skipped an environment, or left one pending
 
@@ -2550,6 +2554,30 @@ When nothing applied, the verdict reads `⚪ nothing applied, the pending
 environments wait on the lines below`. Follow each line's remedy; once the
 predecessors have applied, comment `shipmate apply`, or push.
 
+### `apply refused: <n> cell(s) behind <base>`
+
+The annotation, and the apply result comment's error fence, read ``apply
+refused: <n> cell(s) behind <base> (<stack> / <env>, ...); update the branch from
+<base> and push.``, and the comment carries ``⚪ not applied, behind <base>:
+<cells>. Update the branch from <base> and push.`` Nothing applied.
+
+A bare or targeted `shipmate apply` checks every cell it would apply: the merge
+of the base into the branch changes its stack, directly or through a module it
+sources, or removes files in it, or its apply check records that its plan found
+the base changed it. Its plan was made on the branch's tree, so applying it
+would revert the base's change, and the whole run refuses. A cell of an
+environment the apply does not select (held for review, or `targeted` on a bare
+apply) is not checked.
+
+Update the branch from the base and push. The push re-plans on the new tree;
+review the plan, then apply again.
+
+A failed read of the pull request or its base tip refuses with ``apply refused:
+could not read the base tip of pull request #<n> (<why>); comment `shipmate
+apply` again.`` A merge conflict refuses with `change detection on the merge of
+the base into the branch failed: <cause>. Update the branch from the base and
+push.` (§`could not resolve the merge base of the pull request's base`).
+
 ### An apply cell refused: ``apply aborted for `<env>` / `<stack>`: ...``
 
 Every pre-merge apply cell, on every apply form, runs a read-only pre-apply check
@@ -2571,14 +2599,31 @@ reason. On every form it refuses when:
   dispatches its own apply; there is nothing to do.
 - `could not confirm <what> (<why>)`: a read failed. Comment `shipmate apply`,
   or push.
+- `the base branch moved from <sha> to <sha> since this apply was detected;
+  this cell and every later wave and environment level of this run are not
+  applied`: any push to the base branch refuses the wave, whatever the stack,
+  because a wave cannot repeat `detect`'s per-stack check before its
+  credentials. A base merge during a running bare apply leaves it half-applied.
+  Update the branch from the base and push, then apply again: its `detect` runs
+  the per-stack check.
+- `the cell's newest apply check no longer records plan run <n> (it records
+  <what>)`: a newer plan republished the cell's check while the wave waited.
+  Comment `shipmate plan`, review, then apply. When it records `a behind check`,
+  that plan found the base changed the stack: update the branch from the base
+  and push.
+- `the apply reached the wave without its base tip, plan run and plan-text
+  digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
+- `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
+  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
+  check and its completion jobs write only successes, since a later run may have
+  completed those checks already. Comment `shipmate apply`. A merge deploy's
+  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
+  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
+  and the cell refuses on the attempt number. Otherwise a commented apply's claim
+  finds its comment taken and the run does nothing, and an `auto` run refuses at
+  `detect` (`a re-run of an auto apply never applies`).
 
 An `auto` cell also refuses when:
-
-- `the base branch moved from <sha> to <sha> since this auto apply was
-  detected`: any push to the base branch refuses the wave, whatever the stack,
-  because a wave cannot repeat `detect`'s per-stack overlap check before its
-  credentials. Update the branch from the base and push. A bare
-  `shipmate apply` is no remedy: it runs no overlap check.
 - `the newest autoplan of <head> is run <n>, not plan run <p>, which this auto
   apply applies` (or `is not listed`), or `the cell's newest plan record names
   plan run <r>, not plan run <p>` (or `names no plan run`): a newer autoplan, or
@@ -2605,15 +2650,10 @@ An `auto` cell also refuses when:
   or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
-- `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
-  were re-run ("Re-run failed jobs"). A re-run's release jobs write no apply
-  check and its completion jobs write only successes, since a later run may have
-  completed those checks already. Comment `shipmate apply`. A merge deploy's
-  re-run is allowed. "Re-run all jobs" reaches this check only when an earlier
-  attempt's claim failed before its reaction landed: the re-run's claim then answers 201,
-  and the cell refuses on the attempt number. Otherwise a commented apply's claim
-  finds its comment taken and the run does nothing, and an `auto` run refuses at
-  `detect` (`a re-run of an auto apply never applies`).
+- `the wave row applies plan run <r>, not plan run <p>, which this auto apply
+  applies`: the wave matrix and the provenance run `detect` bound disagree, so
+  the plan the cell would download is not the one checked. Comment `shipmate
+  apply`.
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
 - a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),
@@ -2660,7 +2700,7 @@ holds; git's own error is in the `detect` annotation after the colon.
    checkout; it may have been force-pushed away from the base branch. Update the
    branch from the base and push.
 
-An `auto` apply's `detect` computes the same merge base, between the base tip
+Every apply's `detect` with a cell to apply computes the same merge base, between the base tip
 and the head, to tell whether the base changed any file since the branch left
 it. It refuses with the same text, ending `Update the branch from the base and
 push; if it fails again, the base commit is not reachable from this checkout.`,
@@ -2677,8 +2717,8 @@ anywhere in the repository refuses, not only in a stack, and so does a file the
 base added under a directory the branch renamed: a base commit can land after
 GitHub reported the pull request mergeable. If the runner's git is older than
 2.38 (`git --version`), merge-tree fails here; see
-[`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites. A bare `shipmate apply`
-is no remedy for any of these refusals: it runs no overlap check.
+[`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites. A bare or targeted
+`shipmate apply` runs the same detection and refuses the same way.
 
 ### A public repository's pull request gets no plan, comment or gate status
 
@@ -3060,6 +3100,30 @@ wait.
 - `hold` and `deploy` re-post after a wait with no re-check: a hold can
   overwrite a newer run's gate (a re-plan clears it), and a deploy verdict can
   overwrite a hold on the merged head, where the gate no longer gates a merge.
+
+### A deploy refused a cell planned behind the base
+
+The annotation reads:
+
+```text
+deploy aborted: <stack> / <env>: each was planned behind the base, so no reviewed
+plan exists for it. This deploy applies nothing, so these other cells of this merge
+are not applied either: <other stack> / <env>. Open a new pull request that changes
+every listed stack (any edit that `terramate list --changed` marks, such as a comment
+line). It plans the current default branch for all of them, this merged change
+included, and its cells are applied before merge under a required gate (`shipmate
+apply`, and `shipmate apply <env>` for a `targeted` environment), or by its deploy
+otherwise. Re-running this deploy checks out the same commit and refuses again. This
+deploy's apply checks are never read again and stay open on the merged pull request.
+```
+
+The message is one line; it is wrapped here. The merged pull request's plan
+found that the base had changed these stacks after its branch left them, so it
+planned nothing for them and published a behind apply check instead. The pull
+request merged without being updated from the base, so no reviewed plan of these
+cells exists. Open the pull request the message describes, review its plan, and
+apply it. The merged pull request keeps its cell locks on these cells; the new
+pull request's `shipmate unlock <env> --evict` releases them.
 
 ### A deploy refused an apply check on a stack that lost its env tag
 

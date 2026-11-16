@@ -1,0 +1,6 @@
+[31m╷[0m[0m
+[31m│[0m [0m[1m[31mError: [0m[0m[1mSaved plan is stale[0m
+[31m│[0m [0m
+[31m│[0m [0m[0mThe given plan file can no longer be applied because the state was changed
+[31m│[0m [0mby another operation after the plan was created.
+[31m╵[0m[0m

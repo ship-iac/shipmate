@@ -404,8 +404,10 @@ waiting cell, or holding a cell another pull request locks skips the environment
 ordered after it by `needs`, a review-exempt one included, and its cells that do not apply in the run make the cells ordered `after` them
 wait, which can skip more; §Env apply order computes the whole set. An `auto`
 apply adds two causes: an environment that is not `auto`, and one holding a cell
-whose stack the merge of the base into the branch changes ([`../CONTRACT.md`](../CONTRACT.md)
-§`apply_mode: auto`, Overlap).
+whose stack the merge of the base into the branch changes, or whose apply check
+records that its plan found the base changed it ([`../CONTRACT.md`](../CONTRACT.md)
+§`apply_mode: auto`, Overlap). A bare or targeted apply refuses the whole run over
+such a cell instead (§`apply_mode: auto`, Behind the base, bare and targeted).
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,
 §Env model for `split`, §Env apply order for `needs` and the waiting cells, §Fan-out for
