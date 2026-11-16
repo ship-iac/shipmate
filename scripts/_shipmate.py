@@ -681,10 +681,53 @@ def live_plan_runs(repo, pr_number, run=None):
     `_live_dispatch_runs`'."""
     listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW, run)
     listed = [r for r in listed if r.get("status") != "completed"]
+    return _plans_of(listed, pr_number), complete
+
+
+def _pr_number_str(pr_number):
+    """Raise `ValueError` unless `pr_number` is a str `is_pr_number` accepts: a parsed title's
+    number is a str, so an int would match no run."""
+    if not isinstance(pr_number, str) or not is_pr_number(pr_number):
+        raise ValueError(f"pull request number {pr_number!r} is not a decimal str")
+
+
+def _plans_of(listed, pr_number):
+    """The runs of `listed` that plan pull request `pr_number`, ascending by id: titled
+    `plan pr=<pr_number>`, or titled `shipmate \u00b7 plan pr=<pr_number> ` and more that does not
+    parse. Raises as `_pr_number_str` does."""
+    _pr_number_str(pr_number)
     matched, unparsed = titled_runs(listed, ("plan",), pr_number)
     prefix = re.compile(rf"shipmate \u00b7 plan pr={re.escape(pr_number)} ")
     runs = [r for r, _ in matched] + [r for r in unparsed if prefix.match(r["display_title"])]
-    return sorted(runs, key=lambda r: r["id"]), complete
+    return sorted(runs, key=lambda r: r["id"])
+
+
+_CREATED_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def plan_runs_since(repo, pr_number, since, run=None):
+    """`(runs, complete)`: each `workflow_dispatch` run of `SHIPMATE_WORKFLOW` created at or after
+    `since`, a `created_at` timestamp, that plans pull request `pr_number` (`_plans_of`), any
+    status, any actor, as listed, ascending by id. The listing's `created` filter includes the
+    same second. `complete` is false, and nothing is read, when `since` is not a whole-second
+    UTC timestamp: GitHub answers a malformed filter with an empty listing, not an error. It is
+    also false when a page fails or is malformed, or a run fails `_listed_run` with
+    `display_title` (that run is left out). A run dispatched seconds before the read can be
+    missing from the listing. Raises as `_pr_number_str` does, before any read."""
+    _pr_number_str(pr_number)
+    if not isinstance(since, str) or _CREATED_AT.fullmatch(since) is None:
+        return [], False
+    created = urllib.parse.quote(">=" + since)
+    listed = _pages(
+        f"repos/{repo}/actions/workflows/{SHIPMATE_WORKFLOW}/runs"
+        f"?event=workflow_dispatch&created={created}",
+        "workflow_runs",
+        run,
+    )
+    if listed is None:
+        return [], False
+    shaped = [r for r in listed if _listed_run(r, "display_title")]
+    return _plans_of(shaped, pr_number), len(shaped) == len(listed)
 
 
 def holder_dispatch_runs(repo, holders, run=None):

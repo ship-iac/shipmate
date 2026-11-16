@@ -41,11 +41,21 @@ def forbid_shared_runner(monkeypatch):
     monkeypatch.setattr(_shipmate, "_run", _bypassed)
 
 
+#: The `created_at` `listed_autoplan` gives a run.
+AUTOPLAN_CREATED = "2026-11-15T22:47:48Z"
+
+
 def listed_autoplan(run_id, head, **keys):
     """One run object of the autoplan listing as `apply-gate.autoplan_runs`' `--jq`
-    projects it: a `pull_request_target` run of `head` pushed by `k3np`, `keys` over it."""
+    projects it: a `pull_request_target` run of `head` pushed by `k3np`, created at
+    `AUTOPLAN_CREATED`, `keys` over it."""
     login = {"login": "k3np"}
-    run = {"id": run_id, "event": "pull_request_target", "head_sha": head}
+    run = {
+        "id": run_id,
+        "event": "pull_request_target",
+        "head_sha": head,
+        "created_at": AUTOPLAN_CREATED,
+    }
     return run | {"actor": login, "triggering_actor": login} | keys
 
 
@@ -62,7 +72,7 @@ def autoplans_read(repo, head):
         ),
         "--jq",
         (
-            ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, "
+            ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, created_at, "
             "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} "
             "| tojson"
         ),
@@ -239,3 +249,54 @@ def stub_read_locks(monkeypatch, cl, locks=None, reads=None):
         return dict(locks or {})
 
     monkeypatch.setattr(cl, "read_locks", read_locks)
+
+
+def dispatched_plan(run_id, pr, status="in_progress", **keys):
+    """One run of the `workflow_dispatch` listing of `shipmate.yml`, shaped like `gh api
+    'repos/ship-iac/repo-example-stacks/actions/workflows/shipmate.yml/runs?event=
+    workflow_dispatch&created=%3E%3D2026-11-15T22%3A47%3A48Z&per_page=100'` (2026-11-16) answers
+    one, cut to the keys the engine reads: a `shipmate plan` of pull request `pr` by the App,
+    created at `AUTOPLAN_CREATED`, `keys` over it."""
+    run = {
+        "id": run_id,
+        "display_title": f"shipmate · plan pr={pr} ref= comment=",
+        "event": "workflow_dispatch",
+        "status": status,
+        "conclusion": None if status != "completed" else "success",
+        "run_attempt": 1,
+        "created_at": AUTOPLAN_CREATED,
+        "actor": {"login": "shipmate-iac[bot]"},
+        "triggering_actor": {"login": "shipmate-iac[bot]"},
+    }
+    return run | keys
+
+
+def plan_jobs(run_id, detect="success", attempt=1, names=None):
+    """The jobs listing body of dispatched plan run `run_id`, shaped like `gh api
+    'repos/ship-iac/repo-example-stacks/actions/runs/43638853580/jobs?filter=latest&per_page=100'`
+    (2026-11-16) answers it, cut to the keys the engine reads: every job `completed` at run
+    attempt `attempt`, `plan / detect` concluding `detect`, or absent when `detect` is None.
+    `names` replaces the job names."""
+    rows = [
+        ("plan / claim", "success"),
+        ("release", "skipped"),
+        ("plan / facts", "success"),
+        ("plan / detect", detect),
+        ("plan / dev-eu / stacks/app", "success"),
+        ("plan / summary", "success"),
+    ]
+    rows = [(n, c) for n, c in rows if c is not None]
+    if names is not None:
+        rows = [(n, "success") for n in names]
+    jobs = [
+        {
+            "id": 132581633286 + i,
+            "run_id": run_id,
+            "run_attempt": attempt,
+            "name": name,
+            "status": "completed",
+            "conclusion": conclusion,
+        }
+        for i, (name, conclusion) in enumerate(rows)
+    ]
+    return json.dumps({"total_count": len(jobs), "jobs": jobs})

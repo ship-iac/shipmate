@@ -45,6 +45,7 @@ from _shipmate import (
     check_runs,
     gh_json,
     named,
+    one_line,
     run_annotated,
     validate_head_sha,
     write_outputs,
@@ -419,16 +420,19 @@ def refuse_actor(lines, app_id, actor, triggering_actor):
         )
 
 
-def refuse_provenance(repo, head, runnable, actions):
+def refuse_provenance(repo, head, runnable, actions, pr_number):
     """The newest autoplan of `head`, refused unless every cell in `runnable` records one plan
     run and `apply-gate.provenance_reason` admits it, with each cell's event action from
-    `actions` (`apply-gate.plan_actions`).
+    `actions` (`apply-gate.plan_actions`), and no `shipmate plan` run of pull request
+    `pr_number`, a str, counts as newer (`apply-gate.newer_plans` with jobs read).
 
-    A `shipmate plan` run is a `workflow_dispatch` the App sends, so its commenter is lost and
-    nothing authorizes it as the pusher; it is never listed. A newer autoplan of the head that
-    recorded no cell must not leave an older one applying. A ready-for-review or reopen autoplan
-    dispatches no auto apply yet becomes the newest autoplan, and its clicker is no pusher; a
-    record with no action is an older engine's."""
+    A `shipmate plan` run is a `workflow_dispatch`, so its commenter is lost and nothing
+    authorizes it as the pusher; it is never the autoplan listed. Any actor's newer plan run
+    refuses while live, or once it planned: it rewrites the head's records, so applying the
+    older plan under it would apply what the reviewer no longer sees. A newer autoplan of the
+    head that recorded no cell must not leave an older one applying. A ready-for-review or
+    reopen autoplan dispatches no auto apply yet becomes the newest autoplan, and its clicker is
+    no pusher; a record with no action is an older engine's."""
     runs = sorted({c["plan_run_id"] for c in runnable}, key=int)
     if len(runs) > 1:
         listed = "; ".join(
@@ -459,7 +463,29 @@ def refuse_provenance(repo, head, runnable, actions):
             f"::error::auto apply refused: {_provenance_text(runs[0], head, *reason)} "
             + _AUTO_REMEDY
         )
+    reason = ag.newer_plan(*ag.newer_plans(repo, pr_number, newest, jobs=True, run=_run))
+    if reason:
+        raise SystemExit(f"::error::auto apply refused: {_newer_plan_text(runs[0], *reason)}")
     return newest
+
+
+def _newer_plan_text(run_id, cause, newer):
+    """`apply-gate.newer_plan`'s `(cause, newer)` for plan run `run_id`, with its remedy."""
+    if cause == "plan-listing":
+        return (
+            "the shipmate plan runs of this pull request could not all be listed, so a newer one "
+            "may exist. " + _AUTO_REMEDY
+        )
+    status = one_line(newer.get("status")).replace("_", " ")
+    if status == "completed":
+        return (
+            f"shipmate plan run {newer['id']} of this pull request planned after plan run "
+            f"{run_id}. Review its plan, then comment `shipmate apply`."
+        )
+    return (
+        f"shipmate plan run {newer['id']} of this pull request is {status} and newer than plan "
+        f"run {run_id}. Wait for it to finish, review its plan, then comment `shipmate apply`."
+    )
 
 
 def _provenance_text(run_id, head, cause, detail):
@@ -605,8 +631,9 @@ def bare_main(auto=False):
     (`build-matrix.base_changed_stacks`) is named in `held_cells`: it stays pending and stops
     its environment's `needs` successors, as a locked cell does. With a cell to apply, its
     records must name one plan run that `apply-gate.provenance_reason` admits against the
-    head's newest autoplan listed (`refuse_provenance`), and that listed run's pusher must have
-    write access (`refuse_pusher`). Writes the bare outputs plus
+    head's newest autoplan listed, no newer `shipmate plan` run of the pull request may be live
+    or have planned (`refuse_provenance`), and that listed run's pusher must have write access
+    (`refuse_pusher`). Writes the bare outputs plus
     `provenance_run` and `pusher`, that run's `actor` login, both empty when no cell applies,
     `base_sha`, the base tip overlap was computed
     on, empty when no pull request read was needed, and `bare_envs`, the
@@ -680,7 +707,7 @@ def bare_main(auto=False):
         provenance_run = pusher = ""
         if runnable:
             actions = ag.plan_actions(lines, app_id)
-            newest = refuse_provenance(repo, head, runnable, actions)
+            newest = refuse_provenance(repo, head, runnable, actions, pr_number)
             pusher = refuse_pusher(repo, newest)
             provenance_run = runnable[0]["plan_run_id"]
         auto_outputs = {
