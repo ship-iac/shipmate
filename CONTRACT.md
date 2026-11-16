@@ -4099,10 +4099,31 @@ names an error. A job that failed without an `::error::` renders no fence.
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
+- **Unread report.** `🔴 could not read the detect report; see the run`, under the verdict
+  (and under the auto line when there is one). The comment's fields (the dispositions, waiting
+  and held cells, environment order and pusher) reach it as a file, with no size cap. The
+  `detect` job writes an empty report before checkout, `apply-detect` overwrites it with the
+  complete one, marked `"complete": true`, and the job uploads whichever is there, after a
+  failed step too, as the artifact `apply-report-<run attempt>-<random token>`, kept 7 days.
+  `detect`
+  outputs that name and `summary` downloads exactly it. "Re-run all jobs" runs `detect` again,
+  under a new name; "Re-run failed jobs" does not re-run a `detect` that succeeded, so `summary`
+  reuses its outputs and downloads the report that attempt uploaded; once the artifact has
+  expired, that re-run reads the report as unread. An incomplete report is read only when the
+  `detect` job failed with a refusal, so a refused detect renders no such line when its report
+  arrives. The line shows when the artifact is missing (the upload or download failed,
+  or `detect` never ran), or the file is unreadable, not a JSON object, incomplete without a
+  detect refusal (a crash, or a failed checkout that named no error), or not the shape the comment reads: a field of another type, a list of
+  environment names holding something else, a waiting or held cell without its string keys, a
+  held cell neither `locked` (with a numeric, null or absent holder) nor `overlap`, or a
+  `skipped_after` value that is not a list of names. Every field then reads empty, which alone
+  would read `🟢 no pending applies` over pending cells, so the verdict is never 🟢: a failed run
+  reads `🔴 failed`, any other `⚪ result unknown`, or with rows its counts followed by
+  `result unknown`.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a
   blank line on both sides, one per environment in the plan comment's order,
-  from `apply-detect`'s `env_order` output (a bare apply orders every
+  from the report's `env_order` (a bare apply orders every
   environment with an apply check on the head, a targeted one names its
   environment).
 - **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per
@@ -4165,7 +4186,7 @@ actionable warning cannot be lost on either path. In the order they render:
   it does not apply this run; see its line below` for one holding a locked,
   overlap or waiting cell, and otherwise, an `auto` apply's environment that is
   not `auto`, `` comment `shipmate apply`, which applies them in order ``. A detect
-  that wrote no `skipped_after` renders the cause-agnostic `⚪ <env>: skipped,
+  report whose `skipped_after` names nothing for it renders the cause-agnostic `⚪ <env>: skipped,
   ordered after an environment not fully applying this run`.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
   environment that is also `targeted` is listed once, here and not on a targeted
@@ -4183,14 +4204,14 @@ actionable warning cannot be lost on either path. In the order they render:
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,
   then re-plan. If #<n> has already merged or closed, comment `shipmate unlock
   <env> --evict` once #<n>'s apply, auto and deploy runs have ended.``, one per pull
-  request `#<n>` holding a cell lock on pending cells of `<env>` (`held_cells`
+  request `#<n>` holding a cell lock on pending cells of `<env>` (the report's `held_cells`
   with `cause` `locked`), naming each as `<stack> / <env>` comma-separated. A lock whose holder is
   unknown renders ``🔒 locked by an unknown holder: <cells>. Comment
   `shipmate unlock <env> --evict`.`` Every form renders these lines.
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
   it, so their plans would revert that change: <cells>. Update the branch from
   the base and push.``, one line naming each of an `auto` apply's overlap cells
-  (`held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
+  (the report's `held_cells` with `cause` `overlap`, §`apply_mode: auto`) as
   `<stack> / <env>` comma-separated. Only the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
@@ -4236,7 +4257,7 @@ log text holds every line:
 - **no review required** — `<env>: no approving review was required, so the
   default review: true had nothing to enforce`, one per `review: true`
   environment a `NONE` decision authorized. It has its own cause, so it has its
-  own detect output (`review_not_required_envs`, from both detects) rather than
+  own report field (`review_not_required_envs`, from both detects) rather than
   widening `applied_exempt_envs`. It prints in the targeted and the
   all-environments form, and names only environments with an applied, failed
   or not-recorded row — apply ran there, so infrastructure may have changed —

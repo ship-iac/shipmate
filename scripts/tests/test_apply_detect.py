@@ -1,5 +1,7 @@
 import contextlib
 import json
+import os
+import pathlib
 
 import pytest
 from _detect_fixtures import (
@@ -18,7 +20,7 @@ from _detect_fixtures import (
     stub_read_locks,
 )
 from _detect_fixtures import check_run as _check
-from _loader import github_outputs, load_script
+from _loader import detect_report, github_outputs, load_script
 from _shipmate import run_annotated
 
 ad = load_script("apply-detect")
@@ -844,21 +846,23 @@ def test_main_names_a_reviewed_env_applied_with_no_review_required(
     Mutation: compare `review_decision != "NONE"` in `authorize._review_not_required` -- the
     NONE/reviewed and APPROVED cases swap and go red.
     Mutation: drop its exempt check -- the NONE/exempt case names dev-eu and goes red."""
-    out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
+    _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
     _stub_apply(
         monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
     )
     ad.main()
-    assert json.loads(github_outputs(out)["review_not_required_envs"]) == expected
+    assert detect_report()["review_not_required_envs"] == expected
 
 
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply-run.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty`, `head_sha`, `review_not_required_envs`, `waiting_cells` and
-    `env_order`; a targeted apply is env-level 0 alone, so levels 1-3 must say `true` or
-    apply-run.yml runs them into `fromJSON('')`.
+    `envlevelN_empty` and `head_sha`, and the report file holds exactly the targeted form's four
+    fields: `review_not_required_envs`, `waiting_cells`, `held_cells` and `env_order`; a
+    targeted apply is env-level 0 alone, so levels 1-3 must say `true` or apply-run.yml runs them
+    into `fromJSON('')`.
 
+    Mutation: drop `held_cells` from `main`'s report -- red.
     Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
     `envlevel1`."""
     out = _apply_env(monkeypatch, tmp_path)
@@ -887,11 +891,14 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         f"envlevel3_waves={empty}\n"
         "envlevel3_empty=true\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-        "review_not_required_envs=[]\n"
-        "waiting_cells=[]\n"
-        "held_cells=[]\n"
-        'env_order=["dev-eu"]\n'
     )
+    assert detect_report() == {
+        "review_not_required_envs": [],
+        "waiting_cells": [],
+        "held_cells": [],
+        "env_order": ["dev-eu"],
+        "complete": True,
+    }
 
 
 def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
@@ -1243,10 +1250,14 @@ def test_main_refuses_an_unusable_pull_request_number(monkeypatch, tmp_path):
 #: `platform` (dev-eu) runs after `dns`, tagged in dev-us only.
 _ZIGZAG_DEPS = {"stacks/dns": set(), "stacks/platform": {"stacks/dns"}}
 _ZIGZAG_TAGS = {"stacks/dns": ["env/dev-us"], "stacks/platform": ["env/dev-eu"]}
-_PLATFORM_WAITS = (
-    '[{"stack": "stacks/platform", "environment": "dev-eu", '
-    '"after_stack": "stacks/dns", "after_environment": "dev-us"}]'
-)
+_PLATFORM_WAITS = [
+    {
+        "stack": "stacks/platform",
+        "environment": "dev-eu",
+        "after_stack": "stacks/dns",
+        "after_environment": "dev-us",
+    }
+]
 
 
 def _zigzag(monkeypatch, tmp_path, checks, table=None):
@@ -1257,7 +1268,7 @@ def _zigzag(monkeypatch, tmp_path, checks, table=None):
     ad.main()
     parsed = github_outputs(out)
     waves = json.loads(parsed["envlevel0_waves"])
-    return [c["stack"] for w in waves.values() for c in w], parsed["waiting_cells"]
+    return [c["stack"] for w in waves.values() for c in w], detect_report()["waiting_cells"]
 
 
 def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, tmp_path):
@@ -1274,7 +1285,7 @@ def test_a_completed_upstream_in_another_environment_does_not_hold_a_cell(monkey
     """Mutation: drop the `not in completed_names` filter from `pending_tuples`, so every
     check name counts -- the completed `dns/dev-us` holds `platform`."""
     checks = [_apply_check("stacks/platform", cells=1), _check(name="apply / stacks/dns / dev-us")]
-    assert _zigzag(monkeypatch, tmp_path, checks) == (["stacks/platform"], "[]")
+    assert _zigzag(monkeypatch, tmp_path, checks) == (["stacks/platform"], [])
 
 
 def test_a_needs_order_added_after_the_plan_still_makes_the_cell_wait(monkeypatch, tmp_path):
@@ -1345,10 +1356,10 @@ def test_a_cell_another_pull_request_holds_stays_pending_and_its_dependent_waits
     Mutation: print `0` for the notice's `locked=` -- `locked=1` is absent."""
     parsed, applied = _locked_run(monkeypatch, tmp_path, held(ad.cl, "stacks/dns", "dev-eu", 7))
     assert applied == ["stacks/workers"]
-    assert json.loads(parsed["held_cells"]) == [
+    assert detect_report()["held_cells"] == [
         {"stack": "stacks/dns", "environment": "dev-eu", "cause": "locked", "holder": 7}
     ]
-    assert json.loads(parsed["waiting_cells"]) == [
+    assert detect_report()["waiting_cells"] == [
         {
             "stack": "stacks/platform",
             "environment": "dev-eu",
@@ -1369,7 +1380,7 @@ def test_a_cell_the_applying_pull_request_holds_applies(monkeypatch, tmp_path):
     lock = held(ad.cl, "stacks/dns", "dev-eu", int(PR_NUMBER))
     parsed, applied = _locked_run(monkeypatch, tmp_path, lock)
     assert applied == ["stacks/dns", "stacks/workers", "stacks/platform"]
-    assert json.loads(parsed["held_cells"]) == []
+    assert detect_report()["held_cells"] == []
 
 
 def test_a_failed_lock_read_refuses_the_targeted_apply(monkeypatch, tmp_path):
@@ -1392,3 +1403,18 @@ def test_a_targeted_apply_reads_the_locks_of_its_pending_cells_environment(monke
     _, applied = _locked_run(monkeypatch, tmp_path, lock, reads, checks, tags)
     assert reads == [("acme/iac", {"dev-eu"})]
     assert applied == ["stacks/workers"]
+
+
+@pytest.mark.parametrize("env", ["", "dev-eu"], ids=["bare", "targeted"])
+def test_a_refused_detect_leaves_the_empty_report_its_job_wrote(monkeypatch, tmp_path, env):
+    """The job writes `{}` before checkout; a refusal never marks it complete, so the result
+    comment reads it only beside the refusal.
+
+    Mutation: call `write_report({})` at the top of `main` -- the refused report reads complete,
+    red."""
+    _apply_env(monkeypatch, tmp_path, SHIPMATE_ENV=env, SHIPMATE_HEAD_SHA="not-a-sha")
+    path = pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"])
+    path.write_text("{}", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        ad.main()
+    assert path.read_text(encoding="utf-8") == "{}"

@@ -1593,6 +1593,13 @@ def test_wave_job_name_matches_the_cell_job_grammar():
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
+def _set_report(monkeypatch, tmp_path, report):
+    """`report` as the complete downloaded apply report the render step reads."""
+    path = tmp_path / "apply-report.json"
+    path.write_text(json.dumps({**report, "complete": True}), encoding="utf-8")
+    monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
+
+
 def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     """The render step's env for a targeted `dev-eu` apply as `apply-run.yml` wires it: `waves_json`
     in env-level 0, the other levels and every env set empty."""
@@ -1601,8 +1608,7 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
     for i in range(1, wv.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
-    for kind in ("EXCLUDED", "SKIPPED", "REVIEW_HELD", "APPLIED_EXEMPT", "REVIEW_NOT_REQUIRED"):
-        monkeypatch.setenv(f"SHIPMATE_{kind}_ENVS", "")
+    _set_report(monkeypatch, tmp_path, {})
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
@@ -1864,8 +1870,8 @@ def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
 
 
 def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
-    """Mutation: drop the `SHIPMATE_ENV_ORDER` argument from `main`'s `build_comment` call --
-    `live` first by name, red."""
+    """Mutation: pass `()` for the env order in `main`'s `build_comment` call -- `live` first by
+    name, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     waves = json.dumps(
@@ -1877,7 +1883,7 @@ def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
         }
     )
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
-    monkeypatch.setenv("SHIPMATE_ENV_ORDER", '["staging", "live"]')
+    _set_report(monkeypatch, tmp_path, {"env_order": ["staging", "live"]})
     body = _main_body(tmp_path)
     assert [line for line in body.splitlines() if line.startswith("#### ")] == [
         "#### staging: 1 cell, 1 not attempted",
@@ -1895,11 +1901,14 @@ def _all_envs_main_env(monkeypatch, tmp_path, row_env, exempt, no_review):
     checks.write_text("", encoding="utf-8")
     _main_env(monkeypatch, tmp_path, cells, "", str(checks))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
-    monkeypatch.setenv("SHIPMATE_EXCLUDED_ENVS", json.dumps(["sbx"]))
-    monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", json.dumps(["stg"]))
-    monkeypatch.setenv("SHIPMATE_REVIEW_HELD_ENVS", json.dumps(["prod"]))
-    monkeypatch.setenv("SHIPMATE_APPLIED_EXEMPT_ENVS", json.dumps(exempt))
-    monkeypatch.setenv("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS", json.dumps(no_review))
+    report = {
+        "excluded_envs": ["sbx"],
+        "skipped_envs": ["stg"],
+        "review_held_envs": ["prod"],
+        "applied_exempt_envs": exempt,
+        "review_not_required_envs": no_review,
+    }
+    _set_report(monkeypatch, tmp_path, report)
 
 
 def _all_envs_body(row_env):
@@ -1915,12 +1924,11 @@ def _all_envs_body(row_env):
 
 
 def test_main_reads_every_env_set_under_its_own_name(monkeypatch, tmp_path, capsys):
-    """Five inputs are JSON arrays of env names with one shape, so a crossed read in main renders
-    a plausible comment, or notice, naming the wrong environments for the wrong reason.
+    """Five report fields are JSON arrays of env names with one shape, so a crossed read in main
+    renders a plausible comment, or notice, naming the wrong environments for the wrong reason.
 
-    Mutation: swap the `SHIPMATE_REVIEW_HELD_ENVS` and `SHIPMATE_APPLIED_EXEMPT_ENVS` reads in
-    main -- red.
-    Mutation: read `SHIPMATE_REVIEW_NOT_REQUIRED_ENVS` under another name -- the qa notice is
+    Mutation: pass `review_held_envs` to `notices` as the exempt envs in main -- red.
+    Mutation: pass `[]` for `review_not_required_envs` to `notices` in main -- the qa notice is
     gone, red."""
     _all_envs_main_env(monkeypatch, tmp_path, "qa", ["dev-eu"], ["qa"])
     assert _main_body(tmp_path) == _all_envs_body("qa")
@@ -2185,13 +2193,13 @@ def test_a_run_that_is_not_auto_has_no_auto_line_even_with_a_pusher():
 
 def test_main_renders_the_auto_line_from_the_render_step_env(monkeypatch, tmp_path):
     """Mutation: read `SHIPMATE_AUTO` under another name in `main` -- no line, red.
-    Mutation: read `SHIPMATE_PUSHER` under another name in `main` -- no pusher, red."""
+    Mutation: pass `pusher=""` in `main`'s `build_comment` call -- no pusher, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
     monkeypatch.setenv("SHIPMATE_AUTO", "true")
-    monkeypatch.setenv("SHIPMATE_PUSHER", "k3np")
+    _set_report(monkeypatch, tmp_path, {"pusher": "k3np"})
     assert _main_body(tmp_path) == (
         f"### shipmate apply\n\n🟢 no pending applies {_MAIN_AT}\n\n"
         "dispatched as an `apply_mode: auto` apply, after an autoplan triggered by @<!-- -->`k3np`"
@@ -2380,12 +2388,13 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
 
 
 def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp_path):
-    """Mutation: drop the `SHIPMATE_HELD_CELLS` argument from `main`'s `build_comment` call --
-    🟢 no pending applies, red."""
+    """Mutation: pass `()` for `held_cells` in `main`'s `build_comment` call -- 🟢 no pending
+    applies, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
-    monkeypatch.setenv("SHIPMATE_HELD_CELLS", json.dumps([_locked("stacks/app", "dev-eu", 12)]))
+    held = [_locked("stacks/app", "dev-eu", 12)]
+    _set_report(monkeypatch, tmp_path, {"held_cells": held})
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
@@ -2573,13 +2582,13 @@ def test_a_partly_applied_run_counts_a_locked_overlap_cell_once():
 
 
 def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tmp_path):
-    """Mutation: drop the `SHIPMATE_HELD_CELLS` argument from `main`'s `build_comment` call --
-    🟢 no pending applies, red."""
+    """Mutation: pass `()` for `held_cells` in `main`'s `build_comment` call -- 🟢 no pending
+    applies, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
     overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
-    monkeypatch.setenv("SHIPMATE_HELD_CELLS", json.dumps(overlap))
+    _set_report(monkeypatch, tmp_path, {"held_cells": overlap})
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the base also changed the pending "
         f"cells' stacks {_MAIN_AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
@@ -2791,15 +2800,14 @@ def test_the_skipped_and_bare_lines_escape_every_env_name():
 def test_main_renders_the_predecessors_and_bare_envs_from_the_render_step_env(
     monkeypatch, tmp_path
 ):
-    """Mutation: read `SHIPMATE_SKIPPED_AFTER` under another name in `main` -- the
+    """Mutation: pass `None` for `skipped_after` in `main`'s `build_comment` call -- the
     cause-agnostic line, red.
-    Mutation: read `SHIPMATE_BARE_ENVS` under another name in `main` -- no bare line, red."""
+    Mutation: pass `()` for `bare` in `main`'s `build_comment` call -- no bare line, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
-    monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", '["prod"]')
-    monkeypatch.setenv("SHIPMATE_SKIPPED_AFTER", '{"prod": ["dev"]}')
-    monkeypatch.setenv("SHIPMATE_BARE_ENVS", '["dev"]')
+    report = {"skipped_envs": ["prod"], "skipped_after": {"prod": ["dev"]}, "bare_envs": ["dev"]}
+    _set_report(monkeypatch, tmp_path, report)
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the pending environments wait on the "
         f"lines below {_MAIN_AT}\n\n"

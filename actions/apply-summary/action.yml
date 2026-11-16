@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts, mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
+description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts and apply-detect's report artifact, the comment's dispositions, waiting and held cells, environment order and pusher (a missing or unreadable one renders a red line and never a green verdict), mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -24,42 +24,14 @@ inputs:
     description: Env-level 3 waves JSON; a padded empty map when level 3 has no cell, as in every targeted apply. Empty when detect did not succeed.
     required: false
     default: ""
-  excluded-envs:
-    description: "JSON array of targeted environments left pending, including held ones; the comment lists a held one under the hold (all-environments form only). Empty = []."
+  report-artifact:
+    description: "detect's `report_artifact` output: the name of the artifact holding apply-detect's report. Empty (detect never ran) reads the report as unread."
     required: false
     default: ""
-  skipped-envs:
-    description: "JSON array of environments skipped because they are ordered after an environment not fully applying this run (held for review, excluded as targeted, holding a waiting cell, holding a cell another pull request locks, or, under the auto form, holding a cell the base also changed or not `apply_mode: auto`); all-environments form only. Empty = []."
+  detect-result:
+    description: "`needs.detect.result`. Only `failure` with a non-empty `detect-refusal` lets the comment read an incomplete report: the empty one the detect job wrote before a step refused."
     required: false
     default: ""
-  skipped-after:
-    description: "JSON object mapping each skipped environment to the predecessors it waits on (all-environments form only); the comment names each with the remedy of its kind. Empty = {}."
-    required: false
-    default: "{}"
-  review-held-envs:
-    description: JSON array of environments held until an approving review lands (all-environments form only). Empty = [].
-    required: false
-    default: ""
-  applied-exempt-envs:
-    description: "JSON array of environments applied without an approving review, per `review: false` on their entries (all-environments form only); the render step annotates each with a notice, not a comment line. Empty = []."
-    required: false
-    default: ""
-  review-not-required-envs:
-    description: "JSON array of `review: true` environments authorized under a null review decision, because the pull request's review state required none (both forms). The render step annotates each with an applied, failed or unrecorded row with a notice, not a comment line. Empty = []."
-    required: false
-    default: ""
-  waiting-cells:
-    description: "JSON list of cells left pending because a cell they run after is pending and not applying this run, each with that cell (both forms); the comment names each cell's blocker and its remedy."
-    required: false
-    default: "[]"
-  held-cells:
-    description: "JSON list of pending cells left pending for a cause of their own, each `{stack, environment, cause}`. `cause` is `locked` when another pull request holds the cell's lock, with `holder` its pull request number, null when unknown (both forms); the comment names each holder and the remedy. `cause` is `overlap` when the auto form left the cell pending because the merge of the base into the branch changes its stack, directly or through a module it sources, or removes files in it; the comment names them and the remedy, updating the branch from the base. Empty = []."
-    required: false
-    default: "[]"
-  bare-envs:
-    description: "JSON array of pending environments the auto form left for a bare `shipmate apply`, neither `apply_mode: auto`, targeted nor held; the comment names each. Empty = []."
-    required: false
-    default: "[]"
   detect-refusal:
     description: "detect's `refusal` output, setup's or else apply-detect's: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
@@ -68,18 +40,10 @@ inputs:
     description: "The lock job's `refusal` output: the first error of the `::error::` message that failed lock acquisition (a refusal or a failed API call) on one line, empty when it raised none. Non-empty, the comment shows it in a code fence under the verdict line, as it does detect-refusal; empty leaves the comment unchanged."
     required: false
     default: ""
-  env-order:
-    description: "apply-detect's `env_order` output: JSON [env, ...] in apply order. The comment puts one heading per environment in this order, and any environment it does not name after them by name. Empty (detect refused) orders every environment by name; a value that is not a list of names does too, and warns."
-    required: false
-    default: ""
   auto:
     description: "'true' for an `apply_mode: auto` run: the comment says so under the verdict line, refused or not."
     required: false
     default: "false"
-  pusher:
-    description: "apply-detect's `pusher` output: the login the auto form admitted as the pusher, which the auto line names as the login that triggered the autoplan. Empty renders the line without it."
-    required: false
-    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
@@ -116,6 +80,17 @@ runs:
         path: cells
         github-token: ${{ github.token }}
         merge-multiple: false
+
+    - name: Download the apply report
+      # Reviewer-facing only (continue-on-error): the render reads a missing report as unread,
+      # renders a red line and never a green verdict. An empty name would download every
+      # artifact of the run.
+      if: ${{ inputs.report-artifact != '' }}
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: ${{ inputs.report-artifact }}
+        path: apply-report
 
     - name: Warn on apply cell summaries download failure
       if: ${{ steps.download.outcome == 'failure' }}
@@ -180,20 +155,11 @@ runs:
         SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
         SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
         SHIPMATE_RESULTS: ${{ inputs.results }}
-        SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
-        SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
-        SHIPMATE_SKIPPED_AFTER: ${{ inputs.skipped-after }}
-        SHIPMATE_REVIEW_HELD_ENVS: ${{ inputs.review-held-envs }}
-        SHIPMATE_APPLIED_EXEMPT_ENVS: ${{ inputs.applied-exempt-envs }}
-        SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
-        SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
-        SHIPMATE_HELD_CELLS: ${{ inputs.held-cells }}
-        SHIPMATE_BARE_ENVS: ${{ inputs.bare-envs }}
+        SHIPMATE_REPORT_PATH: apply-report/report.json
+        SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
-        SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_AUTO: ${{ inputs.auto }}
-        SHIPMATE_PUSHER: ${{ inputs.pusher }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}

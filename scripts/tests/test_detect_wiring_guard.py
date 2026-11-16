@@ -29,6 +29,7 @@ _SCRIPT_ENV = {
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_REVIEW_DECISION": "${{ inputs.review-decision }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+        "SHIPMATE_REPORT_PATH": "${{ inputs.report-path }}",
     },
     "deploy-detect": {
         "GH_TOKEN": "${{ github.token }}",
@@ -70,6 +71,7 @@ _DETECT_STEPS = {
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
+            "report-path": "${{ steps.report.outputs.path }}",
         },
     },
     ("deploy.yml", "$/actions/deploy-detect"): {
@@ -96,21 +98,11 @@ _APPLY_DETECT_OUTPUTS = {
     "envlevel2_empty": "${{ steps.d.outputs.envlevel2_empty }}",
     "envlevel3_empty": "${{ steps.d.outputs.envlevel3_empty }}",
     "head_sha": "${{ steps.d.outputs.head_sha }}",
-    "excluded_envs": "${{ steps.d.outputs.excluded_envs }}",
-    "skipped_envs": "${{ steps.d.outputs.skipped_envs }}",
-    "skipped_after": "${{ steps.d.outputs.skipped_after }}",
-    "review_held_envs": "${{ steps.d.outputs.review_held_envs }}",
-    "applied_exempt_envs": "${{ steps.d.outputs.applied_exempt_envs }}",
-    "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
-    "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
-    "held_cells": "${{ steps.d.outputs.held_cells }}",
-    "env_order": "${{ steps.d.outputs.env_order }}",
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
-    "pusher": "${{ steps.d.outputs.pusher }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
-    "bare_envs": "${{ steps.d.outputs.bare_envs }}",
     "refusal": "${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}",
     "tools": "${{ steps.setup.outputs.tools }}",
+    "report_artifact": "${{ steps.report.outputs.name }}",
 }
 
 #: The whole `outputs:` of `deploy.yml`'s `detect`. `tools` is the version pair every env-level's
@@ -153,7 +145,8 @@ _VARS_HOLDERS = {
 @pytest.mark.parametrize("action", sorted(_SCRIPT_ENV))
 def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(action):
     """Mutation: delete `SHIPMATE_REVIEW_DECISION` from `apply-detect`'s script step.
-    Mutation: delete `SHIPMATE_PR_NUMBER` from it. Mutation: delete `SHIPMATE_AUTO` from it."""
+    Mutation: delete `SHIPMATE_PR_NUMBER` from it. Mutation: delete `SHIPMATE_AUTO` from it.
+    Mutation: read `SHIPMATE_REPORT_PATH` from anything but the `report-path` input."""
     doc = action_yaml(action)
     steps = [s for s in doc["runs"]["steps"] if "/../../scripts/" in str(s.get("run", ""))]
     assert len(steps) == 1, f"{action}: expected one script step, got {len(steps)}"
@@ -236,11 +229,12 @@ def test_the_apply_detect_checkouts_are_shallow_and_full_history_for_auto():
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
-    `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
-    orders environments by name; delete `held_cells`; delete `provenance_run`; delete
-    `base_sha`; delete `skipped_after`; delete `bare_envs`; delete `pusher`; drop
-    `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal reaches the comment
-    and the gate as the generic text; delete `tools`, so every wave cell refuses."""
+    `refusal`, so the apply comment never names a detect refusal; add
+    `report: ${{ steps.d.outputs.report }}`, a job output GitHub drops whole when any part of it
+    is masked; restore `held_cells: ${{ steps.d.outputs.held_cells }}`; delete `provenance_run`;
+    delete `base_sha`; drop `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal
+    reaches the comment and the gate as the generic text; delete `tools`, so every wave cell
+    refuses."""
     assert workflow_yaml("apply-run.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -271,8 +265,8 @@ def test_only_the_listed_steps_carry_the_variables():
 
 
 #: The whole `outputs:` of `actions/apply-detect`, hand-written. `apply-run.yml`'s `detect` reads
-#: each by name, and an output the action stops declaring reads '' there: a dropped
-#: `waiting_cells` renders a fully waiting targeted apply as `🟢 no pending applies`.
+#: each by name, and an output the action stops declaring reads '' there. The comment's fields
+#: are no output: they travel in the `apply-report` artifact.
 _APPLY_DETECT_ACTION_OUTPUTS = {
     "envlevel0_waves": {
         "description": (
@@ -298,81 +292,6 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         "description": "The echoed head SHA.",
         "value": "${{ steps.d.outputs.head_sha }}",
     },
-    "excluded_envs": {
-        "description": (
-            "Bare and auto forms: JSON list of targeted envs left pending, including held ones; "
-            "the comment lists a held one under the hold. The targeted form writes none."
-        ),
-        "value": "${{ steps.d.outputs.excluded_envs }}",
-    },
-    "skipped_envs": {
-        "description": (
-            "Bare and auto forms: JSON list of envs skipped because they are ordered after an "
-            "env not fully applying this run (held for review, excluded as targeted, holding a "
-            "waiting cell, holding a cell another pull request locks, or, under the auto form, "
-            "holding a cell the base also changed or not `apply_mode: auto`). The targeted form "
-            "writes none."
-        ),
-        "value": "${{ steps.d.outputs.skipped_envs }}",
-    },
-    "skipped_after": {
-        "description": (
-            "Bare and auto forms: JSON object mapping each env in skipped_envs to its transitive "
-            "`needs` predecessors not fully applying for a cause of their own (targeted, held, "
-            "holding a waiting, locked or overlap cell, or, under the auto form, not "
-            "`apply_mode: auto`). The targeted form writes none."
-        ),
-        "value": "${{ steps.d.outputs.skipped_after }}",
-    },
-    "review_held_envs": {
-        "description": (
-            "Bare and auto forms: JSON list of envs held because the PR is not reviewed. The "
-            "targeted form writes none."
-        ),
-        "value": "${{ steps.d.outputs.review_held_envs }}",
-    },
-    "applied_exempt_envs": {
-        "description": (
-            "Bare and auto forms: JSON list of envs applied without an approving review "
-            "because their entry holds `review: false`. The targeted form writes none."
-        ),
-        "value": "${{ steps.d.outputs.applied_exempt_envs }}",
-    },
-    "review_not_required_envs": {
-        "description": (
-            "JSON list of `review: true` envs authorized under a null review decision, because "
-            "the pull request's review state required none, else []."
-        ),
-        "value": "${{ steps.d.outputs.review_not_required_envs }}",
-    },
-    "waiting_cells": {
-        "description": (
-            "JSON list of cells left pending because a cell they run after (CONTRACT.md "
-            "§Fan-out) is pending and not applying this run, each with that cell; both forms."
-        ),
-        "value": "${{ steps.d.outputs.waiting_cells }}",
-    },
-    "held_cells": {
-        "description": (
-            "JSON list of pending cells left pending and not applying this run for a cause of "
-            "their own, each `{stack, environment, cause}`. `cause` is `locked` when another "
-            "pull request holds the cell's lock, and such a cell also carries `holder`, that "
-            "pull request's number (null when the lock's holder is unknown); both forms. "
-            "`cause` is `overlap` when the merge of the base into the branch changes the cell's "
-            "stack, directly or through a module it sources, or removes files in it, so its plan "
-            "would revert that change; auto form only. "
-            "A cell both locked and overlapping is listed once per cause."
-        ),
-        "value": "${{ steps.d.outputs.held_cells }}",
-    },
-    "env_order": {
-        "description": (
-            "JSON list of every environment the apply checks on the head name, in apply order "
-            "(the env-levels of the table's `needs`, ties by name); the targeted form names its "
-            "one environment. Read by the apply result comment to order its environment headings."
-        ),
-        "value": "${{ steps.d.outputs.env_order }}",
-    },
     "provenance_run": {
         "description": (
             "Auto form only: the autoplan run every applied cell's record names; empty when no "
@@ -380,28 +299,13 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.provenance_run }}",
     },
-    "pusher": {
-        "description": (
-            "Auto form only: the login of that autoplan run's `actor`, after the pusher check "
-            "admits it; empty when no cell applies. Read by the apply result comment to name the "
-            "pusher."
-        ),
-        "value": "${{ steps.d.outputs.pusher }}",
-    },
     "base_sha": {
         "description": (
             "Auto form only: the tip of the pull request's base branch, read from its ref after "
-            "the mergeability wait, that the overlap cells in held_cells were computed on; empty "
+            "the mergeability wait, that the report's overlap cells were computed on; empty "
             "when no environment had a pending cell to consider."
         ),
         "value": "${{ steps.d.outputs.base_sha }}",
-    },
-    "bare_envs": {
-        "description": (
-            "Auto form only: JSON list of pending envs neither `apply_mode: auto`, targeted nor "
-            "held, left for a bare `shipmate apply`."
-        ),
-        "value": "${{ steps.d.outputs.bare_envs }}",
     },
     "refusal": {
         "description": (
@@ -417,11 +321,50 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
 
 
 def test_the_apply_detect_action_declares_exactly_these_outputs():
-    """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
-    delete its `refusal` output; delete its `env_order` output; delete its `held_cells`
-    output; restore `skipped_envs`' description without the lock cause; delete its
-    `provenance_run` output; delete its `base_sha` output; drop the overlap cause from
-    `held_cells`' description; restore `skipped_envs`' description without the overlap cause;
-    delete its `skipped_after` output; delete its `bare_envs` output; delete its `pusher`
-    output."""
+    """Mutations: add a `report` output to `actions/apply-detect/action.yml`; restore its
+    `pusher` output; delete its `refusal` output; delete its `provenance_run` output; delete its
+    `base_sha` output; restore `held_cells` in `base_sha`'s description."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
+
+
+#: The first step of `apply-run.yml`'s `detect`, hand-written.
+_REPORT_SEED = {
+    "id": "report",
+    "shell": "bash",
+    "run": (
+        "set -euo pipefail\n"
+        'path="$RUNNER_TEMP/apply-report/report.json"\n'
+        'mkdir -p "${path%/*}"\n'
+        "echo '{}' > \"$path\"\n"
+        "token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')\n"
+        'echo "path=$path" >> "$GITHUB_OUTPUT"\n'
+        'echo "name=apply-report-$GITHUB_RUN_ATTEMPT-$token" >> "$GITHUB_OUTPUT"\n'
+    ),
+}
+
+#: The last step of `apply-run.yml`'s `detect`, hand-written.
+_REPORT_UPLOAD = {
+    "name": "Upload the apply report",
+    "if": "${{ !cancelled() && steps.report.outputs.name != '' }}",
+    "continue-on-error": True,
+    "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "with": {
+        "name": "${{ steps.report.outputs.name }}",
+        "path": "${{ steps.report.outputs.path }}",
+        "if-no-files-found": "ignore",
+        "retention-days": 7,
+    },
+}
+
+
+def test_the_detect_job_seeds_its_report_first_and_uploads_it_last():
+    """The job writes `{}` before checkout, setup or detect can refuse, and uploads the report
+    after any of them failed, under a name unique to the call and attempt (`report_artifact`, in
+    `_APPLY_DETECT_OUTPUTS`): every refusal leaves a report, and no re-run or second call reads
+    another's.
+
+    Mutations: move the seed step after `setup`; drop the attempt from the name; drop the random
+    token; drop the upload's `if:`, so a refusal uploads nothing; upload from another path; drop
+    `retention-days`."""
+    steps = workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"]
+    assert (steps[0], steps[-1]) == (_REPORT_SEED, _REPORT_UPLOAD)

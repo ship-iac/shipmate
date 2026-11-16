@@ -548,6 +548,11 @@ def github_outputs(path):
     return dict(ln.split("=", 1) for ln in path.read_text(encoding="utf-8").splitlines())
 
 
+def detect_report():
+    """The report object apply-detect wrote to ``SHIPMATE_REPORT_PATH``."""
+    return json.loads(pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"]).read_text(encoding="utf-8"))
+
+
 def jsonl(*rows):
     """``rows`` as JSON lines, each newline-terminated, as a ``gh api --paginate --jq`` listing
     prints them."""
