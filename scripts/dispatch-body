@@ -44,9 +44,11 @@ Exit codes:
     4 UNDETERMINED      the attempts ended on transient failures, a later attempt failed after a
                         transient one, or the listing failed or was malformed
 
-On 1 and 4 the final failure's message goes to stderr, unannotated. When 4 follows a failed or
-malformed listing, that message is the listing's error; the dispatch's own failure is in the
-retry notices printed above it.
+When the attempts fail (1 or 4), the final failure's message goes to stderr as one escaped
+`::warning::` line. When 4 follows a failed or malformed listing, that message is the listing's
+error; the dispatch's own failure is in the retry notices printed above it. A refusal before any
+request (an empty `SHIPMATE_APP_SLUG`, a missing or unexpected `COMMENT_ID`) exits 1 with an
+`::error::`.
 
 Known ceilings: a run not listed yet when the listing is last read is not seen, so that attempt
 can be retried and start twice; a second commented `plan` or `apply` run loses its comment's
@@ -72,6 +74,8 @@ from _shipmate import (
     _MAX_PAGES,
     _PAGE,
     SHIPMATE_WORKFLOW,
+    command_data,
+    one_line,
     parse_run_title,
     retried,
     run,
@@ -256,8 +260,8 @@ def _before_retry(repo, t0, failed_at):
         try:
             landed = listed()
         except (SystemExit, Exception) as e:
-            why = e if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
-            print(f"listing shipmate.yml runs failed: {why}", file=sys.stderr)
+            why = str(e.code) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
+            _warn(f"listing shipmate.yml runs failed: {why}")
             raise SystemExit(UNDETERMINED) from None
         if landed:
             raise SystemExit(MAY_HAVE_STARTED)
@@ -265,11 +269,17 @@ def _before_retry(repo, t0, failed_at):
     return before_retry
 
 
+def _warn(cause):
+    """Print `cause`, gh's stderr possibly among it, as one escaped `::warning::` line: a caller
+    that reaches here degrades or posts its own failure."""
+    print(f"::warning::{command_data(one_line(cause))}", file=sys.stderr)
+
+
 def _exit_failed(e, failed):
     """Exit for `retried`'s final `SystemExit` `e` after `failed` failed attempts."""
     if isinstance(e.code, int):
         raise e
-    print(e.code, file=sys.stderr)
+    _warn(e.code)
     # Only a first attempt that failed without a transient failure cannot have started a run.
     if failed > 1:
         raise SystemExit(UNDETERMINED) from None

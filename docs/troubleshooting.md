@@ -459,11 +459,11 @@ The apply result comment names each cell OpenTofu refused this way in a note:
 ``stale plan: <cells>. The cell's state changed after this plan; comment `shipmate
 plan`, review the new plan, then apply.``
 
-The fix is a re-plan and an apply of the fresh plan. On an open pull request,
-comment `shipmate plan` or push; re-running the old run's plan jobs does not
-re-plan, because their artifact uploads 409. After the merge, open a new pull
-request touching the stack. There is no force: an apply that silently
-re-planned would apply
+The fix is a re-plan and an apply of the fresh plan. Re-plan (comment
+`shipmate plan` or push on an open pull request), or after the merge open a new
+pull request touching the stack. Re-running the old run's plan jobs does not
+re-plan, because their artifact uploads 409. There is no force: an apply that
+silently re-planned would apply
 something nobody reviewed, and the check left pending is exactly what stops the
 gate greening over an unapplied stack.
 
@@ -680,8 +680,8 @@ step log, and the one error annotation is:
 Every job installs the OpenTofu version the default branch decides
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), so a merged
 `tools.tofu` change, or an engine re-pin that moves the `VERSIONS` default,
-invalidates every plan awaiting apply. Re-plan: on an open pull request, comment
-`shipmate plan` or push; after the merge, open a new pull request touching the
+invalidates every plan awaiting apply. Re-plan (comment `shipmate plan` or push on
+an open pull request), or after the merge open a new pull request touching the
 stack.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
@@ -1339,8 +1339,8 @@ apply side's encryption key. The engine cannot tell the causes apart:
 - **The artifact is corrupt, truncated or altered.** Re-plan; a re-run
   downloads the same artifact.
 
-To re-plan on an open pull request, comment `shipmate plan` or push; after the
-merge, open a new pull request touching the stack.
+Re-plan (comment `shipmate plan` or push on an open pull request), or after the
+merge open a new pull request touching the stack.
 
 ### `plan artifact ... cannot be read`
 
@@ -1348,8 +1348,8 @@ The apply cell could not open its reviewed plan artifact; the error at
 the end of the message says why. Nothing was applied.
 
 - **The artifact downloaded without `stack.otplan`.** No earlier step reports
-  it. Re-plan: comment `shipmate plan` or push on an open pull request; after
-  the merge, open a new pull request touching the stack. A re-run downloads the
+  it. Re-plan (comment `shipmate plan` or push on an open pull request), or
+  after the merge open a new pull request touching the stack. A re-run downloads the
   same artifact.
 - **The runner's disk failed.** The refusal comes before any apply step, so a
   re-run of the job is safe; a self-hosted runner needs its disk fixed.
@@ -1454,8 +1454,8 @@ other case, re-plan and reconcile against the provider:
    `<run_id>-<run_attempt>` of the run that saved it, and
    `gh cache list --key state/<stack-slug>/<env>/ -L 100 --sort created_at --repo <owner>/<repo>`
    lists the entries that survive, newest first.
-4. Re-plan on a pull request touching the stack: on an open pull request,
-   comment `shipmate plan` or push; after the merge, open a new pull request.
+4. Re-plan (comment `shipmate plan` or push on an open pull request), or after
+   the merge open a new pull request touching the stack.
    When step 1 found no entry, the plan repeats the lost apply. Do not apply
    it as it stands: apply a plan
    from this procedure only when each resource the lost apply touched shows

@@ -43,7 +43,8 @@ MIN_LEN = len(MAGIC) + SALT_LEN + TAG_LEN  # an empty plaintext has an empty bod
 ITERATIONS = 600000
 KEY_VAR = "SHIPMATE_CRYPT_KEY"
 _REPLAN = (
-    "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
+    "(comment shipmate plan or push), or after the merge open a new pull request touching the "
+    "stack."
 )
 _RUNNER = (
     "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
@@ -195,8 +196,9 @@ def decrypt(path):
         "",
         unreadable=(
             f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
-            f"downloaded without stack.otplan needs a re-plan: {_REPLAN} For a disk failure on "
-            "the runner, the refusal comes before any apply step, so a re-run of the job is safe."
+            f"downloaded without stack.otplan needs a re-plan. Re-plan {_REPLAN} For a disk "
+            "failure on the runner, the refusal comes before any apply step, so a re-run of the "
+            "job is safe."
         ),
         unauthenticated=(
             f"::error::plan artifact `{path}` failed authentication: it was encrypted with "

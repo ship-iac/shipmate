@@ -40,6 +40,15 @@ NOT_FOUND = "command failed (1): gh api x\ngh: Not Found (HTTP 404)"
 UNPROCESSABLE = "command failed (1): gh api x\ngh: Unexpected inputs provided (HTTP 422)"
 FORBIDDEN = "command failed (1): gh api x\ngh: Resource not accessible (HTTP 403)"
 ANSWER = '{"workflow_run_id":123}'
+#: gh's stderr holding a line that would start a workflow command, a CR and a `%`.
+FORGED = "command failed (1): gh api x\n::error::forged\r\ngh: Forbidden 100% (HTTP 403)"
+
+
+def _warned(message):
+    """`message`, multi-line gh text without `%`, CR or `::`, as its one `::warning::` line."""
+    return "::warning::" + message.replace("\n", " | ") + "\n"
+
+
 HEAD = "0123456789abcdef0123456789abcdef01234567"
 PLAN_TITLE = "shipmate · plan pr=42 ref= comment="
 
@@ -118,7 +127,42 @@ def test_a_4xx_on_the_first_attempt_posts_once_and_exits_1(calls, monkeypatch, c
     answering(monkeypatch, calls, [SystemExit(FORBIDDEN), ANSWER], [""])
     code, out, err = post(capsys)
     assert (code, out, calls) == (1, "", [SENT])
-    assert err == FORBIDDEN + "\n"
+    assert err == _warned(FORBIDDEN)
+
+
+#: `FORGED` as its one escaped `::warning::` line, hand-written.
+FORGED_WARNING = (
+    "::warning::command failed (1): gh api x | ::error::forged | gh: Forbidden 100%25 (HTTP 403)\n"
+)
+
+
+def test_a_permanent_failure_prints_ghs_error_as_one_escaped_warning(calls, monkeypatch, capsys):
+    """gh's stderr can hold a line that would start a workflow command; the failure prints as
+    one escaped warning, raw text nowhere, and still exits 1. Mutation: print `e.code` raw."""
+    answering(monkeypatch, calls, [SystemExit(FORGED)])
+    assert post(capsys) == (1, "", FORGED_WARNING)
+
+
+def test_a_failure_after_a_transient_one_prints_it_escaped(calls, monkeypatch, capsys):
+    """Mutation: print `e.code` raw."""
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), SystemExit(FORGED)], [""])
+    code, out, err = post(capsys)
+    assert (code, out) == (db.UNDETERMINED, "")
+    assert err.endswith("%0Agh: Bad Gateway (HTTP 502)\n" + FORGED_WARNING)
+
+
+def test_a_failed_listing_prints_its_failure_escaped(calls, monkeypatch, capsys):
+    """gh's own `::error::` prefix stays inside the one warning line. Mutations: print the
+    listing failure raw; raise it to `run_annotated` (exit 1)."""
+    answering(
+        monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit("::error::" + FORGED)]
+    )
+    code, out, err = post(capsys)
+    assert (code, out) == (db.UNDETERMINED, "")
+    assert err.endswith(
+        "%0Agh: Bad Gateway (HTTP 502)\n::warning::listing shipmate.yml runs failed: ::error::"
+        + FORGED_WARNING.removeprefix("::warning::")
+    )
 
 
 def test_a_transient_failure_lists_then_retries(calls, monkeypatch, capsys):
@@ -212,7 +256,8 @@ def test_a_created_at_without_a_zone_is_undetermined(calls, monkeypatch, capsys)
     code, _, err = post(capsys)
     assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
     assert err.endswith(
-        "\nlisting shipmate.yml runs failed: ValueError: listed run created_at without a zone: "
+        "\n::warning::listing shipmate.yml runs failed: ValueError: listed run created_at without "
+        "a zone: "
         '{"created_at": "2026-11-07T11:59:55"}\n'
     )
 
@@ -223,7 +268,7 @@ def test_a_listing_that_raises_anything_is_undetermined(calls, monkeypatch, caps
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [OSError("disk gone")])
     code, _, err = post(capsys)
     assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST])
-    assert err.endswith("\nlisting shipmate.yml runs failed: OSError: disk gone\n")
+    assert err.endswith("\n::warning::listing shipmate.yml runs failed: OSError: disk gone\n")
 
 
 def test_a_failed_listing_prints_its_failure(calls, monkeypatch, capsys):
@@ -232,7 +277,9 @@ def test_a_failed_listing_prints_its_failure(calls, monkeypatch, capsys):
     drop the listing failure's print -> stderr ends at the retry notice; print the type name for
     a `SystemExit` too -> `SystemExit: ` before gh's text."""
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [SystemExit(FORBIDDEN)])
-    assert post(capsys)[2].endswith("\nlisting shipmate.yml runs failed: " + FORBIDDEN + "\n")
+    assert post(capsys)[2].endswith(
+        "\n" + _warned("listing shipmate.yml runs failed: " + FORBIDDEN)
+    )
 
 
 def test_three_transient_failures_are_undetermined(calls, monkeypatch, capsys):
@@ -244,7 +291,7 @@ def test_three_transient_failures_are_undetermined(calls, monkeypatch, capsys):
         db.UNDETERMINED,
         [SENT, SLEPT_2, LIST, SENT, SLEPT_5, LIST, SENT],
     )
-    assert err.endswith(BAD_GATEWAY + "\n")
+    assert err.endswith("\n" + _warned(BAD_GATEWAY))
 
 
 def test_a_4xx_after_a_transient_failure_is_undetermined(calls, monkeypatch, capsys):
@@ -253,7 +300,7 @@ def test_a_4xx_after_a_transient_failure_is_undetermined(calls, monkeypatch, cap
     answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), SystemExit(UNPROCESSABLE)], [""])
     code, _, err = post(capsys)
     assert (code, calls) == (db.UNDETERMINED, [SENT, SLEPT_2, LIST, SENT])
-    assert err.endswith(UNPROCESSABLE + "\n")
+    assert err.endswith("\n" + _warned(UNPROCESSABLE))
 
 
 @pytest.mark.parametrize(("ago", "code"), [(4, 3), (6, 0)])
@@ -305,7 +352,7 @@ def test_an_auto_dispatch_to_a_fence_without_its_inputs_names_repin(calls, monke
     gh's message; drop the stdout write -> the reply cannot carry it."""
     answering(monkeypatch, calls, [SystemExit(UNPROCESSABLE)])
     assert (post(capsys), calls) == (
-        (1, INPUTS_HINT, f"{UNPROCESSABLE}\n::error::{INPUTS_HINT}\n"),
+        (1, INPUTS_HINT, f"{_warned(UNPROCESSABLE)}::error::{INPUTS_HINT}\n"),
         [SENT],
     )
 
@@ -314,7 +361,7 @@ def test_an_auto_dispatch_to_a_fence_without_its_inputs_names_repin(calls, monke
 def test_a_missing_file_or_trigger_prints_the_layout_hint(calls, monkeypatch, capsys, answer):
     """Mutations: drop either `_LAYOUT_ANSWERS` entry -> its shape prints no hint."""
     answering(monkeypatch, calls, [SystemExit(answer)])
-    assert post(capsys) == (1, LAYOUT_HINT, f"{answer}\n::error::{LAYOUT_HINT}\n")
+    assert post(capsys) == (1, LAYOUT_HINT, f"{_warned(answer)}::error::{LAYOUT_HINT}\n")
 
 
 @pytest.mark.parametrize(
@@ -534,7 +581,7 @@ def test_a_listing_past_ten_pages_is_undetermined(calls, monkeypatch, capsys):
     code, _, err = post(capsys)
     assert (code, calls[:3], len(calls)) == (db.UNDETERMINED, [sent, SLEPT_2, PAGE_1], 12)
     assert err.endswith(
-        "\nlisting shipmate.yml runs failed: ValueError: shipmate.yml runs since "
+        "\n::warning::listing shipmate.yml runs failed: ValueError: shipmate.yml runs since "
         "2026-11-07T11:59:55+00:00 run past 10 pages\n"
     )
 

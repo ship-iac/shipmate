@@ -454,9 +454,9 @@ _GH_ERROR_STUB = _on_dispatch_call(
 
 @bash_only
 def test_a_failed_dispatch_prints_ghs_error_to_the_log(tmp_path):
-    """`post` prints gh's message to stderr on a failure, and the log is where the failure reply
-    sends the reader, so that line must print. The failure exit still removes the file holding
-    it and leaves the job workspace (the step's working directory) empty.
+    """`post` prints gh's message to stderr on a failure, as one escaped warning, and the log is
+    where the failure reply sends the reader, so that line must print. The failure exit still
+    removes the file holding it and leaves the job workspace (the step's working directory) empty.
 
     Mutations: delete the `$err` `printf` line; drop the `trap` that removes `$errfile`.
     """
@@ -464,7 +464,12 @@ def test_a_failed_dispatch_prints_ghs_error_to_the_log(tmp_path):
     workspace.mkdir()
     result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_GH_ERROR_STUB, cwd=workspace)
     assert result.returncode == 1, f"a failed dispatch must fail the step: {result.returncode}"
-    assert "gh: Not Found (HTTP 404)" in result.stdout.splitlines(), (
+    warning = (
+        "::warning::command failed (1): gh api -X POST "
+        "repos/org/repo/actions/workflows/shipmate.yml/dispatches --input - | "
+        "gh: Not Found (HTTP 404)"
+    )
+    assert warning in result.stdout.splitlines(), (
         f"gh's message must reach the log: {result.stdout}"
     )
     assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
@@ -493,7 +498,8 @@ def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_
 def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
     """`dispatch-body` exits 1 here, as it does when the body cannot be built or the first
     attempt fails with a failure that is not transient. The step exits 1, annotates the failure
-    itself (`post` prints it unannotated), and posts the failure reply carrying the run link.
+    itself (`dispatch-body` prints its cause only as a warning), and posts the failure reply
+    carrying the run link.
 
     Mutations: drop the failure branch's `::error::` echo; drop its `say_no_run_started`.
     """
