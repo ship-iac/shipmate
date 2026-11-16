@@ -1,5 +1,7 @@
 import contextlib
 import json
+import os
+import pathlib
 
 import pytest
 from _detect_fixtures import (
@@ -895,6 +897,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "waiting_cells": [],
         "held_cells": [],
         "env_order": ["dev-eu"],
+        "complete": True,
     }
 
 
@@ -1403,12 +1406,15 @@ def test_a_targeted_apply_reads_the_locks_of_its_pending_cells_environment(monke
 
 
 @pytest.mark.parametrize("env", ["", "dev-eu"], ids=["bare", "targeted"])
-def test_a_refused_detect_still_writes_an_empty_report(monkeypatch, tmp_path, env):
-    """The report is written before any refusal, so the result comment of a refused run reads
-    every field empty rather than as an unread report.
+def test_a_refused_detect_leaves_the_empty_report_its_job_wrote(monkeypatch, tmp_path, env):
+    """The job writes `{}` before checkout; a refusal never marks it complete, so the result
+    comment reads it only beside the refusal.
 
-    Mutation: drop the `write_report({})` at the top of `main` -- no file, red."""
+    Mutation: call `write_report({})` at the top of `main` -- the refused report reads complete,
+    red."""
     _apply_env(monkeypatch, tmp_path, SHIPMATE_ENV=env, SHIPMATE_HEAD_SHA="not-a-sha")
+    path = pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"])
+    path.write_text("{}", encoding="utf-8")
     with pytest.raises(SystemExit):
         ad.main()
-    assert detect_report() == {}
+    assert path.read_text(encoding="utf-8") == "{}"

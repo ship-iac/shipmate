@@ -806,6 +806,7 @@ def test_the_auto_form_writes_its_eleven_fields_in_one_report(tmp_path, monkeypa
         "env_order",
         "pusher",
         "bare_envs",
+        "complete",
     }
     assert {"provenance_run", "base_sha"} <= set(parsed)
     assert not {"pusher", "bare_envs", "held_cells", "report"} & set(parsed)

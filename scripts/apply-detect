@@ -45,6 +45,7 @@ from _shipmate import (
     _load,
     _run,
     check_runs,
+    command_data,
     gh_json,
     named,
     run_annotated,
@@ -57,6 +58,7 @@ wv = _load("waves")
 ag = _load("apply-gate")
 az = _load("authorize")
 cl = _load("cell-lock")
+ac = _load("apply-comment")
 
 _NAMED = 10
 #: The auto form's mergeability wait: reads, and seconds between them. Unprobed: GitHub
@@ -70,16 +72,23 @@ _AUTO_RETRY = "comment `shipmate apply`"
 
 
 def write_report(report):
-    """Write `report` as JSON to `SHIPMATE_REPORT_PATH`, which the action uploads as the
-    `apply-report` artifact for the apply result comment; nothing else reads it. Its fields:
-    `excluded_envs`, `skipped_envs`, `skipped_after`, `review_held_envs` and `applied_exempt_envs`
-    (bare and auto forms), `review_not_required_envs`, `waiting_cells`, `held_cells` and
-    `env_order` (every form), `pusher` and `bare_envs` (auto form), as each form's docstring
-    describes them. A file, not a job output: the report has no size cap, and GitHub drops a
-    whole job output when any substring of it is masked."""
+    """Write the complete `report`, marked `"complete": true`, as JSON to `SHIPMATE_REPORT_PATH`,
+    which the caller uploads as an artifact for the apply result comment; nothing else reads it.
+    Its fields: `excluded_envs`, `skipped_envs`, `skipped_after`, `review_held_envs` and
+    `applied_exempt_envs` (bare and auto forms), `review_not_required_envs`, `waiting_cells`,
+    `held_cells` and `env_order` (every form), `pusher` and `bare_envs` (auto form), as each
+    form's docstring describes them. A file, not a job output: the report has no size cap, and
+    GitHub drops a whole job output when any substring of it is masked.
+
+    Also prints the review-exempt and no-review notices `apply-comment.notices` prints, so the
+    audit trail survives a comment that cannot read the report."""
+    for env in report.get("applied_exempt_envs", []):
+        print(f"::notice::{command_data(env)}: {ac._EXEMPT}")
+    for env in report.get("review_not_required_envs", []):
+        print(f"::notice::{command_data(env)}: {ac._NO_REVIEW}")
     path = pathlib.Path(os.environ["SHIPMATE_REPORT_PATH"])
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report), encoding="utf-8")
+    path.write_text(json.dumps({**report, "complete": True}), encoding="utf-8")
 
 
 def paths_with_checks(env, candidate_paths, check_names):
@@ -759,8 +768,6 @@ def bare_main(auto=False):
 
 
 def main():
-    # Before any refusal: a refused run's comment reads every field empty, not an unread report.
-    write_report({})
     if os.environ.get("SHIPMATE_AUTO") == "true":
         bare_main(auto=True)
         return

@@ -4,7 +4,7 @@
 Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
-the expected-cell set (per-env-level waves JSON), the head SHA, apply-detect's `report` (the
+the expected-cell set (per-env-level waves JSON), the head SHA, apply-detect's report file (the
 excluded/skipped/held envs and the predecessors each skipped env waits on (bare and auto forms),
 the waiting cells and the held cells, locked (both forms) or overlap (auto form only), the envs
 left for a bare apply and the pusher (auto form only), the env order, and the review-exempt and
@@ -493,7 +493,9 @@ def _tally_tokens(n):
     return [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
 
 
-def _verdict(rows, failed_run, held, head_sha, run_url, waiting=(), held_cells=(), left=()):
+def _verdict(
+    rows, failed_run, held, head_sha, run_url, waiting=(), held_cells=(), left=(), unknown=False
+):
     """(circle, line): the line under the header and its circle. With rows: a count per
     status in `_STATUS` order, zero counts omitted, led by a bare `failed` when the run failed
     and no failed or blocked row shows it, then `N waiting` when cells wait, `N locked` for the
@@ -505,7 +507,9 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=(), held_cells=(
     sentence, the left sentence when `left` names an environment (left for a bare apply,
     `targeted` or skipped), or `🟢 no pending applies`. Then
     `provenance`. The circle is returned with the line so the footer decision reads it, never
-    the rendered text.
+    the rendered text. `unknown` (apply-detect's report was unread, so every set above is empty)
+    keeps a run that did not fail off 🟢: with rows the counts end `result unknown` and ⚪
+    joins the circles; without rows the line is `⚪ result unknown`.
 
     The leading `failed` is suppressed by a `failed` or `blocked` row, each of which already
     names a cell that did not apply. An `unrecorded` row does not suppress it: it describes ONE
@@ -514,6 +518,8 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=(), held_cells=(
     `not attempted`; suppressing on it would hide that environment's only failure signal."""
     if not rows:
         circle, text = _empty_verdict(failed_run, held, waiting, held_cells, left)
+        if unknown and not failed_run:
+            circle, text = "⚪", "result unknown"
     else:
         n = collections.Counter(r["status"] for r in rows)
         tokens = _tally_tokens(n)
@@ -531,6 +537,9 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=(), held_cells=(
         based = [c for c in overlap if (c["stack"], c["environment"]) not in keys]
         if based:
             tokens.append(f"{len(based)} held (base changed)")
+            circles.append("⚪")
+        if unknown:
+            tokens.append("result unknown")
             circles.append("⚪")
         circle = "🔴" if failed_run else sc.worst(circles)
         text = ", ".join(tokens)
@@ -911,18 +920,20 @@ def build_comment(
     the auto form's overlap cells. `skipped_after`
     and `bare` are detect's: the skipped lines name each predecessor, and a line names each
     environment left for a bare apply. A run that applied nothing and left a `bare`, `targeted`
-    or skipped environment is never 🟢. A `report_unread` run (`read_report`) is 🔴, with
-    `_REPORT_UNREAD` under the verdict.
+    or skipped environment is never 🟢. A `report_unread` run (`read_report`) is never 🟢: its
+    verdict says the result is unknown, and `_REPORT_UNREAD` sits under it.
 
     Every row is guaranteed its bare line: the space all headings and remaining rows' bare lines
     need is reserved up front, together, so an early giant apply.txt cannot starve a later row.
     When even the bare lines overflow HARD_CAP, `_compact` renders them without headings or the
     blocked reasons and with one footer line per disposition, the lock lines, and one per waiting
     blocker; past that a SystemExit names the cause."""
-    # Every field reads empty when the report is unread, which alone would read green.
-    failed = _results_failed(results_csv) or report_unread
+    failed = _results_failed(results_csv)
     left = [*bare, *excluded, *skipped]
-    circle, verdict = _verdict(rows, failed, held, head_sha, run_url, waiting, held_cells, left)
+    # Every field reads empty when the report is unread, which alone would read green.
+    circle, verdict = _verdict(
+        rows, failed, held, head_sha, run_url, waiting, held_cells, left, report_unread
+    )
     fence = sc.reason_fence(refusal) if refusal else ""
     auto_line = _auto_line(pusher) if auto_dispatched else ""
     unread = _REPORT_UNREAD if report_unread else ""
@@ -980,6 +991,12 @@ def build_comment(
 #: The line under the verdict when apply-detect's report could not be read.
 _REPORT_UNREAD = "🔴 could not read the detect report; see the run"
 
+#: The keys the renderer reads from each cell of the report's two cell lists, all strings.
+_CELL_KEYS = {
+    "waiting_cells": ("stack", "environment", "after_stack", "after_environment"),
+    "held_cells": ("stack", "environment", "cause"),
+}
+
 #: Every field of apply-detect's report and the value a missing one reads as.
 _REPORT_DEFAULTS = {
     "excluded_envs": [],
@@ -996,23 +1013,62 @@ _REPORT_DEFAULTS = {
 }
 
 
-def read_report(path):
+def _names(value):
+    return type(value) is list and all(type(e) is str for e in value)
+
+
+def _cells(value, keys):
+    return type(value) is list and all(
+        type(c) is dict and all(type(c.get(k)) is str for k in keys) for c in value
+    )
+
+
+def _held(cell):
+    """Whether held cell `cell` (string `cause` checked) is `overlap`, or `locked` with a `holder`
+    that is a pull request number or null."""
+    holder = cell.get("holder", "")
+    return cell["cause"] == "overlap" or (
+        cell["cause"] == "locked" and (holder is None or type(holder) is int)
+    )
+
+
+def _shape_error(fields):
+    """The first field of `fields` the renderer cannot read, as a cause, else None: every field
+    of its default's type, every list of environment names a list of strings, every cell an
+    object with the string keys `_CELL_KEYS` names, every held cell `_held`, and `skipped_after`
+    an object of environment name lists."""
+    for key, default in _REPORT_DEFAULTS.items():
+        if type(fields[key]) is not type(default):
+            return f"{key} is not a JSON {type(default).__name__}"
+    ok = {
+        **{k: _names(v) for k, v in fields.items() if type(v) is list and k not in _CELL_KEYS},
+        **{k: _cells(fields[k], keys) for k, keys in _CELL_KEYS.items()},
+        "skipped_after": all(_names(v) for v in fields["skipped_after"].values()),
+    }
+    bad = [k for k, good in ok.items() if not good]
+    if not bad and not all(map(_held, fields["held_cells"])):
+        bad = ["held_cells"]
+    return f"{bad[0]} is not the shape the comment reads" if bad else None
+
+
+def read_report(path, refused=False):
     """(fields, unread) from apply-detect's report file at `path`. `fields` holds every
-    `_REPORT_DEFAULTS` key, a missing one at its default. `unread` is True, and `fields` all
-    defaults, when the file is missing or unreadable, is not a JSON object, holds a field of
-    another type than its default, or an `env_order` that is not a list of names; one warning
-    names the cause. The caller then never renders a green verdict: empty fields alone would."""
+    `_REPORT_DEFAULTS` key, a missing one at its default. Only a report `write_report` finished
+    carries `"complete": true`; an incomplete one is read only when detect `refused`, whose
+    report is the empty one written before any refusal (or what the refusal wrote). `unread` is
+    True, and `fields` all defaults, when the file is missing or unreadable, is not a JSON
+    object, is incomplete without a refusal (detect died after the empty report was written),
+    or holds a field the renderer cannot read (`_shape_error`); one warning names the cause. The
+    caller then never renders a green verdict: empty fields alone would."""
     try:
         report = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
         if not isinstance(report, dict):
             raise ValueError("not a JSON object")
+        if report.get("complete") is not True and not refused:
+            raise ValueError("detect did not finish it and refused nothing")
         fields = {k: report.get(k, d) for k, d in _REPORT_DEFAULTS.items()}
-        wrong = [k for k, d in _REPORT_DEFAULTS.items() if type(fields[k]) is not type(d)]
-        if wrong:
-            name = type(_REPORT_DEFAULTS[wrong[0]]).__name__
-            raise ValueError(f"{wrong[0]} is not a JSON {name}")
-        if not all(isinstance(e, str) for e in fields["env_order"]):
-            raise ValueError("env_order is not a list of environment names")
+        if cause := _shape_error(fields):
+            raise ValueError(cause)
     except (OSError, ValueError) as exc:
         print(f"::warning::could not read the detect report ({command_data(str(exc))})")
         return dict(_REPORT_DEFAULTS), True
@@ -1029,7 +1085,9 @@ def main():
     )
     rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "")
-    r, unread = read_report(os.environ.get("SHIPMATE_REPORT_PATH", ""))
+    # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
+    refusal = os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
+    r, unread = read_report(os.environ.get("SHIPMATE_REPORT_PATH", ""), refused=bool(refusal))
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
     for line in notices(rows, r["applied_exempt_envs"], r["review_not_required_envs"]):
         print(line)
@@ -1044,9 +1102,7 @@ def main():
         r["review_held_envs"],
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
         r["waiting_cells"],
-        # Exclusive: a detect refusal skips the lock job, whose output then reads empty.
-        os.environ.get("SHIPMATE_DETECT_REFUSAL", "")
-        or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
+        refusal or os.environ.get("SHIPMATE_LOCK_REFUSAL", ""),
         r["env_order"],
         r["held_cells"],
         r["skipped_after"],

@@ -145,7 +145,21 @@ jobs:
       base_sha: ${{ steps.d.outputs.base_sha }}
       refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
       tools: ${{ steps.setup.outputs.tools }}
+      report_artifact: ${{ steps.report.outputs.name }}
     steps:
+      # Before any step that can refuse, so every refusal leaves a report for the result comment;
+      # apply-detect overwrites it with the complete one. One artifact name per call and attempt,
+      # so a re-run or a second call in the run never reads another's report.
+      - id: report
+        shell: bash
+        run: |
+          set -euo pipefail
+          path="$RUNNER_TEMP/apply-report/report.json"
+          mkdir -p "${path%/*}"
+          echo '{}' > "$path"
+          token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "name=apply-report-$GITHUB_RUN_ATTEMPT-$token" >> "$GITHUB_OUTPUT"
       - if: ${{ !inputs.auto }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.ref }}" }
@@ -171,6 +185,19 @@ jobs:
           # arrived, which refuses a targeted apply and holds every environment of a bare one.
           review-decision: ${{ needs.review.outputs.decision }}
           github-vars: ${{ toJSON(vars) }}
+          report-path: ${{ steps.report.outputs.path }}
+      - name: Upload the apply report
+        # Reviewer-facing only (continue-on-error): the apply result comment is its one reader,
+        # and it renders a missing report as a red line, never a green verdict. Runs after a
+        # failed checkout, setup or detect too.
+        if: ${{ !cancelled() && steps.report.outputs.name != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.report.outputs.name }}
+          path: ${{ steps.report.outputs.path }}
+          if-no-files-found: ignore
+          retention-days: 1
 
   # Holds every cell the waves apply before the first one starts. A cell another pull request
   # took after `detect` read the locks refuses the whole run here. A new `shipmate apply` or
@@ -320,6 +347,7 @@ jobs:
           envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
           envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
           envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          report-artifact: ${{ needs.detect.outputs.report_artifact }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
           auto: ${{ inputs.auto }}

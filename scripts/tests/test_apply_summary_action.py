@@ -264,6 +264,7 @@ def test_declared_inputs_are_exactly_these():
         "envlevel1-waves",
         "envlevel2-waves",
         "envlevel3-waves",
+        "report-artifact",
         "detect-refusal",
         "lock-refusal",
         "auto",
@@ -392,6 +393,7 @@ _APPLY_SUMMARY_WITH = {
     "envlevel1-waves": "${{ needs.detect.outputs.envlevel1_waves }}",
     "envlevel2-waves": "${{ needs.detect.outputs.envlevel2_waves }}",
     "envlevel3-waves": "${{ needs.detect.outputs.envlevel3_waves }}",
+    "report-artifact": "${{ needs.detect.outputs.report_artifact }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
     "auto": "${{ inputs.auto }}",
@@ -408,6 +410,7 @@ def test_apply_passes_apply_summary_exactly_this_with():
 
     Mutation: drop `environment:` from the step's `with:` -- red.
     Mutation: restore `held-cells: ${{ needs.detect.outputs.held_cells }}` -- red.
+    Mutation: drop `report-artifact:` from the step's `with:` -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
     Mutation: drop `auto:` from the step's `with:` -- red."""
@@ -419,19 +422,21 @@ def test_apply_passes_apply_summary_exactly_this_with():
 #: apply-summary's report download step, hand-written.
 _REPORT_DOWNLOAD = {
     "name": "Download the apply report",
+    "if": "${{ inputs.report-artifact != '' }}",
     "continue-on-error": True,
     "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
-    "with": {"name": "apply-report", "path": "apply-report"},
+    "with": {"name": "${{ inputs.report-artifact }}", "path": "apply-report"},
 }
 
 
 def test_the_report_is_downloaded_by_exact_name_where_the_render_reads_it():
-    """By `name`, not `pattern`, and to the directory the render step's `SHIPMATE_REPORT_PATH`
-    names (pinned in `_RENDER_ENV`). A failed download degrades: the render reads the report as
-    unread, renders the red line and never a green verdict.
+    """By the exact name detect output, not a `pattern`, to the directory the render step's
+    `SHIPMATE_REPORT_PATH` names (pinned in `_RENDER_ENV`), and never with an empty name, which
+    downloads every artifact of the run. A failed download degrades: the render reads the report
+    as unread, renders the red line and never a green verdict.
 
-    Mutations: rename the artifact; download to another path; drop `continue-on-error`, so a
-    missing report skips the comment; download by `pattern`."""
+    Mutations: drop the `if:`; name a fixed artifact; download to another path; drop
+    `continue-on-error`, so a missing report skips the comment; download by `pattern`."""
     steps = action_yaml("apply-summary")["runs"]["steps"]
     assert next(s for s in steps if s.get("name") == _REPORT_DOWNLOAD["name"]) == _REPORT_DOWNLOAD
 

@@ -141,13 +141,15 @@ def _render(monkeypatch, tmp_path, name, report_env, report=None):
 def test_the_report_renders_the_comment_the_eleven_inputs_rendered(monkeypatch, tmp_path, name):
     """`fixtures/apply-report/<name>.md` and `.out` are the comment and stdout `apply-comment.main`
     rendered from the same fields as eleven separate env vars, captured raw at engine commit
-    `27dab46f`, before they became one report file; the file renders them byte for byte. A refused
-    detect writes `{}`, which renders as every field empty.
+    `27dab46f`, before they became one report file; the complete file renders them byte for byte.
+    A refused detect leaves the empty report its job wrote first, which renders as every field
+    empty.
 
     Mutation: default `skipped_after` to `[]` in `_REPORT_DEFAULTS` -- every scenario that omits
     it reads as unread, red. Mutation: drop `pusher` from `main`'s `build_comment` call --
     `auto`, red."""
-    report = json.dumps(SCENARIOS[name][2])
+    fields = SCENARIOS[name][2]
+    report = json.dumps({**fields, "complete": True}) if fields else "{}"
     body, out = _render(monkeypatch, tmp_path, name, {}, report)
     assert body == (FIXTURES / f"{name}.md").read_text(encoding="utf-8")
     assert out == (FIXTURES / f"{name}.out").read_text(encoding="utf-8")
@@ -174,10 +176,20 @@ def test_a_missing_field_reads_as_its_default(tmp_path):
 
     Mutation: `report[k]` for `report.get(k, d)` in `read_report` -- KeyError, red."""
     path = tmp_path / "report.json"
-    path.write_text('{"held_cells": [{"stack": "a", "environment": "e"}]}', encoding="utf-8")
+    held = [{"stack": "a", "environment": "e", "cause": "overlap"}]
+    path.write_text(json.dumps({"held_cells": held, "complete": True}), encoding="utf-8")
     fields, unread = ac.read_report(str(path))
-    assert fields == {**_DEFAULTS, "held_cells": [{"stack": "a", "environment": "e"}]}
+    assert fields == {**_DEFAULTS, "held_cells": held}
     assert unread is False
+
+
+#: A cell's stack and environment, for the shape cases.
+_AE = {"stack": "a", "environment": "e"}
+
+
+def _complete(**fields):
+    """`fields` as a complete report's text."""
+    return json.dumps({**fields, "complete": True})
 
 
 #: The red line an unread report adds under the verdict, hand-written.
@@ -197,33 +209,97 @@ _AT = (
         pytest.param("", id="empty"),
         pytest.param("{", id="not-json"),
         pytest.param("[]", id="not-an-object"),
-        pytest.param('{"held_cells": {}}', id="held-cells-not-a-list"),
-        pytest.param('{"pusher": null}', id="pusher-not-a-string"),
-        pytest.param('{"env_order": ["dev", 1]}', id="env-order-not-names"),
+        pytest.param("{}", id="empty-without-a-refusal"),
+        pytest.param('{"held_cells": []}', id="incomplete"),
+        pytest.param('{"complete": "true"}', id="complete-not-true"),
+        pytest.param('{"held_cells": {}, "complete": true}', id="held-cells-not-a-list"),
+        pytest.param('{"pusher": null, "complete": true}', id="pusher-not-a-string"),
+        pytest.param('{"env_order": ["dev", 1], "complete": true}', id="env-order-not-names"),
+        pytest.param('{"excluded_envs": [{}], "complete": true}', id="env-list-not-names"),
+        pytest.param(
+            '{"waiting_cells": [{"stack": "a", "environment": "e"}], "complete": true}',
+            id="waiting-cell-keys",
+        ),
+        pytest.param(
+            '{"held_cells": [{"stack": "a", "environment": "e"}], "complete": true}',
+            id="held-cell-keys",
+        ),
+        pytest.param(_complete(held_cells=[{**_AE, "cause": "gone"}]), id="held-cell-cause"),
+        pytest.param(
+            _complete(held_cells=[{**_AE, "cause": "locked"}]), id="locked-cell-without-holder"
+        ),
+        pytest.param(
+            _complete(held_cells=[{**_AE, "cause": "locked", "holder": "7"}]),
+            id="locked-cell-holder-not-a-number",
+        ),
+        pytest.param('{"skipped_after": {"s": "d"}, "complete": true}', id="skipped-after-values"),
+        pytest.param('{"skipped_after": {"s": [1]}, "complete": true}', id="skipped-after-names"),
     ],
 )
 def test_an_unread_report_renders_the_red_line_and_never_green(monkeypatch, tmp_path, report):
     """Detect never uploaded the report (it died before writing it, or the upload or download
-    failed), or the file is not the report's shape: every field reads empty, which alone would
-    render `🟢 no pending applies` over pending cells, so the verdict is 🔴 and the red line names
-    the cause. The render does not fail.
+    failed), died after its job wrote the empty report without refusing, or the file is not the
+    shape the comment reads: every field reads empty, which alone would render `🟢 no pending
+    applies` over pending cells. A run whose jobs succeeded reads `⚪ result unknown`, the red line
+    names the cause, and the render does not fail.
 
-    Mutation: return the defaults without the unread flag when the file is missing -- `missing`
-    renders green, red. Mutation: drop the `except` around `json.loads` -- `empty` and `not-json`
-    raise, red. Mutation: drop the type check -- the wrong-typed cases render green or raise, red.
-    Mutation: drop the env order's name check -- `env-order-not-names` renders green, red.
-    Mutation: leave `report_unread` out of `failed` in `build_comment` -- 🟢 verdict, red."""
+    Mutation: return the defaults without the unread flag -- every case renders green, red.
+    Mutation: catch `OSError` only -- every case but `missing` raises, red. Mutation: drop the
+    `complete` check -- `empty-without-a-refusal`, `incomplete` and `complete-not-true` render
+    green, red. Mutation: drop the type check -- `pusher-not-a-string` renders green, red.
+    Mutation: drop the name lists from `_shape_error` -- `env-order-not-names` and
+    `env-list-not-names`, red. Mutation: drop the cell key check -- the two key cases raise,
+    red. Mutation: drop the `_held` check -- the held cause and holder cases, red. Mutation: drop
+    the `skipped_after` check -- its two cases, red. Mutation: render `🟢 no pending applies` for
+    an unknown run without rows -- red."""
     body, out = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, report)
     assert body == (
-        f"### shipmate apply\n\n🔴 failed {_AT}\n\n{_UNREAD}\n\n"
+        f"### shipmate apply\n\n⚪ result unknown {_AT}\n\n{_UNREAD}\n\n"
         "Comment `shipmate help` for the available commands."
     )
     assert out.startswith("::warning::could not read the detect report (")
 
 
+def test_an_unread_report_of_a_failed_run_reads_failed(monkeypatch, tmp_path):
+    """A refused detect whose report never arrived: the job results say failed, so the verdict
+    stays `🔴 failed`, over the red line and the refusal.
+
+    Mutation: let an unread report override a failed run with `⚪ result unknown` -- red."""
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", {}, None)
+    assert body == (
+        f"### shipmate apply\n\n🔴 failed {_AT}\n\n{_UNREAD}\n\n"
+        "```\napply refused: no apply check on the head\n```\n\n"
+        "Comment `shipmate help` for the available commands."
+    )
+
+
+def test_an_unread_report_over_applied_rows_is_never_green(monkeypatch, tmp_path):
+    """Mutation: drop the `result unknown` token from the rows form of `_verdict` -- `🟢 1
+    applied`, red."""
+    body, _ = _render(monkeypatch, tmp_path, "targeted", {}, None)
+    assert body.split("\n")[:5] == [
+        "### shipmate apply dev-eu",
+        "",
+        f"⚪ 1 applied, result unknown {_AT}",
+        "",
+        _UNREAD,
+    ]
+
+
+def test_a_refused_detect_reads_its_incomplete_report(monkeypatch, tmp_path):
+    """A refusal leaves the report incomplete (the empty one its job wrote, or what the refusal
+    wrote); with the refusal it renders as read, no red line.
+
+    Mutation: ignore `refused` in `read_report` -- the red line appears, red."""
+    held = [{"stack": "stacks/a", "environment": "dev", "cause": "overlap"}]
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", {}, json.dumps({"held_cells": held}))
+    assert _UNREAD not in body
+    assert "stacks/a / dev" in body
+
+
 def test_a_wide_environment_graph_renders_pending_not_green(monkeypatch, tmp_path):
     """54 targeted environments left pending and 54 skipped after them, each waiting on all 54:
-    the report holds every one (156,131 bytes, past the 128 KiB one env string can carry), and
+    the report holds every one (156,149 bytes, past the 128 KiB one env string can carry), and
     the comment names them pending instead of reading green.
 
     Mutation: write the report through `json.dumps(report)[:131072]` in `apply-detect`'s
@@ -240,7 +316,7 @@ def test_a_wide_environment_graph_renders_pending_not_green(monkeypatch, tmp_pat
     monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
     ad.write_report(report)
     text = path.read_text(encoding="utf-8")
-    assert len(text) == 156_131
+    assert len(text) == 156_149
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, text)
     lines = body.split("\n")
     assert lines[2] == (

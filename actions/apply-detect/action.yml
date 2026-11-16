@@ -1,5 +1,5 @@
 name: shipmate apply-detect
-description: A targeted apply computes one environment's work set from the head's apply checks and wave-orders it at env-level 0. A bare apply (empty environment) computes the work set of every environment not `targeted`, buckets it into env-levels and wave-orders each level. Every form skips already-applied cells. The auto form (`auto`) is the bare form over the environments whose `apply_mode` is `auto`, with the refusals the `auto` input names. Writes the apply result comment's fields to the `apply-report` artifact (`scripts/apply-detect` `write_report`), on a refusal too. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read, and pull-requests:read for the auto form.
+description: A targeted apply computes one environment's work set from the head's apply checks and wave-orders it at env-level 0. A bare apply (empty environment) computes the work set of every environment not `targeted`, buckets it into env-levels and wave-orders each level. Every form skips already-applied cells. The auto form (`auto`) is the bare form over the environments whose `apply_mode` is `auto`, with the refusals the `auto` input names. Writes the apply result comment's fields to `report-path` (`scripts/apply-detect` `write_report`). Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read, and pull-requests:read for the auto form.
 inputs:
   environment:
     description: Target environment, e.g. dev-eu. Empty runs the bare form over every pending environment.
@@ -22,6 +22,9 @@ inputs:
     description: "'true' runs the auto form, the bare form over the `apply_mode: auto` environments, dispatched by the App after an autoplan: it refuses unless the actor is the App's bot, the plan is the head's newest autoplan, its pusher has write access and the pull request is mergeable at this head, and holds a cell whose stack the merge of the base into the branch changes, directly or through a module it sources, or removes files in. Needs a full-history checkout of the head."
     required: false
     default: "false"
+  report-path:
+    description: The file the complete report is written to, for the caller to upload as the apply result comment's report artifact.
+    required: true
   github-vars:
     description: >-
       The caller's reachable GitHub variables, serialised with toJSON. Read only when the
@@ -57,17 +60,5 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
-        SHIPMATE_REPORT_PATH: ${{ runner.temp }}/apply-report/report.json
+        SHIPMATE_REPORT_PATH: ${{ inputs.report-path }}
       run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"
-    - name: Upload the apply report
-      # Reviewer-facing only (continue-on-error): the apply result comment is its one reader, and
-      # it renders a missing report as a red line, never a green verdict. Runs after a refusal,
-      # which writes an empty report; `overwrite: true` replaces an earlier attempt's.
-      if: ${{ !cancelled() }}
-      continue-on-error: true
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-      with:
-        name: apply-report
-        path: ${{ runner.temp }}/apply-report/report.json
-        if-no-files-found: ignore
-        overwrite: true

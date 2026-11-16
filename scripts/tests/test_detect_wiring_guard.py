@@ -29,7 +29,7 @@ _SCRIPT_ENV = {
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_REVIEW_DECISION": "${{ inputs.review-decision }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
-        "SHIPMATE_REPORT_PATH": "${{ runner.temp }}/apply-report/report.json",
+        "SHIPMATE_REPORT_PATH": "${{ inputs.report-path }}",
     },
     "deploy-detect": {
         "GH_TOKEN": "${{ github.token }}",
@@ -71,6 +71,7 @@ _DETECT_STEPS = {
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
+            "report-path": "${{ steps.report.outputs.path }}",
         },
     },
     ("deploy.yml", "$/actions/deploy-detect"): {
@@ -101,6 +102,7 @@ _APPLY_DETECT_OUTPUTS = {
     "base_sha": "${{ steps.d.outputs.base_sha }}",
     "refusal": "${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}",
     "tools": "${{ steps.setup.outputs.tools }}",
+    "report_artifact": "${{ steps.report.outputs.name }}",
 }
 
 #: The whole `outputs:` of `deploy.yml`'s `detect`. `tools` is the version pair every env-level's
@@ -144,7 +146,7 @@ _VARS_HOLDERS = {
 def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(action):
     """Mutation: delete `SHIPMATE_REVIEW_DECISION` from `apply-detect`'s script step.
     Mutation: delete `SHIPMATE_PR_NUMBER` from it. Mutation: delete `SHIPMATE_AUTO` from it.
-    Mutation: point its `SHIPMATE_REPORT_PATH` away from the path the upload step reads."""
+    Mutation: read `SHIPMATE_REPORT_PATH` from anything but the `report-path` input."""
     doc = action_yaml(action)
     steps = [s for s in doc["runs"]["steps"] if "/../../scripts/" in str(s.get("run", ""))]
     assert len(steps) == 1, f"{action}: expected one script step, got {len(steps)}"
@@ -325,26 +327,44 @@ def test_the_apply_detect_action_declares_exactly_these_outputs():
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
 
 
-#: The apply-detect action's report upload step, hand-written.
+#: The first step of `apply-run.yml`'s `detect`, hand-written.
+_REPORT_SEED = {
+    "id": "report",
+    "shell": "bash",
+    "run": (
+        "set -euo pipefail\n"
+        'path="$RUNNER_TEMP/apply-report/report.json"\n'
+        'mkdir -p "${path%/*}"\n'
+        "echo '{}' > \"$path\"\n"
+        "token=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')\n"
+        'echo "path=$path" >> "$GITHUB_OUTPUT"\n'
+        'echo "name=apply-report-$GITHUB_RUN_ATTEMPT-$token" >> "$GITHUB_OUTPUT"\n'
+    ),
+}
+
+#: The last step of `apply-run.yml`'s `detect`, hand-written.
 _REPORT_UPLOAD = {
     "name": "Upload the apply report",
-    "if": "${{ !cancelled() }}",
+    "if": "${{ !cancelled() && steps.report.outputs.name != '' }}",
     "continue-on-error": True,
     "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "with": {
-        "name": "apply-report",
-        "path": "${{ runner.temp }}/apply-report/report.json",
+        "name": "${{ steps.report.outputs.name }}",
+        "path": "${{ steps.report.outputs.path }}",
         "if-no-files-found": "ignore",
-        "overwrite": True,
+        "retention-days": 1,
     },
 }
 
 
-def test_apply_detect_uploads_its_report_after_the_detect_step_writes_it():
-    """The upload reads `report.json` where the detect step writes it (`_SCRIPT_ENV`), and runs
-    after a refused detect too, replacing an earlier attempt's artifact.
+def test_the_detect_job_seeds_its_report_first_and_uploads_it_last():
+    """The job writes `{}` before checkout, setup or detect can refuse, and uploads the report
+    after any of them failed, under a name unique to the call and attempt (`report_artifact`, in
+    `_APPLY_DETECT_OUTPUTS`): every refusal leaves a report, and no re-run or second call reads
+    another's.
 
-    Mutations: drop the upload's `if:`, so a refusal uploads nothing and the comment reads the
-    report unread; drop `overwrite: true`, so a re-run fails 409; point its `path` elsewhere;
-    rename the artifact."""
-    assert action_yaml("apply-detect")["runs"]["steps"][-1] == _REPORT_UPLOAD
+    Mutations: move the seed step after `setup`; drop the attempt from the name; drop the random
+    token; drop the upload's `if:`, so a refusal uploads nothing; drop `retention-days`; upload
+    from another path."""
+    steps = workflow_yaml("apply-run.yml")["jobs"]["detect"]["steps"]
+    assert (steps[0], steps[-1]) == (_REPORT_SEED, _REPORT_UPLOAD)

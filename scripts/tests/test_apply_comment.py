@@ -1594,9 +1594,9 @@ def test_wave_job_name_matches_the_cell_job_grammar():
 
 
 def _set_report(monkeypatch, tmp_path, report):
-    """`report` as the downloaded apply report the render step reads."""
+    """`report` as the complete downloaded apply report the render step reads."""
     path = tmp_path / "apply-report.json"
-    path.write_text(json.dumps(report), encoding="utf-8")
+    path.write_text(json.dumps({**report, "complete": True}), encoding="utf-8")
     monkeypatch.setenv("SHIPMATE_REPORT_PATH", str(path))
 
 
