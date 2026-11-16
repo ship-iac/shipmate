@@ -30,16 +30,18 @@ import time
 from urllib.parse import quote
 
 from _shipmate import (
+    READ_ERRORS,
     StackCycle,
     _load,
     command_data,
     current_run_url,
     deploy_lock_remedy,
     exit_text,
+    gh_json,
     is_run_id,
+    listed_jobs,
     lock_who,
     one_line,
-    retried,
     run_annotated,
     validate_head_sha,
     write_outputs,
@@ -193,67 +195,71 @@ def refuse_behind_checks(pending, behind):
     )
 
 
-#: The wave job's step that runs `apply-cell`, as `apply-env-level.yml` names it.
+#: The wave job's steps `deploy-detect` reads, as `apply-env-level.yml` names them: the pre-apply
+#: check, whose failure makes `apply-cell` refuse before it applies, and the step running
+#: `apply-cell`.
+PRE_APPLY_STEP = "Pre-apply check"
 APPLY_STEP = "Apply the cell"
 
 
 def _apply_not_started(job):
-    """Whether listed job `job` shows its cell's apply never started: no steps, or exactly one
-    `APPLY_STEP` concluded `skipped`. Any other shape, an unnamed step included, may have
+    """Whether listed job `job` shows its cell never applied: no steps, exactly one `APPLY_STEP`
+    concluded `skipped`, or exactly one `PRE_APPLY_STEP` concluded `failure`, which makes
+    `apply-cell` refuse before it applies. Any other shape, an unnamed step included, may have
     applied."""
     steps = job.get("steps")
     if steps == []:
         return True
     if not isinstance(steps, list):
         return False
-    named = [s for s in steps if isinstance(s, dict) and s.get("name") == APPLY_STEP]
-    return len(named) == 1 and named[0].get("conclusion") == "skipped"
+
+    def conclusion(name):
+        named = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
+        return named[0].get("conclusion") if len(named) == 1 else None
+
+    return conclusion(APPLY_STEP) == "skipped" or conclusion(PRE_APPLY_STEP) == "failure"
 
 
 def _holding_run(repo, run_id):
-    """`("live", None)` while run `run_id` is not `completed`, `("ended", jobs)` once it is, with
-    every job of every attempt, or `("unreadable", why)` when a read fails after its retries,
-    the run has no status, or its listing is empty or malformed."""
-
-    def read(*args):
-        return retried(lambda: ad._run(["gh", "api", *args]))
-
+    """`("live", None)` while run `run_id` is not `completed`, or lists a job that is not, as a
+    re-run started between the two reads does; `("ended", jobs)` once it is, with every job of
+    every attempt; `("unreadable", None)` when the run or its jobs listing could not be read
+    completely, the cause printed as a warning."""
     try:
-        status = json.loads(read(f"repos/{repo}/actions/runs/{run_id}")).get("status")
-        if not isinstance(status, str):
-            return "unreadable", f"the run has status {status!r}"
-        if status != "completed":
-            return "live", None
-        listing = read(
-            "--paginate",
-            "--jq",
-            ".jobs[]",
-            f"repos/{repo}/actions/runs/{run_id}/jobs?filter=all&per_page=100",
-        )
-        jobs = ad.ag.parse_jsonl(listing.splitlines())
-    except SystemExit as e:
-        return "unreadable", one_line(exit_text(e))
-    except (ValueError, AttributeError) as e:
-        return "unreadable", one_line(repr(e))
+        status = gh_json(f"repos/{repo}/actions/runs/{run_id}", ad._run)["status"]
+    except READ_ERRORS as e:
+        why = exit_text(e) if isinstance(e, SystemExit) else repr(e)
+        sys.stderr.write(f"::warning::{command_data(one_line(why))}\n")
+        return "unreadable", None
+    if not isinstance(status, str):
+        sys.stderr.write(f"::warning::run {run_id} has status {command_data(repr(status))}\n")
+        return "unreadable", None
+    if status != "completed":
+        return "live", None
+    jobs = listed_jobs(repo, run_id, ad._run, counted=True, job_filter="all")
+    if jobs is None:
+        return "unreadable", None
     if not jobs:
-        return "unreadable", "the jobs listing came back empty"
-    if not all(isinstance(j, dict) and isinstance(j.get("name"), str) for j in jobs):
-        return "unreadable", "a listed job has no name"
+        sys.stderr.write(f"::warning::run {run_id} lists no job\n")
+        return "unreadable", None
+    if any(j["status"] != "completed" for j in jobs):
+        return "live", None
     return "ended", jobs
 
 
 def refuse_in_flight(repo, lines, app_id, pending):
     """Refuse when the newest App apply check of a `pending` cell is `in_progress` under another
-    run that may still apply it, or may have applied it without saving its state. The check's
-    `details_url` names the holder only when it is exactly a run page of this repository; this
-    run's own page passes, so a re-run of this deploy passes over its own flips.
+    run: a live holder may still apply the cell, and an ended holder may have applied it without
+    saving its state. Everything else deploys. The check's `details_url` names the holder only
+    when it is exactly a run page of this repository; this run's own page passes, so a re-run of
+    this deploy passes over its own flips.
 
-    The holder is read once. While it is not `completed`, the cell is held. Once it is, its jobs
-    listing decides: when no job of the cell started `APPLY_STEP` (`_apply_not_started`, or no
-    job at all), the ended holder writes nothing more to the check, so the cell deploys with a
-    warning; otherwise the cell is held. A failed read, and a `details_url` naming no run of this
-    repository, hold it too. The refusal names every other pending cell, which it does not apply
-    either."""
+    The holder is read once. While it, or a job it lists, is not `completed`, the cell is held.
+    Once both are, its jobs listing decides: when no job of the cell applied
+    (`_apply_not_started`, or no job at all), the ended holder writes nothing more to the check,
+    so the cell deploys with a warning; otherwise the cell is held. A run or listing that could
+    not be read completely, and a `details_url` naming no run of this repository, hold it too.
+    The refusal names every other pending cell, which it does not apply either."""
     latest = ad.ag.latest_by_name(ad.ag.app_runs(lines, app_id))
     own = current_run_url()
     runs, held = {}, {}
@@ -267,10 +273,10 @@ def refuse_in_flight(repo, lines, app_id, pending):
             for name in sorted(map(_name, cells)):
                 sys.stderr.write(
                     f"::warning::{command_data(name)}: run {run_id} ended before applying this "
-                    "cell and left its apply check in progress; deploying it\n"
+                    "cell and left its apply check in progress; this deploy queues it\n"
                 )
         return
-    sentences = [_held(cause, ident, cells, runs) for (cause, ident), cells in sorted(held.items())]
+    sentences = [_held(cause, ident, cells) for (cause, ident), cells in sorted(held.items())]
     hit = [c for cells in held.values() for c in cells]
     others = _also([c for c in pending if c not in hit])
     raise SystemExit(f"::error::deploy refused: {' '.join(sentences)}{others}")
@@ -301,13 +307,18 @@ def _holder(repo, cell, check, runs):
     return state, run_id
 
 
-def _held(cause, ident, cells, runs):
+#: The troubleshooting section that returns an in-progress apply check to `queued` by hand.
+_BY_HAND = "Return an in-progress apply check by hand"
+
+
+def _held(cause, ident, cells):
     """The refusal's sentence for `cells`, held for `cause` by run or check `ident`."""
     names = ", ".join(sorted(map(_name, cells)))
     if cause == "live":
         return (
-            f"{names} are held in progress by run {ident}, which is still running; wait for it "
-            "to end, then re-run this deploy."
+            f"{names} are held in progress by run {ident}, which is still running. Re-run this "
+            "deploy once it ends: the re-run deploys a cell that run never applied, and refuses "
+            "one whose apply may have started."
         )
     if cause == "ended":
         return (
@@ -318,10 +329,12 @@ def _held(cause, ident, cells, runs):
     if cause == "unknown":
         return (
             f"{names}: apply check {ident} is in progress with no run named; follow "
-            "docs/troubleshooting.md section An apply check is in progress with no run named to "
-            "return it to queued or complete it by hand, then re-run this deploy."
+            f"docs/troubleshooting.md section {_BY_HAND}, then re-run this deploy."
         )
-    return f"{names}: could not read run {ident} ({runs[ident][1]}); re-run this deploy."
+    return (
+        f"{names}: run {ident} could not be read completely; re-run this deploy. If it fails "
+        f"the same way, follow docs/troubleshooting.md section {_BY_HAND}."
+    )
 
 
 def refuse_locked(repo, pending, pr_number):
