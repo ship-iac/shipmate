@@ -38,6 +38,7 @@ def gh(monkeypatch, tmp_path):
     monkeypatch.setenv("SHIPMATE_ENV", "dev-eu")
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "success")
     monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "success")
+    monkeypatch.setenv("SHIPMATE_SENTINEL_OUTCOME", "success")
     monkeypatch.setenv("SHIPMATE_CELLS", json.dumps(_CELLS))
     monkeypatch.setenv("SHIPMATE_RECORDS", str(tmp_path / "records"))
     posts = []
@@ -302,10 +303,36 @@ def test_the_reader_never_reads_past_the_bound():
     assert spy.reads == [ur.RECORD_MAX + 1]
 
 
-@pytest.mark.parametrize("fail", [MemoryError(), OSError("I/O error")])
-def test_a_record_that_cannot_be_read_is_invalid(fail):
-    """Mutations: drop `MemoryError` from the `except`; drop `OSError` from it."""
-    assert ur._record(_Spy(b"", fail), 1, _CELLS[1]) is None
+def test_a_record_that_cannot_be_read_is_invalid():
+    """Mutation: drop `OSError` from the `except`."""
+    assert ur._record(_Spy(b"", OSError("I/O error")), 1, _CELLS[1]) is None
+
+
+def test_a_failed_sentinel_with_no_record_directory_reads_every_result_as_unknown(
+    gh, monkeypatch, tmp_path
+):
+    """Without the sentinel a lone record downloads with no directory, so a download holding no
+    record directory proves nothing. Every cell reads `result unknown`, and the reply adds no
+    "could not be read" clause, which would repeat it. Mutations: ignore the sentinel outcome
+    (every cell `did not run`); keep the clause when every cell reads unknown."""
+    posts, _ = gh
+    monkeypatch.setenv("SHIPMATE_SENTINEL_OUTCOME", "failure")
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released")), flat=True)
+    ur.main()
+    assert posts == _post("failed", "result unknown for stacks/app, stacks/db, stacks/dns.")
+
+
+def test_a_failed_sentinel_still_reads_records_in_their_own_directories(gh, monkeypatch, tmp_path):
+    """Two or more artifacts download into directories with or without the sentinel. Mutation:
+    read every failed sentinel as unreadable results (the reply fails over three `none`
+    records)."""
+    posts, _ = gh
+    monkeypatch.setenv("SHIPMATE_SENTINEL_OUTCOME", "failure")
+    _records(tmp_path, "none", "none", "none")
+    ur.main()
+    assert posts == _post(
+        "notice", "released no state lock in dev-eu: no probed cell held a state lock."
+    )
 
 
 def test_three_records_all_count(gh, tmp_path):

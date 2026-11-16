@@ -16,24 +16,21 @@ inputs:
 runs:
   using: composite
   steps:
-    # With two or more matches `download-artifact` gives each artifact a directory of its name;
-    # a lone match is written without one, so this sentinel keeps a lone record attributable.
-    - name: Write the download sentinel
-      if: ${{ inputs.cells != '[]' }}
-      shell: bash
-      run: printf x > "$RUNNER_TEMP/shipmate-unlock-sentinel"
+    # `download-artifact` writes a lone match without a directory of its name; with this
+    # sentinel uploaded, every record downloads into its artifact's directory.
     - name: Upload the download sentinel
       id: sentinel
-      if: ${{ inputs.cells != '[]' }}
+      if: ${{ inputs.detect-result == 'success' && inputs.cells != '[]' }}
       continue-on-error: true
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: shipmate-unlock-sentinel
-        path: ${{ runner.temp }}/shipmate-unlock-sentinel
+        path: ${{ github.action_path }}/action.yml
+        retention-days: 1
         overwrite: true
     - name: Download the cells' records
       id: download
-      if: ${{ inputs.cells != '[]' }}
+      if: ${{ inputs.detect-result == 'success' && inputs.cells != '[]' }}
       # Display only: the reply names a failed download, so it must not stop the reply. No
       # `github-token`: this run's own artifacts download with no token permission.
       continue-on-error: true
@@ -50,6 +47,7 @@ runs:
         SHIPMATE_ENV: ${{ inputs.environment }}
         SHIPMATE_CELLS: ${{ inputs.cells }}
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
-        SHIPMATE_DOWNLOAD_OUTCOME: ${{ steps.sentinel.outcome == 'success' && steps.download.outcome || 'failure' }}
+        SHIPMATE_DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+        SHIPMATE_SENTINEL_OUTCOME: ${{ steps.sentinel.outcome }}
         SHIPMATE_RECORDS: ${{ runner.temp }}/unlock-records
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-result"

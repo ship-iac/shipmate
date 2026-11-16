@@ -136,6 +136,18 @@ def test_any_other_answer_replies_and_fails(env, capsys, answer, fail, why):
     assert capsys.readouterr().err == f"::error::claiming comment 123 failed: {why}\n"
 
 
+def test_an_empty_verb_labels_the_footer_as_the_comment_run(env, monkeypatch):
+    """The label goes through `reply-comment`'s one rule. Mutation: pass `f"{verb} run"` without
+    `rc.label` (the footer reads `[ run]`)."""
+    monkeypatch.setenv("SHIPMATE_REPLY_VERB", "")
+    env.answer = "HTTP/2.0 202 Accepted\n\r\n{}"
+    assert env.go() == 1
+    assert env.replies[0][1].endswith(
+        "\n\n[comment run](https://github.com/o/r/actions/runs/50). Comment `shipmate help` for "
+        "the available commands."
+    )
+
+
 def test_a_status_line_below_the_first_is_not_the_status(env):
     """Only gh's first line is the status; a header or the body can carry the same text.
     Mutation: take the first line anywhere in the answer that matches the pattern."""

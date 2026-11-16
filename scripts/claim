@@ -141,7 +141,7 @@ def not_started(comment, pr, why):
         "failed",
         NOT_STARTED,
         current_run_url(),
-        f"{verb} run",
+        rc.label(f"{verb} run"),
     )
     try:
         rc.post(pr, body)

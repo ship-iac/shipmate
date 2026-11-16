@@ -102,32 +102,27 @@ def test_the_unlock_result_action_downloads_without_a_token_and_never_fails_on_i
     condition; pass `steps.download.conclusion` (always `success` under `continue-on-error`);
     the sentinel: rename it `shipmate-unlock-0` (it would read as cell 0's record), drop its
     `overwrite` (a re-run of `result` fails its upload), drop its `continue-on-error` (a failed
-    upload skips the reply), read the download's outcome without it (a lone record downloaded
-    without its directory reads `did not run` rather than the download failing)."""
+    upload skips the reply), drop `retention-days`, drop the `detect-result` clause from it or
+    from the download, pass `steps.download.outcome` as the sentinel's outcome."""
     steps = action_yaml("unlock-result")["runs"]["steps"]
     assert steps == [
         {
-            "name": "Write the download sentinel",
-            "if": "${{ inputs.cells != '[]' }}",
-            "shell": "bash",
-            "run": 'printf x > "$RUNNER_TEMP/shipmate-unlock-sentinel"',
-        },
-        {
             "name": "Upload the download sentinel",
             "id": "sentinel",
-            "if": "${{ inputs.cells != '[]' }}",
+            "if": "${{ inputs.detect-result == 'success' && inputs.cells != '[]' }}",
             "continue-on-error": True,
             "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
             "with": {
                 "name": "shipmate-unlock-sentinel",
-                "path": "${{ runner.temp }}/shipmate-unlock-sentinel",
+                "path": "${{ github.action_path }}/action.yml",
+                "retention-days": 1,
                 "overwrite": True,
             },
         },
         {
             "name": "Download the cells' records",
             "id": "download",
-            "if": "${{ inputs.cells != '[]' }}",
+            "if": "${{ inputs.detect-result == 'success' && inputs.cells != '[]' }}",
             "continue-on-error": True,
             "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
             "with": {
@@ -145,10 +140,8 @@ def test_the_unlock_result_action_downloads_without_a_token_and_never_fails_on_i
                 "SHIPMATE_ENV": "${{ inputs.environment }}",
                 "SHIPMATE_CELLS": "${{ inputs.cells }}",
                 "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
-                "SHIPMATE_DOWNLOAD_OUTCOME": (
-                    "${{ steps.sentinel.outcome == 'success' && steps.download.outcome "
-                    "|| 'failure' }}"
-                ),
+                "SHIPMATE_DOWNLOAD_OUTCOME": "${{ steps.download.outcome }}",
+                "SHIPMATE_SENTINEL_OUTCOME": "${{ steps.sentinel.outcome }}",
                 "SHIPMATE_RECORDS": "${{ runner.temp }}/unlock-records",
             },
             "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-result"',

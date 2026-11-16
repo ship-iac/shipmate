@@ -22,8 +22,8 @@ The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBE
 before any `gh` call; a failed POST exits 1 unannotated, naming the pull request and gh's
 stderr, never the body.
 
-The footer links this run (`current_run_url()`) as `SHIPMATE_REPLY_LABEL`, `comment run` when
-it is unset or empty, then `FOOTER_HINT` on a refusal or a failure; a notice or a started run
+The footer links this run (`current_run_url()`) as `SHIPMATE_REPLY_LABEL`, through `label`,
+then `FOOTER_HINT` on a refusal or a failure; a notice or a started run
 carries no hint.
 """
 
@@ -53,7 +53,17 @@ def started_text(verb, run_id):
     return f"started the {sc._md_escape(verb)} run; it is listed in this repository's Actions tab"
 
 
-def body(verb, env, outcome, text, run_url, label="comment run"):
+#: The footer label of a reply posted by the comment-handling run.
+DEFAULT_LABEL = "comment run"
+
+
+def label(value):
+    """`value` as a footer label, or `DEFAULT_LABEL` when it names no run: empty, or ` run` from
+    an empty verb."""
+    return DEFAULT_LABEL if value.strip() in ("", "run") else value
+
+
+def body(verb, env, outcome, text, run_url, label=DEFAULT_LABEL):
     """The whole comment body for `outcome`, which must be a key of `VERDICTS`; the footer links
     `run_url` as `label`."""
     foot = sc.footer(run_url, hint=outcome in ("refused", "failed"), label=label)
@@ -95,7 +105,7 @@ def main():
         outcome,
         verdict,
         current_run_url(),
-        os.environ.get("SHIPMATE_REPLY_LABEL") or "comment run",
+        label(os.environ.get("SHIPMATE_REPLY_LABEL", "")),
     )
     try:
         post(pr, text)
