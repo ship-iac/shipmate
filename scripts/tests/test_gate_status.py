@@ -1328,6 +1328,57 @@ def test_replan_jobs_of_another_attempt_are_never_kept(in_process, monkeypatch, 
     )
 
 
+def test_replan_judges_no_job_of_another_attempt(in_process, monkeypatch, capsys):
+    """Run 9 listed at attempt 1 while its jobs answer at attempt 2, with `plan / detect` still
+    running: the attempt check comes first, so the jobs are read again on the next listing (at
+    attempt 1, draft-skipped) instead of failing on the unfinished detect. Mutation: call
+    `ag.planned` before the attempt check -- exit 1 on the first listing."""
+    unfinished = _with_detect(attempt=2, status="in_progress", conclusion=None)
+    calls = _live_head(
+        monkeypatch,
+        runs=_row(9, "completed", "success"),
+        jobs={9: [unfinished, _DRAFT_SKIPPED]},
+    )
+    assert _cli("replan", SHA, "7") == 0
+    assert capsys.readouterr() == (f"{_LIVE}\n", "")
+    assert calls.count(_jobs_read(9)) == 2
+
+
+def test_replan_with_no_re_list_judges_its_one_listing_as_the_last(in_process, monkeypatch, capsys):
+    """With no re-list, the first listing is the last: an attempt mismatch exits 1 there.
+    Mutation: pass `last=False` to the first judgement -- the head prints."""
+    monkeypatch.setattr(gs, "REPLAN_WAIT", 0)
+    _live_head(
+        monkeypatch, runs=_row(9, "completed", "success", attempt=2), jobs={9: _DRAFT_SKIPPED}
+    )
+    assert _cli("replan", SHA, "7") == (
+        "autoplan run 9 is listed at run attempt 2 and its jobs at [1]"
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_replan_a_blocking_run_wins_over_an_attempt_mismatch(in_process, monkeypatch, capsys):
+    """On the last listing an attempt mismatch refuses only once every run is judged: run 11,
+    listed there and planned, blocks. Mutation: refuse at the mismatch -- exit 1."""
+    nine = _row(9, "completed", "success", attempt=2)
+    runs = [nine, nine, nine, nine + _row(11, "completed", "success")]
+    _live_head(monkeypatch, runs=runs, jobs={9: _DRAFT_SKIPPED, 11: _ZERO_CELL})
+    assert _cli("replan", SHA, "7") == 0
+    assert capsys.readouterr() == (
+        "",
+        f"pull request #7 moved to {_LIVE}, whose autoplan run 11 succeeded; nothing dispatched\n",
+    )
+
+
+def test_replan_a_job_without_an_int_run_attempt_exits_1(in_process, monkeypatch, capsys):
+    """Mutation: drop the jobs' `run_attempt` type check -- the mismatch path answers instead."""
+    body = json.loads(_captured_jobs(_ZERO_CELL))
+    body["jobs"][0]["run_attempt"] = "1"
+    _live_head(monkeypatch, runs=_row(9, "completed", "success"), jobs={9: json.dumps(body)})
+    assert _cli("replan", SHA, "7") == "the jobs of autoplan run 9 carry run attempts [1, '1']"
+    assert capsys.readouterr().out == ""
+
+
 def test_replan_jobs_of_another_attempt_are_read_again(in_process, monkeypatch, capsys):
     """Attempt 2 listed, its jobs first read at attempt 1, then at 2, where it planned.
     Mutation: keep the first read's evidence -- the head prints."""

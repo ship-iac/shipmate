@@ -341,42 +341,52 @@ def _unfinished(runs):
     return None
 
 
-def _planned(run_id):
-    """`(planned, attempts)`: whether run `run_id` planned, from its latest attempt's jobs, and
-    the sorted run attempts those jobs carry."""
+def _jobs(run_id):
+    """`(jobs, attempts)`: run `run_id`'s latest attempt's jobs and the sorted run attempts they
+    carry, each an int."""
     jobs, complete = run_jobs(_repo(), run_id, run)
     if not complete:
         raise SystemExit(f"the jobs of autoplan run {run_id} could not be listed")
+    attempts = sorted(
+        {j.get("run_attempt") for j in jobs}, key=lambda a: (type(a) is not int, repr(a))
+    )
+    if not all(type(a) is int for a in attempts):
+        raise SystemExit(
+            one_line(f"the jobs of autoplan run {run_id} carry run attempts {attempts}")
+        )
+    return jobs, attempts
+
+
+def _planned(run_id, jobs):
     try:
-        planned = ag.planned(jobs)
+        return ag.planned(jobs)
     except ValueError as exc:
         raise SystemExit(one_line(f"autoplan run {run_id}: {exc}")) from None
-    return planned, sorted({j.get("run_attempt") for j in jobs}, key=repr)
 
 
 def _succeeded(runs, evidence, last):
     """The block reason of the first run of `runs` that succeeded and planned, or None. Jobs are
-    read once per run attempt into `evidence`, and kept only when every job carries the listed
-    attempt; otherwise they are read again on the next listing, and on the `last` one the run
-    cannot be judged."""
+    read once per run attempt into `evidence`, and judged and kept only when every job carries
+    the listed attempt; otherwise they are read again on the next listing, and on the `last`
+    one, when no run blocks, the run cannot be judged."""
+    mismatch = None
     for r in runs:
         if r["conclusion"] != "success":
             continue
         key = (r["id"], r["run_attempt"])
         if key not in evidence:
-            planned, attempts = _planned(r["id"])
+            jobs, attempts = _jobs(r["id"])
             if attempts != [r["run_attempt"]]:
-                if last:
-                    raise SystemExit(
-                        one_line(
-                            f"autoplan run {r['id']} is listed at run attempt "
-                            f"{r['run_attempt']} and its jobs at {attempts}"
-                        )
-                    )
+                mismatch = mismatch or (
+                    f"autoplan run {r['id']} is listed at run attempt {r['run_attempt']} and "
+                    f"its jobs at {attempts}"
+                )
                 continue
-            evidence[key] = planned
+            evidence[key] = _planned(r["id"], jobs)
         if evidence[key]:
             return f", whose autoplan run {r['id']} succeeded"
+    if mismatch and last:
+        raise SystemExit(one_line(mismatch))
     return None
 
 
@@ -421,7 +431,7 @@ def _replan(sha, pr):
         print(stop, file=sys.stderr)
         return
     runs, evidence, polls = _autoplans(live), {}, REPLAN_WAIT // REPLAN_POLL
-    reason = _unfinished(runs) or _dispatched(pr) or _succeeded(runs, evidence, False)
+    reason = _unfinished(runs) or _dispatched(pr) or _succeeded(runs, evidence, polls == 0)
     for poll in range(polls):
         if reason:
             break
