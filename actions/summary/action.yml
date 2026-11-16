@@ -199,6 +199,7 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
+        SHIPMATE_BEHIND: ${{ inputs.behind }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
@@ -260,7 +261,8 @@ runs:
         # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
         # mid-publish would merge the unpublished cells. A re-run that publishes nothing still
         # holds. It stands until `Create/refresh gate`; `Create apply checks` publishes after it.
-        if [ -n "$cells" ]; then
+        # A run of only behind cells has no cell summary and still publishes their checks.
+        if [ -n "$cells" ] || [ -s bodies.jsonl ]; then
           hold "Plan run $GITHUB_RUN_ID holds this while it publishes; if that run has ended, re-plan (comment shipmate plan or push)"
         fi
 
@@ -408,6 +410,11 @@ runs:
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
         SHIPMATE_STACKED_HOLD: ${{ steps.build.outputs.stacked_hold }}
+        SHIPMATE_BEHIND: ${{ inputs.behind }}
+        # The hold step's files: the head's apply checks and the bodies this run publishes.
+        SHIPMATE_CHECK_RUNS: apply-check-runs.jsonl
+        SHIPMATE_BODIES: bodies.jsonl
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"
 
     - name: Download cell errors
@@ -446,7 +453,8 @@ runs:
           if live=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" moved "$HEAD_SHA" "$PR" 2>moved.err); then
             cat moved.err >&2
             [ -n "$live" ] || return 0
-            if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ]; then
+            # The hold step's own test: it wrote a publish hold for a cell summary or a body.
+            if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ] || [ -s bodies.jsonl ]; then
               echo "::notice::pull request #$PR has moved past $HEAD_SHA; this run writes no comment or apply check on it, and its publish hold stays there"
             else
               echo "::notice::pull request #$PR has moved past $HEAD_SHA; this run writes no comment, apply check or gate on it"

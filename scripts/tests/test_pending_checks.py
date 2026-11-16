@@ -42,6 +42,11 @@ def _plan_run(monkeypatch):
     # A non-github.com server, so a URL built with a hardcoded host does not match.
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://ghe.example.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("SHIPMATE_BEHIND", NO_BEHIND)
+
+
+#: build-matrix's `behind` output for a plan with no behind cell.
+NO_BEHIND = '{"base":"main","tip":"","since":"","commits":{},"cells":[]}'
 
 
 def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
@@ -262,7 +267,7 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
     """The whole `env:` of the summary step running pending-checks. Mutations: drop
     `SHIPMATE_PR_NUMBER` from it -- red; drop `SHIPMATE_APP_ID` -- red; drop
     `SHIPMATE_PLANNED_CELLS` -- red; rebind or drop `GH_TOKEN` -- red; drop `SHIPMATE_APP_SLUG`
-    or read it from `steps.plantoken` -- red."""
+    or read it from `steps.plantoken` -- red; drop `SHIPMATE_BEHIND` -- red."""
     (step,) = [
         s
         for s in action_yaml("summary")["runs"]["steps"]
@@ -275,6 +280,7 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_PLAN_RESULT": "${{ inputs.plan-result }}",
         "SHIPMATE_PLANNED_CELLS": "${{ inputs.planned-cells }}",
+        "SHIPMATE_BEHIND": "${{ inputs.behind }}",
         "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
     }
 
@@ -891,4 +897,124 @@ def test_a_cell_missing_a_key_fails_loud(tmp_path):
         f"::error::cell summary {cell_json} missing keys ['changed'] -- plan-cell and the "
         "summary job must run the same engine revision; re-pin every engine reference to one "
         "commit, then re-plan (comment shipmate plan or push)"
+    )
+
+
+TIP, SINCE = "c" * 40, "d" * 40
+_BEHIND = {
+    "base": "main",
+    "tip": TIP,
+    "since": SINCE,
+    "commits": {"abc1234": "edit workers (#41)"},
+    "cells": [
+        {
+            "stack": "stacks/workers",
+            "environment": "dev-eu",
+            "cause": "changed",
+            "shas": ["abc1234"],
+            "more": 0,
+        },
+        {"stack": "modules/net", "environment": "prod", "cause": "changed", "shas": [], "more": 0},
+    ],
+}
+_WORKERS_SUMMARY = (
+    "⏪ stacks/workers / dev-eu is behind main: `abc1234` edit workers (#41) changed it since "
+    "this branch left it; a plan of this branch would revert that change. Update the branch "
+    "from main.\n\nThis cell is not planned until the branch is updated from main."
+)
+
+
+def _emit_behind(tmp_path, monkeypatch, behind=_BEHIND, records=()):
+    """`main()`'s bodies for one changed cell summary and the behind report `behind`, over a
+    check-run listing of `records`."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", json.dumps(behind))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        _main(tmp_path, monkeypatch, cells=1, planned="1", records=records)
+    return [json.loads(line) for line in out.getvalue().splitlines()]
+
+
+def test_a_behind_cell_gets_a_queued_check_with_a_record_and_no_digest(tmp_path, monkeypatch):
+    """Each behind cell gets one queued body naming its base commits. Its record names this run
+    and `behind: true`, and carries neither a digest (no plan exists) nor a title (no apply
+    restores one). `cells` counts summaries and behind cells, in every record of the run.
+
+    Mutations: count only the cell summaries in `cells` -- 1, red; add `"title"` to the behind
+    record -- red."""
+    bodies = _emit_behind(tmp_path, monkeypatch)
+    assert [json.loads(b["external_id"])["cells"] for b in bodies] == [3, 3, 3]
+    workers = bodies[1]
+    assert workers == {
+        "name": "apply / stacks/workers / dev-eu",
+        "head_sha": HEAD,
+        "status": "queued",
+        "external_id": (
+            f'{{"plan_run":"{RUN_ID}","pr":"{PR}","cells":3,"action":"synchronize","behind":true}}'
+        ),
+        "output": {"title": "Behind main: update the branch", "summary": _WORKERS_SUMMARY},
+    }
+    assert bodies[2]["name"] == "apply / modules/net / prod"
+
+
+def _as_check_runs(bodies):
+    """`bodies` as the App's check runs on the head, ids in order."""
+    return [json.dumps({**b, "id": i, "app": {"id": int(APP_ID)}}) for i, b in enumerate(bodies, 1)]
+
+
+def test_the_behind_record_reads_back_through_the_apply_readers(tmp_path, monkeypatch):
+    """The record this script writes is the one `apply-gate.behind_names` reads, and the run it
+    names is complete: its published names equal every record's `cells`.
+
+    Mutations: write `"behind": "true"` -- no behind name, red; leave the behind cells out of
+    `cells` -- the run is incomplete, red."""
+    runs = _as_check_runs(_emit_behind(tmp_path, monkeypatch))
+    assert pc.ag.behind_names(runs, APP_ID) == {
+        "apply / stacks/workers / dev-eu",
+        "apply / modules/net / prod",
+    }
+    assert pc.ag.incomplete_runs(runs, APP_ID) == {}
+
+
+def test_a_published_behind_check_is_not_published_again(tmp_path, monkeypatch):
+    """A re-run of the summary skips a behind check this run already published, and a newer
+    run's record refuses with `NEWER_RUN`, as for any cell.
+
+    Mutation: publish every behind cell whatever `published` says -- two bodies, red."""
+    mine = _record_line(
+        9,
+        "apply / stacks/workers / dev-eu",
+        json.dumps({"plan_run": RUN_ID, "behind": True}),
+        status="queued",
+    )
+    bodies = _emit_behind(tmp_path, monkeypatch, records=[mine])
+    assert [b["name"] for b in bodies] == ["apply / stacks/c0 / dev", "apply / modules/net / prod"]
+    newer = _record_line(
+        10, "apply / stacks/workers / dev-eu", _ext(str(int(RUN_ID) + 1)), status="queued"
+    )
+    with pytest.raises(SystemExit) as e:
+        _emit_behind(tmp_path / "again", monkeypatch, records=[newer])
+    assert e.value.code == pc.NEWER_RUN
+
+
+def test_a_long_base_branch_keeps_the_record_under_the_cap(tmp_path, monkeypatch):
+    """The base branch goes in the check title, never the record, so a 255-character branch
+    keeps the record bounded. Mutation: add `"base"` to the behind record -- over the cap,
+    red."""
+    base = "b" * 255
+    bodies = _emit_behind(tmp_path, monkeypatch, behind={**_BEHIND, "base": base})
+    assert bodies[1]["output"]["title"] == f"Behind {base}: update the branch"
+    assert len(bodies[1]["external_id"]) <= pc.EXTERNAL_ID_CAP
+
+
+@pytest.mark.parametrize("raw", ["", "not json", json.dumps({**_BEHIND, "tip": ""})])
+def test_an_unreadable_behind_value_publishes_nothing(tmp_path, monkeypatch, capsys, raw):
+    """A behind report that does not read is an evidence gap: a behind cell nobody can see would
+    get no check. Mutation: read an unreadable value as no behind cell -- the cell summary's body
+    is printed, red."""
+    monkeypatch.setenv("SHIPMATE_BEHIND", raw)
+    _main(tmp_path, monkeypatch, cells=1, planned="1")
+    out, err = capsys.readouterr()
+    assert (out, err) == (
+        "",
+        f"::warning::this run publishes no apply check: {pc.gs.BEHIND_UNREAD}\n",
     )

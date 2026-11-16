@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from _loader import github_outputs, load_script
@@ -13,6 +14,8 @@ def d(**kw):
         "planned_cells": "3",
         "cell_count": 3,
         "pending": True,
+        "behind": 0,
+        "open_older": 0,
     }
     base.update(kw)
     return gate_state.decide(**base)
@@ -236,6 +239,12 @@ def _main_body(tmp_path, monkeypatch, capsys, **env):
     monkeypatch.setenv("SHIPMATE_PLANNED_CELLS", "3")
     monkeypatch.setenv("SHIPMATE_CELL_COUNT", "3")
     monkeypatch.setenv("SHIPMATE_PENDING", "true")
+    monkeypatch.setenv("SHIPMATE_BEHIND", json.dumps(NO_BEHIND))
+    (tmp_path / "checks.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "bodies.jsonl").write_text("", encoding="utf-8")
+    monkeypatch.setenv("SHIPMATE_CHECK_RUNS", str(tmp_path / "checks.jsonl"))
+    monkeypatch.setenv("SHIPMATE_BODIES", str(tmp_path / "bodies.jsonl"))
+    monkeypatch.setenv("SHIPMATE_APP_ID", "4242")
     for k, v in env.items():
         if v is None:
             monkeypatch.delenv(k, raising=False)
@@ -391,6 +400,7 @@ def test_evidence_gap_is_the_one_evidence_rule(
             plan_result=plan_result,
             planned_cells=planned_cells,
             cell_count=cell_count,
+            behind=0,
             missing=missing,
         )
         == description
@@ -400,7 +410,7 @@ def test_evidence_gap_is_the_one_evidence_rule(
 def test_pending_checks_call_without_names_gets_the_no_names_text():
     """`pending-checks` passes no `missing`. Mutation: default `missing` to a name -- red."""
     assert (
-        gate_state.evidence_gap(plan_result="failure", planned_cells="2", cell_count=1)
+        gate_state.evidence_gap(plan_result="failure", planned_cells="2", cell_count=1, behind=0)
         == _PLAN_FAILED
     )
 
@@ -461,3 +471,242 @@ def test_main_reads_the_stacked_hold(tmp_path, monkeypatch, capsys):
         "reason": _STACKED_HOLD,
         "comment_mode": "post",
     }
+
+
+NO_BEHIND = {"base": "main", "tip": "", "since": "", "commits": {}, "cells": []}
+_ROW = {
+    "stack": "stacks/a",
+    "environment": "dev",
+    "cause": "changed",
+    "shas": ["abc1234"],
+    "more": 2,
+}
+ONE_BEHIND = {
+    "base": "main",
+    "tip": "c" * 40,
+    "since": "d" * 40,
+    "commits": {"abc1234": "edit a"},
+    "cells": [_ROW],
+}
+
+
+def test_the_behind_reader_accepts_the_no_behind_value_and_one_behind_cell():
+    """Mutation: require a non-empty `tip` -- the no-behind value is unread, red."""
+    assert gate_state.behind_cells(json.dumps(NO_BEHIND)) == NO_BEHIND
+    assert gate_state.behind_cells(json.dumps(ONE_BEHIND)) == ONE_BEHIND
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        pytest.param({**ONE_BEHIND, "commits": {}}, id="sha-missing-from-commits"),
+        pytest.param({**ONE_BEHIND, "commits": {"abc1234": "a", "def5678": "b"}}, id="extra-key"),
+        pytest.param({**ONE_BEHIND, "tip": ""}, id="cells-without-a-tip"),
+        pytest.param({**NO_BEHIND, "tip": "c" * 40}, id="a-tip-without-cells"),
+        pytest.param({**NO_BEHIND, "base": ""}, id="no-base"),
+        pytest.param({**ONE_BEHIND, "cells": [{**_ROW, "cause": "moved"}]}, id="cause"),
+        pytest.param({**ONE_BEHIND, "cells": [{**_ROW, "more": True}]}, id="bool-more"),
+        pytest.param(
+            {**ONE_BEHIND, "cells": [{**_ROW, "cause": "conflict"}]}, id="conflict-with-shas"
+        ),
+        pytest.param({k: v for k, v in NO_BEHIND.items() if k != "cells"}, id="no-cells-key"),
+        pytest.param([], id="not-an-object"),
+    ],
+)
+def test_the_behind_reader_refuses_any_other_shape(report):
+    """Mutations: skip the check that every listed sha is a key of `commits` --
+    `sha-missing-from-commits` red; accept cells with an empty tip -- `cells-without-a-tip`
+    red."""
+    assert gate_state.behind_cells(json.dumps(report)) is None
+
+
+@pytest.mark.parametrize("raw", ["", "{", "null"])
+def test_an_unreadable_behind_value_is_an_evidence_gap(raw):
+    """Mutation: drop the `behind is None` check from `evidence_gap` -- no gap, red."""
+    got = gate_state.evidence_gap(
+        plan_result="success",
+        planned_cells="1",
+        cell_count=1,
+        behind=gate_state.behind_cells(raw) and 0,
+    )
+    assert got == gate_state.BEHIND_UNREAD
+
+
+def test_a_docs_only_plan_is_not_an_evidence_gap_and_greens():
+    """A plan with no changed cell and the no-behind value: no gap, no behind cell, no older
+    check, so the gate greens with nothing to post. Mutation: require a non-empty `tip` in
+    `behind_cells` -- the plan holds, red."""
+    behind = len(gate_state.behind_cells(json.dumps(NO_BEHIND))["cells"])
+    got = d(planned_cells="0", cell_count=0, pending=False, plan_result="skipped", behind=behind)
+    assert got == ("success", "no pending applies for this PR", "nothing-changed")
+
+
+def test_every_cell_behind_holds_the_gate_pending_and_posts():
+    """An all-behind run has no cell summary and no changed cell, but a comment to post.
+    Mutations: drop the `behind` branch -- `success`, red; return mode `nothing-changed` -- red."""
+    got = d(
+        planned_cells="0", cell_count=0, pending=False, plan_result="skipped", behind=2, base="main"
+    )
+    assert got == ("pending", "2 cell(s) behind main; update the branch from main", "post")
+
+
+def test_the_behind_text_wins_over_a_stacked_holder():
+    """The comment still shows the stacked lines; the gate names the behind cells first.
+    Mutation: test `pending` before `behind` -- the stacked text, red."""
+    got = d(behind=1, base="release/2", stacked_hold="stacked #3 holds 1 cell(s)")
+    assert got == (
+        "pending",
+        "1 cell(s) behind release/2; update the branch from release/2",
+        "post",
+    )
+
+
+_OLDER = "an earlier plan's 2 apply check(s) are still open on this head; push a commit to re-plan"
+
+
+@pytest.mark.parametrize(
+    ("kw", "mode"),
+    [
+        ({"planned_cells": "0", "cell_count": 0, "plan_result": "skipped"}, "nothing-changed"),
+        ({}, "post"),
+    ],
+    ids=["zero-cells", "no-change-cells"],
+)
+def test_an_older_runs_open_apply_check_keeps_a_success_pending(kw, mode):
+    """A run that planned nothing, or only no-change cells, would green over an earlier plan's
+    still-queued checks. Mutation: apply the open-check rule to zero cells only --
+    `no-change-cells` greens, red."""
+    assert d(pending=False, open_older=2, **kw) == ("pending", _OLDER, mode)
+
+
+def test_an_unread_check_listing_keeps_a_success_pending():
+    """Mutation: read `open_older` None as no open check -- `success`, red."""
+    got = d(pending=False, open_older=None, planned_cells="0", cell_count=0, plan_result="skipped")
+    assert got == ("pending", gate_state.OLDER_UNREAD, "nothing-changed")
+
+
+def test_zero_cells_and_no_open_check_greens():
+    got = d(pending=False, planned_cells="0", cell_count=0, plan_result="skipped")
+    assert got == ("success", "no pending applies for this PR", "nothing-changed")
+
+
+def _check(cid, name, status="queued", conclusion=None, app=4242, plan_run="7"):
+    return json.dumps(
+        {
+            "name": name,
+            "id": cid,
+            "status": status,
+            "conclusion": conclusion,
+            "app": {"id": app},
+            "external_id": json.dumps({"plan_run": plan_run}),
+        }
+    )
+
+
+def _open_older(tmp_path, checks, bodies=()):
+    (tmp_path / "c").write_text("".join(f"{c}\n" for c in checks), encoding="utf-8")
+    (tmp_path / "b").write_text(
+        "".join(json.dumps({"name": n}) + "\n" for n in bodies), encoding="utf-8"
+    )
+    return gate_state.open_older(tmp_path / "c", tmp_path / "b", "4242")
+
+
+def test_open_older_counts_the_newest_app_check_per_name_not_done(tmp_path):
+    """`a` is queued, `b` completed `neutral` (done), `c` queued under a newer `success`, `d`
+    queued but this run publishes it, `e` another App's. Only `a` is open.
+
+    Mutations: count a completed check as open -- 3, red; drop the `bodies.jsonl` exclusion --
+    2, red; drop the App filter -- 2, red."""
+    checks = [
+        _check(1, "apply / a / dev"),
+        _check(2, "apply / b / dev", "completed", "neutral"),
+        _check(3, "apply / c / dev"),
+        _check(4, "apply / c / dev", "completed", "success"),
+        _check(5, "apply / d / dev"),
+        _check(6, "apply / e / dev", app=15368),
+    ]
+    assert _open_older(tmp_path, checks, bodies=["apply / d / dev"]) == 1
+
+
+def test_an_earlier_attempt_of_this_run_counts_as_open(tmp_path, monkeypatch):
+    """Every attempt of a run shares its run id: a "Re-run all jobs" attempt that plans fewer
+    cells leaves attempt 1's queued check, which still blocks the merge. Mutation: leave out
+    names whose record names `GITHUB_RUN_ID` -- 0, red."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "7")
+    assert _open_older(tmp_path, [_check(1, "apply / a / dev", plan_run="7")]) == 1
+
+
+@pytest.mark.parametrize("missing", ["c", "b"])
+def test_open_older_is_unknown_without_either_file(tmp_path, missing):
+    """Mutation: read a missing listing as no check (`return 0`) -- red."""
+    _open_older(tmp_path, [])
+    (tmp_path / missing).unlink()
+    assert gate_state.open_older(tmp_path / "c", tmp_path / "b", "4242") is None
+
+
+def test_main_holds_a_docs_only_plan_pending_without_the_check_listing(
+    tmp_path, monkeypatch, capsys
+):
+    """Mutation: read the missing file as no check -- `success`, red."""
+    body = _main_body(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        SHIPMATE_PLANNED_CELLS="0",
+        SHIPMATE_CELL_COUNT="0",
+        SHIPMATE_PENDING="false",
+        SHIPMATE_PLAN_RESULT="skipped",
+        SHIPMATE_CHECK_RUNS=str(tmp_path / "absent.jsonl"),
+    )
+    assert body["state"] == "pending"
+    assert body["reason"] == gate_state.OLDER_UNREAD
+
+
+def test_main_reads_the_behind_report_and_names_its_base(tmp_path, monkeypatch, capsys):
+    """Mutation: pass `base=""` from `main` -- the text names no branch, red."""
+    report = {**ONE_BEHIND, "base": "release/2"}
+    body = _main_body(
+        tmp_path, monkeypatch, capsys, SHIPMATE_BEHIND=json.dumps(report), SHIPMATE_PENDING="false"
+    )
+    assert (body["state"], body["reason"]) == (
+        "pending",
+        "1 cell(s) behind release/2; update the branch from release/2",
+    )
+
+
+#: The gate step's env with every `${{ }}` value a docs-only run hands it.
+_DOCS_ONLY = {
+    "${{ inputs.detect-result }}": "success",
+    "${{ inputs.detect-refusal }}": "",
+    "${{ inputs.plan-result }}": "skipped",
+    "${{ inputs.planned-cells }}": "0",
+    "${{ steps.build.outputs.count }}": "0",
+    "${{ steps.build.outputs.pending }}": "false",
+    "${{ steps.build.outputs.missing }}": "[]",
+    "${{ inputs.is-draft }}": "false",
+    "${{ inputs.on-demand }}": "false",
+    "${{ steps.build.outputs.stacked_hold }}": "",
+    "${{ inputs.behind }}": json.dumps(NO_BEHIND),
+    "${{ inputs.app-id }}": "4242",
+}
+
+
+def test_a_docs_only_plan_greens_through_the_gate_steps_own_env(tmp_path, monkeypatch, capsys):
+    """The gate step's YAML env, its expressions answered for a docs-only run beside the hold
+    step's two files (no apply check, no body), reaches `success`. The App id is what the open
+    check count reads; without it every docs-only plan would stay pending. Mutation: drop
+    `SHIPMATE_APP_ID` from the step -- pending, red."""
+    from _loader import step_by
+
+    env = step_by("summary", id="gate")["env"]
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "apply-check-runs.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "bodies.jsonl").write_text("", encoding="utf-8")
+    for k in list(os.environ):
+        if k.startswith("SHIPMATE_"):
+            monkeypatch.delenv(k)
+    for k, v in env.items():
+        monkeypatch.setenv(k, _DOCS_ONLY.get(v, v))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+    gate_state.main()
+    assert github_outputs(tmp_path / "out")["state"] == "success"

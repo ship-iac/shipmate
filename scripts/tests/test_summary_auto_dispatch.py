@@ -41,6 +41,8 @@ def _gate(**overrides):
         "planned_cells": "1",
         "cell_count": 1,
         "pending": True,
+        "behind": 0,
+        "open_older": 0,
     } | overrides
     state, _, mode = gs.decide(**kwargs)
     return state or "", mode

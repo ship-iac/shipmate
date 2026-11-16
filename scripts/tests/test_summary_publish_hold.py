@@ -235,6 +235,7 @@ def _run(
     planned_cells=None,
     run_id=RUN_ID,
     moved=None,
+    behind='{"base":"main","tip":"","since":"","commits":{},"cells":[]}',
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
@@ -267,6 +268,7 @@ def _run(
         "SHIPMATE_APP_SLUG": "shipmate-test",
         "SHIPMATE_PLAN_RESULT": plan_result,
         "SHIPMATE_PLANNED_CELLS": planned_cells,
+        "SHIPMATE_BEHIND": behind,
         "HEAD_SHA": HEAD_SHA,
         "STATE": "pending",
         "DESCRIPTION": "waiting",
@@ -822,3 +824,29 @@ def test_a_recovered_read_of_a_moved_head_passes_its_retry_notices_through(tmp_p
     assert (codes, calls, stderr, stdout) == ([0], [], RETRY_NOTICES, MOVED_NOTICE)
     output = (tmp_path / "github_output").read_text(encoding="utf-8")
     assert output == "superseded=true\nmoved=true\n"
+
+
+_ONE_BEHIND = json.dumps(
+    {
+        "base": "main",
+        "tip": "c" * 40,
+        "since": "d" * 40,
+        "commits": {},
+        "cells": [
+            {"stack": "stacks/a", "environment": "dev", "cause": "conflict", "shas": [], "more": 0}
+        ],
+    }
+)
+
+
+@bash_only
+def test_a_run_of_only_behind_cells_writes_the_publish_hold(tmp_path):
+    """No cell summary, one behind cell: its queued check is in `bodies.jsonl`, so the hold step
+    writes the publish hold before `Create apply checks` publishes it, and a job dying between
+    the two leaves a hold rather than an older green. Mutation: restore the `cell.json`-only
+    condition -- no publish hold, red."""
+    codes, calls, _, _ = _run(
+        tmp_path, steps=(HOLD,), plan_result="skipped", planned_cells="0", behind=_ONE_BEHIND
+    )
+    assert codes == [0]
+    assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]

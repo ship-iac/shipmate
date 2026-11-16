@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Emit `POST /check-runs` bodies (JSONL on stdout) for every planned cell.
+"""Emit `POST /check-runs` bodies (JSONL on stdout) for every planned cell and every behind cell.
 
 The summary job creates ALL pending apply checks with ONE App installation
 token, so the App private key never enters the plan matrix cells (they execute
@@ -9,8 +9,8 @@ queued check titled with the plan's counts whose summary is the plan in a fence,
 completed/neutral "no changes" check. Each check's external_id is a compact JSON record of
 the id of the plan run that produced the cell, the number of the pull request it planned,
 the sha256 of the plan text that run published, on either branch, and
-`cells`, the number of cells that run planned, against which apply judges whether
-the run published every check, and `action`, the plan run's event action (`""` when its
+`cells`, the number of cells that run planned plus its behind cells, against which apply judges
+whether the run published every check, and `action`, the plan run's event action (`""` when its
 payload names none, as a `shipmate plan` dispatch's does), which the auto apply requires
 to be a push's, and `title`, the check's own output title, which a successful apply restores
 after a failed one retitled the check. GitHub caps `external_id` at `EXTERNAL_ID_CAP`
@@ -19,6 +19,11 @@ refuses. That digest is computed here, over the whole plan.txt this job download
 copied from the cell: it is what binds the reviewed text to the plan apply executes.
 The comment and the check embed capped prefixes of the same file, so the digest covers at
 least what a reviewer saw and often more.
+Each behind cell (`SHIPMATE_BEHIND`, build-matrix's `behind` output read by
+`gate-state.behind_cells`) gets a queued check titled `Behind <base>: update the branch` whose
+summary names the base commits that changed its stack, and whose record is `{plan_run, pr, cells,
+action, behind: true}`: no digest, since no plan exists, and no title, which no apply restores.
+The base branch stays out of the record, whose size it would make unbounded.
 The check name uses the stack PATH so deploy-detect (which only has the path)
 reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
 refuses over it, and deploy-detect's work queue comes up empty.
@@ -31,8 +36,9 @@ run's checks, whatever its cells hold. That refusal alone exits `NEWER_RUN`: the
 the gate on any other failure.
 
 A run whose evidence `gate-state.evidence_gap` rejects (a plan job that did not succeed, a missing
-or unparseable `SHIPMATE_PLANNED_CELLS`, or parsed cell summaries that do not match it) emits
-nothing and reads no plan text, with a `::warning::` when that withholds a body.
+or unparseable `SHIPMATE_PLANNED_CELLS` or `SHIPMATE_BEHIND`, or parsed cell summaries that do
+not match it) emits nothing and reads no plan text, with a `::warning::` when that withholds a
+body.
 """
 
 import hashlib
@@ -149,6 +155,26 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
     }
 
 
+def behind_body(row, report, head_sha, plan_run, pr, cells, action):
+    """The POST body for the behind cell `row` of the behind report `report`: queued, titled
+    with the base branch, its summary `summary-comment.behind_line` and that the cell is not
+    planned until the branch is updated. `cells` and `action` are as `body`'s."""
+    base = report["base"]
+    return {
+        "name": ag.check_name(row["stack"], row["environment"]),
+        "head_sha": head_sha,
+        "status": "queued",
+        "external_id": external_id(
+            {"plan_run": plan_run, "pr": pr, "cells": cells, "action": action, "behind": True}
+        ),
+        "output": {
+            "title": f"Behind {base}: update the branch",
+            "summary": f"{sc.behind_line(row, report)}\n\nThis cell is not planned until the "
+            f"branch is updated from {sc._md_name(base)}.",
+        },
+    }
+
+
 def external_id(record):
     """`record` as compact JSON; a record over `EXTERNAL_ID_CAP` characters refuses."""
     text = json.dumps(record, separators=(",", ":"))
@@ -196,19 +222,26 @@ def main():
         for cj, cell in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
     ]
     todo = [c for c in cells if c[0] not in done]
+    report = gs.behind_cells(os.environ.get("SHIPMATE_BEHIND", ""))
+    rows = [] if report is None else report["cells"]
     gap = gs.evidence_gap(
         plan_result=os.environ.get("SHIPMATE_PLAN_RESULT", ""),
         planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
         cell_count=len(cells),
+        behind=None if report is None else len(rows),
     )
     if gap:
-        if todo:
+        if todo or rows:
             print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
         return
     action = event_action()
     url = current_run_url()
+    total = len(cells) + len(rows)
     for name, cj, cell in todo:
-        print(json.dumps(body(name, cj, cell, head, plan_run, pr, len(cells), action, url)))
+        print(json.dumps(body(name, cj, cell, head, plan_run, pr, total, action, url)))
+    for row in rows:
+        if ag.check_name(row["stack"], row["environment"]) not in done:
+            print(json.dumps(behind_body(row, report, head, plan_run, pr, total, action)))
 
 
 if __name__ == "__main__":
