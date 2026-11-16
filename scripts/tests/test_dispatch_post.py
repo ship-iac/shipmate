@@ -474,28 +474,32 @@ def test_a_commented_dispatch_without_the_slug_is_refused_before_any_post(
     Mutation: drop the startup refusal in `main` -> the dispatch is sent."""
     command(monkeypatch, calls, verb, slug="")
     answering(monkeypatch, calls, [ANSWER])
-    refusal = (
-        "::error::SHIPMATE_APP_SLUG is empty on a commented dispatch, so a run it started could "
-        "not be found after a lost answer; nothing was dispatched. This is an engine wiring "
-        "defect: actions/dispatch passes the slug of the App token it minted."
-    )
-    assert post(capsys) == (refusal, "", "")
+    assert post(capsys) == (slug_refusal(verb), "", "")
     assert calls == []
 
 
-@pytest.mark.parametrize(
-    "env",
-    [
-        {"VERB": "plan", "PR_NUMBER": "42"},
-        {"VERB": "auto", "PR_NUMBER": "42", "REF": HEAD},
-    ],
-    ids=["replan", "auto"],
-)
-def test_a_comment_less_dispatch_needs_no_slug(calls, monkeypatch, capsys, env):
-    """The replan and `auto` read no title. Mutation: refuse an empty slug on every dispatch;
-    refuse it when `VERB` is `auto` (the auto row reddens)."""
-    for name, value in {**env, "COMMENT_ID": "", "SHIPMATE_APP_SLUG": ""}.items():
-        monkeypatch.setenv(name, value)
+def slug_refusal(verb):
+    return (
+        f"::error::SHIPMATE_APP_SLUG is empty, so a run this {verb} dispatch started could not "
+        "be found after a lost answer; nothing was dispatched. This is an engine wiring defect: "
+        "the dispatching step passes the slug of the App token it minted."
+    )
+
+
+def test_a_comment_less_plan_without_the_slug_is_refused_before_any_post(
+    calls, monkeypatch, capsys
+):
+    """A comment-less plan finds its run by title, as a commented dispatch does. Mutation:
+    refuse only a commented dispatch (`if os.environ.get("COMMENT_ID") and not ...`) -> the
+    plan is sent."""
+    comment_less_plan(monkeypatch, calls, slug="")
+    answering(monkeypatch, calls, [ANSWER])
+    assert (post(capsys), calls) == ((slug_refusal("plan"), "", ""), [])
+
+
+def test_an_auto_dispatch_needs_no_slug(calls, monkeypatch, capsys):
+    """`auto` reads no title. Mutation: refuse an empty slug on every dispatch -> refused."""
+    monkeypatch.setenv("SHIPMATE_APP_SLUG", "")
     answering(monkeypatch, calls, [ANSWER])
     assert post(capsys)[0] == 0
 
@@ -543,16 +547,53 @@ def test_a_failed_command_listing_is_undetermined(calls, monkeypatch, capsys):
     assert (post(capsys)[0], calls) == (db.UNDETERMINED, [sent, SLEPT_2, PAGE_1])
 
 
-def test_the_replan_keeps_the_comment_less_rule(calls, monkeypatch, capsys):
-    """A plan without a comment is the replan. Mutation: route every plan through the title
-    rule (`if not want["comment"]` -> `if want["verb"] == "auto"`) -> the per-workflow pages
-    are read."""
-    monkeypatch.setenv("VERB", "plan")
-    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [""])
-    replan = json.dumps(
-        {"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, "return_run_details": True}
-    )
-    assert (post(capsys)[0], calls) == (0, [(POST, replan), SLEPT_2, LIST, (POST, replan)])
+def comment_less_plan(monkeypatch, log, slug=SLUG):
+    """Set the env of a comment-less `plan` of pull request 42 and a clock that each sleep
+    advances; return the POST as `answering` logs it."""
+    for name, value in {"VERB": "plan", "PR_NUMBER": "42", "SHIPMATE_APP_SLUG": slug}.items():
+        monkeypatch.setenv(name, value)
+    clock = [NOW]
+
+    def sleep(s):
+        log.append(("sleep", s))
+        clock[0] += timedelta(seconds=s)
+
+    monkeypatch.setattr(db, "_now", lambda: clock[0])
+    monkeypatch.setattr(_shipmate, "_sleep", sleep)
+    body = {
+        "ref": "main",
+        "inputs": {"verb": "plan", "pr_number": "42"},
+        "return_run_details": True,
+    }
+    return (POST, json.dumps(body))
+
+
+def test_a_comment_less_plan_stops_on_its_own_titled_run(calls, monkeypatch, capsys):
+    """Several comment-less plans dispatched in one step must not stop each other's retries, so
+    the run is found by title, not by time. Mutation: keep `landed_since` for a comment-less plan
+    (`if not want["comment"]`) -> the one-page time listing is read instead."""
+    sent = comment_less_plan(monkeypatch, calls)
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [run_row(PLAN_TITLE)])
+    assert (post(capsys)[0], calls) == (db.MAY_HAVE_STARTED, [sent, SLEPT_2, PAGE_1])
+
+
+@pytest.mark.parametrize(
+    "listed",
+    [
+        run_row("shipmate · plan pr=43 ref= comment="),
+        run_row("shipmate · plan pr=42 ref= comment=99"),
+        run_row(PLAN_TITLE, actor="dev"),
+        run_row(f"shipmate · auto pr=42 ref={HEAD} comment="),
+    ],
+    ids=["other-pull-request", "commented", "foreign-actor", "auto"],
+)
+def test_another_runs_title_does_not_stop_a_comment_less_plan(calls, monkeypatch, capsys, listed):
+    """Another pull request's comment-less plan, landing from the same step, is not this one's.
+    Mutation: compare the parsed title without its `pr` in `command_run_listed` -> the other pull
+    request's run stops the retry."""
+    sent = comment_less_plan(monkeypatch, calls)
+    answering(monkeypatch, calls, [SystemExit(BAD_GATEWAY), ANSWER], [listed] * 9)
+    assert (post(capsys)[0], calls) == (0, [sent, *WINDOW, sent])
 
 
 def test_an_empty_slug_raises_before_any_listing():

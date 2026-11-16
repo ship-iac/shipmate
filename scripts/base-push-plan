@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""After a push to the default branch, print the open pull requests to re-plan, one number per
+line: `actions/base-push-plan` dispatches `shipmate plan` for each, so a cell the push changed
+shows as behind on the pull request's plan before anyone comments.
+
+Env: `SHIPMATE_PUSH` (`deploy-detect`'s `push`), `SHIPMATE_DEFAULT_BRANCH`, `SHIPMATE_APP_ID`,
+`SHIPMATE_APP_SLUG`, `GITHUB_REPOSITORY`, `GH_TOKEN`.
+
+A candidate is an open pull request into the default branch, not a draft, whose head carries an
+App apply check in any state, when the push changed a path outside every stack (`outside`) or
+one of those checks names a stack the push changed. A candidate with a live App `apply` or
+`auto` run is skipped and named: a plan dispatched now would republish the apply checks that run
+applies from. Every candidate is decided from one live run listing; an incomplete listing, an
+App run whose title does not parse, or an empty slug selects none, since any of them can hide
+such a run. A pull request whose checks cannot be read is skipped with a warning.
+
+Display-only: each degrade warns on stderr and prints no number; a failed pull request listing
+exits 1, which the caller reports as a warning.
+"""
+
+import json
+import os
+import sys
+from urllib.parse import quote
+
+import _shipmate
+from _shipmate import (
+    READ_ERRORS,
+    SHIPMATE_WORKFLOW,
+    _load,
+    check_runs,
+    command_data,
+    dispatched_by_app,
+    exit_text,
+    is_head_sha,
+    one_line,
+    retried,
+    run_annotated,
+    titled_runs,
+)
+
+ag = _load("apply-gate")
+
+_NONE = "so no open pull request was re-planned after this push"
+
+
+def _warn(text):
+    sys.stderr.write(f"::warning::{command_data(one_line(text))}\n")
+
+
+def read_push(raw):
+    """`(stacks, outside)` of the `push` output `raw`, or None when it is not that shape:
+    `{"stacks": [str, ...], "outside": bool}`, or `{"stacks": null, "outside": true}`."""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or set(value) != {"stacks", "outside"}:
+        return None
+    stacks, outside = value["stacks"], value["outside"]
+    if not isinstance(outside, bool):
+        return None
+    if stacks is None:
+        return (set(), True) if outside is True else None
+    if not isinstance(stacks, list) or not all(isinstance(s, str) for s in stacks):
+        return None
+    return set(stacks), outside
+
+
+def open_pulls(repo, base):
+    """`[{number, draft, sha}]` of every open pull request into `base`. A failed read or a row
+    without an int number, a bool draft and a head SHA raises `SystemExit`."""
+    args = [
+        "gh",
+        "api",
+        "--paginate",
+        f"repos/{repo}/pulls?state=open&base={quote(base, safe='')}&per_page=100",
+        "--jq",
+        ".[] | {number, draft, sha: .head.sha} | tojson",
+    ]
+    pulls = []
+    for line in filter(None, retried(lambda: _shipmate._run(args)).splitlines()):
+        pull = json.loads(line)
+        if not (
+            type(pull.get("number")) is int
+            and isinstance(pull.get("draft"), bool)
+            and is_head_sha(pull.get("sha"))
+        ):
+            raise SystemExit(
+                f"::error::{command_data(one_line(f'unreadable pull request {line}'))}"
+            )
+        pulls.append(pull)
+    return pulls
+
+
+def check_stacks(repo, sha, app_id):
+    """The stacks the App's apply checks on `sha` name, whatever their state."""
+    lines = check_runs(repo, sha).splitlines()
+    return {ag.parse_check_name(n)[0] for n in ag.latest_by_name(ag.app_runs(lines, app_id))}
+
+
+def candidates(repo, pulls, stacks, outside, app_id):
+    """The numbers of `pulls` to re-plan, in listed order: not a draft, with an App apply check,
+    and `outside` or a checked stack in `stacks`. A failed check read warns and skips that pull
+    request only."""
+    picked = []
+    for pull in pulls:
+        if pull["draft"]:
+            continue
+        try:
+            named = check_stacks(repo, pull["sha"], app_id)
+        except READ_ERRORS as e:
+            why = exit_text(e) if isinstance(e, SystemExit) else repr(e)
+            _warn(f"pull request #{pull['number']} was not re-planned: {why}")
+            continue
+        if named and (outside or named & stacks):
+            picked.append(pull["number"])
+    return picked
+
+
+def without_live_applies(repo, picked, slug):
+    """`picked` less each pull request with a live App `apply` or `auto` run, each named in a
+    notice; None, with a warning, when the one live run listing cannot rule such a run out."""
+    listed, complete = _shipmate._live_dispatch_runs(repo, SHIPMATE_WORKFLOW)
+    _, unparsed = titled_runs(listed, (), "")
+    if not complete or any(dispatched_by_app(r, slug) for r in unparsed):
+        _warn(f"the live shipmate.yml run listing is incomplete, {_NONE}")
+        return None
+    kept = []
+    for number in picked:
+        matched, _ = titled_runs(listed, ("apply", "auto"), str(number))
+        live = [(r["id"], p["verb"]) for r, p in matched if dispatched_by_app(r, slug)]
+        if not live:
+            kept.append(number)
+            continue
+        runs = ", ".join(f"{verb} run {rid}" for rid, verb in live)
+        print(
+            f"::notice title=re-plan::pull request #{number} was not re-planned: its {runs} is "
+            "live, and a plan now would republish the apply checks it applies from",
+            file=sys.stderr,
+        )
+    return kept
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    app_id, slug = os.environ.get("SHIPMATE_APP_ID", ""), os.environ.get("SHIPMATE_APP_SLUG", "")
+    push = read_push(os.environ.get("SHIPMATE_PUSH", ""))
+    if push is None:
+        _warn(f"deploy detect reported no changed stacks, {_NONE}")
+        return
+    if not (app_id and slug):
+        _warn(f"the App id or slug is empty, {_NONE}")
+        return
+    stacks, outside = push
+    pulls = open_pulls(repo, os.environ["SHIPMATE_DEFAULT_BRANCH"])
+    picked = candidates(repo, pulls, stacks, outside, app_id)
+    if picked:
+        picked = without_live_applies(repo, picked, slug) or []
+    for number in picked:
+        print(number)
+
+
+if __name__ == "__main__":
+    run_annotated(main)

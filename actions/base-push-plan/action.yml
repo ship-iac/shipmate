@@ -1,0 +1,69 @@
+name: shipmate base-push-plan
+description: >-
+  Dispatch shipmate plan for each open pull request a push to the default branch may have put
+  behind (scripts/base-push-plan selects them), so its plan shows the cells the push changed.
+  Display-only: every failure warns and the action succeeds. Mints its own App token with actions
+  write, pull-requests read and checks read.
+inputs:
+  push:
+    description: deploy-detect's `push` output; empty or malformed re-plans nothing.
+    required: true
+  app-id:
+    description: shipmate App id (repo/org variable).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Mint the re-plan token
+      id: token
+      # Display-only: a failed mint leaves the token empty, which the next step reports.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+        permission-pull-requests: read
+        permission-checks: read
+    - name: Dispatch a plan of each selected pull request
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        SHIPMATE_PUSH: ${{ inputs.push }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # dispatch-body's inputs, beside PR_NUMBER per pull request.
+        VERB: plan
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        # Display-only: every failure warns and the step exits 0. A failed dispatch continues to
+        # the next pull request, so one failure never drops the later ones.
+        if [ -z "${GH_TOKEN:-}" ]; then
+          echo "::warning::the re-plan token mint failed, so no open pull request was re-planned after this push"
+          exit 0
+        fi
+        if ! prs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/base-push-plan" 2>select.err); then
+          sed 's/^::error::/::warning::/' select.err >&2
+          echo "::warning::could not select the open pull requests to re-plan, so none was re-planned after this push"
+          exit 0
+        fi
+        cat select.err >&2
+        for pr in $prs; do
+          rc=0
+          # Exit codes are documented in scripts/dispatch-body.
+          PR_NUMBER=$pr python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" >/dev/null || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice title=re-plan::dispatched shipmate plan for pull request #$pr: this push may have changed a stack it plans"
+          elif [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
+            echo "::warning::the plan dispatch for pull request #$pr answered with an error, so a plan may have started; check the Actions tab"
+          else
+            echo "::warning::the plan dispatch for pull request #$pr failed; comment shipmate plan on it to check it against the base"
+          fi
+        done

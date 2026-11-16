@@ -644,6 +644,7 @@ runs:
         VERB: plan
         PR_NUMBER: ${{ inputs.pr-number }}
         DISPATCH_REF: ${{ github.event.repository.default_branch }}
+        SHIPMATE_APP_SLUG: ${{ steps.plantoken.outputs.app-slug }}
         SHIPMATE_LIVE: ${{ steps.livehead.outputs.live }}
       run: |
         set -euo pipefail

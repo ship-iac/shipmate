@@ -39,6 +39,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/apply-summary@main
       - if: false
+        uses: ship-iac/shipmate/actions/base-push-plan@main
+      - if: false
         uses: ship-iac/shipmate/actions/build-matrix@main
       - if: false
         uses: ship-iac/shipmate/actions/cell-init@main

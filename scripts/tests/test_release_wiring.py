@@ -56,6 +56,7 @@ def test_release_workflow_releases_the_closed_pull_requests_locks():
 SUMMARY_STEP_NAMES = [
     "Complete gate on the merged PR head SHA",
     "Release the merged pull request's cell locks",
+    "Re-plan the open pull requests this push may put behind",
 ]
 
 DEPLOY_RELEASE_STEP = {
@@ -72,12 +73,12 @@ DEPLOY_RELEASE_STEP = {
 }
 
 
-def test_deploy_summary_releases_last_after_any_level_result():
+def test_deploy_summary_releases_after_the_gate_write_and_any_level_result():
     """Mutations: move the release step first; its `if:` to `success()`; `!=` in the
     `release-pending` expression."""
     steps = workflow_jobs("deploy.yml")["summary"]["steps"]
     assert [s["name"] for s in steps] == SUMMARY_STEP_NAMES
-    assert steps[-1] == DEPLOY_RELEASE_STEP
+    assert steps[1] == DEPLOY_RELEASE_STEP
 
 
 def test_deploy_detect_hands_the_pull_request_number_to_the_summary():

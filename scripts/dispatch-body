@@ -3,41 +3,42 @@
 it and print the API's answer.
 
 Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `COMMENT_ID`, `DISPATCH_REF`,
-`GITHUB_REPOSITORY`, `GH_TOKEN`, and `SHIPMATE_APP_SLUG`, the shipmate App's slug, which only a
-commented dispatch reads.
+`GITHUB_REPOSITORY`, `GH_TOKEN`, and `SHIPMATE_APP_SLUG`, the shipmate App's slug, which every
+dispatch but `auto` reads.
 
 `COMMENT_ID` is the command comment's id, sent as `comment_id`. A commented `apply` or
-`unlock` must carry one, and `plan` may; an empty one on a `plan` is the comment-less replan,
-whose body carries no `comment_id`. `auto` carries none. Any other combination, or a value
-that is not a comment id (`_shipmate._COMMENT_ID`), exits 1 before any request.
+`unlock` must carry one, and `plan` may; an empty one on a `plan` is a comment-less plan (the
+plan summary's replan, the deploy's re-plan of open pull requests), whose body carries no
+`comment_id`. `auto` carries none. Any other combination, or a value that is not a comment id
+(`_shipmate._COMMENT_ID`), exits 1 before any request.
 
 It retries a transient failure (`_shipmate.retried`), and a transient failure may have
 started a run: GitHub can start it and still answer 502. Before each retry it lists
 `shipmate.yml`'s runs, and what stops the retry depends on the dispatch:
 
-- Commented: every page of the per-workflow listing (no server filter) back to `t0`, five
-  seconds before the first attempt, read again each second until 10 s after the failed
-  attempt. A `workflow_dispatch` run whose actor is `<SHIPMATE_APP_SLUG>[bot]` and whose title
-  parses (`_shipmate.parse_run_title`) as this verb and comment id, with this pull request, or
-  for `unlock` no pull request and this ref, is this command's run and stops the retry. The
-  title is consumer-authored, so only an App run's title counts. A commented dispatch with an
-  empty `SHIPMATE_APP_SLUG` exits 1 before the first POST, since no listed run could be told to
-  be its own.
-- Comment-less (`auto`, the replan): one page of 100 `workflow_dispatch` runs, newest first;
-  any created since `t0` stops the retry. No title is read, because nothing marks such a run as
-  this dispatch's. A concurrent dispatch landing in the window therefore stops the retry too; a
-  wrong stop costs a comment, a wrong retry a double start.
+- Every dispatch but `auto`: every page of the per-workflow listing (no server filter) back
+  to `t0`, five seconds before the first attempt, read again each second until 10 s after the
+  failed attempt. A `workflow_dispatch` run whose actor is `<SHIPMATE_APP_SLUG>[bot]` and whose
+  title parses (`_shipmate.parse_run_title`) as this verb and comment id (empty for a
+  comment-less plan), with this pull request, or for `unlock` no pull request and this ref, is
+  this dispatch's run and stops the retry. The title is consumer-authored, so only an App run's
+  title counts. Such a dispatch with an empty `SHIPMATE_APP_SLUG` exits 1 before the first POST,
+  since no listed run could be told to be its own.
+- `auto`: one page of 100 `workflow_dispatch` runs, newest first; any created since `t0` stops
+  the retry. No title is read, because an `auto` title names a head, not this dispatch. A
+  concurrent dispatch landing in the window therefore stops the retry too; a wrong stop costs a
+  comment, a wrong retry a double start.
 
 Exit codes:
 
     0                   dispatched; stdout is the API's answer, unchanged
-    1                   a commented dispatch without `SHIPMATE_APP_SLUG`, refused before any
-                        request; or failed on the first attempt with a failure that is not
-                        transient, so no run started. When the answer shows a `shipmate.yml`
+    1                   a dispatch other than `auto` without `SHIPMATE_APP_SLUG`, refused
+                        before any request; or failed on the first attempt with a failure that
+                        is not transient, so no run started. When the answer shows a `shipmate.yml`
                         older than this dispatch (`skew_hint`), stdout is the remedy sentence
                         and stderr ends with it as an `::error::` line
-    3 MAY_HAVE_STARTED  a listed run is this command's (commented) or was created since `t0`
-                        (comment-less); not retried
+    3 MAY_HAVE_STARTED  a listed run is this dispatch's by its title, or was created since `t0`
+                        (`auto`); not retried
     4 UNDETERMINED      the attempts ended on transient failures, a later attempt failed after a
                         transient one, or the listing failed or was malformed
 
@@ -47,8 +48,11 @@ retry notices printed above it.
 
 Known ceilings: a run not listed yet when the listing is last read is not seen, so that attempt
 can be retried and start twice; a second commented `plan` or `apply` run loses its comment's
-claim and does no work, and a second `unlock` finds no lock. A runner clock ahead of GitHub's by
-more than five seconds puts `t0` after a run that landed.
+claim and does no work, a second comment-less `plan` plans the head again, and a second `unlock`
+finds no lock. Every comment-less plan of one pull request has the same title, so another one
+landing in the window (the summary's replan beside the deploy's re-plan) stops the retry too;
+either plans the pull request's head. A runner clock ahead of GitHub's by more than five
+seconds puts `t0` after a run that landed.
 """
 
 import json
@@ -228,7 +232,7 @@ def _before_retry(repo, t0, failed_at):
     want, slug = _command_title(), os.environ.get("SHIPMATE_APP_SLUG", "")
 
     def listed():
-        if not want["comment"]:
+        if want["verb"] == "auto":
             return landed_since(repo, t0, run=run)
         deadline = failed_at[-1] + _LIST_WINDOW
         while not command_run_listed(repo, t0, want, slug, run=run):
@@ -270,11 +274,11 @@ def main(argv=()):
         raise SystemExit("::error::usage: dispatch-body")
     repo = os.environ["GITHUB_REPOSITORY"]
     data = json.dumps(body())
-    if os.environ.get("COMMENT_ID") and not os.environ.get("SHIPMATE_APP_SLUG"):
+    if os.environ["VERB"] != "auto" and not os.environ.get("SHIPMATE_APP_SLUG"):
         raise SystemExit(
-            "::error::SHIPMATE_APP_SLUG is empty on a commented dispatch, so a run it started "
-            "could not be found after a lost answer; nothing was dispatched. This is an engine "
-            "wiring defect: actions/dispatch passes the slug of the App token it minted."
+            f"::error::SHIPMATE_APP_SLUG is empty, so a run this {os.environ['VERB']} dispatch "
+            "started could not be found after a lost answer; nothing was dispatched. This is an "
+            "engine wiring defect: the dispatching step passes the slug of the App token it minted."
         )
     args = [
         "gh",

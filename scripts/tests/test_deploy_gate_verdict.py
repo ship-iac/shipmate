@@ -45,11 +45,24 @@ EXPECTED_SUMMARY = {
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
             },
         },
+        {
+            "name": "Re-plan the open pull requests this push may put behind",
+            "if": "${{ !cancelled() }}",
+            "uses": "$/actions/base-push-plan",
+            "with": {
+                "push": "${{ needs.detect.outputs.push }}",
+                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+            },
+        },
     ],
 }
 
 
 def test_the_deploy_gate_step_hands_gate_refresh_every_result():
     """Mutations: drop `deploy-results` or `detect-result`; add back a mint step;
-    `head_sha` -> `head-sha`; drop `queue: max`."""
+    `head_sha` -> `head-sha`; drop `queue: max`. The re-plan is display-only, so it is the last
+    step and runs after a failed gate write or lock release: its `if:` to `always()`; move it
+    before the gate write; add `actions: write` to the job's `permissions` (the App mint
+    carries it)."""
     assert workflow_jobs("deploy.yml")["summary"] == EXPECTED_SUMMARY

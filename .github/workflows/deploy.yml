@@ -8,8 +8,9 @@ on:
       # and no environment supplies it (the waves bind the env's apply environment). Without it
       # every env-level apply refuses at its decrypt.
       SHIPMATE_ENCRYPTION_KEY: { required: false }
-      # Feeds the `summary` job's App-token mints for the gate write and the lock release. An
-      # empty key fails loud in each one's `Verify the App key arrived`, before the mint.
+      # Feeds the `summary` job's App-token mints for the gate write, the lock release and the
+      # re-plan of open pull requests. An empty key fails loud in the first two's `Verify the App
+      # key arrived`, before the mint; the re-plan only warns.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
 jobs:
@@ -182,5 +183,13 @@ jobs:
           head-sha: ${{ needs.detect.outputs.head_sha }}
           merged: "true"
           release-pending: ${{ needs.detect.outputs.refused_locked == 'true' }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # Display-only: runs after a failed gate write or lock release, and never fails the job.
+      - name: Re-plan the open pull requests this push may put behind
+        if: ${{ !cancelled() }}
+        uses: $/actions/base-push-plan
+        with:
+          push: ${{ needs.detect.outputs.push }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
