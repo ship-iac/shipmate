@@ -1632,17 +1632,24 @@ def _list_merge(monkeypatch):
 def test_a_stack_the_base_did_not_change_stays_applyable_from_a_blobless_clone(
     blobless, tmp_path, monkeypatch
 ):
-    """The branch changes `stacks/a`, the base `stacks/b`. In a blobless clone the merge fetches
-    the base's blobs under the merge environment, and only `stacks/b` is behind.
+    """The branch changes `stacks/a` and the first line of `stacks/b/main.tf`, the base its last
+    line, so `git merge-tree` merges that file's content. The clone lacks the base's blob of it,
+    which the merge fetches under the merge environment, and only `stacks/b` is behind.
 
     Mutation: hold every candidate when the base changed any stack (`changed or` for
     `c["stack"] in changed or`) -- `stacks/a` is behind, red."""
-    blobless({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "b\n"}, "common")
+    lines = [f"line {n}\n" for n in range(10)]
+    blobless({"stacks/a/main.tf": "a\n", "stacks/b/main.tf": "".join(lines)}, "common")
     _git("checkout", "-q", "-b", "pr", cwd=blobless.src)
-    blobless({"stacks/a/main.tf": "a edit\n"}, "pr")
+    blobless(
+        {"stacks/a/main.tf": "a edit\n", "stacks/b/main.tf": "".join(["x\n", *lines[1:]])}, "pr"
+    )
     _git("checkout", "-q", "main", cwd=blobless.src)
-    tip = blobless({"stacks/b/main.tf": "b edit\n"}, "base")
+    tip = blobless({"stacks/b/main.tf": "".join([*lines[:-1], "y\n"])}, "base")
+    blob = _git("rev-parse", f"{tip}:stacks/b/main.tf", cwd=blobless.src).strip()
     _clone(tmp_path, monkeypatch, blobless.src, "pr")
+    missing = _git("rev-list", "--objects", "--missing=print", tip).split()
+    assert f"?{blob}" in missing  # Not vacuous: the merge needs a blob the clone lacks.
     _list_merge(monkeypatch)
     cells = [{"stack": s, "environment": "dev-eu"} for s in ("stacks/a", "stacks/b")]
     assert ad.behind_cells(tip, cells, [], APP_ID) == [cells[1]]
