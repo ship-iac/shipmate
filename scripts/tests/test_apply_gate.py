@@ -2,7 +2,7 @@ import io
 import json
 
 import pytest
-from _detect_fixtures import autoplans_read, listed_autoplan
+from _detect_fixtures import AUTOPLAN_CREATED, autoplans_read, listed_autoplan
 from _loader import load_script
 
 ag = load_script("apply-gate")
@@ -608,6 +608,7 @@ def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
         "id": 12,
         "event": "x",
         "head_sha": _HEAD,
+        "created_at": AUTOPLAN_CREATED,
         "actor": {"login": "k3np"},
         "triggering_actor": {"login": "k3np"},
     }
@@ -632,6 +633,7 @@ def test_autoplan_runs_returns_every_listed_run_in_listing_order():
             "id": 5,
             "event": "pull_request_target",
             "head_sha": _HEAD,
+            "created_at": AUTOPLAN_CREATED,
             "actor": {"login": "k3np"},
             "triggering_actor": {"login": "k3np"},
             "status": "completed",
@@ -641,6 +643,7 @@ def test_autoplan_runs_returns_every_listed_run_in_listing_order():
             "id": 12,
             "event": "pull_request_target",
             "head_sha": _HEAD,
+            "created_at": AUTOPLAN_CREATED,
             "actor": {"login": "k3np"},
             "triggering_actor": {"login": "k3np"},
             "status": "queued",
@@ -759,3 +762,21 @@ def test_provenance_reason_names_the_first_failing_check(newest, cells, expected
 def test_provenance_reason_compares_run_ids_as_strings():
     """A record `"07"` names no run 7. Mutation: `newest["id"] != int(plan_run)` (passes)."""
     assert ag.provenance_reason(listed_autoplan(7, _HEAD), "07", _HEAD, {}) == ("newer", 7)
+
+
+def test_newest_autoplan_selects_by_id_not_by_creation():
+    """The greatest id is created first here. Mutation: select by `created_at` (run 5)."""
+    newest, _ = _newest(
+        json.dumps(listed_autoplan(5, _HEAD, created_at="2026-11-15T22:47:49Z")),
+        json.dumps(listed_autoplan(12, _HEAD, created_at="2026-11-15T22:47:48Z")),
+    )
+    assert newest["id"] == 12
+
+
+def test_newer_plan_names_a_counted_run_over_an_incomplete_listing():
+    """Mutations: test `complete` first (the counted run reads as a listing failure); name the
+    last counted run."""
+    runs = [{"id": 4}, {"id": 9}]
+    assert ag.newer_plan(runs, False) == ("newer-plan", {"id": 4})
+    assert ag.newer_plan([], False) == ("plan-listing", None)
+    assert ag.newer_plan([], True) is None

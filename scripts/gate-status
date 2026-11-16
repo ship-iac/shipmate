@@ -88,6 +88,7 @@ from _shipmate import (
     run,
     run_annotated,
     run_jobs,
+    status_text,
     validate_head_sha,
     write_retried,
 )
@@ -418,7 +419,7 @@ def _dispatched(pr):
     own = os.environ.get("GITHUB_RUN_ID", "")
     for r in runs:
         if str(r["id"]) != own:
-            status = one_line(r.get("status")).replace("_", " ")
+            status = status_text(r.get("status"))
             return f"; its shipmate plan run {r['id']} is {status} and plans the live head"
     return None
 

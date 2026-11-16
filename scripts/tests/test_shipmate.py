@@ -25,11 +25,13 @@ from _shipmate import (
     is_transient,
     known_holders,
     named,
+    plan_runs_since,
     pr_head,
     retried,
     review_count,
     run,
     run_annotated,
+    status_text,
     utf8_output,
     validate_head_sha,
     write_retried,
@@ -907,3 +909,130 @@ def test_known_holders_names_the_known_ones_ascending_and_evict_release_appends_
         "release the locks #5, #12 and an unknown holder hold; applying it after that may "
         "overwrite what they applied to dev"
     )
+
+
+# Shaped like `gh api 'repos/ship-iac/repo-example-stacks/actions/workflows/shipmate.yml/runs?
+# event=workflow_dispatch&created=%3E%3D2026-11-15T22%3A47%3A48Z&per_page=100'` (2026-11-16).
+_SINCE = "2026-11-15T22:47:48Z"
+_SINCE_ARGV = [
+    "gh",
+    "api",
+    (
+        "repos/o/r/actions/workflows/shipmate.yml/runs?event=workflow_dispatch"
+        "&created=%3E%3D2026-11-15T22%3A47%3A48Z&per_page=100&page=1"
+    ),
+]
+
+
+def _dispatched(run_id, title, status="completed", login="shipmate-iac[bot]"):
+    return {
+        "id": run_id,
+        "display_title": title,
+        "event": "workflow_dispatch",
+        "status": status,
+        "conclusion": "success" if status == "completed" else None,
+        "run_attempt": 1,
+        "created_at": _SINCE,
+        "actor": {"login": login},
+    }
+
+
+def _since(rows, pr="7", since=_SINCE, argv=None):
+    argv = [] if argv is None else argv
+
+    def gh(args):
+        argv.append(args)
+        if isinstance(rows, BaseException):
+            raise rows
+        return json.dumps({"total_count": len(rows), "workflow_runs": rows})
+
+    return plan_runs_since("o/r", pr, since, run=gh), argv
+
+
+def test_plan_runs_since_lists_every_status_and_actor_of_this_pull_requests_plans():
+    """The read is one per-workflow `workflow_dispatch` listing from `since`, `>=` encoded.
+    Rows: 9 another pull request whose number starts with 7; 3 an unparsed plan of #7 with a
+    ref; 4 an unparsed apply title; 6 an unparsed plan of #8; 2 a human's completed plan.
+    Mutations: drop the `created=` filter (the argv differs); ignore prefix-matching unparsed
+    titles (3 drops); count every unparsed title (4 and 6 join); match the prefix without its
+    trailing space (`plan pr=7` matches 9's `plan pr=70 ref=x`); drop the pull request filter
+    (5 of #8 joins); keep only live runs (2 drops); sort by listing order (8 before 2)."""
+    rows = [
+        _dispatched(9, "shipmate · plan pr=70 ref=x comment="),
+        _dispatched(5, "shipmate · plan pr=8 ref= comment="),
+        _dispatched(3, "shipmate · plan pr=7 ref=x comment=", status="queued"),
+        _dispatched(4, "shipmate · apply pr=7 ref=x comment="),
+        _dispatched(6, "shipmate · plan pr=8 ref=x comment="),
+        _dispatched(8, "shipmate · plan pr=7 ref= comment=11", status="in_progress"),
+        _dispatched(2, "shipmate · plan pr=7 ref= comment=", login="octocat"),
+    ]
+    (runs, complete), argv = _since(rows)
+    assert ([r["id"] for r in runs], complete) == ([2, 3, 8], True)
+    assert argv == [_SINCE_ARGV]
+
+
+def test_plan_runs_since_refuses_an_int_pull_request_number_before_any_read():
+    """`cell-lock` holds the number as an int, and a parsed title's is a str: an int matches no
+    run and the read fails open. Mutations: drop the boundary check (the read is made and the int
+    reaches `re.escape`, a `TypeError`); drop only `plan_runs_since`'s call of it (the read is
+    made before `_plans_of` raises)."""
+    argv = []
+    with pytest.raises(ValueError, match=r"pull request number 7 is not a decimal str"):
+        _since([_dispatched(2, "shipmate · plan pr=7 ref= comment=")], pr=7, argv=argv)
+    assert argv == []
+
+
+@pytest.mark.parametrize(
+    "since",
+    [None, "", "2026-11-15 22:47:48", "2026-11-15T22:47:48Z\n", "2026-11-15T22:47:48.5Z", "x"],
+)
+def test_plan_runs_since_reads_nothing_from_a_malformed_timestamp(since):
+    """GitHub answers a malformed `created` filter with an empty listing (probed 2026-11-16), so
+    the read would count no run. Mutation: drop the timestamp check (the read is made and
+    answers complete); `re.match` for `fullmatch` with a `$` anchor (the trailing newline
+    passes)."""
+    rows = [_dispatched(2, "shipmate · plan pr=7 ref= comment=")]
+    assert _since(rows, since=since) == (([], False), [])
+
+
+def test_plan_runs_since_is_incomplete_over_a_failed_read_or_an_unshaped_run(capsys):
+    """Mutations: answer a failed page as complete; count a run with no title as complete
+    (the shaped run 3 is still returned)."""
+    assert _since(SystemExit("::error::gh failed"))[0] == ([], False)
+    rows = [_dispatched(3, "shipmate · plan pr=7 ref= comment="), {"id": 4, "status": "queued"}]
+    runs, complete = _since(rows)[0]
+    assert ([r["id"] for r in runs], complete) == ([3], False)
+
+
+@pytest.mark.parametrize(
+    "total",
+    [
+        pytest.param(1, id="more-advertised"),
+        pytest.param(None, id="missing"),
+        pytest.param(True, id="bool"),
+    ],
+)
+def test_plan_runs_since_is_incomplete_when_the_listing_returns_another_count_than_it_advertises(
+    total, capsys
+):
+    """A listing advertising one run and returning none hides it. Mutations: drop the count
+    check (more-advertised answers complete); skip it when `total_count` is absent (missing);
+    accept a bool count (`True == 1`, so bool passes)."""
+    argv = []
+
+    def gh(args):
+        argv.append(args)
+        rows = [_dispatched(2, "shipmate · plan pr=7 ref= comment=")] if total is True else []
+        body = {"workflow_runs": rows}
+        if total is not None:
+            body["total_count"] = total
+        return json.dumps(body)
+
+    assert plan_runs_since("o/r", "7", _SINCE, run=gh) == ([], False)
+    assert "::warning::" in capsys.readouterr().err
+
+
+def test_status_text_reads_a_listed_status_as_words():
+    """Mutations: drop the `_` replacement; drop `one_line` (the newline survives)."""
+    assert status_text("in_progress") == "in progress"
+    assert status_text("a\nb") == "a | b"

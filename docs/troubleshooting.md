@@ -2373,8 +2373,9 @@ apply checks yet.
 `detect` reads the head's autoplans from the Actions runs listing
 (`event=pull_request_target`, `head_sha=<head>`), and the newest one listed
 must be the plan run every cell records. Usually plan run `<n>` is a `shipmate
-plan` run (`workflow_dispatch`), which is never listed: the App dispatches it,
-and it does not carry the commenter, so there is no pusher to authorize. Comment
+plan` run (`workflow_dispatch`), which is never in this listing: anyone with
+write access can dispatch it, the App on a comment included, and it does not
+carry the commenter, so there is no pusher to authorize. Comment
 `shipmate apply`, which applies that plan under the comment-time requirements.
 Otherwise a newer autoplan of the same head exists. One started by a push
 dispatches its own `auto` apply once it completes with apply checks; one started
@@ -2392,6 +2393,40 @@ request to apply it.``:
 - ``plan run <n> is a `<event>` run, not an autoplan`` or `plan run <n> planned
   <sha>, not the head <sha>`: the listing returned a run outside its own
   `event=` or `head_sha=` filter. Comment `shipmate apply`.
+
+### `auto apply refused: shipmate plan run <m> of this pull request is <status> and newer than plan run <n>`
+
+Someone, the App or a person, dispatched a `shipmate plan` of this pull request
+after the autoplan the `auto` run applies, and it has not finished. It plans the
+head again and replaces its apply records, so the older plan does not apply
+under it. Wait for run `<m>` to finish, review its plan, then comment `shipmate
+apply`.
+
+### `auto apply refused: shipmate plan run <m> of this pull request planned after plan run <n>`
+
+A `shipmate plan` of this pull request dispatched after the autoplan finished
+with its `plan / detect` job succeeded, whatever the run's conclusion: it planned
+the head again, even if it published no apply check. Review its plan, then
+comment `shipmate apply`.
+
+### `auto apply refused: the shipmate plan runs of this pull request could not all be listed, so a newer one may exist`
+
+`detect` could not rule out a newer `shipmate plan` run. The causes:
+
+- a page of the `event=workflow_dispatch&created=>=<time>` listing, or of a
+  newer completed run's jobs listing, failed or was malformed;
+- either listing returned another number of entries than its `total_count`
+  advertises, or ran past 10 pages;
+- a listed run had no int id or no string title;
+- a newer run's `status`, or a completed one's `conclusion`, is not a string;
+- a newer completed run's `run_attempt` is not an int, or its jobs carry
+  another attempt;
+- its jobs list two `plan / detect` jobs, or one not `completed` or with no
+  string `conclusion`;
+- the autoplan's `created_at` is not a whole-second UTC time.
+
+A failed or malformed page and a count mismatch log a warning naming the
+listing. Comment `shipmate apply`.
 
 ### ``not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...``
 
@@ -2553,6 +2588,21 @@ An `auto` cell also refuses when:
   run`` or `the newest autoplan of <head> is a run of <sha>, not of <head>`: the
   Actions runs listing returned a run outside its own `event=` or `head_sha=`
   filter. Comment `shipmate apply`, or push.
+- `shipmate plan run <m> of this pull request is <status> and newer than plan
+  run <n>, which this auto apply applies`: a `shipmate plan` of this pull request
+  created after the plan run is running while the wave waits: dispatched since
+  `detect`, missing from `detect`'s listing, or created after the plan run and
+  cancelled before its `detect`, then re-run. Wait for it to
+  finish, review its plan, then comment `shipmate apply`.
+- `shipmate plan run <m> of this pull request planned after plan run <n>, which
+  this auto apply applies`: such a plan ran and ended, its `plan / detect` job
+  succeeded, while the wave waited. Review its plan, then comment `shipmate
+  apply`.
+- `could not confirm no newer shipmate plan run of pull request #<pr> (the
+  listing is incomplete)`: the plan runs created since the plan run could not be
+  judged, for the causes under ``auto apply refused: the shipmate plan runs of
+  this pull request could not all be listed`` above. Comment `shipmate apply`,
+  or push.
 - `an auto apply reached the wave without its plan run and base tip`: `detect`'s
   outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs

@@ -46,10 +46,11 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   `STACK` in `SHIPMATE_ENV`, is open at `SHIPMATE_HEAD_SHA` and `GITHUB_RUN_ATTEMPT` is `1`.
   With `SHIPMATE_AUTO` `true` it also refuses unless the pull request is not a draft,
   `SHIPMATE_PROVENANCE_RUN` is the head's newest autoplan and the run the cell's newest plan
-  record names, its pusher still passes
-  `authorize.pusher_reason`, and the base tip is still `SHIPMATE_BASE_SHA`. A "Re-run
-  failed jobs" of an apply re-runs its waves without `detect` or `acquire`, and a wave can wait
-  hours on an environment approval, so each apply cell checks here before its credentials.
+  record names, no newer `shipmate plan` run of the pull request created since that autoplan
+  is live or planned, its pusher still passes `authorize.pusher_reason`, and the base tip is
+  still `SHIPMATE_BASE_SHA`. A "Re-run failed jobs" of an apply re-runs its waves without
+  `detect` or `acquire`, and a wave can wait hours on an environment approval, so each apply
+  cell checks here before its credentials.
   With `SHIPMATE_DEPLOY` `true` (a merge deploy's wave) it runs no other check and refuses only
   when a pull request other than `SHIPMATE_PR_NUMBER`, the merged one (empty on a push, read as
   `0`), holds the cell's lock: one taken after the deploy's detect.
@@ -89,6 +90,7 @@ from _shipmate import (
     retried,
     run_annotated,
     stacked_through,
+    status_text,
     write_outputs,
 )
 
@@ -991,7 +993,10 @@ def _plan_record(repo, head, name, run):
     return plan_run, ag.plan_actions(lines, app_id).get(name)
 
 
-def _verify_auto(repo, head, provenance, env, stack, where, run):
+def _verify_auto(repo, head, provenance, env, stack, where, run, pr):
+    """The auto form's provenance checks of plan run `provenance` on `head` for pull request
+    `pr`, a str, then the newer-plan check over the plan runs created since that autoplan: a
+    run `detect` listed can be re-run while the wave waits, keeping its `created_at`."""
     newest = _confirm(
         where,
         f"plan run {provenance} is the newest autoplan of {head}",
@@ -1007,6 +1012,30 @@ def _verify_auto(repo, head, provenance, env, stack, where, run):
     )
     reason = ag.provenance_reason(newest, provenance, head, {name: record})
     _refuse_provenance(where, head, provenance, reason)
+    what = f"no newer shipmate plan run of pull request #{pr}"
+    counted, complete = _confirm(
+        where,
+        what,
+        lambda: ag.newer_plans(repo, pr, newest, since=newest.get("created_at"), run=run),
+    )
+    reason = ag.newer_plan(counted, complete)
+    if reason is not None and reason[0] == "plan-listing":
+        raise SystemExit(
+            f"::error::apply aborted for {where}: could not confirm {what} (the listing is "
+            f"incomplete); {_RETRY}"
+        )
+    if reason is not None:
+        newer = reason[1]
+        status = status_text(newer.get("status"))
+        plan = f"shipmate plan run {newer['id']} of this pull request"
+        why = (
+            f"{plan} planned after plan run {provenance}, which this auto apply applies; review "
+            "its plan, then comment `shipmate apply`"
+            if status == "completed"
+            else f"{plan} is {status} and newer than plan run {provenance}, which this auto apply "
+            "applies; wait for it to finish, review its plan, then comment `shipmate apply`"
+        )
+        raise SystemExit(f"::error::apply aborted for {where}: {why}")
     # The pusher's write access can be revoked while a wave waits on an approval.
     reason = az.pusher_reason(repo, newest, run=run)
     if reason:
@@ -1106,7 +1135,7 @@ def _verify_cmd(repo, _, run):
             f"::error::apply aborted for {where}: the base branch moved from {base} to {tip} "
             "since this auto apply was detected; update the branch from the base and push"
         )
-    _verify_auto(repo, head, provenance, env, stack, where, run)
+    _verify_auto(repo, head, provenance, env, stack, where, run, str(pr))
 
 
 COMMANDS = {

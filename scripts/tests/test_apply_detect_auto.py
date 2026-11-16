@@ -9,9 +9,11 @@ from _detect_fixtures import (
     PR_NUMBER,
     _apply_check,
     autoplans_read,
+    dispatched_plan,
     forbid_shared_runner,
     held,
     listed_autoplan,
+    plan_jobs,
     stub_read_locks,
     stub_read_table,
     wave_cells,
@@ -74,10 +76,32 @@ def _listed(entry):
     return json.dumps(listed_autoplan(int(RUN), HEAD, **keys))
 
 
-def _github(checks, listing, permission, pulls, calls, argv, tip=BASE):
+def _answer(body):
+    if isinstance(body, BaseException):
+        raise body
+    return body
+
+
+def _plans_body(plans):
+    """The `shipmate plan` listing's page holding `plans`."""
+    if isinstance(plans, BaseException):
+        raise plans
+    return json.dumps({"total_count": len(plans), "workflow_runs": list(plans)})
+
+
+def _github(checks, listing, permission, pulls, calls, argv, tip=BASE, plans=(), jobs=None):
     """A `gh api` double answering each read `_run_auto` documents by its path prefix; any
     other read, a single-run `actions/runs/<id>` read among them, fails the test."""
+    jobs = jobs or {}
     answers = [
+        (
+            "repos/o/r/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&",
+            lambda: _plans_body(plans),
+        ),
+        *(
+            (f"repos/o/r/actions/runs/{run_id}/jobs?", lambda body=body: _answer(body))
+            for run_id, body in jobs.items()
+        ),
         ("repos/o/r/git/ref/heads/main", lambda: _ref(tip)),
         (f"repos/o/r/commits/{HEAD}/check-runs?", lambda: "\n".join(map(json.dumps, checks))),
         (
@@ -123,6 +147,8 @@ def _run_auto(
     base_changed=(),
     base_reads=None,
     tip=BASE,
+    plans=(),
+    jobs=None,
 ):
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
     to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
@@ -132,7 +158,8 @@ def _run_auto(
     changed (an exception raises from the read), `tip` the base branch ref's commit (an
     exception raises from the read). Each `gh api` path goes to `calls`, its whole argv to
     `argv`, each sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap
-    detection is asked about to `base_reads`.
+    detection is asked about to `base_reads`. `plans` is the `shipmate plan` listing's runs (an
+    exception raises from the read), `jobs` maps a run id to its jobs listing's body.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
     out = tmp_path / "out"
@@ -163,6 +190,8 @@ def _run_auto(
         [] if calls is None else calls,
         [] if argv is None else argv,
         tip,
+        plans,
+        jobs,
     )
 
     tree = {e: list(stacks) for e in envs}
@@ -378,7 +407,12 @@ def test_the_autoplan_listing_reads_every_page(tmp_path, monkeypatch):
     query."""
     argv = []
     _run_auto(tmp_path, monkeypatch, argv=argv)
-    assert [a for a in argv if any("/actions/workflows/" in x for x in a)] == [LISTING]
+    autoplans = [
+        a
+        for a in argv
+        if any("/actions/workflows/" in x and "=workflow_dispatch" not in x for x in a)
+    ]
+    assert autoplans == [LISTING]
 
 
 def test_cells_recording_two_runs_refuse(tmp_path, monkeypatch):
@@ -786,6 +820,212 @@ def test_a_cell_both_locked_and_overlapping_is_held_once_per_cause():
         {**cell, "holder": 7, "cause": "locked"},
         {**cell, "cause": "overlap"},
     ]
+
+
+NEWER = 123460
+PLANS_READ = [
+    "gh",
+    "api",
+    (
+        "repos/o/r/actions/workflows/shipmate.yml/runs?event=workflow_dispatch"
+        "&created=%3E%3D2026-11-15T22%3A47%3A48Z&per_page=100&page=1"
+    ),
+]
+WAIT = "Wait for it to finish, review its plan, then comment `shipmate apply`."
+LISTING_REFUSAL = (
+    "::error::auto apply refused: the shipmate plan runs of this pull request could not all be "
+    f"listed, so a newer one may exist. {REMEDY}"
+)
+_FAIL = SystemExit("::error::command failed (1): gh api")
+
+
+def _live_refusal(status):
+    return (
+        f"::error::auto apply refused: shipmate plan run {NEWER} of this pull request is "
+        f"{status} and newer than plan run {RUN}. {WAIT}"
+    )
+
+
+def test_the_shipmate_plan_listing_is_one_read_from_the_plan_runs_creation(tmp_path, monkeypatch):
+    """The listing is read from the admitted autoplan's `created_at`, `>=` encoded, every
+    status. Mutation: drop the `created=` filter (the argv differs)."""
+    argv = []
+    _run_auto(tmp_path, monkeypatch, argv=argv)
+    assert [a for a in argv if any("event=workflow_dispatch" in x for x in a)] == [PLANS_READ]
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        pytest.param((int(RUN), 123999), id="zero-cell"),
+        pytest.param(
+            (int(RUN), {"id": 123999, "status": "in_progress", "conclusion": None}),
+            id="in-progress",
+        ),
+    ],
+)
+def test_a_newer_autoplan_still_refuses_before_any_plan_listing(tmp_path, monkeypatch, entries):
+    """A newer autoplan of the head, one that recorded no cell or one still running, refuses as
+    before, and the `shipmate plan` listing is not read. Mutation: drop `provenance_reason`'s
+    `newer` clause (both apply)."""
+    calls = []
+    assert _refusal(tmp_path, monkeypatch, listing=entries, calls=calls) == (
+        f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
+        f"(run 123999 is). {REMEDY}"
+    )
+    assert not [c for c in calls if "event=workflow_dispatch" in c]
+
+
+@pytest.mark.parametrize(
+    ("plan", "status"),
+    [
+        pytest.param(dispatched_plan(NEWER, PR_NUMBER), "in progress", id="app"),
+        pytest.param(
+            dispatched_plan(NEWER, PR_NUMBER, actor={"login": "octocat"}),
+            "in progress",
+            id="human",
+        ),
+        pytest.param(dispatched_plan(NEWER, PR_NUMBER, status="queued"), "queued", id="queued"),
+        pytest.param(
+            dispatched_plan(
+                NEWER, PR_NUMBER, display_title=f"shipmate · plan pr={PR_NUMBER} ref=x comment="
+            ),
+            "in progress",
+            id="unparsed-plan-title",
+        ),
+    ],
+)
+def test_a_live_newer_shipmate_plan_run_refuses(tmp_path, monkeypatch, plan, status):
+    """Created in the plan run's own second with a greater id, by any actor; no jobs are read
+    for a live run (the double fails any jobs read). Mutations: compare by `created_at` (equal,
+    so none is newer); filter by the App's actor (human applies); ignore live runs; hard-code
+    `in progress` (queued differs); ignore unparsed titles that start `shipmate · plan pr=<n> `
+    (unparsed-plan-title applies)."""
+    assert _refusal(tmp_path, monkeypatch, plans=[plan]) == _live_refusal(status)
+
+
+@pytest.mark.parametrize(
+    "conclusion",
+    [pytest.param("success", id="success"), pytest.param("failure", id="failure-after-detect")],
+)
+def test_a_completed_newer_shipmate_plan_run_that_planned_refuses(
+    tmp_path, monkeypatch, conclusion
+):
+    """A failed newer plan whose `plan / detect` succeeded counts: it may have published no
+    record, yet it planned the head again. Mutations: count no completed run; count only
+    completed `success` runs (failure-after-detect applies)."""
+    plan = dispatched_plan(NEWER, PR_NUMBER, status="completed", conclusion=conclusion)
+    assert _refusal(tmp_path, monkeypatch, plans=[plan], jobs={NEWER: plan_jobs(NEWER)}) == (
+        f"::error::auto apply refused: shipmate plan run {NEWER} of this pull request planned "
+        f"after plan run {RUN}. Review its plan, then comment `shipmate apply`."
+    )
+
+
+def _completed(conclusion="cancelled"):
+    return [dispatched_plan(NEWER, PR_NUMBER, status="completed", conclusion=conclusion)]
+
+
+@pytest.mark.parametrize(
+    ("plans", "jobs"),
+    [
+        pytest.param(
+            _completed(),
+            {NEWER: plan_jobs(NEWER, names=["plan / claim", "release"])},
+            id="cancelled-before-detect",
+        ),
+        pytest.param(_completed(), {NEWER: plan_jobs(NEWER, names=[])}, id="cancelled-queued"),
+        pytest.param(
+            _completed("startup_failure"), {NEWER: plan_jobs(NEWER, names=[])}, id="startup-failure"
+        ),
+        pytest.param(
+            _completed("success"),
+            {NEWER: plan_jobs(NEWER, detect="skipped")},
+            id="detect-skipped",
+        ),
+        pytest.param([dispatched_plan(123450, PR_NUMBER)], {}, id="older"),
+        pytest.param([dispatched_plan(int(RUN), PR_NUMBER)], {}, id="the-plan-run-itself"),
+        pytest.param([dispatched_plan(NEWER, "80")], {}, id="other-pull-request"),
+        pytest.param(
+            [
+                dispatched_plan(
+                    NEWER, PR_NUMBER, display_title=f"shipmate · apply pr={PR_NUMBER} ref=x"
+                )
+            ],
+            {},
+            id="unparsed-apply-title",
+        ),
+    ],
+)
+def test_a_shipmate_plan_run_that_does_not_count_applies(tmp_path, monkeypatch, plans, jobs):
+    """A completed run whose jobs listing is complete and empty never started a job, so it did
+    not plan. Mutations: count every completed run (the cancelled, startup and skipped rows
+    refuse); read the jobs through `run_jobs`, which reads an empty listing as unlistable
+    (cancelled-queued and startup-failure refuse); drop the id filter (older refuses); `>=`
+    against the plan run (the-plan-run-itself refuses); drop the pull request filter
+    (other-pull-request refuses); count every unparsed title (unparsed-apply-title refuses)."""
+    parsed = _run_auto(tmp_path, monkeypatch, plans=plans, jobs=jobs)
+    assert _applied(parsed) == [("stacks/app", "dev-eu")]
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        pytest.param({"plans": _FAIL}, id="listing-fails"),
+        pytest.param({"listing": ({"created_at": None},)}, id="created-at-null"),
+        pytest.param({"listing": ({"created_at": "2026-11-15T22:47:48"},)}, id="created-at-bad"),
+        pytest.param({"plans": _completed(), "jobs": {NEWER: _FAIL}}, id="jobs-fail"),
+        pytest.param(
+            {
+                "plans": _completed(),
+                "jobs": {NEWER: plan_jobs(NEWER, names=["plan / claim"], total=2)},
+            },
+            id="jobs-count-short",
+        ),
+        pytest.param({"plans": [dispatched_plan(NEWER, PR_NUMBER, status=None)]}, id="status-null"),
+        pytest.param(
+            {"plans": [dispatched_plan(NEWER, PR_NUMBER, status="completed", conclusion=None)]},
+            id="conclusion-null",
+        ),
+        pytest.param(
+            {
+                "plans": [dispatched_plan(NEWER, PR_NUMBER, run_attempt="1", status="completed")],
+                "jobs": {NEWER: plan_jobs(NEWER, names=[])},
+            },
+            id="attempt-not-int",
+        ),
+        pytest.param(
+            {"plans": _completed(), "jobs": {NEWER: plan_jobs(NEWER, attempt=2)}},
+            id="jobs-of-another-attempt",
+        ),
+        pytest.param(
+            {
+                "plans": _completed(),
+                "jobs": {NEWER: plan_jobs(NEWER, names=["plan / detect", "plan / detect"])},
+            },
+            id="two-detect-jobs",
+        ),
+    ],
+)
+def test_a_newer_plan_it_cannot_rule_out_refuses(tmp_path, monkeypatch, kw):
+    """Mutations: answer a failed listing as complete (listing-fails applies); drop the
+    timestamp check (a malformed `created_at` is read, created-at-bad applies); answer an
+    unlistable jobs read as not planned (jobs-fail applies); drop the jobs listing's count check
+    (jobs-count-short applies, its one listed job no detect); read a run's status unchecked
+    (status-null refuses as `None` and newer, conclusion-null reads its jobs, an unqueued read);
+    drop the run attempt comparison (jobs-of-another-attempt applies); drop the `run_attempt`
+    type check (attempt-not-int, whose listing holds no job to compare, applies); answer
+    `planned`'s `ValueError` as not planned (two-detect-jobs applies)."""
+    assert _refusal(tmp_path, monkeypatch, **kw) == LISTING_REFUSAL
+
+
+def test_the_first_counted_newer_plan_ends_the_read(tmp_path, monkeypatch):
+    """A live newer plan refuses without reading the jobs of a later completed one (the double
+    fails any jobs read). Mutation: keep reading after the first counted run."""
+    plans = [
+        dispatched_plan(NEWER, PR_NUMBER),
+        dispatched_plan(NEWER + 1, PR_NUMBER, status="completed"),
+    ]
+    assert _refusal(tmp_path, monkeypatch, plans=plans) == _live_refusal("in progress")
 
 
 def test_the_auto_form_writes_its_eleven_fields_in_one_report(tmp_path, monkeypatch):

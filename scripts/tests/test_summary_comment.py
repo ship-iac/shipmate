@@ -3211,7 +3211,7 @@ _AUTOPLAN_ARGV = [
     ),
     "--jq",
     (
-        ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, "
+        ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, created_at, "
         "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} | tojson"
     ),
 ]
