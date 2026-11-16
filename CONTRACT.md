@@ -2598,9 +2598,10 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   ready-for-review run of the same head is never an `auto` source, yet it is
   the newest, and an `auto` run from the older push's plan would refuse it as
   `newer`. A newer run logs "autoplan run <id> of <head> is newer than this run;
-  no auto apply started; comment shipmate apply to apply". An empty listing,
-  which lags this run, dispatches with a warning, and the `auto` run's own check
-  still refuses an older plan; a failed or malformed listing dispatches nothing,
+  no auto apply started; comment shipmate apply to apply". A listing that holds
+  no run as new as this one lags it and dispatches with the warning "autoplan
+  run <id> of <head> is not listed yet; dispatching the auto apply, whose own
+  provenance check refuses if this run is not the newest"; a failed or malformed listing dispatches nothing,
   with a warning. An autoplan created after this read still makes the `auto`
   run refuse.
 
@@ -3816,15 +3817,20 @@ in this order, and stops at the first run that blocks:
    `plan / detect` skipped), a `closed`-event run, a cancelled or failed one.
 4. When nothing blocks, the push that moved the head can still be seconds from
    listing its autoplan, so the autoplan runs are listed again every 5 s for
-   15 s, each newly listed run judged as in 1 and 3, then the live plan runs
-   once more.
+   15 s. Each listing is judged whole as in 1 and 3: a re-run keeps its run id
+   and can turn queued. A run attempt's jobs are read once.
+5. After the wait the pull request is read again: a head that moved again, a
+   closed pull request or a draft dispatches nothing. Then the live plan runs
+   are read once more.
 
 So every dispatch waits 15 s. On a dispatch the run notices "pull request #<n>
 moved to <sha>, which has no autoplan run that planned it or is in progress;
 dispatched shipmate plan (on demand, so no auto apply follows it)"; otherwise
 it logs "pull request #<n> is <state>; nothing dispatched", "pull request #<n>
-moved to <sha>, a draft; nothing dispatched", "pull request #<n> moved to
-<sha>, which has an autoplan run <id> in progress; nothing dispatched", "pull
+moved to <sha>, a draft; nothing dispatched", "pull request #<n> moved from
+<sha> to <sha> while this run waited; nothing dispatched", "pull request #<n>
+moved to <sha>, which has an autoplan run <id> in progress; nothing
+dispatched", "pull
 request #<n> moved to <sha>; its shipmate plan run <id> is <status> and plans
 the live head; nothing dispatched" or "pull request #<n> moved to <sha>, whose
 autoplan run <id> succeeded; nothing dispatched", each naming the lowest such
@@ -4291,9 +4297,10 @@ run posts nothing: a push cancels a dispatched plan through the fence's
 `cancel-in-progress`, and the push's autoplan answers. It runs only on an
 on-demand run, under `summary`'s fork clause, when `summary` did not output
 `superseded` as `true` and its comment write printed neither `created` nor
-`moved`. A superseded run and one whose pull request moved past its head post
-nothing, a run whose plan job was cancelled included: the live head is replanned
-instead (§Plan comment). The reply is:
+`moved`. A superseded run posts nothing, and neither does a run whose pull
+request moved past its head, one whose plan job was cancelled included: the
+live head is replanned instead (§Plan comment). A run whose plan job was
+cancelled on a head that did not move replies as below. The reply is:
 
 - summary cancelled when `summary` ended `cancelled` and the run was not
   cancelled, for example at a full gate-writer queue for the head, and

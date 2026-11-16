@@ -1196,8 +1196,10 @@ and any workflow file may grant itself that scope — must not be able to *state
 one. A number
 cannot lie about its own head repository, and a number naming a fork's pull
 request resolves to that fork, which the `build-matrix` step refuses in `detect`
-exactly as it refuses one on the autoplan leg. What the dispatch leg does add is
-`pull-requests: read` on the one job that looks the pull request up, and an
+exactly as it refuses one on the autoplan leg. `pull-requests: read` sits on the
+one job that looks the pull request up, `facts`, for both legs: the dispatch
+leg reads the pull request by number, and an autoplan whose payload says draft
+reads the draft flag once more. What the dispatch leg does add is an
 authorization step ahead of comment-ops' dispatch: it sends one only for a
 commenter whose permission on the repository is `write` or `admin`
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops). A branch-pushed workflow can
