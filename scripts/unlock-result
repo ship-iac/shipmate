@@ -9,12 +9,14 @@ Runs in `unlock.yml`'s `result` job, which checks nothing out. Reads `GITHUB_REP
 directory the records were downloaded into) and `GH_TOKEN` (`pull-requests: write`).
 
 Each unlock leg uploads one record, artifact `shipmate-unlock-<strategy.job-index>` holding
-`unlock-record.json`: `{"index", "outcome", "lock_id"}`, `outcome` being `released`, `none` or
-`failed`. The cell is `cells[index]`, never a name from the record: a leg runs pull-request HCL,
-so a record can be forged, and the reply is display only. A record whose artifact name is not
-`shipmate-unlock-<index>` exactly, whose `index` differs from that name's, or whose `outcome`
-is unknown counts as missing; an index outside `cells` names no cell, and a cell with no
-record "did not run". A `lock_id` outside `lock-info`'s charset is dropped.
+`shipmate-unlock-<strategy.job-index>.json`: `{"index", "outcome", "lock_id"}`, `outcome` being
+`released`, `none` or `failed`, all downloaded into `SHIPMATE_RECORDS`. The cell is
+`cells[index]`, never a name from the record: a leg runs pull-request HCL, so a record can be
+forged, and the reply is display only. A record whose file name is not
+`shipmate-unlock-<index>.json` exactly, whose `index` differs from the name's, or whose `outcome`
+is unknown counts as missing; an index outside
+`cells` names no cell, and a cell with no record "did not run". A `lock_id` outside
+`lock-info`'s charset is dropped.
 
 The pull request is read from the comment's `html_url`. A comment not on a pull request, an
 unreadable comment or a failed POST warns and exits 0: the run's own result stays the unlock's
@@ -52,18 +54,15 @@ BARE = (
 
 
 def records(root):
-    """{index: (outcome, lock_id)} of the valid records under `root`, one directory per
-    artifact."""
+    """{index: (outcome, lock_id)} of the valid records under `root`."""
     out = {}
-    if not root.is_dir():
-        return out
-    for d in root.iterdir():
-        m = _ARTIFACT.fullmatch(d.name)
+    for f in root.glob("shipmate-unlock-*.json"):
+        m = _ARTIFACT.fullmatch(f.stem)
         if m is None:
             continue
         index = int(m[1])
         try:
-            rec = json.loads((d / "unlock-record.json").read_text(encoding="utf-8"))
+            rec = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if (
@@ -80,8 +79,7 @@ def records(root):
 
 
 def _released(env, items):
-    n = len(items)
-    return f"released {n} state lock{'s' if n > 1 else ''} in {env}: {', '.join(items)}"
+    return f"released {len(items)} state lock(s) in {env}: {', '.join(items)}"
 
 
 def reply(env, cells, recs, detect_result, download_outcome):

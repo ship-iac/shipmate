@@ -2192,10 +2192,10 @@ failed cell reds the run.
 
 **The unlock result reply.** Each `unlock` leg uploads a record, even when it
 failed: artifact `shipmate-unlock-<strategy.job-index>` holding its outcome and
-the probed lock id. The outcome is `released` only when `force-unlock`
-succeeded, `none` when a clean probe found no lock, and `failed` otherwise (a
-failed init, probe or `force-unlock`, or a leg that failed before
-`unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
+the probed lock id in `shipmate-unlock-<strategy.job-index>.json`. The outcome
+is `released` only when `force-unlock` succeeded, `none` when a clean probe
+found no lock, and `failed` otherwise (a failed init, probe or `force-unlock`,
+or a leg that failed before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
 `permissions: { pull-requests: write }`, `ubuntu-slim`, the job token) runs
 unless the run was cancelled or `detect` was skipped. It reads the pull request
 number from the command comment's `html_url`, downloads the records, and posts
@@ -2220,8 +2220,9 @@ is one of:
 
 The reply is display only and gates nothing. A record is written by a job that
 runs the pull request's HCL, so it can be forged: the reply names a cell only by
-the index in its artifact name, into `detect`'s queue, never by a name in the
-record; a record whose own `index` differs from its artifact name's is ignored,
+the index in its file name (`shipmate-unlock-<n>.json`, which the engine
+chooses), into `detect`'s queue, never by a name in the record; a record whose
+own `index` differs from its file name's is ignored,
 and a lock id outside the charset `scripts/lock-info` accepts is dropped. Stack
 names are escaped. A comment not on a pull request, an unreadable comment or a
 failed post posts nothing and warns; a failed download is named in the reply.
@@ -4992,7 +4993,7 @@ by a plan run; passes `auto: true`, `ref` and `pr_number`) and the `unlock` job
 `SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC), the
 `deploy`, `apply` and `auto` jobs grant `pull-requests: read`, and the `unlock`
 job grants `pull-requests: write`, which `unlock.yml`'s `guard` requests for the
-🚀 reaction; without it every unlock run fails at startup, and `shipmate doctor`
+🚀 reaction and its `result` job for the unlock result reply; without it every unlock run fails at startup, and `shipmate doctor`
 reports the missing grant.
 
 ## OpenTofu note

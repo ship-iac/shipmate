@@ -146,7 +146,8 @@ combining fourteen live probes.
     different or extra. Without `auto: true`, `apply.yml`'s `guard` refuses every
     `verb: auto` dispatch, so no `apply_mode: auto` environment applies.
   - Whether its `unlock` job grants `pull-requests: write` (or `write-all`).
-    `unlock.yml`'s `guard` requests it for the 🚀 reaction, and a called
+    `unlock.yml`'s `guard` requests it for the 🚀 reaction and its `result`
+    job for the unlock result reply, and a called
     workflow's jobs are capped by the calling job's permissions, so without it
     every unlock run dies at startup with no job and no log.
   - Whether its `pull_request_target` types are exactly the fence's `opened`,

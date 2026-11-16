@@ -40,7 +40,7 @@ RECORD_STEPS = [
         "run": (
             "python3 -c 'import json, os; print(json.dumps("
             '{"index": int(os.environ["INDEX"]), "outcome": os.environ["OUTCOME"] or "failed", '
-            '"lock_id": os.environ["LOCK_ID"]}))\' > "$RUNNER_TEMP/unlock-record.json"'
+            '"lock_id": os.environ["LOCK_ID"]}))\' > "$RUNNER_TEMP/shipmate-unlock-$INDEX.json"'
         ),
     },
     {
@@ -49,7 +49,7 @@ RECORD_STEPS = [
         "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
         "with": {
             "name": "shipmate-unlock-${{ strategy.job-index }}",
-            "path": "${{ runner.temp }}/unlock-record.json",
+            "path": "${{ runner.temp }}/shipmate-unlock-${{ strategy.job-index }}.json",
             "overwrite": True,
         },
     },
@@ -73,7 +73,8 @@ def test_the_result_job_is_this_whole_job():
 def test_each_leg_records_its_outcome_under_its_own_index_even_when_it_failed():
     """The last two steps of the `unlock` job, after `unlock-cell` with `id: cell`. Mutations:
     drop `if: ${{ always() }}` from either (a failed leg reads `did not run`); drop `or
-    "failed"`; name the artifact by `matrix.stack`; drop `overwrite: true` (a re-run of a
+    "failed"`; name the artifact by `matrix.stack`; upload `unlock-record.json` (the file name
+    carries the index the reply reads); drop `overwrite: true` (a re-run of a
     failed leg cannot replace its record); drop `id: cell` (both outputs read empty)."""
     steps = workflow_jobs("unlock.yml")["unlock"]["steps"]
     assert steps[-3]["id"] == "cell"
@@ -92,9 +93,9 @@ def test_unlock_cell_reads_released_only_when_the_force_unlock_succeeded():
 
 def test_the_unlock_result_action_downloads_without_a_token_and_never_fails_on_it():
     """Mutations: drop `continue-on-error` (a failed download reds `result`); `merge-multiple:
-    true` (records sharing a file name overwrite each other); add `github-token` (the API path
-    needs `actions: read`, which `result` lacks); drop the `[]` condition; pass
-    `steps.download.conclusion` (always `success` under `continue-on-error`)."""
+    false` (several records land in per-artifact directories the script does not read); add
+    `github-token` (the API path needs `actions: read`, which `result` lacks); drop the `[]`
+    condition; pass `steps.download.conclusion` (always `success` under `continue-on-error`)."""
     steps = action_yaml("unlock-result")["runs"]["steps"]
     assert steps == [
         {
@@ -106,7 +107,7 @@ def test_the_unlock_result_action_downloads_without_a_token_and_never_fails_on_i
             "with": {
                 "pattern": "shipmate-unlock-*",
                 "path": "${{ runner.temp }}/unlock-records",
-                "merge-multiple": False,
+                "merge-multiple": True,
             },
         },
         {

@@ -60,9 +60,10 @@ def gh(monkeypatch, tmp_path):
 
 
 def _record(tmp_path, name, **rec):
-    d = tmp_path / "records" / name
-    d.mkdir(parents=True)
-    (d / "unlock-record.json").write_text(json.dumps(rec), encoding="utf-8")
+    """Write record `rec` as `<name>.json`, where `download-artifact` merges every record."""
+    d = tmp_path / "records"
+    d.mkdir(exist_ok=True)
+    (d / f"{name}.json").write_text(json.dumps(rec), encoding="utf-8")
 
 
 def _records(tmp_path, *outcomes):
@@ -89,16 +90,8 @@ def test_released_cells_are_listed_with_their_lock_ids(gh, tmp_path):
     _records(tmp_path, "released", "none", "released")
     ur.main()
     assert posts == _post(
-        "notice", f"released 2 state locks in dev-eu: stacks/app ({_ID}), stacks/dns ({_ID})."
+        "notice", f"released 2 state lock(s) in dev-eu: stacks/app ({_ID}), stacks/dns ({_ID})."
     )
-
-
-def test_one_released_cell_reads_singular(gh, tmp_path):
-    """Mutation: `n > 1` to `n > 0` in the plural (reads `1 state locks`)."""
-    posts, _ = gh
-    _records(tmp_path, "none", "released", "none")
-    ur.main()
-    assert posts == _post("notice", f"released 1 state lock in dev-eu: stacks/db ({_ID}).")
 
 
 def test_every_probed_cell_without_a_lock_is_a_notice(gh, tmp_path):
@@ -137,7 +130,7 @@ def test_a_failed_probe_and_a_missing_leg_fail_the_reply_and_keep_the_released(g
     assert posts == _post(
         "failed",
         "could not determine the lock of stacks/app; stacks/db did not run; released 1 state "
-        f"lock in dev-eu: stacks/dns ({_ID}).",
+        f"lock(s) in dev-eu: stacks/dns ({_ID}).",
     )
 
 
@@ -181,7 +174,7 @@ def test_a_failed_download_is_reported_not_read_as_cells_that_did_not_run(gh, mo
     ],
 )
 def test_a_record_that_fails_a_check_reads_as_did_not_run(gh, tmp_path, name, rec):
-    """A record's cell is its artifact name's index, which must match the record's `index`; an
+    """A record's cell is its file name's index, which must match the record's `index`; an
     index outside `cells` names no cell, since only `cells` is iterated. Mutations, one per case
     but the out-of-range one: drop `rec["index"] != index`; `type(...) is not int` to
     `not isinstance(..., int)` (`true` reads as 1); drop the outcome check (`cleared` reads as no
@@ -194,16 +187,14 @@ def test_a_record_that_fails_a_check_reads_as_did_not_run(gh, tmp_path, name, re
     assert posts == _post("failed", "stacks/db did not run.")
 
 
-def test_two_artifacts_holding_the_same_file_name_both_count(gh, tmp_path):
-    """Each artifact downloads into its own directory (`merge-multiple: false`), every record
-    named `unlock-record.json`. Mutation: read only the first record found (`break` after
-    `out[index] = ...`)."""
+def test_three_records_all_count(gh, tmp_path):
+    """Mutation: read only the first record found (`break` after `out[index] = ...`)."""
     posts, _ = gh
     _records(tmp_path, "released", "released", "released")
     ur.main()
     assert posts == _post(
         "notice",
-        f"released 3 state locks in dev-eu: stacks/app ({_ID}), stacks/db ({_ID}), "
+        f"released 3 state lock(s) in dev-eu: stacks/app ({_ID}), stacks/db ({_ID}), "
         f"stacks/dns ({_ID}).",
     )
 
@@ -214,7 +205,7 @@ def test_a_lock_id_outside_the_charset_is_dropped(gh, tmp_path):
     _records(tmp_path, "none", None, "none")
     _record(tmp_path, "shipmate-unlock-1", index=1, outcome="released", lock_id="[x](https://e)")
     ur.main()
-    assert posts == _post("notice", "released 1 state lock in dev-eu: stacks/db.")
+    assert posts == _post("notice", "released 1 state lock(s) in dev-eu: stacks/db.")
 
 
 def test_a_hostile_stack_name_renders_escaped(gh, monkeypatch, tmp_path):
@@ -227,7 +218,7 @@ def test_a_hostile_stack_name_renders_escaped(gh, monkeypatch, tmp_path):
     ur.main()
     assert posts == _post(
         "failed",
-        "could not determine the lock of @<!-- -->org/team; released 1 state lock in dev-eu: "
+        "could not determine the lock of @<!-- -->org/team; released 1 state lock(s) in dev-eu: "
         f"&#91;x&#93;(https://e) ({_ID}).",
     )
 
@@ -245,10 +236,11 @@ def test_a_hostile_stack_name_renders_escaped(gh, monkeypatch, tmp_path):
     ],
 )
 def test_a_comment_not_on_this_pull_request_posts_nothing_and_exits_0(gh, capsys, answer):
-    """Mutations: match `/pull/<n>#` with `re.search` (the id-mismatched URL and another
-    repository's post); drop `is_pr_number` (`09` posts on `issues/09`); drop `AttributeError`
-    from the read's `except` (a list answer raises); drop `SystemExit` from it (a failed read
-    exits 1)."""
+    """Mutations: `/issues/` for `/pull/` in the expected URL (the issue comment posts); match
+    `/pull/<n>#` with `re.search` (the id-mismatched URL and another repository's post); drop
+    `is_pr_number` (`09` posts on `issues/09`); drop the `isinstance(url, str)` guard (`{}`
+    raises); drop `AttributeError` from the read's `except` (a list answer raises); drop
+    `SystemExit` from it (a failed read exits 1)."""
     posts, state = gh
     state["comment"] = answer
     ur.main()
