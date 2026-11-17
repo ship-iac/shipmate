@@ -22,7 +22,8 @@ from the environment:
   provenance check repeats: a ready-for-review run of the same head is never an `auto` source,
   yet it is the newest. Read only once every other condition holds and an `auto` environment
   holds a change. A listing with no run as new as this one (the listing lagging this run)
-  dispatches with a warning; a failed or malformed listing exits 1 with one `::error::` line.
+  dispatches with a warning; a failed or malformed listing exits `UNREAD` with one `::error::`
+  line, and the summary replies that no auto apply started.
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
@@ -40,11 +41,16 @@ from _shipmate import (
     is_run_id,
     json_or_none,
     one_line,
+    print_annotated,
     run_annotated,
     validate_head_sha,
 )
 
 ag = _load("apply-gate")
+
+#: The exit code of a failed or malformed autoplan listing, read once a change calls for an auto
+#: apply: the summary step replies on it, and on no other failure.
+UNREAD = 3
 
 _KEYS = ("stack", "environment", "changed")
 _SKEW = (
@@ -102,16 +108,18 @@ def auto_set(raw):
 def newer_autoplan(repo, head, run_id):
     """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
     none is listed newer. A listing that holds no run as new as this one lags it: it warns and
-    returns None."""
+    returns None. A failed or malformed listing prints one `::error::` line and exits
+    `UNREAD`."""
     if not is_run_id(run_id):
         raise SystemExit(f"::error::GITHUB_RUN_ID must be a run id (got: {run_id!r})")
     try:
         newest = ag.newest_autoplan(repo, head, run=_run)
     except (SystemExit, ValueError) as exc:
         cause = exit_text(exc) if isinstance(exc, SystemExit) else exc
-        raise SystemExit(
+        print_annotated(
             f"::error::the autoplan runs of {head} could not be read ({one_line(cause)})"
-        ) from None
+        )
+        raise SystemExit(UNREAD) from None
     if newest is None or newest["id"] < int(run_id):
         print(
             f"::warning::autoplan run {run_id} of {head} is not listed yet; dispatching the auto "

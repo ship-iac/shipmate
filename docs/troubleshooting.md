@@ -2268,8 +2268,8 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
    head's autoplan runs not listed or malformed) it warns `could not decide
-   whether to dispatch an auto apply; no auto apply started` and posts no
-   reply. Separately, when an autoplan of a
+   whether to dispatch an auto apply; no auto apply started`. It posts a reply
+   only when the autoplan runs could not be read (below). Separately, when an autoplan of a
    pull request that is not a draft was not started by a push (marking it
    ready, reopening it or another non-push event started it, or its event could
    not be read) and a changed cell of an `auto` environment is not locked by
@@ -2300,6 +2300,13 @@ Once the `auto` run has finished, comment `shipmate apply` to apply what it did
 not, under the comment-time apply requirements, except a cell held because the
 base changed its stack: update the branch from the base and push (§`⚪ held, the
 base changed these stacks after this branch left it`).
+
+### `auto apply not started: the autoplan runs of this head could not be read`
+
+The plan run's `summary` job found a change for an `auto` environment but could
+not read the head's autoplan runs to check that this run is the newest, so it
+dispatched nothing. A `::warning::` on that run names the cause. The gate is
+unchanged and nothing applied. Comment `shipmate apply`.
 
 ### `auto apply not started: the dispatch failed`, or `auto apply may have started: the dispatch answered with an error`
 

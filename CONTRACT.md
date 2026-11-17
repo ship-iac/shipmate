@@ -2776,7 +2776,9 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   no run as new as this one lags it and dispatches with the warning "autoplan
   run <id> of <head> is not listed yet; dispatching the auto apply, whose own
   provenance check refuses if this run is not the newest"; a failed or
-  malformed listing dispatches nothing, with a warning. An autoplan created
+  malformed listing dispatches nothing, warns, and posts one reply, ``🔴 failed:
+  auto apply not started: the autoplan runs of this head could not be read;
+  comment `shipmate apply` ``. An autoplan created
   after this read still makes the `auto` run refuse.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
