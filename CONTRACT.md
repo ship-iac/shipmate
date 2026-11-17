@@ -92,6 +92,14 @@ every link to the run URL silently — that fallback being the designed behaviou
 observable would fail. A rename that leaves no wave job matching also fails
 `apply-complete`, which retries the listing and then fails the run.
 
+Each saver leg is named `save-state (<env> <stack>)`, with no ` / ` of its own,
+so `is_cell_job` never matches one; `apply-gate.is_leg_job` matches it as
+`L<n> / save-state (<env> <stack>)`, whole or after a ` / ` boundary, and
+`apply-complete` reads a cell's saved state from it. `scripts/state-read` finds a
+cell's wave job by its exact name under the reader's own level. Renaming a leg
+or a wave job leaves its cells without evidence, so their checks return to
+`queued` or stay unwritten and the wave's verdict fails.
+
 `scripts/apply-complete` is the second reader: given the pre-flight snapshot of
 check ids a run may write, it reads each snapshotted `apply / <stack> / <env>`
 check name back to its stack and environment (`apply-gate.parse_check_name`; an
@@ -1277,9 +1285,9 @@ omits `id-token` takes nothing away from a job that declares it.
 **No calling job of an apply may cap the cache mode.** Each `waveN-save` job of
 `apply-env-level.yml` declares `cache-mode: write`, and a caller's `cache-mode:
 read` caps every job it calls, so a nested `write` under it fails the run at
-startup. The consumer's `shipmate.yml` therefore declares no `cache-mode` on its
-`apply`, `auto` and `deploy` jobs, nor at its workflow level. The wave jobs
-declare `cache-mode: read` themselves.
+startup. The consumer's `shipmate.yml` therefore declares no `cache-mode` that
+denies writes on its `apply`, `auto` and `deploy` jobs, nor at its workflow
+level. The wave jobs declare `cache-mode: read` themselves.
 
 ## Tag grammar
 
@@ -3618,8 +3626,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   and `detect` fails the run before any cell starts. An apply run then holds at
   most 256 cell jobs and at most one saver leg per cell, beside a fixed set of
   control jobs per env-level (releases, readers, verdicts, completions); a merge
-  deploy adds up to 256 `warm` legs. Every listing of a run's jobs that decides a
-  check or a saved state pages through the whole listing.
+  deploy adds up to 256 `warm` legs. The state readers, verdicts and completions
+  each page through the run's whole jobs listing.
   The way past it is to split the change across several pull requests: the
   matrix is built over `terramate list --changed` from the merge base of the
   pull request's base and head, so a narrower diff is a smaller matrix. A
