@@ -3312,11 +3312,13 @@ it``. A later refusal of the same deploy can still stop it.
      --jq '.[] | select(.status != "completed" or .conclusion == "action_required")'
    ```
 
-   Continue when it prints nothing, and run it again right before step 4. The
-   engine cannot hold off new runs for you: a push, a comment or a re-run that
-   starts a shipmate run between your last listing and step 4 can apply the cell
-   beside the re-run deploy, so do this while nobody else is working on the
-   repository.
+   Cancel or delete a listed run that awaits approval; it does not end by
+   waiting. Continue when the command prints nothing, and run it again right
+   before step 4. The engine cannot hold off new runs for you: any shipmate run
+   that starts after your last listing, until the re-run deploy has applied the
+   cell, can apply it beside that deploy. Pushes by people or by automation
+   such as Dependabot, comments and re-runs all start one, so pause them for
+   that time.
 2. Find out whether the cell's change was applied: read the stack's state and
    its recent apply runs.
 3. Mint an installation token of the shipmate App. Only the App that created a
