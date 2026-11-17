@@ -4,6 +4,7 @@ the real 60 s."""
 
 import io
 import json
+from typing import Any
 
 import _shipmate
 import pytest
@@ -46,7 +47,7 @@ def gh(monkeypatch):
     }.items():
         monkeypatch.setenv(name, value)
     cc.gs.app_user.cache_clear()
-    state = {"calls": [], "fail": [], "statuses": "", "slept": []}
+    state: dict[str, Any] = {"calls": [], "fail": [], "statuses": "", "slept": []}
 
     def post(args, secrets=(), stdin=None):
         state["calls"].append((args, stdin))

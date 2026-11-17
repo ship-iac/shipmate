@@ -90,7 +90,7 @@ def gh(monkeypatch):
         cancels, posts, job_reads = [], [], []
         #: `(login, body)` of the pull request's comments; each post adds the App's.
         comments, marker_reads = [], []
-        waiters = None
+        go = waiters = None
 
     rec = Rec()
 

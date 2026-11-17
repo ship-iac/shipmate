@@ -250,7 +250,9 @@ def test_the_canonical_pr_number_step_is_this_whole_step():
     Mutations: delete the step -- red; loosen its pattern to `^[0-9]+$` -- red."""
     steps = workflow_jobs("apply.yml")[GUARD_JOB]["steps"]
     assert steps[-1] == CANONICAL_PR_NUMBER_STEP
-    regex = re.search(r"=~ (\S+) \]\]", steps[-1]["run"]).group(1)
+    match = re.search(r"=~ (\S+) \]\]", steps[-1]["run"])
+    assert match
+    regex = match.group(1)
     assert regex == "^" + _shipmate._PR_NUMBER.pattern + "$"
 
 

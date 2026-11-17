@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import Any
 
 import _shipmate
 import pytest
@@ -46,7 +47,7 @@ def calls(monkeypatch):
     monkeypatch.setattr(_shipmate, "_sleep", lambda _s: None)
     recorded = []
     fail = {}
-    reads = {"calls": []}
+    reads: dict[str, Any] = {"calls": []}
 
     def run(args, secrets=(), stdin=None):
         if args[:2] == ["gh", "api"] and len(args) == 3:
@@ -61,6 +62,7 @@ def calls(monkeypatch):
             raise SystemExit(f"command failed (1): {' '.join(args)}\n{fail[cid]}")
         stored = reads.get(args[4])
         if isinstance(stored, dict):
+            assert stdin is not None
             body = json.loads(stdin)
             reads[args[4]] = {**stored, **body}
         return "{}"
