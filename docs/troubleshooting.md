@@ -1389,12 +1389,12 @@ run can take the name. Nothing was saved: follow
 ### `the state of <env> / <stack> was not found under <key>`
 
 The saver leg's saves, under the cell's key and under the same key with `-r1`,
-left no entry that an exact-key lookup found, or the leg's earlier step failed
-(its log shows which). When the first exact-key lookup after a save finds no
-entry, the action looks up the same key up to four more times over about 30 s
-before it reports the entry not found; a failed or cancelled save runs no
-lookup and reports at once. The cache service refuses a save for a key another
-job reserved, and the leg reads that as a miss. Follow
+left no entry that an exact-key lookup found. A leg whose fetch step failed
+prints that step's own error instead. When the first exact-key lookup after a
+save finds no entry, the action looks up the same key up to four more times over
+about 30 s before it reports the entry not found; a failed or cancelled save
+runs no lookup and reports at once. The cache service refuses a save for a key
+another job reserved, and the leg reads that as a miss. Follow
 §`The apply step ran and its state was not saved`; its step 1 checks both keys.
 
 ### `the state saver runs only on GitHub-hosted runners`

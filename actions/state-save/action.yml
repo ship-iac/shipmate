@@ -54,7 +54,8 @@ runs:
         attempt: ${{ inputs.attempt }}
         key-suffix: -r1
     - name: Fail unless the state entry was found
-      if: always()
+      # A failed fetch names its own cause; no save or lookup ran to report on.
+      if: ${{ always() && steps.fetch.outcome == 'success' }}
       shell: bash
       env:
         PRIMARY_SAVED: ${{ steps.primary.outputs.saved }}

@@ -23,6 +23,7 @@ import io
 import json
 import os
 import subprocess
+import urllib.parse
 import zipfile
 
 from _shipmate import _load, command_data, retried, run, run_annotated, write_outputs
@@ -39,7 +40,8 @@ MEMBER = "state.bundle"
 
 def _artifacts(name):
     repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
-    path = f"repos/{repo}/actions/runs/{run_id}/artifacts?name={name}&per_page=100"
+    query = urllib.parse.quote(name, safe="")
+    path = f"repos/{repo}/actions/runs/{run_id}/artifacts?name={query}&per_page=100"
     listing = retried(lambda: run(["gh", "api", "--paginate", "--jq", ".artifacts[]", path]))
     found = [json.loads(line) for line in listing.splitlines() if line.strip()]
     return [a for a in found if a.get("name") == name]

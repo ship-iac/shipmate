@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import urllib.parse
 import zipfile
 
 import pytest
@@ -147,6 +148,21 @@ def test_the_listing_asks_for_the_cells_artifact_name(monkeypatch, tmp_path):
             f"repos/o/r/actions/runs/77/artifacts?name={NAME}&per_page=100",
         ]
     ]
+
+
+def test_a_name_holding_query_characters_lists_its_artifact(monkeypatch):
+    """The stub answers as the API does, by the decoded `name` parameter. Mutation: put the
+    name in the query unencoded (`+` decodes to a space, `&` and `#` cut it short)."""
+    name = "state.dev-eu.stacks-a+b&c#d%e.2"
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "77")
+
+    def server(argv):
+        asked = urllib.parse.parse_qs(urllib.parse.urlsplit(argv[-1]).query).get("name")
+        return json.dumps({"id": 1, "name": name}) if asked == [name] else ""
+
+    monkeypatch.setattr(ss, "run", server)
+    assert ss._artifacts(name) == [{"id": 1, "name": name}]
 
 
 @pytest.mark.parametrize(
@@ -295,13 +311,14 @@ def test_the_actions_steps_are_pinned_whole():
     Mutations: `mode: save` on the `-r1` call; drop the primary's `continue-on-error` (a refused
     save then skips the retry); drop `!cancelled()` (the implied `success()` skips the retry
     after the primary failed); `stack-slug` from a fetch output; `if: success()` on the last
-    step; `PRIMARY_SAVED` from the primary's `outcome == 'success'`."""
+    step; `PRIMARY_SAVED` from the primary's `outcome == 'success'`; `if: always()` on the last
+    step (a failed fetch then also reports a lost save)."""
     steps = action_yaml("state-save")["runs"]["steps"]
     assert steps[:3] == _STEPS
     last = steps[3]
     assert {k: v for k, v in last.items() if k != "run"} == {
         "name": "Fail unless the state entry was found",
-        "if": "always()",
+        "if": "${{ always() && steps.fetch.outcome == 'success' }}",
         "shell": "bash",
         "env": {
             "PRIMARY_SAVED": "${{ steps.primary.outputs.saved }}",
