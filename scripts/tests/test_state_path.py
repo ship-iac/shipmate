@@ -234,3 +234,63 @@ def test_real_tofu_init_records_what_main_reads(tmp_path, monkeypatch):
         )
         got.append((name, config, env, _run_main(stack_dir, monkeypatch, env)))
     assert got == REAL_TOOLCHAIN
+
+
+VALID = [
+    ("stacks/app", "stacks/app/.state/dev/terraform.tfstate"),
+    (".", "./terraform.tfstate"),
+    (".", "./terraform.tfstate.d/ws/terraform.tfstate"),
+]
+
+
+@pytest.mark.parametrize(("stack", "path"), VALID)
+def test_validate_returns_a_clean_path_unchanged(stack, path):
+    """The cache version keys on the path string, so the root stack's `./terraform.tfstate`
+    must come back as given. Mutation: return `posixpath.normpath(path)`, and the root rows
+    lose their `./`."""
+    assert sp.validate(stack, path) == path
+
+
+INVALID = [
+    ("stacks/app", "stacks/app/../x"),
+    ("stacks/app", "/abs"),
+    ("stacks/app", "./stacks/app/x"),
+    ("stacks/app", "stacks/apps/x"),
+    ("stacks/app", "stacks/app2x/y"),
+    ("stacks/app", "stacks/app/./x"),
+    ("stacks/app", "stacks/app/a b"),
+    ("stacks/app", "stacks/app/x\n"),
+    ("stacks/app", "stacks/app/"),
+    (".", "terraform.tfstate"),
+    (".", "./../x"),
+    (".", "./."),
+    (".", ".//x"),
+]
+
+
+@pytest.mark.parametrize(("stack", "path"), INVALID)
+def test_validate_refuses_a_path_outside_the_stack_or_not_normal(stack, path):
+    """Mutations: drop the `normpath` equality on `rel` (`stacks/app/./x` passes); test
+    `startswith(stack)` without the `/` (`stacks/app2x/y` passes); drop the `../` test
+    (`stacks/app/../x` passes, as `normpath` keeps a leading `..`)."""
+    with pytest.raises(SystemExit) as exc:
+        sp.validate(stack, path)
+    assert exc.value.code == (
+        f"::error::{stack}: the state path {path!r} is not a clean relative path inside the "
+        "stack, so shipmate cannot tell where its state lives."
+    )
+
+
+def test_state_path_keeps_the_root_stacks_dot_slash_path():
+    """Existing root-stack entries are cached under `./terraform.tfstate`. Mutation: return
+    `posixpath.normpath(...)` from `validate`."""
+    assert sp.state_path(".", None, "") == "./terraform.tfstate"
+
+
+def test_state_path_refuses_through_validate(monkeypatch):
+    """`state_path` hands its result to `validate`, so the two cannot drift. Mutation: return
+    `posixpath.join(stack, rel)` without calling `validate`."""
+    calls = []
+    monkeypatch.setattr(sp, "validate", lambda stack, path: calls.append((stack, path)) or "v")
+    assert sp.state_path("stacks/app", None, "") == "v"
+    assert calls == [("stacks/app", "stacks/app/terraform.tfstate")]
