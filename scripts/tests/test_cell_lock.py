@@ -3286,7 +3286,7 @@ def _one_lock():
 
 _KEPT = "::notice::kept the 1 cell lock(s) pull request #7 would release: "
 _RETRY_NOTE = (
-    ". Re-run this job once it ends; another pull request's `shipmate unlock <env> --evict` also "
+    ". Re-run this job once it ends; another pull request's `shipmate unlock dev --evict` also "
     "releases them\n"
 )
 

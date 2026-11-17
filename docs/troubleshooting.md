@@ -1029,7 +1029,9 @@ The merged pull request still holds those locks, and other pull requests' applie
 leave the cells pending. Re-run the deploy's failed jobs. Each run releases every
 lock the merged pull request holds whose cell has no pending apply check, and
 every one after a `detect` that refused over another pull request's lock, so a
-re-run releases what the failed one owed, whatever else it re-applies. A failed
+re-run releases what the failed one owed, whatever else it re-applies, once no
+run of the merged pull request may still apply a cell or save its state (§A
+release kept the locks: `kept the <k> cell lock(s)`). A failed
 mint names its cause; when the App lacks `contents: write`, or the installation
 has not accepted it, see [`github-app.md`](github-app.md) §Re-approve after
 permission changes.
@@ -1087,11 +1089,13 @@ request's cell locks`, logs the notice `` kept the <k> cell lock(s) pull request
 #<n> would release: run <url> may still apply a cell or save its state. Re-run
 this job once it ends; another pull request's `shipmate unlock <env> --evict`
 also releases them ``, or with `the live runs of shipmate.yml could not all be
-listed` in place of the run. The job succeeds.
+listed` in place of the run, and one `shipmate unlock <env> --evict` per
+environment of the kept locks. The job succeeds.
 
 An apply or `auto` run of #<n>, or a dispatch run whose title does not parse,
-had not finished its env-levels, so it may still have been saving the state of
-a cell it applied. Releasing the lock then would let another pull request
+may not have finished its env-levels, so it may still have been saving the
+state of a cell it applied; a run whose jobs could not be listed, or an
+incomplete runs listing, reads the same way. Releasing the lock then would let another pull request
 restore that state before the save ([`../CONTRACT.md`](../CONTRACT.md) §Cell
 locks, "A run of the holder keeps its locks").
 
@@ -1111,7 +1115,7 @@ apply a cell or save its state. Once they end, re-run this deploy. ``, or ``
 deploy. ``, then the other pending cells it does not apply.
 
 The merged pull request locks a pending cell, and one of its apply or `auto`
-runs had not finished its env-levels, so restoring the cell's state here could
+runs may not have finished its env-levels, so restoring the cell's state here could
 miss what that run applied ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks, "A
 run of the holder keeps its locks"). The deploy applies nothing, and its lock
 release keeps the locks on pending cells.
@@ -1295,7 +1299,8 @@ Another pull request, or an unknown holder, locks one of the merge's pending
 cells ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks), so the deploy applies
 nothing. When the deploy mapped the merge to its pull request, its lock release
 still runs and releases every lock the merged pull request holds, pending cells'
-included; a merge it could not map runs no lock release (see §`could not map
+included, unless a run of it may still apply a cell or save its state (§A
+release kept the locks: `kept the <k> cell lock(s)`); a merge it could not map runs no lock release (see §`could not map
 <sha> to a merged pull request ...`). When the deploy mapped the merge to its pull
 request, the merged head's `shipmate / gate` turns to `failure`; otherwise the
 gate is written on the merge commit. The apply checks stay pending.

@@ -2679,7 +2679,9 @@ holder's run that may still apply is live (§Comment-ops). Before it refuses,
 `detect` writes the output `refused_locked` `true`, and the deploy's release
 step passes it to `actions/lock-release` as `release-pending`, so the merged
 pull request's locks are released on its pending cells too: none of them
-applied. A failed lock read refuses the run as well. The refused deploy's apply
+applied. While a run of the merged pull request may still apply a cell or save
+its state, that release keeps them all (below, "A run of the holder keeps its
+locks"). A failed lock read refuses the run as well. The refused deploy's apply
 checks stay pending on the merged head, and its `summary` turns that head's
 `shipmate / gate` to `failure`, as for any `detect` refusal.
 
@@ -2721,9 +2723,11 @@ whose jobs cannot be listed counts, and so does an incomplete runs listing.
   lock of the pull request, delete none while such a run exists, and print
   `` kept the <n> cell lock(s) pull request #<pr> would release: run <url> may
   still apply a cell or save its state. Re-run this job once it ends; another
-  pull request's `shipmate unlock <env> --evict` also releases them ``, with
-  `the live runs of shipmate.yml could not all be listed` for an incomplete
-  listing, as a notice; the job does not fail.
+  pull request's `shipmate unlock <env> --evict` also releases them ``, one
+  command per environment of those locks joined by `or`, with `the live runs of
+  shipmate.yml could not all be listed` for an incomplete listing, as a notice;
+  the job does not fail. A kept lock is released only by a re-run of that job or
+  by an eviction: a close without merge starts no second release.
 - The deploy's `detect`, after the check for another pull request's lock,
   refuses the whole run when the merged pull request locks a pending cell and
   such a run exists: `` deploy refused: <stack> / <env>, ... are locked by
@@ -2744,8 +2748,9 @@ it may still apply a cell or save its state (above); after a
 `detect` refused over another pull request's lock, the deploy's `summary`
 deletes those on pending cells too. The deploy's
 release step runs whenever `deploy-detect` found the merged pull request, before
-and apart from its work queue, so either job alone releases every such lock,
-even when the deploy applies no cell. The `release` job alone handles a close
+and apart from its work queue, so either job alone releases every such lock
+once no run of the pull request may still apply a cell or save its state, even
+when the deploy applies no cell. The `release` job alone handles a close
 without merge and a merge that starts no deploy. A deploy that completed a
 cell's check and then was cancelled, or failed its delete, leaves a lock its
 re-run still releases.
@@ -2758,7 +2763,9 @@ walk needs that fails refuses `--evict` before any delete, unless the pull
 request's head branch is the default branch, where no holder is read for
 stacking; a runs listing of the live-run check, or that check's own holder
 read, that fails refuses too. A release and an eviction continue past a delete
-that refuses, then fail naming each lock left held. A failed release stays owed until
+that refuses, then fail naming each lock left held. A runs or jobs listing that
+fails in a release does not refuse: keeping the locks is the closed side, so the
+release keeps them all and succeeds (above). A failed release stays owed until
 a re-run of that job succeeds. The plan comment's marker alone degrades: a lock
 read that fails there warns, and the comment marks no cell; a holder whose walk
 is cut short warns, and the comment says it cannot tell whether it is stacked.
