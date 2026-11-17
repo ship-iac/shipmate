@@ -81,13 +81,13 @@ from _shipmate import (
     gh_json,
     is_pr_number,
     is_run_id,
+    listed_jobs,
     live_plan_runs,
     one_line,
     pr_head,
     retried,
     run,
     run_annotated,
-    run_jobs,
     status_text,
     validate_head_sha,
     write_retried,
@@ -345,8 +345,9 @@ def _unfinished(runs):
 def _jobs(run_id):
     """`(jobs, attempts)`: run `run_id`'s latest attempt's jobs and the sorted run attempts they
     carry, each an int."""
-    jobs, complete = run_jobs(_repo(), run_id, run)
-    if not complete:
+    # Counted: a short listing that drops the detect job reads as an autoplan that did not plan.
+    jobs = listed_jobs(_repo(), run_id, run, counted=True)
+    if not jobs:
         raise SystemExit(f"the jobs of autoplan run {run_id} could not be listed")
     attempts = sorted(
         {j.get("run_attempt") for j in jobs}, key=lambda a: (type(a) is not int, repr(a))

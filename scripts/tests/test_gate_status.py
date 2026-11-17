@@ -1006,6 +1006,7 @@ def _with_detect(drop=(), attempt=1, **detect):
 def _two_detects():
     body = json.loads(_captured_jobs(_ZERO_CELL))
     body["jobs"] += [j for j in body["jobs"] if j["name"] == "plan / detect"]
+    body["total_count"] = len(body["jobs"])
     return json.dumps(body)
 
 
@@ -1045,7 +1046,7 @@ _JOBS_CAUSE = "autoplan run 9: job plan / detect has status 'completed' and conc
         ),
         pytest.param(
             _row(9, "completed", "success"),
-            {9: '{"jobs": []}'},
+            {9: '{"total_count": 0, "jobs": []}'},
             "the jobs of autoplan run 9 could not be listed",
             [*_DISPATCH_READS, _jobs_read(9)],
             id="no-jobs",
@@ -1101,6 +1102,32 @@ def test_replan_an_unreadable_run_or_job_exits_1_and_prints_no_head(
 
 
 _PLAN_7 = "shipmate \u00b7 plan pr=7 ref= comment="
+
+
+def test_replan_a_short_jobs_listing_exits_1_and_prints_no_head(in_process, monkeypatch, capsys):
+    """A succeeded autoplan's jobs listing advertises one job more than it returns, the missing
+    one its `plan / detect`: the listing cannot tell whether the run planned, so nothing is
+    dispatched and the caller warns.
+
+    Mutation: list the jobs without `counted` -- the run reads as not planned and the head
+    prints, red."""
+    body = json.loads(_captured_jobs(_ZERO_CELL))
+    body["jobs"] = [j for j in body["jobs"] if j["name"] != "plan / detect"]
+    total = body["total_count"]
+    calls = _live_head(
+        monkeypatch, runs=_row(9, "completed", "success"), jobs={9: json.dumps(body)}
+    )
+    code = _cli("replan", SHA, "7")
+    out, err = capsys.readouterr()
+    assert (code, out, calls) == (
+        "the jobs of autoplan run 9 could not be listed",
+        "",
+        [_PULL_READ, _RUNS_READ, *_DISPATCH_READS, _jobs_read(9)],
+    )
+    assert err == (
+        "::warning::repos/acme/demo/actions/runs/9/jobs?filter=latest advertised "
+        f"[{total}] entries and returned {total - 1}\n"
+    )
 
 
 @pytest.mark.parametrize(
