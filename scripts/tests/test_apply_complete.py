@@ -1208,6 +1208,21 @@ def test_a_state_cell_whose_leg_has_not_concluded_is_unresolved(leg):
     assert [r.get("unresolved") for r in rows] == [True]
 
 
+def test_an_earlier_resolved_row_survives_a_later_lagging_leg():
+    """Attempt 1 saw APP and its leg succeed; attempt 2 lists the leg without a conclusion.
+    Mutation: give the lagging leg's unresolved row the cell job's `success` (`merge` then
+    prefers it and drops it, so APP gets no write)."""
+    found = {"wave1": _report(state=[APP])}
+    cell = job(APP_JOB, "success")
+    done, _ = apply_complete.classify(
+        {"wave1": {APP: [2]}}, {"wave1": "success"}, [cell, job(APP_LEG, "success")], "", found
+    )
+    lagging, _ = apply_complete.classify(
+        {"wave1": {APP: [2]}}, {"wave1": "success"}, [cell, job(APP_LEG, None)], "", found
+    )
+    assert apply_complete.merge(done + lagging) == [row(APP, [2], cell)]
+
+
 @pytest.mark.parametrize(
     "text",
     [

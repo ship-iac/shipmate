@@ -214,12 +214,11 @@ def classify(by_wave, results, jobs, job_id, states):
             job = won or (matched[-1] if matched else None)
             if not matched and not not_run:
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
-            elif any(j.get("conclusion") is None for j in matched) and not won:
+            elif (any(j.get("conclusion") is None for j in matched) and not won) or _leg_lagging(
+                check, found, legs
+            ):
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
                 rows.append({**_row(check, ids), "unresolved": True})
-            elif _leg_lagging(check, found, legs):
-                unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
-                rows.append({**_row(check, ids, job), "unresolved": True})
             else:
                 conclusion = job and job.get("conclusion")
                 rows.append(_row(check, ids, job, persisted(check, found, conclusion, legs)))
