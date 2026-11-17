@@ -243,6 +243,12 @@ def test_no_line_is_not_run_only_from_the_jobs_own_record(
     assert (code, out["report"]) == (0, expected)
 
 
+def test_the_apply_step_is_the_one_the_wave_names():
+    """`test_deploy_detect.py` pins the wave step's name to the same text. Mutation: rename
+    `APPLY_STEP`."""
+    assert sr.APPLY_STEP == "Apply the cell"
+
+
 def test_a_cell_with_no_listed_job_refuses_beside_the_levels_literal_row(monkeypatch, tmp_path):
     """A wave cancelled before its matrix expanded lists only the level's literal row, which
     every unexpanded wave of the level shares. Mutation: class an unlisted cell `not_run`, as

@@ -1135,6 +1135,8 @@ _EVIDENCE = [
     ("success", _report(), None, _lost("the state reader did not classify the cell")),
     ("failure", _report(state=[APP]), "failure", _lost("the saver job concluded failure")),
     ("failure", _report(not_applied=[APP]), None, ({"status": "queued"}, "Failed: boom")),
+    ("failure", _report(not_run=[APP]), None, ({"status": "queued"}, "Failed: boom")),
+    ("cancelled", _report(not_run=[APP]), None, ({"status": "queued"}, "Cancelled")),
     ("cancelled", _report(state=[APP]), "success", ({"status": "queued"}, "Cancelled")),
     (
         "cancelled",
@@ -1157,7 +1159,8 @@ def test_a_check_completes_only_on_evidence_its_state_was_saved(
     """The completion's write per cell conclusion and persistence evidence. The cell's own
     annotation reads `boom`, its leg's none. Mutations: pass a `state` cell without a `success`
     leg; `success` for a `success` cell in `not_applied`; read an absent report as one with no
-    reason; `Failed: <error>` winning over `state not saved`."""
+    reason; `Failed: <error>` winning over `state not saved`; read `not_run` as no
+    class."""
     annotations["value"] = [] if leg else [{"annotation_level": "failure", "message": "boom"}]
     rows, unresolved = apply_complete.classify(
         {"wave1": {APP: [2]}},

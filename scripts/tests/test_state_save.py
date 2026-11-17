@@ -164,6 +164,23 @@ def test_a_bundle_path_outside_the_stack_is_refused(monkeypatch, tmp_path, path)
     assert list(leg.ws.rglob("*")) == []
 
 
+def test_the_root_stacks_path_is_passed_on_as_the_restore_names_it(monkeypatch, tmp_path):
+    """`actions/cache` versions an entry on its path string, and the restore passes
+    `./terraform.tfstate` for the root stack `.`. Mutation: output `os.path.normpath(path)`."""
+    bundle = _bundle(path="./terraform.tfstate")
+    leg = _Leg(
+        monkeypatch,
+        tmp_path,
+        [{"id": 1, "name": "state.dev-eu...2"}],
+        {1: _zip(bundle)},
+        digest=_digest(bundle),
+        STACK=".",
+        SLUG=".",
+    )
+    assert leg() == (0, {"path": "./terraform.tfstate", "kind": "save"})
+    assert (leg.ws / "terraform.tfstate").read_bytes() == CIPHER
+
+
 def test_a_bundle_without_the_header_is_refused(monkeypatch, tmp_path):
     """Mutation: drop the header test."""
     bundle = PATH.encode() + b"\n" + CIPHER
