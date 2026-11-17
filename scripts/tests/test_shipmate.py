@@ -507,7 +507,8 @@ def test_create_retried_runs_before_retry_after_each_wait(monkeypatch):
         return "x"
 
     monkeypatch.setattr("_shipmate._sleep", lambda s: log.append(f"sleep {s}"))
-    assert create_retried(call, before_retry=lambda: log.append("hook")) == "x"
+    created = create_retried(call, before_retry=lambda: log.append("hook"))
+    assert created == "x"
     assert log == ["call", "sleep 60", "hook", "call", "sleep 60", "hook", "call"]
 
 

@@ -1125,6 +1125,7 @@ def test_the_comment_offers_no_eviction_that_evict_refuses(monkeypatch, tmp_path
         except cl.Blocked:
             blocked.add(env)
         except SystemExit:
+            # Only the blocked envs are compared, so any other exit leaves an env out.
             pass
     assert (set(envs) - offered, blocked) == ({"dev", "stg"}, {"dev", "stg"})
 
