@@ -23,10 +23,10 @@ import os
 import sys
 from urllib.parse import quote
 
-import _shipmate
 from _shipmate import (
     READ_ERRORS,
     SHIPMATE_WORKFLOW,
+    _live_dispatch_runs,
     _load,
     check_runs,
     command_data,
@@ -36,6 +36,7 @@ from _shipmate import (
     one_line,
     retried,
     run_annotated,
+    run_stdout,
     titled_runs,
     warn,
 )
@@ -76,7 +77,7 @@ def open_pulls(repo, base):
         ".[] | {number, draft, sha: .head.sha} | tojson",
     ]
     pulls = []
-    for line in filter(None, retried(lambda: _shipmate._run(args)).splitlines()):
+    for line in filter(None, retried(lambda: run_stdout(args)).splitlines()):
         pull = json.loads(line)
         if not (
             type(pull.get("number")) is int
@@ -118,7 +119,7 @@ def candidates(repo, pulls, stacks, outside, app_id):
 def without_live_applies(repo, picked, slug):
     """`picked` less each pull request with a live App `apply` or `auto` run, each named in a
     notice; None, with a warning, when the one live run listing cannot rule such a run out."""
-    listed, complete = _shipmate._live_dispatch_runs(repo, SHIPMATE_WORKFLOW)
+    listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW)
     _, unparsed = titled_runs(listed, (), "")
     if not complete or any(dispatched_by_app(r, slug) for r in unparsed):
         warn(f"the live shipmate.yml run listing is incomplete, {_NONE}")

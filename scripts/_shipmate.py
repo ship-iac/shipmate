@@ -174,6 +174,12 @@ def _run(args):
         raise SystemExit(f"::error::{e}") from None
 
 
+def run_stdout(args):
+    """`_run(args)`, looked up at each call so a patched `_shipmate._run` reaches a module that
+    imported this name."""
+    return _run(args)
+
+
 #: gh's text for a failure a later attempt can outlast; never a 4xx, whose answer a retry keeps.
 #: Captured raw from gh: `connection refused`. Quoted by a consumer: `Something went wrong`,
 #: `TLS handshake timeout`, `unexpected end of JSON input`. The rest: 5xx and Go transport errors.
@@ -187,6 +193,12 @@ TRANSIENT = re.compile(
 #: The sleeps before the second and third attempts.
 RETRY_DELAYS = (2, 5)
 _sleep = time.sleep
+
+
+def sleep(seconds):
+    """`_sleep(seconds)`, looked up at each call so a patched `_shipmate._sleep` reaches a module
+    that imported this name."""
+    _sleep(seconds)
 
 
 def is_transient(exc):

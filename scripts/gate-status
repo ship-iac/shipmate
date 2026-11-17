@@ -70,7 +70,6 @@ import re
 import sys
 from urllib.parse import quote
 
-import _shipmate
 from _shipmate import (
     GATE_CONTEXT,
     _load,
@@ -88,6 +87,7 @@ from _shipmate import (
     run,
     run_annotated,
     run_jobs,
+    sleep,
     status_text,
     validate_head_sha,
     write_retried,
@@ -436,7 +436,7 @@ def _replan(sha, pr):
     for poll in range(polls):
         if reason:
             break
-        _shipmate._sleep(REPLAN_POLL)
+        sleep(REPLAN_POLL)
         runs = _autoplans(live)
         reason = _unfinished(runs) or _succeeded(runs, evidence, poll == polls - 1)
     if not reason and (changed := _changed(pr, live)):
