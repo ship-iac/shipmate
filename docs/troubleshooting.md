@@ -3302,29 +3302,22 @@ it``. A later refusal of the same deploy can still stop it.
 
 ### Return an in-progress apply check by hand
 
-1. Confirm that no run may still apply the cell. Identify the run that flipped the
-   check: open the check's details link (GitHub redirects a renamed repository), or
-   look through the pull request's shipmate apply runs and the default branch's
-   deploy runs in the Actions tab. The run has ended only when this prints exactly
-   `completed`:
+1. Confirm that no run may still apply the cell. List every shipmate run that
+   has not ended, whatever its age:
 
    ```bash
-   gh run view <run id> --repo <owner>/<repo> --json status --jq .status
+   for s in requested queued pending waiting in_progress; do
+     gh api --paginate \
+       "repos/<owner>/<repo>/actions/workflows/shipmate.yml/runs?status=$s&per_page=100" \
+       --jq '.workflow_runs[] | "\(.id) \(.status) \(.display_title)"'
+   done
    ```
 
-   Any other value (`queued`, `waiting`, `pending`, `requested`, `in_progress`)
-   means wait for it to end and re-run the deploy instead: returning its check to
-   `queued` lets the re-run deploy apply the cell beside it. When no run can be
-   identified, list the shipmate runs:
-
-   ```bash
-   gh run list --repo <owner>/<repo> --workflow shipmate.yml \
-     --json status,displayTitle --limit 100
-   ```
-
-   Continue only when no run titled `shipmate · apply pr=<n> ...` or
-   `shipmate · auto pr=<n> ...` for that pull request, and no run titled
-   `shipmate · deploy`, has a status other than `completed`; then go to step 2.
+   Continue only when no listed run is titled `shipmate · apply pr=<n> ...` or
+   `shipmate · auto pr=<n> ...` for that pull request, or `shipmate · deploy`.
+   Otherwise wait for those runs to end and re-run the deploy instead: returning
+   the check to `queued` lets the re-run deploy apply the cell beside a run that
+   can still apply it.
 2. Find out whether the cell's change was applied: read the stack's state and
    its recent apply runs.
 3. Mint an installation token of the shipmate App. Only the App that created a
