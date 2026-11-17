@@ -3305,14 +3305,26 @@ it``. A later refusal of the same deploy can still stop it.
 1. Confirm that no run may still apply the cell. Identify the run that flipped the
    check: open the check's details link (GitHub redirects a renamed repository), or
    look through the pull request's shipmate apply runs and the default branch's
-   deploy runs in the Actions tab. The run has ended when its page shows a status
-   other than Queued, Waiting or In progress (such as Success, Failure, Cancelled
-   or Timed out) for its latest attempt. While that run has not ended, wait for it
-   to end and re-run the deploy instead: returning its check to `queued` lets the
-   re-run deploy apply the cell beside it. When no run can be identified, continue
-   only once the Actions tab shows no shipmate apply run of that pull request and
-   no deploy run of the default branch that is queued, waiting or in progress; then
-   go to step 2.
+   deploy runs in the Actions tab. The run has ended only when this prints exactly
+   `completed`:
+
+   ```bash
+   gh run view <run id> --repo <owner>/<repo> --json status --jq .status
+   ```
+
+   Any other value (`queued`, `waiting`, `pending`, `requested`, `in_progress`)
+   means wait for it to end and re-run the deploy instead: returning its check to
+   `queued` lets the re-run deploy apply the cell beside it. When no run can be
+   identified, list the shipmate runs:
+
+   ```bash
+   gh run list --repo <owner>/<repo> --workflow shipmate.yml \
+     --json status,displayTitle --limit 100
+   ```
+
+   Continue only when no run titled `shipmate · apply pr=<n> ...` or
+   `shipmate · auto pr=<n> ...` for that pull request, and no run titled
+   `shipmate · deploy`, has a status other than `completed`; then go to step 2.
 2. Find out whether the cell's change was applied: read the stack's state and
    its recent apply runs.
 3. Mint an installation token of the shipmate App. Only the App that created a

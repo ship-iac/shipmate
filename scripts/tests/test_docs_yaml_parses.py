@@ -442,7 +442,7 @@ def test_each_page_holds_its_fences():
         ("docs/hardening.md", "json"): 1,
         ("docs/hardening.md", "yaml"): 2,
         ("docs/releasing.md", "bash"): 8,
-        ("docs/troubleshooting.md", "bash"): 3,
+        ("docs/troubleshooting.md", "bash"): 5,
         ("docs/troubleshooting.md", "hcl"): 2,
         ("docs/troubleshooting.md", "text"): 7,
     }, f"fence labels per page changed: {sorted(found.items())}"

@@ -396,8 +396,9 @@ def _holder(status, jobs=None, total=None, attempt=1, again=None):
 
 
 def _answer(runs, path):
-    """`_run_main`'s answer to `path` from `runs`, its own copy: its text, or its exception
-    raised. A list answers each read with its next item, and every later read with its last."""
+    """`_run_main`'s answer to `path` from `runs`: its text, or its exception raised. A list
+    answers each read with its next item, popped from that list, and every later read with its
+    last; `_run_main` passes its own copy of each list, so a parametrized case keeps its data."""
     held = (runs or {}).get(path)
     if isinstance(held, list):
         held = held.pop(0) if len(held) > 1 else held[0]
@@ -1867,6 +1868,18 @@ def test_a_listed_job_of_a_later_attempt_holds_the_cell_live(tmp_path, monkeypat
     jobs = [_job(steps=[]), _job(name="apply / run / detect", steps=[], status="queued", attempt=2)]
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert str(exc.value) == _LIVE
+
+
+def test_a_listing_below_the_run_attempt_holds_the_cell_live(tmp_path, monkeypatch):
+    """Both run reads show attempt 2 `completed`, but the listing holds only attempt-1 jobs, the
+    cell's among them never applied: the listing is stale, so it cannot show what attempt 2 did,
+    and the cell is held as live.
+
+    Mutation: hold only on a later attempt (`>`) -- deploys, red."""
+    jobs = [_job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")])]
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=2))
     assert str(exc.value) == _LIVE
 
 
