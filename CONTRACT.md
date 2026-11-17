@@ -1127,9 +1127,9 @@ the repository root, or none:
   and `waveN-verdict` fails unless each cell's state was found saved or the cell
   had none to save. None of the three binds an environment, holds the encryption
   key or runs pull-request code. The evidence is the cell's own log, so the
-  cell's own pull-request code can claim `none` and skip its own save: the trust
-  per-cell completion already had, which guards against a lost save, not against
-  the applied code. A leg takes only an artifact of the cell's name
+  cell's own pull-request code can claim `none` and skip its own save, the trust
+  per-cell completion already had: the evidence guards against a lost save, not
+  against the applied code. A leg takes only an artifact of the cell's name
   whose bytes match the logged digest, refuses a path outside the stack, and
   saves under `state/<slug>/<env>/<run>-<attempt>` built from the reader's row,
   then under the same key with `-r1` when no lookup finds the first save. A
