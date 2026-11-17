@@ -51,6 +51,7 @@ def row(check, ids, j=None):
         "conclusion": None if j is None else j["conclusion"],
         "job_id": None if j is None else j["id"],
         "url": None if j is None else j["html_url"],
+        "persisted": None,
     }
 
 
@@ -58,8 +59,23 @@ def _by_check(rows):
     return {r["check"]: r for r in rows}
 
 
+def _report(**classes):
+    """A `state-read` report: every class empty unless given."""
+    return {"state": [], "none": [], "not_applied": [], "not_run": [], "refused": {}, **classes}
+
+
+def _none_reports(by_wave):
+    """Each wave's report with every cell in `none`: no state to save, so no leg needed."""
+    return {wave: _report(none=sorted(cells)) for wave, cells in by_wave.items()}
+
+
+def _state_env(by_wave):
+    """`SHIPMATE_WAVE_STATE_JSON` for `_none_reports`, each report a JSON string."""
+    return json.dumps({w: json.dumps(r) for w, r in _none_reports(by_wave).items()})
+
+
 def _classify(jobs, by_wave=BY_WAVE, results=RAN):
-    return apply_complete.classify(by_wave, results, jobs)
+    return apply_complete.classify(by_wave, results, jobs, "", _none_reports(by_wave))
 
 
 DNS = "apply / stacks/dns / dev-eu"
@@ -192,7 +208,11 @@ def test_a_cancelled_wave_that_never_expanded_is_not_run():
     unresolved."""
     unexpanded = job(SKIPPED_ROW, "cancelled")
     rows, unresolved = apply_complete.classify(
-        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, [OWN, unexpanded], "900"
+        {"wave1": BY_WAVE["wave1"]},
+        {"wave1": "cancelled"},
+        [OWN, unexpanded],
+        "900",
+        _none_reports(BY_WAVE),
     )
     assert (rows, unresolved) == ([row(APP, [2, 3])], [])
 
@@ -218,7 +238,7 @@ def test_a_missing_cell_of_a_cancelled_wave_that_may_have_started_is_unresolved(
     any level -> another-level gets a row; drop the `cancelled` conclusion check -> skipped-row
     gets a row."""
     rows, unresolved = apply_complete.classify(
-        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, listed, "900"
+        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, listed, "900", _none_reports(BY_WAVE)
     )
     assert (rows, unresolved) == ([], ["stacks/app / dev-eu"])
 
@@ -242,7 +262,14 @@ def test_a_cancelled_wave_keeps_its_listed_cells_rows():
 
 
 def _write(conclusion, *, url="https://u/job/9", job_id=9, ids=(5,), repo="acme/demo"):
-    r = {"check": APP, "ids": list(ids), "conclusion": conclusion, "job_id": job_id, "url": url}
+    r = {
+        "check": APP,
+        "ids": list(ids),
+        "conclusion": conclusion,
+        "job_id": job_id,
+        "url": url,
+        "persisted": None,
+    }
     return apply_complete.writes(r, repo)
 
 
@@ -397,6 +424,8 @@ def _run(by_wave, results, jobs):
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
             "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results),
+            "SHIPMATE_MODE": "complete",
+            "SHIPMATE_WAVE_STATE_JSON": _state_env(by_wave),
             "SHIPMATE_JOB_ID": "900",
         },
         capture_output=True,
@@ -415,6 +444,8 @@ def test_main_refuses_wave_results_that_are_no_non_empty_object(results):
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(BY_WAVE),
             "SHIPMATE_WAVE_RESULTS_JSON": results,
+            "SHIPMATE_MODE": "complete",
+            "SHIPMATE_WAVE_STATE_JSON": _state_env(BY_WAVE),
             "SHIPMATE_JOB_ID": "900",
         },
         capture_output=True,
@@ -487,7 +518,7 @@ def test_a_wrong_argument_list_refuses(argv):
     with pytest.raises(SystemExit) as exc:
         apply_complete.main(argv)
     assert str(exc.value) == (
-        "::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]"
+        "::error::usage: apply-complete [list | plan <rows> | verdict <rows> | stranded <reasons>]"
     )
 
 
@@ -708,6 +739,8 @@ def _select(tmp_path, listings, results=None, *, list_stderr="", list_rc=None):
         "RUNNER_TEMP": str(runner_temp).replace("\\", "/"),
         "SHIPMATE_BY_WAVE_JSON": json.dumps(HARNESS_BY_WAVE),
         "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results or HARNESS_RAN),
+        "SHIPMATE_WAVE_STATE_JSON": _state_env(HARNESS_BY_WAVE),
+        "SHIPMATE_MODE": "complete",
         "SHIPMATE_JOB_ID": "900",
         "FIXTURES": str(fixtures).replace("\\", "/"),
         "LAST_FIXTURE": str(len(listings)),
@@ -968,16 +1001,25 @@ def test_the_steps_are_exactly_these():
     assert [s.get("name") for s in action_steps("apply-complete")] == [
         "Verify the App key arrived",
         "List run jobs and decide each apply check's write",
+        "Fail unless every cell's state was saved",
         "Mint App installation token",
         "Write the apply checks",
         "Fail over any cell the jobs listing never resolved",
     ]
 
 
-def test_no_step_carries_an_if():
+def test_a_verdict_checks_no_key_mints_nothing_and_writes_nothing():
     """A failed listing ends the job before the mint, and a missing key already fails at
-    verify-app-key. Mutation: restore the mint's `always()`."""
-    assert [s.get("if") for s in action_steps("apply-complete")] == [None] * 5
+    verify-app-key. Mutations: restore the mint's `always()`; drop the mode test from the
+    mint's `if:`; run the verdict step in `complete` mode."""
+    assert [(s.get("name"), s.get("if")) for s in action_steps("apply-complete")] == [
+        ("Verify the App key arrived", "${{ inputs.mode != 'verdict' }}"),
+        ("List run jobs and decide each apply check's write", None),
+        ("Fail unless every cell's state was saved", "${{ inputs.mode == 'verdict' }}"),
+        ("Mint App installation token", "${{ inputs.mode != 'verdict' }}"),
+        ("Write the apply checks", "${{ inputs.mode != 'verdict' }}"),
+        ("Fail over any cell the jobs listing never resolved", None),
+    ]
 
 
 def test_the_write_token_can_read_the_pull_request_and_nothing_more():
@@ -1039,6 +1081,8 @@ def test_the_listing_step_reads_this_job_and_the_wave_results():
         "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_BY_WAVE_JSON": "${{ inputs.by-wave }}",
         "SHIPMATE_WAVE_RESULTS_JSON": "${{ inputs.wave-results }}",
+        "SHIPMATE_WAVE_STATE_JSON": "${{ inputs.wave-state }}",
+        "SHIPMATE_MODE": "${{ inputs.mode }}",
         "SHIPMATE_JOB_ID": "${{ inputs.job-id }}",
     }
 
@@ -1057,8 +1101,281 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
         {"wave1": "cancelled", "wave2": "cancelled"},
         [OWN, listed, job(SKIPPED_ROW, "cancelled")],
         "900",
+        _none_reports(by_wave),
     )
     assert (rows, unresolved) == (
         [row("apply / stacks/api / dev-eu", [5], listed), row(WEB, [4])],
         ["stacks/app / dev-eu"],
+    )
+
+
+#: The saver leg of the cell `APP`, as the jobs listing names it.
+APP_LEG = "apply / run / L0 / save-state (dev-eu stacks/app)"
+APP_JOB = "apply / run / L0 / dev-eu / stacks/app"
+
+
+def _lost(reason, cancelled=False):
+    word = "Cancelled" if cancelled else "Failed"
+    return {"status": "queued"}, f"{word}: state not saved ({reason})"
+
+
+#: (cell conclusion, wave report or None, leg conclusion or None for no leg, write).
+_EVIDENCE = [
+    ("success", _report(state=[APP]), "success", "success"),
+    ("success", _report(none=[APP]), None, "success"),
+    ("success", _report(not_applied=[APP]), None, _lost("the cell succeeded without applying")),
+    (
+        "success",
+        _report(refused={APP: "no state line in the cell's log"}),
+        None,
+        _lost("no state line in the cell's log"),
+    ),
+    ("success", _report(state=[APP]), "failure", _lost("the saver job concluded failure")),
+    ("success", None, None, _lost("the state reader did not finish")),
+    ("success", _report(), None, _lost("the state reader did not classify the cell")),
+    ("failure", _report(state=[APP]), "failure", _lost("the saver job concluded failure")),
+    ("failure", _report(not_applied=[APP]), None, ({"status": "queued"}, "Failed: boom")),
+    ("cancelled", _report(state=[APP]), "success", ({"status": "queued"}, "Cancelled")),
+    (
+        "cancelled",
+        _report(state=[APP]),
+        "cancelled",
+        _lost("the saver job concluded cancelled", cancelled=True),
+    ),
+]
+
+
+def _evidence_jobs(conclusion, leg):
+    jobs = [job(APP_JOB, conclusion, jid=21)]
+    return jobs + ([job(APP_LEG, leg, jid=22)] if leg else [])
+
+
+@pytest.mark.parametrize(("conclusion", "found", "leg", "expected"), _EVIDENCE)
+def test_a_check_completes_only_on_evidence_its_state_was_saved(
+    annotations, conclusion, found, leg, expected
+):
+    """The completion's write per cell conclusion and persistence evidence. The cell's own
+    annotation reads `boom`, its leg's none. Mutations: pass a `state` cell without a `success`
+    leg; `success` for a `success` cell in `not_applied`; read an absent report as one with no
+    reason; `Failed: <error>` winning over `state not saved`."""
+    annotations["value"] = [] if leg else [{"annotation_level": "failure", "message": "boom"}]
+    rows, unresolved = apply_complete.classify(
+        {"wave1": {APP: [2]}},
+        {"wave1": "success"},
+        _evidence_jobs(conclusion, leg),
+        "",
+        {"wave1": found},
+    )
+    assert unresolved == []
+    (entry,) = apply_complete.writes(rows[0], "acme/demo")
+    body = {k: v for k, v in entry["body"].items() if k != "details_url"}
+    if expected == "success":
+        assert (body, entry["title"]) == ({"status": "completed", "conclusion": "success"}, None)
+    else:
+        assert (body, entry["title"]) == expected
+
+
+def test_a_failed_legs_error_line_names_the_reason(annotations):
+    """Mutation: drop the leg's annotation read (`_lost_reason` returns the fixed reason)."""
+    annotations["value"] = [{"annotation_level": "failure", "message": "no artifact matches"}]
+    rows, _ = apply_complete.classify(
+        {"wave1": {APP: [2]}},
+        {"wave1": "success"},
+        _evidence_jobs("success", "failure"),
+        "",
+        {"wave1": _report(state=[APP])},
+    )
+    (entry,) = apply_complete.writes(rows[0], "acme/demo")
+    assert entry["title"] == "Failed: state not saved (no artifact matches)"
+    assert annotations["calls"] == [
+        ("repos/acme/demo/check-runs/22/annotations?per_page=100", False)
+    ]
+
+
+@pytest.mark.parametrize("leg", [None, "pending"])
+def test_a_state_cell_whose_leg_has_not_concluded_is_unresolved(leg):
+    """The listing lags a finished leg as it lags a finished cell, so the caller asks again.
+    Mutation: drop the `_leg_lagging` branch (a missing leg then raises on `legs[-1]`, a
+    pending one writes `state not saved`)."""
+    jobs = [job(APP_JOB, "success")] + ([job(APP_LEG, None)] if leg else [])
+    rows, unresolved = apply_complete.classify(
+        {"wave1": {APP: [2]}}, {"wave1": "success"}, jobs, "", {"wave1": _report(state=[APP])}
+    )
+    assert unresolved == ["stacks/app / dev-eu"]
+    assert [r.get("unresolved") for r in rows] == [True]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "{}",
+        "[]",
+        json.dumps({**_report(), "state": "x"}),
+        json.dumps({**_report(), "refused": []}),
+        json.dumps(_report(state=[APP], none=[APP])),
+        json.dumps(_report(state=[APP], refused={APP: "r"})),
+        json.dumps({**_report(), "extra": []}),
+        json.dumps(_report(refused={APP: 1})),
+    ],
+    ids=["empty", "object", "list", "class", "refused", "twice", "refused-twice", "extra", "why"],
+)
+def test_a_malformed_report_is_absent(text):
+    """Mutations: accept a report naming a cell twice; drop the key-set test."""
+    assert apply_complete.report(text) is None
+
+
+def test_a_well_formed_report_is_read_whole():
+    found = _report(state=[APP], refused={DNS: "r"})
+    assert apply_complete.report(json.dumps(found)) == found
+
+
+@pytest.mark.parametrize(
+    ("name", "stack", "env", "leg"),
+    [
+        (APP_LEG, "stacks/app", "dev-eu", True),
+        ("L3 / save-state (dev-eu stacks/app)", "stacks/app", "dev-eu", True),
+        ("apply / run / L0 / save-state (dev stacks/app)", "stacks/app", "dev-eu", False),
+        ("apply / run / L0 / save-state (dev-eu stacks/app)x", "stacks/app", "dev-eu", False),
+        ("apply / run / save-state (dev-eu stacks/app)", "stacks/app", "dev-eu", False),
+        (APP_JOB, "stacks/app", "dev-eu", False),
+        ("apply / run / L0 / save-state (dev-eu .)", ".", "dev-eu", True),
+    ],
+)
+def test_a_leg_is_matched_by_its_whole_name(name, stack, env, leg):
+    """Mutations: `search` for `fullmatch`; drop the `L<n>` segment."""
+    assert apply_complete.ag.is_leg_job(name, stack, env) is leg
+
+
+def _main(by_wave, results, jobs, states, mode="complete"):
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "apply-complete")],
+        input="\n".join(json.dumps(j) for j in jobs),
+        env={
+            **os.environ,
+            "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
+            "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(results),
+            "SHIPMATE_WAVE_STATE_JSON": states if isinstance(states, str) else json.dumps(states),
+            "SHIPMATE_MODE": mode,
+            "SHIPMATE_JOB_ID": "900",
+        },
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.parametrize("waves", [1, 8])
+def test_one_wave_and_every_wave_take_the_same_evidence(waves):
+    """`waveN-complete` passes one wave, `complete` all eight. Mutation: read every wave's
+    cells against the first wave's report."""
+    by_wave = {f"wave{n}": {f"apply / s{n} / dev-eu": [n]} for n in range(waves)}
+    lost = f"apply / s{waves - 1} / dev-eu"
+    states = {w: json.dumps(_report(none=sorted(c))) for w, c in by_wave.items()}
+    states[f"wave{waves - 1}"] = json.dumps(_report(refused={lost: "why"}))
+    jobs = [job(f"L0 / dev-eu / s{n}", "success") for n in range(waves)]
+    done = _main(by_wave, dict.fromkeys(by_wave, "success"), jobs, states)
+    assert (done.returncode, done.stderr) == (0, "")
+    persisted = {r["check"]: r["persisted"] for r in map(json.loads, done.stdout.splitlines())}
+    assert persisted == {
+        **{c: None for cells in by_wave.values() for c in cells},
+        lost: {"reason": "why", "leg_id": None},
+    }
+
+
+@pytest.mark.parametrize("raw", ["", "[]", "x"])
+def test_main_refuses_a_wave_state_that_is_no_object(raw):
+    """Mutation: read an unparseable `wave-state` as no reports."""
+    done = _main(BY_WAVE, RAN, [job("L0 / dev-eu / stacks/dns", "success")], raw)
+    assert (done.returncode, done.stderr) == (
+        1,
+        "::error::wave-state must be a JSON object of state-read reports\n",
+    )
+
+
+@pytest.mark.parametrize("mode", ["", "verdct", "Complete"])
+def test_main_refuses_an_unknown_mode(mode):
+    """Mutation: drop the mode test."""
+    done = _main(BY_WAVE, RAN, [], {}, mode=mode)
+    assert (done.returncode, done.stderr) == (1, "::error::mode must be complete or verdict\n")
+
+
+DB = "apply / stacks/db / dev-eu"
+DB_JOB = "apply / run / L0 / dev-eu / stacks/db"
+
+
+def _verdict_of(tmp_path, rows, by_wave):
+    path = tmp_path / "rows.jsonl"
+    path.write_text(rows, encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(SCRIPTS / "apply-complete"), "verdict", str(path)],
+        env={
+            **os.environ,
+            "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
+            "SHIPMATE_WAVE_RESULTS_JSON": json.dumps(dict.fromkeys(by_wave, "success")),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+
+def _verdict(tmp_path, jobs, states):
+    by_wave = {"wave1": {APP: [2], DB: [3]}}
+    rows = _main(by_wave, {"wave1": "success"}, jobs, states, mode="verdict").stdout
+    return _verdict_of(tmp_path, rows, by_wave)
+
+
+_VERDICT_TAIL = (
+    "Never re-run these cells' jobs or their workflow run. A re-run, a shipmate apply comment, or "
+    "a merge can apply their reviewed plans again against the state from before the apply. "
+    "Before applying or merging any plan of a named stack in its environment, on any pull "
+    "request, follow docs/troubleshooting.md section The apply step ran and its state was not "
+    "saved.\n"
+)
+
+
+def test_a_verdict_names_each_cell_without_evidence(tmp_path):
+    """Mutations: drop the never-re-run instruction; exit 0 on a refused cell."""
+    jobs = [job(APP_JOB, "success"), job(APP_LEG, "success"), job(DB_JOB, "success")]
+    states = {"wave1": json.dumps(_report(state=[APP], refused={DB: "no state line"}))}
+    done = _verdict(tmp_path, jobs, states)
+    assert (done.returncode, done.stdout) == (1, "")
+    assert done.stderr == (
+        "::error::no saved state was found for these cells: stacks/db / dev-eu (no state line). "
+        + _VERDICT_TAIL
+    )
+
+
+@pytest.mark.parametrize("db", ["success", "failure"])
+def test_a_verdict_passes_every_cell_with_evidence_whatever_its_outcome(tmp_path, db):
+    """A failed cell whose state was saved passes: its failed wave stops the next release.
+    Mutation: count a failed cell as a verdict failure."""
+    jobs = [
+        job(APP_JOB, "success"),
+        job(APP_LEG, "success"),
+        job(DB_JOB, db),
+        job("apply / run / L0 / save-state (dev-eu stacks/db)", "success"),
+    ]
+    states = {"wave1": json.dumps(_report(state=[APP, DB]))}
+    done = _verdict(tmp_path, jobs, states)
+    assert (done.returncode, done.stdout, done.stderr) == (0, "", "")
+
+
+def test_a_verdict_without_a_report_blocks(tmp_path):
+    """Mutation: fail only on refused cells (a missing report passes)."""
+    jobs = [job(APP_JOB, "success"), job(DB_JOB, "success")]
+    done = _verdict(tmp_path, jobs, {"wave1": ""})
+    assert done.returncode == 1
+    assert done.stderr == (
+        "::error::no saved state was found for these cells: stacks/app / dev-eu (the state reader "
+        "did not finish); stacks/db / dev-eu (the state reader did not finish). " + _VERDICT_TAIL
+    )
+
+
+def test_a_verdict_blocks_on_a_cell_no_attempt_resolved(tmp_path):
+    """Mutation: skip cells without a merged row."""
+    done = _verdict_of(tmp_path, "", {"wave1": {APP: [2]}})
+    assert (done.returncode, done.stderr) == (
+        1,
+        "::error::no saved state was found for these cells: stacks/app / dev-eu (the jobs "
+        "listing never resolved the cell). " + _VERDICT_TAIL,
     )

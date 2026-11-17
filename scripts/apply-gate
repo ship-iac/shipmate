@@ -107,6 +107,19 @@ def is_cell_job(job_name, stack, env):
     return re.fullmatch(pattern, job_name) is not None
 
 
+def leg_job_name(stack, env):
+    """A cell's saver leg's own name, `save-state (<env> <stack>)`, as `apply-env-level.yml`
+    declares it: no ` / ` of its own, so `is_cell_job` never matches a leg."""
+    return f"save-state ({env} {stack})"
+
+
+def is_leg_job(job_name, stack, env):
+    """Whether the listed job `job_name` is the cell's saver leg, `L<n> / <leg_job_name>`,
+    whole or after a ` / ` boundary, as `is_cell_job` matches a cell job."""
+    pattern = rf"(?:.* / )?L[0-9]+ / {re.escape(leg_job_name(stack, env))}"
+    return re.fullmatch(pattern, job_name) is not None
+
+
 def app_runs(check_run_lines, app_id):
     """The check-runs in JSONL `check_run_lines` that the App `app_id` created: `parse_jsonl`
     then the fail-closed `from_app`."""

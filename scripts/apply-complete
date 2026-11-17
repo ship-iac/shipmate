@@ -52,6 +52,18 @@ attempt resolved gets no write, so a stale listing never turns a completed `succ
 a cancelled wave is missing while that literal row is listed, the cells are written `Not run`
 even if one started before the cancel; the check returns to `queued` either way, and only the
 title differs.
+
+Each row also carries `persisted`, the evidence that the cell's state was saved, from the wave's
+`state-read` report in `SHIPMATE_WAVE_STATE_JSON` and the cell's saver leg
+(`apply-gate.is_leg_job`): none is needed for a cell in `none` or `not_run`, or in
+`not_applied` unless its job succeeded; a cell in `state` needs a `success` leg. Anything else
+is a reason: an absent or malformed report, a `refused` cell, a failed or cancelled leg, a cell
+in no class. A cell in `state` whose leg is not listed with a conclusion is unresolved, as a
+lagging cell is. A `success`, `failure` or `cancelled` cell with a reason is written `queued`,
+`Failed: state not saved (<reason>)` or `Cancelled: state not saved (<reason>)` in place of the
+table's write. `apply-complete verdict <rows>` (`SHIPMATE_MODE` `verdict`) writes nothing and
+refuses, naming each cell of the waves with a reason or no resolved row, whatever its job's
+conclusion.
 """
 
 import json
@@ -71,9 +83,20 @@ RETRY_PREFIX = "retry: "
 UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
 ERROR_LINE_CAP = 120
 EMPTY_LISTING = "the run jobs listing came back empty; cannot tell which wave cells succeeded"
+_CLASSES = ("state", "none", "not_applied", "not_run")
+READER_UNFINISHED = "the state reader did not finish"
+UNAPPLIED_SUCCESS = "the cell succeeded without applying"
+UNCLASSIFIED = "the state reader did not classify the cell"
+NEVER_RERUN = (
+    "Never re-run these cells' jobs or their workflow run. A re-run, a shipmate apply comment, "
+    "or a merge can apply their reviewed plans again against the state from before the apply. "
+    "Before applying or merging any plan of a named stack in its environment, on any pull "
+    "request, follow docs/troubleshooting.md section The apply step ran and its state was not "
+    "saved."
+)
 
 
-def _row(check, ids, job=None):
+def _row(check, ids, job=None, persisted=None):
     job = job or {}
     return {
         "check": check,
@@ -81,7 +104,71 @@ def _row(check, ids, job=None):
         "conclusion": job.get("conclusion"),
         "job_id": job.get("id"),
         "url": job.get("html_url"),
+        "persisted": persisted,
     }
+
+
+def report(text):
+    """The `state-read` report in `text`, or None when it is empty, not JSON, or not that
+    shape: every class a list of check names, `refused` a name-to-reason object, and no name
+    in two places."""
+    try:
+        parsed = json.loads(text) if isinstance(text, str) else None
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict) or set(parsed) != {*_CLASSES, "refused"}:
+        return None
+    lists = [parsed[c] for c in _CLASSES]
+    refused = parsed["refused"]
+    if not all(isinstance(names, list) for names in lists) or not isinstance(refused, dict):
+        return None
+    names = [n for names in lists for n in names] + list(refused)
+    texts = names + list(refused.values())
+    if not all(isinstance(x, str) for x in texts) or len(set(names)) != len(names):
+        return None
+    return parsed
+
+
+def reports(raw):
+    """`{wave key: report or None}` from `SHIPMATE_WAVE_STATE_JSON`, each value the reader's
+    `report` output as a JSON string, `""` when it is absent."""
+    try:
+        waves = json.loads(raw)
+    except ValueError:
+        waves = None
+    if not isinstance(waves, dict):
+        raise SystemExit("::error::wave-state must be a JSON object of state-read reports")
+    return {wave: report(text) for wave, text in waves.items()}
+
+
+def persisted(check, found, conclusion, legs):
+    """None when the cell left no state to save or its saver leg saved it; else
+    `{"reason", "leg_id"}`. `found` is the wave's report (None when absent), `conclusion` the
+    cell job's, `legs` the cell's listed saver legs, each with a conclusion. A cell that ran
+    successfully without applying exists only through a forged line, so it has a reason."""
+    if found is None:
+        return {"reason": READER_UNFINISHED, "leg_id": None}
+    if check in found["refused"]:
+        return {"reason": found["refused"][check], "leg_id": None}
+    if check in found["none"] or check in found["not_run"]:
+        return None
+    if check in found["not_applied"]:
+        if conclusion == "success":
+            return {"reason": UNAPPLIED_SUCCESS, "leg_id": None}
+        return None
+    if check in found["state"]:
+        if any(j.get("conclusion") == "success" for j in legs):
+            return None
+        leg = legs[-1]
+        return {"reason": f"the saver job concluded {leg['conclusion']}", "leg_id": leg.get("id")}
+    return {"reason": UNCLASSIFIED, "leg_id": None}
+
+
+def _leg_lagging(check, found, legs):
+    """Whether the cell's saver leg is what the listing has not shown yet: the cell has a
+    state to save and no leg is listed with a conclusion, so the caller asks again."""
+    saved = found is not None and check in found["state"]
+    return saved and (not legs or any(j.get("conclusion") is None for j in legs))
 
 
 def unexpanded(jobs, job_id):
@@ -95,11 +182,12 @@ def unexpanded(jobs, job_id):
     )
 
 
-def classify(by_wave, results, jobs, job_id=""):
+def classify(by_wave, results, jobs, job_id, states):
     """`(rows, unresolved)` for the cells of the waves keyed in `results`, each wave's job
-    result, from the jobs listing `jobs` that holds this job, `job_id`: `unresolved` labels the
-    cells with no resolved row, each listed without a conclusion also getting an `unresolved`
-    row."""
+    result, from the jobs listing `jobs` that holds this job, `job_id`, and `states`, each
+    wave's `report` (`reports`): `unresolved` labels the cells with no resolved row, each listed
+    without a conclusion, or with a state whose saver leg is not listed with one, also getting
+    an `unresolved` row. Each row carries `persisted` for its cell."""
     literal = unexpanded(jobs, job_id)
     rows, unresolved = [], []
     for wave in sorted(results):
@@ -117,19 +205,24 @@ def classify(by_wave, results, jobs, job_id=""):
         not_run = results[wave] == "skipped" or (
             results[wave] == "cancelled" and literal and not started
         )
+        found = states.get(wave)
         for check, ids, matched in cells:
+            legs = [
+                j for j in jobs if ag.is_leg_job(j.get("name", ""), *ag.parse_check_name(check))
+            ]
             won = next((j for j in matched if j.get("conclusion") == "success"), None)
-            if won:
-                rows.append(_row(check, ids, won))
-            elif not matched and not_run:
-                rows.append(_row(check, ids))
-            elif not matched:
+            job = won or (matched[-1] if matched else None)
+            if not matched and not not_run:
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
-            elif any(j.get("conclusion") is None for j in matched):
+            elif any(j.get("conclusion") is None for j in matched) and not won:
                 unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
                 rows.append({**_row(check, ids), "unresolved": True})
+            elif _leg_lagging(check, found, legs):
+                unresolved.append(check.removeprefix(ag.APPLY_PREFIX))
+                rows.append({**_row(check, ids, job), "unresolved": True})
             else:
-                rows.append(_row(check, ids, matched[-1]))
+                conclusion = job and job.get("conclusion")
+                rows.append(_row(check, ids, job, persisted(check, found, conclusion, legs)))
     return rows, sorted(unresolved)
 
 
@@ -154,10 +247,25 @@ def error_line(job_id, repo):
     return f"Failed: {line[:ERROR_LINE_CAP]}" if line else "Failed"
 
 
+def _lost_reason(why, repo):
+    """The reason in a `state not saved` title: a failed leg's first error line when it has
+    one."""
+    if why["leg_id"] is not None:
+        line = error_line(why["leg_id"], repo)
+        if line != "Failed":
+            return line.removeprefix("Failed: ")
+    return why["reason"]
+
+
 def writes(row, repo):
-    """The `patch-checks` entries for `row`, one per check id."""
-    conclusion = row["conclusion"]
-    if conclusion == "success":
+    """The `patch-checks` entries for `row`, one per check id. A cell that ran with a
+    `persisted` reason returns to `queued` titled `ag.lost_state_title`, whatever its own
+    outcome."""
+    conclusion, why = row["conclusion"], row["persisted"]
+    if why and conclusion in ("success", "failure", "cancelled"):
+        reason = _lost_reason(why, repo)
+        body, title = {"status": "queued"}, ag.lost_state_title(conclusion == "cancelled", reason)
+    elif conclusion == "success":
         body, title = {"status": "completed", "conclusion": "success"}, None
     elif conclusion == "failure":
         body, title = {"status": "queued"}, error_line(row["job_id"], repo)
@@ -222,6 +330,30 @@ def list_jobs():
     sys.stdout.write(listing)
 
 
+def verdict(rows_path):
+    """Refuse when any cell of the waves in `SHIPMATE_WAVE_RESULTS_JSON` has a `persisted`
+    reason or no resolved row, whatever its job's conclusion, naming each cell and its reason;
+    no write. A failed cell whose state was saved passes: its failed wave stops the next
+    release anyway."""
+    by_wave = json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"])
+    waves = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
+    merged = {r["check"]: r for r in merge(_rows(rows_path))}
+    lost = []
+    for wave in sorted(waves):
+        for check in sorted(by_wave.get(wave) or {}):
+            row = merged.get(check)
+            why = "the jobs listing never resolved the cell" if row is None else None
+            why = why or (row["persisted"] or {}).get("reason")
+            if why:
+                lost.append(f"{check.removeprefix(ag.APPLY_PREFIX)} ({why})")
+    if lost:
+        raise SystemExit(
+            "::error::"
+            + one_line(f"no saved state was found for these cells: {'; '.join(lost)}. ")
+            + NEVER_RERUN
+        )
+
+
 def stranded(reasons_path):
     """Refuse with the `RETRY_PREFIX` reasons in `reasons_path` on one line: they hold gh's
     stderr and stack names raw, and `run_annotated` prints the refusal escaped."""
@@ -232,15 +364,26 @@ def stranded(reasons_path):
     )
 
 
-def main(argv=()):
+def command(argv):
+    """Run the subcommand `argv` names, or refuse with the usage."""
+    commands = {"plan": plan, "stranded": stranded, "verdict": verdict}
     if argv == ["list"]:
         list_jobs()
-        return
-    if len(argv) == 2 and argv[0] in ("plan", "stranded"):
-        (plan if argv[0] == "plan" else stranded)(argv[1])
-        return
+    elif len(argv) == 2 and argv[0] in commands:
+        commands[argv[0]](argv[1])
+    else:
+        raise SystemExit(
+            "::error::usage: apply-complete [list | plan <rows> | verdict <rows> | stranded "
+            "<reasons>]"
+        )
+
+
+def main(argv=()):
     if argv:
-        raise SystemExit("::error::usage: apply-complete [list | plan <rows> | stranded <reasons>]")
+        command(argv)
+        return
+    if os.environ.get("SHIPMATE_MODE") not in ("complete", "verdict"):
+        raise SystemExit("::error::mode must be complete or verdict")
     try:
         results = json.loads(os.environ["SHIPMATE_WAVE_RESULTS_JSON"])
     except ValueError:
@@ -252,6 +395,7 @@ def main(argv=()):
         results,
         ag.parse_jsonl(sys.stdin),
         os.environ["SHIPMATE_JOB_ID"],
+        reports(os.environ["SHIPMATE_WAVE_STATE_JSON"]),
     )
     for row in rows:
         print(json.dumps(row))

@@ -1,6 +1,12 @@
 name: shipmate apply-complete
-description: Write the apply checks of the given waves from their cells' wave jobs in this run - completed on success, otherwise returned to queued and titled with the outcome. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and checks:read to read a failed job's annotations.
+description: Write the apply checks of the given waves from their cells' wave jobs and saver legs in this run - completed on success with evidence the cell's state was saved, otherwise returned to queued and titled with the outcome - or, in verdict mode, fail when any cell of the waves has no such evidence, writing nothing. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and, to write, checks:read to read a failed job's annotations.
 inputs:
+  mode:
+    description: "`complete` writes the apply checks; `verdict` writes nothing and fails naming each cell whose state was not saved. Anything else refuses."
+    required: true
+  wave-state:
+    description: "JSON object mapping each wave key in wave-results to its state-read report, as a JSON string, empty when the reader wrote none. An absent or unreadable report is a reason for every cell of its wave."
+    required: true
   by-wave:
     description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
     required: true
@@ -11,21 +17,22 @@ inputs:
     description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
     required: true
   deploy:
-    description: "`true` on the merge deploy. Otherwise a re-run writes only its `success` entries, and a merged pull request gets only its `success` writes."
-    required: true
+    description: "`complete` mode only. `true` on the merge deploy. Otherwise a re-run writes only its `success` entries, and a merged pull request gets only its `success` writes."
+    required: false
   pr-number:
-    description: The pull request the run applies; read before a pre-merge write.
-    required: true
+    description: "`complete` mode only. The pull request the run applies; read before a pre-merge write."
+    required: false
   app-id:
-    description: shipmate App id (a repo/org variable, not a secret).
-    required: true
+    description: "`complete` mode only. shipmate App id (a repo/org variable, not a secret)."
+    required: false
   private-key:
-    description: shipmate App private key (from the shipmate-engine environment secret).
-    required: true
+    description: "`complete` mode only. shipmate App private key (from the shipmate-engine environment secret)."
+    required: false
 runs:
   using: composite
   steps:
     - name: Verify the App key arrived
+      if: ${{ inputs.mode != 'verdict' }}
       uses: $/actions/verify-app-key
       with:
         app-id: ${{ inputs.app-id }}
@@ -36,6 +43,8 @@ runs:
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
         SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
+        SHIPMATE_WAVE_STATE_JSON: ${{ inputs.wave-state }}
+        SHIPMATE_MODE: ${{ inputs.mode }}
         SHIPMATE_JOB_ID: ${{ inputs.job-id }}
       # `apply-complete list` paginates because a 256-cell level exceeds the 100-per-page cap.
       # Unlike apply-summary's cosmetic listing, this one decides which checks complete, so it
@@ -80,8 +89,11 @@ runs:
           esac
         done
         # A success from any attempt, else the last row any attempt saw. Reads a failed job's
-        # annotations with this step's job token, before the App token exists.
-        python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" plan "$RUNNER_TEMP/rows.jsonl" > "$RUNNER_TEMP/writes.jsonl"
+        # annotations with this step's job token, before the App token exists. A verdict writes
+        # nothing, and its job may not read annotations.
+        if [ "$SHIPMATE_MODE" != verdict ]; then
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" plan "$RUNNER_TEMP/rows.jsonl" > "$RUNNER_TEMP/writes.jsonl"
+        fi
         # Echoed once after the loop, not per attempt: the file is rewritten each time, so an
         # exhausted run would otherwise log the same warning once per attempt.
         cat "$RUNNER_TEMP/diagnostics.txt" >&2
@@ -92,8 +104,17 @@ runs:
               > "$RUNNER_TEMP/stranded.txt"
         fi
 
+    - name: Fail unless every cell's state was saved
+      if: ${{ inputs.mode == 'verdict' }}
+      shell: bash
+      env:
+        SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
+        SHIPMATE_WAVE_RESULTS_JSON: ${{ inputs.wave-results }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" verdict "$RUNNER_TEMP/rows.jsonl"
+
     - name: Mint App installation token
       # Minted after the jobs listing, so the token's lifetime never spans it.
+      if: ${{ inputs.mode != 'verdict' }}
       id: token
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
@@ -105,6 +126,7 @@ runs:
         permission-pull-requests: read
 
     - name: Write the apply checks
+      if: ${{ inputs.mode != 'verdict' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
