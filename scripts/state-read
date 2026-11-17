@@ -3,8 +3,9 @@
 
 Runs in a wave's `waveN-read` job, which runs no pull-request code, after the wave. For each
 cell of the wave (`SHIPMATE_BY_WAVE_JSON`'s `SHIPMATE_WAVE` entry) it finds the cell's job in
-this run's jobs listing (`apply-complete`'s `fetch_jobs`), restricted to this job's own level
-(the listed name of `SHIPMATE_JOB_ID`, this job's check run id), reads that job's log and counts
+this run's jobs listing (`apply-complete`'s `fetch_jobs`) with `apply-gate.cell_jobs`, under
+this job's own level (the listed name of `SHIPMATE_JOB_ID`, this job's check run id), as
+`apply-complete` matches it, reads that job's log and counts
 whole lines matching `LINE`, the line `state-handoff` prints. It never prints a log line.
 
 - `state` (a saver row): one line with a digest and an `attempt` at most the job's
@@ -65,11 +66,6 @@ def _jobs():
         return None
 
 
-def _level(jobs, job_id):
-    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
-    return own.rpartition(" / ")[0]
-
-
 def listed(cells, job_id):
     """`(level, {check: [jobs]})` from the first listing that holds this job and a concluded job
     for every cell, retried; else from the last listing that held this job. Raises SystemExit
@@ -77,12 +73,9 @@ def listed(cells, job_id):
     best = None
     for delay in (*LISTING_DELAYS, None):
         jobs = _jobs()
-        level = _level(jobs or [], job_id)
+        level = ag.level_of(jobs or [], job_id)
         if level:
-            names = {
-                check: f"{level} / {ag.cell_job_name(stack, env)}" for check, stack, env in cells
-            }
-            best = level, {c: [j for j in jobs if j.get("name") == n] for c, n in names.items()}
+            best = level, {c: ag.cell_jobs(jobs, level, stack, env) for c, stack, env in cells}
             if all(m and all(j.get("conclusion") for j in m) for m in best[1].values()):
                 return best
         if delay is not None:

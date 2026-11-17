@@ -258,14 +258,17 @@ _NONE = {
     }
 }
 
+#: The completion job, check run id 900, whose level `L0` the cell jobs share.
+_OWN = {"name": "L0 / complete", "conclusion": None, "id": 900}
+
 
 def test_a_wave_slice_reads_no_later_wave_as_unmatched():
     """wave0's completion runs before wave1 has a job in the listing. Mutation: `classify` walks
     every key of `by_wave` instead of those of its wave results -> wave1's cells read
     unresolved."""
-    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    jobs = [_OWN, {"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
     by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
-    assert apply_complete.classify(by_wave, {"wave0": "success"}, jobs, "", _NONE) == (
+    assert apply_complete.classify(by_wave, {"wave0": "success"}, jobs, "900", _NONE) == (
         [
             {
                 "check": "apply / dns / dev",
@@ -364,8 +367,8 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
     )
     runs = [check("apply / dns / dev", 1), check("apply / dns / dev", 2, **extra)]
     by_wave = apply_snapshot.by_wave(waves, apply_snapshot.snapshot(waves, runs, APP_ID))
-    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
-    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, jobs, "", _NONE)
+    jobs = [_OWN, {"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, jobs, "900", _NONE)
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1]
 
@@ -387,9 +390,9 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     ]
     snap = apply_snapshot.snapshot(waves, runs, APP_ID)
     assert snap == {"apply / dns / dev": [1, 2]}
-    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    jobs = [_OWN, {"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
     rows, _ = apply_complete.classify(
-        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, jobs, "", _NONE
+        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, jobs, "900", _NONE
     )
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1, 2]

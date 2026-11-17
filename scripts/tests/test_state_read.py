@@ -349,7 +349,7 @@ def test_the_lines_attempt_may_not_exceed_the_jobs(
 
 
 def test_another_levels_job_and_a_saver_leg_never_match(monkeypatch, tmp_path):
-    """Mutations: match by `ag.is_cell_job` (any level) instead of this job's own level; name
+    """Mutations: drop the level from `apply-gate.cell_jobs` (`is_cell_job` at any level); name
     the leg `<env> / <stack>` (`LEG_NAME`)."""
     other = _job("a", jid=2, level="apply / run / L1")
     leg = {"id": 3, "name": f"{LEVEL} / {_leg('a', 'dev-eu')}", "conclusion": "success"}

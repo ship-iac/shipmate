@@ -120,6 +120,23 @@ def is_leg_job(job_name, stack, env):
     return re.fullmatch(pattern, job_name) is not None
 
 
+def level_of(jobs, job_id):
+    """The level of the listed job `job_id`: its name up to its last ` / ` (`apply / run / L0`
+    for `apply / run / L0 / wave0-read`), or "" when `jobs` does not list it."""
+    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
+    return own.rpartition(" / ")[0]
+
+
+def cell_jobs(jobs, level, stack, env):
+    """The listed jobs of `jobs` that are the cell's wave job at `level` (`level_of`): named
+    `<level> / <env> / <stack>` and matched by `is_cell_job`. None when `level` is empty, so a
+    listing that does not list the calling job matches no cell."""
+    name = f"{level} / {cell_job_name(stack, env)}"
+    if not level or not is_cell_job(name, stack, env):
+        return []
+    return [j for j in jobs if j.get("name") == name]
+
+
 def app_runs(check_run_lines, app_id):
     """The check-runs in JSONL `check_run_lines` that the App `app_id` created: `parse_jsonl`
     then the fail-closed `from_app`."""

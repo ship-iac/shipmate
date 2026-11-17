@@ -95,8 +95,11 @@ observable would fail. A rename that leaves no wave job matching also fails
 Each saver leg is named `save-state (<env> <stack>)`, with no ` / ` of its own,
 so `is_cell_job` never matches one; `apply-gate.is_leg_job` matches it as
 `L<n> / save-state (<env> <stack>)`, whole or after a ` / ` boundary, and
-`apply-complete` reads a cell's saved state from it. `scripts/state-read` finds a
-cell's wave job by its exact name under the reader's own level. Renaming a leg
+`apply-complete` reads a cell's saved state from it. `scripts/state-read` and
+`scripts/apply-complete` find a cell's wave job with one matcher,
+`apply-gate.cell_jobs`: its exact name under the calling job's own level, which
+`is_cell_job` must also match. A listing that does not list the calling job
+matches no cell. Renaming a leg
 or a wave job leaves its cells without evidence, so their checks return to
 `queued` or stay unwritten and the wave's verdict fails.
 
@@ -104,7 +107,7 @@ or a wave job leaves its cells without evidence, so their checks return to
 check ids a run may write, it reads each snapshotted `apply / <stack> / <env>`
 check name back to its stack and environment (`apply-gate.parse_check_name`; an
 environment name holds no ` / `) and matches that cell's wave job in the same
-run's job-name listing with the same matcher, to decide each check's write from
+run's job-name listing with `cell_jobs`, to decide each check's write from
 the run's own job conclusions. A rename of the apply-env-level job's `name:`
 would leave every cell of a wave that ran unmatched, so the completion retries,
 writes none of them and fails the level (§Apply check lifecycle).

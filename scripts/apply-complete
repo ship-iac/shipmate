@@ -20,6 +20,9 @@ from the snapshot's check name with `apply-gate.parse_check_name`. Requiring the
 level and a ` / ` boundary, not a bare `str.endswith`, keeps out a job of env
 `dev-eu` for env `eu` and a non-wave job such as `apply / run / detect` for env
 `run` and stack `detect`; either would complete a check its own apply never earned.
+`apply-gate.cell_jobs` also requires the cell job's level to be this job's own
+(`SHIPMATE_JOB_ID`, this job's check run id), as `state-read` does, so a listing that
+does not list this job matches no cell and every cell of a wave that ran is retried.
 
 The cells are those of the waves named in `SHIPMATE_WAVE_RESULTS_JSON`, `{wave key: result
 of its wave job}`, read from `SHIPMATE_BY_WAVE_JSON`, `apply-snapshot`'s `by_wave`. Each cell
@@ -174,8 +177,7 @@ def _leg_lagging(check, found, legs):
 def unexpanded(jobs, job_id):
     """Whether `jobs` holds a `cancelled` literal unexpanded wave row of the level of the job
     `job_id`. Every wave of a level shares that name, so the row does not say which wave."""
-    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
-    level = own.rpartition(" / ")[0]
+    level = ag.level_of(jobs, job_id)
     row = level + " / " + UNEXPANDED
     return bool(level) and any(
         j.get("name") == row and j.get("conclusion") == "cancelled" for j in jobs
@@ -189,14 +191,11 @@ def classify(by_wave, results, jobs, job_id, states):
     without a conclusion, or with a state whose saver leg is not listed with one, also getting
     an `unresolved` row. Each row carries `persisted` for its cell."""
     literal = unexpanded(jobs, job_id)
+    level = ag.level_of(jobs, job_id)
     rows, unresolved = [], []
     for wave in sorted(results):
         cells = [
-            (
-                check,
-                ids,
-                [j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))],
-            )
+            (check, ids, ag.cell_jobs(jobs, level, *ag.parse_check_name(check)))
             for check, ids in sorted((by_wave.get(wave) or {}).items())
         ]
         # An expanded matrix lists all its cells at once, so a cell missing beside a listed

@@ -74,8 +74,20 @@ def _state_env(by_wave):
     return json.dumps({w: json.dumps(r) for w, r in _none_reports(by_wave).items()})
 
 
-def _classify(jobs, by_wave=BY_WAVE, results=RAN):
-    return apply_complete.classify(by_wave, results, jobs, "", _none_reports(by_wave))
+#: The level most tests' cell jobs run at, and this completion job's check run id.
+LEVEL = "L0"
+SELF_ID = 900
+
+
+def own(level=LEVEL):
+    """This completion job as the listing names it under `level`, whose cells it matches."""
+    return job(f"{level} / complete", None, jid=SELF_ID)
+
+
+def _classify(jobs, by_wave=BY_WAVE, results=RAN, level=LEVEL):
+    return apply_complete.classify(
+        by_wave, results, [own(level), *jobs], str(SELF_ID), _none_reports(by_wave)
+    )
 
 
 DNS = "apply / stacks/dns / dev-eu"
@@ -109,26 +121,47 @@ def test_matches_the_nested_reusable_workflow_job_name_suffix(prefix):
     job is named `<env> / <stack>`; the same stack in another env matches nothing.
     Mutation: `apply-gate.cell_job_name` builds `<stack> / <env>`."""
     by_wave = {"wave1": BY_WAVE["wave1"]}
+    level = prefix.removesuffix(" / dev-eu / stacks/app")
     j = job(prefix, "success")
-    assert _classify([j], by_wave) == ([row(APP, [2, 3], j)], [])
+    assert _classify([j], by_wave, level=level) == ([row(APP, [2, 3], j)], [])
     other = job(prefix.replace("dev-eu", "dev-us"), "success")
-    assert _classify([other, j], by_wave) == ([row(APP, [2, 3], j)], [])
-    assert _classify([other], by_wave) == ([], ["stacks/app / dev-eu"])
+    assert _classify([other, j], by_wave, level=level) == ([row(APP, [2, 3], j)], [])
+    assert _classify([other], by_wave, level=level) == ([], ["stacks/app / dev-eu"])
+
+
+def test_a_cell_job_of_another_level_never_completes_the_cell():
+    """`state-read` matches the same way (`apply-gate.cell_jobs`). Mutation: drop the level
+    from the match (`is_cell_job` alone) -> APP takes the other level's `success`."""
+    by_wave = {"wave1": BY_WAVE["wave1"]}
+    other = job("deploy / L1 / dev-eu / stacks/app", "success")
+    assert _classify([other], by_wave, level="deploy / L0") == ([], ["stacks/app / dev-eu"])
+
+
+def test_a_listing_without_this_job_matches_no_cell():
+    """Mutation: match every level when this job is not listed -> APP takes the job."""
+    rows, unresolved = apply_complete.classify(
+        {"wave1": BY_WAVE["wave1"]},
+        RAN,
+        [job("L0 / dev-eu / stacks/app", "success")],
+        str(SELF_ID),
+        _none_reports(BY_WAVE),
+    )
+    assert (rows, unresolved) == ([], ["stacks/app / dev-eu"])
 
 
 @pytest.mark.parametrize(
-    ("by_wave", "name"),
+    ("by_wave", "name", "level"),
     [
-        ({"wave0": {"apply / detect / apply": [5]}}, "apply / detect"),
-        (BY_WAVE, "apply / verify / dev-eu / stacks/app"),
+        ({"wave0": {"apply / detect / apply": [5]}}, "apply / detect", "apply"),
+        (BY_WAVE, "apply / verify / dev-eu / stacks/app", "apply / verify"),
     ],
     ids=["orchestration-job", "non-wave-cell-job"],
 )
-def test_only_a_wave_job_completes_a_cell(by_wave, name):
+def test_only_a_wave_job_completes_a_cell(by_wave, name, level):
     """A job outside an `L<n>` env-level can end in ` / <env> / <stack>`: the orchestration
     job `apply / detect` does for env `apply` and root stack `detect`, and it succeeds when
     that cell's wave failed. Mutation: `apply-gate.is_cell_job` drops the `L<n>` segment."""
-    rows, unresolved = _classify([job(name, "success")], by_wave)
+    rows, unresolved = _classify([job(name, "success")], by_wave, level=level)
     assert (rows, len(unresolved)) == ([], len(by_wave))
 
 
@@ -419,7 +452,7 @@ def test_merge_withholds_an_earlier_outcome_a_later_attempt_lists_unresolved():
 def _run(by_wave, results, jobs):
     return subprocess.run(
         [sys.executable, str(SCRIPTS / "apply-complete")],
-        input="\n".join(json.dumps(j) for j in jobs),
+        input="\n".join(json.dumps(j) for j in [own(), *jobs]),
         env={
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
@@ -720,8 +753,10 @@ def _select(tmp_path, listings, results=None, *, list_stderr="", list_rc=None):
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
     for i, listing in enumerate(listings, 1):
+        # Every listing that comes back lists this job, which names the cells' level.
+        served = listing and jsonl(own()) + listing
         (fixtures / f"{i}.jsonl").write_text(
-            "FAIL\n" + _all_success("dns") if listing is None else listing,
+            "FAIL\n" + jsonl(own()) + _all_success("dns") if listing is None else served,
             encoding="utf-8",
             newline="\n",
         )
@@ -1095,7 +1130,7 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
         "wave1": {APP: [2, 3], "apply / stacks/api / dev-eu": [5]},
         "wave2": BY_WAVE["wave2"],
     }
-    listed = job("L1 / dev-eu / stacks/api", "cancelled")
+    listed = job("deploy / L1 / dev-eu / stacks/api", "cancelled")
     rows, unresolved = apply_complete.classify(
         by_wave,
         {"wave1": "cancelled", "wave2": "cancelled"},
@@ -1112,6 +1147,7 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
 #: The saver leg of the cell `APP`, as the jobs listing names it.
 APP_LEG = "apply / run / L0 / save-state (dev-eu stacks/app)"
 APP_JOB = "apply / run / L0 / dev-eu / stacks/app"
+RUN_L0 = "apply / run / L0"
 
 
 def _lost(reason, cancelled=False):
@@ -1148,7 +1184,7 @@ _EVIDENCE = [
 
 
 def _evidence_jobs(conclusion, leg):
-    jobs = [job(APP_JOB, conclusion, jid=21)]
+    jobs = [own(RUN_L0), job(APP_JOB, conclusion, jid=21)]
     return jobs + ([job(APP_LEG, leg, jid=22)] if leg else [])
 
 
@@ -1166,7 +1202,7 @@ def test_a_check_completes_only_on_evidence_its_state_was_saved(
         {"wave1": {APP: [2]}},
         {"wave1": "success"},
         _evidence_jobs(conclusion, leg),
-        "",
+        "900",
         {"wave1": found},
     )
     assert unresolved == []
@@ -1185,7 +1221,7 @@ def test_a_failed_legs_error_line_names_the_reason(annotations):
         {"wave1": {APP: [2]}},
         {"wave1": "success"},
         _evidence_jobs("success", "failure"),
-        "",
+        "900",
         {"wave1": _report(state=[APP])},
     )
     (entry,) = apply_complete.writes(rows[0], "acme/demo")
@@ -1200,9 +1236,9 @@ def test_a_state_cell_whose_leg_has_not_concluded_is_unresolved(leg):
     """The listing lags a finished leg as it lags a finished cell, so the caller asks again.
     Mutation: drop the `_leg_lagging` branch (a missing leg then raises on `legs[-1]`, a
     pending one writes `state not saved`)."""
-    jobs = [job(APP_JOB, "success")] + ([job(APP_LEG, None)] if leg else [])
+    jobs = [own(RUN_L0), job(APP_JOB, "success")] + ([job(APP_LEG, None)] if leg else [])
     rows, unresolved = apply_complete.classify(
-        {"wave1": {APP: [2]}}, {"wave1": "success"}, jobs, "", {"wave1": _report(state=[APP])}
+        {"wave1": {APP: [2]}}, {"wave1": "success"}, jobs, "900", {"wave1": _report(state=[APP])}
     )
     assert unresolved == ["stacks/app / dev-eu"]
     assert [r.get("unresolved") for r in rows] == [True]
@@ -1214,11 +1250,12 @@ def test_an_earlier_resolved_row_survives_a_later_lagging_leg():
     prefers it and drops it, so APP gets no write)."""
     found = {"wave1": _report(state=[APP])}
     cell = job(APP_JOB, "success")
+    by_wave, ran = {"wave1": {APP: [2]}}, {"wave1": "success"}
     done, _ = apply_complete.classify(
-        {"wave1": {APP: [2]}}, {"wave1": "success"}, [cell, job(APP_LEG, "success")], "", found
+        by_wave, ran, [own(RUN_L0), cell, job(APP_LEG, "success")], "900", found
     )
     lagging, _ = apply_complete.classify(
-        {"wave1": {APP: [2]}}, {"wave1": "success"}, [cell, job(APP_LEG, None)], "", found
+        by_wave, ran, [own(RUN_L0), cell, job(APP_LEG, None)], "900", found
     )
     assert apply_complete.merge(done + lagging) == [row(APP, [2], cell)]
 
@@ -1265,10 +1302,10 @@ def test_a_leg_is_matched_by_its_whole_name(name, stack, env, leg):
     assert apply_complete.ag.is_leg_job(name, stack, env) is leg
 
 
-def _main(by_wave, results, jobs, states, mode="complete"):
+def _main(by_wave, results, jobs, states, mode="complete", level=LEVEL):
     return subprocess.run(
         [sys.executable, str(SCRIPTS / "apply-complete")],
-        input="\n".join(json.dumps(j) for j in jobs),
+        input="\n".join(json.dumps(j) for j in [own(level), *jobs]),
         env={
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(by_wave),
@@ -1338,7 +1375,7 @@ def _verdict_of(tmp_path, rows, by_wave):
 
 def _verdict(tmp_path, jobs, states):
     by_wave = {"wave1": {APP: [2], DB: [3]}}
-    rows = _main(by_wave, {"wave1": "success"}, jobs, states, mode="verdict").stdout
+    rows = _main(by_wave, {"wave1": "success"}, jobs, states, "verdict", RUN_L0).stdout
     return _verdict_of(tmp_path, rows, by_wave)
 
 
