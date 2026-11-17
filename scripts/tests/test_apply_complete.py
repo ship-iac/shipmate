@@ -152,15 +152,17 @@ def test_a_listing_without_this_job_matches_no_cell():
 @pytest.mark.parametrize(
     ("by_wave", "name", "level"),
     [
-        ({"wave0": {"apply / detect / apply": [5]}}, "apply / detect", "apply"),
+        ({"wave0": {"apply / detect / run": [5]}}, "apply / run / detect", "apply"),
         (BY_WAVE, "apply / verify / dev-eu / stacks/app", "apply / verify"),
     ],
     ids=["orchestration-job", "non-wave-cell-job"],
 )
 def test_only_a_wave_job_completes_a_cell(by_wave, name, level):
     """A job outside an `L<n>` env-level can end in ` / <env> / <stack>`: the orchestration
-    job `apply / detect` does for env `apply` and root stack `detect`, and it succeeds when
-    that cell's wave failed. Mutation: `apply-gate.is_cell_job` drops the `L<n>` segment."""
+    job `apply / run / detect` does for env `run` and root stack `detect`, and it succeeds when
+    that cell's wave failed. Each `level` makes the job's whole name the one `cell_jobs` builds.
+    Mutations: `apply-gate.is_cell_job` drops the `L<n>` segment (non-wave-cell-job);
+    `cell_jobs` drops its `is_cell_job` test (both)."""
     rows, unresolved = _classify([job(name, "success")], by_wave, level=level)
     assert (rows, len(unresolved)) == ([], len(by_wave))
 
@@ -182,9 +184,9 @@ def test_never_completes_a_cell_that_was_not_snapshotted():
 def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
     """A "dev-eu / stacks/dns" job shares its trailing characters with env `eu`'s cell job
     "eu / stacks/dns" but is another env, so only a ` / `-boundary-respecting suffix may
-    count. Same idiom as scripts/apply-comment's _job_url, pinned in
+    count. `is_cell_job`'s own boundary is pinned in
     test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
-    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
+    Mutation: `apply-gate.cell_jobs` matches a bare `endswith` of `<env> / <stack>`."""
     by_wave = {"wave0": {"apply / stacks/dns / eu": [1]}}
     assert _classify([job("L0 / dev-eu / stacks/dns", "success")], by_wave)[0] == []
 
@@ -193,7 +195,7 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     """Two real cells, "stacks/app" and a bare "app", plus two decoy jobs sharing a trailing
     substring with each without naming them: a different stack ("stacks/my-app") and a
     different env ("prod-dev-eu"). None of it may complete anything.
-    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
+    Mutation: `apply-gate.cell_jobs` matches a bare `endswith` of `<env> / <stack>`."""
     by_wave = {"wave0": {"apply / stacks/app / dev-eu": [2, 3], "apply / app / dev-eu": [99]}}
     jobs = [
         job("L0 / dev-eu / stacks/my-app", "success"),
