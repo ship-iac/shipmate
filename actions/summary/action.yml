@@ -679,12 +679,23 @@ runs:
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_GATE_STATE: ${{ steps.gate.outputs.state }}
         SHIPMATE_COMMENT_MODE: ${{ steps.gate.outputs.comment_mode }}
+        # reply-comment's input.
+        PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
         # Reviewer-facing degrade only: the gate is already written and nothing here touches it.
-        if ! envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" 2>decide.err); then
+        rc=0
+        envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" 2>decide.err) || rc=$?
+        if [ "$rc" -ne 0 ]; then
           sed 's/^::error::/::warning::/' decide.err >&2
           echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+          # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
+          # pull request gets the same reply as a failed dispatch.
+          if [ "$rc" -eq 3 ]; then
+            SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME=failed \
+              SHIPMATE_REPLY_TEXT="auto apply not started: the autoplan runs of this head could not be read; comment \`shipmate apply\`" \
+              python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+          fi
           exit 0
         fi
         cat decide.err >&2

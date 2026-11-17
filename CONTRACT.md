@@ -299,8 +299,9 @@ writes them again. Apply runs of one pull request run one at a time, so an
 `in_progress` check that a pre-merge `snapshot` sees belongs to a dead run.
 
 **In-progress checks on a merge deploy.** The merge deploy refuses the whole run
-over a pending cell whose newest App apply check is `in_progress` under another
-run that may have applied the cell or may still apply it: a live holding run may
+over a pending cell with an App apply check `in_progress` under another run
+that may have applied the cell or may still apply it, whether that check is the
+cell's newest or an older one under a newer re-plan check: a live holding run may
 still apply it, and an ended one may have applied it without saving its state.
 This refusal runs after the stranded-check and behind-check refusals and before
 the deploy reads any plan run. The check's details link names the holding run
@@ -2775,7 +2776,9 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   no run as new as this one lags it and dispatches with the warning "autoplan
   run <id> of <head> is not listed yet; dispatching the auto apply, whose own
   provenance check refuses if this run is not the newest"; a failed or
-  malformed listing dispatches nothing, with a warning. An autoplan created
+  malformed listing dispatches nothing, warns, and posts one reply, ``🔴 failed:
+  auto apply not started: the autoplan runs of this head could not be read;
+  comment `shipmate apply` ``. An autoplan created
   after this read still makes the `auto` run refuse.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
@@ -3450,14 +3453,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty, which run on
+  every engine job but thirty-one, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `gate-hold`
   and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and
   `complete`, and `unlock.yml`'s
-  `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
+  `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-one
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the

@@ -8,6 +8,7 @@ The gate conditions are fed from `gate-state.decide`'s real outputs, so a change
 
 import json
 import os
+import re
 
 import pytest
 from _loader import (
@@ -186,6 +187,7 @@ def test_the_dispatch_steps_are_wired_exactly():
         "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
         "SHIPMATE_GATE_STATE": "${{ steps.gate.outputs.state }}",
         "SHIPMATE_COMMENT_MODE": "${{ steps.gate.outputs.comment_mode }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
     }
     mint = step_by("summary", name=MINT)
     assert mint["id"] == "autotoken"
@@ -210,6 +212,13 @@ def test_the_dispatch_steps_are_wired_exactly():
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
     }
+
+
+def test_the_decision_replies_on_auto_dispatchs_unread_exit_code():
+    """The step keys its reply on a bare exit-code literal, which must be `UNREAD`; every
+    `-eq` comparison of `$rc` in the step is that one. Mutation: renumber `UNREAD` to 4 -- red."""
+    run = step_by("summary", name=DECIDE)["run"]
+    assert re.findall(r'"\$rc" -eq ([0-9]+)', run) == [str(ad.UNREAD)]
 
 
 # A stub, not `_GH_RECORDER`: that one discards stdin.
@@ -318,6 +327,8 @@ _LISTING = (
 )
 
 
+_COMMENTS = "repos/acme/demo/issues/42/comments"
+
 _JQ = (
     ".workflow_runs[] | {id, event, head_sha, status, conclusion, run_attempt, created_at, "
     "actor: {login: .actor.login}, triggering_actor: {login: .triggering_actor.login}} | tojson"
@@ -398,7 +409,7 @@ def test_a_failed_autoplan_listing_warns_on_one_line(tmp_path):
         tmp_path, DECIDE, cells=[("dev", True)], runs="", runs_rc=1, runs_err="HTTP 404\nnext"
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert (_paths(calls), outputs) == ([_LISTING], {})
+    assert (_paths(calls), outputs) == ([_LISTING, _COMMENTS], {})
     assert proc.stderr.splitlines() == [
         (
             f"::warning::the autoplan runs of {HEAD_SHA} could not be read (command failed (1): gh "
@@ -418,24 +429,37 @@ def test_a_failed_autoplan_listing_warns_on_one_line(tmp_path):
     ],
     ids=["failed", "not-json", "str-id", "missing-keys"],
 )
-def test_an_unreadable_autoplan_listing_decides_nothing_and_warns(tmp_path, runs, rc):
-    """Toward no apply: the step's degrade, a warning and no `envs`. Mutations: treat a failed
-    read as newest (the `failed` row dispatches); catch `ValueError` as newest (the malformed
-    rows dispatch)."""
+def test_an_unreadable_autoplan_listing_decides_nothing_warns_and_replies(tmp_path, runs, rc):
+    """Toward no apply: the step's degrade, a warning, no `envs`, and a reply with the step's
+    token saying that no auto apply started and to comment `shipmate apply`.
+
+    Mutations: treat a failed read as newest (the `failed` row dispatches); catch `ValueError`
+    as newest (the malformed rows dispatch); drop the reply call -- no comment call, red."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs=runs, runs_rc=rc)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert (_paths(calls), outputs) == ([_LISTING], {})
+    assert (_paths(calls), outputs) == ([_LISTING, _COMMENTS], {})
     assert proc.stdout.splitlines() == [
         "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+    ]
+    assert (tmp_path / "reply.md.token").read_text(encoding="utf-8") == "x"
+    assert (tmp_path / "reply.md").read_text(encoding="utf-8").splitlines()[:3] == [
+        "### shipmate apply",
+        "",
+        (
+            "🔴 failed: auto apply not started: the autoplan runs of this head could not be "
+            "read; comment `shipmate apply`"
+        ),
     ]
 
 
 @bash_only
 @pytest.mark.parametrize("auto", ["", "not json", '{"dev": 1}', '["dev", 1]'])
 def test_a_missing_or_malformed_auto_set_decides_nothing_and_warns(tmp_path, auto):
-    """Toward no apply: the step degrades the refusal to warnings and writes no `envs`.
+    """Toward no apply: the step degrades the refusal to warnings, writes no `envs` and posts no
+    reply, since no change is known to call for an auto apply.
 
-    Mutation: treat a malformed value as `[]` (the step succeeds, `envs` is written empty)."""
+    Mutations: treat a malformed value as `[]` (the step succeeds, `envs` is written empty);
+    reply on every failure of the decision -- a comment call, red."""
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], auto=auto)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (calls, outputs) == ([], {})
@@ -610,7 +634,7 @@ def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab
 
 
 @pytest.mark.parametrize("code", [None, 1], ids=["none", "int"])
-def test_a_listing_exit_without_text_names_a_fixed_cause(monkeypatch, code):
+def test_a_listing_exit_without_text_names_a_fixed_cause(monkeypatch, capsys, code):
     """A `SystemExit` with no text names `gh failed`, not `None` or `1`. Mutation: print
     `str(exc.code)`."""
 
@@ -620,6 +644,7 @@ def test_a_listing_exit_without_text_names_a_fixed_cause(monkeypatch, code):
     monkeypatch.setattr(ad.ag, "newest_autoplan", fail)
     with pytest.raises(SystemExit) as exc:
         ad.newer_autoplan("acme/demo", HEAD_SHA, "999")
-    assert exc.value.code == (
-        f"::error::the autoplan runs of {HEAD_SHA} could not be read (gh failed)"
+    assert exc.value.code == ad.UNREAD
+    assert capsys.readouterr().err == (
+        f"::error::the autoplan runs of {HEAD_SHA} could not be read (gh failed)\n"
     )

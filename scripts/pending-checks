@@ -30,7 +30,9 @@ refuses over it, and deploy-detect's work queue comes up empty.
 
 Only cells this run has not published are emitted, judged against the head's check runs in the
 JSONL file `SHIPMATE_CHECK_RUNS` (the App `SHIPMATE_APP_ID`'s, newest per name): a re-run of the
-summary job leaves alone a check an apply has completed, or is completing, since. A record from a
+summary job leaves alone a check an apply has completed, or is completing, since. A cell planned
+over this run's own behind record, which an earlier attempt published, gets its plan check
+anyway. A record from a
 newer plan run refuses before any cell summary is read, so an older run never replaces a newer
 run's checks, whatever its cells hold. That refusal alone exits `NEWER_RUN`: the summary step holds
 the gate on any other failure.
@@ -212,7 +214,9 @@ def main():
         (ag.check_name(cell["stack"], cell["environment"]), cj, cell)
         for cj, cell in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
     ]
-    todo = [c for c in cells if c[0] not in done]
+    # A behind record of this run's earlier attempt does not stand for a cell this attempt plans.
+    behind = ag.behind_names(lines, os.environ.get("SHIPMATE_APP_ID", ""))
+    todo = [c for c in cells if c[0] not in done - behind]
     report = gs.behind_cells(os.environ.get("SHIPMATE_BEHIND", ""))
     rows = [] if report is None else report["cells"]
     gap = gs.evidence_gap(
@@ -232,7 +236,6 @@ def main():
         print(json.dumps(body(name, cj, cell, head, plan_run, pr, total, action, url)))
     # This run's earlier attempt may have published a plan check under the name; only a behind
     # record of this run stands for this behind cell.
-    behind = ag.behind_names(lines, os.environ.get("SHIPMATE_APP_ID", ""))
     for row in rows:
         if ag.check_name(row["stack"], row["environment"]) not in done & behind:
             print(json.dumps(behind_body(row, report, head, plan_run, pr, total, action)))

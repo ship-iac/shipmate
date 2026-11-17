@@ -1828,6 +1828,28 @@ def test_a_check_a_live_run_holds_refuses_the_deploy(tmp_path, monkeypatch, stat
     assert "wave0" not in github_outputs(tmp_path / "out.txt")
 
 
+def test_a_newer_replan_check_does_not_hide_an_older_held_one(tmp_path, monkeypatch):
+    """A same-head re-plan queued a newer `stacks/app` check while run 77, still running, holds
+    the older one `in_progress`: the deploy refuses as it does with the held check alone.
+
+    Mutation: read only each cell's newest App apply check -- deploys, red."""
+    checks = [
+        _in_flight("stacks/app", cells=2, id=1),
+        _apply_check("stacks/web", cells=2, id=2),
+        _apply_check("stacks/app", cells=2, id=3),
+    ]
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app"), _cell("stacks/web")],
+            checks=checks,
+            runs=_holder("in_progress"),
+        )
+    assert str(exc.value) == _LIVE
+    assert "wave0" not in github_outputs(tmp_path / "out.txt")
+
+
 def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkeypatch):
     """Run 77 reads `completed` on attempt 1, but its listing shows the cell's attempt-1 job not
     `completed`: the cell is held as live.

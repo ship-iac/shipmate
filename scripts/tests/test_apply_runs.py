@@ -156,8 +156,19 @@ def test_run_jobs_reads_every_page():
     """Mutation: stop after the first page -- red (the `in_progress` job lost)."""
     first = [{"name": f"j{i}", "status": "completed"} for i in range(100)]
     second = [{"name": "apply / run / L0 / dev / app", "status": "in_progress"}]
-    run = _Gh({_jobs(1): {"jobs": first}, _jobs(2): {"jobs": second}})
-    assert _shipmate.run_jobs("o/r", 5, run=run) == (first + second, True)
+    pages = {
+        _jobs(1): {"total_count": 101, "jobs": first},
+        _jobs(2): {"total_count": 101, "jobs": second},
+    }
+    assert _shipmate.run_jobs("o/r", 5, run=_Gh(pages)) == (first + second, True)
+
+
+def test_run_jobs_with_a_listing_short_of_its_count_is_incomplete():
+    """A listing that returns fewer jobs than its `total_count` hides a job, which may be the
+    one that keeps a run from reading idle. Mutation: `listed_jobs` without `counted` -- red."""
+    jobs = [{"name": "apply / run / review", "status": "completed"}]
+    run = _Gh({_jobs(1): {"total_count": 2, "jobs": jobs}})
+    assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
 
 
 def test_run_jobs_with_a_failed_second_page_is_incomplete():

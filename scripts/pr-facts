@@ -29,6 +29,7 @@ from _shipmate import (
     READ_ERRORS,
     command_data,
     event_payload,
+    exit_text,
     is_pr_number,
     one_line,
     run_annotated,
@@ -119,9 +120,7 @@ def draft_now(repository, number):
     try:
         draft = _gh_json(f"repos/{repository}/pulls/{number}")["draft"]
     except READ_ERRORS as exc:
-        cause = (
-            str(exc.code).removeprefix("::error::") if isinstance(exc, SystemExit) else repr(exc)
-        )
+        cause = exit_text(exc) if isinstance(exc, SystemExit) else repr(exc)
     else:
         if isinstance(draft, bool):
             return "true" if draft else "false"

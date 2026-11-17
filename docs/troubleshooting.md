@@ -1424,7 +1424,12 @@ other case, re-plan and reconcile against the provider:
    Do not apply the re-plan or forget the address. The plan does not identify
    the object the lost apply created; the `Apply the stored plan` log names it
    only if it shows `Creation complete … [id=…]` for that address. On the open
-   pull request, the re-plan completes or replaces the cell's apply check.
+   pull request, a re-plan by comment on the same head publishes a newer apply
+   check for the cell. An older check of the cell that a run left `in_progress`
+   on that head stays so, and a merge deploy can refuse over it: return or
+   complete it as in
+   [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
+   before merging.
    After the merge, a new pull request's plan completes only its own head's
    check. The merged head's check stays pending, and nothing reads it again:
    a later deploy takes only the pending checks of its own merge's pull
@@ -2268,8 +2273,8 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
    head's autoplan runs not listed or malformed) it warns `could not decide
-   whether to dispatch an auto apply; no auto apply started` and posts no
-   reply. Separately, when an autoplan of a
+   whether to dispatch an auto apply; no auto apply started`. It posts a reply
+   only when the autoplan runs could not be read (below). Separately, when an autoplan of a
    pull request that is not a draft was not started by a push (marking it
    ready, reopening it or another non-push event started it, or its event could
    not be read) and a changed cell of an `auto` environment is not locked by
@@ -2300,6 +2305,13 @@ Once the `auto` run has finished, comment `shipmate apply` to apply what it did
 not, under the comment-time apply requirements, except a cell held because the
 base changed its stack: update the branch from the base and push (§`⚪ held, the
 base changed these stacks after this branch left it`).
+
+### `auto apply not started: the autoplan runs of this head could not be read`
+
+The plan run's `summary` job found a change for an `auto` environment but could
+not read the head's autoplan runs to check that this run is the newest, so it
+dispatched nothing. A `::warning::` on that run names the cause. The gate is
+unchanged and nothing applied. Comment `shipmate apply`.
 
 ### `auto apply not started: the dispatch failed`, or `auto apply may have started: the dispatch answered with an error`
 
@@ -3087,10 +3099,10 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-two jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+All thirty-three jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
 `claim`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `claim`, `queue` and `outcome`,
 `apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
-`wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary`,
+`wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 
@@ -3273,8 +3285,9 @@ always passes one.
 
 ### A merge deploy refused an apply check another run holds in progress
 
-The annotation starts `deploy refused:` and names, per cause, the cells whose
-newest apply check is `in_progress` under a run other than this deploy. It ends
+The annotation starts `deploy refused:` and names, per cause, the cells with
+an apply check `in_progress` under a run other than this deploy, the newest or an
+older one under a newer re-plan check. It ends
 naming every other pending cell of the merge, which the refused deploy does not
 apply either. A release job flips a cell's check to `in_progress` with a link to
 its run, and that run's completion writes it again. A gate-bypassing merge while
@@ -3287,7 +3300,7 @@ lifecycle, In-progress checks on a merge deploy).
 | The annotation says | Do |
 | --- | --- |
 | `are held in progress by run <id>, which is still running` | Once run `<id>` ends, re-run this deploy. A cell whose check that run left in progress deploys if the run never applied it and is refused otherwise, with the next row's text. If the run's page shows it ended and the deploy still refuses with this text, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
-| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | A job of the cell in run `<id>` does not show that it never applied (no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`), so it may have changed infrastructure, and its check was never completed. Read that run's cell job log. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return the check to `queued`, or complete it when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
+| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | A job of the cell in run `<id>` does not show that it never applied (no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`), so it may have changed infrastructure, and the cell's checks that run holds were never completed. Read that run's cell job log. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return each of those checks to `queued`, or complete each when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 | `run <id> could not be read completely` | The run or its jobs listing could not be read completely; a warning above the annotation names the cause. Re-run this deploy. If it fails the same way, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 | `apply check <check id> is in progress with no run named` | The check's details link is not exactly a run page of this repository, `<server>/<owner>/<repo>/actions/runs/<id>`, so the deploy cannot tell which run holds the cell or whether that run applied it. A renamed or transferred repository is one way a link stops matching. Follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 
@@ -3323,8 +3336,9 @@ it``. A later refusal of the same deploy can still stop it.
    check run can update it, so neither `GITHUB_TOKEN` nor a personal token can.
    GitHub's flow signs a JWT with the App's private key and calls
    `POST /app/installations/<installation id>/access_tokens`.
-4. With that token as `GH_TOKEN`, either return the check to `queued`, so the
-   re-run deploy applies it:
+4. With that token as `GH_TOKEN`, take each of the cell's apply checks that is
+   `in_progress` on the head, and either return it to `queued`, so the re-run
+   deploy applies the cell:
 
    ```bash
    gh api -X PATCH repos/<owner>/<repo>/check-runs/<check id> -f status=queued
@@ -3338,6 +3352,10 @@ it``. A later refusal of the same deploy can still stop it.
      -f status=completed -f conclusion=success
    ```
 
+   A newer check of the cell that a re-plan queued stays `queued`, and the
+   re-run deploy applies the cell from it. When the change is already applied
+   and its state saved, complete that newer check the same way too; when the
+   cell should be applied again, leave it queued.
 5. Re-run this deploy.
 
 ### The post-merge deploy was dropped as superseded

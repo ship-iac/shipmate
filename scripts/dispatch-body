@@ -74,12 +74,11 @@ from _shipmate import (
     _MAX_PAGES,
     _PAGE,
     SHIPMATE_WORKFLOW,
-    command_data,
-    one_line,
     parse_run_title,
     retried,
     run,
     run_annotated,
+    warn,
 )
 
 MAY_HAVE_STARTED = 3
@@ -261,7 +260,7 @@ def _before_retry(repo, t0, failed_at):
             landed = listed()
         except (SystemExit, Exception) as e:
             why = str(e.code) if isinstance(e, SystemExit) else f"{type(e).__name__}: {e}"
-            _warn(f"listing shipmate.yml runs failed: {why}")
+            warn(f"listing shipmate.yml runs failed: {why}")
             raise SystemExit(UNDETERMINED) from None
         if landed:
             raise SystemExit(MAY_HAVE_STARTED)
@@ -269,17 +268,11 @@ def _before_retry(repo, t0, failed_at):
     return before_retry
 
 
-def _warn(cause):
-    """Print `cause`, gh's stderr possibly among it, as one escaped `::warning::` line: a caller
-    that reaches here degrades or posts its own failure."""
-    print(f"::warning::{command_data(one_line(cause))}", file=sys.stderr)
-
-
 def _exit_failed(e, failed):
     """Exit for `retried`'s final `SystemExit` `e` after `failed` failed attempts."""
     if isinstance(e.code, int):
         raise e
-    _warn(e.code)
+    warn(e.code)
     # Only a first attempt that failed without a transient failure cannot have started a run.
     if failed > 1:
         raise SystemExit(UNDETERMINED) from None

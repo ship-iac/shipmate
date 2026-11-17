@@ -48,6 +48,7 @@ from _shipmate import (
     _load,
     _run,
     check_runs,
+    exit_text,
     gh_json,
     named,
     one_line,
@@ -610,7 +611,7 @@ def _base_tip(repo, pr_number, read, lead, remedy):
         pull = read()
         return pull["base"]["ref"], ag.base_tip(repo, pull, run=_run)
     except SystemExit as e:
-        why = one_line(str(e.code).removeprefix("::error::"))
+        why = one_line(exit_text(e))
     except (LookupError, TypeError, AttributeError, ValueError) as e:
         why = repr(e)
     raise SystemExit(
