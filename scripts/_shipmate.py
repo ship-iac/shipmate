@@ -849,6 +849,12 @@ def one_line(text):
     return " | ".join(part for part in str(text).splitlines() if part)
 
 
+def warn(cause):
+    """Print `cause`, gh's stderr possibly among it, as one escaped `::warning::` line on
+    stderr."""
+    sys.stderr.write(f"::warning::{command_data(one_line(cause))}\n")
+
+
 def status_text(status):
     """A listed run's `status` as log or refusal words: one line, `_` read as a space."""
     return one_line(status).replace("_", " ")

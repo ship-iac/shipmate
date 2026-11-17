@@ -37,15 +37,12 @@ from _shipmate import (
     retried,
     run_annotated,
     titled_runs,
+    warn,
 )
 
 ag = _load("apply-gate")
 
 _NONE = "so no open pull request was re-planned after this push"
-
-
-def _warn(text):
-    sys.stderr.write(f"::warning::{command_data(one_line(text))}\n")
 
 
 def read_push(raw):
@@ -111,7 +108,7 @@ def candidates(repo, pulls, stacks, outside, app_id):
             named = check_stacks(repo, pull["sha"], app_id)
         except READ_ERRORS as e:
             why = exit_text(e) if isinstance(e, SystemExit) else repr(e)
-            _warn(f"pull request #{pull['number']} was not re-planned: {why}")
+            warn(f"pull request #{pull['number']} was not re-planned: {why}")
             continue
         if named and (outside or named & stacks):
             picked.append(pull["number"])
@@ -124,7 +121,7 @@ def without_live_applies(repo, picked, slug):
     listed, complete = _shipmate._live_dispatch_runs(repo, SHIPMATE_WORKFLOW)
     _, unparsed = titled_runs(listed, (), "")
     if not complete or any(dispatched_by_app(r, slug) for r in unparsed):
-        _warn(f"the live shipmate.yml run listing is incomplete, {_NONE}")
+        warn(f"the live shipmate.yml run listing is incomplete, {_NONE}")
         return None
     kept = []
     for number in picked:
@@ -147,10 +144,10 @@ def main():
     app_id, slug = os.environ.get("SHIPMATE_APP_ID", ""), os.environ.get("SHIPMATE_APP_SLUG", "")
     push = read_push(os.environ.get("SHIPMATE_PUSH", ""))
     if push is None:
-        _warn(f"deploy detect did not report the changed stacks, {_NONE}")
+        warn(f"deploy detect did not report the changed stacks, {_NONE}")
         return
     if not (app_id and slug):
-        _warn(f"the App id or slug is empty, {_NONE}")
+        warn(f"the App id or slug is empty, {_NONE}")
         return
     stacks, outside = push
     pulls = open_pulls(repo, os.environ["SHIPMATE_DEFAULT_BRANCH"])

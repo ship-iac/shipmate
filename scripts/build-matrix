@@ -23,6 +23,7 @@ from _shipmate import (
     _load,
     _run,
     command_data,
+    exit_text,
     named,
     one_line,
     run,
@@ -484,7 +485,7 @@ def _remove_worktree(tree):
     try:
         run(["git", "worktree", "remove", "--force", tree])
     except SystemExit as e:
-        why = one_line(str(e.code).removeprefix("::error::"))
+        why = one_line(exit_text(e))
         print(f"::warning::{command_data(f'could not remove the merge worktree {tree} ({why})')}")
 
 
