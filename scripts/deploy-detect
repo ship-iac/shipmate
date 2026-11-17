@@ -239,23 +239,38 @@ def _read_run(repo, run_id):
     return status, attempt
 
 
+def _job_attempts(run_id, jobs):
+    """The `run_attempt` of each of run `run_id`'s listed `jobs`, or None, with one warning
+    naming the cause, when it lists no job or a job whose attempt is not an int."""
+    if not jobs:
+        sys.stderr.write(f"::warning::run {run_id} lists no job\n")
+        return None
+    bad = [j.get("run_attempt") for j in jobs if type(j.get("run_attempt")) is not int]
+    if bad:
+        found = command_data(repr(bad[0]))
+        sys.stderr.write(f"::warning::run {run_id} lists a job with run_attempt {found}\n")
+        return None
+    return [j["run_attempt"] for j in jobs]
+
+
 def _holding_run(repo, run_id):
-    """`("live", None)` while run `run_id` is not `completed`, or when read again after its jobs
-    listing it is not the same completed attempt: a re-run between the reads may not list its
-    jobs yet. `("ended", jobs)` otherwise, with every job of every attempt. `("unreadable", None)`
-    when a run read or the jobs listing could not be read completely; each cause prints as one
-    warning."""
+    """`("live", None)` while run `run_id` is not `completed`, when its listing shows a job of an
+    attempt above the first read's, or when read again after its jobs listing it is not the same
+    completed attempt: a re-run between the reads may not list its jobs yet, or may list them
+    before the run read shows it. `("ended", jobs)` otherwise, with every job of every attempt.
+    `("unreadable", None)` when a run read or the jobs listing could not be read completely, a
+    job's `run_attempt` included; each cause prints as one warning."""
     first = _read_run(repo, run_id)
     if first is None:
         return "unreadable", None
     if first[0] != "completed":
         return "live", None
     jobs = listed_jobs(repo, run_id, ad._run, counted=True, job_filter="all")
-    if jobs is None:
+    attempts = None if jobs is None else _job_attempts(run_id, jobs)
+    if attempts is None:
         return "unreadable", None
-    if not jobs:
-        sys.stderr.write(f"::warning::run {run_id} lists no job\n")
-        return "unreadable", None
+    if max(attempts) > first[1]:
+        return "live", None
     again = _read_run(repo, run_id)
     if again is None:
         return "unreadable", None
@@ -272,13 +287,13 @@ def refuse_in_flight(repo, lines, app_id, pending):
     this deploy passes over its own flips.
 
     The holder is read, its jobs listed, and the holder read again. While it is not
-    `completed`, or not the same completed attempt when read again after the listing, or a job
-    of the cell it lists is not `completed`, the cell is held. Otherwise its jobs listing
-    decides: when no job of the cell applied
-    (`_apply_not_started`, or no job at all), the ended holder writes nothing more to the check,
-    so the cell deploys with a warning; otherwise the cell is held. A run or listing that could
-    not be read completely, and a `details_url` naming no run of this repository, hold it too.
-    The refusal names every other pending cell, which it does not apply either."""
+    `completed`, lists a job of a later attempt, is not the same completed attempt when read
+    again after the listing, or lists a job of the cell that is not `completed`, the cell is
+    held. Otherwise its jobs listing decides: when no job of the cell applied
+    (`_apply_not_started`, or no job at all), the ended holder writes nothing more to the
+    check, so the cell deploys with a warning; otherwise the cell is held. A run or listing
+    that could not be read completely, and a `details_url` naming no run of this repository,
+    hold it too. The refusal names every other pending cell, which it does not apply either."""
     latest = ad.ag.latest_by_name(ad.ag.app_runs(lines, app_id))
     own = current_run_url()
     runs, held = {}, {}
@@ -308,12 +323,10 @@ def _name(cell):
 def _holder(repo, cell, check, runs):
     """`(cause, id)` for `cell`, whose apply check `check` another run holds in progress:
     `("unknown", <check id>)` when `details_url` names no run of this repository, else
-    `(<cause>, <run id>)`: from the run's state in `runs`, filled through `_holding_run` once per
-    run, `live` when it is not `completed` or not the same completed attempt when read again
-    after the listing, and also while a job of the cell it lists is not `completed`; `deploy`
-    when the run
-    ended and every job of the cell shows it never applied (`_apply_not_started`), or when the run
-    lists no job of the cell."""
+    `(<cause>, <run id>)`: the run's state in `runs`, filled through `_holding_run` once per
+    run; also `live` while a job of the cell it lists is not `completed`; `deploy` when the run
+    ended and every job of the cell shows it never applied (`_apply_not_started`), or when the
+    run lists no job of the cell."""
     url, page = check.get("details_url") or "", current_run_url("")
     run_id = url.removeprefix(page) if url.startswith(page) else ""
     if not is_run_id(run_id):

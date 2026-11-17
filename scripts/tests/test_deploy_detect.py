@@ -396,8 +396,8 @@ def _holder(status, jobs=None, total=None, attempt=1, again=None):
 
 
 def _answer(runs, path):
-    """`_run_main`'s answer to `path` from `runs`: its text, or its exception raised. A list
-    answers each read with its next item, and every later read with its last."""
+    """`_run_main`'s answer to `path` from `runs`, its own copy: its text, or its exception
+    raised. A list answers each read with its next item, and every later read with its last."""
     held = (runs or {}).get(path)
     if isinstance(held, list):
         held = held.pop(0) if len(held) > 1 else held[0]
@@ -469,6 +469,8 @@ def _run_main(
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
     stub_read_table(monkeypatch, (dd.bm.ec,), table, order, reads=reads)
     jsonl = "\n".join(json.dumps(c) for c in checks)
+    # A copy per call, so `_answer` never consumes a parametrized case's own lists.
+    runs = {k: list(v) if isinstance(v, list) else v for k, v in (runs or {}).items()}
     lock_answer = _lock_answer(locks)
 
     def _run(args):
@@ -1782,13 +1784,15 @@ _LIVE = (
 )
 
 
-def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed"):
-    """One listed job; `steps`, `(name, conclusion)` pairs, default to a started apply."""
+def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed", attempt=1):
+    """One listed job of run attempt `attempt`; `steps`, `(name, conclusion)` pairs, default to a
+    started apply."""
     if steps is None:
         steps = [("Set up job", "success"), ("Apply the cell", "success")]
     return {
         "name": name,
         "status": status,
+        "run_attempt": attempt,
         "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps],
     }
 
@@ -1851,6 +1855,18 @@ def test_a_rerun_between_the_reads_holds_the_cell_live(tmp_path, monkeypatch, ag
     runs = _holder("completed", [_job(steps=[])], again=again)
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, runs)
+    assert str(exc.value) == _LIVE
+
+
+def test_a_listed_job_of_a_later_attempt_holds_the_cell_live(tmp_path, monkeypatch):
+    """Both run reads show attempt 1 `completed`, but the listing already shows an attempt-2
+    `detect` queued: the re-run started and the run reads lag it. The cell's attempt-1 job never
+    applied, but attempt 2 may still apply it, so the cell is held as live.
+
+    Mutation: drop the job-attempt check -- deploys, red."""
+    jobs = [_job(steps=[]), _job(name="apply / run / detect", steps=[], status="queued", attempt=2)]
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert str(exc.value) == _LIVE
 
 
@@ -1968,6 +1984,7 @@ _BAD_ATTEMPTS = [None, True, "2"]
             for bad in _BAD_ATTEMPTS
         ],
         (_holder("completed", _NEVER_APPLIED, again=_GH_500), (4, 1)),
+        *[(_holder("completed", [_job(steps=[], attempt=bad)]), (1, 1)) for bad in _BAD_ATTEMPTS],
     ],
     ids=[
         "run read",
@@ -1979,23 +1996,25 @@ _BAD_ATTEMPTS = [None, True, "2"]
         *[f"first attempt {bad!r}" for bad in _BAD_ATTEMPTS],
         *[f"second attempt {bad!r}" for bad in _BAD_ATTEMPTS],
         "second read",
+        *[f"job attempt {bad!r}" for bad in _BAD_ATTEMPTS],
     ],
 )
 def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypatch, runs, reads):
     """A run read (first or second) or jobs listing that fails after its retries, an empty
     listing, a listing short of its `total_count`, and a run read with no string status or no
-    int `run_attempt` (null, true or "2", on either read) each refuse naming the run, with no
-    traceback: the cell may be applying. A repeat points at the by-hand section.
-    `reads` counts the run reads and the jobs listing reads. Under `filter=all`, `total_count`
-    counts every attempt's jobs: a probe of run 43649538511 listed 51 of 51 under `all` and 38
-    of 38 under `latest`.
+    int `run_attempt` (null, true or "2", on either read) or a listed job with one each refuse
+    naming the run, with no traceback: the cell may be applying. A repeat points at the by-hand
+    section. `reads` counts the run reads and the jobs listing reads. Under `filter=all`,
+    `total_count` counts every attempt's jobs: a probe of run 43649538511 listed 51 of 51 under
+    `all` and 38 of 38 under `latest`.
 
     Mutation: deploy on a failed read -- deploys, red.
     Mutation: deploy on a failed listing -- deploys, red.
     Mutation: list without the count check -- the short listing deploys, red.
     Mutation: read a missing status as `completed` -- the listing is read, red.
     Mutation: `isinstance` in place of `type(...) is int` -- a `true` attempt on both reads
-    deploys, red."""
+    deploys, red.
+    Mutation: accept a job with a non-int attempt -- a traceback or a deploy, red."""
     monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
     urls = []
     with pytest.raises(SystemExit) as exc:
