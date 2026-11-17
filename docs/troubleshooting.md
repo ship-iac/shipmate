@@ -1424,9 +1424,10 @@ other case, re-plan and reconcile against the provider:
    Do not apply the re-plan or forget the address. The plan does not identify
    the object the lost apply created; the `Apply the stored plan` log names it
    only if it shows `Creation complete … [id=…]` for that address. On the open
-   pull request, the re-plan publishes a newer apply check for the cell. An
-   older check of the cell that a run left `in_progress` stays so, and a merge
-   deploy refuses over it: return or complete it as in
+   pull request, a re-plan by comment on the same head publishes a newer apply
+   check for the cell. An older check of the cell that a run left `in_progress`
+   on that head stays so, and a merge deploy refuses over it: return or
+   complete it as in
    [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
    before merging.
    After the merge, a new pull request's plan completes only its own head's
