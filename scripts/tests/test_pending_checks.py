@@ -1039,6 +1039,28 @@ def test_an_earlier_attempts_plan_check_does_not_stand_for_a_behind_cell(tmp_pat
     ]
 
 
+def test_a_cell_an_earlier_attempt_found_behind_gets_a_plan_check(tmp_path, monkeypatch):
+    """Attempt 1 of this run found `stacks/c0` behind and published its behind check; this
+    attempt plans the cell, so its queued plan check is published over the behind record.
+
+    Mutation: skip every name this run published (`not in done`) -- no `stacks/c0` body,
+    red."""
+    earlier = _record_line(
+        9,
+        "apply / stacks/c0 / dev",
+        json.dumps({"plan_run": RUN_ID, "behind": True}),
+        status="queued",
+    )
+    bodies = _emit_behind(tmp_path, monkeypatch, records=[earlier])
+    assert [b["name"] for b in bodies] == [
+        "apply / stacks/c0 / dev",
+        "apply / stacks/workers / dev-eu",
+        "apply / modules/net / prod",
+    ]
+    assert bodies[0]["status"] == "queued"
+    assert "behind" not in json.loads(bodies[0]["external_id"])
+
+
 def test_the_summary_reads_a_bounded_prefix_and_the_digest_the_whole_file(tmp_path, monkeypatch):
     """The summary decodes only a prefix of the plan text, never a second whole copy, and the
     digest covers the whole file. 1,000,000 bytes of ASCII lines then the byte 0xFF, which a
