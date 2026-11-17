@@ -68,7 +68,6 @@ import sys
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
-import _shipmate
 from _shipmate import (
     _COMMENT_ID,
     _MAX_PAGES,
@@ -78,6 +77,7 @@ from _shipmate import (
     retried,
     run,
     run_annotated,
+    sleep,
     warn,
 )
 
@@ -251,7 +251,7 @@ def _before_retry(repo, t0, failed_at):
         while not command_run_listed(repo, t0, want, slug, run=run):
             if _now() >= deadline:
                 return False
-            _shipmate._sleep(_POLL_SECONDS)
+            sleep(_POLL_SECONDS)
         return True
 
     def before_retry():
