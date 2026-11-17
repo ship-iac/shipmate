@@ -8,6 +8,7 @@ The gate conditions are fed from `gate-state.decide`'s real outputs, so a change
 
 import json
 import os
+import re
 
 import pytest
 from _loader import (
@@ -211,6 +212,13 @@ def test_the_dispatch_steps_are_wired_exactly():
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
     }
+
+
+def test_the_decision_replies_on_auto_dispatchs_unread_exit_code():
+    """The step keys its reply on a bare exit-code literal, which must be `UNREAD`; every
+    exit-code comparison in the step is that one. Mutation: renumber `UNREAD` to 4 -- red."""
+    run = step_by("summary", name=DECIDE)["run"]
+    assert re.findall(r'"\$rc" -eq ([0-9]+)', run) == [str(ad.UNREAD)]
 
 
 # A stub, not `_GH_RECORDER`: that one discards stdin.

@@ -1424,7 +1424,11 @@ other case, re-plan and reconcile against the provider:
    Do not apply the re-plan or forget the address. The plan does not identify
    the object the lost apply created; the `Apply the stored plan` log names it
    only if it shows `Creation complete … [id=…]` for that address. On the open
-   pull request, the re-plan completes or replaces the cell's apply check.
+   pull request, the re-plan publishes a newer apply check for the cell. An
+   older check of the cell that a run left `in_progress` stays so, and a merge
+   deploy refuses over it: return or complete it as in
+   [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
+   before merging.
    After the merge, a new pull request's plan completes only its own head's
    check. The merged head's check stays pending, and nothing reads it again:
    a later deploy takes only the pending checks of its own merge's pull
@@ -3295,7 +3299,7 @@ lifecycle, In-progress checks on a merge deploy).
 | The annotation says | Do |
 | --- | --- |
 | `are held in progress by run <id>, which is still running` | Once run `<id>` ends, re-run this deploy. A cell whose check that run left in progress deploys if the run never applied it and is refused otherwise, with the next row's text. If the run's page shows it ended and the deploy still refuses with this text, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
-| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | A job of the cell in run `<id>` does not show that it never applied (no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`), so it may have changed infrastructure, and its check was never completed. Read that run's cell job log. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return the check to `queued`, or complete it when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
+| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | A job of the cell in run `<id>` does not show that it never applied (no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`), so it may have changed infrastructure, and the cell's checks that run holds were never completed. Read that run's cell job log. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return each of those checks to `queued`, or complete each when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 | `run <id> could not be read completely` | The run or its jobs listing could not be read completely; a warning above the annotation names the cause. Re-run this deploy. If it fails the same way, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 | `apply check <check id> is in progress with no run named` | The check's details link is not exactly a run page of this repository, `<server>/<owner>/<repo>/actions/runs/<id>`, so the deploy cannot tell which run holds the cell or whether that run applied it. A renamed or transferred repository is one way a link stops matching. Follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 
@@ -3347,6 +3351,10 @@ it``. A later refusal of the same deploy can still stop it.
      -f status=completed -f conclusion=success
    ```
 
+   A newer check of the cell that a re-plan queued stays `queued`, and the
+   re-run deploy applies the cell from it. When the change is already applied
+   and its state saved, complete that newer check the same way too; when the
+   cell should be applied again, leave it queued.
 5. Re-run this deploy.
 
 ### The post-merge deploy was dropped as superseded

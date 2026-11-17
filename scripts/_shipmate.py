@@ -820,9 +820,10 @@ def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest"):
 
 
 def run_jobs(repo, run_id, run=None):
-    """`(jobs, complete)`: `listed_jobs`, or `([], False)` when it is None or empty: a live run
-    that lists no job is not read as idle."""
-    jobs = listed_jobs(repo, run_id, run)
+    """`(jobs, complete)`: `listed_jobs` counted, or `([], False)` when it is None or empty: a
+    live run that lists no job is not read as idle, and a listing short of its `total_count` is
+    not read as every job."""
+    jobs = listed_jobs(repo, run_id, run, counted=True)
     return (jobs, True) if jobs else ([], False)
 
 

@@ -1,17 +1,19 @@
 """The prose counts and lists of engine jobs that run on `ubuntu-slim` or bind `shipmate-engine`
 match the workflows.
 
-Each count is derived from `.github/workflows/`: a job runs on `ubuntu-slim` when its `runs-on`
-is exactly that label, and binds `shipmate-engine` when its `environment` names it, as a string
-or as a mapping's `name`. Each list's backticked job ids, `wave0-<x>` … `wave7-<x>` expanded and
-workflow file names dropped, must equal the derived job ids as a multiset; which workflow a job
-sits under is not checked. Threat model: a job added, moved or relabelled without the prose
-following it.
+Each count is derived from the reusable engine workflows in `.github/workflows/`, those whose
+`on` holds `workflow_call`, so the repository's own CI does not count: a job runs on
+`ubuntu-slim` when its `runs-on` is exactly that label, and binds `shipmate-engine` when its
+`environment` names it, as a string or as a mapping's `name`. Each list's backticked job ids,
+`wave0-<x>` … `wave7-<x>` expanded and workflow file names dropped, must equal the derived job
+ids as a multiset; which workflow a job sits under is not checked. Threat model: a job added,
+moved or relabelled without the prose following it.
 
 Mutations, each red: `thirty-one` to `thirty` at each of `CONTRACT.md`'s two sites, `docs/aws.md`'s
 two sites and `docs/getting-started.md`'s; `thirty-three` to `thirty-two` in
 `docs/troubleshooting.md`; drop `and `result`` from the `unlock.yml` entry of the `CONTRACT.md`
-and `docs/aws.md` lists; drop `and `replan`` from `docs/troubleshooting.md`'s list.
+and `docs/aws.md` lists; drop `and `replan`` from `docs/troubleshooting.md`'s list; with
+`ci.yml`'s job moved to `ubuntu-slim`, drop the `workflow_call` filter.
 """
 
 import collections
@@ -30,10 +32,12 @@ def _words(n):
 
 
 def _jobs(selected):
+    workflows = [workflow_yaml(path) for path in sorted(WORKFLOWS.glob("*.yml"))]
     return [
         job
-        for path in sorted(WORKFLOWS.glob("*.yml"))
-        for job, spec in workflow_yaml(path)["jobs"].items()
+        for workflow in workflows
+        if "workflow_call" in workflow["on"]
+        for job, spec in workflow["jobs"].items()
         if selected(spec)
     ]
 
@@ -45,6 +49,12 @@ def _binds_engine(spec):
 
 SLIM = _jobs(lambda spec: spec.get("runs-on") == "ubuntu-slim")
 ENGINE_BOUND = _jobs(_binds_engine)
+
+
+def test_the_derived_counts_are_the_documented_ones():
+    """The counts the prose states, hand-written. Mutation: count every workflow with
+    `ci.yml`'s job on `ubuntu-slim` -- 32, red."""
+    assert (len(SLIM), len(ENGINE_BOUND)) == (31, 33)
 
 
 def _doc(name):

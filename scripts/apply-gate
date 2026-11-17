@@ -348,7 +348,7 @@ def newest_autoplan(repo, head, *, run):
 
 
 def planned(jobs):
-    """Whether a plan run planned, from `jobs`: the complete jobs listing (`_shipmate.listed_jobs`)
+    """Whether a plan run planned, from `jobs`: the complete jobs listing (`_shipmate.run_jobs`)
     of a run attempt that has ended, every job of that attempt, which the caller checks. It
     planned when exactly one job is named `CALLER_PREFIX + "detect"`, `completed` with conclusion
     `success`. A draft-skipped run lists that job `skipped`, a `closed`-event run and a run

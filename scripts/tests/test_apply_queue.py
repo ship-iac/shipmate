@@ -369,13 +369,33 @@ def test_a_malformed_jobs_listing_keeps_its_run_and_the_queue_still_replies(gh, 
 
     def gh_run(argv):
         run_id = int(argv[2].split("/")[5])
-        return json.dumps({"jobs": listings[run_id]})
+        return json.dumps({"total_count": len(listings[run_id]), "jobs": listings[run_id]})
 
     monkeypatch.setattr(aq, "run_jobs", lambda repo, rid: _shipmate.run_jobs(repo, rid, gh_run))
     gh.runs = [_r(40), _r(45)]
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
+
+
+def test_a_jobs_listing_short_of_its_count_cancels_nothing(gh, monkeypatch):
+    """Through the real `run_jobs`: stale run 40 lists only its waiting cell job and advertises
+    two jobs, so the hidden one may be applying: the run is kept, and nothing is cancelled or
+    replied.
+
+    Mutation: `run_jobs` lists without `counted` -- 40 is cancelled, red."""
+    import json
+
+    import _shipmate
+
+    def gh_run(argv):
+        jobs = [{"name": "apply / run / L0 / prod / app", "status": "waiting"}]
+        return json.dumps({"total_count": 2, "jobs": jobs})
+
+    monkeypatch.setattr(aq, "run_jobs", lambda repo, rid: _shipmate.run_jobs(repo, rid, gh_run))
+    gh.runs = [_r(40)]
+    gh.go()
+    assert (gh.cancels, gh.posts) == ([], [])
 
 
 def _stale(jobs):
