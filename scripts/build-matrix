@@ -71,6 +71,12 @@ def workload_of(tags, stack, errors=None):
     return workloads[0][len("workload/") :] if workloads else ""
 
 
+def slug_of(stack):
+    """A stack's slug, `stack` with every `/` replaced by `-`: the one Python derivation, which
+    must equal apply-cell's `Stack slug` step (`tr / -`)."""
+    return stack.replace("/", "-")
+
+
 def guard_slug_collisions(cells):
     """A plan artifact is `plan.<env>.<path with '/' replaced by '-'>`, so `a/b`
     and `a-b` in one environment produce ONE artifact name and an apply
@@ -84,7 +90,7 @@ def guard_slug_collisions(cells):
         by_slug = {}
         for c in cells:
             if c["environment"] == env:
-                by_slug.setdefault(c["stack"].replace("/", "-"), set()).add(c["stack"])
+                by_slug.setdefault(slug_of(c["stack"]), set()).add(c["stack"])
         for slug, paths in sorted(by_slug.items()):
             if len(paths) > 1:
                 raise SystemExit(

@@ -1,0 +1,31 @@
+name: shipmate state-read
+description: Find each cell of one wave in this run's jobs listing, read its state line from its job log, and class it for the state saver. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and read their logs. Runs no pull-request code and takes no key.
+inputs:
+  by-wave:
+    description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
+    required: true
+  wave:
+    description: The wave key whose cells to read, e.g. wave0.
+    required: true
+  job-id:
+    description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
+    required: true
+outputs:
+  cells:
+    description: JSON list of saver rows, one per cell whose log holds one state digest. Absent when the step failed.
+    value: ${{ steps.read.outputs.cells }}
+  report:
+    description: "JSON object `{state, none, not_applied, not_run: [check, ...], refused: {check: reason}}` naming every cell of the wave. Absent when the step failed."
+    value: ${{ steps.read.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - name: Read each cell's state line
+      id: read
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHIPMATE_BY_WAVE_JSON: ${{ inputs.by-wave }}
+        SHIPMATE_WAVE: ${{ inputs.wave }}
+        SHIPMATE_JOB_ID: ${{ inputs.job-id }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/state-read"

@@ -70,6 +70,7 @@ UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 RETRY_PREFIX = "retry: "
 UNEXPANDED = "${{ matrix.environment }} / ${{ matrix.stack }}"
 ERROR_LINE_CAP = 120
+EMPTY_LISTING = "the run jobs listing came back empty; cannot tell which wave cells succeeded"
 
 
 def _row(check, ids, job=None):
@@ -193,27 +194,30 @@ def plan(every_path):
             print(json.dumps(entry))
 
 
-def list_jobs():
-    """Print every job of this run, one JSON object per line, from one paginated `gh api` call,
-    unvalidated. A failed call prints its cause as one `::error::` and a `RETRY_PREFIX` line;
-    an empty listing prints a `RETRY_PREFIX` line. Both exit `UNRESOLVED_EXIT`: the
-    listing lags a finished job, and a failed or empty one is the extreme form of that lag. The
-    caller's loop is the only retry."""
+def fetch_jobs():
+    """Every job of this run as `gh api`'s raw JSON lines, from one paginated call. Raises
+    SystemExit naming the cause on a failed call or an empty listing: the listing lags a
+    finished job, and a failed or empty one is the extreme form of that lag."""
     repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
     path = f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"
+    listing = run(["gh", "api", "--paginate", "--jq", ".jobs[]", path])
+    if not listing.strip():
+        raise SystemExit(EMPTY_LISTING)
+    return listing
+
+
+def list_jobs():
+    """Print every job of this run, one JSON object per line, unvalidated (`fetch_jobs`). A
+    failure prints its cause as one `::error::` and a `RETRY_PREFIX` line, except an empty
+    listing, which prints only the `RETRY_PREFIX` line. Both exit `UNRESOLVED_EXIT`. The
+    caller's loop is the only retry."""
     try:
-        listing = run(["gh", "api", "--paginate", "--jq", ".jobs[]", path])
+        listing = fetch_jobs()
     except SystemExit as exc:
         cause = one_line(exc.code)
-        print_annotated(f"::error::{cause}")
+        if cause != EMPTY_LISTING:
+            print_annotated(f"::error::{cause}")
         print(RETRY_PREFIX + cause, file=sys.stderr)
-        sys.exit(UNRESOLVED_EXIT)
-    if not listing.strip():
-        print(
-            RETRY_PREFIX + "the run jobs listing came back empty; "
-            "cannot tell which wave cells succeeded",
-            file=sys.stderr,
-        )
         sys.exit(UNRESOLVED_EXIT)
     sys.stdout.write(listing)
 

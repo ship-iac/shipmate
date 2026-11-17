@@ -54,6 +54,7 @@ SCRIPTS_EXPECTED = [
     "reply-comment",
     "state-handoff",
     "state-path",
+    "state-read",
     "summary-comment",
     "tofu-error",
     "tool-versions",

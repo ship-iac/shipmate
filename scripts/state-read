@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Read each cell's state line from its own job log and class the wave's cells for the saver.
+
+Runs in a wave's `waveN-read` job, which runs no pull-request code, after the wave. For each
+cell of the wave (`SHIPMATE_BY_WAVE_JSON`'s `SHIPMATE_WAVE` entry) it finds the cell's job in
+this run's jobs listing (`apply-complete`'s `fetch_jobs`), restricted to this job's own level
+(the listed name of `SHIPMATE_JOB_ID`, this job's check run id), reads that job's log and counts
+whole lines matching `LINE`, the line `state-handoff` prints. It never prints a log line.
+
+- `state` (a saver row): one line with a digest and an `attempt` at most the job's
+  `run_attempt`.
+- `none`, `not_applied`: one line of that value.
+- `not_run`: no line, the job `cancelled`, `skipped` or `failure`, and its `steps` empty or its
+  `Apply the cell` step concluded `skipped`.
+- `refused`, with a reason: anything else.
+
+`not_run` comes only from GitHub's own record of the job, never from the cell's silence and
+never from the level's unexpanded matrix row, which every unexpanded wave of a level shares: a
+cell with no listed job is refused. A job concluded `success` is never `not_run`.
+
+The listing is retried for lag about 2 minutes, while any cell's job is missing or has no
+conclusion; a log with no line is re-read within its own retry budget before it counts as
+none; two lines refuse at once. Writes the outputs `cells` (the saver rows, JSON) and `report`
+(`{"state": [...], "none": [...], "not_applied": [...], "not_run": [...], "refused": {check:
+reason}}`) and exits 0 with refused cells. A listing that never succeeds, or that never lists
+this job, exits 1 with no output.
+"""
+
+import json
+import os
+import re
+import sys
+import time
+
+from _shipmate import _load, one_line, run, run_annotated, write_outputs
+
+ag = _load("apply-gate")
+ac = _load("apply-complete")
+bm = _load("build-matrix")
+
+LINE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z "
+    r"shipmate-state-digest=(none|not-applied|missing|[0-9a-f]{64}) attempt=([1-9][0-9]{0,3})"
+)
+#: The wave step that runs apply-cell; `deploy-detect` reads the same name.
+APPLY_STEP = "Apply the cell"
+#: About 2 minutes, as `apply-complete`'s listing loop.
+LISTING_DELAYS = (2, 3, 5, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10)
+LOG_DELAYS = (3, 5, 10, 15)
+NOT_LISTED = "the cell's job is not listed"
+NO_CONCLUSION = "the cell's job has no conclusion"
+
+
+def _wait(seconds):
+    time.sleep(seconds)
+
+
+def _jobs():
+    """The parsed listing, or None with a printed warning when it failed."""
+    try:
+        return ag.parse_jsonl(ac.fetch_jobs().splitlines())
+    except SystemExit as exc:
+        print(f"state-read: the jobs listing failed: {one_line(exc.code)}", file=sys.stderr)
+        return None
+
+
+def _level(jobs, job_id):
+    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
+    return own.rpartition(" / ")[0]
+
+
+def listed(cells, job_id):
+    """`(level, {check: [jobs]})` from the first listing that holds this job and a concluded job
+    for every cell, retried; else from the last listing that held this job. Raises SystemExit
+    when no listing held this job."""
+    best = None
+    for delay in (*LISTING_DELAYS, None):
+        jobs = _jobs()
+        level = _level(jobs or [], job_id)
+        if level:
+            names = {
+                check: f"{level} / {ag.cell_job_name(stack, env)}" for check, stack, env in cells
+            }
+            best = level, {c: [j for j in jobs if j.get("name") == n] for c, n in names.items()}
+            if all(m and all(j.get("conclusion") for j in m) for m in best[1].values()):
+                return best
+        if delay is not None:
+            _wait(delay)
+    if best is None:
+        raise SystemExit(
+            "::error::the run's jobs listing failed or never listed this job, so the wave's cells "
+            "cannot be found; no state is saved for this wave."
+        )
+    return best
+
+
+def _log(job_id):
+    repo = os.environ["GITHUB_REPOSITORY"]
+    return run(["gh", "api", f"repos/{repo}/actions/jobs/{job_id}/logs"])
+
+
+def state_lines(job_id):
+    """The `LINE` matches of the job's log, re-read while it holds none; None when no read
+    succeeded."""
+    found = None
+    for delay in (*LOG_DELAYS, None):
+        try:
+            text = _log(job_id)
+        except SystemExit as exc:
+            print(f"state-read: job {job_id}'s log read failed: {one_line(exc.code)}")
+        else:
+            lines = text.removeprefix("﻿").split("\n")
+            found = [m for m in map(LINE.fullmatch, (x.removesuffix("\r") for x in lines)) if m]
+            if found:
+                return found
+        if delay is not None:
+            _wait(delay)
+    return found
+
+
+def _never_started(job):
+    steps = job.get("steps")
+    if job.get("conclusion") not in ("cancelled", "skipped", "failure"):
+        return False
+    if steps == []:
+        return True
+    named = [s for s in steps or [] if s.get("name") == APPLY_STEP]
+    return len(named) == 1 and named[0].get("conclusion") == "skipped"
+
+
+def _without_log(matched):
+    """The class a cell takes from its listed jobs alone, or None when its log decides."""
+    if not matched:
+        return "refused", NOT_LISTED
+    if len(matched) > 1:
+        return "refused", f"{len(matched)} jobs match the cell"
+    if not matched[0].get("conclusion"):
+        return "refused", NO_CONCLUSION
+    # A job that ran no step has no log to read.
+    if matched[0].get("steps") == [] and _never_started(matched[0]):
+        return "not_run", None
+    return None
+
+
+def classify(check, stack, env, matched):
+    """`(class, detail)` for one cell: a saver row for `state`, a reason for `refused`."""
+    decided = _without_log(matched)
+    if decided:
+        return decided
+    job = matched[0]
+    found = state_lines(job.get("id"))
+    if found is None:
+        return "refused", "the cell's log could not be read"
+    if not found:
+        if _never_started(job):
+            return "not_run", None
+        return "refused", "no state line in the cell's log"
+    if len(found) > 1:
+        return "refused", f"{len(found)} state lines in the cell's log"
+    return _from_line(check, stack, env, job, found[0])
+
+
+def _from_line(check, stack, env, job, line):
+    value, attempt = line.group(1), int(line.group(2))
+    if not isinstance(job.get("run_attempt"), int) or attempt > job["run_attempt"]:
+        return "refused", "the state line's attempt is above the job's"
+    if value == "missing":
+        return "refused", "the apply ran and left no state file"
+    if value in ("none", "not-applied"):
+        return value.replace("-", "_"), None
+    row = {
+        "check": check,
+        "stack": stack,
+        "environment": env,
+        "slug": bm.slug_of(stack),
+        "digest": value,
+        "attempt": str(attempt),
+    }
+    return "state", row
+
+
+def main():
+    by_wave = json.loads(os.environ["SHIPMATE_BY_WAVE_JSON"])
+    wave = os.environ["SHIPMATE_WAVE"]
+    cells = [(c, *ag.parse_check_name(c)) for c in sorted(by_wave.get(wave) or {})]
+    _, matched = listed(cells, os.environ["SHIPMATE_JOB_ID"])
+    report = {"state": [], "none": [], "not_applied": [], "not_run": [], "refused": {}}
+    rows = []
+    for check, stack, env in cells:
+        kind, detail = classify(check, stack, env, matched[check])
+        if kind == "refused":
+            report["refused"][check] = detail
+        else:
+            report[kind].append(check)
+        if kind == "state":
+            rows.append(detail)
+        print(
+            one_line(f"state-read: {check}: {kind}" + (f" ({detail})" if kind == "refused" else ""))
+        )
+    write_outputs(cells=json.dumps(rows), report=json.dumps(report))
+
+
+if __name__ == "__main__":
+    run_annotated(main)
