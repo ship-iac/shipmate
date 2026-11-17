@@ -47,6 +47,16 @@ APPLY_PREFIX = "apply / "
 #: name, and `CONTRACT.md` §Check names states it.
 CALLER_PREFIX = "plan / "
 DONE_CONCLUSIONS = {"success", "neutral"}
+#: The apply-check title words for a cell whose state the saver did not save. `apply-complete`
+#: writes `Failed: state not saved (<reason>)` or `Cancelled: state not saved (<reason>)`, and
+#: `apply-comment` names the cells whose newest check carries one.
+STATE_NOT_SAVED = "state not saved"
+_LOST_TITLES = (f"Failed: {STATE_NOT_SAVED} (", f"Cancelled: {STATE_NOT_SAVED} (")
+
+
+def lost_state_title(cancelled, reason):
+    """The apply-check title for a cell whose state was not saved, for `reason`."""
+    return f"{'Cancelled' if cancelled else 'Failed'}: {STATE_NOT_SAVED} ({reason})"
 
 
 def env_pr_number():
@@ -135,6 +145,15 @@ def done_names(check_runs):
     conclusion, or a stale completed run superseded by a newer pending one,
     is never mistaken for done."""
     return {name for name, run in latest_by_name(check_runs).items() if _is_done(run)}
+
+
+def lost_state_names(check_runs):
+    """Names whose *latest* run's title starts with a `lost_state_title` form."""
+    return {
+        name
+        for name, run in latest_by_name(check_runs).items()
+        if str(((run.get("output") or {}).get("title")) or "").startswith(_LOST_TITLES)
+    }
 
 
 def parse_jsonl(lines):

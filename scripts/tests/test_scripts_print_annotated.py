@@ -52,6 +52,7 @@ SCRIPTS_EXPECTED = [
     "register-app",
     "repin",
     "reply-comment",
+    "state-handoff",
     "state-path",
     "summary-comment",
     "tofu-error",

@@ -28,7 +28,6 @@ def _cell(**kw):
         "environment": "dev-eu",
         "result": "applied",
         "reason": "",
-        "state_lost": False,
     }
     base.update(kw)
     return base
@@ -114,11 +113,11 @@ HINT = "Comment `shipmate help` for the available commands."
 #: repeats an apply whose state was not saved.
 _UNRECORDED_REMEDY = "Re-plan."
 
-#: What the `not attempted:` note appends when no row carries the lost-save marker: the lost cell's
-#: artifact can be missing, so the retry is never prescribed without the pointer.
+#: What the `not attempted:` note appends in both forms: the lost-state note reads the apply
+#: checks, and a failed check scan leaves a lost cell in no note.
 _LOST_POINTER = (
-    " If a cell's job log shows `The apply step ran and its state was not saved`, follow "
-    "docs/troubleshooting.md section of that name first."
+    " If a `save-state` or wave verdict job's log shows `The apply step ran and its state was "
+    "not saved`, follow docs/troubleshooting.md section of that name first."
 )
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
@@ -530,7 +529,7 @@ def test_the_not_attempted_note_names_the_targeted_env_escaped():
 
     Mutation: build the command without `_md_escape` -- red.
     Mutation: drop the lost-save pointer the note appends without a `state not saved:` note, which a
-    lost cell whose artifact did not upload needs -- red."""
+    lost cell needs when the check scan failed -- red."""
     rows = [_row(status="not_attempted", apply_text=None)]
     assert ac._not_attempted_note(rows, "x</summary>") == (
         "not attempted: the apply checks stay pending; retry with "
@@ -554,8 +553,8 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
     ]
     sections = _comment(rows, env="").split("\n\n")
     assert sections[-2] == (
-        "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply step ran and its state was "
-        "not saved or not verified. Never re-run these cells' jobs or their workflow run. A "
+        "state not saved: **@<!-- -->acme/db (dev-eu)**. Their apply step may have run, and no "
+        "saved state was found for them. Never re-run these cells' jobs or their workflow run. A "
         "re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans again "
         "against the state from before the apply. Before applying or merging any plan of a "
         "named stack in the environment named beside it, on any pull request, follow "
@@ -568,7 +567,7 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
 
 
 def test_the_state_lost_note_is_capped_and_absent_without_a_lost_cell():
-    """The unnamed cells are counted and pointed at their job logs.
+    """The unnamed cells are counted and pointed at the saver and verdict job logs.
 
     Mutation: name every cell in `named` from `_state_lost_note` -- red.
     Mutation: drop the job-log clause after the count -- red.
@@ -576,18 +575,19 @@ def test_the_state_lost_note_is_capped_and_absent_without_a_lost_cell():
     rows = [_row(status="failed", stack=f"s{i}", state_lost=True) for i in range(6)]
     assert ac._state_lost_note(rows).startswith(
         "state not saved: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
-        "**s4 (dev-eu)**, and 1 more, whose job logs show `The apply step ran and its state "
-        "was not saved`. The apply step ran"
+        "**s4 (dev-eu)**, and 1 more, named in the `save-state` and wave verdict job logs with "
+        "`The apply step ran and its state was not saved`. Their apply step"
     )
-    assert "whose job logs" not in ac._state_lost_note(rows[:5])
+    assert "named in the" not in ac._state_lost_note(rows[:5])
     assert ac._state_lost_note([_row()]) == ""
 
 
-def test_load_cells_refuses_a_non_boolean_state_lost(tmp_path):
-    """Mutation: drop the `state_lost` type check -- red."""
-    _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(state_lost="false"))
-    with pytest.raises(SystemExit, match="key 'state_lost' must be a boolean"):
-        ac.load_cells(str(tmp_path))
+def test_load_cells_reads_a_cell_without_state_lost(tmp_path):
+    """The note reads the apply checks, not the cell. Mutation: keep `state_lost` in
+    `CELL_KEYS` -- red (the cell reads as pin skew)."""
+    _write_cell(tmp_path, "dev-eu", "stacks-app", _cell())
+    [(cell, _)] = ac.load_cells(str(tmp_path))
+    assert cell == _cell()
 
 
 def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
@@ -1250,7 +1250,9 @@ def test_apply_summary_artifact_name_matches_contract():
 APP_ID = "12345"
 
 
-def _check(name, *, status="completed", conclusion="success", run_id=1, app_id=int(APP_ID)):
+def _check(
+    name, *, status="completed", conclusion="success", run_id=1, app_id=int(APP_ID), title=None
+):
     # `run_id`, not `id`: shadowing the builtin in a parameter name is a lint
     # finding, and the JSON key stays `id` either way.
     return {
@@ -1259,6 +1261,7 @@ def _check(name, *, status="completed", conclusion="success", run_id=1, app_id=i
         "conclusion": conclusion,
         "id": run_id,
         "app": {"id": app_id},
+        "output": {"title": title},
     }
 
 
@@ -1273,7 +1276,7 @@ def _check_maps(tmp_path, *checks):
 
 
 def test_load_check_maps_splits_present_and_done(tmp_path):
-    present, done = _check_maps(
+    present, done, _ = _check_maps(
         tmp_path,
         _check("apply / stacks/app / dev-eu", run_id=1),
         _check("apply / stacks/db / dev-eu", status="in_progress", conclusion=None, run_id=2),
@@ -1282,11 +1285,42 @@ def test_load_check_maps_splits_present_and_done(tmp_path):
     assert done == {"apply / stacks/app / dev-eu"}
 
 
+_LOST = "apply / stacks/app / dev-eu"
+
+
+def test_load_check_maps_names_the_checks_whose_newest_title_says_state_not_saved(tmp_path):
+    """Both completion titles count; `Failed: <error>`, an older run's title and the words
+    anywhere but the start do not. Mutations: match the constant anywhere in the title; judge
+    every run, not the newest per name; drop the `Cancelled` form."""
+    _, _, lost = _check_maps(
+        tmp_path,
+        _check(_LOST, status="queued", conclusion=None, title="Failed: state not saved (x)"),
+        _check(
+            "apply / b / dev-eu",
+            status="queued",
+            conclusion=None,
+            title="Cancelled: state not saved (y)",
+        ),
+        _check("apply / c / dev-eu", status="queued", conclusion=None, title="Failed: boom"),
+        _check("apply / d / dev-eu", title="Failed: boom, state not saved (z)"),
+        _check("apply / e / dev-eu", run_id=1, title="Failed: state not saved (old)"),
+        _check("apply / e / dev-eu", run_id=2),
+    )
+    assert lost == {_LOST, "apply / b / dev-eu"}
+
+
+def test_apply_check_state_marks_the_lost_rows():
+    """Mutation: leave `state_lost` as `build_rows` set it."""
+    rows = [_row(), _row(stack="stacks/db")]
+    out = ac.apply_check_state(rows, set(), set(), {_LOST})
+    assert [r["state_lost"] for r in out] == [True, False]
+
+
 def test_load_check_maps_ignores_checks_from_another_app_identity(tmp_path):
     # Security-relevant: a same-name check created by any other identity must
     # not be able to paint an applied cell as stranded (nor green a pending
     # one). Same posture as the gate's own from_app filter.
-    present, done = _check_maps(
+    present, done, _ = _check_maps(
         tmp_path,
         _check("apply / stacks/app / dev-eu", status="in_progress", conclusion=None, app_id=15368),
     )
@@ -1298,7 +1332,7 @@ def test_load_check_maps_judges_the_newest_run_per_name(tmp_path):
     # A duplicate apply check created mid-apply is deliberately left pending by
     # apply-cell; the newest run per name (highest id) must win, so the cell
     # reads pending even though an older completed run exists.
-    present, done = _check_maps(
+    present, done, _ = _check_maps(
         tmp_path,
         _check("apply / stacks/app / dev-eu", run_id=1),
         _check("apply / stacks/app / dev-eu", status="queued", conclusion=None, run_id=2),
@@ -1315,7 +1349,7 @@ def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys
     warning embeds it)."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
-    assert ac.load_check_maps(str(p), "") == (set(), set())
+    assert ac.load_check_maps(str(p), "") == (set(), set(), set())
     assert capsys.readouterr().out == (
         f"::warning::{p} could not be read as apply checks (SHIPMATE_APP_ID is empty; "
         "set the SHIPMATE_APP_ID repo/org variable to the shipmate App id (see "
@@ -1378,21 +1412,20 @@ def test_load_check_maps_missing_file_warns_and_is_no_data(tmp_path, capsys):
     """The scan step always writes checks.jsonl, so absence is a failure: no data and a warning,
     not a crash and not silence. Mutation: restore `except FileNotFoundError: return set(), set()`
     ahead of the catch-all."""
-    present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
-    assert (present, done) == (set(), set())
+    assert ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID) == (set(), set(), set())
     assert "::warning::" in capsys.readouterr().out
 
 
 def test_load_check_maps_empty_file_is_no_data(tmp_path):
     p = tmp_path / "checks.jsonl"
     p.write_text("", encoding="utf-8")
-    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set())
 
 
 def test_load_check_maps_reads_jsonl(tmp_path):
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
-    present, done = ac.load_check_maps(str(p), APP_ID)
+    present, done, _ = ac.load_check_maps(str(p), APP_ID)
     assert present == done == {"apply / stacks/app / dev-eu"}
 
 
@@ -1402,7 +1435,7 @@ def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys
     # a warning rather than propagate.
     p = tmp_path / "checks.jsonl"
     p.write_text("not json\n", encoding="utf-8")
-    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set())
     assert "::warning::" in capsys.readouterr().out
 
 
@@ -1416,7 +1449,7 @@ def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, ca
     `int()` here rather than pinned as a literal."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
-    assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
+    assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set(), set())
     with pytest.raises(ValueError) as exc:
         int("Iv1.notanumericid")
     assert capsys.readouterr().out == (
@@ -1503,7 +1536,7 @@ def test_load_check_maps_malformed_shape_degrades_with_a_warning(tmp_path, capsy
     for payload in reaching:
         p = tmp_path / "checks.jsonl"
         p.write_text(payload, encoding="utf-8")
-        assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
+        assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set()), payload
         assert "::warning::" in capsys.readouterr().out, payload
 
 
@@ -1514,7 +1547,7 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
     for payload in ({"status": "completed"}, {"name": "apply / stacks/app / dev-eu"}):
         p = tmp_path / "checks.jsonl"
         p.write_text(json.dumps(payload), encoding="utf-8")
-        assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
+        assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set()), payload
         assert "::warning::" not in capsys.readouterr().out, payload
 
 
