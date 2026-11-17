@@ -3,7 +3,6 @@ import json
 import pathlib
 import subprocess
 
-import _loader
 import _shipmate
 import pytest
 from _detect_fixtures import (
@@ -20,7 +19,7 @@ from _detect_fixtures import (
     wave_cells,
 )
 from _detect_fixtures import check_run as _check
-from _loader import github_outputs, load_script
+from _loader import github_outputs, load_script, workflow_jobs
 
 dd = load_script("deploy-detect")
 
@@ -2173,7 +2172,7 @@ def test_every_wave_names_the_steps_the_deploy_reads():
     Mutation: rename the wave's `Pre-apply check` step -- red.
     Mutation: rename `APPLY_STEP` -- red.
     Mutation: rename `PRE_APPLY_STEP` -- red."""
-    jobs = _loader.workflow_jobs("apply-env-level.yml")
+    jobs = workflow_jobs("apply-env-level.yml")
     names = {
         wave: [
             (s.get("name"), s["uses"].rsplit("/", 1)[1])
