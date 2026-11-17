@@ -3302,22 +3302,21 @@ it``. A later refusal of the same deploy can still stop it.
 
 ### Return an in-progress apply check by hand
 
-1. Confirm that no run may still apply the cell. List every shipmate run that
-   has not ended, whatever its age:
+1. Wait until no shipmate run of the repository is unfinished, whatever its
+   title: a plan or comment run can still dispatch an apply. This lists every
+   run of the last 1,000 that has not completed or still awaits approval:
 
    ```bash
-   for s in requested queued pending waiting in_progress; do
-     gh api --paginate \
-       "repos/<owner>/<repo>/actions/workflows/shipmate.yml/runs?status=$s&per_page=100" \
-       --jq '.workflow_runs[] | "\(.id) \(.status) \(.display_title)"'
-   done
+   gh run list --repo <owner>/<repo> --workflow shipmate.yml --limit 1000 \
+     --json databaseId,status,conclusion,displayTitle \
+     --jq '.[] | select(.status != "completed" or .conclusion == "action_required")'
    ```
 
-   Continue only when no listed run is titled `shipmate · apply pr=<n> ...` or
-   `shipmate · auto pr=<n> ...` for that pull request, or `shipmate · deploy`.
-   Otherwise wait for those runs to end and re-run the deploy instead: returning
-   the check to `queued` lets the re-run deploy apply the cell beside a run that
-   can still apply it.
+   Continue when it prints nothing, and run it again right before step 4. The
+   engine cannot hold off new runs for you: a push, a comment or a re-run that
+   starts a shipmate run between your last listing and step 4 can apply the cell
+   beside the re-run deploy, so do this while nobody else is working on the
+   repository.
 2. Find out whether the cell's change was applied: read the stack's state and
    its recent apply runs.
 3. Mint an installation token of the shipmate App. Only the App that created a
