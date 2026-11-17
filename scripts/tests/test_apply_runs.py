@@ -285,6 +285,15 @@ def test_listed_jobs_answers_an_empty_listing_as_no_jobs():
     assert _shipmate.listed_jobs("o/r", 5, run=_gh({}, fail={_jobs(1)})) is None
 
 
+def test_listed_jobs_warns_of_a_job_with_no_string_name(capsys):
+    """A malformed job makes the listing None and says why. Mutation: drop the warning -- red."""
+    jobs = {"jobs": [{"status": "completed", "name": None}]}
+    assert _shipmate.listed_jobs("o/r", 5, run=_gh({_jobs(1): jobs})) is None
+    assert capsys.readouterr().err == (
+        "::warning::run 5 lists a job with no string status or name\n"
+    )
+
+
 @pytest.mark.parametrize("bad", [True, -5, "123"], ids=["bool", "negative", "string"])
 def test_a_run_id_unfit_for_a_link_makes_both_listings_incomplete(bad):
     """A run id is bound into a link. A bool fails both checks of `_listed_run` (`str(True)` is

@@ -3,6 +3,7 @@ import json
 import pathlib
 import subprocess
 
+import _loader
 import _shipmate
 import pytest
 from _detect_fixtures import (
@@ -28,6 +29,11 @@ CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=
 LOCKS_URL = "repos/acme/iac/git/matching-refs/shipmate/locks/dev-eu/"
 PULLS_PATH = "repos/o/r/commits/merge123/pulls"
 CLOSED_PATH = "repos/o/r/pulls?state=closed&base=main&sort=updated&direction=desc&per_page=100"
+OWN_RUN = "900"
+RUN_PAGE = "https://github.com/acme/iac/actions/runs/"
+HOLDER = "77"
+RUN_PATH = f"repos/acme/iac/actions/runs/{HOLDER}"
+JOBS_PATH = f"{RUN_PATH}/jobs?filter=all&per_page=100&page=1"
 WARNING = (
     "::warning::could not map merge123 to a merged pull request (commits/merge123/pulls stayed "
     "empty and no recently closed pull request records it as its merge commit); deploying it "
@@ -369,6 +375,38 @@ def _stub_merged_head(monkeypatch, pull_reads, answer, run):
         monkeypatch.setattr(dd.time, "sleep", lambda s: None)
 
 
+def _in_flight(stack, env="dev-eu", url=RUN_PAGE + HOLDER, **kw):
+    """An App apply check a release flipped to `in_progress`, naming run page `url`."""
+    return {**_apply_check(stack, env, **kw), "status": "in_progress", "details_url": url}
+
+
+def _holder(status, jobs=None, total=None, attempt=1, again=None):
+    """`_run_main`'s `runs`: run `HOLDER` read with `status` on `attempt`, and `jobs` as its
+    one-page jobs listing advertising `total` jobs (default: as many as it holds). `again`, a run
+    object or an exception, answers the second run read (default: the first answer again)."""
+    first = json.dumps({"id": int(HOLDER), "status": status, "run_attempt": attempt})
+    second = first if again is None else again
+    if isinstance(second, dict):
+        second = json.dumps({"id": int(HOLDER), **second})
+    answers = {RUN_PATH: [first, second]}
+    if jobs is not None:
+        count = len(jobs) if total is None else total
+        answers[JOBS_PATH] = json.dumps({"total_count": count, "jobs": jobs})
+    return answers
+
+
+def _answer(runs, path):
+    """`_run_main`'s answer to `path` from `runs`: its text, or its exception raised. A list
+    answers each read with its next item, popped from that list, and every later read with its
+    last; `_run_main` passes its own copy of each list, so a parametrized case keeps its data."""
+    held = (runs or {}).get(path)
+    if isinstance(held, list):
+        held = held.pop(0) if len(held) > 1 else held[0]
+    if isinstance(held, BaseException):
+        raise held
+    return held
+
+
 def _run_main(
     tmp_path,
     monkeypatch,
@@ -387,6 +425,7 @@ def _run_main(
     dot=None,
     locks=None,
     pull_reads=None,
+    runs=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. Without `pull_reads`, `_merged_head` is stubbed rather than fed, so the only `gh api`
@@ -413,6 +452,9 @@ def _run_main(
     `head` and branch `main`, and answers its reads by path; those reads land in `urls` too, and
     `pr_number` is unused.
 
+    `runs`, a `{path: JSON text or exception}` map, answers the holding-run reads by path; an
+    exception is raised by every read of its path.
+
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
     for k, v in {
@@ -421,11 +463,15 @@ def _run_main(
         "GITHUB_REF_NAME": "main",
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_RUN_ID": OWN_RUN,
     }.items():
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
     stub_read_table(monkeypatch, (dd.bm.ec,), table, order, reads=reads)
     jsonl = "\n".join(json.dumps(c) for c in checks)
+    # A copy per call, so `_answer` never consumes a parametrized case's own lists.
+    runs = {k: list(v) if isinstance(v, list) else v for k, v in (runs or {}).items()}
     lock_answer = _lock_answer(locks)
 
     def _run(args):
@@ -435,7 +481,7 @@ def _run_main(
         path = next(a for a in args if a.startswith("repos/"))
         if urls is not None:
             urls.append(path)
-        return (pull_reads or {}).get(path) or lock_answer(path) or jsonl
+        return _answer(runs, path) or (pull_reads or {}).get(path) or lock_answer(path) or jsonl
 
     _stub_merged_head(monkeypatch, pull_reads, (head, pr_number), _run)
     # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks, reported
@@ -689,8 +735,8 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
 
 
 def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
-    """A pre-merge release flips a check to `in_progress`; a run that died before completing it
-    leaves it there, and the merge deploy owns it. Mutation: `ag.done_names` counts any
+    """A pre-merge release flips a check to `in_progress`; a run that ended before applying its
+    cell leaves it there, and the merge deploy owns it. Mutation: `ag.done_names` counts any
     non-`queued` status as done -> dev-us is dropped."""
     parsed = _run_main(
         tmp_path,
@@ -698,11 +744,9 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
         checks=[
             _apply_check("stacks/app", "dev-eu", plan_run="42", cells=2),
-            {
-                **_apply_check("stacks/app", "dev-us", plan_run="42", cells=2),
-                "status": "in_progress",
-            },
+            _in_flight("stacks/app", "dev-us", plan_run="42", cells=2, id=2),
         ],
+        runs=_holder("completed", [_job(name="apply / run / detect", steps=[])]),
     )
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
 
@@ -1723,3 +1767,399 @@ def test_a_failed_diff_warns_and_writes_no_push(git_repo, capsys):
         "::warning::the push's changed paths could not be read: command failed (128): git diff "
     )
     assert len(err.splitlines()) == 1
+
+
+_TROUBLESHOOT_LOST = (
+    "Follow docs/troubleshooting.md section The apply step ran and its state was not saved "
+    "before applying them again."
+)
+_BY_HAND = "docs/troubleshooting.md section Return an in-progress apply check by hand"
+_OTHERS = (
+    " This deploy applies nothing, so these other cells of this merge are not applied either: "
+    "stacks/web / dev-eu."
+)
+_LIVE = (
+    "::error::deploy refused: stacks/app / dev-eu are held in progress by run 77, which is still "
+    "running. Once it ends, re-run this deploy: a cell whose check that run left in progress "
+    "deploys if the run never applied it and is refused otherwise." + _OTHERS
+)
+
+
+def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed", attempt=1):
+    """One listed job of run attempt `attempt`; `steps`, `(name, conclusion)` pairs, default to a
+    started apply."""
+    if steps is None:
+        steps = [("Set up job", "success"), ("Apply the cell", "success")]
+    return {
+        "name": name,
+        "status": status,
+        "run_attempt": attempt,
+        "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps],
+    }
+
+
+def _two_cells(tmp_path, monkeypatch, runs, check=None, urls=None):
+    """`stacks/app` in flight (`check`, default held by run `HOLDER`) beside a queued
+    `stacks/web`, both pending."""
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app"), _cell("stacks/web")],
+        checks=[
+            check or _in_flight("stacks/app", cells=2, id=1),
+            _apply_check("stacks/web", cells=2, id=2),
+        ],
+        runs=runs,
+        urls=urls,
+    )
+
+
+@pytest.mark.parametrize("status", ["in_progress", "queued", "waiting"])
+def test_a_check_a_live_run_holds_refuses_the_deploy(tmp_path, monkeypatch, status):
+    """Run 77 still runs, so its cell may be applying: the deploy refuses, naming the run, what a
+    re-run after it ends does, and the other pending cell, and writes no wave.
+
+    Mutation: drop the `refuse_in_flight` call -- deploys, red.
+    Mutation: treat only `in_progress` as live -- `queued` and `waiting` read a jobs listing
+    the stub does not hold and refuse as unreadable, red."""
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder(status))
+    assert str(exc.value) == _LIVE
+    assert "wave0" not in github_outputs(tmp_path / "out.txt")
+
+
+def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkeypatch):
+    """Run 77 reads `completed` on attempt 1, but its listing shows the cell's attempt-1 job not
+    `completed`: the cell is held as live.
+
+    Mutation: drop the cell jobs' status check -- the cell's job lists no steps, so it deploys,
+    red."""
+    jobs = [_job(steps=[], status="queued")]
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert str(exc.value) == _LIVE
+
+
+@pytest.mark.parametrize(
+    "again",
+    [{"status": "completed", "run_attempt": 2}, {"status": "queued", "run_attempt": 1}],
+    ids=["attempt advanced", "queued"],
+)
+def test_a_rerun_between_the_reads_holds_the_cell_live(tmp_path, monkeypatch, again):
+    """Run 77 reads `completed` on attempt 1 and its cell job never applied, but read again after
+    the listing it is a newer attempt, or queued again: a re-run whose jobs may not be listed yet
+    may still apply the cell, so the cell is held as live.
+
+    Mutation: skip the second read -- deploys, red.
+    Mutation: compare the status only -- the advanced attempt deploys, red.
+    Mutation: compare the attempt only -- the queued read deploys, red."""
+    runs = _holder("completed", [_job(steps=[])], again=again)
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, runs)
+    assert str(exc.value) == _LIVE
+
+
+def test_a_listed_job_of_a_later_attempt_holds_the_cell_live(tmp_path, monkeypatch):
+    """Both run reads show attempt 1 `completed`, but the listing already shows an attempt-2
+    `detect` queued: the re-run started and the run reads lag it. The cell's attempt-1 job never
+    applied, but attempt 2 may still apply it, so the cell is held as live.
+
+    Mutation: drop the job-attempt check -- deploys, red."""
+    jobs = [_job(steps=[]), _job(name="apply / run / detect", steps=[], status="queued", attempt=2)]
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert str(exc.value) == _LIVE
+
+
+def test_a_listing_below_the_run_attempt_holds_the_cell_live(tmp_path, monkeypatch):
+    """Both run reads show attempt 2 `completed`, but the listing holds only attempt-1 jobs, the
+    cell's among them never applied: the listing is stale, so it cannot show what attempt 2 did,
+    and the cell is held as live.
+
+    Mutation: hold only on a later attempt (`>`) -- deploys, red."""
+    jobs = [_job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")])]
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=2))
+    assert str(exc.value) == _LIVE
+
+
+def test_a_stuck_job_of_another_cell_does_not_hold_the_cell(tmp_path, monkeypatch, capsys):
+    """Run 77 reads `completed` and lists a job of another cell still `in_progress`; the cell's
+    own job never applied, so the cell deploys with the warning.
+
+    Mutation: count every listed job's status -- held as live, red."""
+    jobs = [
+        _job(name="apply / run / L0 / dev-eu / stacks/web", steps=[], status="in_progress"),
+        _job(steps=[]),
+    ]
+    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert "run 77 ended before applying this cell" in capsys.readouterr().err
+
+
+_NOT_STARTED = {
+    "skipped": [_job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")])],
+    "no steps": [_job(steps=[])],
+    "no job": [_job(name="apply / run / L0 / dev-eu / stacks/web")],
+    "pre-apply failed, apply failed": [
+        _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "failure")])
+    ],
+    "pre-apply failed, apply succeeded": [
+        _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "success")])
+    ],
+}
+
+
+@pytest.mark.parametrize("jobs", _NOT_STARTED.values(), ids=_NOT_STARTED.keys())
+def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
+    tmp_path, monkeypatch, capsys, jobs
+):
+    """Run 77 ended and its cell job never applied: `Apply the cell` `skipped`, no steps, no job
+    for the cell, or a failed `Pre-apply check`, after which `Apply the cell` runs only to
+    refuse. Probe (runs 43968821022 and 43968821153): a leg that started `Apply the cell` never
+    lists it `skipped`, and a pre-apply failure lists it `success`. Nothing writes the check
+    again, so the deploy queues it and warns.
+
+    Mutation: refuse on any ended run -- refuses, red.
+    Mutation: drop the `Pre-apply check` clause -- the two pre-apply cases refuse, red."""
+    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    warnings = [line for line in capsys.readouterr().err.splitlines() if "run 77" in line]
+    assert warnings == [
+        (
+            "::warning::stacks/app / dev-eu: run 77 ended before applying this cell and left "
+            "its apply check in progress; this deploy queues it"
+        )
+    ]
+
+
+_STARTED = {
+    "success": [_job()],
+    "failure": [_job(steps=[("Apply the cell", "failure")])],
+    "cancelled": [_job(steps=[("Apply the cell", "cancelled")])],
+    "no conclusion": [_job(steps=[("Apply the cell", None)])],
+    "unnamed step": [_job(steps=[("Run ship-iac/shipmate/actions/apply-cell@main", "success")])],
+    "one of two jobs": [_job(steps=[]), _job(steps=[("Apply the cell", "failure")])],
+    "pre-apply passed, apply failed": [
+        _job(steps=[("Pre-apply check", "success"), ("Apply the cell", "failure")])
+    ],
+}
+
+
+@pytest.mark.parametrize("jobs", _STARTED.values(), ids=_STARTED.keys())
+def test_an_ended_run_whose_apply_may_have_started_refuses(tmp_path, monkeypatch, jobs):
+    """Run 77 ended and its cell job lists `Apply the cell` as started (any conclusion but
+    `skipped`) after a `Pre-apply check` that did not fail, or lists steps without either (an
+    older engine), or one of two jobs did: the cell may have applied without saving its state,
+    so the deploy refuses and names the procedure.
+
+    Mutation: deploy every ended run -- deploys, red.
+    Mutation: treat only `success` as started -- the other started cases deploy, red.
+    Mutation: count any `Pre-apply check` conclusion as not started -- the pre-apply-passed case
+    deploys, red."""
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
+    assert str(exc.value) == (
+        "::error::deploy refused: stacks/app / dev-eu were left in progress by run 77, which "
+        "ended after their apply may have started, so their state may not be saved. "
+        + _TROUBLESHOOT_LOST
+        + _OTHERS
+    )
+
+
+_GH_500 = SystemExit("::error::gh api repos/acme/iac/actions/runs/77 failed\nHTTP 500: boom")
+
+
+_NEVER_APPLIED = [_job(steps=[])]
+_BAD_ATTEMPTS = [None, True, "2"]
+
+
+@pytest.mark.parametrize(
+    ("runs", "reads"),
+    [
+        ({RUN_PATH: _GH_500}, (3, 0)),
+        ({**_holder("completed"), JOBS_PATH: _GH_500}, (1, 3)),
+        (_holder("completed", []), (1, 1)),
+        (
+            _holder("completed", [_job(name="apply / run / L0 / dev-eu / stacks/web")], total=2),
+            (1, 1),
+        ),
+        ({RUN_PATH: json.dumps({"id": 77, "run_attempt": 1})}, (1, 0)),
+        ({RUN_PATH: json.dumps({"id": 77, "status": "completed"})}, (1, 0)),
+        *[(_holder("completed", _NEVER_APPLIED, attempt=bad), (1, 0)) for bad in _BAD_ATTEMPTS],
+        *[
+            (
+                _holder(
+                    "completed", _NEVER_APPLIED, again={"status": "completed", "run_attempt": bad}
+                ),
+                (2, 1),
+            )
+            for bad in _BAD_ATTEMPTS
+        ],
+        (_holder("completed", _NEVER_APPLIED, again=_GH_500), (4, 1)),
+        *[(_holder("completed", [_job(steps=[], attempt=bad)]), (1, 1)) for bad in _BAD_ATTEMPTS],
+    ],
+    ids=[
+        "run read",
+        "jobs listing",
+        "empty listing",
+        "short listing",
+        "no status",
+        "run with no attempt",
+        *[f"first attempt {bad!r}" for bad in _BAD_ATTEMPTS],
+        *[f"second attempt {bad!r}" for bad in _BAD_ATTEMPTS],
+        "second read",
+        *[f"job attempt {bad!r}" for bad in _BAD_ATTEMPTS],
+    ],
+)
+def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypatch, runs, reads):
+    """A run read (first or second) or jobs listing that fails after its retries, an empty
+    listing, a listing short of its `total_count`, and a run read with no string status or no
+    int `run_attempt` (null, true or "2", on either read) or a listed job with one each refuse
+    naming the run, with no traceback: the cell may be applying. A repeat points at the by-hand
+    section. `reads` counts the run reads and the jobs listing reads. Under `filter=all`,
+    `total_count` counts every attempt's jobs: a probe of run 43649538511 listed 51 of 51 under
+    `all` and 38 of 38 under `latest`.
+
+    Mutation: deploy on a failed read -- deploys, red.
+    Mutation: deploy on a failed listing -- deploys, red.
+    Mutation: list without the count check -- the short listing deploys, red.
+    Mutation: read a missing status as `completed` -- the listing is read, red.
+    Mutation: `isinstance` in place of `type(...) is int` -- a `true` attempt on both reads
+    deploys, red.
+    Mutation: accept a job with a non-int attempt -- a traceback or a deploy, red."""
+    monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
+    urls = []
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(tmp_path, monkeypatch, runs, urls=urls)
+    assert str(exc.value) == (
+        "::error::deploy refused: stacks/app / dev-eu: run 77 could not be read completely; "
+        f"re-run this deploy. If it fails the same way, follow {_BY_HAND}." + _OTHERS
+    )
+    assert (urls.count(RUN_PATH), urls.count(JOBS_PATH)) == reads
+
+
+def test_a_deploy_rerun_passes_its_own_in_progress_checks(tmp_path, monkeypatch):
+    """Attempt 2 of this deploy meets the checks its attempt 1 flipped, naming this run's page
+    (which carries no attempt): it deploys and reads no run.
+
+    Mutation: drop the own-run exclusion -- run 900 is read, red.
+    Mutation: compare with a URL carrying the attempt -- run 900 is read, red."""
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    urls = []
+    parsed = _two_cells(
+        tmp_path,
+        monkeypatch,
+        runs={},
+        check=_in_flight("stacks/app", url=RUN_PAGE + OWN_RUN, cells=2, id=1),
+        urls=urls,
+    )
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert [u for u in urls if "/actions/runs/" in u] == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"{RUN_PAGE}{OWN_RUN}/attempts/2",
+        f"{RUN_PAGE}{HOLDER}?x",
+        f"https://github.com/acme/other/actions/runs/{HOLDER}",
+        "",
+        None,
+    ],
+)
+def test_a_check_naming_no_run_of_this_repository_refuses(tmp_path, monkeypatch, url):
+    """A `details_url` that is not exactly a run page of this repository names no holder the
+    deploy can read: it refuses naming the check id and the by-hand procedure, never telling
+    the reader to wait, and reads no run.
+
+    Mutation: match the run URL by prefix -- the `/attempts/2` and `?x` cases pass or read a
+    run, red.
+    Mutation: reuse the live sentence for an unknown holder -- red."""
+    urls = []
+    with pytest.raises(SystemExit) as exc:
+        _two_cells(
+            tmp_path,
+            monkeypatch,
+            runs={},
+            check=_in_flight("stacks/app", url=url, cells=2, id=41),
+            urls=urls,
+        )
+    assert str(exc.value) == (
+        "::error::deploy refused: stacks/app / dev-eu: apply check 41 is in progress with no run "
+        f"named; follow {_BY_HAND}, then re-run this deploy." + _OTHERS
+    )
+    assert [u for u in urls if "/actions/runs/" in u] == []
+
+
+def test_a_reopened_check_its_live_run_holds_refuses(tmp_path, monkeypatch):
+    """A check reopened to `in_progress` keeps its old `success` conclusion; the status decides.
+
+    Mutation: test `conclusion` instead of `status` -- deploys, red."""
+    check = {**_in_flight("stacks/app", cells=2, id=1), "conclusion": "success"}
+    with pytest.raises(SystemExit, match="held in progress by run 77"):
+        _two_cells(tmp_path, monkeypatch, _holder("in_progress"), check=check)
+
+
+def test_a_queued_check_reads_no_run(tmp_path, monkeypatch):
+    """A `queued` check is pending work as before, whatever its `details_url`.
+
+    Mutation: refuse every not-done check -- refuses, red."""
+    urls = []
+    check = {**_apply_check("stacks/app", cells=2, id=1), "details_url": RUN_PAGE + HOLDER}
+    parsed = _two_cells(tmp_path, monkeypatch, runs={}, check=check, urls=urls)
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
+    assert [u for u in urls if "/actions/runs/" in u] == []
+
+
+def test_a_stranded_check_refuses_before_an_in_flight_one(tmp_path, monkeypatch):
+    """`stacks/gone` lost its tags and its check is in flight; `stacks/app`'s is too. The
+    stranded refusal names it first.
+
+    Mutation: call `refuse_in_flight` before `refuse_stranded_checks` -- the in-flight text,
+    red."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[],
+            checks=[
+                _in_flight("stacks/app", cells=2, id=1),
+                _in_flight("stacks/gone", cells=2, id=2),
+            ],
+            stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
+            deps={"stacks/app": set(), "stacks/gone": set()},
+            runs=_holder("in_progress"),
+        )
+    assert str(exc.value).startswith("::error::deploy aborted: apply / stacks/gone / dev-eu: ")
+
+
+def test_an_in_flight_check_refuses_before_its_missing_digest(tmp_path, monkeypatch):
+    """`stacks/app`'s in-flight check records no plan-text digest: the in-flight refusal speaks,
+    not the digest refusal, whose remedy is a re-plan.
+
+    Mutation: call `refuse_in_flight` after `with_plan_runs` -- the digest text, red."""
+    check = _in_flight("stacks/app", plan_sha256=None, cells=2, id=1)
+    with pytest.raises(SystemExit, match="held in progress by run 77"):
+        _two_cells(tmp_path, monkeypatch, _holder("in_progress"), check=check)
+
+
+def test_every_wave_names_the_steps_the_deploy_reads():
+    """The deploy finds whether a cell applied in a jobs listing by these step names.
+
+    Mutation: rename the wave's `Apply the cell` step -- red.
+    Mutation: rename the wave's `Pre-apply check` step -- red.
+    Mutation: rename `APPLY_STEP` -- red.
+    Mutation: rename `PRE_APPLY_STEP` -- red."""
+    jobs = _loader.workflow_jobs("apply-env-level.yml")
+    names = {
+        wave: [
+            (s.get("name"), s["uses"].rsplit("/", 1)[1])
+            for s in jobs[wave]["steps"]
+            if s.get("uses", "").endswith(("/pre-apply", "/apply-cell"))
+        ]
+        for wave in (f"wave{n}" for n in range(8))
+    }
+    expected = [("Pre-apply check", "pre-apply"), ("Apply the cell", "apply-cell")]
+    assert names == {f"wave{n}": expected for n in range(8)}
+    assert (dd.PRE_APPLY_STEP, dd.APPLY_STEP) == ("Pre-apply check", "Apply the cell")

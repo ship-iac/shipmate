@@ -191,7 +191,8 @@ jobs:
     steps: &wave-steps
       # Every attempt: a wave can wait hours on an environment approval, and "Re-run failed
       # jobs" skips `detect` and `lock`. A failure skips the cloud credentials; apply-cell runs
-      # only to refuse.
+      # only to refuse. `deploy-detect` reads this step's listed name and `Apply the cell`'s
+      # to tell whether an ended run applied a cell.
       - name: Pre-apply check
         id: pre-apply
         if: ${{ inputs.pr_number != '' || inputs.deploy }}
@@ -220,7 +221,8 @@ jobs:
         with:
           role-to-assume: ${{ matrix.role_arn }}
           aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
+      - name: Apply the cell
+        uses: $/actions/apply-cell
         if: ${{ !cancelled() && (success() || steps.pre-apply.outcome == 'failure') }}
         with:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
