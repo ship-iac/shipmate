@@ -222,10 +222,24 @@ refuses the run before wave0.
    the link only, one check at a time. Each wave needs its release, and each
    completion job needs its wave, so no flip lands after the completion that
    answers it. A release runs only when every earlier wave and release succeeded
-   or was skipped, so a failed release skips its wave and every later one.
-3. Written once the cell's wave job has a result, by that wave's
-   `waveN-complete` job and again by `complete`, from the job's state in the run's
-   jobs listing. The summary is never rewritten; the error goes in the title.
+   or was skipped, and every earlier wave's state verdict succeeded or was
+   skipped with its wave, so a failed release or verdict skips every later wave
+   and fails the level, which skips every successor env-level.
+3. Written once the cell's wave job has a result and the wave's state verdict
+   has run, by that wave's `waveN-complete` job and again by `complete`, from
+   the job's state in the run's jobs listing and the wave's state evidence
+   (§State backend). The summary is never rewritten; the error goes in the title.
+
+A cell whose wave job ended `success`, `failure` or `cancelled` and that has no
+evidence its state was saved is written `queued`, titled
+`Failed: state not saved (<reason>)` (`Cancelled: state not saved (<reason>)`
+for a cancelled job), linked to the cell's job unless it was cancelled, in place
+of the table's write. Evidence is a cell with no state to save (a remote
+backend, or an apply step that never started) or a `success` saver leg for its
+state; a job that succeeded without starting its apply step is never evidence.
+The reason is the reader's, the saver leg's first error line, or why no report
+was read. A cell whose saver leg the listing does not yet show with a conclusion
+is retried as a missing cell job is.
 
 | Cell's wave job | Write |
 | --- | --- |
@@ -246,8 +260,9 @@ annotation: its first line, control characters stripped, cut at 120 characters.
 `Failed` alone when there is none or the annotation read fails. The title only
 names the error; the outcome comes from the job's conclusion in the listing.
 
-A completion job runs only for a wave that ended `success` or `failure`;
-`complete` runs after every release, wave and completion job, rewrites the whole
+A completion job runs only for a wave that ended `success` or `failure`, after
+that wave's reader, saver and verdict jobs; `complete` runs after every release,
+wave, reader, saver, verdict and completion job, rewrites the whole
 snapshot with the same writes, and is the only writer on a cancelled run. A
 completion job's failure never fails the level (job-level
 `continue-on-error: true`): `complete` handles every snapshot check of the level again.
@@ -1089,31 +1104,54 @@ the repository root, or none:
 | any other `type` | any | none: the backend owns its state |
 
 - **A path** — a local backend. The cell restores that path through
-  `actions/state` before it plans or applies, and `apply-cell` saves it after the
-  apply (`plan-cell` and `drift-cell` restore only; neither writes state). The
-  cached file is encrypted with `SHIPMATE_ENCRYPTION_KEY` (§Plan artifact
-  encryption), because any workflow run, a fork's pull request included, can
-  restore a default-branch cache entry. An empty encryption key refuses the restore
-  and the save. An entry that fails authentication and an openssl
-  or disk failure on the runner each fail the restore naming the matched cache
-  key, so tofu never reads it and the cell skips its save. An encryption key
-  rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
-  truncated or altered entry, and one copied under another stack's or
-  environment's key each fail authentication; `docs/troubleshooting.md`
-  §`state cache entry ... failed authentication` tells them apart.
-  The save is verified: `actions/state` looks its entry up by the exact save
-  key, with no `restore-keys`, and after a miss up to four more times over
-  about 30 s; its `saved` output is `true` only when a lookup finds it,
-  because `actions/cache/save` warns and succeeds when the cache stores
-  nothing. `Save state` does not fail on a miss. `apply-cell`'s
-  `Warn that the applied state was not saved` step fails the cell's job, so its
-  apply check stays pending, whenever an apply step that ran over a restored
-  state is followed by a save that failed, was cancelled, was not found, or was
-  skipped for an absent or empty state file; `docs/troubleshooting.md`
-  §`The apply step ran and its state was not saved` has the recovery.
-- **None** — a backend such as S3 owns the state. Both `actions/state` steps are
-  skipped, shipmate never handles a state file, and the backend and its locking
-  are the consumer's configuration.
+  `actions/state` before it plans or applies (`plan-cell` and `drift-cell`
+  restore only). No wave cell writes the Actions cache: every wave job runs
+  `cache-mode: read`. After the apply step, whatever its outcome, `apply-cell`'s
+  `Hand off the state` step prints one line, `shipmate-state-digest=<value>
+  attempt=<run attempt>`. For a non-empty state file it seals a copy under the
+  cell's state key and uploads it, with its path, as the artifact
+  `state.<env>.<slug>.<attempt>`; the value is that bundle's sha256. After the
+  wave, `waveN-read` reads the line from each cell's own job log,
+  `waveN-save` runs one `save-state (<env> <stack>)` leg per cell with a digest,
+  and `waveN-verdict` fails unless each cell's state was found saved or the cell
+  had none to save. None of the three binds an environment, holds the encryption
+  key or runs pull-request code. A leg takes only an artifact of the cell's name
+  whose bytes match the logged digest, refuses a path outside the stack, and
+  saves under `state/<slug>/<env>/<run>-<attempt>` built from the reader's row,
+  then under the same key with `-r1` when no lookup finds the first save. A
+  leg whose cell logged an earlier attempt than its own (a copied cell, or a
+  re-run of the leg alone) only looks the entry up and never saves. The cached
+  file is encrypted with `SHIPMATE_ENCRYPTION_KEY` (§Plan artifact encryption),
+  because any workflow run, a fork's pull request included, can restore a
+  default-branch cache entry. An empty encryption key refuses the restore, and
+  the handoff of a non-empty state. An entry that fails authentication and an
+  openssl or disk failure on the runner each fail the restore naming the matched
+  cache key, so tofu never reads it. An encryption key rotation, different
+  values on `<env>-plan` and `<env>-apply`, a corrupt, truncated or altered
+  entry, and one copied under another stack's or environment's key each fail
+  authentication; `docs/troubleshooting.md` §`state cache entry ... failed
+  authentication` tells them apart. Every restore matches both the save key and
+  its `-r1` form, since it restores the newest entry under the
+  `state/<slug>/<env>/` prefix. A save is verified: `actions/state` looks its
+  entry up by the exact key, with no `restore-keys`, and after a miss up to four
+  more times over about 30 s; its `saved` output is `true` only when a lookup
+  finds it, because `actions/cache/save` warns and succeeds when the cache
+  stores nothing. A cell without that evidence, such as one the reader refuses
+  (an apply that ran and left an absent or empty state file among them) or one
+  whose leg fails or is cancelled, has its apply check returned to `queued`
+  titled `Failed: state not saved (<reason>)` or
+  `Cancelled: state not saved (<reason>)`, and the wave's verdict fails;
+  `docs/troubleshooting.md` §`The apply step ran and its state was not saved` has
+  the recovery. A re-run cannot recover a failed save.
+- **Local-backend state needs GitHub-hosted runners.** The saver legs run on the
+  caller's `runs_on`, so the saving and restoring runners share OS, `tar` and
+  compression, and a leg refuses unless `RUNNER_ENVIRONMENT` is `github-hosted`:
+  a reused self-hosted runner could alter what it saves. So that no cell applies
+  when its save would refuse, a local-backend cell on any other runner refuses
+  before its apply step. A remote backend has no such limit.
+- **None** — a backend such as S3 owns the state. The restore is skipped, the
+  cell's line reads `none`, no leg runs, shipmate never handles a state file,
+  and the backend and its locking are the consumer's configuration.
 
 `.terraform/environment` is never read: the engine selects a
 workspace through `TF_WORKSPACE` alone and never runs `tofu workspace select`.
@@ -1135,10 +1173,12 @@ green gate over infrastructure nothing recorded. So:
   local state lives; see the job log`.
 
 **Trust.** The path comes from the checked-out commit's backend configuration.
-`plan-cell` and `drift-cell` never save state, and `actions/cache` versions an
+No job that runs pull-request code saves state, and `actions/cache` versions an
 entry on its path string, so a branch that points its backend elsewhere plans
-against empty state, visibly. `apply-cell` saves, and it runs the reviewed
-commit, whose backend block was part of the review.
+against empty state, visibly. Only the saver legs save. The path they save comes
+from the bundle of a cell that ran the reviewed commit, whose backend block was
+part of the review; a leg refuses one outside the stack and saves it as the
+restore names it, `./<rel>` for the root stack included.
 
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
@@ -1233,6 +1273,13 @@ documents for its `checks: read` requirement. The grant belongs on the calling
 job and nowhere else — a job-level `permissions:` block replaces the
 workflow-level default rather than intersecting it, so a top-level block that
 omits `id-token` takes nothing away from a job that declares it.
+
+**No calling job of an apply may cap the cache mode.** Each `waveN-save` job of
+`apply-env-level.yml` declares `cache-mode: write`, and a caller's `cache-mode:
+read` caps every job it calls, so a nested `write` under it fails the run at
+startup. The consumer's `shipmate.yml` therefore declares no `cache-mode` on its
+`apply`, `auto` and `deploy` jobs, nor at its workflow level. The wave jobs
+declare `cache-mode: read` themselves.
 
 ## Tag grammar
 
@@ -1489,7 +1536,9 @@ has merged, a live `push` run of its merge commit (its deploy) that may still
 apply. Its jobs are named after their first ` / `, whatever the consumer names
 its calling job; the run is live until its `summary` job, which runs after every
 env-level, is listed `completed`, while any job but a `warm` leg (`warm` or
-`warm / <stack>`, which applies nothing) is not `completed`, and while a job is
+`warm / <stack>`, which applies nothing) is not `completed` (a wave's state
+reader, saver leg and verdict included, so a run stays live until its state is
+saved), and while a job is
 listed with a `run_attempt` other than the run's (a re-run not yet fully
 listed). A job waiting on `needs` may not be listed yet, so the `summary` clause
 keeps such a run live, and a run that lists no job yet refuses as not started. A listing that
@@ -1691,7 +1740,7 @@ the second run waits in `shipmate-apply-<pr_number>` until the first ends
 first run applied completed, so it applies none of them. A cell the first run
 left pending (failed, cancelled or not run) is pending for the second run too,
 which takes it up as a later `shipmate apply` would. The exception is a first
-run whose `Save state` failed on a local backend: the second run restores the
+run that left a local-backend cell's state not saved: the second run restores the
 pre-apply state and applies the plan again, the same risk a second `shipmate
 apply` comment already carries; `docs/troubleshooting.md` §`The apply step ran
 and its state was not saved` is the recovery. A double replan costs one extra
@@ -2430,8 +2479,8 @@ check/status/comment/issue that crosses a workflow-run boundary:
     apply checks pending, so no refresh greens the gate until they apply;
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
-    superseded deploy, unless a cell's job log shows
-    `The apply step ran and its state was not saved` (`docs/troubleshooting.md`
+    superseded deploy, unless a cell's apply check is
+    titled `... state not saved (...)` (`docs/troubleshooting.md`
     has the section of that name).
 
   Plan runs of one head can write out of order. An older run's `summary` that
@@ -3425,6 +3474,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   downloads with it; `apply-cell` hashes the rendered plan from stdin and reads the first
   field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on
   `ubuntu-26.04`, x64, and 2026-10-18 on `ubuntu-26.04-arm`).
+- A stack with a local backend needs a GitHub-hosted `runs_on` for its apply
+  and deploy runs: its apply cell refuses before applying, and its saver leg
+  refuses, on any runner whose `RUNNER_ENVIRONMENT` is not `github-hosted`
+  (§State backend).
 - Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
   provides these tools other than PyYAML. PyYAML differs per image: the
   `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), the
@@ -3531,8 +3584,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   again until it is deleted. A job with `tofu: "false"` restores and saves no
   OpenTofu entry. A job saves an entry after a restore that missed and only
   after the tool installed; a failed save does not fail the job.
-  `plan.yml` and `unlock.yml` declare `cache-mode: read`, so their jobs
-  restore only and pass `setup` `cache-save: "false"`. Entries come from the
+  `plan.yml` and `unlock.yml` declare `cache-mode: read`, and so does each
+  `apply-env-level.yml` wave job, so their jobs restore only and pass `setup`
+  `cache-save: "false"`. Entries come from the
   apply, deploy and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
   downloads the release files in every plan job. Each leg of a deploy run's
@@ -3561,7 +3615,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   units, each with its own check (see Check names, above).
 - The plan fan-out is bounded at 256 cells (`build-matrix`'s `MATRIX_LIMIT`,
   the GitHub Actions matrix limit). Above it `build-matrix` refuses
-  and `detect` fails the run before any cell starts.
+  and `detect` fails the run before any cell starts. An apply run then holds at
+  most 256 cell jobs and at most one saver leg per cell, beside a fixed set of
+  control jobs per env-level (releases, readers, verdicts, completions); a merge
+  deploy adds up to 256 `warm` legs. Every listing of a run's jobs that decides a
+  check or a saved state pages through the whole listing.
   The way past it is to split the change across several pull requests: the
   matrix is built over `terramate list --changed` from the merge base of the
   pull request's base and head, so a narrower diff is a smaller matrix. A
@@ -4556,15 +4614,14 @@ job believed before its check was completed:
   unrelated run's completed check hide a real failure in this one. A failed
   apply can still have changed resources, and a failed cell whose state was
   not saved is named by the `state not saved:` note.
-- **state not saved** is a note, not a status: `apply-cell-summary` writes
-  `state_lost` into `cell.json`, true unless the cell's
-  `Warn that the applied state was not saved` step's outcome is `success` or
-  `skipped`, so a cancelled or unknown outcome counts as lost. That step fires
-  when the apply step ran, the state was restored, and `actions/state` did not
-  report `saved`. The `state not saved:` note names up to 5 of those cells
-  and counts the rest, whose job logs show
-  `The apply step ran and its state was not saved`, and says: the apply step
-  ran and its state was not saved or not verified; never re-run the cells'
+- **state not saved** is a note, not a status: it names the cells whose newest
+  App-authored apply check is titled `Failed: state not saved (<reason>)` or
+  `Cancelled: state not saved (<reason>)`, read from the check scan the comment
+  already makes. `apply-complete` writes those titles when a cell's apply may
+  have run and no evidence shows its state saved (§State backend). The note
+  names up to 5 of those cells and counts the rest, which the `save-state` and
+  wave verdict job logs name, and says: their apply step may have run, and no
+  saved state was found for them; never re-run the cells'
   jobs or their workflow run; a re-run, a `shipmate apply` comment, or a merge
   can apply their reviewed plans again against the state from before the
   apply; before applying or merging any plan of a named stack in the
@@ -4574,22 +4631,18 @@ job believed before its check was completed:
   While it is present, the `not attempted:` note's retry command is to run
   once those cells are recovered, because any apply covering them applies
   their reviewed plans again. Every `not attempted:` note also carries a
-  cause-agnostic pointer to that section, because the upload is best-effort: a
-  lost cell whose artifact did not upload renders as not attempted and no note
-  names it. The marker reaches only the
-  comment of the run that lost the state; a later run's comment, and the
-  remedies it renders, do not know. Nothing refuses a later apply of the cell.
-  The warning step's `exit 1`, not the artifact, keeps the cell's apply check
-  pending.
+  cause-agnostic pointer to that section, because a failed check scan leaves a
+  lost cell in no note. The note degrades with the check scan, as the
+  check-state axis does. Nothing refuses a later apply of the cell; its check
+  stays pending until an apply completes it.
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
 which means *unknown*, and the comment falls back to artifact-only status.
 Absence never manufactures a not-recorded row.
 
-`cell.json` holds the strings `stack`, `environment`, `result` and `reason`,
-and the boolean `state_lost`; the validator refuses a cell missing any of them
-or carrying another type. Its `result` grammar is `applied | failed | blocked`. Not recorded
+`cell.json` holds the strings `stack`, `environment`, `result` and `reason`;
+the validator refuses a cell missing any of them or carrying another type. Its `result` grammar is `applied | failed | blocked`. Not recorded
 is a display status derived at render time, never a value `apply-cell` writes,
 so the validator still rejects an out-of-enum `result`.
 
@@ -5234,16 +5287,15 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   are not in the key: stacks whose locks name the same providers at the same
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
-- `drift-cell` and `apply-cell` save it; `plan-cell` never does. A plan run,
-  from an autoplan or a command, and an unlock run hold the default branch's
-  cache scope while they run the pull request's HCL, so `plan.yml` and
-  `unlock.yml` declare `cache-mode: read` and the token in those runs cannot
-  save an entry whatever the cell's HCL runs. Apply cells still save with a
-  cache write while running the pull request's HCL, and the key carries no
-  environment, so an entry one environment's apply saves is restored by any
-  environment's cells. Each saves after a restore that missed, and only when
-  `init` left a file in the cache; `apply-cell` saves only after a successful
-  apply, and a failed save does not fail the cell.
+- `drift-cell` saves it; `plan-cell` and `apply-cell` never do. A plan run,
+  from an autoplan or a command, an unlock run and an apply wave hold the
+  default branch's cache scope while they run the pull request's HCL, so
+  `plan.yml` and `unlock.yml` declare `cache-mode: read`, as does each
+  `apply-env-level.yml` wave job, and the token in those jobs cannot save an
+  entry whatever the cell's HCL runs. The key carries no environment, so an
+  entry one environment's drift saves is restored by any environment's cells.
+  `drift-cell` saves after a restore that missed, and only when `init` left a
+  file in the cache; a failed save does not fail the cell.
 - Every merge deploy's `warm` job saves the entry of each distinct lock on the
   merged commit, up to 256 distinct locks, so no cell needs to have run for an
   entry to exist. Its `detect` picks one stack per distinct digest among every
@@ -5321,7 +5373,7 @@ environment of that level (§Fan-out), before any env-level-1 apply starts, and 
 on. A failure anywhere in an env-level skips every successor level's applies
 for that deploy run — the failed environment's stacks stay pending, and
 downstream environments are not touched until it is fixed and re-run. A cell
-whose job log shows `The apply step ran and its state was not saved` is fixed
+whose apply check is titled `... state not saved (...)` is fixed
 by `docs/troubleshooting.md` §`The apply step ran and its state was not saved`,
 never by a re-run, which applies it again.
 `MAX_ENV_LEVELS` is `4`; an env-order graph that would span more levels than
@@ -5389,8 +5441,8 @@ its environment's other cells still apply. An environment with a waiting cell is
 applying, so its `needs` successors are skipped, and each new skip can make
 more cells wait; the bare form computes both to one fixpoint.
 Completed cells skip idempotently, so re-commenting `shipmate apply` resumes
-where the previous run stopped, except for a cell whose job log shows
-`The apply step ran and its state was not saved`: its check is pending, so a
+where the previous run stopped, except for a cell whose apply check
+is titled `... state not saved (...)`: its check is pending, so a
 re-comment applies it again (`docs/troubleshooting.md`
 §`The apply step ran and its state was not saved`).
 

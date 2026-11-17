@@ -464,9 +464,8 @@ reviewer costs, so the choice is made with the price visible:
   secret with extra steps. Row 17's deployment branch policy narrows that to
   jobs running at the default branch, which is a real bound and not a reviewer
   gate: no human sees the deployment before its secrets are released.
-- Its apply can plant a cache entry that the gated environments' cells in the
-  same repository restore ("A cache entry planted by an unreviewed apply" under
-  "What none of this fixes").
+- Its apply chooses the state its own stacks restore in that environment ("A
+  cache entry planted by an unreviewed apply" under "What none of this fixes").
 - **`split: false` is the strongest form of going without a reviewer.** A
   logical env holding `split: false` binds one bare `<env>` for plan and apply, and a
   reviewer on it stalls that environment's plan cells and every drift sweep covering it — so the gate
@@ -1295,18 +1294,19 @@ Three properties of these jobs bound what that code reaches:
   it.** Each of the three checkouts sets `persist-credentials: false`, which
   removes only the token's copy in the checkout's git configuration. Treat the
   job token in the table as held by the pull request's code.
-- **Plan and unlock cells cannot write the Actions cache.** Their workflows
-  declare `cache-mode: read`, and the cache service enforces it on the job's
-  token: a save that got past `actions/cache` was refused (measured). Apply
-  cells save state and providers, so their code can write the default branch's
-  cache ("A cache entry planted by an unreviewed apply", below).
+- **Plan, unlock and apply cells cannot write the Actions cache.** `plan.yml`
+  and `unlock.yml` declare `cache-mode: read`, as does each apply wave job, and
+  the cache service enforces it on the job's token: a save that got past
+  `actions/cache` was refused (measured). An apply cell's state reaches the
+  cache only through its wave's saver leg, which runs no pull-request code and
+  saves only the bytes whose digest the cell printed, under that cell's own key
+  ("A cache entry planted by an unreviewed apply", below).
 - **A repository-wide encryption key spans environments.** Set as a repository
   or organization secret (`CONTRACT.md` §Plan artifact encryption),
   `SHIPMATE_ENCRYPTION_KEY` is one value, and `scripts/plan-crypt` derives
   nothing per environment, so it seals every environment's plan artifacts and
   cached state. Code in a plan or apply cell can decrypt every one of them it
-  can fetch, and code in an apply cell can seal a state entry that any
-  environment's cells restore and accept. An environment holding its own value
+  can fetch. An environment holding its own value
   on its plan and apply environments is outside that set.
 
 A plan cell holds the key, and on a local backend its environment's decrypted
@@ -1376,32 +1376,35 @@ starts `facts`, `detect` and `release`, while plan and apply refuse it
   unlock cells go without them. A split environment's plan cells have no bound
   in the repository beyond who can push a branch (§1–2).
 - **A cache entry planted by an unreviewed apply.** An apply cell runs the pull
-  request's configuration in a job that can write the default branch's Actions
-  cache, because it saves state (`CONTRACT.md` §State backend) and providers
-  (§Terramate safeguards). Where an environment applies without anyone's
-  approval ("What pull-request code holds" lists when), code in that apply can
-  save a provider or state entry that other plan,
-  drift and apply cells restore, in every environment and on every later pull
-  request. Nothing verifies a restored provider archive: the lock file verifies
-  provider packages, not the archive around them. A restored state entry
-  carries an HMAC tag (`CONTRACT.md` §Plan artifact encryption), which detects
-  corruption, an entry written without the encryption key, and an entry moved under
-  another stack's or environment's key. It does not detect an older entry of
-  the same stack and environment saved again under a newer key (a rollback),
-  nor anything code that runs with the encryption key writes: code in an apply cell
-  holds it, so an entry it saves verifies like any other.
-  The same jobs save the Terramate and OpenTofu release files that `setup`
-  restores in every job (`CONTRACT.md` §Runner prerequisites). Every job
-  verifies those three files per tool against the committed signer keys, so a
+  request's configuration and holds the encryption key, but its job cannot
+  write the Actions cache. Its wave's saver leg saves the bytes whose digest the
+  cell printed in its own log, under that cell's own stack and environment key.
+  So where an environment applies without anyone's approval ("What
+  pull-request code holds" lists when), code in that apply chooses the state
+  its own stack and environment restore next: an entry it sealed verifies like
+  any other, and the HMAC tag (`CONTRACT.md` §Plan artifact encryption) does not
+  detect an older state of the same stack and environment saved again (a
+  rollback). It cannot have an entry saved under another stack's or
+  environment's key, nor a provider or tool entry. An entry already in the cache
+  is restored like any other, whoever saved it: one an earlier apply cell
+  planted stays this exposure until the repository's `state/` cache entries are
+  deleted and each stack's state is imported again (`docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved` has the import).
+  Nothing verifies a restored provider archive: the lock file verifies
+  provider packages, not the archive around them. The Terramate and OpenTofu
+  release files that `setup` restores in every job (`CONTRACT.md` §Runner
+  prerequisites) are verified per tool against the committed signer keys, so a
   planted tool entry costs each job a download until it is deleted, never an
   unverified release file. `actions/cache` restores an entry with `tar -P`,
   though, so a crafted tool or provider entry can write files outside its cache
   directory, which nothing verifies; writing one takes a job that
-  saves in the default branch's scope: an apply, deploy or drift run.
+  saves in the default branch's scope: a job of an apply, deploy or drift run
+  other than a wave cell.
   `setup` replaces a restored release directory or file that is a symlink,
   unreadable or not a regular file; that handles a corrupt or stale entry and is
   no defence here, because the extraction has already run.
-  Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
+  Plan and unlock runs and apply wave cells cannot save (`cache-mode: read`).
+  Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval
   count (see "The gate is an assertion, not a proof"). The cache is per

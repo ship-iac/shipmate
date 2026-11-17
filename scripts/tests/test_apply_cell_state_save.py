@@ -135,11 +135,10 @@ def test_saved_is_true_only_on_an_exact_key_hit():
 def test_the_troubleshooting_entry_states_the_re_lookup():
     """Mutation: change `four` to `three` in the sentence."""
     text = (ENGINE / "docs" / "troubleshooting.md").read_text(encoding="utf-8")
-    heading = "### `The apply step ran and its state was not saved`\n"
+    heading = "### `the state of <env> / <stack> was not found under <key>`\n"
     entry = " ".join(text[text.index(heading) :].split("\n### ", 1)[0].split())
     assert (
-        "When the first exact-key lookup finds no entry, the action looks up the same key up to "
-        "four more times over about 30 s before it reports the state not saved; a failed, "
-        "cancelled or skipped save runs no lookup and reports at once, and a run cancelled "
-        "after the save reports the state not saved although the entry may exist."
+        "When the first exact-key lookup after a save finds no entry, the action looks up the "
+        "same key up to four more times over about 30 s before it reports the entry not found; "
+        "a failed or cancelled save runs no lookup and reports at once."
     ) in entry

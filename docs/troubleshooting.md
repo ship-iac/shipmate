@@ -474,9 +474,9 @@ cell — the right recovery when nothing moved (a credentials failure, a rate li
 a cancelled run). If the apply partially succeeded, the state serial advanced
 and the stored plan no longer matches it, so that retry is refused here instead.
 Re-plan first; the two recoveries are not interchangeable. On a local backend,
-a cell whose job log shows `The apply step ran and its state was not saved` is
-the exception: the cache restores the state from before the apply, so a retry
-applies the plan again unrefused. Follow
+a cell whose check is titled `Failed: state not saved (...)` or
+`Cancelled: state not saved (...)` is the exception: the cache restores the
+state from before the apply, so a retry applies the plan again unrefused. Follow
 §`The apply step ran and its state was not saved` instead.
 
 A cancelled run has one further failure mode a bare retry cannot clear: it can
@@ -1334,7 +1334,7 @@ apply side's encryption key. The engine cannot tell the causes apart:
   `SHIPMATE_ENCRYPTION_KEY` secrets on `<env>-plan` and `<env>-apply`. A
   re-plan alone fails the same way. Make the two equal, then re-plan. On a
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
-  reverse, because apply cells saved the cached state; on a remote backend
+  reverse, because apply cells sealed the cached state; on a remote backend
   either direction works.
 - **The artifact is corrupt, truncated or altered.** Re-plan; a re-run
   downloads the same artifact.
@@ -1373,27 +1373,85 @@ the refusal. What to do depends on the step that refused:
   applied. Re-plan once the runner works; a transient hosted-runner disk
   failure clears on its own, and a self-hosted runner needs its openssl or disk
   fixed.
-- **An apply cell's `Save state`.** See
-  §`The apply step ran and its state was not saved`, which says when a re-run
-  of the job is safe.
+- **An apply cell's `Hand off the state`.** Its state was not handed off; see
+  §`The apply step ran and its state was not saved`.
+
+### `no artifact of this run named ... matches the cell's state digest`
+
+A `save-state (<env> <stack>)` job found no artifact of the run named
+`state.<env>.<slug>.<attempt>` whose bytes hash to the digest the cell printed.
+The cell's upload failed, the artifact expired (an earlier attempt's cell), or
+another job of the run uploaded an artifact of that name first, so the cell's
+own upload failed or sits beside one that does not match. Only code of the same
+run can take the name. Nothing was saved: follow
+§`The apply step ran and its state was not saved`.
+
+### `the state of <env> / <stack> was not found under <key>`
+
+The saver leg's saves, under the cell's key and under the same key with `-r1`,
+left no entry that an exact-key lookup found, or the leg's earlier step failed
+(its log shows which). When the first exact-key lookup after a save finds no
+entry, the action looks up the same key up to four more times over about 30 s
+before it reports the entry not found; a failed or cancelled save runs no
+lookup and reports at once. The cache service refuses a save for a key another
+job reserved, and the leg reads that as a miss. Follow
+§`The apply step ran and its state was not saved`; its step 1 checks both keys.
+
+### `the state saver runs only on GitHub-hosted runners`
+
+A local-backend stack ran on a runner whose `RUNNER_ENVIRONMENT` is not
+`github-hosted`. In an apply cell this refuses before the apply step, so nothing
+was applied; in a saver leg it refuses before any API call. Set the caller's
+`runs_on` to a GitHub-hosted label, or move the stack to a remote backend
+(`CONTRACT.md` §State backend). A refused saver leg leaves the cell's state not
+saved: follow §`The apply step ran and its state was not saved`.
+
+### `no saved state was found for these cells`
+
+A `waveN-verdict` job names each cell of its wave with its reason and fails, so
+no later wave of the run starts and the level fails. Each named cell's check
+returned to `queued` titled `Failed: state not saved (<reason>)` or
+`Cancelled: state not saved (<reason>)`. Follow
+§`The apply step ran and its state was not saved`, whose table explains each
+reason. A reason `the jobs listing never resolved the cell` means the verdict's
+listing never showed the cell's job, or its saver leg, with a conclusion; the
+check then stays as it was, and the same section applies.
+
+### `the run's jobs listing failed or never listed this job`
+
+A `waveN-read` job could not list the run's jobs, retried for about two
+minutes, or never found itself in the listing. It wrote no report, so its
+saver legs did not run and the wave's verdict names every cell of the wave
+with `the state reader did not finish`. Follow
+§`The apply step ran and its state was not saved` for each.
 
 ### `The apply step ran and its state was not saved`
 
-An apply cell on a local backend ran its `Apply the stored plan` step (status
-`success`, `failure` or `cancelled`), and `Save state` did not store the state
-that step left: the save failed or was cancelled, the exact-key lookups after it
-found no entry, or there was no state file to save. When the first exact-key
-lookup finds no entry, the action looks up the same key up to four more times
-over about 30 s before it reports the state not saved; a failed, cancelled or
-skipped save runs no lookup and reports at once, and a run cancelled after the
-save reports the state not saved although the entry may exist. The warning
-step fails the cell's job, so its apply check stays pending. An apply run that was not
-cancelled posts an apply comment; its row reads not recorded when its apply
-succeeded, otherwise failed, and its `state not saved:` note names up to 5
-lost cells whose summary artifact uploaded and counts the rest. Without that
-artifact the row reads not attempted, and the pointer every `not attempted:`
-note carries leads here. A cancelled run and the merge deploy post no comment, and a later run's comment does not
-know the state was lost: the job log and the pending check are the signal.
+An apply cell's apply step may have run, and no saved state was found for it.
+Its apply check returned to `queued` titled `Failed: state not saved (<reason>)`
+or `Cancelled: state not saved (<reason>)`, its wave's `waveN-verdict` job
+failed naming the cell with `no saved state was found for these cells`, and no
+later wave of the run started. The reason names what is missing:
+
+| Reason | Meaning |
+| --- | --- |
+| `the apply ran and left no state file` | the cell's apply step ran on a local backend and the state file was absent or empty |
+| `no state line in the cell's log`, `<n> state lines in the cell's log` | the cell's `Hand off the state` step printed no line, or more than one; a runner lost during the apply prints none |
+| `the cell's job is not listed`, `<n> jobs match the cell`, `the cell's job has no conclusion` | the reader could not find the cell's one finished job in the run's jobs listing, retried for about two minutes; a wave cancelled before its matrix expanded lists none |
+| `the cell's log could not be read` | the reader's reads of the cell's job log failed after retries |
+| `the state line's attempt is above the job's` | the line names a later run attempt than the job that printed it |
+| `the cell succeeded without applying` | the cell's job succeeded and its line says its apply step never started |
+| `the saver job concluded <conclusion>`, or the first error line of the cell's `save-state (<env> <stack>)` job | the saver leg failed or was cancelled: see §`no artifact of this run named ... matches the cell's state digest`, §`the state of <env> / <stack> was not found under <key>` and §`the state saver runs only on GitHub-hosted runners` |
+| `the state reader did not finish`, `the state reader did not classify the cell` | the wave's `waveN-read` job failed or wrote no usable report |
+
+Some of these never ran an apply (a wave cancelled before it started, say);
+the job log of the cell shows whether its `Apply the stored plan` step ran. A
+re-run cannot recover a failed save: a re-run of the saver leg alone only looks
+the entry up, and a re-run of the cell applies again. An apply run that was not
+cancelled posts an apply comment; its `state not saved:` note names up to 5
+cells whose check carries one of those titles and counts the rest. A cancelled
+run and the merge deploy post no comment: the verdict's log and the queued
+check are the signal.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
 before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
@@ -1402,14 +1460,16 @@ does not tell it apart: a log without completion lines does not prove nothing
 changed, because an interrupted apply can create a resource before OpenTofu
 logs or records it.
 
-When the same job's `Apply the stored plan` step is `skipped`, nothing was
-applied, this warning is not printed, and a re-run of the job is safe. In every
-other case, re-plan and reconcile against the provider:
+When the cell's `Apply the stored plan` step is `skipped`, nothing was
+applied: re-plan or apply again as usual. In every other case, re-plan and
+reconcile against the provider:
 
-1. Check whether the save stored the entry after all:
+1. Check whether a save stored the entry after all:
    `gh cache list --key <key> --json key --jq '.[] | select(.key == "<key>")' --repo <owner>/<repo>`,
-   with the exact `key` the `Save state` step log shows (`--key` alone matches
-   by prefix). When it is printed, the save worked and only the lookups missed it:
+   for each of the two keys the cell's `save-state (<env> <stack>)` job log
+   names, `state/<stack-slug>/<env>/<run_id>-<run_attempt>` and the same with
+   `-r1` (`--key` alone matches by prefix). When either is printed, the save
+   worked and only the lookups missed it:
    re-plan (step 4) and never re-run the job; the re-plan reads the saved
    state. After a successful apply it shows no changes. After a failed or
    cancelled apply, OpenTofu may not have recorded, and the step log may not
@@ -2161,8 +2221,8 @@ stays pending and the rest of the run applied. Follow the remedy:
   for, apply a `targeted` one with `shipmate apply <env>`, then comment
   `shipmate apply`.
 
-Before any of these, check the run for a cell whose job log shows
-`The apply step ran and its state was not saved`: any apply that covers its
+Before any of these, check the run for a cell whose apply check
+is titled `... state not saved (...)`: any apply that covers its
 environment applies that cell again. Follow
 §`The apply step ran and its state was not saved` for it first.
 
@@ -3366,6 +3426,6 @@ behind; it begins no dispatch once its 10-minute budget is spent, and its
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the
 cancel.
-Re-run that deploy the same way, unless one of its cells' job logs shows
-`The apply step ran and its state was not saved`: the re-run applies that cell
+Re-run that deploy the same way, unless one of its cells' apply checks is
+titled `... state not saved (...)`: the re-run applies that cell
 again. Follow §`The apply step ran and its state was not saved` first.
