@@ -249,6 +249,10 @@ def _credentialed_step_offenses(wf_name, job_name, job):
         if _never_runs(step) or not any(action in uses for action in CREDENTIALED_ACTIONS):
             continue
         with_ = step.get("with") or {}
+        # A verdict mints no token and writes no check; its steps are pinned whole by
+        # test_apply_state_saver_wiring.py.
+        if "apply-complete" in uses and with_.get("mode") == "verdict":
+            continue
         missing = [k for k in ("app-id", "private-key") if k not in with_]
         if missing:
             offenses.append(f"{wf_name}:{job_name} ({uses}) missing with: {missing}")

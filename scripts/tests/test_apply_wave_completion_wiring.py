@@ -8,7 +8,10 @@ skipped wave's listing row carries the literal matrix template, so a completion 
 no cell and fails after the action's retry. It never fails the level (job-level
 `continue-on-error`); `complete` waits for every release, wave and completion, rewrites every
 check and still fails the level on a check it cannot write. No wave waits for a completion, so a
-completion never delays an apply, and no completion runs before its wave.
+completion never delays an apply, and no completion runs before its wave. Each completion also
+waits for its wave's reader, saver and verdict and reads the reader's report, so a check completes
+only after its wave's verdict; `complete` waits for all of them. Each release needs every earlier
+wave's verdict, and runs only when each succeeded or was skipped with its wave.
 
 Threat model: an accidental edit to the workflow (a dropped clause, a wrong slice, a moved
 `needs:` entry). Whole parsed values against hand-written constants cover it.
@@ -32,7 +35,9 @@ COMPLETION_STEPS = [
         "uses": "$/actions/apply-complete",
         "with": {
             "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
+            "mode": "complete",
             "wave-results": "${{ env.WAVE_RESULTS }}",
+            "wave-state": "${{ env.WAVE_STATE }}",
             "job-id": "${{ job.check_run_id }}",
             "deploy": "${{ inputs.deploy }}",
             "pr-number": "${{ inputs.pr_number }}",
@@ -44,7 +49,7 @@ COMPLETION_STEPS = [
 
 def _completion(n):
     return {
-        "needs": ["snapshot", f"wave{n}"],
+        "needs": ["snapshot", f"wave{n}", f"wave{n}-read", f"wave{n}-save", f"wave{n}-verdict"],
         "if": (
             "${{ always() && needs.snapshot.result == 'success' && "
             f"(needs.wave{n}.result == 'success' || needs.wave{n}.result == 'failure') }}}}"
@@ -53,14 +58,17 @@ def _completion(n):
         "continue-on-error": True,
         "permissions": {"actions": "read", "checks": "read"},
         "environment": {"name": "shipmate-engine", "deployment": False},
-        "env": {"WAVE_RESULTS": f'{{"wave{n}": "${{{{ needs.wave{n}.result }}}}"}}'},
+        "env": {
+            "WAVE_RESULTS": f'{{"wave{n}": "${{{{ needs.wave{n}.result }}}}"}}',
+            "WAVE_STATE": f'{{"wave{n}": ${{{{ toJSON(needs.wave{n}-read.outputs.report) }}}}}}',
+        },
         "steps": COMPLETION_STEPS,
     }
 
 
 #: Written out in full: a template-only guard cannot catch a wrong template.
 WAVE3_COMPLETE = {
-    "needs": ["snapshot", "wave3"],
+    "needs": ["snapshot", "wave3", "wave3-read", "wave3-save", "wave3-verdict"],
     "if": (
         "${{ always() && needs.snapshot.result == 'success' && "
         "(needs.wave3.result == 'success' || needs.wave3.result == 'failure') }}"
@@ -69,13 +77,18 @@ WAVE3_COMPLETE = {
     "continue-on-error": True,
     "permissions": {"actions": "read", "checks": "read"},
     "environment": {"name": "shipmate-engine", "deployment": False},
-    "env": {"WAVE_RESULTS": '{"wave3": "${{ needs.wave3.result }}"}'},
+    "env": {
+        "WAVE_RESULTS": '{"wave3": "${{ needs.wave3.result }}"}',
+        "WAVE_STATE": '{"wave3": ${{ toJSON(needs.wave3-read.outputs.report) }}}',
+    },
     "steps": [
         {
             "uses": "$/actions/apply-complete",
             "with": {
                 "by-wave": "${{ needs.snapshot.outputs.by_wave }}",
+                "mode": "complete",
                 "wave-results": "${{ env.WAVE_RESULTS }}",
+                "wave-state": "${{ env.WAVE_STATE }}",
                 "job-id": "${{ job.check_run_id }}",
                 "deploy": "${{ inputs.deploy }}",
                 "pr-number": "${{ inputs.pr_number }}",
@@ -113,6 +126,30 @@ COMPLETE = {
         "wave5-complete",
         "wave6-complete",
         "wave7-complete",
+        "wave0-read",
+        "wave1-read",
+        "wave2-read",
+        "wave3-read",
+        "wave4-read",
+        "wave5-read",
+        "wave6-read",
+        "wave7-read",
+        "wave0-save",
+        "wave1-save",
+        "wave2-save",
+        "wave3-save",
+        "wave4-save",
+        "wave5-save",
+        "wave6-save",
+        "wave7-save",
+        "wave0-verdict",
+        "wave1-verdict",
+        "wave2-verdict",
+        "wave3-verdict",
+        "wave4-verdict",
+        "wave5-verdict",
+        "wave6-verdict",
+        "wave7-verdict",
     ],
     "if": "${{ always() && needs.snapshot.result == 'success' }}",
     "runs-on": "ubuntu-slim",
@@ -128,7 +165,17 @@ COMPLETE = {
             '"wave5": "${{ needs.wave5.result }}", '
             '"wave6": "${{ needs.wave6.result }}", '
             '"wave7": "${{ needs.wave7.result }}"}'
-        )
+        ),
+        "WAVE_STATE": (
+            '{"wave0": ${{ toJSON(needs.wave0-read.outputs.report) }}, '
+            '"wave1": ${{ toJSON(needs.wave1-read.outputs.report) }}, '
+            '"wave2": ${{ toJSON(needs.wave2-read.outputs.report) }}, '
+            '"wave3": ${{ toJSON(needs.wave3-read.outputs.report) }}, '
+            '"wave4": ${{ toJSON(needs.wave4-read.outputs.report) }}, '
+            '"wave5": ${{ toJSON(needs.wave5-read.outputs.report) }}, '
+            '"wave6": ${{ toJSON(needs.wave6-read.outputs.report) }}, '
+            '"wave7": ${{ toJSON(needs.wave7-read.outputs.report) }}}'
+        ),
     },
     "steps": COMPLETION_STEPS,
 }
@@ -137,6 +184,7 @@ JOB_IDS = sorted(
     ["complete", "snapshot", *WAVES]
     + [f"wave{n}-complete" for n in range(8)]
     + [f"wave{n}-release" for n in range(8)]
+    + [f"wave{n}-{kind}" for n in range(8) for kind in ("read", "save", "verdict")]
 )
 
 WAVE_NEEDS = {
@@ -172,10 +220,15 @@ def _release(n):
         f" && (needs.wave{k}.result == 'success' || needs.wave{k}.result == 'skipped')"
         f" && (needs.wave{k}-release.result == 'success'"
         f" || needs.wave{k}-release.result == 'skipped')"
+        f" && (needs.wave{k}-verdict.result == 'success'"
+        f" || (needs.wave{k}-verdict.result == 'skipped' && needs.wave{k}.result == 'skipped'))"
         for k in range(n)
     )
     return {
-        "needs": ["snapshot", *(j for k in range(n) for j in (f"wave{k}", f"wave{k}-release"))],
+        "needs": [
+            "snapshot",
+            *(j for k in range(n) for j in (f"wave{k}", f"wave{k}-release", f"wave{k}-verdict")),
+        ],
         "if": (
             "${{ !cancelled() && needs.snapshot.result == 'success' && "
             f"toJSON(fromJSON(inputs.waves_json).wave{n}) != '[]'{earlier} }}}}"
@@ -224,14 +277,26 @@ WAVE0_RELEASE = {
 }
 
 WAVE2_RELEASE = {
-    "needs": ["snapshot", "wave0", "wave0-release", "wave1", "wave1-release"],
+    "needs": [
+        "snapshot",
+        "wave0",
+        "wave0-release",
+        "wave0-verdict",
+        "wave1",
+        "wave1-release",
+        "wave1-verdict",
+    ],
     "if": (
         "${{ !cancelled() && needs.snapshot.result == 'success' && "
         "toJSON(fromJSON(inputs.waves_json).wave2) != '[]' && "
         "(needs.wave0.result == 'success' || needs.wave0.result == 'skipped') && "
         "(needs.wave0-release.result == 'success' || needs.wave0-release.result == 'skipped') && "
+        "(needs.wave0-verdict.result == 'success' || "
+        "(needs.wave0-verdict.result == 'skipped' && needs.wave0.result == 'skipped')) && "
         "(needs.wave1.result == 'success' || needs.wave1.result == 'skipped') && "
-        "(needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') }}"
+        "(needs.wave1-release.result == 'success' || needs.wave1-release.result == 'skipped') && "
+        "(needs.wave1-verdict.result == 'success' || "
+        "(needs.wave1-verdict.result == 'skipped' && needs.wave1.result == 'skipped')) }}"
     ),
     "runs-on": "ubuntu-slim",
     "permissions": {"actions": "read"},
@@ -255,7 +320,9 @@ WAVE2_RELEASE = {
 def test_each_wave_completion_job_is_exactly(n):
     """Mutations: drop the `result` clause from `wave2-complete`'s `if:`; `.wave1` in
     `wave2-complete`'s `env`; `needs: [snapshot]` on `wave5-complete`; add `checks: write`
-    to `wave5-complete`'s permissions; drop `continue-on-error` from `wave3-complete`."""
+    to `wave5-complete`'s permissions; drop `continue-on-error` from `wave3-complete`; drop
+    `wave4-verdict` from `wave4-complete`'s `needs`; `wave2-read` in `wave3-complete`'s
+    `WAVE_STATE`."""
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-complete"] == _completion(n)
 
 
@@ -299,7 +366,9 @@ def test_each_wave_runs_only_after_its_release_succeeded():
 def test_each_release_job_is_exactly(n):
     """Mutations: drop `snapshot` from `wave2-release.needs`; drop the `!cancelled()` prefix from
     `wave4-release.if`; `'failure'` for `'skipped'` in one clause of `wave6-release.if`; add
-    `continue-on-error: true` to `wave1-release`; `.wave2` in `wave3-release`'s slice."""
+    `continue-on-error: true` to `wave1-release`; `.wave2` in `wave3-release`'s slice; drop
+    `wave3-verdict` from `wave5-release`'s `needs` and `if:`; accept a `skipped` `wave2-verdict`
+    in `wave4-release` without its wave `skipped`."""
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-release"] == _release(n)
 
 

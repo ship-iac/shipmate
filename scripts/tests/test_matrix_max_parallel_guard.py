@@ -41,6 +41,13 @@ EXPECTED_STRATEGIES = {
         }
         for n in range(8)
     },
+    **{
+        ("apply-env-level.yml", f"wave{n}-save"): {
+            "fail-fast": False,
+            "matrix": {"include": f"${{{{ fromJSON(needs.wave{n}-read.outputs.cells) }}}}"},
+        }
+        for n in range(8)
+    },
     ("deploy.yml", "warm"): {
         "fail-fast": False,
         "max-parallel": _FROM_DETECT,

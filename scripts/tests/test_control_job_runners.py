@@ -8,7 +8,8 @@ grow with the cell count and an `ubuntu-slim` job stops at 15 minutes; `deploy.y
 takes it for the same reason, its calls growing with the open pull requests. The other control
 jobs take the 1-CPU `ubuntu-slim` image. `deploy.yml`'s `warm` saves the provider and OpenTofu
 cache entries the cells restore, whose keys carry the runner's OS and architecture, so it takes the
-cells' runner.
+cells' runner; so does each `waveN-save` leg, which saves the state the cells restore, and each
+`waveN-read`, whose log reads grow with the wave's cells.
 `apply.yml`'s `run` calls a workflow and takes no runner. Engine CI (`ci.yml`, `manifest-load.yml`)
 stays on `ubuntu-latest`. A new job, a moved job or a flipped label fails here. Mutations:
 `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`; `plan.yml` `summary` to `ubuntu-slim`;
@@ -29,6 +30,9 @@ EXPECTED = {
     **{("apply-env-level.yml", f"wave{n}"): INPUT for n in range(8)},
     **{("apply-env-level.yml", f"wave{n}-complete"): SLIM for n in range(8)},
     **{("apply-env-level.yml", f"wave{n}-release"): SLIM for n in range(8)},
+    **{("apply-env-level.yml", f"wave{n}-read"): INPUT for n in range(8)},
+    **{("apply-env-level.yml", f"wave{n}-save"): INPUT for n in range(8)},
+    **{("apply-env-level.yml", f"wave{n}-verdict"): SLIM for n in range(8)},
     ("apply-env-level.yml", "complete"): SLIM,
     ("apply.yml", "guard"): SLIM,
     ("apply.yml", "claim"): SLIM,

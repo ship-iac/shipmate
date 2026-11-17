@@ -84,7 +84,12 @@ _MINT_ACTION = "actions/create-github-app-token@"
 _SITES = {
     ACTIONS / "summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-summary" / "action.yml": (("runs", "steps"), _ACTION_WITH),
-    ACTIONS / "apply-complete" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    # Its verdict mode mints nothing, so the call and the mint share one condition.
+    ACTIONS / "apply-complete" / "action.yml": (
+        ("runs", "steps"),
+        _ACTION_WITH,
+        "${{ inputs.mode != 'verdict' }}",
+    ),
     ACTIONS / "apply-release" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-snapshot" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "gate-refresh" / "action.yml": (("runs", "steps"), _ACTION_WITH),
@@ -129,13 +134,13 @@ def test_the_mint_sites_are_the_ones_this_guard_knows_about():
 
 def test_every_mint_site_verifies_the_key_arrived():
     """Mutations: delete the call from one site, or wire its `private-key` to the app id; move
-    `apply-snapshot`'s call after its `snap` step."""
+    `apply-snapshot`'s call after its `snap` step; `== 'verdict'` in `apply-complete`'s call."""
     for path, site in _SITES.items():
         if site is None:
             continue
-        keys, with_ = site
+        keys, with_, *condition = site
         step = _steps(path, keys)[0]
-        assert step == _call(with_), (
+        assert step == _call(with_) | ({"if": condition[0]} if condition else {}), (
             f"{path.name} must open with the App-key precondition call verbatim; got {step!r}"
         )
 

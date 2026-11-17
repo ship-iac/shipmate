@@ -13,7 +13,8 @@ cell, from its detect job's output (`apply-env-level.yml` from its `tools` input
 `apply-run.yml` and `deploy.yml` fill from theirs) and at `deploy.yml`'s `warm` job, which installs
 OpenTofu to fill the provider cache; `tofu: "false"` at the detect jobs, which never run
 OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml site, whose workflow-level
-`cache-mode: read` denies the save with a warning; and `if: false` on the manifest-load parse
+`cache-mode: read` denies the save with a warning, and at every `apply-env-level.yml` wave cell,
+whose job-level `cache-mode: read` does the same; and `if: false` on the manifest-load parse
 probe.
 """
 
@@ -44,7 +45,8 @@ def _setup_steps():
 _DETECT = {"id": "setup", "with": {"tofu": "false", "resolve": "true"}}
 _FROM_DETECT = "${{ needs.detect.outputs.tools }}"
 EXPECTED_STEPS = {
-    "apply-env-level.yml": [{"with": {"versions": "${{ inputs.tools }}"}}] * 8,
+    "apply-env-level.yml": [{"with": {"versions": "${{ inputs.tools }}", "cache-save": "false"}}]
+    * 8,
     "apply-run.yml": [_DETECT],
     "deploy.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     "drift.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],

@@ -65,10 +65,13 @@ def test_every_cell_job_binds_the_resolved_environment():
         )
 
 
-#: Matrix jobs that touch no cell's state and bind no environment, written by hand. `warm` runs
-#: `init -backend=false` on the merged commit to fill the provider cache: no backend, no
-#: credentials, and a protected apply environment would hold each leg for a reviewer.
-UNBOUND_MATRIX = {("deploy.yml", "warm")}
+#: Matrix jobs that bind no environment, written by hand. `warm` runs `init -backend=false` on
+#: the merged commit to fill the provider cache: no backend, no credentials, and a protected
+#: apply environment would hold each leg for a reviewer. Each `waveN-save` leg saves a cell's
+#: sealed state with no key and no credentials: the cell's own log names the bytes it saves.
+UNBOUND_MATRIX = {("deploy.yml", "warm")} | {
+    ("apply-env-level.yml", f"wave{n}-save") for n in range(8)
+}
 
 
 def test_the_unbound_matrix_jobs_bind_no_environment():

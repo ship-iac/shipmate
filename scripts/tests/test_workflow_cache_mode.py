@@ -1,14 +1,15 @@
 """`cache-mode` placement across every engine workflow, both levels, pinned whole.
 
-`plan.yml` and `unlock.yml` run pull-request HCL with the default branch's cache scope. A missing
-workflow-level `read` there, or a job-level `write` (the job-level key wins over the workflow
-key), lets that HCL save an Actions-cache entry that drift and apply jobs restore. An added `read`
-on a job that saves state or providers denies the save with the step still green.
+`plan.yml` and `unlock.yml` run pull-request HCL with the default branch's cache scope, and so does
+each `apply-env-level.yml` wave cell. A missing `read` there, or a job-level `write` (the
+job-level key wins over the workflow key), lets that HCL save an Actions-cache entry that drift,
+plan and apply jobs restore. Only the `waveN-save` legs, which run no pull-request code, save state;
+an added `read` on one denies its save, which then fails the leg.
 
 Mutations: delete `cache-mode: read` from `unlock.yml`; set `plan.yml`'s to `none`; add a
-job-level `cache-mode: write` to `plan.yml`'s `plan` job; add a job-level `cache-mode: read` to
-`apply-env-level.yml`'s `wave0` job; add a new `.github/workflows/probe.yaml`; add an empty
-top-level `cache-mode:` to `apply.yml`.
+job-level `cache-mode: write` to `plan.yml`'s `plan` job; set `wave3`'s to `write`; delete
+`wave5-save`'s; add a new `.github/workflows/probe.yaml`; add an empty top-level
+`cache-mode:` to `apply.yml`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -18,7 +19,43 @@ _ABSENT = object()
 
 #: Hand-written: every workflow file by name, so a new file reds until its mode is decided.
 _EXPECTED = {
-    "apply-env-level.yml": (_ABSENT, {}),
+    "apply-env-level.yml": (
+        _ABSENT,
+        {
+            "wave0": "read",
+            "wave1": "read",
+            "wave2": "read",
+            "wave3": "read",
+            "wave4": "read",
+            "wave5": "read",
+            "wave6": "read",
+            "wave7": "read",
+            "wave0-read": "read",
+            "wave1-read": "read",
+            "wave2-read": "read",
+            "wave3-read": "read",
+            "wave4-read": "read",
+            "wave5-read": "read",
+            "wave6-read": "read",
+            "wave7-read": "read",
+            "wave0-save": "write",
+            "wave1-save": "write",
+            "wave2-save": "write",
+            "wave3-save": "write",
+            "wave4-save": "write",
+            "wave5-save": "write",
+            "wave6-save": "write",
+            "wave7-save": "write",
+            "wave0-verdict": "read",
+            "wave1-verdict": "read",
+            "wave2-verdict": "read",
+            "wave3-verdict": "read",
+            "wave4-verdict": "read",
+            "wave5-verdict": "read",
+            "wave6-verdict": "read",
+            "wave7-verdict": "read",
+        },
+    ),
     "apply-run.yml": (_ABSENT, {}),
     "apply.yml": (_ABSENT, {}),
     "ci.yml": (_ABSENT, {}),
