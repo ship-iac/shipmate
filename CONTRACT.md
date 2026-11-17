@@ -299,8 +299,9 @@ writes them again. Apply runs of one pull request run one at a time, so an
 `in_progress` check that a pre-merge `snapshot` sees belongs to a dead run.
 
 **In-progress checks on a merge deploy.** The merge deploy refuses the whole run
-over a pending cell whose newest App apply check is `in_progress` under another
-run that may have applied the cell or may still apply it: a live holding run may
+over a pending cell with an App apply check `in_progress` under another run
+that may have applied the cell or may still apply it, whether that check is the
+cell's newest or an older one under a newer re-plan check: a live holding run may
 still apply it, and an ended one may have applied it without saving its state.
 This refusal runs after the stranded-check and behind-check refusals and before
 the deploy reads any plan run. The check's details link names the holding run

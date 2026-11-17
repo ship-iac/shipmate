@@ -3273,8 +3273,9 @@ always passes one.
 
 ### A merge deploy refused an apply check another run holds in progress
 
-The annotation starts `deploy refused:` and names, per cause, the cells whose
-newest apply check is `in_progress` under a run other than this deploy. It ends
+The annotation starts `deploy refused:` and names, per cause, the cells with
+an apply check `in_progress` under a run other than this deploy, the newest or an
+older one under a newer re-plan check. It ends
 naming every other pending cell of the merge, which the refused deploy does not
 apply either. A release job flips a cell's check to `in_progress` with a link to
 its run, and that run's completion writes it again. A gate-bypassing merge while
@@ -3323,8 +3324,9 @@ it``. A later refusal of the same deploy can still stop it.
    check run can update it, so neither `GITHUB_TOKEN` nor a personal token can.
    GitHub's flow signs a JWT with the App's private key and calls
    `POST /app/installations/<installation id>/access_tokens`.
-4. With that token as `GH_TOKEN`, either return the check to `queued`, so the
-   re-run deploy applies it:
+4. With that token as `GH_TOKEN`, take each of the cell's apply checks that is
+   `in_progress` on the head, and either return it to `queued`, so the re-run
+   deploy applies the cell:
 
    ```bash
    gh api -X PATCH repos/<owner>/<repo>/check-runs/<check id> -f status=queued
