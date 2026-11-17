@@ -127,8 +127,9 @@ def _row(stack, digest, attempt="1"):
 
 
 def test_a_mixed_wave_classes_every_cell(monkeypatch, tmp_path):
-    """Mutations: map `not-applied` to `none`; class `missing` as `none`; drop the `steps == []`
-    branch, and a never-started job's unreadable log refuses it."""
+    """`c` failed inside its apply step before applying. Mutations: map `not-applied` to `none`;
+    class `missing` as `none`; read the log before the job's record, and a never-started job's
+    unreadable log refuses it."""
     jobs = [
         OWN,
         _job("a", jid=1),
@@ -137,7 +138,7 @@ def test_a_mixed_wave_classes_every_cell(monkeypatch, tmp_path):
             "c",
             jid=3,
             conclusion="failure",
-            steps=[{"name": "Apply the cell", "conclusion": "skipped"}],
+            steps=[{"name": "Apply the cell", "conclusion": "failure"}],
         ),
         _job("d", jid=4, conclusion="cancelled", steps=[]),
         _job("e", jid=5),
@@ -232,9 +233,12 @@ def test_no_line_is_not_run_only_from_the_jobs_own_record(
 ):
     """Mutations: `not_run` on no line alone; `not_run` when the step is absent from a
     non-empty list; refuse a `failure` job with the step `skipped`; `not_run` for a `success`
-    job with the step `skipped`."""
+    job with the step `skipped`; read the log before the job's record (a never-started cell then
+    costs every log read and retry)."""
     job = _job("a", jid=1, conclusion=conclusion, steps=steps)
-    code, out = _Run(monkeypatch, tmp_path, [_check("a")], [[OWN, job]], {1: [_log()]})()
+    run = _Run(monkeypatch, tmp_path, [_check("a")], [[OWN, job]], {1: [_log()]})
+    code, out = run()
+    assert run.reads.get(1, 0) == (0 if kind == "not_run" else len(sr.LOG_DELAYS) + 1)
     expected = (
         _report(not_run=[_check("a")])
         if kind == "not_run"

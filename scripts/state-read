@@ -10,8 +10,9 @@ whole lines matching `LINE`, the line `state-handoff` prints. It never prints a 
 - `state` (a saver row): one line with a digest and an `attempt` at most the job's
   `run_attempt`.
 - `none`, `not_applied`: one line of that value.
-- `not_run`: no line, the job `cancelled`, `skipped` or `failure`, and its `steps` empty or its
-  `Apply the cell` step concluded `skipped`.
+- `not_run`: the job `cancelled`, `skipped` or `failure`, and its `steps` empty or its
+  `Apply the cell` step concluded `skipped`. Decided before any log read, so such a cell costs
+  no read or retry; a skipped `Apply the cell` also skips the step that prints the line.
 - `refused`, with a reason: anything else.
 
 `not_run` comes only from GitHub's own record of the job, never from the cell's silence and
@@ -136,8 +137,7 @@ def _without_log(matched):
         return "refused", f"{len(matched)} jobs match the cell"
     if not matched[0].get("conclusion"):
         return "refused", NO_CONCLUSION
-    # A job that ran no step has no log to read.
-    if matched[0].get("steps") == [] and _never_started(matched[0]):
+    if _never_started(matched[0]):
         return "not_run", None
     return None
 
@@ -152,8 +152,6 @@ def classify(check, stack, env, matched):
     if found is None:
         return "refused", "the cell's log could not be read"
     if not found:
-        if _never_started(job):
-            return "not_run", None
         return "refused", "no state line in the cell's log"
     if len(found) > 1:
         return "refused", f"{len(found)} state lines in the cell's log"
