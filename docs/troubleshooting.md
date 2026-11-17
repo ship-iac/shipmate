@@ -2770,8 +2770,7 @@ A push to a pull request in a public repository starts a `shipmate.yml` run that
 ends `startup_failure` with zero jobs. It creates no new `plan / ` check, no plan
 comment update and no `shipmate / gate` status; the results of an earlier run on
 the same head may remain. From 2026-12-02 GitHub blocks `pull_request_target` in
-a public repository unless a repository Actions event policy allows it, and its
-announced brownout on 2026-11-16, 16:00-18:00 UTC, gives the same symptom. A
+a public repository unless a repository Actions event policy allows it. A
 private or internal repository is unaffected.
 
 The `release` run of a closed pull request is blocked the same way, so a pull
@@ -2786,8 +2785,7 @@ Create the policy
 `scripts/onboard --app-id <id> --dry-run` reports whether the repository's own
 policies allow shipmate's events (§What `scripts/onboard` reports). GitHub's
 documentation says such a policy allows the events; shipmate has not yet
-observed a run under the block with the policy in place, and the 2026-11-16
-brownout is the first chance.
+observed a run under the block with the policy in place.
 
 ### A cell is behind the base
 
