@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Fetch one cell's sealed state bundle for its saver leg, which runs no pull-request code.
+
+Runs as the first step of `actions/state-save`, in a `waveN-save` leg whose row comes from
+`state-read`: `STACK`, `ENV_NAME`, `SLUG`, `DIGEST` (the sha256 the cell printed) and
+`ATTEMPT` (the attempt the cell printed). It refuses unless `RUNNER_ENVIRONMENT` is exactly
+`github-hosted`, before any API call. It then lists every artifact of this run named
+`state-handoff.artifact_name(ENV_NAME, SLUG, ATTEMPT)`, downloads each, and keeps those whose
+bundle hashes to `DIGEST`: one copy or several byte-identical ones pass, and none refuses,
+which also covers a name another job of the run took first. From the bundle it masks the state
+path, checks it with `state-path.validate(STACK, path)` and writes the ciphertext to
+`$GITHUB_WORKSPACE/<path>`.
+
+Outputs `path` and `kind`: `save` when `ATTEMPT` equals this leg's `GITHUB_RUN_ATTEMPT`, else
+`lookup` (an earlier attempt's cell, or a re-run of only this leg, never saves). The cache key
+is built from the row by `actions/state`, never from the bundle. It reads no encryption key and
+never decrypts: the digest from the cell's own log binds the bytes, and every restore
+authenticates them for its own prefix.
+"""
+
+import hashlib
+import io
+import json
+import os
+import subprocess
+import zipfile
+
+from _shipmate import _load, command_data, retried, run, run_annotated, write_outputs
+
+sh = _load("state-handoff")
+sp = _load("state-path")
+
+HOSTED_ONLY = (
+    "::error::the state saver runs only on GitHub-hosted runners; a reused self-hosted runner "
+    "could alter what it saves. Use a GitHub-hosted runs_on or a remote backend."
+)
+MEMBER = "state.bundle"
+
+
+def _artifacts(name):
+    repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
+    path = f"repos/{repo}/actions/runs/{run_id}/artifacts?name={name}&per_page=100"
+    listing = retried(lambda: run(["gh", "api", "--paginate", "--jq", ".artifacts[]", path]))
+    found = [json.loads(line) for line in listing.splitlines() if line.strip()]
+    return [a for a in found if a.get("name") == name]
+
+
+def _download(artifact_id):
+    """The zip archive's bytes; `run` decodes stdout as text, which would corrupt them."""
+    argv = [
+        "gh",
+        "api",
+        f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts/{artifact_id}/zip",
+    ]
+
+    def call():
+        # A fixed gh argv run with shell=False; the id is an integer from the listing.
+        p = subprocess.run(argv, capture_output=True)  # noqa: S603
+        if p.returncode != 0:
+            stderr = p.stderr.decode("utf-8", "replace").strip()
+            raise SystemExit(f"command failed ({p.returncode}): {' '.join(argv)}\n{stderr}")
+        return p.stdout
+
+    return retried(call)
+
+
+def _bundle(archive):
+    """The one `MEMBER` of a downloaded archive, or None."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+            if zf.namelist() != [MEMBER]:
+                return None
+            return zf.read(MEMBER)
+    except zipfile.BadZipFile:
+        return None
+
+
+def matching(name, digest):
+    """The bundle of an artifact named `name` whose bytes hash to `digest`, or None."""
+    for artifact in _artifacts(name):
+        if not isinstance(artifact.get("id"), int):
+            continue
+        try:
+            bundle = _bundle(_download(artifact["id"]))
+        except SystemExit:
+            print(f"state-save: artifact {artifact['id']} could not be downloaded")
+            continue
+        if bundle is not None and hashlib.sha256(bundle).hexdigest() == digest:
+            return bundle
+    return None
+
+
+def main():
+    if os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
+        raise SystemExit(HOSTED_ONLY)
+    stack, env, slug = os.environ["STACK"], os.environ["ENV_NAME"], os.environ["SLUG"]
+    digest, attempt = os.environ["DIGEST"], os.environ["ATTEMPT"]
+    name = sh.artifact_name(env, slug, attempt)
+    bundle = matching(name, digest)
+    if bundle is None:
+        raise SystemExit(
+            f"::error::no artifact of this run named {name} matches the cell's state digest."
+        )
+    if not bundle.startswith(sh.BUNDLE_MAGIC):
+        raise SystemExit(f"::error::the bundle in {name} does not start with the bundle header.")
+    head, _, ciphertext = bundle.removeprefix(sh.BUNDLE_MAGIC).partition(b"\n")
+    path = head.decode("utf-8", "replace")
+    # The path may hold a value the cell masked, and masks do not cross jobs.
+    print(f"::add-mask::{command_data(path)}")
+    sp.validate(stack, path)
+    target = os.path.join(os.environ["GITHUB_WORKSPACE"], path)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with open(target, "wb") as fh:
+        fh.write(ciphertext)
+    kind = "save" if attempt == os.environ["GITHUB_RUN_ATTEMPT"] else "lookup"
+    write_outputs(path=path, kind=kind)
+    print(f"state-save: {name} matched; mode {kind}")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

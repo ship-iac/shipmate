@@ -1,0 +1,72 @@
+name: shipmate state-save
+description: Save one cell's sealed local state from a job that runs no pull-request code. Takes the cell's bundle artifact whose bytes match the digest its own log printed, then saves it under the cell's state key, or under the same key with -r1 when that save is not found. Runs only on GitHub-hosted runners; takes no encryption key. Reads the job's GITHUB_TOKEN, which needs actions:read to list and download this run's artifacts.
+inputs:
+  stack:
+    description: The cell's stack path, as state-read's row names it.
+    required: true
+  environment:
+    description: The cell's environment.
+    required: true
+  slug:
+    description: The cell's stack slug, from state-read's row.
+    required: true
+  digest:
+    description: The sha256 of the cell's bundle, from the state line in the cell's own log.
+    required: true
+  attempt:
+    description: The run attempt the cell's state line names. An attempt below this job's only looks the entry up and never saves.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Fetch the cell's state bundle
+      id: fetch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        STACK: ${{ inputs.stack }}
+        ENV_NAME: ${{ inputs.environment }}
+        SLUG: ${{ inputs.slug }}
+        DIGEST: ${{ inputs.digest }}
+        ATTEMPT: ${{ inputs.attempt }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/state-save"
+    - name: Save the state
+      id: primary
+      # A save the cache service refuses fails this step; the -r1 save must still run.
+      continue-on-error: true
+      uses: $/actions/state
+      with:
+        stack-slug: ${{ inputs.slug }}
+        env: ${{ inputs.environment }}
+        mode: ${{ steps.fetch.outputs.kind }}
+        path: ${{ steps.fetch.outputs.path }}
+        attempt: ${{ inputs.attempt }}
+        key-suffix: ""
+    - name: Save the state under the retry key
+      id: retry
+      if: ${{ !cancelled() && steps.fetch.outcome == 'success' && steps.primary.outputs.saved != 'true' }}
+      uses: $/actions/state
+      with:
+        stack-slug: ${{ inputs.slug }}
+        env: ${{ inputs.environment }}
+        mode: ${{ steps.fetch.outputs.kind }}
+        path: ${{ steps.fetch.outputs.path }}
+        attempt: ${{ inputs.attempt }}
+        key-suffix: -r1
+    - name: Fail unless the state entry was found
+      if: always()
+      shell: bash
+      env:
+        PRIMARY_SAVED: ${{ steps.primary.outputs.saved }}
+        RETRY_SAVED: ${{ steps.retry.outputs.saved }}
+        STACK: ${{ inputs.stack }}
+        ENV_NAME: ${{ inputs.environment }}
+        SLUG: ${{ inputs.slug }}
+        ATTEMPT: ${{ inputs.attempt }}
+      run: |
+        if [ "$PRIMARY_SAVED" = true ] || [ "$RETRY_SAVED" = true ]; then
+          exit 0
+        fi
+        key="state/$SLUG/$ENV_NAME/$GITHUB_RUN_ID-$ATTEMPT"
+        echo "::error::the state of $ENV_NAME / $STACK was not found under $key or $key-r1. Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge can apply this cell's reviewed plan again against the state from before the apply. Before applying or merging any plan of this stack in this environment, on any pull request, follow docs/troubleshooting.md section The apply step ran and its state was not saved."
+        exit 1

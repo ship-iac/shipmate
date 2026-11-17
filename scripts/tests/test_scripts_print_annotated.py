@@ -55,6 +55,7 @@ SCRIPTS_EXPECTED = [
     "state-handoff",
     "state-path",
     "state-read",
+    "state-save",
     "summary-comment",
     "tofu-error",
     "tool-versions",
