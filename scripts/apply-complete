@@ -91,11 +91,11 @@ READER_UNFINISHED = "the state reader did not finish"
 UNAPPLIED_SUCCESS = "the cell succeeded without applying"
 UNCLASSIFIED = "the state reader did not classify the cell"
 NEVER_RERUN = (
-    "Never re-run these cells' jobs or their workflow run. A re-run, a shipmate apply comment, "
-    "or a merge can apply their reviewed plans again against the state from before the apply. "
-    "Before applying or merging any plan of a named stack in its environment, on any pull "
-    "request, follow docs/troubleshooting.md section The apply step ran and its state was not "
-    "saved."
+    "If a named cell's apply step ran, never re-run its job or the workflow run. A re-run, a "
+    "shipmate apply comment, or a merge can apply its reviewed plan again against the state from "
+    "before the apply. Before applying or merging any plan of that stack in its environment, on "
+    "any pull request, follow docs/troubleshooting.md section The apply step ran and its state "
+    "was not saved."
 )
 
 

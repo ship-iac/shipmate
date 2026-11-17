@@ -1379,17 +1379,20 @@ def _verdict(tmp_path, jobs, states):
     return _verdict_of(tmp_path, rows, by_wave)
 
 
+#: Conditional: a named cell may never have started its apply step (a wave cancelled before
+#: its matrix expanded names every cell `the cell's job is not listed`).
 _VERDICT_TAIL = (
-    "Never re-run these cells' jobs or their workflow run. A re-run, a shipmate apply comment, or "
-    "a merge can apply their reviewed plans again against the state from before the apply. "
-    "Before applying or merging any plan of a named stack in its environment, on any pull "
-    "request, follow docs/troubleshooting.md section The apply step ran and its state was not "
-    "saved.\n"
+    "If a named cell's apply step ran, never re-run its job or the workflow run. A re-run, a "
+    "shipmate apply comment, or a merge can apply its reviewed plan again against the state from "
+    "before the apply. Before applying or merging any plan of that stack in its environment, on "
+    "any pull request, follow docs/troubleshooting.md section The apply step ran and its state "
+    "was not saved.\n"
 )
 
 
 def test_a_verdict_names_each_cell_without_evidence(tmp_path):
-    """Mutations: drop the never-re-run instruction; exit 0 on a refused cell."""
+    """Mutations: drop the never-re-run instruction; make it unconditional (the earlier
+    `Never re-run these cells' jobs`); exit 0 on a refused cell."""
     jobs = [job(APP_JOB, "success"), job(APP_LEG, "success"), job(DB_JOB, "success")]
     states = {"wave1": json.dumps(_report(state=[APP], refused={DB: "no state line"}))}
     done = _verdict(tmp_path, jobs, states)
