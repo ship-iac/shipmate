@@ -3094,10 +3094,10 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-two jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+All thirty-three jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
 `claim`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `claim`, `queue` and `outcome`,
 `apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
-`wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary`,
+`wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 
