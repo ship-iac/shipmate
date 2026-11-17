@@ -26,7 +26,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   check is pending on `SHIPMATE_HEAD_SHA`, and every one of them with `SHIPMATE_RELEASE_PENDING`
   `true` (a deploy refused before applying any cell); `false` deletes them all while the pull
   request is closed, and only those committed by `SHIPMATE_CLOSED_AT` once it is open again.
-  Refuses, after releasing the rest, naming each lock whose delete refused.
+  Deletes none of them, with a `::notice::`, while a run may still apply one of the pull
+  request's cells or save its state (`applying_runs`). Refuses, after releasing the rest,
+  naming each lock whose delete refused.
 - `evict`: deletes the locks other pull requests (or an unknown holder) hold in `SHIPMATE_ENV`
   on the cells whose apply check on `SHIPMATE_HEAD_SHA` is pending (failed and cancelled
   included) and is no behind record, a cell this pull request cannot apply; writes outputs
@@ -419,7 +421,14 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
     read `pr`'s state after listing its locks; still closed, delete them all; merged since,
     apply the merge rule to the pending checks of the head it merged at; open again, delete
     only a lock committed at or before the close. An unreadable state or repository id refuses
-    before any delete. An unknown holder is never released here."""
+    before any delete. An unknown holder is never released here.
+
+    Threat model: while a run that applied a cell has not finished saving its state, no other
+    run may restore that state to apply the cell. The lock is the one marker that exists before
+    the cell job leaves its `apply-<env>-<stack>` group and does not depend on the head, so
+    while `applying_runs` names a run of `pr`, or cannot list them all, nothing is deleted and a
+    `::notice::` says why; a re-run of the releasing job once that run ends, or another pull
+    request's `--evict`, releases them."""
     if (pending is None) == (closed_at is None):
         raise ValueError("pass exactly one of pending and closed_at")
     mine = [lock for lock in _scan(repo, "shipmate/locks/", run).values() if lock.pr == pr]
@@ -432,7 +441,17 @@ def release(repo, pr: int, *, pending=None, closed_at=None, run=_run):
             return ag.check_name(lock.stack, lock.env) in pending
         return state == "OPEN" and _when(lock.committed_at) > _when(closed_at)
 
-    return _delete_each(repo, [lock for lock in mine if not keep(lock)], run)
+    doomed = [lock for lock in mine if not keep(lock)]
+    if doomed:
+        ids, complete = applying_runs(repo, pr, run=run)
+        if ids or not complete:
+            print(
+                f"::notice::kept the {len(doomed)} cell lock(s) pull request #{pr} would release: "
+                f"{applying_reason(ids, complete)}. Re-run this job once it ends; another pull "
+                "request's `shipmate unlock <env> --evict` also releases them"
+            )
+            return [], []
+    return _delete_each(repo, doomed, run)
 
 
 def _delete_each(repo, locks, run):
@@ -611,6 +630,53 @@ def _deploying(jobs, attempt):
 
 def _warm(name):
     return name == "warm" or name.startswith("warm / ")
+
+
+def _call_job(job, *path):
+    """Whether listed job `job` is `<caller> / <path>`, matched whole: a cell of env `run` and
+    root stack `summary` also ends in ` / run / summary`."""
+    return job["name"].split(" / ")[1:] == list(path)
+
+
+def _applying(jobs, attempt):
+    """Whether an apply or `auto` run on `attempt` listing `jobs` may still apply a cell or save
+    its state. It has done both once its `summary` (`<caller> / run / summary`), which needs
+    every env-level, is `in_progress` or `completed`, every other job but `outcome` (`<caller> /
+    outcome`) is `completed`, and every job is of `attempt`; an empty listing has not. `summary`
+    writes the gate in its first step, so a merge can land while it runs."""
+
+    def tail(j):
+        return _call_job(j, "run", "summary") or _call_job(j, "outcome")
+
+    started = ("in_progress", "completed")
+    return (
+        not any(_call_job(j, "run", "summary") and j["status"] in started for j in jobs)
+        or any(j.get("run_attempt") != attempt for j in jobs)
+        or any(j["status"] != "completed" for j in jobs if not tail(j))
+    )
+
+
+def applying_runs(repo: str, pr: int, *, run=_run) -> tuple[list[int], bool]:
+    """`(ids, complete)`: the id of each live run of `SHIPMATE_WORKFLOW` that may still apply a
+    cell of `pr` or save its state, ascending: an `apply` or `auto` run titled for `pr`, or one
+    whose title does not parse (`holder_dispatch_runs`), unless its jobs show it past its
+    env-levels (`_applying`). A run whose jobs cannot be listed counts. `complete` is false when
+    the runs listing is incomplete. A point-in-time check: a run started after it is not seen."""
+    found, complete = holder_dispatch_runs(repo, {pr}, run)
+    ids = []
+    for r in found:
+        jobs = listed_jobs(repo, r["id"], run)
+        if jobs is None or _applying(jobs, r["attempt"]):
+            ids.append(r["id"])
+    return ids, complete
+
+
+def applying_reason(ids, complete):
+    """Why `applying_runs`' `(ids, complete)` holds a lock, one clause per cause."""
+    why = [f"run {current_run_url(str(i))} may still apply a cell or save its state" for i in ids]
+    if not complete:
+        why.append(f"the live runs of {SHIPMATE_WORKFLOW} could not all be listed")
+    return "; ".join(why)
 
 
 def evict_stacks(names, env):

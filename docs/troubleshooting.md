@@ -1055,6 +1055,10 @@ merged or closed.
   deploy mapped the merge to its pull request, with every other lock #<n> holds (§A merge deploy refused: `deploy refused: <n>
   pending cell(s) are locked by another pull request`). A merge into a
   branch no deploy runs on leaves the check pending, and the lock with it.
+- **A run of #<n> could still apply a cell or save its state when the release
+  ran.** The release log has the notice ``kept the <k> cell lock(s) pull request
+  #<n> would release``: see §A release kept the locks: `kept the <k> cell
+  lock(s)`.
 - **#<n> was closed without merging, then reopened, and the lock is newer than
   the close.** The release keeps a lock taken after the close while #<n> is
   open again. An apply that took the lock after the close refuses and deletes
@@ -1075,6 +1079,45 @@ For the second and third causes, re-pin the fence
 differs. In every case, `shipmate unlock <env> --evict` from a pull request that
 changes the cell and still has to apply it releases the lock once #<n>'s runs
 have ended.
+
+### A release kept the locks: `kept the <k> cell lock(s)`
+
+The `release` job, or the merge deploy's `summary` at `Release the merged pull
+request's cell locks`, logs the notice `` kept the <k> cell lock(s) pull request
+#<n> would release: run <url> may still apply a cell or save its state. Re-run
+this job once it ends; another pull request's `shipmate unlock <env> --evict`
+also releases them ``, or with `the live runs of shipmate.yml could not all be
+listed` in place of the run. The job succeeds.
+
+An apply or `auto` run of #<n>, or a dispatch run whose title does not parse,
+had not finished its env-levels, so it may still have been saving the state of
+a cell it applied. Releasing the lock then would let another pull request
+restore that state before the save ([`../CONTRACT.md`](../CONTRACT.md) §Cell
+locks, "A run of the holder keeps its locks").
+
+1. Wait for the run the notice links to end.
+2. Re-run the job that logged the notice. Once no such run is live, it releases
+   what it kept.
+
+A pull request that needs one of those cells can instead comment `shipmate
+unlock <env> --evict` once #<n>'s runs have ended.
+
+### A merge deploy refused: `are locked by #<n>, this deploy's pull request`
+
+The deploy's `detect` annotation reads `` deploy refused: <stack> / <env>, ...
+are locked by #<n>, this deploy's pull request, whose run(s) <id>, ... may still
+apply a cell or save its state. Once they end, re-run this deploy. ``, or ``
+... whose live runs of shipmate.yml could not all be listed; re-run this
+deploy. ``, then the other pending cells it does not apply.
+
+The merged pull request locks a pending cell, and one of its apply or `auto`
+runs had not finished its env-levels, so restoring the cell's state here could
+miss what that run applied ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks, "A
+run of the holder keeps its locks"). The deploy applies nothing, and its lock
+release keeps the locks on pending cells.
+
+1. Wait for each run the message names to end.
+2. Re-run the deploy.
 
 ### `shipmate unlock <env> --evict` is refused: `#<h> is stacked on this pull request`
 

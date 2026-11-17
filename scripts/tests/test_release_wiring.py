@@ -125,6 +125,7 @@ LOCK_RELEASE_STEPS = [
             "permission-contents": "write",
             "permission-checks": "read",
             "permission-pull-requests": "read",
+            "permission-actions": "read",
         },
     },
     {
@@ -145,6 +146,6 @@ LOCK_RELEASE_STEPS = [
 
 
 def test_lock_release_runs_the_release_command_with_its_inputs():
-    """Mutations: drop `SHIPMATE_CLOSED_AT`; drop `permission-checks`; run `acquire`; bind
-    `SHIPMATE_RELEASE_PENDING` to `inputs.merged`."""
+    """Mutations: drop `SHIPMATE_CLOSED_AT`; drop `permission-checks`; drop
+    `permission-actions`; run `acquire`; bind `SHIPMATE_RELEASE_PENDING` to `inputs.merged`."""
     assert action_steps("lock-release") == LOCK_RELEASE_STEPS

@@ -5,7 +5,8 @@ description: >-
   release-pending 'true' (its deploy refused before applying any cell); a close without merge
   releases every lock while the pull request stays closed, applies the merge rule once it has
   merged since, and releases only those taken at or before the close once it is reopened.
-  Mints its own App token with contents:write, checks:read and pull-requests:read.
+  Releases none while one of the pull request's runs may still apply a cell or save its state.
+  Mints its own App token with contents:write, checks:read, pull-requests:read and actions:read.
 inputs:
   pr-number:
     description: The pull request whose locks are released.
@@ -51,6 +52,9 @@ runs:
         permission-contents: write
         permission-checks: read
         permission-pull-requests: read
+        # Lists the pull request's live apply and auto runs and their jobs: a lock stays while
+        # one may still apply a cell or save its state.
+        permission-actions: read
     - name: Release the cell locks
       shell: bash
       env:

@@ -207,10 +207,11 @@ def test_holder_dispatch_runs_keeps_a_holders_apply_and_auto_runs_and_unparseabl
 
     Mutations: compare the title's `pr` string with the int holder -- red (no holder run kept);
     keep a run listed `completed` -- red; read a non-string status as ended -- red; drop the
-    unparseable-title branch -- red; keep `plan` and `unlock` titles -- red."""
+    unparseable-title branch -- red; keep `plan` and `unlock` titles -- red; drop `attempt` --
+    red."""
     rows = [
         _apply(1, pr="12", actor={"login": "kp"}),
-        _run(2, "shipmate · auto pr=9 ref=" + _SHA + " comment="),
+        {**_run(2, "shipmate · auto pr=9 ref=" + _SHA + " comment="), "run_attempt": 2},
         _apply(3, pr="7"),
         _run(4, "shipmate · plan pr=12 ref= comment=11"),
         _run(5, f"shipmate · unlock pr= ref={_SHA} comment=11"),
@@ -226,10 +227,10 @@ def test_holder_dispatch_runs_keeps_a_holders_apply_and_auto_runs_and_unparseabl
     )
     assert got == (
         [
-            {"id": 1, "verb": "apply", "holder": 12},
-            {"id": 2, "verb": "auto", "holder": 9},
-            {"id": 6, "verb": None, "holder": None},
-            {"id": 8, "verb": "apply", "holder": 12},
+            {"id": 1, "verb": "apply", "holder": 12, "attempt": None},
+            {"id": 2, "verb": "auto", "holder": 9, "attempt": 2},
+            {"id": 6, "verb": None, "holder": None, "attempt": None},
+            {"id": 8, "verb": "apply", "holder": 12, "attempt": None},
         ],
         True,
     )

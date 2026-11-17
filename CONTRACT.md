@@ -2529,7 +2529,10 @@ pull request cannot roll back what another applied. The lock is per cell, never
 per environment. The merge deploy does not apply over another pull request's
 lock either: its `detect` refuses the whole run when another pull request locks
 a pending cell, and each of its wave cells refuses a lock another pull request
-took after that `detect` (below).
+took after that `detect` (below). No release deletes a pull request's locks while
+one of its apply or `auto` runs may still apply a cell or save its state, and the
+merge deploy refuses a pending cell the merged pull request itself locks then
+(below, "A run of the holder keeps its locks").
 
 **Store.** A locked cell is one git ref,
 `refs/shipmate/locks/<env>/<key>`, where `<key>` is the lowercase hex SHA-256
@@ -2563,11 +2566,11 @@ not this deleter's lock, and done; still on the same commit refuses.
 | --- | --- | --- |
 | `shipmate apply`, bare or targeted | `apply-run.yml` `detect` | Refuses the whole run first when a cell it would apply is behind the base (§`apply_mode: auto`, Behind the base, bare and targeted). Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
 | the same run | `apply-run.yml` `lock`, after `detect` and before the first env-level | Locks every cell the env-levels will apply. A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
-| merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it |
-| merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below) |
+| merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it. Deletes none while a run of the pull request may still apply a cell or save its state (below) |
+| merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below). So does a pending cell the merged pull request locks, while one of its runs may still apply a cell or save its state (below) |
 | merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
-| merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
-| close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
+| merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included. Deletes none while a run of the merged pull request may still apply a cell or save its state (below) |
+| close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none. Deletes none while a run of the pull request may still apply a cell or save its state (below) |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head and is no behind record, a cell this pull request cannot apply; refuses, deleting none and naming every such holder in the run log (the reply may summarise past 4,000 characters), when a holder is stacked on this pull request at any depth, its walk is cut short or it cannot be read, or while a run that may still apply a holder's cells is live or the runs cannot all be read (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder names its chain and says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`; a holder whose walk is cut short gets a `could not tell` line instead and leaves the gate alone (§Plan comment) |
 
@@ -2700,9 +2703,44 @@ before it have applied. The merged pull request keeps its locks on the cells
 that did not apply, other than the refused one; the recovery pull request's
 `--evict` releases those as above.
 
+**A run of the holder keeps its locks.** While a run that applied a cell has not
+finished saving its state, no other run may restore that state to apply the
+cell. The apply check is per head, so it cannot carry that rule; the cell lock
+exists before the cell job leaves its `apply-<env>-<stack>` concurrency group
+and names no head, so the lock carries it. A run of `shipmate.yml` may still
+apply a cell of a pull request or save its state when it is a live
+`workflow_dispatch` run, any actor, titled as an `apply` or `auto` run of that
+pull request, or whose title does not parse, until its jobs listing shows it
+past its env-levels: its `<caller> / run / summary` job `in_progress` or
+`completed`, every other job but `<caller> / outcome` `completed`, and every job
+of the run's attempt. `summary` needs every env-level and writes the gate in its
+first step, so a merge can land while it runs, and it does not count. A run
+whose jobs cannot be listed counts, and so does an incomplete runs listing.
+
+- The `release` job and the deploy's release step, when they would delete any
+  lock of the pull request, delete none while such a run exists, and print
+  `` kept the <n> cell lock(s) pull request #<pr> would release: run <url> may
+  still apply a cell or save its state. Re-run this job once it ends; another
+  pull request's `shipmate unlock <env> --evict` also releases them ``, with
+  `the live runs of shipmate.yml could not all be listed` for an incomplete
+  listing, as a notice; the job does not fail.
+- The deploy's `detect`, after the check for another pull request's lock,
+  refuses the whole run when the merged pull request locks a pending cell and
+  such a run exists: `` deploy refused: <stack> / <env>, ... are locked by
+  #<pr>, this deploy's pull request, whose run(s) <id>, ... may still apply a
+  cell or save its state. Once they end, re-run this deploy. ``, or `` ...
+  whose live runs of shipmate.yml could not all be listed; re-run this
+  deploy. ``, then the other pending cells it does not apply. It writes no
+  `refused_locked`, so the release step keeps the locks on pending cells.
+
+Both reads are point-in-time: a run started after them is not seen. Only apply
+and `auto` runs are read; a deploy holds no lock, so two merge deploys are kept
+apart only by the consumer's deploy concurrency group.
+
 **Release is reconciled, not queued.** On a merge, each run of the `release`
 job and of the deploy's `summary`, re-runs included, deletes each lock the
-merged pull request holds whose cell has no pending apply check; after a
+merged pull request holds whose cell has no pending apply check, unless a run of
+it may still apply a cell or save its state (above); after a
 `detect` refused over another pull request's lock, the deploy's `summary`
 deletes those on pending cells too. The deploy's
 release step runs whenever `deploy-detect` found the merged pull request, before
@@ -2735,7 +2773,10 @@ the same way with its own App token, retrying a transient failure, and that
 token also requests `actions: read` to list the live runs of the consumer's
 workflow (a subset of the App's `actions: write`, so no re-approval). Every lock write mints an App token with `contents: write`
 in a job bound to `shipmate-engine`: `apply-run.yml`'s `lock`, `release.yml`'s
-`release`, `deploy.yml`'s `summary` and `comment-ops.yml`'s `ops`. An
+`release`, `deploy.yml`'s `summary` and `comment-ops.yml`'s `ops`. The release
+token (`actions/lock-release`) also requests `actions: read`, to list the pull
+request's live runs and their jobs, a subset of the App's `actions: write`; the
+deploy's `detect` lists them with its `GITHUB_TOKEN` at `actions: read`. An
 installation that has not accepted `contents: write` fails each of those
 mints, so every `shipmate apply` refuses at `lock` (`docs/github-app.md`
 §Re-approve after permission changes).

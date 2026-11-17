@@ -697,6 +697,7 @@ def test_release_merged_keeps_only_our_pending_locks():
     gh.on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, OLD, ZERO, False), "{}")
     gh.on(update(dropped_ref, OTHER, ZERO, False), "{}")
+    quiet(gh)
     gone, refused = cl.release(REPO, PR, pending={"apply / stacks/app / prod"}, run=gh)
     assert ([g.ref for g in gone], refused) == ([AUTH_REF, dropped_ref], [])
     assert gh.drained()
@@ -724,6 +725,7 @@ def test_release_unmerged_of_a_reopened_pull_request_deletes_only_locks_by_the_c
     """Mutations: drop the date comparison (the later lock is deleted); compare `<` (the
     same-second lock is kept); release an unknown holder."""
     gh = _unmerged(_pr_state("OPEN", "2026-10-24T11:00:00Z"))
+    quiet(gh)
     gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
     assert ([g.ref for g in gone], refused) == ([AUTH_REF, DNS_REF], [])
     assert gh.drained()
@@ -734,6 +736,7 @@ def test_release_unmerged_of_a_closed_pull_request_deletes_every_lock():
     disagree. Mutation: apply the date fence whatever the state (the later lock is kept)."""
     gh = _unmerged(_pr_state("CLOSED", "2026-10-24T11:00:00Z"))
     gh.on(update(LATER_REF, OTHER, ZERO, False), "{}")
+    quiet(gh)
     gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
     assert ([g.ref for g in gone], refused) == ([AUTH_REF, DNS_REF, LATER_REF], [])
     assert gh.drained()
@@ -760,6 +763,7 @@ def test_release_unmerged_of_a_since_merged_pull_request_keeps_its_pending_locks
         ),
     )
     gh.on(update(DNS_REF, NEW, ZERO, False), "{}").on(update(LATER_REF, OTHER, ZERO, False), "{}")
+    quiet(gh)
     gone, refused = cl.release(REPO, PR, closed_at="2026-10-24T11:00:00Z", run=gh)
     assert ([g.ref for g in gone], refused) == ([DNS_REF, LATER_REF], [])
     assert gh.drained()
@@ -787,6 +791,7 @@ def test_release_continues_past_a_refused_delete():
     gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), FAIL)
     gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
     gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
+    quiet(gh)
     assert cl.release(REPO, PR, pending=set(), run=gh) == (
         [lock(DNS_REF, OTHER, stack="stacks/dns")],
         [(lock(AUTH_REF, OLD), _AUTH_REFUSAL)],
@@ -1572,6 +1577,7 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
         gh.on(PR_STATE_READ, _pr_state("OPEN", "2026-10-24T11:00:00Z"))
     sha = OLD if released == AUTH_REF else NEW
     gh.on(REPO_ID_READ, REPO_ID).on(update(released, sha, ZERO, False), "{}")
+    quiet(gh)
     _main(monkeypatch, tmp_path, "release", gh, env)
     assert gh.drained()
 
@@ -1589,6 +1595,7 @@ def test_release_cli_release_pending_deletes_every_lock_without_reading_checks(
     gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
     gh.on(update(DNS_REF, NEW, ZERO, False), "{}")
     env = {"SHIPMATE_MERGED": "true", "SHIPMATE_RELEASE_PENDING": "true"}
+    quiet(gh)
     _main(monkeypatch, tmp_path, "release", gh, env)
     assert gh.drained()
 
@@ -1616,6 +1623,7 @@ def test_release_cli_names_each_refused_delete_after_releasing_the_rest(
     gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
     gh.on(update(DNS_REF, OTHER, ZERO, False), "{}")
     env = {"SHIPMATE_MERGED": "false", "SHIPMATE_CLOSED_AT": LATE}
+    quiet(gh)
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, tmp_path, "release", gh, env)
     assert exc.value.code == _AUTH_REFUSAL
@@ -3233,3 +3241,133 @@ def test_verify_auto_refuses_a_wave_row_of_another_plan_run_before_any_read(monk
         f"::error::{WHERE} the wave row applies plan run 4243, not plan run {RUN}, which this "
         f"auto apply applies; {RETRY}"
     )
+
+
+#: An apply run of #7, hand-written: `apply / run / ...` jobs on attempt 1.
+_APPLY_RUN = 51
+_APPLY_TITLE = f"shipmate · apply pr={PR} ref={OLD} comment=5"
+
+
+def apply_jobs(attempt=1, **statuses):
+    """An apply run's jobs listing, `{job name after "apply / ": status}`, every job on
+    `attempt`."""
+    jobs = [
+        {"name": f"apply / {name}", "status": s, "run_attempt": attempt}
+        for name, s in statuses.items()
+    ]
+    return json.dumps({"jobs": jobs})
+
+
+#: An apply run past its env-levels: `summary` runs, having written the gate.
+SUMMING = {
+    "guard": "completed",
+    "run / review": "completed",
+    "run / lock": "completed",
+    "run / L0 / dev / stacks/auth": "completed",
+    "run / L0 / save-state (dev stacks/auth)": "completed",
+    "run / summary": "in_progress",
+    "outcome": "pending",
+}
+
+
+def _with_apply_run(gh, jobs, title=_APPLY_TITLE):
+    """Queue the live-run listings with one live run `_APPLY_RUN` titled `title` on attempt 1,
+    and `jobs` (text or an exception) answering its jobs listing."""
+    row = {**_dispatched(_APPLY_RUN, title), "run_attempt": 1}
+    for status in STATUSES:
+        rows = [row] if status == "in_progress" else []
+        gh.on(dispatch_listing(status), json.dumps({"workflow_runs": rows}))
+    return gh.on(jobs_listing(_APPLY_RUN), jobs)
+
+
+def _one_lock():
+    return _all_locks((AUTH_REF, OLD, message(PR, "dev", "stacks/auth"), EARLY))
+
+
+_KEPT = "::notice::kept the 1 cell lock(s) pull request #7 would release: "
+_RETRY_NOTE = (
+    ". Re-run this job once it ends; another pull request's `shipmate unlock <env> --evict` also "
+    "releases them\n"
+)
+
+
+def test_release_keeps_every_lock_while_a_run_of_the_holder_may_still_save(monkeypatch, capsys):
+    """Run 51 of #7 is saving the state of a cell it applied, so the merge release deletes
+    nothing and says why. Mutation: drop `ids or` from `release`'s guard -- the delete is an
+    unexpected call, red."""
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPO)
+    gh = _with_apply_run(
+        _one_lock(),
+        apply_jobs(**{**SUMMING, "run / L0 / save-state (dev stacks/auth)": "in_progress"}),
+    )
+    assert cl.release(REPO, PR, pending=set(), run=gh) == ([], [])
+    assert capsys.readouterr().out == (
+        f"{_KEPT}run {_URL}/{_APPLY_RUN} may still apply a cell or save its state{_RETRY_NOTE}"
+    )
+    assert gh.drained()
+
+
+def test_release_keeps_every_lock_when_the_live_runs_cannot_all_be_listed(capsys):
+    """Fail closed: a failed runs listing may hide the holder's run. Mutation: drop `or not
+    complete` from `release`'s guard -- the delete is an unexpected call, red."""
+    gh = _one_lock()
+    for status in STATUSES:
+        gh.on(dispatch_listing(status), FAIL if status == "queued" else NO_RUNS)
+    assert cl.release(REPO, PR, closed_at=LATE, run=gh.on(PR_STATE_READ, _pr_state("CLOSED"))) == (
+        [],
+        [],
+    )
+    assert capsys.readouterr().out == (
+        f"{_KEPT}the live runs of shipmate.yml could not all be listed{_RETRY_NOTE}"
+    )
+    assert gh.drained()
+
+
+def test_release_deletes_once_the_holders_run_is_past_its_env_levels():
+    """A merge can land while the holder's `summary` runs: it wrote the gate first and applies
+    and saves nothing, so the lock goes. Mutation: count `summary` as unfinished work (drop it
+    from `_applying`'s `tail`) -- the lock is kept and its delete never sent, red."""
+    gh = _with_apply_run(_one_lock(), apply_jobs(**SUMMING))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(AUTH_REF, OLD, ZERO, False), "{}")
+    gone, refused = cl.release(REPO, PR, pending=set(), run=gh)
+    assert ([g.ref for g in gone], refused) == ([AUTH_REF], [])
+    assert gh.drained()
+
+
+#: The cell of env `run` and root stack `summary`, done: its name ends in ` / run / summary`.
+SUMMARY_CELL = {"run / L0 / run / summary": "completed"}
+
+
+@pytest.mark.parametrize(
+    ("jobs", "attempt"),
+    [
+        pytest.param([], 1, id="no-job-listed"),
+        pytest.param({**SUMMING, "run / summary": "pending"}, 1, id="summary-waiting"),
+        pytest.param(
+            {k: v for k, v in SUMMING.items() if k != "run / summary"}, 1, id="no-summary"
+        ),
+        pytest.param({**SUMMING, "run / L1 / dev / stacks/dns": "queued"}, 1, id="cell-unfinished"),
+        pytest.param(
+            {**{k: v for k, v in SUMMING.items() if k != "run / summary"}, **SUMMARY_CELL},
+            1,
+            id="cell-summary",
+        ),
+        pytest.param(SUMMING, 2, id="another-attempt"),
+    ],
+)
+def test_a_run_short_of_its_summary_or_with_work_left_may_still_apply(jobs, attempt):
+    """Mutations: read an empty listing as ended (`any` over no jobs) -- no-job-listed red; take
+    a `pending` summary as started -- summary-waiting red; match `<caller> / run / summary` by
+    suffix in `_call_job` -- cell-summary red (env `run`, root stack `summary`); drop the
+    `run_attempt` clause -- another-attempt red; count every job but `summary` as done --
+    cell-unfinished red."""
+    listed = json.loads(apply_jobs(**jobs))["jobs"] if jobs else []
+    assert cl._applying(listed, attempt) is True
+
+
+def test_an_unlistable_jobs_listing_counts_the_run_as_applying():
+    """Mutation: skip a run whose jobs listing is None -- `ids` is empty, red."""
+    gh = _with_apply_run(Gh(), FAIL)
+    assert cl.applying_runs(REPO, PR, run=gh) == ([_APPLY_RUN], True)
+    assert gh.drained()

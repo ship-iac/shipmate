@@ -765,20 +765,22 @@ def plan_runs_since(repo, pr_number, since, run=None):
 def holder_dispatch_runs(repo, holders, run=None):
     """`(runs, complete)`: each live `workflow_dispatch` run of `SHIPMATE_WORKFLOW` that
     may apply a cell of one of `holders` (pull request numbers), any actor: an `apply` or `auto`
-    run titled for one, as `{id, verb, holder}`, and a run whose title does not parse, as
-    `{id, verb: None, holder: None}`, since it may be one. A run listed `completed` has ended;
-    any other status, a non-string one included, is live. `complete` is
-    `_live_dispatch_runs`'."""
+    run titled for one, as `{id, verb, holder, attempt}`, and a run whose title does not parse,
+    as `{id, verb: None, holder: None, attempt}`, since it may be one. `attempt` is the listed
+    `run_attempt`, as listed. A run listed `completed` has ended; any other status, a non-string
+    one included, is live. `complete` is `_live_dispatch_runs`'."""
     listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW, run)
     runs = []
     for r in listed:
         if r.get("status") == "completed":
             continue
         parsed = parse_run_title(r["display_title"])
+        attempt = r.get("run_attempt")
         if parsed is None:
-            runs.append({"id": r["id"], "verb": None, "holder": None})
+            runs.append({"id": r["id"], "verb": None, "holder": None, "attempt": attempt})
         elif parsed["verb"] in ("apply", "auto") and int(parsed["pr"]) in holders:
-            runs.append({"id": r["id"], "verb": parsed["verb"], "holder": int(parsed["pr"])})
+            verb, holder = parsed["verb"], int(parsed["pr"])
+            runs.append({"id": r["id"], "verb": verb, "holder": holder, "attempt": attempt})
     return runs, complete
 
 

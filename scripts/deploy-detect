@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 from _shipmate import (
     READ_ERRORS,
+    SHIPMATE_WORKFLOW,
     StackCycle,
     _load,
     command_data,
@@ -377,9 +378,12 @@ def refuse_locked(repo, pending, pr_number):
     """Refuse the whole run when another pull request holds the lock of a `pending` cell; a
     push that merged no pull request passes `0`, which no pull request holds. Writes
     `refused_locked=true` first, so the lock release also drops the merged pull request's
-    locks on pending cells. A failed lock read refuses through `locked_cells`."""
-    locked = ad.locked_cells(repo, pending, pr_number)
+    locks on pending cells. Then `refuse_own_applying`. A failed lock read refuses."""
+    pr_number = int(pr_number)
+    locks = ad.cl.read_locks(repo, {c["environment"] for c in pending}, run=ad._run)
+    locked = ad.cl.foreign(locks, pending, pr_number)
     if not locked:
+        refuse_own_applying(repo, pending, locks, pr_number)
         return
     write_outputs(refused_locked=True)
     held = sorted((f"{c['stack']} / {c['environment']}", lock_who(c["holder"])) for c in locked)
@@ -390,6 +394,36 @@ def refuse_locked(repo, pending, pr_number):
         f"request: {', '.join(f'{k} (locked by {who})' for k, who in held)}. None of this "
         f"deploy's {len(cells)} pending cell(s) were applied: {', '.join(cells)}. {remedy}."
     )
+
+
+def refuse_own_applying(repo, pending, locks, pr_number):
+    """Refuse the whole run when the merged pull request `pr_number` locks a `pending` cell and
+    one of its runs may still apply a cell or save its state, or its runs cannot all be listed
+    (`cell-lock.applying_runs`). Threat model: while a run that applied a cell has not finished
+    saving its state, no other run may restore that state to apply the cell; the apply check is
+    per head and does not cover it. Writes no `refused_locked`: the lock release keeps the locks
+    on pending cells, and keeps them all while such a run is live."""
+    own = [
+        c
+        for c in pending
+        if getattr(locks.get(ad.cl.ref_name(c["environment"], c["stack"])), "pr", None) == pr_number
+    ]
+    if not pr_number or not own:
+        return
+    ids, complete = ad.cl.applying_runs(repo, pr_number, run=ad._run)
+    if not ids and complete:
+        return
+    names = ", ".join(sorted(map(_name, own)))
+    who = f"{names} are locked by #{pr_number}, this deploy's pull request"
+    if ids:
+        why = (
+            f"{who}, whose run(s) {', '.join(map(str, ids))} may still apply a cell or save its "
+            "state. Once they end, re-run this deploy."
+        )
+    else:
+        why = f"{who}, whose live runs of {SHIPMATE_WORKFLOW} could not all be listed; re-run "
+        why += "this deploy."
+    raise SystemExit(f"::error::deploy refused: {why}{_also([c for c in pending if c not in own])}")
 
 
 def refuse_inversions(pending, order, deps, tag_map):

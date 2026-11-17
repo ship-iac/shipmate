@@ -1327,8 +1327,9 @@ LOCK_REMEDY = f"Open a pull request that changes these stacks. {_STEP_7} Then ap
 LOCKED_PUSH = '{"stacks": ["stacks/app", "stacks/dns"], "outside": true}'
 
 
-def _locked_run(tmp_path, monkeypatch, locks, pr_number="12"):
-    """`_run_main` over two pending dev-eu cells, stacks/app and stacks/dns, under `locks`."""
+def _locked_run(tmp_path, monkeypatch, locks, pr_number="12", runs=None):
+    """`_run_main` over two pending dev-eu cells, stacks/app and stacks/dns, under `locks`, with
+    `runs` answering the run reads."""
     return _run_main(
         tmp_path,
         monkeypatch,
@@ -1336,7 +1337,44 @@ def _locked_run(tmp_path, monkeypatch, locks, pr_number="12"):
         checks=[_apply_check("stacks/app", cells=2), _apply_check("stacks/dns", cells=2)],
         pr_number=pr_number,
         locks=locks,
+        runs=runs,
     )
+
+
+#: `_shipmate.LIVE_RUN_STATUSES`, hand-written.
+LIVE_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+DISPATCHES = "repos/acme/iac/actions/workflows/shipmate.yml/runs?event=workflow_dispatch"
+OWN_APPLY = 61
+
+
+def _dispatches(jobs=None, fail=False):
+    """`runs` for the live-run listings of `shipmate.yml`: empty, or with `jobs` (a list) one
+    live `apply` run of #12, `OWN_APPLY`, on attempt 1 whose jobs listing answers `jobs`. `fail`
+    fails the `queued` listing."""
+    row = {
+        "id": OWN_APPLY,
+        "display_title": f"shipmate · apply pr=12 ref={HEAD} comment=5",
+        "event": "workflow_dispatch",
+        "status": "in_progress",
+        "run_attempt": 1,
+    }
+    out = {}
+    for status in LIVE_STATUSES:
+        rows = [row] if jobs is not None and status == "in_progress" else []
+        out[f"{DISPATCHES}&status={status}&per_page=100&page=1"] = json.dumps(
+            {"workflow_runs": rows}
+        )
+    if fail:
+        out[f"{DISPATCHES}&status=queued&per_page=100&page=1"] = SystemExit("::error::gh failed")
+    if jobs is not None:
+        listed = [{"name": f"apply / {n}", "status": st, "run_attempt": 1} for n, st in jobs]
+        path = f"repos/acme/iac/actions/runs/{OWN_APPLY}/jobs?filter=latest&per_page=100&page=1"
+        out[path] = json.dumps({"jobs": listed})
+    return out
+
+
+#: Run `OWN_APPLY` past its env-levels: its `summary` runs, having written the gate.
+SUMMING = [("run / L0 / dev-eu / stacks/dns", "completed"), ("run / summary", "in_progress")]
 
 
 def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkeypatch):
@@ -1359,11 +1397,61 @@ def test_main_refuses_a_pending_cell_another_pull_request_locks(tmp_path, monkey
     }
 
 
-def test_main_deploys_a_cell_the_merged_pull_request_itself_locks(tmp_path, monkeypatch):
-    """Mutation: pass `0` instead of the merged pull request's number -- #12's own lock refuses."""
-    parsed = _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 12})
+@pytest.mark.parametrize(
+    "runs",
+    [
+        pytest.param(_dispatches(), id="no-live-run"),
+        pytest.param(_dispatches(SUMMING), id="summary"),
+    ],
+)
+def test_main_deploys_a_cell_the_merged_pull_request_itself_locks(tmp_path, monkeypatch, runs):
+    """#12's own run has ended, or is past its env-levels: its `summary` writes the gate first,
+    so the merge can land while it runs. Mutations: pass `0` instead of the merged pull
+    request's number -- #12's own lock refuses; count `summary` as unfinished work in
+    `cell-lock._applying` -- summary refuses."""
+    parsed = _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 12}, runs=runs)
     assert sorted(c["stack"] for c in wave_cells(dd.wv, parsed)) == ["stacks/app", "stacks/dns"]
     assert "refused_locked" not in parsed
+
+
+def test_main_refuses_the_merged_pull_requests_own_lock_while_its_run_may_still_save(
+    tmp_path, monkeypatch
+):
+    """Run 61 of #12 may still save the state of stacks/dns, so restoring it here could lose
+    what 61 applied: the whole run refuses, naming the run, and writes no `refused_locked`,
+    which would release the pending cells' locks. Mutations: drop the `refuse_own_applying`
+    call -- deploys, red; drop `ids or` (`if complete: return`) -- deploys, red; write
+    `refused_locked` before the raise -- the outputs differ, red."""
+    runs = _dispatches([*SUMMING[:1], ("run / L0 / save-state (dev-eu stacks/dns)", "in_progress")])
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 12}, runs=runs)
+    assert str(exc.value) == (
+        "::error::deploy refused: stacks/dns / dev-eu are locked by #12, this deploy's pull "
+        "request, whose run(s) 61 may still apply a cell or save its state. Once they end, "
+        "re-run this deploy. This deploy applies nothing, so these other cells of this merge "
+        "are not applied either: stacks/app / dev-eu."
+    )
+    assert github_outputs(tmp_path / "out.txt") == {
+        "head_sha": HEAD,
+        "pr_number": "12",
+        "push": LOCKED_PUSH,
+    }
+
+
+def test_main_refuses_the_merged_pull_requests_own_lock_when_its_runs_cannot_be_listed(
+    tmp_path, monkeypatch
+):
+    """Fail closed. Mutation: drop `and complete` (`if not ids: return`) -- deploys, red."""
+    with pytest.raises(SystemExit) as exc:
+        _locked_run(
+            tmp_path, monkeypatch, {("stacks/dns", "dev-eu"): 12}, runs=_dispatches(fail=True)
+        )
+    assert str(exc.value) == (
+        "::error::deploy refused: stacks/dns / dev-eu are locked by #12, this deploy's pull "
+        "request, whose live runs of shipmate.yml could not all be listed; re-run this deploy. "
+        "This deploy applies nothing, so these other cells of this merge are not applied "
+        "either: stacks/app / dev-eu."
+    )
 
 
 def test_a_push_that_merged_no_pull_request_refuses_any_held_cell(tmp_path, monkeypatch):
