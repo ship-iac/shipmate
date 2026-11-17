@@ -1451,7 +1451,9 @@ the entry up, and a re-run of the cell applies again. An apply run that was not
 cancelled posts an apply comment; its `state not saved:` note names up to 5
 cells whose check carries one of those titles and counts the rest. A cancelled
 run and the merge deploy post no comment: the verdict's log and the queued
-check are the signal.
+check are the signal. The reader takes each cell's evidence from that cell's
+own log, so a cell's own pull-request code can claim `none` and skip its own
+save, and no reason then names the cell.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
 before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
