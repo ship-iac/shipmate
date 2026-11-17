@@ -27,6 +27,7 @@ def patched(monkeypatch):
         if args[2] != "-X":
             out.append(("GET", args[2]))
             return json.dumps({"merged": args[2].endswith("/pulls/7")})
+        assert stdin is not None
         out.append((args[4], json.loads(stdin)))
         return "{}"
 

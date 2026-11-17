@@ -1329,9 +1329,8 @@ repository only). The policy
 targets the workflow path `.github/workflows/shipmate.yml`, so the events are
 allowed for that file and never repository-wide. GitHub's documentation says
 the policy allows the events; shipmate has not yet observed a run under the
-block with the policy in place, and the 2026-11-16 brownout is the first
-chance. The engine's own fork handling does not change: a fork's pull request
-starts `facts`, `detect` and `release`, while plan and apply refuse it
+block with the policy in place.
+The engine's own fork handling does not change: a fork's pull request starts `facts`, `detect` and `release`, while plan and apply refuse it
 ("Contributors without push access") and unlock refuses it (`CONTRACT.md`
 §Comment-ops).
 

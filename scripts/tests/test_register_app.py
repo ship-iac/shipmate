@@ -1,3 +1,4 @@
+import email.message
 import http.client
 import http.server
 import stat
@@ -307,7 +308,11 @@ def test_convert_failure_scrubs_the_code_out_of_the_url_and_answer(monkeypatch):
 
     def fake_urlopen(req, timeout):
         raise urllib.error.HTTPError(
-            req.full_url, 404, "Not Found", {}, io.BytesIO(b'{"message": "code CODE123 not found"}')
+            req.full_url,
+            404,
+            "Not Found",
+            email.message.Message(),
+            io.BytesIO(b'{"message": "code CODE123 not found"}'),
         )
 
     monkeypatch.setattr(ra.urllib.request, "urlopen", fake_urlopen)
@@ -354,14 +359,17 @@ def test_convert_refuses_a_read_or_decode_failure_after_the_post(monkeypatch, ra
 
 def test_convert_refuses_when_reading_the_error_body_fails(monkeypatch):
     """Mutation: drop `ValueError` from the guarded body read -> the closed-file error escapes."""
+    import io
     import urllib.error
 
-    class _Closed:
-        def read(self):
+    class _Closed(io.BytesIO):
+        def read(self, size=-1):
             raise ValueError("I/O operation on closed file")
 
     def fake_urlopen(req, timeout):
-        raise urllib.error.HTTPError(req.full_url, 502, "Bad Gateway", {}, _Closed())
+        raise urllib.error.HTTPError(
+            req.full_url, 502, "Bad Gateway", email.message.Message(), _Closed()
+        )
 
     monkeypatch.setattr(ra.urllib.request, "urlopen", fake_urlopen)
     with pytest.raises(SystemExit) as exc:

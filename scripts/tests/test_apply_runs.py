@@ -20,20 +20,19 @@ def _apply(id_, pr="7", ref=_SHA, **kw):
     return _run(id_, f"shipmate · apply pr={pr} ref={ref} comment=11", **kw)
 
 
-def _gh(pages, fail=()):
+class _Gh:
     """A `run` serving `pages` ({path: body}); a path in `fail` exits non-transiently and a
-    path not in `pages` lists nothing."""
-    calls = []
+    path not in `pages` lists nothing. `calls` holds each path read, in order."""
 
-    def run(argv):
+    def __init__(self, pages, fail=()):
+        self.pages, self.fail, self.calls = pages, fail, []
+
+    def __call__(self, argv):
         assert argv[:2] == ["gh", "api"]
-        calls.append(argv[2])
-        if argv[2] in fail:
+        self.calls.append(argv[2])
+        if argv[2] in self.fail:
             raise SystemExit(f"::error::command failed (1): gh api {argv[2]}\nHTTP 404")
-        return json.dumps(pages.get(argv[2], {"workflow_runs": [], "jobs": []}))
-
-    run.calls = calls
-    return run
+        return json.dumps(self.pages.get(argv[2], {"workflow_runs": [], "jobs": []}))
 
 
 def _listing(status, page=1):
@@ -41,7 +40,7 @@ def _listing(status, page=1):
 
 
 def _call(pages, fail=()):
-    return _shipmate.apply_runs("o/r", "7", "shipmate-iac", run=_gh(pages, fail))
+    return _shipmate.apply_runs("o/r", "7", "shipmate-iac", run=_Gh(pages, fail))
 
 
 def _row(id_, ref=_SHA, verb="apply", status="pending", by_app=True, comment="11"):
@@ -60,7 +59,7 @@ def test_every_page_of_every_live_status_is_read():
     `LIVE_RUN_STATUSES` -- red; drop `requested` -- red (the call list differs); drop the
     `event=workflow_dispatch` filter -- red; list a file other than `shipmate.yml` -- red."""
     first = [_apply(1000 + i, pr="8") for i in range(99)] + [_apply(5)]
-    run = _gh(
+    run = _Gh(
         {
             _listing("pending"): {"workflow_runs": first},
             _listing("pending", 2): {"workflow_runs": [_apply(1100, ref=_OLD)]},
@@ -123,7 +122,7 @@ def test_an_unparseable_title_on_an_app_dispatched_run_makes_the_listing_incompl
 
 def test_an_empty_slug_marks_no_run_by_app():
     """Mutation: build the bot login without the empty-slug check -- red (`[bot]` trusted)."""
-    run = _gh({_listing("queued"): {"workflow_runs": [_apply(1, actor={"login": "[bot]"})]}})
+    run = _Gh({_listing("queued"): {"workflow_runs": [_apply(1, actor={"login": "[bot]"})]}})
     got = _shipmate.apply_runs("o/r", "7", "", run=run)
     assert got == ([_row(1, status="pending", by_app=False)], True)
 
@@ -157,31 +156,31 @@ def test_run_jobs_reads_every_page():
     """Mutation: stop after the first page -- red (the `in_progress` job lost)."""
     first = [{"name": f"j{i}", "status": "completed"} for i in range(100)]
     second = [{"name": "apply / run / L0 / dev / app", "status": "in_progress"}]
-    run = _gh({_jobs(1): {"jobs": first}, _jobs(2): {"jobs": second}})
+    run = _Gh({_jobs(1): {"jobs": first}, _jobs(2): {"jobs": second}})
     assert _shipmate.run_jobs("o/r", 5, run=run) == (first + second, True)
 
 
 def test_run_jobs_with_a_failed_second_page_is_incomplete():
     """Mutation: return the first page's jobs as complete on a failed page -- red."""
     first = [{"name": f"j{i}", "status": "completed"} for i in range(100)]
-    run = _gh({_jobs(1): {"jobs": first}}, fail={_jobs(2)})
+    run = _Gh({_jobs(1): {"jobs": first}}, fail={_jobs(2)})
     assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
 
 
 def test_run_jobs_with_no_job_is_incomplete():
     """A live run that lists no job is not idle. Mutation: drop `not jobs` -- red."""
-    assert _shipmate.run_jobs("o/r", 5, run=_gh({_jobs(1): {"jobs": []}})) == ([], False)
+    assert _shipmate.run_jobs("o/r", 5, run=_Gh({_jobs(1): {"jobs": []}})) == ([], False)
 
 
 def test_run_jobs_with_a_job_without_status_is_incomplete():
     """Mutations: drop the status check -- red; return the partial list -- red."""
-    run = _gh({_jobs(1): {"jobs": [{"name": "x", "status": "pending"}, {"name": "y"}]}})
+    run = _Gh({_jobs(1): {"jobs": [{"name": "x", "status": "pending"}, {"name": "y"}]}})
     assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
 
 
 def test_run_jobs_with_a_job_without_name_is_incomplete():
     """`apply-queue` keys on the name. Mutation: drop the name check -- red."""
-    run = _gh({_jobs(1): {"jobs": [{"status": "pending"}]}})
+    run = _Gh({_jobs(1): {"jobs": [{"status": "pending"}]}})
     assert _shipmate.run_jobs("o/r", 5, run=run) == ([], False)
 
 
@@ -198,7 +197,7 @@ def test_the_live_statuses_are_pinned_whole():
 
 
 def _holders(pages, fail=()):
-    return _shipmate.holder_dispatch_runs("o/r", {12, 9}, run=_gh(pages, fail))
+    return _shipmate.holder_dispatch_runs("o/r", {12, 9}, run=_Gh(pages, fail))
 
 
 def test_holder_dispatch_runs_keeps_a_holders_apply_and_auto_runs_and_unparseable_titles():
@@ -254,7 +253,7 @@ def test_live_push_runs_lists_every_run_of_the_commit_not_completed():
         {"id": 4, "status": "completed"},
         {"id": 5, "status": None, "run_attempt": 1},
     ]
-    run = _gh({_PUSH: {"workflow_runs": rows}})
+    run = _Gh({_PUSH: {"workflow_runs": rows}})
     assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([(3, 2), (5, 1)], True)
     assert run.calls == [_PUSH]
 
@@ -262,11 +261,11 @@ def test_live_push_runs_lists_every_run_of_the_commit_not_completed():
 def test_live_push_runs_with_a_failed_page_or_a_malformed_run_is_incomplete():
     """Mutations: return the rows of a failed listing as complete -- red; keep a run without an
     int `id` -- red."""
-    assert _shipmate.live_push_runs("o/r", _SHA, run=_gh({}, {_PUSH})) == (
+    assert _shipmate.live_push_runs("o/r", _SHA, run=_Gh({}, {_PUSH})) == (
         [],
         False,
     )
-    run = _gh({_PUSH: {"workflow_runs": [{"id": None, "status": "queued"}]}})
+    run = _Gh({_PUSH: {"workflow_runs": [{"id": None, "status": "queued"}]}})
     assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)
 
 
@@ -274,21 +273,21 @@ def test_live_push_runs_with_a_failed_page_or_a_malformed_run_is_incomplete():
 def test_live_push_runs_with_a_live_run_without_an_int_attempt_is_incomplete(attempt):
     """Mutation: drop the `run_attempt` check -- red."""
     row = {"id": 3, "status": "queued", "run_attempt": attempt}
-    run = _gh({_PUSH: {"workflow_runs": [row]}})
+    run = _Gh({_PUSH: {"workflow_runs": [row]}})
     assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)
 
 
 def test_listed_jobs_answers_an_empty_listing_as_no_jobs():
     """`run_jobs` reads it as incomplete; `listed_jobs` tells it from a failure. Mutation:
     `listed_jobs` returns None for an empty listing -- red."""
-    assert _shipmate.listed_jobs("o/r", 5, run=_gh({_jobs(1): {"jobs": []}})) == []
-    assert _shipmate.listed_jobs("o/r", 5, run=_gh({}, fail={_jobs(1)})) is None
+    assert _shipmate.listed_jobs("o/r", 5, run=_Gh({_jobs(1): {"jobs": []}})) == []
+    assert _shipmate.listed_jobs("o/r", 5, run=_Gh({}, fail={_jobs(1)})) is None
 
 
 def test_listed_jobs_warns_of_a_job_with_no_string_name(capsys):
     """A malformed job makes the listing None and says why. Mutation: drop the warning -- red."""
     jobs = {"jobs": [{"status": "completed", "name": None}]}
-    assert _shipmate.listed_jobs("o/r", 5, run=_gh({_jobs(1): jobs})) is None
+    assert _shipmate.listed_jobs("o/r", 5, run=_Gh({_jobs(1): jobs})) is None
     assert capsys.readouterr().err == (
         "::warning::run 5 lists a job with no string status or name\n"
     )
@@ -301,5 +300,5 @@ def test_a_run_id_unfit_for_a_link_makes_both_listings_incomplete(bad):
     -- red (negative)."""
     row = {"id": bad, "display_title": "x", "event": "workflow_dispatch", "status": "queued"}
     assert _holders({_listing("queued"): {"workflow_runs": [row]}}) == ([], False)
-    run = _gh({_PUSH: {"workflow_runs": [{"id": bad, "status": "queued"}]}})
+    run = _Gh({_PUSH: {"workflow_runs": [{"id": bad, "status": "queued"}]}})
     assert _shipmate.live_push_runs("o/r", _SHA, run=run) == ([], False)
