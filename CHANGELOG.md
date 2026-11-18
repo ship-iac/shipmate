@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 Tags (backfilled after the tag).
 
-Re-pin with `python <engine>/scripts/repin <consumer> v0.57.0`: the published `shipmate.yml` fence is unchanged since 0.56.0. A consumer below 0.56.0 adds `--write-fence`; one that skipped an earlier release also applies that release's Re-pin line and its `Changed — BREAKING` steps.
+Re-pin with `python <engine>/scripts/repin <consumer> v0.57.0`: the published `shipmate.yml` fence is unchanged since 0.56.0. A consumer below 0.56.0 adds `--write-fence`; one that skipped an earlier release also makes that release's `Changed — BREAKING` edits in the same commit, but runs only this release's `repin`.
 
 ### Added
 
