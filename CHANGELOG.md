@@ -8,7 +8,9 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.57.0] — 2026-11-18
+
+Re-pin with `scripts/repin <consumer> v0.57.0`: the published `shipmate.yml` fence is unchanged.
 
 ### Added
 
