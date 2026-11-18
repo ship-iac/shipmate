@@ -10,7 +10,7 @@ section below names the SHA the release tags.
 
 ## [0.57.0] — 2026-11-18
 
-Tags (backfilled after the tag).
+Tags `53afc4f`.
 
 Re-pin with `python <engine>/scripts/repin <consumer> v0.57.0`: the published `shipmate.yml` fence is unchanged since 0.56.0.
 
