@@ -142,9 +142,11 @@ def _render(monkeypatch, tmp_path, name, report_env, report=None):
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
 def test_the_report_renders_the_comment_the_eleven_inputs_rendered(monkeypatch, tmp_path, name):
     """`fixtures/apply-report/<name>.md` and `.out` are the comment and stdout `apply-comment.main`
-    rendered from the same fields as eleven separate env vars, captured raw at engine commit
-    `27dab46f`, before they became one report file; the complete file renders them byte for byte.
-    The `N environments pending` verdict token, which postdates that capture, was added by hand.
+    rendered, captured raw at engine commit `27dab46f` from the same fields as eleven separate env
+    vars, before they became one report file; the complete file renders them byte for byte.
+    `auto.md` and `bare-every-kind.md` were re-captured raw at engine commit `e717a8c3`, for the
+    `N environments pending` token: this file's `_render` per scenario under pytest on Windows,
+    `comment.md` copied byte for byte (a file sink, no TTY); `.gitattributes` stores it as LF.
     A refused detect leaves the empty report its job wrote first, which renders as every field
     empty.
 
