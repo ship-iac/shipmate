@@ -105,15 +105,15 @@ def _not_attempted_note(rows, env_name):
     )
 
 
-def _held_note(rows, jobs, run_url):
+def _held_note(rows, jobs):
     """The 'state not saved' note: every cell whose apply check is held (`ag.held_names`),
-    named in **bold** + `_md_name` like `_unrecorded_note` and linked to its `save` job's log,
-    capped for its reason."""
-    cells = [
-        f"{_bold_cell(r)} {sc.link(_job_url(r, jobs, run_url, 'save'), 'save log')}"
-        for r in rows
-        if r["held"]
-    ]
+    named in **bold** + `_md_name` like `_unrecorded_note` and linked to its `save` job's log
+    when the listing holds one, capped for its reason."""
+    cells = []
+    for r in rows:
+        if r["held"]:
+            url = _job_url(r, jobs, None, "save")
+            cells.append(f"{_bold_cell(r)} {sc.link(url, 'save log')}" if url else _bold_cell(r))
     if not cells:
         return ""
     listed = named(cells, _NAMED)
@@ -391,7 +391,7 @@ def load_check_maps(path, app_id):
         return set(), set(), set()
 
 
-def apply_check_state(rows, present, done, held=frozenset()):
+def apply_check_state(rows, present, done, held):
     """Re-derive display status from the real apply-check state (in place).
 
     The pending apply checks ARE the work queue, so they -- not the per-cell
@@ -421,10 +421,14 @@ def apply_check_state(rows, present, done, held=frozenset()):
     stranded -- and downgrading on check state would let an unrelated run's
     green check hide a real failure in this one.
 
-    Each row's `held` is whether its check is in `held`."""
+    Each row's `held` is whether its check is in `held`. A held row is never `unrecorded`:
+    that note's re-plan re-creates the check pending and so erases the hold, which only the
+    `state not saved:` note's procedure may lift."""
     for row in rows:
         name = ag.check_name(row["stack"], row["environment"])
         row["held"] = name in held
+        if row["held"]:
+            continue
         if row["status"] == "applied" and name in present and name not in done:
             row["status"] = "unrecorded"
         elif row["status"] == "not_attempted" and name in done:
@@ -443,15 +447,18 @@ def _resources(text):
 
 def _state(row):
     """A row's state text: applied counts (or `applied`), the same plus `, not recorded`,
-    `failed`, `blocked: <reason>` (escaped: cell.json is untrusted), `not attempted`."""
+    `failed`, `blocked: <reason>` (escaped: cell.json is untrusted), `not attempted`; a held
+    row's text ends `, state not saved`."""
     status = row["status"]
     word = _STATUS[status][1]
     if status == "blocked":
-        return f"{word}: {sc._md_escape(row['reason'])}"
-    if status in ("applied", "unrecorded"):
+        text = f"{word}: {sc._md_escape(row['reason'])}"
+    elif status in ("applied", "unrecorded"):
         counts = _resources(row["apply_text"]) or "applied"
-        return counts if status == "applied" else f"{counts}, {word}"
-    return word
+        text = counts if status == "applied" else f"{counts}, {word}"
+    else:
+        text = word
+    return f"{text}, state not saved" if row.get("held") else text
 
 
 def _cell_line(row, url, env=None):
@@ -1005,7 +1012,7 @@ def build_comment(
     notes = (
         _lock_note(rows, env_name),
         _stale_note(rows),
-        _held_note(rows, jobs, run_url),
+        _held_note(rows, jobs),
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )

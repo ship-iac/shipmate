@@ -113,8 +113,8 @@ HINT = "Comment `shipmate help` for the available commands."
 #: repeats an apply whose state was not saved.
 _UNRECORDED_REMEDY = "Re-plan."
 
-#: What the `not attempted:` note appends when no row carries the lost-save marker: the lost cell's
-#: artifact can be missing, so the retry is never prescribed without the pointer.
+#: What the `not attempted:` note appends when no row is held: a failed check scan leaves a held
+#: cell unnamed, so the retry is never prescribed without the pointer.
 _LOST_POINTER = (
     " If a cell's `save` job log names `The apply step ran and its state was not saved`, follow "
     "docs/troubleshooting.md section of that name first."
@@ -681,20 +681,47 @@ def test_a_held_cell_is_named_linked_to_its_save_job_and_holds_the_retry():
 
 
 def test_the_held_note_is_capped_and_absent_without_a_held_cell():
-    """The unnamed cells are counted and pointed at their held checks' title.
+    """The unnamed cells are counted and pointed at their held checks' title; a cell whose `save`
+    job is not listed is named without a link.
 
     Mutation: name every cell in `named` from `_held_note` -- red.
     Mutation: drop the check-title clause after the count -- red.
-    Mutation: add the clause at the cap (`>=`) -- red."""
+    Mutation: add the clause at the cap (`>=`) -- red.
+    Mutation: link the run page when no `save` job is listed -- red."""
     rows = [_row(status="failed", stack=f"s{i}", held=True) for i in range(6)]
-    link = f'<a href="{RUN_URL}">save log</a>'
-    assert ac._held_note(rows, [], RUN_URL).startswith(
-        f"state not saved: **s0 (dev-eu)** {link}, **s1 (dev-eu)** {link}, **s2 (dev-eu)** "
-        f"{link}, **s3 (dev-eu)** {link}, **s4 (dev-eu)** {link}, and 1 more, whose apply checks "
-        "are titled `State not saved`. Their apply step"
+    assert ac._held_note(rows, []).startswith(
+        "state not saved: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
+        "**s4 (dev-eu)**, and 1 more, whose apply checks are titled `State not saved`. Their "
+        "apply step"
     )
-    assert "whose apply checks" not in ac._held_note(rows[:5], [], RUN_URL)
-    assert ac._held_note([_row()], [], RUN_URL) == ""
+    assert "whose apply checks" not in ac._held_note(rows[:5], [])
+    assert ac._held_note([_row()], []) == ""
+
+
+def test_an_applied_cell_with_a_held_check_is_never_not_recorded():
+    """Apply succeeded and save failed: the row stays applied, its line says the state is not
+    saved, and only the `state not saved:` note names it, because the `not recorded:` note's
+    re-plan would re-create the check pending and erase the hold.
+
+    Mutations: drop the held skip from `apply_check_state`; drop `, state not saved` from
+    `_state` -- red."""
+    name = "apply / stacks/app / dev-eu"
+    rows = ac.apply_check_state([_row()], {name}, set(), {name})
+    jobs = [_job("apply / run / L0 / dev-eu / stacks/app / save", "https://gh/job/save")]
+    body = ac.build_comment(rows, jobs, RUN_URL, [], [], "dev-eu", "success", head_sha=SHA)
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n#### dev-eu: 1 cell, 1 applied\n\n"
+        '<details><summary>🟢 stacks/app: +1 ~0 -0, state not saved <a href="https://gh/run/1">'
+        "logs</a></summary>\n\n```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed."
+        "\n```\n</details>\n\n"
+        'state not saved: **stacks/app (dev-eu)** <a href="https://gh/job/save">save log</a>. '
+        "Their apply step may have run and their state is not known saved. Never re-run these "
+        "cells' jobs or their workflow run. A re-run, a `shipmate apply` comment, or a merge can "
+        "apply their reviewed plans again against the state from before the apply. Before "
+        "applying or merging any plan of a named stack in the environment named beside it, on "
+        "any pull request, follow docs/troubleshooting.md section "
+        "`The apply step ran and its state was not saved`."
+    )
 
 
 def test_load_cells_reads_a_cell_without_state_lost(tmp_path):
@@ -1489,7 +1516,9 @@ def test_apply_check_state_applied_with_done_check_stays_applied():
     """A done check is not a pending one, though its name is in both sets. Mutation: drop
     `and name not in done` from apply_check_state."""
     rows = [_row(status="applied", stack="stacks/app")]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
+    ac.apply_check_state(
+        rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"}, set()
+    )
     assert rows[0]["status"] == "applied"
 
 
@@ -1498,7 +1527,7 @@ def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
     # apply check failed (or the job was cancelled) after the cell summary was composed
     # and uploaded.
     rows = [_row(status="applied", stack="stacks/app")]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set(), set())
     assert rows[0]["status"] == "unrecorded"
 
 
@@ -1507,7 +1536,9 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
     # cosmetic (continue-on-error) artifact upload dropped, so no cell.json
     # arrived and the row would otherwise claim the check stays pending.
     rows = [_row(status="not_attempted", stack="stacks/app", apply_text=None)]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
+    ac.apply_check_state(
+        rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"}, set()
+    )
     assert rows[0]["status"] == "applied"
     assert rows[0]["apply_text"] is None  # No output to show, so it renders its bare line.
 
@@ -1519,7 +1550,7 @@ def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
         _row(status="applied", stack="stacks/app"),
         _row(status="not_attempted", stack="stacks/db", apply_text=None),
     ]
-    ac.apply_check_state(rows, set(), set())
+    ac.apply_check_state(rows, set(), set(), set())
     assert [r["status"] for r in rows] == ["applied", "not_attempted"]
 
 
@@ -1532,7 +1563,7 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
         _row(status="failed", stack="stacks/app"),
         _row(status="blocked", stack="stacks/db", reason="state restore failed"),
     ]
-    ac.apply_check_state(rows, done, done)
+    ac.apply_check_state(rows, done, done, set())
     assert [r["status"] for r in rows] == ["failed", "blocked"]
 
 
@@ -1702,7 +1733,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
     }
     assert snap.snapshot(waves, [run], APP_ID) == {"apply / stacks/app / dev-eu": [7]}
     rows = [_row(environment="dev-eu", stack="stacks/app")]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set(), set())
     assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
