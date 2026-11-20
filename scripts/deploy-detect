@@ -15,8 +15,9 @@ cases. A pending cell that `after` runs behind a pending cell `needs` puts on a 
 has no order that meets both. A pending cell another pull request locks refuses too;
 CONTRACT.md §Cell locks gives the reason. A pending cell whose apply check records that its
 plan found the base changed it has no reviewed plan (`refuse_behind_checks`). A pending cell
-whose apply check another run holds in progress refuses while that run may still apply it,
-or may have applied it without saving its state (`refuse_in_flight`).
+whose apply check another run holds in progress refuses unless that run ended without applying
+it, and on a re-run so does a pending cell an earlier attempt of this run may have applied
+without saving its state (`refuse_in_flight`).
 
 It also writes `warm`, the cache warm-up matrix (`warm_rows`), which never refuses,
 `max_parallel`, its cap, and `push`, the stacks the push changed (`push_stacks`), which the
@@ -30,15 +31,12 @@ import time
 from urllib.parse import quote
 
 from _shipmate import (
-    READ_ERRORS,
     StackCycle,
     _load,
     command_data,
     current_run_url,
     deploy_lock_remedy,
     exit_text,
-    gh_json,
-    is_run_id,
     listed_jobs,
     lock_who,
     one_line,
@@ -195,109 +193,25 @@ def refuse_behind_checks(pending, behind):
     )
 
 
-def _apply_not_started(job):
-    """Whether listed job `job` shows its cell never applied: no steps, exactly one `APPLY_STEP`
-    concluded `skipped`, or exactly one `PRE_APPLY_STEP` concluded `failure`, which makes
-    `apply-cell` refuse before it applies. Any other shape, an unnamed step included, may have
-    applied."""
-    steps = job.get("steps")
-    if steps == []:
-        return True
-    if not isinstance(steps, list):
-        return False
-
-    def conclusion(name):
-        named = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
-        return named[0].get("conclusion") if len(named) == 1 else None
-
-    return (
-        conclusion(ad.ag.APPLY_STEP) == "skipped" or conclusion(ad.ag.PRE_APPLY_STEP) == "failure"
-    )
-
-
-def _read_run(repo, run_id):
-    """`(status, run_attempt)` of run `run_id`, or None, with one warning naming the cause, when
-    the read fails, the status is not a string or the attempt not an int."""
-    try:
-        read = gh_json(f"repos/{repo}/actions/runs/{run_id}", ad._run)
-        status, attempt = read["status"], read["run_attempt"]
-    except READ_ERRORS as e:
-        why = exit_text(e) if isinstance(e, SystemExit) else repr(e)
-        sys.stderr.write(f"::warning::{command_data(one_line(why))}\n")
-        return None
-    if not isinstance(status, str):
-        sys.stderr.write(f"::warning::run {run_id} has status {command_data(repr(status))}\n")
-        return None
-    if type(attempt) is not int:
-        sys.stderr.write(f"::warning::run {run_id} has run_attempt {command_data(repr(attempt))}\n")
-        return None
-    return status, attempt
-
-
-def _newest_attempt(run_id, jobs):
-    """The highest `run_attempt` of run `run_id`'s listed `jobs`, or None, with one warning
-    naming the cause, when it lists no job or a job whose attempt is not an int."""
-    if not jobs:
-        sys.stderr.write(f"::warning::run {run_id} lists no job\n")
-        return None
-    bad = [j.get("run_attempt") for j in jobs if type(j.get("run_attempt")) is not int]
-    if bad:
-        found = command_data(repr(bad[0]))
-        sys.stderr.write(f"::warning::run {run_id} lists a job with run_attempt {found}\n")
-        return None
-    return max(j["run_attempt"] for j in jobs)
-
-
-def _holding_run(repo, run_id):
-    """`("live", None)` while run `run_id` is not `completed`, when its listing's newest attempt
-    is not the first read's, or when read again after its jobs listing it is not the same
-    completed attempt: a re-run between the reads may not list its jobs yet, or may list them
-    before the run read shows it, and a listing below the run's attempt is stale.
-    `("ended", jobs)` otherwise, with every job of every attempt. `("unreadable", None)` when a
-    run read or the jobs listing could not be read completely, a job's `run_attempt` included;
-    each cause prints as one warning."""
-    first = _read_run(repo, run_id)
-    if first is None:
-        return "unreadable", None
-    if first[0] != "completed":
-        return "live", None
-    jobs = listed_jobs(repo, run_id, ad._run, counted=True, job_filter="all")
-    newest = None if jobs is None else _newest_attempt(run_id, jobs)
-    if newest is None:
-        return "unreadable", None
-    if newest != first[1]:
-        return "live", None
-    again = _read_run(repo, run_id)
-    if again is None:
-        return "unreadable", None
-    if again != first:
-        return "live", None
-    return "ended", jobs
-
-
 def refuse_in_flight(repo, lines, app_id, pending):
     """Refuse when any App apply check of a `pending` cell is `in_progress` under another run,
     not only the newest, since a same-head re-plan queues a newer check over a held one: a live
     holder may still apply the cell, and an ended holder may have applied it without saving its
-    state. Everything else deploys. The check's `details_url` names the holder only
-    when it is exactly a run page of this repository; this run's own page passes, so a re-run of
-    this deploy passes over its own flips.
+    state. The check's `details_url` names the holder only when it is exactly a run page of this
+    repository; this run's own flips are read from this run's earlier attempts instead
+    (`_own_unsaved`).
 
-    The holder is read, its jobs listed, and the holder read again. While it is not
-    `completed`, its listing's newest attempt is not the one read, it is not the same completed
-    attempt when read again after the listing, or it lists a job of the cell that is not
-    `completed`, the cell is held. Otherwise its jobs listing decides: when no job of the cell
-    applied (`_apply_not_started`, or no job at all), the ended holder writes nothing more to
-    the check, so the cell deploys with a warning; otherwise the cell is held. A run or listing
-    that could not be read completely, and a `details_url` naming no run of this repository,
-    hold it too. The refusal names every other pending cell, which it does not apply either."""
+    `ad.holder_state` decides each holder: an ended holder that never applied the cell writes
+    nothing more to the check, so the cell deploys with a warning; every other cause holds it.
+    The refusal names every other pending cell, which it does not apply either."""
     flipped = _flipped(lines, app_id)
     runs, held = {}, {}
     for c in pending:
         for check in flipped.get(ad.ag.check_name(c["stack"], c["environment"]), []):
-            cells = held.setdefault(_holder(repo, c, check, runs), [])
+            cells = held.setdefault(ad.holder_state(repo, c, check, runs), [])
             if c not in cells:
                 cells.append(c)
+    _own_unsaved(repo, pending, held)
     deployed = {k: held.pop(k) for k in [k for k in held if k[0] == "deploy"]}
     if not held:
         for (_, run_id), cells in sorted(deployed.items()):
@@ -313,6 +227,29 @@ def refuse_in_flight(repo, lines, app_id, pending):
     raise SystemExit(f"::error::deploy refused: {' '.join(sentences)}{others}")
 
 
+def _own_unsaved(repo, pending, held):
+    """On a re-run (`GITHUB_RUN_ATTEMPT` above 1), which runs `detect` again, add to `held` each
+    `pending` cell an earlier attempt of this run applied, or may have, without saving its state
+    (`ag.unsaved`) as `ended`; or every pending cell as `unreadable` when this run's jobs cannot
+    be listed completely, since this run always lists its own `detect`."""
+    attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
+    if attempt < 2 or not pending:
+        return
+    own = os.environ["GITHUB_RUN_ID"]
+    jobs = listed_jobs(repo, own, ad._run, counted=True, job_filter="all")
+    readable = jobs is not None and ad.newest_attempt(own, jobs) is not None
+    for c in pending:
+        if not readable:
+            key = ("unreadable", own)
+        elif ad.ag.unsaved(jobs, c["stack"], c["environment"], before=attempt):
+            key = ("ended", own)
+        else:
+            continue
+        cells = held.setdefault(key, [])
+        if c not in cells:
+            cells.append(c)
+
+
 def _flipped(lines, app_id):
     """`{name: [check]}`: every App apply check `in_progress` under a run other than this one."""
     own, flipped = current_run_url(), {}
@@ -324,28 +261,6 @@ def _flipped(lines, app_id):
 
 def _name(cell):
     return f"{cell['stack']} / {cell['environment']}"
-
-
-def _holder(repo, cell, check, runs):
-    """`(cause, id)` for `cell`, whose apply check `check` another run holds in progress:
-    `("unknown", <check id>)` when `details_url` names no run of this repository, else
-    `(<cause>, <run id>)`: the run's state in `runs`, filled through `_holding_run` once per
-    run; also `live` while a job of the cell it lists is not `completed`; `deploy` when the run
-    ended and every job of the cell shows it never applied (`_apply_not_started`), or when the
-    run lists no job of the cell."""
-    url, page = check.get("details_url") or "", current_run_url("")
-    run_id = url.removeprefix(page) if url.startswith(page) else ""
-    if not is_run_id(run_id):
-        return "unknown", str(check["id"])
-    if run_id not in runs:
-        runs[run_id] = _holding_run(repo, run_id)
-    state, detail = runs[run_id]
-    if state != "ended":
-        return state, run_id
-    jobs = [j for j in detail if ad.ag.is_cell_job(j["name"], cell["stack"], cell["environment"])]
-    if any(j["status"] != "completed" for j in jobs):
-        return "live", run_id
-    return ("deploy" if all(map(_apply_not_started, jobs)) else "ended"), run_id
 
 
 #: The troubleshooting section that returns an in-progress apply check to `queued` by hand.
@@ -360,6 +275,11 @@ def _held(cause, ident, cells):
             f"{names} are held in progress by run {ident}, which is still running. Once it "
             "ends, re-run this deploy: a cell whose check that run left in progress deploys if "
             "the run never applied it and is refused otherwise."
+        )
+    if cause == "saved":
+        return (
+            f"{names} were left in progress by run {ident}, which applied them and saved their "
+            f"state. Follow docs/troubleshooting.md section {_BY_HAND}, then re-run this deploy."
         )
     if cause == "ended":
         return (

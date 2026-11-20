@@ -542,7 +542,7 @@ def test_the_holder_reader_names_the_run_from_the_held_link(run_env, link, cause
     entry = apply_complete.writes(held(APP, [5]), "acme/demo")[0]
     assert entry["body"]["details_url"] == HELD_URL
     check = {"id": 5, "details_url": link}
-    assert deploy_detect._holder("acme/demo", {}, check, {"999": ("live", [])}) == cause
+    assert deploy_detect.ad.holder_state("acme/demo", {}, check, {"999": ("live", [])}) == cause
 
 
 def test_merge_ranks_a_hold_below_a_success_and_above_any_other_row():

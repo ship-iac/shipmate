@@ -42,15 +42,21 @@ branch changes or whose apply check records that its plan found the base changed
 import json
 import os
 import pathlib
+import sys
 import time
 
 from _shipmate import (
+    READ_ERRORS,
     Refused,
     _load,
     _run,
     check_runs,
+    command_data,
+    current_run_url,
     exit_text,
     gh_json,
+    is_run_id,
+    listed_jobs,
     named,
     one_line,
     run_annotated,
@@ -344,6 +350,93 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
             return sorted(skipped), run, waiting
         last = (skipped, waiting)
         unavailable = stopped | skipped | lock_envs | {w["environment"] for w in waiting}
+
+
+def _read_run(repo, run_id):
+    """`(status, run_attempt)` of run `run_id`, or None, with one warning naming the cause, when
+    the read fails, the status is not a string or the attempt not an int."""
+    try:
+        read = gh_json(f"repos/{repo}/actions/runs/{run_id}", _run)
+        status, attempt = read["status"], read["run_attempt"]
+    except READ_ERRORS as e:
+        why = exit_text(e) if isinstance(e, SystemExit) else repr(e)
+        sys.stderr.write(f"::warning::{command_data(one_line(why))}\n")
+        return None
+    if not isinstance(status, str):
+        sys.stderr.write(f"::warning::run {run_id} has status {command_data(repr(status))}\n")
+        return None
+    if type(attempt) is not int:
+        sys.stderr.write(f"::warning::run {run_id} has run_attempt {command_data(repr(attempt))}\n")
+        return None
+    return status, attempt
+
+
+def newest_attempt(run_id, jobs):
+    """The highest `run_attempt` of run `run_id`'s listed `jobs`, or None, with one warning
+    naming the cause, when it lists no job or a job whose attempt is not an int."""
+    if not jobs:
+        sys.stderr.write(f"::warning::run {run_id} lists no job\n")
+        return None
+    bad = [j.get("run_attempt") for j in jobs if type(j.get("run_attempt")) is not int]
+    if bad:
+        found = command_data(repr(bad[0]))
+        sys.stderr.write(f"::warning::run {run_id} lists a job with run_attempt {found}\n")
+        return None
+    return max(j["run_attempt"] for j in jobs)
+
+
+def _holding_run(repo, run_id):
+    """`("live", None)` while run `run_id` is not `completed`, when its listing's newest attempt
+    is not the first read's, or when read again after its jobs listing it is not the same
+    completed attempt: a re-run between the reads may not list its jobs yet, or may list them
+    before the run read shows it, and a listing below the run's attempt is stale.
+    `("ended", jobs)` otherwise, with every job of every attempt. `("unreadable", None)` when a
+    run read or the jobs listing could not be read completely, a job's `run_attempt` included;
+    each cause prints as one warning."""
+    first = _read_run(repo, run_id)
+    if first is None:
+        return "unreadable", None
+    if first[0] != "completed":
+        return "live", None
+    jobs = listed_jobs(repo, run_id, _run, counted=True, job_filter="all")
+    newest = None if jobs is None else newest_attempt(run_id, jobs)
+    if newest is None:
+        return "unreadable", None
+    if newest != first[1]:
+        return "live", None
+    again = _read_run(repo, run_id)
+    if again is None:
+        return "unreadable", None
+    if again != first:
+        return "live", None
+    return "ended", jobs
+
+
+def holder_state(repo, cell, check, runs):
+    """`(cause, id)` for `cell`, whose apply check `check` another run holds `in_progress`.
+    `("unknown", <check id>)` when `details_url` is not exactly a run page of this repository,
+    else `(<cause>, <run id>)`, the run's state read through `_holding_run` once per run and kept
+    in `runs`: `live` or `unreadable` as it reads, or, once it ended, `live` while a job of
+    the cell it lists is not `completed`; `ended` when `ag.unsaved` names an attempt;
+    `saved` when an attempt applied and every applying attempt's state is saved; `deploy`
+    when no attempt applied, or the run lists no job of the cell."""
+    url, page = check.get("details_url") or "", current_run_url("")
+    run_id = url.removeprefix(page) if url.startswith(page) else ""
+    if not is_run_id(run_id):
+        return "unknown", str(check["id"])
+    if run_id not in runs:
+        runs[run_id] = _holding_run(repo, run_id)
+    state, jobs = runs[run_id]
+    if state != "ended":
+        return state, run_id
+    stack, env = cell["stack"], cell["environment"]
+    mine = [j for j in jobs if ag.cell_part(j.get("name", ""), stack, env)]
+    if any(j["status"] != "completed" for j in mine):
+        return "live", run_id
+    if ag.unsaved(jobs, stack, env):
+        return "ended", run_id
+    verdicts = ag.attempts(jobs, stack, env).values()
+    return ("deploy" if all(v["applied"] is False for v in verdicts) else "saved"), run_id
 
 
 def _check_run_lines(repo, head_sha):
