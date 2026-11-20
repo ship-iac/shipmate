@@ -43,6 +43,7 @@ outputs:
   head_sha: { description: "The echoed head SHA.", value: "${{ steps.d.outputs.head_sha }}" }
   provenance_run: { description: "Auto form only: the autoplan run every applied cell's record names; empty when no cell applies.", value: "${{ steps.d.outputs.provenance_run }}" }
   base_sha: { description: "The tip of the pull request's base branch, read from its ref (in the auto form after the mergeability wait), that the behind cells were computed on; empty when no cell was selected to apply.", value: "${{ steps.d.outputs.base_sha }}" }
+  refused_by_rule: { description: "`true` when the step failed on a refusal by rule (a cell behind the base, or a targeted apply without its review); empty otherwise, a failed tool or API call included. Set although the step fails.", value: "${{ steps.d.outputs.refused_by_rule }}" }
   refusal: { description: "The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the apply result comment. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.", value: "${{ steps.d.outputs.refusal }}" }
 runs:
   using: composite

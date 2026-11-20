@@ -40,12 +40,16 @@ inputs:
     description: "The lock job's `refusal` output: the first error of the `::error::` message that failed lock acquisition (a refusal or a failed API call) on one line, empty when it raised none. Non-empty, the comment shows it in a code fence under the verdict line, as it does detect-refusal; empty leaves the comment unchanged."
     required: false
     default: ""
+  refused-by-rule:
+    description: "detect's or else the lock job's `refused_by_rule` output: `true` when that job failed on a refusal by rule (a cell behind the base, a targeted apply without its review, another holder's cell lock), empty otherwise. With results that read failed, the verdict reads refused instead of failed; otherwise it is ignored."
+    required: false
+    default: ""
   auto:
     description: "'true' for an `apply_mode: auto` run: the comment says so under the verdict line, refused or not."
     required: false
     default: "false"
   results:
-    description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
+    description: "join(needs.*.result, ',') from the caller; a result other than success, skipped or cancelled renders the verdict failed (refused with refused-by-rule `true`), a blank one included; otherwise a cancelled result renders it cancelled."
     required: true
   head-sha:
     description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one, and the verdict line names it.
