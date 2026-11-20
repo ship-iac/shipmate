@@ -4340,20 +4340,15 @@ names an error. A job that failed without an `::error::` renders no fence.
   environments the run did not apply: held for review, left to a bare apply,
   `targeted` or skipped. A targeted run's report names no other environment,
   so its line never carries this token.
-  The outcome word comes from the job-level `SHIPMATE_RESULTS` tokens, split on
-  `,` and each matched whole, and from the `refused_by_rule` output of
-  `detect` or the `lock` job: `refused` when that output is `true` and the
-  results read failed; else `failed` when any token is outside `success`,
-  `skipped` and `cancelled` (a blank token included); else `cancelled` when
-  any token is `cancelled`; else none. Three refusals count as refused: a
-  `detect` refusal of a cell behind the base (bare or targeted), a targeted
-  apply's review refusal, and the `lock` job's refusal of a cell another pull
-  request or an unknown holder locks. Every other `detect` or `lock` error,
-  a failed setup, tool or API call included, keeps `failed`, and a
-  `refused_by_rule` over results that do not read failed is ignored.
-  `cancelled` covers a job that ended `cancelled` while the run did not
-  (§Comment-ops names which); a cancelled run posts no result
-  comment, and `outcome` replies (§Outcome reply). `refused` and
+  The outcome word: `refused` when the run failed on a refusal by rule: a
+  cell behind the base (bare or targeted), a targeted apply's review refusal,
+  or a cell another pull request or an unknown holder locks, refused by the
+  `lock` job and with every lock that job took released again. Any other
+  refusal, a lock refusal that left a lock behind, and a failed setup, tool or
+  API call read `failed`, as does any other failed job. `cancelled` when no
+  job failed and a job ended `cancelled` while the run did not (§Comment-ops
+  names which); a cancelled run posts no result comment, and `outcome`
+  replies (§Outcome reply). `refused` and
   `cancelled` always lead the counts. `failed` leads them when no row is
   failed or blocked, so an apply run that dies before any cell reports (a
   missing/denied apply environment) still surfaces a failure signal. A
