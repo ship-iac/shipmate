@@ -15,7 +15,15 @@ satisfies it, and the way a cell would actually regain the key -- a direct
 
 import pytest
 import yaml
-from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, action_steps, action_yaml, strings, workflow_jobs
+from _loader import (
+    ENGINE_ENVIRONMENT,
+    WORKFLOWS,
+    action_steps,
+    action_yaml,
+    strings,
+    workflow_jobs,
+    workflow_yaml,
+)
 
 CELLS = ("apply-cell", "drift-cell", "plan-cell")
 
@@ -78,6 +86,14 @@ def test_only_snapshot_and_completion_jobs_read_the_app_key():
         *(f"wave{n}-complete" for n in range(8)),
         *(f"wave{n}-release" for n in range(8)),
     }
+
+
+def test_the_cell_workflow_never_reaches_the_app_key():
+    """`cell.yml`'s `apply` runs pull-request code and its `save` writes the state entry; neither
+    writes a check, so the file names the App key nowhere, a declaration included. Mutation:
+    declare `SHIPMATE_APP_PRIVATE_KEY` under its `on.workflow_call.secrets`."""
+    text = yaml.safe_dump(workflow_yaml("cell.yml"))
+    assert APP_KEY_ENV not in text
 
 
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)

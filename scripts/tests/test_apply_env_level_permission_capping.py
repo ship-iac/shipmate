@@ -21,6 +21,7 @@ from _loader import WORKFLOWS, workflow_yaml
 CALLEES = {
     "apply-env-level.yml": re.compile(r"/apply-env-level\.yml(?:@|$)"),
     "apply-run.yml": re.compile(r"/apply-run\.yml(?:@|$)"),
+    "cell.yml": re.compile(r"/cell\.yml(?:@|$)"),
 }
 
 # GitHub's permission scale for a single scope: absence and `none` grant nothing, `read` and
@@ -66,6 +67,7 @@ EXPECTED_CALLERS = {
     "apply-env-level.yml": {("apply-run.yml", f"envlevel{n}") for n in range(4)}
     | {("deploy.yml", f"envlevel{n}") for n in range(4)},
     "apply-run.yml": {("apply.yml", "run")},
+    "cell.yml": {("apply-env-level.yml", f"wave{n}") for n in range(8)},
 }
 
 

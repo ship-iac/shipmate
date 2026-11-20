@@ -3,15 +3,15 @@ request still holds the cell's lock and is open at the applied head, the base ti
 detect read, the cell's newest plan record still names the wave row's plan run and digest, and,
 under the auto form, the plan run detect bound is still the head's newest autoplan. A wave can
 wait hours on an environment approval, and "Re-run failed jobs" re-runs a failed wave without
-its `detect` and `lock` jobs. The check is the wave job's first step, before the cloud
-credentials. The merge deploy passes the merged pull
+its `detect` and `lock` jobs. The check is the first step of `cell.yml`'s `apply`, before the
+cloud credentials. The merge deploy passes the merged pull
 request (empty on a push) with `deploy` true, and the check then refuses only a lock another pull
 request holds. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
-reports a blocked reason: the check's own refusal. The reads use the wave job's GITHUB_TOKEN.
+reports a blocked reason: the check's own refusal. The reads use the `apply` job's GITHUB_TOKEN.
 
 Whole parsed values against hand-written constants: the check's step, the wave steps that read
-its outcome, the wave jobs' permissions, apply-cell's refusing step and the callers'
-permissions.
+its outcome, the cell's and the wave jobs' permissions, apply-cell's refusing step and the
+callers' permissions.
 """
 
 from _loader import action_yaml, checkouts, secrets_refs, step_by, workflow_jobs
@@ -47,14 +47,14 @@ WAVE_VERIFY = {
     "uses": "$/actions/pre-apply",
     "with": {
         "pr-number": "${{ inputs.pr_number }}",
-        "env": "${{ matrix.environment }}",
-        "stack": "${{ matrix.stack }}",
+        "env": "${{ inputs.environment }}",
+        "stack": "${{ inputs.stack }}",
         "head-sha": "${{ inputs.head_sha }}",
         "auto": "${{ inputs.auto }}",
         "provenance-run": "${{ inputs.provenance_run }}",
         "base-sha": "${{ inputs.base_sha }}",
-        "plan-run-id": "${{ matrix.plan_run_id }}",
-        "plan-sha256": "${{ matrix.plan_sha256 }}",
+        "plan-run-id": "${{ fromJSON(inputs.cell).plan_run_id }}",
+        "plan-sha256": "${{ fromJSON(inputs.cell).plan_sha256 }}",
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "deploy": "${{ inputs.deploy }}",
     },
@@ -70,7 +70,16 @@ def test_pre_apply_runs_the_check_with_the_job_token():
     assert step_by("pre-apply", name="Pre-apply check") == VERIFY_STEP
 
 
-def test_every_wave_checks_first_and_refuses_through_apply_cell():
+PERMISSIONS = {
+    "contents": "read",
+    "actions": "read",
+    "checks": "read",
+    "pull-requests": "read",
+    "id-token": "write",
+}
+
+
+def test_the_cell_checks_first_and_refuses_through_apply_cell():
     """Mutations: drop `|| inputs.deploy` from the `if:` (deploy waves run no check); add
     `&& github.run_attempt > 1` (first attempts skip the check); invert to
     `inputs.pr_number == ''`; drop `deploy:` from `with:` (deploy cells run the pull request
@@ -79,27 +88,20 @@ def test_every_wave_checks_first_and_refuses_through_apply_cell():
     cell refuses as missing its plan run); drop apply-cell's `if:` (a failed check skips
     apply-cell and the cell reports no blocked reason); drop its `!cancelled() &&`; pass
     `steps.pre-apply.conclusion`; drop the refusal input (the blocked reason names no cause);
-    drop `contents: read`, `pull-requests: read` or `checks: read` from the wave permissions
-    (a read 403s and every pre-merge cell refuses)."""
-    jobs = workflow_jobs("apply-env-level.yml")
-    found = {}
-    for wave in WAVES:
-        steps = jobs[wave]["steps"]
-        (cell,) = [s for s in steps if str(s.get("uses", "")).endswith("apply-cell")]
-        found[wave] = (
-            jobs[wave]["permissions"],
-            steps[0],
-            cell.get("if"),
-            {k: v for k, v in cell["with"].items() if k.startswith("pre-apply")},
-        )
+    drop `contents: read`, `pull-requests: read` or `checks: read` from `cell.yml`'s `apply`
+    permissions, or from `wave5`'s, which cap it (a read 403s and every pre-merge cell
+    refuses)."""
+    apply = workflow_jobs("cell.yml")["apply"]
+    steps = apply["steps"]
+    (cell,) = [s for s in steps if str(s.get("uses", "")).endswith("apply-cell")]
+    found = (
+        apply["permissions"],
+        steps[0],
+        cell.get("if"),
+        {k: v for k, v in cell["with"].items() if k.startswith("pre-apply")},
+    )
     expected = (
-        {
-            "contents": "read",
-            "actions": "read",
-            "checks": "read",
-            "pull-requests": "read",
-            "id-token": "write",
-        },
+        PERMISSIONS,
         WAVE_VERIFY,
         "${{ !cancelled() && (success() || steps.pre-apply.outcome == 'failure') }}",
         {
@@ -107,29 +109,27 @@ def test_every_wave_checks_first_and_refuses_through_apply_cell():
             "pre-apply-refusal": "${{ steps.pre-apply.outputs.refusal }}",
         },
     )
-    assert found == dict.fromkeys(WAVES, expected)
-
-
-def test_every_wave_checks_out_the_head_without_persisting_the_token():
-    """The parsed jobs, not the anchor: the waves share one step list, and a wave whose `steps:`
-    is written out in full stops aliasing it. Mutation: delete `persist-credentials` from the
-    anchor's checkout (all eight redden)."""
+    assert found == expected
     jobs = workflow_jobs("apply-env-level.yml")
-    found = {wave: [s.get("with") for s in checkouts(jobs[wave]["steps"])] for wave in WAVES}
-    assert found == dict.fromkeys(
-        WAVES, [{"ref": "${{ inputs.head_sha }}", "persist-credentials": False}]
-    )
+    assert {w: jobs[w]["permissions"] for w in WAVES} == dict.fromkeys(WAVES, PERMISSIONS)
 
 
-def test_every_wave_references_exactly_these_secrets():
-    """A wave job runs pull request code, so every secret it references reaches that code. The
-    parsed jobs, for the reason the checkout test gives; the App key's absence is
-    `test_cells_hold_no_app_key.py`'s. Mutation: an `env: { K: ${{ secrets.SHIPMATE_VARS }} }`
-    on the anchor's apply-cell step (all eight redden)."""
-    jobs = workflow_jobs("apply-env-level.yml")
-    assert {wave: secrets_refs(jobs[wave]) for wave in WAVES} == dict.fromkeys(
-        WAVES, ["secrets.SHIPMATE_ENCRYPTION_KEY", "secrets.SHIPMATE_SECRETS"]
-    )
+def test_the_cell_checks_out_the_head_without_persisting_the_token():
+    """`save` checks nothing out (`test_cell_workflow.py`). Mutation: delete
+    `persist-credentials` from `apply`'s checkout."""
+    found = [s.get("with") for s in checkouts(workflow_jobs("cell.yml")["apply"]["steps"])]
+    assert found == [{"ref": "${{ inputs.head_sha }}", "persist-credentials": False}]
+
+
+def test_the_cell_references_exactly_these_secrets():
+    """`apply` runs pull request code, so every secret it references reaches that code; `save`
+    references none. The App key's absence is `test_cells_hold_no_app_key.py`'s. Mutation: an
+    `env: { K: ${{ secrets.SHIPMATE_VARS }} }` on the apply-cell step."""
+    jobs = workflow_jobs("cell.yml")
+    assert {j: secrets_refs(jobs[j]) for j in ("apply", "save")} == {
+        "apply": ["secrets.SHIPMATE_ENCRYPTION_KEY", "secrets.SHIPMATE_SECRETS"],
+        "save": [],
+    }
 
 
 def test_pre_apply_exposes_the_checks_refusal():

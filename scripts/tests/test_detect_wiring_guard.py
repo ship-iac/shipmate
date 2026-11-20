@@ -126,7 +126,7 @@ _DEPLOY_DETECT_OUTPUTS = {
     "push": "${{ steps.d.outputs.push }}",
 }
 
-#: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
+#: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, four cell steps,
 #: the deploy `warm` step, the `comment-ops` step and the plan `summary` step.
 _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
@@ -138,7 +138,7 @@ _VARS_HOLDERS = {
     ("drift.yml", "drift", "$/actions/drift-cell"),
     ("unlock.yml", "unlock", "$/actions/unlock-cell"),
     ("deploy.yml", "warm", "$/actions/warm"),
-    *(("apply-env-level.yml", f"wave{n}", "$/actions/apply-cell") for n in range(8)),
+    ("cell.yml", "apply", "$/actions/apply-cell"),
     ("comment-ops.yml", "ops", "$/actions/comment-ops"),
     ("plan.yml", "summary", "$/actions/summary"),
 }

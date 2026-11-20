@@ -43,6 +43,7 @@ CALLABLE_WORKFLOWS = [
     "apply-env-level.yml",
     "apply-run.yml",
     "apply.yml",
+    "cell.yml",
     "comment-ops.yml",
     "deploy.yml",
     "drift.yml",

@@ -175,157 +175,117 @@ jobs:
   wave0:
     needs: [snapshot, wave0-release]
     if: ${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' && needs.wave0-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    # A job that calls a workflow takes no `runs-on`, `environment` or `cache-mode`: `cell.yml`
+    # sets each per job. No `concurrency` either: a group repeated here and in `cell.yml` fails
+    # the call at once, and `cell.yml` holds it from `apply` through `save`.
+    uses: ./.github/workflows/cell.yml
     permissions: &wave-permissions { contents: read, actions: read, checks: read, pull-requests: read, id-token: write }
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
-    environment: &wave-environment ${{ matrix.env_binding }}
-    concurrency: &wave-concurrency
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
     name: &wave-name ${{ matrix.environment }} / ${{ matrix.stack }}
-    # wave1..wave7 alias this list, so an edit here changes all eight waves. A change for one
-    # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
-    steps: &wave-steps
-      # Every attempt: a wave can wait hours on an environment approval, and "Re-run failed
-      # jobs" skips `detect` and `lock`. A failure skips the cloud credentials; apply-cell runs
-      # only to refuse. `deploy-detect` reads this step's listed name and `Apply the cell`'s
-      # to tell whether an ended run applied a cell.
-      - name: Pre-apply check
-        id: pre-apply
-        if: ${{ inputs.pr_number != '' || inputs.deploy }}
-        uses: $/actions/pre-apply
-        with:
-          pr-number: ${{ inputs.pr_number }}
-          env: ${{ matrix.environment }}
-          stack: ${{ matrix.stack }}
-          head-sha: ${{ inputs.head_sha }}
-          auto: ${{ inputs.auto }}
-          provenance-run: ${{ inputs.provenance_run }}
-          base-sha: ${{ inputs.base_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          deploy: ${{ inputs.deploy }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { ref: "${{ inputs.head_sha }}", persist-credentials: false }
-      - uses: $/actions/setup
-        with: { versions: "${{ inputs.tools }}" }
-      # The table chooses role and region; detect resolves a reference in it from a repository or
-      # organization variable. A vars.* fallback would pick a role the table did not and stay green.
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - name: Apply the cell
-        uses: $/actions/apply-cell
-        if: ${{ !cancelled() && (success() || steps.pre-apply.outcome == 'failure') }}
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
-          pre-apply-outcome: ${{ steps.pre-apply.outcome }}
-          pre-apply-refusal: ${{ steps.pre-apply.outputs.refusal }}
+    with: &cell-with
+      cell: ${{ toJSON(matrix) }}
+      environment: ${{ matrix.environment }}
+      stack: ${{ matrix.stack }}
+      head_sha: ${{ inputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
+      tools: ${{ inputs.tools }}
+      pr_number: ${{ inputs.pr_number }}
+      auto: ${{ inputs.auto }}
+      provenance_run: ${{ inputs.provenance_run }}
+      base_sha: ${{ inputs.base_sha }}
+      deploy: ${{ inputs.deploy }}
+    # Named, never `inherit`: see the envlevel0 job in apply-run.yml. No App key: the cell holds
+    # none.
+    secrets: &cell-secrets
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
   wave1:
     needs: [wave0, wave1-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' && needs.wave1-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave1 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
   wave2:
     needs: [wave0, wave1, wave2-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' && needs.wave2-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave2 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
   wave3:
     needs: [wave0, wave1, wave2, wave3-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' && needs.wave3-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave3 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
   wave4:
     needs: [wave0, wave1, wave2, wave3, wave4-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' && needs.wave4-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave4 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
   wave5:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' && needs.wave5-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave5 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
   wave6:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' && needs.wave6-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave6 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
   wave7:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7-release]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' && needs.wave7-release.result == 'success' }}
-    runs-on: ${{ inputs.runs_on }}
+    uses: ./.github/workflows/cell.yml
     permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave7 }}
-    environment: *wave-environment
-    concurrency: *wave-concurrency
     name: *wave-name
-    steps: *wave-steps
+    with: *cell-with
+    secrets: *cell-secrets
 
   # Writes one wave's checks when it ends: success completes, any other outcome returns to
   # queued with a title. `continue-on-error`: a cell missing from the listing fails this job

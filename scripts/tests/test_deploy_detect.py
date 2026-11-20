@@ -2165,19 +2165,14 @@ def test_an_in_flight_check_refuses_before_its_missing_digest(tmp_path, monkeypa
         _two_cells(tmp_path, monkeypatch, _holder("in_progress"), check=check)
 
 
-def test_every_wave_names_the_steps_the_deploy_reads():
+def test_the_cell_names_the_steps_the_deploy_reads():
     """The deploy finds whether a cell applied in a jobs listing by these step names.
 
-    Mutation: rename the wave's `Apply the cell` step -- red.
-    Mutation: rename the wave's `Pre-apply check` step -- red."""
-    jobs = workflow_jobs("apply-env-level.yml")
-    names = {
-        wave: [
-            (s.get("name"), s["uses"].rsplit("/", 1)[1])
-            for s in jobs[wave]["steps"]
-            if s.get("uses", "").endswith(("/pre-apply", "/apply-cell"))
-        ]
-        for wave in (f"wave{n}" for n in range(8))
-    }
-    expected = [("Pre-apply check", "pre-apply"), ("Apply the cell", "apply-cell")]
-    assert names == {f"wave{n}": expected for n in range(8)}
+    Mutation: rename `cell.yml`'s `Apply the cell` step -- red.
+    Mutation: rename `cell.yml`'s `Pre-apply check` step -- red."""
+    names = [
+        (s.get("name"), s["uses"].rsplit("/", 1)[1])
+        for s in workflow_jobs("cell.yml")["apply"]["steps"]
+        if s.get("uses", "").endswith(("/pre-apply", "/apply-cell"))
+    ]
+    assert names == [("Pre-apply check", "pre-apply"), ("Apply the cell", "apply-cell")]
