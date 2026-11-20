@@ -4,9 +4,10 @@ detect read, the cell's newest plan record still names the wave row's plan run a
 under the auto form, the plan run detect bound is still the head's newest autoplan. A wave can
 wait hours on an environment approval, and "Re-run failed jobs" re-runs a failed wave without
 its `detect` and `lock` jobs. The check is the first step of `cell.yml`'s `apply`, before the
-cloud credentials. The merge deploy passes the merged pull
-request (empty on a push) with `deploy` true, and the check then refuses only a lock another pull
-request holds. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
+cloud credentials. The merge deploy passes the merged pull request (empty on a push) with
+`deploy` true and the job's check run id, and the check then refuses only a lock another pull
+request holds or, on a re-run, a cell an earlier attempt may have applied without saving its
+state. Its failure skips every step but apply-cell, which runs only to refuse, so the cell
 reports a blocked reason: the check's own refusal. The reads use the `apply` job's GITHUB_TOKEN.
 
 Whole parsed values against hand-written constants: the check's step, the wave steps that read
@@ -36,6 +37,7 @@ VERIFY_STEP = {
         "SHIPMATE_PLAN_SHA256": "${{ inputs.plan-sha256 }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_DEPLOY": "${{ inputs.deploy }}",
+        "JOB_ID": "${{ inputs.job-id }}",
     },
     "run": 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/cell-lock" verify',
 }
@@ -57,6 +59,7 @@ WAVE_VERIFY = {
         "plan-sha256": "${{ fromJSON(inputs.cell).plan_sha256 }}",
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "deploy": "${{ inputs.deploy }}",
+        "job-id": "${{ job.check_run_id }}",
     },
 }
 
@@ -66,7 +69,8 @@ def test_pre_apply_runs_the_check_with_the_job_token():
     `SHIPMATE_AUTO` (every auto cell refuses as a malformed mode); drop the step `id` (the
     action's `refusal` output reads empty); drop `SHIPMATE_DEPLOY` (every deploy cell runs the
     pull request check, and the merged, closed pull request refuses); drop
-    `SHIPMATE_PLAN_SHA256` (every pre-merge cell refuses as missing its digest)."""
+    `SHIPMATE_PLAN_SHA256` (every pre-merge cell refuses as missing its digest); drop `JOB_ID`
+    (every re-run deploy cell refuses as not listed)."""
     assert step_by("pre-apply", name="Pre-apply check") == VERIFY_STEP
 
 
@@ -85,7 +89,8 @@ def test_the_cell_checks_first_and_refuses_through_apply_cell():
     `inputs.pr_number == ''`; drop `deploy:` from `with:` (deploy cells run the pull request
     check); move the step after the credentials step; pass
     `inputs.provenance_run` as `base-sha`; drop `plan-run-id` from `with:` (every pre-merge
-    cell refuses as missing its plan run); drop apply-cell's `if:` (a failed check skips
+    cell refuses as missing its plan run); drop `job-id` from `with:` (every re-run deploy cell
+    refuses as not listed); drop apply-cell's `if:` (a failed check skips
     apply-cell and the cell reports no blocked reason); drop its `!cancelled() &&`; pass
     `steps.pre-apply.conclusion`; drop the refusal input (the blocked reason names no cause);
     drop `contents: read`, `pull-requests: read` or `checks: read` from `cell.yml`'s `apply`

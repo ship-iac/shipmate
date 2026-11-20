@@ -61,6 +61,7 @@ jobs:
           plan-sha256: ${{ fromJSON(inputs.cell).plan_sha256 }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           deploy: ${{ inputs.deploy }}
+          job-id: ${{ job.check_run_id }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.head_sha }}", persist-credentials: false }
       # A read-only job's cache save warns; setup's save is skipped instead.
