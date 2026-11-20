@@ -1399,7 +1399,8 @@ name, in one of these forms:
   the save under the cell's key, and the save under the same key with `-r1`,
   left no entry an exact-key lookup found. When the first lookup after a save
   finds no entry, the job looks the same key up to four more times over about
-  30 s.
+  30 s. A `save` job cancelled before a lookup found the entry reports the
+  state not saved although the entry may exist; step 1 below checks.
 - ``<reason>, so the state of <env> / <stack> is not known saved under <key> or <key>-r1. ...``,
   naming each attempt's two keys, where `<reason>` is one of:
   - `the apply step ran and left no state file`;
@@ -3445,5 +3446,5 @@ A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the
 cancel.
 Re-run that deploy the same way, unless one of its cells' apply checks is
-titled `State not saved`: the re-run refuses that cell. Follow
+titled `State not saved`: the re-run refuses and applies nothing. Follow
 §`The apply step ran and its state was not saved` first.

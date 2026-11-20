@@ -221,7 +221,8 @@ names the holding run only when it is exactly
 `<server>/<owner>/<repo>/actions/runs/<id>` of this repository. A link to the
 run's own page passes, so a merge deploy's re-run proceeds over its own flips.
 A held check is `in_progress` under the run that held it, so an apply of its
-head, that head's merge deploy and a re-run of the deploy refuse the cell.
+head and that head's merge deploy refuse the cell; a re-run of the deploy that
+held it refuses through its earlier attempt (§Re-runs above).
 
 | Holding run | Merge deploy | Pre-merge apply |
 | --- | --- | --- |

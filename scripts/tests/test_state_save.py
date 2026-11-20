@@ -111,10 +111,22 @@ _HOSTED_ONLY = (
 )
 
 
+#: `ss.REMEDY` written out. Mutation: restore "A re-run, a shipmate apply comment, or a merge can
+#: apply this cell's reviewed plan again against the state from before the apply." -- red.
+_REMEDY = (
+    "Never re-run this job or its workflow run. While this cell's apply check is held, a "
+    "shipmate apply of this head and the merge deploy refuse it; an apply of a later head or of "
+    "another pull request is not held and applies its reviewed plan again against the state "
+    "from before the apply. Before applying or merging any plan of this stack in this "
+    "environment, on any pull request, follow docs/troubleshooting.md section The apply step "
+    "ran and its state was not saved."
+)
+
+
 def _refusal(reason, *attempts):
     return (
         f"::error::{reason}, so the state of dev-eu / stacks/app is not known saved under "
-        f"{_keys(*attempts)}. {ss.REMEDY}"
+        f"{_keys(*attempts)}. {_REMEDY}"
     )
 
 
@@ -781,7 +793,7 @@ def _call(mode, suffix, attempt="1"):
 
 NOT_FOUND = (
     "::error::the state of dev-eu / stacks/app was not found under state/stacks-app/dev-eu/77-1 "
-    f"or state/stacks-app/dev-eu/77-1-r1. {ss.REMEDY}\n"
+    f"or state/stacks-app/dev-eu/77-1-r1. {_REMEDY}\n"
 )
 
 
@@ -812,7 +824,7 @@ def test_an_unknown_or_incomplete_decision_fails_with_no_cache_call(tmp_path, fe
     assert log == (
         "::error::shipmate/actions/state-save: the save decision (kind "
         f"'{fetched.get('kind', '')}', attempt '{fetched.get('attempt', '')}') is unknown or "
-        f"incomplete, so this cell's state is not known saved. {ss.REMEDY}\n"
+        f"incomplete, so this cell's state is not known saved. {_REMEDY}\n"
     )
 
 

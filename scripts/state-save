@@ -64,10 +64,12 @@ MEMBER = "state.bundle"
 #: The remedy every refusal ends with; `actions/state-save` repeats it, pinned by
 #: `test_state_save.py` against this constant.
 REMEDY = (
-    "Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge "
-    "can apply this cell's reviewed plan again against the state from before the apply. Before "
-    "applying or merging any plan of this stack in this environment, on any pull request, follow "
-    "docs/troubleshooting.md section The apply step ran and its state was not saved."
+    "Never re-run this job or its workflow run. While this cell's apply check is held, a "
+    "shipmate apply of this head and the merge deploy refuse it; an apply of a later head or of "
+    "another pull request is not held and applies its reviewed plan again against the state "
+    "from before the apply. Before applying or merging any plan of this stack in this "
+    "environment, on any pull request, follow docs/troubleshooting.md section The apply step "
+    "ran and its state was not saved."
 )
 NO_STATE = ("not-applied", "none")
 SLUG = re.compile(r"[A-Za-z0-9._-]+")
