@@ -195,13 +195,6 @@ def refuse_behind_checks(pending, behind):
     )
 
 
-#: The wave job's steps `deploy-detect` reads, as `apply-env-level.yml` names them: the pre-apply
-#: check, whose failure makes `apply-cell` refuse before it applies, and the step running
-#: `apply-cell`.
-PRE_APPLY_STEP = "Pre-apply check"
-APPLY_STEP = "Apply the cell"
-
-
 def _apply_not_started(job):
     """Whether listed job `job` shows its cell never applied: no steps, exactly one `APPLY_STEP`
     concluded `skipped`, or exactly one `PRE_APPLY_STEP` concluded `failure`, which makes
@@ -217,7 +210,9 @@ def _apply_not_started(job):
         named = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
         return named[0].get("conclusion") if len(named) == 1 else None
 
-    return conclusion(APPLY_STEP) == "skipped" or conclusion(PRE_APPLY_STEP) == "failure"
+    return (
+        conclusion(ad.ag.APPLY_STEP) == "skipped" or conclusion(ad.ag.PRE_APPLY_STEP) == "failure"
+    )
 
 
 def _read_run(repo, run_id):

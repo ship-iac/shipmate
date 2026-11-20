@@ -24,11 +24,204 @@ _US = "apply / stacks/app / dev-us"
 
 def test_the_cell_names_are_these_whole_values():
     """Mutations: `parse_check_name` returns `(env, stack)` or keeps the `apply / ` prefix;
-    `plan_check_name` drops `CALLER_PREFIX`; `is_cell_job` rejects the level job without a
-    caller prefix."""
+    `plan_check_name` drops `CALLER_PREFIX`; a step name or the held title changes."""
     assert ag.parse_check_name("apply / stacks/app / dev-eu") == ("stacks/app", "dev-eu")
     assert ag.plan_check_name("stacks/app", "dev-eu") == "plan / dev-eu / stacks/app"
-    assert ag.is_cell_job("L0 / dev-eu / stacks/app", "stacks/app", "dev-eu")
+    assert (ag.PRE_APPLY_STEP, ag.APPLY_STEP, ag.HELD_TITLE) == (
+        "Pre-apply check",
+        "Apply the cell",
+        "State not saved",
+    )
+
+
+@pytest.mark.parametrize(
+    ("job_name", "stack", "env", "expected"),
+    [
+        ("L0 / dev-eu / stacks/app / apply", "stacks/app", "dev-eu", "apply"),
+        ("apply / run / L2 / dev-eu / stacks/app / save", "stacks/app", "dev-eu", "save"),
+        ("apply / run / detect", "detect", "run", None),
+        ("L0 / dev-eu / stacks/app / apply", "stacks/app", "eu", None),
+        ("dev-eu / stacks/app / apply", "stacks/app", "dev-eu", None),
+        ("L0 / dev-eu / stacks/app", "stacks/app", "dev-eu", None),
+        ("L0 / dev-eu / stacks/app / plan", "stacks/app", "dev-eu", None),
+        ("L0 / dev-eu / stacks/app / apply / x", "stacks/app", "dev-eu", None),
+    ],
+)
+def test_cell_part_reads_these_literal_names(job_name, stack, env, expected):
+    """Mutations: drop `L[0-9]+` from the pattern; `search` for `fullmatch`; accept any last
+    segment as the part."""
+    assert ag.cell_part(job_name, stack, env) == expected
+
+
+_LEVELED = [
+    {"id": 1, "name": "apply / run / L0 / dev-eu / stacks/app / apply"},
+    {"id": 2, "name": "apply / run / L0 / dev-eu / stacks/app / save"},
+    {"id": 3, "name": "apply / run / L1 / wave0-complete"},
+    {"id": 4, "name": "apply / run / L1 / dev-eu / stacks/app / apply"},
+    {"id": 5, "name": "apply / run / L0 / dev-us / stacks/app / save"},
+]
+
+
+def test_level_of_reads_a_cell_row_and_a_row_directly_under_the_level():
+    """Mutation: `level_of` cuts only the last segment, so a cell row's level reads
+    `<level> / <env> / <stack>`."""
+    assert ag.level_of(_LEVELED, 2) == "apply / run / L0"
+    assert ag.level_of(_LEVELED, 3) == "apply / run / L1"
+    assert ag.level_of(_LEVELED, 99) == ""
+
+
+def test_cell_rows_are_the_rows_of_one_level_by_part():
+    """Mutations: `cell_rows` drops the level from the name; a row of another env counts."""
+    assert ag.cell_rows(_LEVELED, "apply / run / L0", "stacks/app", "dev-eu") == {
+        "apply": [_LEVELED[0]],
+        "save": [_LEVELED[1]],
+    }
+    assert ag.cell_rows(_LEVELED, "", "stacks/app", "dev-eu") == {"apply": [], "save": []}
+
+
+def test_held_names_are_the_newest_in_progress_runs_titled_held():
+    """Mutations: `held_names` reads the oldest run of a name; it ignores the status; it reads
+    the title from the top level."""
+    held = {"output": {"title": "State not saved"}}
+    runs = [
+        {**_run(_EU, "in_progress", None, run_id=1), **held},
+        {**_run(_US, "in_progress", None, run_id=2), **held},
+        _run(_US, "completed", "success", run_id=3),
+        {**_run("apply / stacks/db / dev-eu", "completed", "failure", run_id=4), **held},
+        {**_run("apply / stacks/net / dev-eu", "in_progress", None, run_id=5), "output": None},
+    ]
+    assert ag.held_names(runs) == {_EU}
+
+
+# Rows copied from the jobs?filter=all listings of probe runs 44161778000 (arm `rr`: attempt 1
+# applied and its save failed; attempt 2 re-ran the failed save, carrying the apply row) and
+# 44164180908 (a cell cancelled while pending on its group). Only the names are re-keyed from the
+# probe's `chain / next / next / rr / s / {apply,saver}` to the cell grammar.
+_APPLY = "apply / run / L0 / dev-eu / stacks/app / apply"
+_SAVE = "apply / run / L0 / dev-eu / stacks/app / save"
+_PROBE_STEP = (
+    'Run echo "PROBE {} start $(date -u +%FT%T.%3NZ) group=$GROUP attempt=$GITHUB_RUN_ATTEMPT"'
+)
+
+
+def _step(name, conclusion):
+    return {"name": name, "status": "completed", "conclusion": conclusion}
+
+
+_RR_APPLY_1 = {
+    "id": 134317220991,
+    "run_attempt": 1,
+    "name": _APPLY,
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-11-17T19:44:19Z",
+    "steps": [
+        _step("Set up job", "success"),
+        _step(_PROBE_STEP.format("apply"), "success"),
+        _step("Complete job", "success"),
+    ],
+}
+_RR_SAVE_1 = {
+    "id": 134317522397,
+    "run_attempt": 1,
+    "name": _SAVE,
+    "status": "completed",
+    "conclusion": "failure",
+    "started_at": "2026-11-17T19:44:46Z",
+    "steps": [
+        _step("Set up job", "success"),
+        _step(_PROBE_STEP.format("saver"), "failure"),
+        _step("Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "skipped"),
+        _step("Complete job", "success"),
+    ],
+}
+_RR_APPLY_2 = {
+    "id": 134320891783,
+    "run_attempt": 2,
+    "name": _APPLY,
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-11-17T19:44:19Z",
+    "steps": [],
+}
+_RR_SAVE_2 = {
+    "id": 134322335889,
+    "run_attempt": 2,
+    "name": _SAVE,
+    "status": "completed",
+    "conclusion": "failure",
+    "started_at": "2026-11-17T19:52:28Z",
+    "steps": [
+        _step("Set up job", "success"),
+        _step(_PROBE_STEP.format("saver"), "failure"),
+        _step("Run actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9", "skipped"),
+        _step("Complete job", "success"),
+    ],
+}
+_PENDING_CANCEL = {
+    "id": 134326095848,
+    "run_attempt": 1,
+    "name": _APPLY,
+    "status": "completed",
+    "conclusion": "cancelled",
+    "started_at": "2026-11-17T19:58:24Z",
+    "steps": [],
+}
+_RR = [_RR_APPLY_1, _RR_SAVE_1, _RR_APPLY_2, _RR_SAVE_2]
+
+
+def test_a_later_attempts_successful_save_credits_the_earlier_attempt():
+    """Mutation: `saved` reads only the attempt's own `save` row."""
+    credited = [*_RR[:3], {**_RR_SAVE_2, "conclusion": "success"}]
+    assert ag.attempts(credited, "stacks/app", "dev-eu") == {
+        1: {"applied": True, "saved": True},
+        2: {"applied": True, "saved": True},
+    }
+    assert ag.unsaved(credited, "stacks/app", "dev-eu") == []
+
+
+def test_a_later_attempts_failed_save_leaves_the_earlier_attempt_unsaved():
+    """Mutations: a carried `apply` row reads as not applied; `unsaved` counts `before`
+    itself."""
+    assert ag.attempts(_RR, "stacks/app", "dev-eu") == {
+        1: {"applied": True, "saved": False},
+        2: {"applied": True, "saved": False},
+    }
+    assert ag.unsaved(_RR, "stacks/app", "dev-eu") == [1, 2]
+    assert ag.unsaved(_RR, "stacks/app", "dev-eu", before=2) == [1]
+    assert ag.unsaved(_RR, "stacks/us", "dev-eu") == []
+
+
+def test_steps_free_apply_rows_read_by_whether_an_earlier_row_explains_them():
+    """A row cancelled while pending reads not applied; a carried row takes the earlier row's
+    verdict; a steps-free row an earlier same-name row does not explain reads unknown, and an
+    unknown apply with no save is unsaved. Mutation: read every `steps: []` row as not
+    applied."""
+    assert ag.attempts([_PENDING_CANCEL], "stacks/app", "dev-eu") == {
+        1: {"applied": False, "saved": None}
+    }
+    assert ag.unsaved([_PENDING_CANCEL], "stacks/app", "dev-eu") == []
+    unexplained = {**_RR_APPLY_2, "started_at": "2026-11-17T19:52:18Z"}
+    assert ag.attempts([_RR_APPLY_1, unexplained], "stacks/app", "dev-eu") == {
+        1: {"applied": True, "saved": None},
+        2: {"applied": None, "saved": None},
+    }
+    assert ag.unsaved([_RR_APPLY_1, unexplained], "stacks/app", "dev-eu") == [1, 2]
+
+
+@pytest.mark.parametrize(
+    ("steps", "applied"),
+    [
+        ([_step("Pre-apply check", "failure"), _step("Apply the cell", "failure")], False),
+        ([_step("Pre-apply check", "success"), _step("Apply the cell", "skipped")], False),
+        ([_step("Pre-apply check", "success"), _step("Apply the cell", "failure")], True),
+    ],
+)
+def test_a_refused_or_skipped_apply_step_reads_not_applied(steps, applied):
+    """Mutations: `Pre-apply check` failure reads applied; a skipped `Apply the cell` reads
+    applied."""
+    row = {**_RR_APPLY_1, "steps": steps}
+    assert ag.attempts([row], "stacks/app", "dev-eu") == {1: {"applied": applied, "saved": None}}
 
 
 @pytest.mark.parametrize(

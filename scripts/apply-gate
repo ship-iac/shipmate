@@ -47,6 +47,12 @@ APPLY_PREFIX = "apply / "
 #: name, and `CONTRACT.md` §Check names states it.
 CALLER_PREFIX = "plan / "
 DONE_CONCLUSIONS = {"success", "neutral"}
+#: The `apply` job's steps the attempt verdict reads, as `cell.yml` names them: the pre-apply
+#: check, whose failure makes `apply-cell` refuse before it applies, and the step running it.
+PRE_APPLY_STEP = "Pre-apply check"
+APPLY_STEP = "Apply the cell"
+#: The title of an apply check held `in_progress` because its cell's state may not be saved.
+HELD_TITLE = "State not saved"
 
 
 def env_pr_number():
@@ -86,15 +92,96 @@ def plan_check_name(stack, env):
     return CALLER_PREFIX + cell_job_name(stack, env)
 
 
-def is_cell_job(job_name, stack, env):
-    """Whether the listed job `job_name` is the cell's wave job, `L<n> / <env> / <stack>`
-    (`apply-run.yml` and `deploy.yml` name their env-level jobs `L<n>`), whole or after a ` / `
-    boundary, since the calling jobs prepend their own names. The `L<n>` segment keeps out
-    any other job ending in ` / <env> / <stack>` (`apply / run / detect` for env `run` and
-    root stack `detect`), and the boundary keeps env `eu` from matching a job of env
-    `dev-eu`."""
-    pattern = rf"(?:.* / )?L[0-9]+ / {re.escape(cell_job_name(stack, env))}"
-    return re.fullmatch(pattern, job_name) is not None
+def cell_part(job_name, stack, env):
+    """`"apply"` or `"save"` when the listed job `job_name` is that job of the cell's
+    `cell.yml`, `L<n> / <env> / <stack> / <part>` (`apply-run.yml` and `deploy.yml` name their
+    env-level jobs `L<n>`), whole or after a ` / ` boundary, since the calling jobs prepend their
+    own names; else None. The `L<n>` segment keeps out any other job ending in the cell's name,
+    and the boundary keeps env `eu` from matching a job of env `dev-eu`."""
+    pattern = rf"(?:.* / )?L[0-9]+ / {re.escape(cell_job_name(stack, env))} / (apply|save)"
+    match = re.fullmatch(pattern, job_name)
+    return match.group(1) if match else None
+
+
+def level_of(jobs, job_id):
+    """The level of the listed job `job_id`, its name up to the `L<n>` segment (`apply / run /
+    L0`): for a cell job, `<level> / <env> / <stack> / <part>`, or a job directly under the
+    level. "" when `jobs` does not list it or its name has neither shape."""
+    own = next((j.get("name", "") for j in jobs if str(j.get("id")) == str(job_id)), "")
+    segments = own.split(" / ")
+    cell = len(segments) >= 4 and segments[-1] in ("apply", "save")
+    depth = 4 if cell and re.fullmatch(r"L[0-9]+", segments[-4]) else 2
+    if len(segments) < depth or not re.fullmatch(r"L[0-9]+", segments[-depth]):
+        return ""
+    return " / ".join(segments[: 1 - depth])
+
+
+def cell_rows(jobs, level, stack, env):
+    """`{"apply": [...], "save": [...]}`: the listed jobs of `jobs` named exactly
+    `<level> / <env> / <stack> / <part>`, `level` from `level_of`. Both empty when `level` is
+    empty, so a listing that does not list the calling job matches no cell."""
+    rows = {"apply": [], "save": []}
+    for part in rows:
+        name = f"{level} / {cell_job_name(stack, env)} / {part}"
+        if level and cell_part(name, stack, env) == part:
+            rows[part] = [j for j in jobs if j.get("name") == name]
+    return rows
+
+
+def _applied(row, earlier):
+    """Whether the `apply` row `row` applied: True, False, or None when unknown. `earlier` maps
+    `(name, started_at)` of earlier attempts' rows to their verdicts: a re-run lists a job it did
+    not re-run again under the new attempt, with the same name and start and no steps."""
+    key = (row.get("name"), row.get("started_at"))
+    if key in earlier:
+        return earlier[key]
+    steps = row.get("steps")
+    if steps == []:
+        # A cell cancelled while pending lists no steps and no earlier row.
+        return False if all(name != key[0] for name, _ in earlier) else None
+    if not isinstance(steps, list):
+        return None
+
+    def conclusion(name):
+        named = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
+        return named[0].get("conclusion") if len(named) == 1 else None
+
+    return not (conclusion(APPLY_STEP) == "skipped" or conclusion(PRE_APPLY_STEP) == "failure")
+
+
+def attempts(jobs, stack, env):
+    """`{attempt: {"applied": ..., "saved": ...}}` for the cell's rows in `jobs`, a
+    `filter=all` listing. `applied` is the attempt's `apply` rows' verdict (`_applied`), True
+    when any applied, None when none is listed or any is unknown. `saved` is True when a `save`
+    row of the attempt or a later one succeeded: a later save succeeds only after the earlier
+    attempts' state was found. None when no such row is listed, else False."""
+    rows = {}
+    for job in jobs:
+        part = cell_part(job.get("name", ""), stack, env)
+        if part:
+            rows.setdefault(job.get("run_attempt"), {"apply": [], "save": []})[part].append(job)
+    earlier, out = {}, {}
+    for attempt in sorted(rows):
+        verdicts = [_applied(row, earlier) for row in rows[attempt]["apply"]]
+        for row, verdict in zip(rows[attempt]["apply"], verdicts, strict=True):
+            earlier.setdefault((row.get("name"), row.get("started_at")), verdict)
+        applied = True if True in verdicts else None if None in verdicts or not verdicts else False
+        saves = [j for k in rows if k >= attempt for j in rows[k]["save"]]
+        saved = any(j.get("conclusion") == "success" for j in saves) if saves else None
+        out[attempt] = {"applied": applied, "saved": saved}
+    return out
+
+
+def unsaved(jobs, stack, env, before=None):
+    """The sorted attempts of the cell in `jobs` (below `before` when given) that applied or may
+    have, and whose state is not known saved (`attempts`)."""
+    return [
+        attempt
+        for attempt, verdict in sorted(attempts(jobs, stack, env).items())
+        if (before is None or attempt < before)
+        and verdict["applied"] is not False
+        and verdict["saved"] is not True
+    ]
 
 
 def app_runs(check_run_lines, app_id):
@@ -126,6 +213,15 @@ def latest_by_name(check_runs, prefix=APPLY_PREFIX):
 
 def _is_done(run):
     return run["status"] == "completed" and run.get("conclusion") in DONE_CONCLUSIONS
+
+
+def held_names(check_runs):
+    """Names whose *latest* run is `in_progress` and titled `HELD_TITLE`."""
+    return {
+        name
+        for name, run in latest_by_name(check_runs).items()
+        if run["status"] == "in_progress" and (run.get("output") or {}).get("title") == HELD_TITLE
+    }
 
 
 def done_names(check_runs):
