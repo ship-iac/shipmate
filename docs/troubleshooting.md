@@ -2184,7 +2184,7 @@ receives no held or skipped environments. A run with no cell result rows, not ev
 - `🔴 refused`: `detect` refused by rule: a cell is behind the base, or a
   targeted apply's environment is held for review.
 - `🔴 cancelled`: a job ended `cancelled` while the run did not, and none
-  failed: a wave job evicted by its cell's concurrency group, or a job timeout.
+  failed: `detect` or `lock` ended `cancelled`, for example on a job timeout.
 - `🔴 failed`: the run failed for any other cause.
 - `⚪ nothing applied, environments are held for review`.
 - `⚪ nothing applied, pending cells are locked or the base also changed their
