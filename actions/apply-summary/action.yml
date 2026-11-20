@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ""
   detect-result:
-    description: "`needs.detect.result`. Only `failure` with a non-empty `detect-refusal` lets the comment read an incomplete report: the empty one the detect job wrote before a step refused."
+    description: "`needs.detect.result`. Only `failure` with a non-empty `detect-refusal` lets the comment read an incomplete report: the empty one the detect job wrote before a step failed with an `::error::`."
     required: false
     default: ""
   detect-refusal:
