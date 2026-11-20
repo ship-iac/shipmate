@@ -19,7 +19,8 @@ pending cells, bucketed into env-levels by the entries' `needs`, after the
 exclusions its docstring names.
 
 The bare and targeted forms refuse the whole run when a cell they would apply is behind the
-base (`refuse_behind`).
+base (`refuse_behind`). Every form refuses it when another run holds the apply check of a cell
+it would apply `in_progress` and may still apply that cell, or may have (`refuse_held`).
 
 A named environment selects the targeted form, scoped to that ONE environment.
 It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
@@ -437,6 +438,69 @@ def holder_state(repo, cell, check, runs):
         return "ended", run_id
     verdicts = ag.attempts(jobs, stack, env).values()
     return ("deploy" if all(v["applied"] is False for v in verdicts) else "saved"), run_id
+
+
+#: The troubleshooting section that returns an in-progress apply check to `queued` by hand.
+BY_HAND = "Return an in-progress apply check by hand"
+
+
+def held_by_others(repo, lines, app_id, cells):
+    """`{(cause, id): [cell]}` for each of `cells` with an App apply check in `lines`, any of
+    them and not only the newest, `in_progress` under a run other than this one, keyed by that
+    check's `holder_state`. A same-head re-plan queues a newer check over a held one."""
+    own, flipped = current_run_url(), {}
+    for check in ag.app_runs(lines, app_id):
+        if check["status"] == "in_progress" and check.get("details_url") != own:
+            flipped.setdefault(check["name"], []).append(check)
+    runs, held = {}, {}
+    for c in cells:
+        for check in flipped.get(ag.check_name(c["stack"], c["environment"]), []):
+            listed = held.setdefault(holder_state(repo, c, check, runs), [])
+            if c not in listed:
+                listed.append(c)
+    return held
+
+
+def refuse_held(repo, lines, app_id, cells):
+    """Refuse the whole apply when another run holds a check of one of `cells` and that run may
+    still apply the cell, may have applied it, or cannot be read (`held_by_others`); a cell an
+    ended run never applied applies. Only this head's checks are read. A plain `SystemExit`,
+    not `Refused`: infrastructure and its saved state may disagree, which no rule explains."""
+    held = {k: v for k, v in held_by_others(repo, lines, app_id, cells).items() if k[0] != "deploy"}
+    if held:
+        sentences = [_held_text(cause, ident, c) for (cause, ident), c in sorted(held.items())]
+        raise SystemExit(f"::error::apply refused: {' '.join(sentences)}")
+
+
+def _held_text(cause, ident, cells):
+    """The apply refusal's sentence for `cells`, held for `cause` by run or check `ident`."""
+    names = ", ".join(sorted(f"{c['stack']} / {c['environment']}" for c in cells))
+    if cause == "live":
+        return (
+            f"{names} are held in progress by run {ident}, which is still running. Wait for it "
+            "to end, then re-run `shipmate apply`."
+        )
+    if cause == "ended":
+        return (
+            f"{names} may have been applied by run {ident} without saving their state; follow "
+            "docs/troubleshooting.md section The apply step ran and its state was not saved, "
+            "then re-plan."
+        )
+    if cause == "saved":
+        return (
+            f"{names} were left in progress by run {ident}, which applied them and saved their "
+            f"state. Follow docs/troubleshooting.md section {BY_HAND}, then re-run `shipmate "
+            "apply`."
+        )
+    if cause == "unknown":
+        return (
+            f"{names}: apply check {ident} is in progress with no run named; follow "
+            f"docs/troubleshooting.md section {BY_HAND}, then re-run `shipmate apply`."
+        )
+    return (
+        f"{names}: run {ident} could not be read completely; re-run `shipmate apply`. If it "
+        f"fails the same way, follow docs/troubleshooting.md section {BY_HAND}."
+    )
 
 
 def _check_run_lines(repo, head_sha):
@@ -874,6 +938,7 @@ def bare_main(auto=False):
     # cell's check stays pending by design for a later apply, and that apply refuses on its own
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
+    refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
     auto_outputs, auto_report = {"base_sha": base_sha}, {}
     if auto:
@@ -996,6 +1061,7 @@ def main():
     # Locked and waiting cells drop before `with_plan_runs`: their checks stay pending for a later
     # apply, which refuses on its own over a record-less cell.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
+    refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
 
     # Before the padding, whose over-depth refusal is where this line helps most.

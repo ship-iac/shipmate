@@ -34,7 +34,6 @@ from _shipmate import (
     StackCycle,
     _load,
     command_data,
-    current_run_url,
     deploy_lock_remedy,
     exit_text,
     listed_jobs,
@@ -204,13 +203,7 @@ def refuse_in_flight(repo, lines, app_id, pending):
     `ad.holder_state` decides each holder: an ended holder that never applied the cell writes
     nothing more to the check, so the cell deploys with a warning; every other cause holds it.
     The refusal names every other pending cell, which it does not apply either."""
-    flipped = _flipped(lines, app_id)
-    runs, held = {}, {}
-    for c in pending:
-        for check in flipped.get(ad.ag.check_name(c["stack"], c["environment"]), []):
-            cells = held.setdefault(ad.holder_state(repo, c, check, runs), [])
-            if c not in cells:
-                cells.append(c)
+    held = ad.held_by_others(repo, lines, app_id, pending)
     _own_unsaved(repo, pending, held)
     deployed = {k: held.pop(k) for k in [k for k in held if k[0] == "deploy"]}
     if not held:
@@ -250,21 +243,8 @@ def _own_unsaved(repo, pending, held):
             cells.append(c)
 
 
-def _flipped(lines, app_id):
-    """`{name: [check]}`: every App apply check `in_progress` under a run other than this one."""
-    own, flipped = current_run_url(), {}
-    for check in ad.ag.app_runs(lines, app_id):
-        if check["status"] == "in_progress" and check.get("details_url") != own:
-            flipped.setdefault(check["name"], []).append(check)
-    return flipped
-
-
 def _name(cell):
     return f"{cell['stack']} / {cell['environment']}"
-
-
-#: The troubleshooting section that returns an in-progress apply check to `queued` by hand.
-_BY_HAND = "Return an in-progress apply check by hand"
 
 
 def _held(cause, ident, cells):
@@ -279,7 +259,7 @@ def _held(cause, ident, cells):
     if cause == "saved":
         return (
             f"{names} were left in progress by run {ident}, which applied them and saved their "
-            f"state. Follow docs/troubleshooting.md section {_BY_HAND}, then re-run this deploy."
+            f"state. Follow docs/troubleshooting.md section {ad.BY_HAND}, then re-run this deploy."
         )
     if cause == "ended":
         return (
@@ -290,11 +270,11 @@ def _held(cause, ident, cells):
     if cause == "unknown":
         return (
             f"{names}: apply check {ident} is in progress with no run named; follow "
-            f"docs/troubleshooting.md section {_BY_HAND}, then re-run this deploy."
+            f"docs/troubleshooting.md section {ad.BY_HAND}, then re-run this deploy."
         )
     return (
         f"{names}: run {ident} could not be read completely; re-run this deploy. If it fails "
-        f"the same way, follow docs/troubleshooting.md section {_BY_HAND}."
+        f"the same way, follow docs/troubleshooting.md section {ad.BY_HAND}."
     )
 
 

@@ -6,13 +6,17 @@ from typing import Any
 import pytest
 from _detect_fixtures import (
     APP_ID,
+    HELD_CASES,
     PR_NUMBER,
+    RUN_ENV,
     _apply_check,
     autoplans_read,
     behind_check,
     dispatched_plan,
     forbid_shared_runner,
     held,
+    held_check,
+    holder_answers,
     listed_autoplan,
     plan_jobs,
     stub_read_locks,
@@ -90,10 +94,14 @@ def _plans_body(plans):
     return json.dumps({"total_count": len(plans), "workflow_runs": list(plans)})
 
 
-def _github(checks, listing, permission, pulls, calls, argv, tip=BASE, plans=(), jobs=None):
-    """A `gh api` double answering each read `_run_auto` documents by its path prefix; any
-    other read, a single-run `actions/runs/<id>` read among them, fails the test."""
+def _github(
+    checks, listing, permission, pulls, calls, argv, tip=BASE, plans=(), jobs=None, runs=()
+):
+    """A `gh api` double answering each read `_run_auto` documents by its path prefix, or by
+    its whole path from `runs`, `(path, body)` pairs; any other read, a single-run
+    `actions/runs/<id>` read among them, fails the test."""
     jobs = jobs or {}
+    exact = dict(runs)
     answers = [
         (
             "repos/o/r/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&",
@@ -118,6 +126,8 @@ def _github(checks, listing, permission, pulls, calls, argv, tip=BASE, plans=(),
         path = next(a for a in args if a.startswith("repos/"))
         calls.append(path)
         argv.append(args)
+        if path in exact:
+            return exact[path]
         answer = next((a for prefix, a in answers if path.startswith(prefix)), None)
         assert answer is not None, f"unexpected read: {args}"
         return answer()
@@ -150,6 +160,7 @@ def _run_auto(
     tip=BASE,
     plans=(),
     jobs=None,
+    runs=(),
 ):
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
     to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
@@ -160,7 +171,8 @@ def _run_auto(
     exception raises from the read). Each `gh api` path goes to `calls`, its whole argv to
     `argv`, each sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap
     detection is asked about to `base_reads`. `plans` is the `shipmate plan` listing's runs (an
-    exception raises from the read), `jobs` maps a run id to its jobs listing's body.
+    exception raises from the read), `jobs` maps a run id to its jobs listing's body, and `runs`
+    answers whole paths (`_github`).
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
     out = tmp_path / "out"
@@ -175,6 +187,7 @@ def _run_auto(
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_REVIEW_DECISION": decision,
+        **RUN_ENV,
     }.items():
         monkeypatch.setenv(k, v)
     planned = len(envs) * len(stacks)
@@ -193,6 +206,7 @@ def _run_auto(
         tip,
         plans,
         jobs,
+        runs,
     )
 
     tree = {e: list(stacks) for e in envs}
@@ -1081,3 +1095,27 @@ def test_a_behind_record_holds_its_cell_once_and_its_sibling_applies(
     assert detect_report()["held_cells"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"}
     ]
+
+
+@pytest.mark.parametrize(
+    ("link", "run", "jobs", "refusal"), HELD_CASES.values(), ids=HELD_CASES.keys()
+)
+def test_an_auto_apply_refuses_a_cell_another_run_holds_unless_it_never_applied(
+    tmp_path, monkeypatch, link, run, jobs, refusal
+):
+    """Run 77 holds `stacks/app / dev-eu`'s apply check `in_progress`: a live run, an ended
+    run that applied it unsaved or saved, an unreadable run and a link naming no run refuse the
+    whole apply; an ended run that never applied it leaves it to apply.
+
+    Mutation: drop the `refuse_held` call in `bare_main` (the held check reads as pending, as
+    before) -- every refusing case applies, red."""
+    kw = {
+        "checks": [held_check("o/r", link, cells=1, app=APP)],
+        "runs": holder_answers("o/r", run, jobs),
+    }
+    if refusal is None:
+        assert _applied(_run_auto(tmp_path, monkeypatch, **kw)) == [("stacks/app", "dev-eu")]
+        return
+    with pytest.raises(SystemExit) as exc:
+        _run_auto(tmp_path, monkeypatch, **kw)
+    assert str(exc.value) == refusal

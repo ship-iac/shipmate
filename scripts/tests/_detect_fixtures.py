@@ -365,3 +365,104 @@ def plan_jobs(run_id, detect="success", attempt=1, names=None, total=None):
         for i, (name, conclusion) in enumerate(rows)
     ]
     return json.dumps({"total_count": len(jobs) if total is None else total, "jobs": jobs})
+
+
+#: The run holding a cell's apply check in the held-check tests, and the detect's own run.
+HOLDER = "77"
+OWN_RUN = "999"
+#: The runner variables `current_run_url` reads, for the detect's run `OWN_RUN`.
+RUN_ENV = {"GITHUB_SERVER_URL": "https://github.com", "GITHUB_RUN_ID": OWN_RUN}
+
+
+def held_check(repo, link="", *, cells, **kw):
+    """`stacks/app / dev-eu`'s App apply check, `in_progress` under run `HOLDER` of `repo`: its
+    run page followed by `link`."""
+    return {
+        **_apply_check("stacks/app", cells=cells, **kw),
+        "status": "in_progress",
+        "details_url": f"https://github.com/{repo}/actions/runs/{HOLDER}{link}",
+    }
+
+
+def cell_job(part, steps=(("Apply the cell", "success"),), conclusion="success"):
+    """The listed `apply` or `save` job (`part`) of `stacks/app / dev-eu` in an apply run,
+    attempt 1, with `steps` as `(name, conclusion)` pairs."""
+    return {
+        "name": f"apply / run / L0 / dev-eu / stacks/app / {part}",
+        "status": "completed",
+        "conclusion": conclusion,
+        "run_attempt": 1,
+        "started_at": f"2026-11-20T10:00:0{int(part == 'save')}Z",
+        "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps],
+    }
+
+
+def holder_answers(repo, run, jobs=None):
+    """`(path, body)` pairs answering run `HOLDER` of `repo`: `run`, the run object's keys
+    beside its id, on every run read, and `jobs`, when given, as its one-page jobs listing."""
+    path = f"repos/{repo}/actions/runs/{HOLDER}"
+    answers = [(path, json.dumps({"id": int(HOLDER), **run}))]
+    if jobs is not None:
+        listing = json.dumps({"total_count": len(jobs), "jobs": jobs})
+        answers.append((f"{path}/jobs?filter=all&per_page=100&page=1", listing))
+    return answers
+
+
+_ENDED = {"status": "completed", "run_attempt": 1}
+_BY_HAND = "docs/troubleshooting.md section Return an in-progress apply check by hand"
+#: `(link, run, jobs, refusal)` per cause a holder of `held_check` reads as, hand-written: the
+#: whole refusal of an apply, or None when the cell applies.
+HELD_CASES = {
+    "live": (
+        "",
+        {"status": "in_progress", "run_attempt": 1},
+        None,
+        (
+            "::error::apply refused: stacks/app / dev-eu are held in progress by run 77, which is "
+            "still running. Wait for it to end, then re-run `shipmate apply`."
+        ),
+    ),
+    "ended unsaved": (
+        "",
+        _ENDED,
+        [cell_job("apply")],
+        (
+            "::error::apply refused: stacks/app / dev-eu may have been applied by run 77 without "
+            "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
+            "state was not saved, then re-plan."
+        ),
+    ),
+    "ended saved": (
+        "",
+        _ENDED,
+        [cell_job("apply"), cell_job("save", steps=())],
+        (
+            "::error::apply refused: stacks/app / dev-eu were left in progress by run 77, which "
+            f"applied them and saved their state. Follow {_BY_HAND}, then re-run `shipmate apply`."
+        ),
+    ),
+    "ended never applied": (
+        "",
+        _ENDED,
+        [cell_job("apply", steps=(("Apply the cell", "skipped"),))],
+        None,
+    ),
+    "unreadable": (
+        "",
+        {"status": "completed"},
+        None,
+        (
+            "::error::apply refused: stacks/app / dev-eu: run 77 could not be read completely; "
+            f"re-run `shipmate apply`. If it fails the same way, follow {_BY_HAND}."
+        ),
+    ),
+    "no run named": (
+        "/job/12",
+        _ENDED,
+        None,
+        (
+            "::error::apply refused: stacks/app / dev-eu: apply check 1 is in progress with no run "
+            f"named; follow {_BY_HAND}, then re-run `shipmate apply`."
+        ),
+    ),
+}
