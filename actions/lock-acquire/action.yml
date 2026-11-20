@@ -27,7 +27,8 @@ inputs:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
 outputs:
-  refusal: { description: "The first error of the `::error::` message that failed the step (a refusal or a failed API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.", value: "${{ steps.a.outputs.refusal }}" }
+  refusal: { description: "The first error of the `::error::` message that failed the step (whatever its cause, a failed API call included), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.", value: "${{ steps.a.outputs.refusal }}" }
+  refused_by_rule: { description: "`true` when the step failed because another pull request or an unknown holder locks a cell; empty otherwise, a failed API call or a refusal whose rollback failed included. Set although the step fails.", value: "${{ steps.a.outputs.refused_by_rule }}" }
 runs:
   using: composite
   steps:

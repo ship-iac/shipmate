@@ -712,6 +712,26 @@ def test_refuse_unreviewed_refuses_everything_else(decision, exempt):
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
+@pytest.mark.parametrize(
+    ("decision", "kind"),
+    [
+        ("REVIEW_REQUIRED", ad.Refused),
+        ("CHANGES_REQUESTED", ad.Refused),
+        ("BANANA", SystemExit),
+        ("", SystemExit),
+    ],
+)
+def test_refuse_unreviewed_refuses_by_rule_only_on_a_known_decision(decision, kind):
+    """A missing review or requested changes read `refused`; a decision that never arrived or
+    has an unknown value is an engine fault and reads `failed`.
+
+    Mutation: raise `Refused` for every reason -- `BANANA` and `""` red. Mutation: drop
+    `CHANGES_REQUESTED` from the refused set -- red."""
+    with pytest.raises(SystemExit) as exc_info:
+        ad.refuse_unreviewed("dev-eu", _gate(""), decision)
+    assert type(exc_info.value) is kind
+
+
 def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
     # One function decides review policy on all three call sites, and a second implementation
     # here would eventually disagree with comment-ops about the same pull request. The reason
@@ -769,6 +789,21 @@ def test_a_refused_targeted_apply_writes_the_refusal_output_whole(monkeypatch, t
     assert out.read_text(encoding="utf-8") == (
         "refusal=not authorized: changes were requested on this PR; resolve them and get a "
         "fresh approval (or dismiss the review), then re-run `shipmate apply`.\n"
+        "refused_by_rule=true\n"
+    )
+
+
+def test_an_invalid_environment_name_writes_no_refused_by_rule(monkeypatch, tmp_path):
+    """A detect failure that is no rule refusal writes `refusal` alone. Mutation: re-raise
+    `check_env_name`'s `SystemExit` in `validate_env` as `Refused` -- a second line."""
+    out = _apply_env(monkeypatch, tmp_path, SHIPMATE_ENV="dev.eu")
+    _boom_on_the_workset(monkeypatch)
+    with pytest.raises(SystemExit) as exc_info:
+        run_annotated(ad.main, refusal_output=True)
+    assert exc_info.value.code == 1
+    assert out.read_text(encoding="utf-8") == (
+        "refusal=SHIPMATE_ENV 'dev.eu' is not an environment name: lowercase letters, digits, "
+        "'-' and '_', with no quotes, spaces or path separators.\n"
     )
 
 
@@ -1522,6 +1557,19 @@ def test_a_targeted_apply_refuses_a_behind_cell_of_its_environment(
         assert len(json.loads(parsed["envlevel0_waves"])["wave0"]) == 1
         assert parsed["base_sha"] == BASE_TIP
     assert base_calls == [(BASE_TIP, ["stacks/app"])]
+
+
+def test_a_behind_refusal_writes_the_refusal_output_whole(monkeypatch, tmp_path):
+    """Mutation: raise a plain `SystemExit` in `refuse_behind` -- no `refused_by_rule` line."""
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [behind_check("stacks/app", cells=1)])
+    with pytest.raises(SystemExit) as exc_info:
+        run_annotated(ad.main, refusal_output=True)
+    assert exc_info.value.code == 1
+    assert out.read_text(encoding="utf-8") == (
+        "refusal=apply refused: 1 cell(s) behind main (stacks/app / dev-eu); update the branch "
+        "from main and push.\nrefused_by_rule=true\n"
+    )
 
 
 def test_a_targeted_apply_with_nothing_pending_reads_no_pull_request(monkeypatch, tmp_path):

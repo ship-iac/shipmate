@@ -154,6 +154,7 @@ jobs:
       provenance_run: ${{ steps.d.outputs.provenance_run }}
       base_sha: ${{ steps.d.outputs.base_sha }}
       refusal: ${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}
+      refused_by_rule: ${{ steps.d.outputs.refused_by_rule }}
       tools: ${{ steps.setup.outputs.tools }}
       report_artifact: ${{ steps.report.outputs.name }}
     steps:
@@ -218,6 +219,7 @@ jobs:
     permissions: {}
     outputs:
       refusal: ${{ steps.l.outputs.refusal }}
+      refused_by_rule: ${{ steps.l.outputs.refused_by_rule }}
     steps:
       - id: l
         uses: $/actions/lock-acquire
@@ -358,6 +360,7 @@ jobs:
           detect-result: ${{ needs.detect.result }}
           detect-refusal: ${{ needs.detect.outputs.refusal }}
           lock-refusal: ${{ needs.lock.outputs.refusal }}
+          refused-by-rule: ${{ needs.detect.outputs.refused_by_rule || needs.lock.outputs.refused_by_rule }}
           auto: ${{ inputs.auto }}
           results: ${{ join(needs.*.result, ',') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

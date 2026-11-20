@@ -360,7 +360,7 @@ def test_no_line_of_the_apply_comment_is_itself_a_shipmate_command():
     ],
 )
 def test_the_verdict_counts_rows_and_carries_a_failed_run(statuses, results, verdict):
-    """A run that dies before any cell reports (a denied apply environment, a job-level cancel)
+    """A run that dies before any cell reports (a denied apply environment, a failed lock job)
     leaves only `not attempted` rows, so the job results add a leading `failed` and the 🔴. A
     `not recorded` row in one environment says nothing about another, so it never suppresses
     that token. A `failed` or `blocked` row already names a cell that did not apply, so it
@@ -375,10 +375,120 @@ def test_the_verdict_counts_rows_and_carries_a_failed_run(statuses, results, ver
         _row(status=s) if isinstance(s, str) else _row(status=s[0], environment=s[1])
         for s in statuses
     ]
-    assert ac._verdict(rows, ac._results_failed(results), (), SHA, RUN_URL) == (
+    assert ac._verdict(rows, ac._results_outcome(results), (), SHA, RUN_URL) == (
         verdict.split(" ", 1)[0],
         f"{verdict} {AT}",
     )
+
+
+def _applied_dev():
+    return _row(environment="dev", apply_text=None)
+
+
+#: The applied `dev` row's heading and line in the pending-token cases, hand-written.
+_DEV_ROW = (
+    '#### dev: 1 cell, 1 applied\n\n🟢 stacks/app: applied <a href="https://gh/run/1">logs</a>\n\n'
+)
+_HELD_PROD = (
+    "⚪ prod: held, the review state does not permit applying; once it clears, comment "
+    "`shipmate apply prod`\n"
+    "held: get an approving review, or resolve or dismiss a requested-changes review. "
+    "The run log's apply-all-detect notice names the decision seen.\n\n"
+)
+
+
+def test_an_applied_run_with_held_and_targeted_environments_counts_them_pending():
+    """`prod` is held and targeted at once, so it counts once.
+
+    Mutation: count `len(held) + len(left)` -- `3 environments pending`, red.
+    Mutation: leave ⚪ out of the circles -- 🟢 and no hint, red."""
+    body = ac.build_comment(
+        [_applied_dev()], [], RUN_URL, ["prod", "stg"], [], "", "success", ["prod"], SHA
+    )
+    assert body == (
+        f"### shipmate apply\n\n⚪ 1 applied, 2 environments pending {AT}\n\n"
+        + _DEV_ROW
+        + "🟡 stg: left pending (targeted), comment `shipmate apply stg`\n"
+        + _HELD_PROD
+        + HINT
+    )
+
+
+def test_an_applied_run_with_one_held_environment_counts_it_pending():
+    """Mutation: render `1 environments pending` -- red."""
+    body = ac.build_comment([_applied_dev()], [], RUN_URL, [], [], "", "success", ["prod"], SHA)
+    assert body == (
+        f"### shipmate apply\n\n⚪ 1 applied, 1 environment pending {AT}\n\n"
+        + _DEV_ROW
+        + "⚪ prod: held, the review state does not permit applying\n"
+        "held: get an approving review, or resolve or dismiss a requested-changes review. "
+        "The run log's apply-all-detect notice names the decision seen.\n\n" + HINT
+    )
+
+
+def test_an_applied_run_counts_a_skipped_environment_pending():
+    """Mutation: drop `skipped` from the pending set -- 🟢 1 applied, red."""
+    body = ac.build_comment([_applied_dev()], [], RUN_URL, [], ["stg"], "", "success", head_sha=SHA)
+    assert body == (
+        f"### shipmate apply\n\n⚪ 1 applied, 1 environment pending {AT}\n\n"
+        + _DEV_ROW
+        + "⚪ stg: skipped, ordered after an environment not fully applying this run\n\n"
+        + HINT
+    )
+
+
+def test_an_applied_auto_run_counts_an_environment_left_for_a_bare_apply_pending():
+    """`bare` is the auto report's `bare_envs`.
+
+    Mutation: drop `bare` from the pending set -- 🟢 1 applied, red."""
+    body = ac.build_comment(
+        [_applied_dev()], [], RUN_URL, [], [], "", "success", head_sha=SHA, bare=["prod"]
+    )
+    assert body == (
+        f"### shipmate apply\n\n⚪ 1 applied, 1 environment pending {AT}\n\n"
+        + _DEV_ROW
+        + "🟡 prod: left pending (not `apply_mode: auto`), comment `shipmate apply`\n\n"
+        + HINT
+    )
+
+
+def test_the_pending_token_follows_the_waiting_and_held_cell_tokens():
+    """Mutation: place the pending token before `N waiting` -- red."""
+    held_cells = [_locked("stacks/db", "dev-eu", 12), _overlap("stacks/web", "dev-eu")]
+    assert ac._verdict([_row()], "", ["prod"], SHA, RUN_URL, [_PLATFORM_WAITS], held_cells) == (
+        "⚪",
+        f"⚪ 1 applied, 1 waiting, 1 locked, 1 held (base changed), 1 environment pending {AT}",
+    )
+
+
+def test_a_failed_run_still_counts_its_pending_environments():
+    """Mutation: append the pending token only when the run has no outcome -- red."""
+    rows = [_row()]
+    assert ac._verdict(rows, ac._results_outcome("success,failure"), ["prod"], SHA, RUN_URL) == (
+        "🔴",
+        f"🔴 failed, 1 applied, 1 environment pending {AT}",
+    )
+
+
+@pytest.mark.parametrize(
+    ("statuses", "verdict"),
+    [
+        (["applied", "applied", "not_attempted"], "🔴 cancelled, 1 not attempted, 2 applied"),
+        (
+            ["applied", "applied", "blocked", "not_attempted"],
+            "🔴 cancelled, 1 not attempted, 1 blocked, 2 applied",
+        ),
+        ([], "🔴 cancelled"),
+    ],
+)
+def test_a_cancelled_run_leads_with_cancelled(statuses, verdict):
+    """A cancelled job with none failed reads `cancelled` whatever the rows say.
+
+    Mutation: suppress the `cancelled` token on a blocked row, as `failed` is -- red.
+    Mutation: take a cancelled run's circle from the rows -- 🟡, red."""
+    rows = [_row(status=s) for s in statuses]
+    outcome = ac._results_outcome("success,success,cancelled,skipped")
+    assert ac._verdict(rows, outcome, (), SHA, RUN_URL) == ("🔴", f"{verdict} {AT}")
 
 
 def test_a_run_that_died_before_any_cell_reported_renders_failed():
@@ -878,7 +988,8 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
 def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     """256 applied cells, one per environment, and 256 targeted environments left pending: one
     targeted line per environment pushes the body past HARD_CAP with no blocked row, and the
-    compact form names them all on one line. The verdict is 🟢, so no hint follows.
+    compact form names them all on one line. The targeted environments are pending, so the
+    verdict is ⚪ and the hint follows.
 
     Mutation: restore `and any(r["status"] == "blocked" for r in rows)` on the `_compact` branch
     in `build_comment` -- SystemExit, red.
@@ -895,7 +1006,12 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     )
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
-    assert lines[:4] == ["### shipmate apply", "", f"🟢 256 applied {AT}", ""]
+    assert lines[:4] == [
+        "### shipmate apply",
+        "",
+        f"⚪ 256 applied, 256 environments pending {AT}",
+        "",
+    ]
     assert lines[4:260] == [
         f'🟢 stacks/app (env-{i}): applied <a href="{_JOB_URL.format(23456789000 + i)}">logs</a>'
         for i in range(256)
@@ -905,6 +1021,8 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
         "🟡 left pending (targeted): "
         + ", ".join(targeted)
         + "; comment `shipmate apply <env>` for each",
+        "",
+        HINT,
     ]
 
 
@@ -1220,14 +1338,25 @@ def test_job_url_does_not_false_match_on_bare_endswith():
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
-def test_results_failed_blank_token_counts_as_failure():
-    # Restores the semantics of the shell tokenizer this replaced (`tr ',' '\n' |
-    # grep -qvE '^(success|skipped)$'`): an empty line never matches that alternation, so a
-    # blank segment reads as failure. Filtering blank tokens out reads a blank as clean.
-    assert ac._results_failed("") is True
-    assert ac._results_failed("success,,skipped") is True
-    assert ac._results_failed("success,") is True
-    assert ac._results_failed("success,skipped") is False
+@pytest.mark.parametrize(
+    ("results", "outcome"),
+    [
+        ("", "failed"),
+        ("success,,skipped", "failed"),
+        ("success,", "failed"),
+        ("success,failure,cancelled", "failed"),
+        ("cancelled,failure", "failed"),
+        ("success,cancelled,skipped", "cancelled"),
+        ("success,skipped", ""),
+    ],
+)
+def test_results_outcome_reads_failed_then_cancelled(results, outcome):
+    """A blank token is a failure: filtering it out would read a blank result as clean.
+
+    Mutation: drop blank tokens -- the blank cases read none, red.
+    Mutation: let `cancelled` win over a failure -- red.
+    Mutation: delete the `cancelled` branch -- `success,cancelled,skipped` reads none, red."""
+    assert ac._results_outcome(results) == outcome
 
 
 def test_cell_schema_guard_apply_cell_writes_every_required_key():
@@ -1920,13 +2049,14 @@ def _all_envs_main_env(monkeypatch, tmp_path, row_env, exempt, no_review):
 
 def _all_envs_body(row_env):
     return (
-        f"### shipmate apply\n\n🟢 1 applied {_MAIN_AT}\n\n#### {row_env}: 1 cell, 1 applied\n\n"
+        "### shipmate apply\n\n"
+        f"⚪ 1 applied, 3 environments pending {_MAIN_AT}\n\n#### {row_env}: 1 cell, 1 applied\n\n"
         f'🟢 stacks/app: applied <a href="{_MAIN_RUN}">logs</a>\n\n'
         "🟡 sbx: left pending (targeted), comment `shipmate apply sbx`\n"
         "⚪ stg: skipped, ordered after an environment not fully applying this run\n"
         "⚪ prod: held, the review state does not permit applying\n"
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
-        "The run log's apply-all-detect notice names the decision seen."
+        "The run log's apply-all-detect notice names the decision seen.\n\n" + HINT
     )
 
 
@@ -2089,7 +2219,12 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
     )
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
-    assert lines[:4] == ["### shipmate apply", "", f"⚪ 256 applied, 4 waiting {AT}", ""]
+    assert lines[:4] == [
+        "### shipmate apply",
+        "",
+        f"⚪ 256 applied, 4 waiting, 258 environments pending {AT}",
+        "",
+    ]
     assert lines[260:] == [
         "",
         "🟡 left pending (targeted): "
@@ -2137,6 +2272,39 @@ def test_a_detect_refusal_sits_in_a_fence_under_the_failed_verdict():
         "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
         "(or dismiss the review), then re-run `shipmate apply`.\n"
         "```\n\n" + HINT
+    )
+
+
+def test_a_detect_refusal_by_rule_reads_refused():
+    """Mutation: ignore `refused` -- `🔴 failed`, red.
+    Mutation: read any non-empty `refusal` as refused -- the unflagged test above, red."""
+    body = ac.build_comment(
+        [],
+        [],
+        RUN_URL,
+        [],
+        [],
+        "dev-eu",
+        "success,success,failure",
+        head_sha=SHA,
+        refusal=_REFUSAL,
+        refused=True,
+    )
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🔴 refused {AT}\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )
+
+
+def test_a_refused_flag_over_a_run_that_did_not_fail_is_ignored():
+    """Mutation: read `refused` without checking that the results read failed -- red."""
+    assert _comment([_row(apply_text=None)], refused=True) == (
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n"
+        "#### dev-eu: 1 cell, 1 applied\n\n"
+        '🟢 stacks/app: applied <a href="https://gh/run/1">logs</a>'
     )
 
 
@@ -2340,14 +2508,14 @@ def test_a_run_where_every_cell_is_locked_is_never_green():
 
 
 def test_a_partly_applied_run_counts_its_locked_cells_beside_its_waiting_ones():
-    """Mutation: drop the `locked` token from `_verdict` -- red.
-    Mutation: drop the locked `circles.append("⚪")` -- 🟢, red (the run has no waiting cell)."""
+    """Mutation: drop the `locked` token from `_white_tokens` -- red.
+    Mutation: drop `_verdict`'s `circles.append("⚪")` -- 🟢, red (the run has no waiting cell)."""
     locked = [_locked("stacks/db", "dev-eu", 12), _locked("stacks/dns", "dev-eu", 12)]
-    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), locked) == (
+    assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), locked) == (
         "⚪",
         f"⚪ 1 applied, 2 locked {AT}",
     )
-    assert ac._verdict([_row()], False, (), SHA, RUN_URL, [_PLATFORM_WAITS], locked) == (
+    assert ac._verdict([_row()], "", (), SHA, RUN_URL, [_PLATFORM_WAITS], locked) == (
         "⚪",
         f"⚪ 1 applied, 1 waiting, 2 locked {AT}",
     )
@@ -2418,21 +2586,28 @@ _LOCK_REFUSAL = (
 )
 
 
+@pytest.mark.parametrize(("flag", "word"), [(None, "failed"), ("true", "refused")])
 def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_applying(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, flag, word
 ):
     """A refused lock job follows a detect that succeeded: its waves name the cells, which read
-    not attempted, and the refusal sits in the detect refusal's fence under the failed verdict.
+    not attempted, and the refusal sits in the detect refusal's fence under the verdict, which
+    reads refused when `SHIPMATE_REFUSED_BY_RULE` is `true`.
 
-    Mutation: drop the `SHIPMATE_LOCK_REFUSAL` read from `main` -- no fence, red."""
+    Mutation: drop the `SHIPMATE_LOCK_REFUSAL` read from `main` -- no fence, red.
+    Mutation: drop the `SHIPMATE_REFUSED_BY_RULE` read from `main` -- the flagged case, red."""
     cells = tmp_path / "cells"
     cells.mkdir()
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
     monkeypatch.setenv("SHIPMATE_RESULTS", "success,success,success,failure,skipped")
     monkeypatch.setenv("SHIPMATE_LOCK_REFUSAL", _LOCK_REFUSAL)
+    if flag:
+        monkeypatch.setenv("SHIPMATE_REFUSED_BY_RULE", flag)
+    else:
+        monkeypatch.delenv("SHIPMATE_REFUSED_BY_RULE", raising=False)
     assert _main_body(tmp_path) == (
-        f"### shipmate apply dev-eu\n\n🔴 failed, 1 not attempted {_MAIN_AT}\n\n"
+        f"### shipmate apply dev-eu\n\n🔴 {word}, 1 not attempted {_MAIN_AT}\n\n"
         f"```\n{_LOCK_REFUSAL}\n```\n\n"
         "#### dev-eu: 1 cell, 1 not attempted\n\n"
         f'🟡 stacks/app: not attempted <a href="{_MAIN_RUN}">logs</a>\n\n'
@@ -2488,10 +2663,10 @@ def test_a_run_whose_every_pending_cell_overlaps_the_base_is_never_green():
 
 
 def test_a_partly_applied_run_counts_its_overlap_cells():
-    """Mutation: drop the overlap token from `_verdict` -- red.
-    Mutation: drop the overlap `circles.append("⚪")` -- 🟢, red."""
+    """Mutation: drop the overlap token from `_white_tokens` -- red.
+    Mutation: drop `_verdict`'s `circles.append("⚪")` -- 🟢, red."""
     overlap = [_overlap("stacks/db", "dev-eu")]
-    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), overlap) == (
+    assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), overlap) == (
         "⚪",
         f"⚪ 1 applied, 1 held (base changed) {AT}",
     )
@@ -2582,7 +2757,7 @@ def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes()
 def test_a_partly_applied_run_counts_a_locked_overlap_cell_once():
     """Mutation: count every overlap cell, locked or not -- `1 held (base changed)`, red."""
     held_cells = [_locked("stacks/db", "dev-eu", 12), _overlap("stacks/db", "dev-eu")]
-    assert ac._verdict([_row()], False, (), SHA, RUN_URL, (), held_cells) == (
+    assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), held_cells) == (
         "⚪",
         f"⚪ 1 applied, 1 locked {AT}",
     )

@@ -4321,7 +4321,7 @@ branch from <base> and push.``, shows when a bare or targeted `detect` refused
 cells behind the base (§`apply_mode: auto`, Behind the base, bare and
 targeted): it names each as `<stack> / <env>` comma-separated and the base
 branch, from the report that refusal wrote, with or without a refusal text. The error fence shows when `detect` or the `lock` job failed with an
-`::error::` (a refusal or a failed tool or API call): its first error on one
+`::error::` (whatever its cause, a failed tool or API call included): its first error on one
 line, in a plain code fence, cut at 4,000 characters and fenced longer than any
 backtick run in it. A failed `detect` skips `lock`, so at most one of them
 names an error. A job that failed without an `::error::` renders no fence.
@@ -4335,16 +4335,31 @@ names an error. A job that failed without an `::error::` renders no fence.
   the waiting line below), `N locked` when another pull request locks
   pending cells (see the locked line below) and `N held (base changed)` for an
   `auto` apply's overlap cells that are not also locked, so a cell under both
-  causes counts once, under `N locked` (see the overlap line below). When the job-level `SHIPMATE_RESULTS`
-  outcome signals a failure and no row is failed or blocked, a bare `failed`
-  leads the counts, so an apply run that dies before any cell reports (a
-  missing/denied apply environment, a job-level cancel) still surfaces a
-  failure signal. A not-recorded row does not suppress it: it describes one
-  cell in one environment and says nothing about a different environment whose
-  job died before reporting. The circle is 🔴 for a failed run, else the worst
-  of the rows' circles and, when cells wait, are locked or are overlap cells, ⚪
-  (🔴, 🟠, 🟡, ⚪, 🟢 in that order), so such a run is never 🟢. With no
-  rows, the first that holds: `🔴 failed`,
+  causes counts once, under `N locked` (see the overlap line below), then
+  `N environments pending` (`1 environment pending`) for the distinct
+  environments the run did not apply: held for review, left to a bare apply,
+  `targeted` or skipped. A targeted run's report names no other environment,
+  so its line never carries this token.
+  The outcome word: `refused` when the run failed on a refusal by rule: a
+  cell behind the base (bare or targeted), a targeted apply's review refusal,
+  or a cell another pull request or an unknown holder locks, refused by the
+  `lock` job with every lock that job created released again; locks it
+  re-entered stay held. Any other refusal, a lock refusal that left a lock it
+  created behind, and a failed setup, tool or
+  API call read `failed`, as does any other failed job. `cancelled` when no
+  job failed and a job ended `cancelled` while the run did not (§Comment-ops
+  names which); a cancelled run posts no result comment, and `outcome`
+  replies (§Outcome reply). `refused` and
+  `cancelled` always lead the counts. `failed` leads them when no row is
+  failed or blocked, so an apply run that dies before any cell reports (a
+  missing/denied apply environment) still surfaces a failure signal. A
+  not-recorded row does not suppress it: it describes one cell in one
+  environment and says nothing about a different environment whose job died
+  before reporting. The circle is 🔴 for any outcome word, else the worst of
+  the rows' circles and, when cells wait, are locked or are overlap cells, or
+  an environment is pending, ⚪ (🔴, 🟠, 🟡, ⚪, 🟢 in that order), so such a
+  run is never 🟢. With no rows, the first that holds: `🔴 refused`,
+  `🔴 failed`, `🔴 cancelled`,
   `⚪ nothing applied, environments are held for review`,
   `⚪ nothing applied, pending cells are locked or the base also changed their
   stacks` (a locked cell and an overlap cell, the same cell or not),
@@ -4368,15 +4383,15 @@ names an error. A job that failed without an `::error::` renders no fence.
   under a new name; "Re-run failed jobs" does not re-run a `detect` that succeeded, so `summary`
   reuses its outputs and downloads the report that attempt uploaded; once the artifact has
   expired, that re-run reads the report as unread. An incomplete report is read only when the
-  `detect` job failed with a refusal, so a refused detect renders no such line when its report
-  arrives. The line shows when the artifact is missing (the upload or download failed,
-  or `detect` never ran), or the file is unreadable, not a JSON object, incomplete without a
-  detect refusal (a crash, or a failed checkout that named no error), or not the shape the comment reads: a field of another type, a list of
+  `detect` job failed with an `::error::` (its `refusal` output is non-empty), so a detect
+  stopped by one renders no such line when its report arrives. The line shows when the artifact is missing (the upload or download failed,
+  or `detect` never ran), or the file is unreadable, not a JSON object, incomplete with an empty detect
+  `refusal` (a crash, or a failed checkout that named no error), or not the shape the comment reads: a field of another type, a list of
   environment names holding something else, a waiting or held cell without its string keys, a
   held cell neither `locked` (with a numeric, null or absent holder) nor `overlap`, or a
   `skipped_after` value that is not a list of names. Every field then reads empty, which alone
-  would read `🟢 no pending applies` over pending cells, so the verdict is never 🟢: a failed run
-  reads `🔴 failed`, any other `⚪ result unknown`, or with rows its counts followed by
+  would read `🟢 no pending applies` over pending cells, so the verdict is never 🟢: a run with an
+  outcome word reads it (`🔴 refused`, `🔴 failed` or `🔴 cancelled`), any other `⚪ result unknown`, or with rows its counts followed by
   `result unknown`.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a

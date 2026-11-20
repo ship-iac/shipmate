@@ -434,9 +434,10 @@ place. Re-run with `--key <path to the App's PEM private key>`.
 
 ## Common failures
 
-When a `shipmate apply` fails at `detect` or `lock` with an `::error::` (a
-refusal or a failed tool or API call), its comment shows the message's first error on one
-line, in a fence under the `🔴 failed` verdict: search this page for its text.
+When a `shipmate apply` fails at `detect` or `lock` with an `::error::`
+(whatever its cause, a failed tool or API call included), its comment shows the message's
+first error on one line, in a fence under the `🔴 refused` or `🔴 failed` verdict: search
+this page for its text.
 The post-merge deploy posts no apply comment, so a deploy's `detect` error is
 only in that run's `detect` annotation.
 
@@ -2180,7 +2181,11 @@ the blocker's environment is held or ordered by `needs`, because the targeted fo
 receives no held or skipped environments. A run with no cell result rows, not even
 `not attempted` ones, reads the first of these verdicts that holds:
 
-- `🔴 failed`: the run failed.
+- `🔴 refused`: `detect` refused by rule: a cell is behind the base, or a
+  targeted apply's environment is held for review.
+- `🔴 cancelled`: a job ended `cancelled` while the run did not, and none
+  failed: `detect` ended `cancelled`, for example on a job timeout.
+- `🔴 failed`: the run failed for any other cause.
 - `⚪ nothing applied, environments are held for review`.
 - `⚪ nothing applied, pending cells are locked or the base also changed their
   stacks`: a pending cell is locked, and an `auto` apply holds a cell the base

@@ -161,6 +161,11 @@ class StackCycle(SystemExit):
     loads `waves` raises and catches one class."""
 
 
+class Refused(SystemExit):
+    """A refusal by rule (a behind cell, a missing review, another holder's cell lock), told
+    apart from a failed setup, tool or API call. Its code is the `::error::` string."""
+
+
 def _run(args):
     """stdout of `args` through `run`, its failure re-raised as an ::error:: annotation.
     `run` stays unprefixed for the hand-run scripts that share it.
@@ -340,9 +345,9 @@ def run_annotated(main, *args, refusal_output=False):
 
     With `refusal_output`, a refusal also writes the step output `refusal`: the first error on
     one line, each of its lines stripped and joined by a space, unescaped and cut at `REASON_CAP`
-    characters, so a failed command keeps the stderr cause under its first line. It is written
-    after the annotations, so a failing write cannot cost them. This is the one writer of that
-    output.
+    characters, so a failed command keeps the stderr cause under its first line. A `Refused`
+    also writes `refused_by_rule=true` in the same call. Both are written after the annotations,
+    so a failing write cannot cost them. This is the one writer of those outputs.
     """
     try:
         main(*args)
@@ -353,7 +358,9 @@ def run_annotated(main, *args, refusal_output=False):
         errors = print_annotated(code)
         if refusal_output:
             # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
-            write_outputs(refusal=" ".join(filter(None, map(str.strip, errors[0])))[:REASON_CAP])
+            reason = " ".join(filter(None, map(str.strip, errors[0])))[:REASON_CAP]
+            marks = {"refused_by_rule": True} if isinstance(exc, Refused) else {}
+            write_outputs(refusal=reason, **marks)
         raise SystemExit(1) from None
 
 

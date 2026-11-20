@@ -101,6 +101,7 @@ _APPLY_DETECT_OUTPUTS = {
     "provenance_run": "${{ steps.d.outputs.provenance_run }}",
     "base_sha": "${{ steps.d.outputs.base_sha }}",
     "refusal": "${{ steps.setup.outputs.refusal || steps.d.outputs.refusal }}",
+    "refused_by_rule": "${{ steps.d.outputs.refused_by_rule }}",
     "tools": "${{ steps.setup.outputs.tools }}",
     "report_artifact": "${{ steps.report.outputs.name }}",
 }
@@ -231,7 +232,8 @@ def test_the_apply_detect_job_outputs_exactly_these_expressions():
     is masked; restore `held_cells: ${{ steps.d.outputs.held_cells }}`; delete `provenance_run`;
     delete `base_sha`; drop `steps.setup.outputs.refusal ||` from `refusal`, so a setup refusal
     reaches the comment and the gate as the generic text; delete `tools`, so every wave cell
-    refuses."""
+    refuses; read `refused_by_rule` as `steps.setup.outputs.refused_by_rule ||
+    steps.d.outputs.refused_by_rule`, so a setup failure could read as a rule refusal."""
     assert workflow_yaml("apply-run.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -307,13 +309,21 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "refusal": {
         "description": (
-            "The first error of the `::error::` message that failed the step (a refusal or a "
-            "failed tool or API call), without the prefix, its lines joined into one; empty when "
-            "the step raised none. Set "
+            "The first error of the `::error::` message that failed the step (whatever its "
+            "cause, a failed tool or API call included), without the prefix, its lines joined "
+            "into one; empty when the step raised none. Set "
             "although the step fails, and read by the apply result comment. Branch-controlled "
             "text (it can name a stack path), so a reader passes it through `env:`."
         ),
         "value": "${{ steps.d.outputs.refusal }}",
+    },
+    "refused_by_rule": {
+        "description": (
+            "`true` when the step failed on a refusal by rule (a cell behind the base, or a "
+            "targeted apply without its review); empty otherwise, a failed tool or API call "
+            "included. Set although the step fails."
+        ),
+        "value": "${{ steps.d.outputs.refused_by_rule }}",
     },
 }
 
@@ -321,7 +331,8 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
 def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: add a `report` output to `actions/apply-detect/action.yml`; restore its
     `pusher` output; delete its `refusal` output; delete its `provenance_run` output; delete its
-    `base_sha` output; restore `held_cells` in `base_sha`'s description."""
+    `base_sha` output; restore `held_cells` in `base_sha`'s description; delete its
+    `refused_by_rule` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS
 
 

@@ -135,6 +135,7 @@ _RENDER_ENV = {
     "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
+    "SHIPMATE_REFUSED_BY_RULE": "${{ inputs.refused-by-rule }}",
     "SHIPMATE_AUTO": "${{ inputs.auto }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
@@ -157,6 +158,8 @@ def test_render_step_env_block_matches_the_expected_mapping():
     never names the refusal -- red.
     Mutation: drop `SHIPMATE_LOCK_REFUSAL` from the render step, so a refused lock job's comment
     never names the refusal -- red.
+    Mutation: drop `SHIPMATE_REFUSED_BY_RULE` from the render step, so a refusal by rule reads
+    failed -- red.
     Mutation: drop `SHIPMATE_AUTO` from the render step, so an auto run's comment never says
     so -- red."""
     render_step = _find_step(
@@ -269,6 +272,7 @@ def test_declared_inputs_are_exactly_these():
         "detect-result",
         "detect-refusal",
         "lock-refusal",
+        "refused-by-rule",
         "auto",
         "results",
         "head-sha",
@@ -399,6 +403,9 @@ _APPLY_SUMMARY_WITH = {
     "detect-result": "${{ needs.detect.result }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
+    "refused-by-rule": (
+        "${{ needs.detect.outputs.refused_by_rule || needs.lock.outputs.refused_by_rule }}"
+    ),
     "auto": "${{ inputs.auto }}",
     "results": "${{ join(needs.*.result, ',') }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -417,7 +424,8 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: drop `detect-result:` from the step's `with:` -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
-    Mutation: drop `auto:` from the step's `with:` -- red."""
+    Mutation: drop `auto:` from the step's `with:` -- red.
+    Mutation: wire only `needs.detect.outputs.refused_by_rule` into `refused-by-rule` -- red."""
     steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
@@ -452,8 +460,8 @@ def test_the_detect_refusal_input_is_optional_and_empty_by_default():
         "description": (
             "detect's `refusal` output, setup's or else apply-detect's: the first error of the "
             "`::error::` message that "
-            "failed detect (a refusal or a failed tool or API call) on one line, empty when "
-            "detect raised none. Non-empty, the comment shows it in a "
+            "failed detect (whatever its cause, a failed tool or API call included) on one line, "
+            "empty when detect raised none. Non-empty, the comment shows it in a "
             "code fence under the verdict line; empty leaves the comment unchanged."
         ),
         "required": False,
@@ -464,13 +472,15 @@ def test_the_detect_refusal_input_is_optional_and_empty_by_default():
 def test_the_lock_inputs_are_optional_with_empty_defaults():
     """`deploy.yml` posts no apply comment; an empty value renders no lock line and no fence.
     Mutation: set `lock-refusal` `required: true` -- red.
+    Mutation: set `refused-by-rule` `required: true` -- red.
     Mutation: default `auto` to `"true"` -- red."""
     inputs = action_yaml("apply-summary")["inputs"]
     assert {
         name: {k: v for k, v in inputs[name].items() if k != "description"}
-        for name in ("lock-refusal", "auto")
+        for name in ("lock-refusal", "refused-by-rule", "auto")
     } == {
         "lock-refusal": {"required": False, "default": ""},
+        "refused-by-rule": {"required": False, "default": ""},
         "auto": {"required": False, "default": "false"},
     }
 

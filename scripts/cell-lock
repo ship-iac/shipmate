@@ -18,7 +18,8 @@ sha, a missing ref and a server fault with the same untyped error, so each error
 ref and decides from what is there.
 
 Subcommands, each reading the environment, printing `::notice::` lines and refusing with
-`::error::` (also written to the step output `refusal`):
+`::error::` (also written to the step output `refusal`, with `refused_by_rule=true` for an
+`acquire` refused by another holder's lock):
 
 - `acquire`: locks every cell of `SHIPMATE_ENVLEVEL0_WAVES`..`SHIPMATE_ENVLEVEL3_WAVES` for
   pull request `SHIPMATE_PR_NUMBER`, then fences the acquisition against a close.
@@ -75,6 +76,7 @@ from _shipmate import (
     READ_ERRORS,
     REASON_CAP,
     SHIPMATE_WORKFLOW,
+    Refused,
     _load,
     _run,
     cell_names,
@@ -312,13 +314,13 @@ def _install(repo, cell, pr, acquisition, tree, run):
         )
     held = _lock(repo, ref, sha, run)
     if held.pr is None:
-        raise SystemExit(
+        raise Refused(
             f"::error::{where} is locked by {lock_who(None)} ({ref}); comment "
             f"`shipmate unlock {env} --evict` to release it"
         )
     if held.pr != pr:
         who = lock_who(held.pr)
-        raise SystemExit(f"::error::{where} is locked by {who}; {lock_wait_remedy(who, env)}")
+        raise Refused(f"::error::{where} is locked by {who}; {lock_wait_remedy(who, env)}")
     if _update(repo, ref, sha, mine.sha, True, run) or _ref_sha(repo, ref, run) == mine.sha:
         return mine, False
     raise SystemExit(f"::error::could not re-enter the lock on {where}: replacing {ref} failed")
@@ -328,11 +330,12 @@ def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
     """Lock every cell for `pr`, re-entering locks `pr` already holds, then pass every lock
     installed through `fence_open`. Returns every lock installed. A refusal first deletes the
     locks this call created, then fences those it replaced: a lock re-entered after a close
-    would otherwise outlive the close's release."""
+    would otherwise outlive the close's release. The refusal stays `Refused` only when the
+    lock refusal it caught was one and neither cleanup added an error."""
     todo = {ref_name(_env(c["environment"]), c["stack"]): c for c in cells}
     if not todo:
         return []
-    installed, created = [], []
+    installed, created, refused = [], [], None
     try:
         tree = json.loads(
             run(
@@ -348,6 +351,7 @@ def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
                 created.append(lock)
     except SystemExit as exc:
         reason = exc.code
+        refused = reason if isinstance(exc, Refused) else None
     except (LookupError, TypeError, ValueError) as exc:
         reason = f"::error::could not lock the cells: an API response was malformed ({exc!r})"
     else:
@@ -358,7 +362,8 @@ def acquire(repo, cells, pr: int, acquisition: str, *, run=_run) -> list[Lock]:
         fence_open(repo, pr, [lock for lock in installed if lock not in created], [], run=run)
     except SystemExit as fenced:
         reason = f"{reason}\n{fenced.code}"
-    raise SystemExit(reason)
+    # `refusal` carries only the first error, so a refusal whose cleanup failed keeps `failed`.
+    raise (Refused if reason == refused else SystemExit)(reason)
 
 
 def _when(stamp):

@@ -1,6 +1,6 @@
 ### shipmate apply
 
-⚪ 2 applied, 1 waiting, 1 locked, 1 held (base changed) at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) in [run #7](https://github.com/acme/repo/actions/runs/42)
+⚪ 2 applied, 1 waiting, 1 locked, 1 held (base changed), 6 environments pending at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) in [run #7](https://github.com/acme/repo/actions/runs/42)
 
 #### qa: 1 cell, 1 applied
 

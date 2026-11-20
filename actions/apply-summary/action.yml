@@ -29,15 +29,19 @@ inputs:
     required: false
     default: ""
   detect-result:
-    description: "`needs.detect.result`. Only `failure` with a non-empty `detect-refusal` lets the comment read an incomplete report: the empty one the detect job wrote before a step refused."
+    description: "`needs.detect.result`. Only `failure` with a non-empty `detect-refusal` lets the comment read an incomplete report: the empty one the detect job wrote before a step failed with an `::error::`."
     required: false
     default: ""
   detect-refusal:
-    description: "detect's `refusal` output, setup's or else apply-detect's: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
+    description: "detect's `refusal` output, setup's or else apply-detect's: the first error of the `::error::` message that failed detect (whatever its cause, a failed tool or API call included) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
     default: ""
   lock-refusal:
-    description: "The lock job's `refusal` output: the first error of the `::error::` message that failed lock acquisition (a refusal or a failed API call) on one line, empty when it raised none. Non-empty, the comment shows it in a code fence under the verdict line, as it does detect-refusal; empty leaves the comment unchanged."
+    description: "The lock job's `refusal` output: the first error of the `::error::` message that failed lock acquisition (whatever its cause, a failed API call included) on one line, empty when it raised none. Non-empty, the comment shows it in a code fence under the verdict line, as it does detect-refusal; empty leaves the comment unchanged."
+    required: false
+    default: ""
+  refused-by-rule:
+    description: "detect's or else the lock job's `refused_by_rule` output: `true` when that job failed on a refusal by rule (a cell behind the base, a targeted apply without its review, another holder's cell lock), empty otherwise. With results that read failed, the verdict reads refused instead of failed; otherwise it is ignored."
     required: false
     default: ""
   auto:
@@ -45,7 +49,7 @@ inputs:
     required: false
     default: "false"
   results:
-    description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
+    description: "join(needs.*.result, ',') from the caller; a result other than success, skipped or cancelled renders the verdict failed (refused with refused-by-rule `true`), a blank one included; otherwise a cancelled result renders it cancelled."
     required: true
   head-sha:
     description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one, and the verdict line names it.
@@ -159,6 +163,7 @@ runs:
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
+        SHIPMATE_REFUSED_BY_RULE: ${{ inputs.refused-by-rule }}
         SHIPMATE_AUTO: ${{ inputs.auto }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
