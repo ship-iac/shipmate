@@ -132,7 +132,7 @@ runs:
         # Degrade, never fail -- the renderer treats an absent name as unknown and falls back to
         # artifact-only status.
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \
-          '.check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}' > checks.jsonl; then
+          '.check_runs[] | {name, status, conclusion, id, app: {id: .app.id}, output: {title: .output.title}}' > checks.jsonl; then
           echo "::warning::apply-check scan failed; the comment falls back to artifact-only status"
         fi
 

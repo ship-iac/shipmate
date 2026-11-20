@@ -305,7 +305,10 @@ def test_token_mint_precedes_the_scan_render_and_post_steps():
 
 
 #: The scan step's check-runs projection, hand-written.
-_SCAN_JQ = ".check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}"
+_SCAN_JQ = (
+    ".check_runs[] | {name, status, conclusion, id, app: {id: .app.id}, "
+    "output: {title: .output.title}}"
+)
 _SCAN_LISTING = (
     '{"name": "apply / a / dev", "status": "completed", "conclusion": "success", "id": 1, '
     '"app": {"id": 7}}\n'
@@ -344,7 +347,8 @@ def _run_scan(tmp_path, checks_rc=0):
 @bash_only
 def test_scan_step_writes_the_listing_to_the_file_the_render_step_reads(tmp_path):
     """Mutations: redirect to `check.jsonl` -> the render step's file is absent; drop
-    `app: {id: .app.id}` from the projection -> the stub refuses the call and the argv differs."""
+    `app: {id: .app.id}` or `output: {title: .output.title}` from the projection -> the stub
+    refuses the call and the argv differs."""
     proc, calls, checks = _run_scan(tmp_path)
     assert proc.returncode == 0, proc.stderr
     assert calls == [
