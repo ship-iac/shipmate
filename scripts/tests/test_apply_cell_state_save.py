@@ -97,7 +97,7 @@ _STATE_KEY = "${{ steps.key.outputs.key }}"
 _LOOKUP_STEP = {
     "name": "Look up the saved entry",
     "id": "verify",
-    "if": "${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}",
+    "if": "${{ inputs.mode != 'restore' }}",
     "uses": "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
     "with": {"path": "${{ inputs.path }}", "key": _STATE_KEY, "lookup-only": "true"},
 }
@@ -110,28 +110,29 @@ def test_the_state_save_is_verified_by_an_exact_key_lookup():
     Every lookup uses the same pinned `actions/cache/restore`; `test_optional_state_guard.py`
     pins the rest of each retry.
 
-    Mutations: add `restore-keys` to the lookup; change the lookup's key; give the lookup an
-    `if:` other than the save's; change the SHA of `verify4`.
+    `lookup` mode runs the same lookups without the save.
+
+    Mutations: add `restore-keys` to the lookup; change the lookup's key; change the save's key
+    to `${{ steps.key.outputs.prefix }}`; narrow the lookup's `if:` to `inputs.mode == 'save'`;
+    change the SHA of `verify4`.
     """
     lookup = step_by("state", id="verify")
     assert lookup == _LOOKUP_STEP
     save = step_by("state", name="Save state")
     assert save["with"]["key"] == _STATE_KEY
-    assert save["if"] == _LOOKUP_STEP["if"]
     for step_id in ("verify2", "verify3", "verify4", "verify5"):
         assert step_by("state", id=step_id)["uses"] == _LOOKUP_STEP["uses"], step_id
 
 
-def test_saved_is_true_only_on_the_lookups_exact_hit():
-    """Mutations: `value: 'true'`; `value: ${{ steps.encrypt.outputs.skip }}`; read `saved` from
-    `verify5` only."""
+def test_saved_is_true_only_on_an_exact_key_hit():
+    """Mutations: `value: 'true'`; read `saved` from `verify5` only."""
     assert action_yaml("state")["outputs"] == {
         "saved": {
             "description": (
-                "`true` only when a save-mode lookup found the entry this run saved under its "
-                "exact key: the first lookup, or one of up to four more about 3, 10, 20 and 30 s "
-                "after a miss. Anything else means the state was not saved: the save failed, was "
-                "cancelled or skipped, or no lookup found the entry."
+                "`true` only when a `save` or `lookup` found the entry under its exact key: the "
+                "first lookup, or one of up to four more about 3, 10, 20 and 30 s after a miss. "
+                "Anything else means no entry was found: the save failed, was cancelled or "
+                "skipped, or no lookup found the entry."
             ),
             "value": (
                 "${{ steps.verify.outputs.cache-hit == 'true' "

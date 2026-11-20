@@ -2,8 +2,8 @@
 """Shared cipher for the plan artifact and the cached local state file.
 
 Single definition of the cipher so plan-cell (require first, encrypt before upload),
-apply-cell (decrypt after download) and actions/state (encrypt before save, decrypt after
-restore) can never drift. The openssl flags and the key derivation live ONLY here.
+apply-cell (decrypt after download, encrypt the state it hands off) and actions/state (decrypt
+after restore) can never drift. The openssl flags and the key derivation live ONLY here.
 
 Format shipmate-crypt-v1: MAGIC || salt || body || tag.
 
@@ -247,8 +247,25 @@ def decrypt_state(path, cache_key):
     )
 
 
+def sealed(path):
+    """Refuse unless `path` holds a whole shipmate-crypt-v1 file by length and header. Needs no
+    key, so it cannot authenticate: it stops a save of plaintext or of nothing."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(MIN_LEN)
+    except OSError as exc:
+        raise SystemExit(
+            f"::error::state file `{path}` cannot be read, so it is not saved. Error: {exc}"
+        ) from None
+    if len(data) < MIN_LEN or not data.startswith(MAGIC):
+        raise SystemExit(
+            f"::error::state file `{path}` is not a sealed shipmate-crypt-v1 file, so it is not "
+            "saved."
+        )
+
+
 USAGE = (
-    "usage: plan-crypt require | plan-crypt {encrypt|decrypt} <file> | "
+    "usage: plan-crypt require | plan-crypt {encrypt|decrypt|sealed} <file> | "
     "plan-crypt {encrypt-state|decrypt-state} <file> <cache-key>"
 )
 
@@ -258,8 +275,8 @@ def main(argv):
         _require_encryption_key()
     elif len(argv) == 4 and argv[1] in ("encrypt-state", "decrypt-state"):
         (encrypt_state if argv[1] == "encrypt-state" else decrypt_state)(argv[2], argv[3])
-    elif len(argv) == 3 and argv[1] in ("encrypt", "decrypt"):
-        (encrypt if argv[1] == "encrypt" else decrypt)(argv[2])
+    elif len(argv) == 3 and argv[1] in ("encrypt", "decrypt", "sealed"):
+        {"encrypt": encrypt, "decrypt": decrypt, "sealed": sealed}[argv[1]](argv[2])
     else:
         raise SystemExit(USAGE)
 
