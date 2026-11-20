@@ -486,20 +486,26 @@ def _held_text(cause, ident, cells):
             "docs/troubleshooting.md section The apply step ran and its state was not saved, "
             "then re-plan."
         )
+    return held_text(cause, ident, names, "re-run `shipmate apply`")
+
+
+def held_text(cause, ident, names, rerun):
+    """The refusal's sentence for the cells `names` held for `cause` `saved`, `unknown` or
+    `unreadable` by run or check `ident`, which the apply and the deploy share; `rerun` is
+    the remedy's last step."""
     if cause == "saved":
         return (
             f"{names} were left in progress by run {ident}, which applied them and saved their "
-            f"state. Follow docs/troubleshooting.md section {BY_HAND}, then re-run `shipmate "
-            "apply`."
+            f"state. Follow docs/troubleshooting.md section {BY_HAND}, then {rerun}."
         )
     if cause == "unknown":
         return (
             f"{names}: apply check {ident} is in progress with no run named; follow "
-            f"docs/troubleshooting.md section {BY_HAND}, then re-run `shipmate apply`."
+            f"docs/troubleshooting.md section {BY_HAND}, then {rerun}."
         )
     return (
-        f"{names}: run {ident} could not be read completely; re-run `shipmate apply`. If it "
-        f"fails the same way, follow docs/troubleshooting.md section {BY_HAND}."
+        f"{names}: run {ident} could not be read completely; {rerun}. If it fails the same "
+        f"way, follow docs/troubleshooting.md section {BY_HAND}."
     )
 
 

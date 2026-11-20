@@ -256,26 +256,13 @@ def _held(cause, ident, cells):
             "ends, re-run this deploy: a cell whose check that run left in progress deploys if "
             "the run never applied it and is refused otherwise."
         )
-    if cause == "saved":
-        return (
-            f"{names} were left in progress by run {ident}, which applied them and saved their "
-            f"state. Follow docs/troubleshooting.md section {ad.BY_HAND}, then re-run this deploy."
-        )
     if cause == "ended":
         return (
             f"{names} were left in progress by run {ident}, which ended after their apply may "
             "have started, so their state may not be saved. Follow docs/troubleshooting.md "
             "section The apply step ran and its state was not saved before applying them again."
         )
-    if cause == "unknown":
-        return (
-            f"{names}: apply check {ident} is in progress with no run named; follow "
-            f"docs/troubleshooting.md section {ad.BY_HAND}, then re-run this deploy."
-        )
-    return (
-        f"{names}: run {ident} could not be read completely; re-run this deploy. If it fails "
-        f"the same way, follow docs/troubleshooting.md section {ad.BY_HAND}."
-    )
+    return ad.held_text(cause, ident, names, "re-run this deploy")
 
 
 def refuse_locked(repo, pending, pr_number):
