@@ -45,6 +45,7 @@ import pathlib
 import time
 
 from _shipmate import (
+    Refused,
     _load,
     _run,
     check_runs,
@@ -411,7 +412,7 @@ def refuse_unreviewed(env, table, decision):
     exempt = bm.ec.exempt_envs(table)
     reason = az._review_reason(decision, env, exempt)
     if reason:
-        raise SystemExit(f"::error::{reason}")
+        raise Refused(f"::error::{reason}")
 
 
 def refuse_actor(lines, app_id, actor, triggering_actor):
@@ -644,7 +645,7 @@ def refuse_behind(repo, pr_number, selected, lines, app_id):
     if behind:
         write_report({"behind": behind, "base": base})
         cells = named([f"{c['stack']} / {c['environment']}" for c in behind], _NAMED)
-        raise SystemExit(
+        raise Refused(
             f"::error::apply refused: {len(behind)} cell(s) behind {base} ({cells}); update the "
             f"branch from {base} and push."
         )

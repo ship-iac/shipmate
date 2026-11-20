@@ -8,6 +8,7 @@ import types
 import pytest
 from _loader import ENGINE
 from _shipmate import (
+    Refused,
     _run,
     approval_rules,
     cell_names,
@@ -801,6 +802,33 @@ def test_run_annotated_ends_a_refusal_output_line_at_a_lone_cr(monkeypatch, tmp_
         1,
         b"refusal=first second third\n",
     )
+
+
+def test_run_annotated_marks_a_refused_exit_as_refused_by_rule(monkeypatch, tmp_path):
+    """A `Refused` writes both outputs and still exits 1. Mutations: never write
+    `refused_by_rule` -- the one `refusal` line; return instead of exiting 1 for a `Refused`
+    -- nothing raised."""
+    main = _raising_refused("::error::apply refused: 1 cell(s) behind main")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        b"refusal=apply refused: 1 cell(s) behind main\nrefused_by_rule=true\n",
+    )
+
+
+def test_run_annotated_writes_no_refused_by_rule_for_a_plain_refusal(monkeypatch, tmp_path):
+    """Mutation: write `refused_by_rule` for every `::error::` exit -- a second line."""
+    main = _raising("::error::command failed (1): gh api x")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        b"refusal=command failed (1): gh api x\n",
+    )
+
+
+def _raising_refused(code):
+    def main():
+        raise Refused(code)
+
+    return main
 
 
 def test_run_annotated_prints_the_annotation_before_it_writes_the_refusal_output(

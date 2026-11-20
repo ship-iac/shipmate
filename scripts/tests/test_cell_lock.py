@@ -275,6 +275,45 @@ def test_another_pull_request_refuses_naming_it_and_rolls_back_this_calls_create
     assert gh.drained()
 
 
+def test_another_pull_requests_lock_is_refused_by_rule_through_the_rollback():
+    """Mutations: `acquire` re-raises a plain `SystemExit`; `_install` raises a plain
+    `SystemExit` for another pull request's lock."""
+    gh = gh_acquire_start(DNS).on(ref_write(DNS_REF, NEW), "{}")
+    msg = message(PR, "dev", "stacks/auth")
+    gh.on(commit_write(AUTH), commit(OTHER, msg, LATE)).on(ref_write(AUTH_REF, OTHER), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(DNS_REF, NEW, ZERO, False), "{}")
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [DNS, AUTH], PR, ACQ, run=gh)
+    assert type(exc.value) is _shipmate.Refused
+    assert gh.drained()
+
+
+def test_a_lock_refusal_whose_rollback_fails_is_a_plain_failure():
+    """Only the first error becomes the `refusal` output, so a refusal over locks left behind
+    must not read as refused by rule. Mutation: re-raise `Refused` whatever the rollback
+    appended."""
+    gh = gh_acquire_start(DNS).on(ref_write(DNS_REF, NEW), "{}")
+    msg = message(PR, "dev", "stacks/auth")
+    gh.on(commit_write(AUTH), commit(OTHER, msg, LATE)).on(ref_write(AUTH_REF, OTHER), FAIL)
+    gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
+    gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
+    gh.on(REPO_ID_READ, REPO_ID).on(update(DNS_REF, NEW, ZERO, False), FAIL)
+    gh.on(ref_read(DNS_REF), refs((DNS_REF, NEW)))
+    with pytest.raises(SystemExit) as exc:
+        cl.acquire(REPO, [DNS, AUTH], PR, ACQ, run=gh)
+    assert type(exc.value) is SystemExit
+    assert exc.value.code == (
+        "::error::`dev` / `stacks/auth` is locked by #12; wait for #12 to merge or close, then "
+        "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev --evict` once "
+        "#12's apply, auto and deploy runs have ended\n"
+        f"::error::could not release the cell lock {DNS_REF} of `dev` / `stacks/dns`; it is still "
+        f"held at {NEW}"
+    )
+    assert gh.drained()
+
+
 def test_a_malformed_response_refuses_and_rolls_back_this_calls_creates():
     """Mutation: catch only `SystemExit` around the install loop (the KeyError escapes and
     DNS_REF's conditional delete is never sent)."""
@@ -283,6 +322,7 @@ def test_a_malformed_response_refuses_and_rolls_back_this_calls_creates():
     gh.on(REPO_ID_READ, REPO_ID).on(update(DNS_REF, NEW, ZERO, False), "{}")
     with pytest.raises(SystemExit) as exc:
         cl.acquire(REPO, [DNS, AUTH], PR, ACQ, run=gh)
+    assert type(exc.value) is SystemExit
     assert exc.value.code == (
         "::error::could not lock the cells: an API response was malformed (KeyError('sha'))"
     )
@@ -290,12 +330,14 @@ def test_a_malformed_response_refuses_and_rolls_back_this_calls_creates():
 
 
 def test_an_unknown_holder_refuses_naming_the_ref():
-    """Mutation: drop the unknown-holder branch (it refuses as `#None`)."""
+    """Refused by rule. Mutations: drop the unknown-holder branch (it refuses as `#None`);
+    `_install` raises a plain `SystemExit` for an unknown holder."""
     gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), FAIL)
     gh.on(ref_read(AUTH_REF), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, "garbage"))
     with pytest.raises(SystemExit) as exc:
         cl.acquire(REPO, [AUTH], PR, ACQ, run=gh)
+    assert type(exc.value) is _shipmate.Refused
     assert exc.value.code == (
         f"::error::`dev` / `stacks/auth` is locked by an unknown holder ({AUTH_REF}); comment "
         "`shipmate unlock dev --evict` to release it"
@@ -304,11 +346,13 @@ def test_an_unknown_holder_refuses_naming_the_ref():
 
 
 def test_a_failed_create_with_the_ref_absent_refuses():
-    """Mutation: treat an absent ref as acquired."""
+    """A plain failure, no rule refusal. Mutations: treat an absent ref as acquired; raise
+    `Refused` for the absent ref."""
     gh = gh_acquire_start(AUTH).on(ref_write(AUTH_REF, NEW), FAIL)
     gh.on(ref_read(AUTH_REF), "[]")
     with pytest.raises(SystemExit) as exc:
         cl.acquire(REPO, [AUTH], PR, ACQ, run=gh)
+    assert type(exc.value) is SystemExit
     assert exc.value.code == (
         f"::error::could not lock `dev` / `stacks/auth`: creating {AUTH_REF} failed and the ref "
         "is absent"
@@ -496,12 +540,14 @@ def _reenter_then_refuse(state):
 
 
 def test_a_refusal_fences_a_lock_reentered_after_a_close():
-    """Mutation: drop the `fence_open` call from `acquire`'s refusal path (AUTH_REF's
-    conditional delete is never sent and the refusal names no fence)."""
+    """A plain failure: the fence's error joins the refusal. Mutations: drop the `fence_open`
+    call from `acquire`'s refusal path (AUTH_REF's conditional delete is never sent and the
+    refusal names no fence); re-raise `Refused` when only `fence_open` appended an error."""
     gh = _reenter_then_refuse(_pr_state("CLOSED", "2026-10-24T11:00:00Z"))
     gh.on(update(AUTH_REF, NEW, ZERO, False), "{}")
     with pytest.raises(SystemExit) as exc:
         cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert type(exc.value) is SystemExit
     assert exc.value.code == (
         f"{DNS_REFUSAL}\n::error::pull request #7 was closed while this run acquired its cell "
         "locks (state CLOSED, last closed 2026-10-24T11:00:00+00:00); the locks it took are "
@@ -543,11 +589,12 @@ def test_an_unreadable_state_keeps_reentered_locks_and_releases_created_ones(ans
 def test_a_refusal_with_an_unreadable_state_keeps_the_reentered_lock():
     """AUTH re-entered, DNS refused as #12's lock, then the state read fails.
 
-    Mutation: treat an unreadable state as closed in `fence_open` (AUTH_REF's delete is an
-    unexpected call)."""
+    Mutations: treat an unreadable state as closed in `fence_open` (AUTH_REF's delete is an
+    unexpected call); re-raise `Refused` when only `fence_open` appended an error."""
     gh = _reenter_then_refuse(FAIL)
     with pytest.raises(SystemExit) as exc:
         cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert type(exc.value) is SystemExit
     assert exc.value.code == (
         f"{DNS_REFUSAL}\n::error::the state of pull request #7 could not be read (::error::"
         "command failed (1): gh api); the cell locks this run created are released and those "
@@ -557,11 +604,12 @@ def test_a_refusal_with_an_unreadable_state_keeps_the_reentered_lock():
 
 
 def test_a_refusal_keeps_a_reentered_lock_of_an_open_pull_request():
-    """Mutation: roll back every installed lock on a refusal (AUTH_REF's delete is an
-    unexpected call)."""
+    """Refused by rule: the fence passed. Mutation: roll back every installed lock on a
+    refusal (AUTH_REF's delete is an unexpected call)."""
     gh = _reenter_then_refuse(_pr_state("OPEN", "2026-10-24T09:00:00Z"))
     with pytest.raises(SystemExit) as exc:
         cl.acquire(REPO, [AUTH, DNS], PR, ACQ, run=gh)
+    assert type(exc.value) is _shipmate.Refused
     assert exc.value.code == DNS_REFUSAL
     assert gh.drained()
 
