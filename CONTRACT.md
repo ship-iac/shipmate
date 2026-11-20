@@ -204,8 +204,9 @@ and a cell re-run on its own refuses before it applies:
 ``apply aborted for `<env>` / `<stack>`: run attempt <n> of this deploy may have applied this cell without saving its state; follow docs/troubleshooting.md section The apply step ran and its state was not saved``
 (`run attempts <n>, <m>` for more than one). A re-run of a merge deploy starts
 from the checks that are still open. A cell's state is saved only by the
-attempt that applied it: a re-run of a cell's `save` job alone saves nothing,
-and fails unless it finds the state an earlier attempt saved.
+attempt that applied it: when an earlier attempt may have applied the cell
+without saving, a re-run's `save` job looks that attempt's state up, never
+saves it, and fails unless it finds it.
 
 **Dead runs.** A run that ends after a flip without writing its checks (a lost
 runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
@@ -219,8 +220,8 @@ pre-merge apply reads only its pull request's head. The check's details link
 names the holding run only when it is exactly
 `<server>/<owner>/<repo>/actions/runs/<id>` of this repository. A link to the
 run's own page passes, so a merge deploy's re-run proceeds over its own flips.
-A held check is `in_progress` under the run that held it, so every apply form
-refuses a held cell.
+A held check is `in_progress` under the run that held it, so an apply of its
+head, that head's merge deploy and a re-run of the deploy refuse the cell.
 
 | Holding run | Merge deploy | Pre-merge apply |
 | --- | --- | --- |
@@ -254,6 +255,10 @@ Accepted limits:
   that read is not seen. The merge deploy reads such a check under the
   in-progress rules above; a cell lock the dead pre-merge run left is released
   with `shipmate unlock`.
+- A held check holds only its own head: an apply of a later head of the pull
+  request (after a push), another pull request's apply or merge deploy, and a
+  merge deploy whose merged head is a later one do not read it, and apply the
+  cell over the state from before the unsaved apply.
 - A plan re-run can create a fresh duplicate apply check after the run's
   detect; it is left pending (its plan was not applied by this run), which
   keeps `shipmate / gate` from greening on a plan the apply never used.
@@ -1050,10 +1055,11 @@ green gate over infrastructure nothing recorded. So:
   local state lives; see the job log`.
 
 **Trust.** The path comes from the checked-out commit's backend configuration.
-`plan-cell` and `drift-cell` never save state, and `actions/cache` versions an
+No job that runs pull-request code saves state, and `actions/cache` versions an
 entry on its path string, so a branch that points its backend elsewhere plans
-against empty state, visibly. `apply-cell` saves, and it runs the reviewed
-commit, whose backend block was part of the review.
+against empty state, visibly. Only a cell's `save` job saves. The path it saves
+comes from the cell's apply, which ran the reviewed commit, whose backend block
+was part of the review.
 
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
@@ -1148,6 +1154,11 @@ documents for its `checks: read` requirement. The grant belongs on the calling
 job and nowhere else — a job-level `permissions:` block replaces the
 workflow-level default rather than intersecting it, so a top-level block that
 omits `id-token` takes nothing away from a job that declares it.
+
+**No calling job of an apply caps the cache mode.** A cell's `save` job
+declares `cache-mode: write`, and a caller's `cache-mode: read` caps every job
+it calls. So the consumer's `shipmate.yml` declares no `cache-mode: read` on
+its `apply`, `auto` and `deploy` jobs, nor at its workflow level.
 
 ## Tag grammar
 
@@ -3344,6 +3355,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   downloads with it; `apply-cell` hashes the rendered plan from stdin and reads the first
   field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on
   `ubuntu-26.04`, x64, and 2026-10-18 on `ubuntu-26.04-arm`).
+- A stack with a local backend needs a GitHub-hosted `runs_on` for its apply
+  and deploy runs: its apply cell refuses before applying, and its `save` job
+  refuses, on any runner whose `RUNNER_ENVIRONMENT` is not `github-hosted`
+  (§State backend).
 - Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
   provides these tools other than PyYAML. PyYAML differs per image: the
   `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), the
@@ -3481,7 +3496,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   units, each with its own check (see Check names, above).
 - The plan fan-out is bounded at 256 cells (`build-matrix`'s `MATRIX_LIMIT`,
   the GitHub Actions matrix limit). Above it `build-matrix` refuses
-  and `detect` fails the run before any cell starts.
+  and `detect` fails the run before any cell starts. An apply run then holds at
+  most 256 cells, two jobs each (`apply` and `save`).
   The way past it is to split the change across several pull requests: the
   matrix is built over `terramate list --changed` from the merge base of the
   pull request's base and head, so a narrower diff is a smaller matrix. A
@@ -4507,8 +4523,8 @@ job believed before its check was completed:
   once those cells are recovered. Every `not attempted:` note also says to
   follow that section first when a cell's `save` job log names it, because the
   note reads the apply checks: a failed check scan leaves a held cell in no
-  note. The held check, not the comment, stops a later apply: every apply form
-  refuses a held cell (§Apply check lifecycle, In-progress checks).
+  note. The held check, not the comment, stops a later apply of the same head
+  (§Apply check lifecycle, In-progress checks).
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
@@ -5162,16 +5178,13 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   are not in the key: stacks whose locks name the same providers at the same
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
-- `drift-cell` and `apply-cell` save it; `plan-cell` never does. A plan run,
-  from an autoplan or a command, and an unlock run hold the default branch's
-  cache scope while they run the pull request's HCL, so `plan.yml` and
-  `unlock.yml` declare `cache-mode: read` and the token in those runs cannot
-  save an entry whatever the cell's HCL runs. Apply cells still save with a
-  cache write while running the pull request's HCL, and the key carries no
-  environment, so an entry one environment's apply saves is restored by any
-  environment's cells. Each saves after a restore that missed, and only when
-  `init` left a file in the cache; `apply-cell` saves only after a successful
-  apply, and a failed save does not fail the cell.
+- `drift-cell` saves it; `plan-cell` and `apply-cell` never do. A plan run,
+  from an autoplan or a command, an unlock run and an apply cell hold the
+  default branch's cache scope while they run the pull request's HCL, so
+  `plan.yml`, `unlock.yml` and each apply cell's `apply` job declare
+  `cache-mode: read`, and their token cannot save an entry whatever the cell's
+  HCL runs. A drift cell saves after a restore that missed, and only when
+  `init` left a file in the cache; a failed save does not fail the cell.
 - Every merge deploy's `warm` job saves the entry of each distinct lock on the
   merged commit, up to 256 distinct locks, so no cell needs to have run for an
   entry to exist. Its `detect` picks one stack per distinct digest among every
