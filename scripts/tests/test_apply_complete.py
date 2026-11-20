@@ -22,6 +22,7 @@ from _loader import (
 )
 
 apply_complete = load_script("apply-complete")
+deploy_detect = load_script("deploy-detect")
 
 BY_WAVE = {
     "wave0": {"apply / stacks/dns / dev-eu": [1]},
@@ -31,17 +32,38 @@ BY_WAVE = {
 #: Every wave ran.
 RAN = {"wave0": "success", "wave1": "success", "wave2": "success"}
 _IDS = iter(range(100, 10_000))
+#: The steps of an `apply` job whose apply step ran.
+APPLIED = [
+    {"name": "Pre-apply check", "conclusion": "success"},
+    {"name": "Apply the cell", "conclusion": "success"},
+]
+#: The steps of an `apply` job whose pre-apply check refused: it never applied.
+REFUSED = [
+    {"name": "Pre-apply check", "conclusion": "failure"},
+    {"name": "Apply the cell", "conclusion": "failure"},
+]
 
 
-def job(name, conclusion, jid=None):
+def job(name, conclusion, jid=None, *, attempt=1, steps=APPLIED):
     jid = next(_IDS) if jid is None else jid
     return {
         "id": jid,
         "name": name,
         "conclusion": conclusion,
-        "status": "completed",
+        "status": "in_progress" if conclusion is None else "completed",
+        "run_attempt": attempt,
+        "started_at": f"2026-11-20T10:{jid // 60 % 60:02d}:{jid % 60:02d}Z",
+        "steps": steps,
         "html_url": f"https://github.com/acme/demo/actions/runs/7/job/{jid}",
     }
+
+
+def cell(prefix, apply, save="success", *, attempt=1, steps=APPLIED):
+    """The `apply` and `save` jobs of the cell `prefix`, `<level> / <env> / <stack>`."""
+    return [
+        job(f"{prefix} / apply", apply, attempt=attempt, steps=steps),
+        job(f"{prefix} / save", save, attempt=attempt, steps=[]),
+    ]
 
 
 def row(check, ids, j=None):
@@ -54,12 +76,20 @@ def row(check, ids, j=None):
     }
 
 
+def held(check, ids):
+    return {**row(check, ids), "held": True}
+
+
 def _by_check(rows):
     return {r["check"]: r for r in rows}
 
 
-def _classify(jobs, by_wave=BY_WAVE, results=RAN):
-    return apply_complete.classify(by_wave, results, jobs)
+#: This completion job, `L0 / complete`, check run id 900, in run attempt 1.
+OWN = job("L0 / complete", None, jid=900)
+
+
+def _classify(jobs, by_wave=BY_WAVE, results=RAN, own=OWN):
+    return apply_complete.classify(by_wave, results, [own, *jobs], str(own["id"]))
 
 
 DNS = "apply / stacks/dns / dev-eu"
@@ -67,88 +97,106 @@ APP = "apply / stacks/app / dev-eu"
 WEB = "apply / stacks/web / dev-eu"
 #: A skipped wave's one listing row: GitHub never expands a skipped job's matrix.
 SKIPPED_ROW = "deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}"
+SKIPPED_L0 = "L0 / ${{ matrix.environment }} / ${{ matrix.stack }}"
 
 
-def test_each_cell_takes_its_matched_jobs_row():
-    """Mutation: drop the job id or URL from a row -> the rows differ."""
-    jobs = [
-        job("L0 / dev-eu / stacks/dns", "success"),
-        job("L0 / dev-eu / stacks/app", "failure"),
-        job("L0 / dev-eu / stacks/web", "cancelled"),
-    ]
-    rows, unresolved = _classify(jobs)
+def test_each_cell_takes_its_apply_jobs_row():
+    """Mutations: drop the job id or URL from a row -> the rows differ; take the `save` job's
+    row -> every row differs."""
+    dns, app, web = (
+        cell("L0 / dev-eu / stacks/dns", "success"),
+        cell("L0 / dev-eu / stacks/app", "failure"),
+        cell("L0 / dev-eu / stacks/web", "cancelled"),
+    )
+    rows, unresolved = _classify([*dns, *app, *web])
     assert unresolved == []
     assert _by_check(rows) == {
-        DNS: row(DNS, [1], jobs[0]),
-        APP: row(APP, [2, 3], jobs[1]),
-        WEB: row(WEB, [4], jobs[2]),
+        DNS: row(DNS, [1], dns[0]),
+        APP: row(APP, [2, 3], app[0]),
+        WEB: row(WEB, [4], web[0]),
     }
 
 
-@pytest.mark.parametrize(
-    "prefix", ["apply / L0 / dev-eu / stacks/app", "deploy / L2 / dev-eu / stacks/app"]
-)
-def test_matches_the_nested_reusable_workflow_job_name_suffix(prefix):
+@pytest.mark.parametrize("level", ["apply / L0", "deploy / L2"])
+def test_matches_the_cell_jobs_under_this_jobs_level(level):
     """A called workflow's jobs display as `<caller job> / <called job> / <job>`, and the cell
-    job is named `<env> / <stack>`; the same stack in another env matches nothing.
+    jobs are `<env> / <stack> / apply|save`; the same stack in another env matches nothing.
     Mutation: `apply-gate.cell_job_name` builds `<stack> / <env>`."""
+    own = job(f"{level} / complete", None, jid=901)
     by_wave = {"wave1": BY_WAVE["wave1"]}
-    j = job(prefix, "success")
-    assert _classify([j], by_wave) == ([row(APP, [2, 3], j)], [])
-    other = job(prefix.replace("dev-eu", "dev-us"), "success")
-    assert _classify([other, j], by_wave) == ([row(APP, [2, 3], j)], [])
-    assert _classify([other], by_wave) == ([], ["stacks/app / dev-eu"])
+    mine = cell(f"{level} / dev-eu / stacks/app", "success")
+    other = cell(f"{level} / dev-us / stacks/app", "success")
+    assert _classify(mine, by_wave, own=own) == ([row(APP, [2, 3], mine[0])], [])
+    assert _classify([*other, *mine], by_wave, own=own) == ([row(APP, [2, 3], mine[0])], [])
+    assert _classify(other, by_wave, own=own) == ([], ["stacks/app / dev-eu"])
+
+
+def test_a_cell_of_another_level_is_not_this_jobs():
+    """Mutation: match the cell jobs at any level (`apply-gate.cell_part` instead of
+    `cell_rows`) -> APP takes the `L1` row."""
+    by_wave = {"wave1": BY_WAVE["wave1"]}
+    assert _classify(cell("L1 / dev-eu / stacks/app", "success"), by_wave) == (
+        [],
+        ["stacks/app / dev-eu"],
+    )
 
 
 @pytest.mark.parametrize(
-    ("by_wave", "name"),
+    ("by_wave", "prefix"),
     [
-        ({"wave0": {"apply / detect / apply": [5]}}, "apply / detect"),
+        ({"wave0": {"apply / detect / run": [5]}}, "apply / run / detect"),
         (BY_WAVE, "apply / verify / dev-eu / stacks/app"),
     ],
     ids=["orchestration-job", "non-wave-cell-job"],
 )
-def test_only_a_wave_job_completes_a_cell(by_wave, name):
-    """A job outside an `L<n>` env-level can end in ` / <env> / <stack>`: the orchestration
-    job `apply / detect` does for env `apply` and root stack `detect`, and it succeeds when
-    that cell's wave failed. Mutation: `apply-gate.is_cell_job` drops the `L<n>` segment."""
-    rows, unresolved = _classify([job(name, "success")], by_wave)
+def test_only_a_wave_job_completes_or_holds_a_cell(by_wave, prefix):
+    """A job outside an `L<n>` env-level can end in ` / <env> / <stack> / apply`: an
+    orchestration job `apply / run / detect / apply` would for env `run` and root stack
+    `detect`. Its unsaved apply holds nothing. Mutation: `apply-gate.cell_part` drops the
+    `L<n>` segment -> the cell is held."""
+    rows, unresolved = _classify(cell(prefix, "success", "failure"), by_wave)
     assert (rows, len(unresolved)) == ([], len(by_wave))
 
 
-def test_a_rerun_success_after_a_failure_completes_the_cell():
-    """Mutation: take the last matched job whatever its conclusion -> the failure row."""
-    ok = job("L0 / dev-eu / stacks/dns", "success")
-    rows, _ = _classify([ok, job("L0 / dev-eu / stacks/dns", "failure")])
-    assert _by_check(rows)[DNS] == row(DNS, [1], ok)
+def test_the_write_reads_this_attempts_rows():
+    """Attempt 2 re-ran the cell after attempt 1 failed. Mutation: read the rows of every attempt
+    (the last listed is attempt 1's) -> DNS reads the failure."""
+    own = job("L0 / complete", None, jid=902, attempt=2)
+    again = cell("L0 / dev-eu / stacks/dns", "success", attempt=2)
+    first = cell("L0 / dev-eu / stacks/dns", "failure")
+    rows, _ = _classify([*again, *first], {"wave0": BY_WAVE["wave0"]}, own=own)
+    assert rows == [row(DNS, [1], again[0])]
 
 
 def test_never_completes_a_cell_that_was_not_snapshotted():
     rows, _ = _classify(
-        [job("L0 / dev-eu / stacks/rogue", "success"), job("L0 / dev-eu / stacks/dns", "failure")]
+        [
+            *cell("L0 / dev-eu / stacks/rogue", "success"),
+            *cell("L0 / dev-eu / stacks/dns", "failure"),
+        ]
     )
     assert all(r["conclusion"] != "success" for r in rows)
 
 
-def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
+def test_a_job_of_a_longer_env_name_cannot_complete_or_hold_the_cell_it_shadows():
     """A "dev-eu / stacks/dns" job shares its trailing characters with env `eu`'s cell job
     "eu / stacks/dns" but is another env, so only a ` / `-boundary-respecting suffix may
     count. Same idiom as scripts/apply-comment's _job_url, pinned in
     test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
-    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
+    Mutation: `apply-gate.cell_part` drops its ` / ` boundary -> the cell is held."""
     by_wave = {"wave0": {"apply / stacks/dns / eu": [1]}}
-    assert _classify([job("L0 / dev-eu / stacks/dns", "success")], by_wave)[0] == []
+    assert _classify(cell("L0 / dev-eu / stacks/dns", "success", "failure"), by_wave)[0] == []
 
 
 def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
-    """Two real cells, "stacks/app" and a bare "app", plus two decoy jobs sharing a trailing
+    """Two real cells, "stacks/app" and a bare "app", plus two decoy cells sharing a trailing
     substring with each without naming them: a different stack ("stacks/my-app") and a
-    different env ("prod-dev-eu"). None of it may complete anything.
-    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
+    different env ("prod-dev-eu"). None of it may complete or hold anything.
+    Mutation: `apply-gate.cell_part` drops its ` / ` boundary -> both cells are held."""
     by_wave = {"wave0": {"apply / stacks/app / dev-eu": [2, 3], "apply / app / dev-eu": [99]}}
     jobs = [
-        job("L0 / dev-eu / stacks/my-app", "success"),
-        job("L0 / prod-dev-eu / stacks/app", "success"),
+        *cell("L0 / dev-eu / stacks/my-app", "success", "failure"),
+        *cell("L0 / prod-dev-eu / stacks/app", "success", "failure"),
     ]
     assert _classify(jobs, by_wave)[0] == []
 
@@ -160,9 +208,9 @@ def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_an_unresolved
     differs; drop the `unresolved` row -> DNS has none."""
     rows, unresolved = _classify(
         [
-            job("L0 / dev-eu / stacks/dns", None),
-            job("L0 / dev-eu / stacks/app", "success"),
-            job("L0 / dev-eu / stacks/web", "success"),
+            *cell("L0 / dev-eu / stacks/dns", None, None),
+            *cell("L0 / dev-eu / stacks/app", "success"),
+            *cell("L0 / dev-eu / stacks/web", "success"),
         ]
     )
     assert unresolved == ["stacks/dns / dev-eu"]
@@ -170,20 +218,113 @@ def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_an_unresolved
     assert sorted(_by_check(rows)) == [APP, DNS, WEB]
 
 
-#: This completion job, `deploy / L1 / complete`, check run id 900.
-OWN = job("deploy / L1 / complete", None, jid=900)
+@pytest.mark.parametrize(
+    "listed",
+    [
+        pytest.param(cell("L0 / dev-eu / stacks/app", "success", None), id="save-lagging"),
+        pytest.param(cell("L0 / dev-eu / stacks/app", "success")[:1], id="save-not-listed"),
+        pytest.param(cell("L0 / dev-eu / stacks/app", "success")[1:], id="apply-not-listed"),
+    ],
+)
+def test_a_lagging_save_is_unresolved_not_held(listed):
+    """A `save` row the listing has not concluded or not shown yet reads as an unsaved apply.
+    Mutation: decide the hold before the lag -> APP is held (save-lagging, save-not-listed)."""
+    rows, unresolved = _classify(listed, {"wave1": BY_WAVE["wave1"]})
+    assert (rows, unresolved) == (
+        [{**row(APP, [2, 3]), "unresolved": True}],
+        ["stacks/app / dev-eu"],
+    )
+
+
+def test_an_applied_cell_whose_save_failed_is_held():
+    """Mutation: write `queued` for apply `success` and save `failure` (drop the hold) -> APP
+    takes the apply row."""
+    rows, unresolved = _classify(
+        cell("L0 / dev-eu / stacks/app", "success", "failure"), {"wave1": BY_WAVE["wave1"]}
+    )
+    assert (rows, unresolved) == ([held(APP, [2, 3])], [])
+
+
+def test_a_rerun_after_an_unsaved_attempt_is_held():
+    """ "Re-run all jobs" after attempt 1 applied and did not save: attempt 2's pre-apply refuses
+    and its `save` fails on the lookup. Mutation: read the hold from this attempt's rows only
+    (`unsaved(..., before=None)` over attempt 2) -> APP reads `Failed` of the `save` job."""
+    own = job("L0 / complete", None, jid=903, attempt=2)
+    jobs = [
+        *cell("L0 / dev-eu / stacks/app", "success", "failure"),
+        *cell("L0 / dev-eu / stacks/app", "failure", "failure", attempt=2, steps=REFUSED),
+    ]
+    rows, _ = _classify(jobs, {"wave1": BY_WAVE["wave1"]}, own=own)
+    assert rows == [held(APP, [2, 3])]
+
+
+def test_a_skipped_wave_after_an_unsaved_attempt_is_held():
+    """Mutation: write `Not run` for a cell of a skipped wave before the hold -> APP reads
+    `Not run`."""
+    own = job("L0 / complete", None, jid=904, attempt=2)
+    jobs = [
+        *cell("L0 / dev-eu / stacks/app", "success", "failure"),
+        job(SKIPPED_L0, "skipped", attempt=2),
+    ]
+    rows, _ = _classify(jobs, {"wave1": BY_WAVE["wave1"]}, {"wave1": "skipped"}, own=own)
+    assert rows == [held(APP, [2, 3])]
+
+
+@pytest.mark.parametrize(
+    ("apply", "title"),
+    [("failure", "failure"), ("cancelled", "cancelled"), ("timed_out", "timed_out")],
+)
+def test_a_saved_cell_writes_its_apply_jobs_outcome(apply, title):
+    """Mutation: take the `save` job's row when it succeeded -> the conclusion is `success`."""
+    jobs = cell("L0 / dev-eu / stacks/app", apply)
+    rows, _ = _classify(jobs, {"wave1": BY_WAVE["wave1"]})
+    assert rows == [row(APP, [2, 3], jobs[0])]
+    assert rows[0]["conclusion"] == title
+
+
+def test_a_failed_save_of_a_cell_that_never_applied_fails_with_the_save_job():
+    """The pre-apply check refused, so nothing applied, and the save failed. Mutation: take the
+    `apply` job's row -> APP's job id is the `apply` job's."""
+    apply, save = cell("L0 / dev-eu / stacks/app", "failure", "failure", steps=REFUSED)
+    rows, _ = _classify([apply, save], {"wave1": BY_WAVE["wave1"]})
+    assert rows == [row(APP, [2, 3], save) | {"conclusion": "failure"}]
+
+
+def test_a_cell_cancelled_while_pending_is_cancelled():
+    """Cancelled while waiting on its group: the `apply` row ended with no steps and no `save`
+    row is listed. Mutation: retry it (unresolved) -> APP has an unresolved row."""
+    pending = job("L0 / dev-eu / stacks/app / apply", "cancelled", steps=[])
+    rows, unresolved = _classify([pending], {"wave1": BY_WAVE["wave1"]})
+    assert (rows, unresolved) == ([row(APP, [2, 3], pending)], [])
+
+
+@pytest.mark.parametrize(
+    "steps", [pytest.param(APPLIED, id="with-steps"), pytest.param([], id="no-steps")]
+)
+def test_an_ended_apply_with_no_save_listed_is_unresolved(steps):
+    """Mutation: write `Cancelled` for any `apply` row with no `save` row -> APP has a row."""
+    ended = job("L0 / dev-eu / stacks/app / apply", "failure", steps=steps)
+    rows, unresolved = _classify([ended], {"wave1": BY_WAVE["wave1"]})
+    assert (rows, unresolved) == (
+        [{**row(APP, [2, 3]), "unresolved": True}],
+        ["stacks/app / dev-eu"],
+    )
+
+
+#: This completion job at level `deploy / L1`, check run id 900.
+OWN_L1 = job("deploy / L1 / complete", None, jid=900)
 
 
 def test_a_cell_of_a_skipped_wave_gets_a_not_run_row():
     """A failed release or a failed earlier wave skips the wave, which never starts. Mutations:
     count every skipped job as the cell's -> APP takes the skipped row; read `skipped` like a
     wave that ran -> APP is unresolved."""
-    ok = job("L0 / dev-eu / stacks/dns", "success")
+    ok = cell("L0 / dev-eu / stacks/dns", "success")
     rows, unresolved = _classify(
-        [ok, job(SKIPPED_ROW, "skipped")], results={**RAN, "wave1": "skipped", "wave2": "skipped"}
+        [*ok, job(SKIPPED_L0, "skipped")], results={**RAN, "wave1": "skipped", "wave2": "skipped"}
     )
     assert unresolved == []
-    assert rows == [row(DNS, [1], ok), row(APP, [2, 3]), row(WEB, [4])]
+    assert rows == [row(DNS, [1], ok[0]), row(APP, [2, 3]), row(WEB, [4])]
 
 
 def test_a_cancelled_wave_that_never_expanded_is_not_run():
@@ -192,7 +333,7 @@ def test_a_cancelled_wave_that_never_expanded_is_not_run():
     unresolved."""
     unexpanded = job(SKIPPED_ROW, "cancelled")
     rows, unresolved = apply_complete.classify(
-        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, [OWN, unexpanded], "900"
+        {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, [OWN_L1, unexpanded], "900"
     )
     assert (rows, unresolved) == ([row(APP, [2, 3])], [])
 
@@ -200,23 +341,26 @@ def test_a_cancelled_wave_that_never_expanded_is_not_run():
 @pytest.mark.parametrize(
     "listed",
     [
-        pytest.param([OWN], id="no-literal-row"),
+        pytest.param([OWN_L1], id="no-literal-row"),
         pytest.param(
             [
-                OWN,
+                OWN_L1,
                 job("deploy / L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", "cancelled"),
             ],
             id="another-level",
         ),
-        pytest.param([OWN, job(SKIPPED_ROW, "skipped")], id="skipped-row"),
+        pytest.param([OWN_L1, job(SKIPPED_ROW, "skipped")], id="skipped-row"),
         pytest.param([job(SKIPPED_ROW, "cancelled")], id="own-job-not-listed"),
+        pytest.param(
+            [{**OWN_L1, "run_attempt": 2}, job(SKIPPED_ROW, "cancelled")], id="another-attempt"
+        ),
     ],
 )
 def test_a_missing_cell_of_a_cancelled_wave_that_may_have_started_is_unresolved(listed):
     """A wave cancelled after its matrix expanded may have applied the cell. Mutations: treat
     every `cancelled` wave as not run -> APP gets a `Not run` row; match the literal row under
     any level -> another-level gets a row; drop the `cancelled` conclusion check -> skipped-row
-    gets a row."""
+    gets a row; match the literal row of any attempt -> another-attempt gets a row."""
     rows, unresolved = apply_complete.classify(
         {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, listed, "900"
     )
@@ -228,17 +372,17 @@ def test_a_missing_cell_of_a_wave_that_ran_is_unresolved_and_never_not_run(resul
     """A wave that ran lists every cell job, so a missing one is a lagging or lost listing; a
     `Not run` write would turn a completed `success` back to `queued`. Mutation: write `Not
     run` for any missing cell -> APP gets a row."""
-    ok = job("L0 / dev-eu / stacks/dns", "success")
-    rows, unresolved = _classify([ok], results={"wave0": "success", "wave1": result})
-    assert (rows, unresolved) == ([row(DNS, [1], ok)], ["stacks/app / dev-eu"])
+    ok = cell("L0 / dev-eu / stacks/dns", "success")
+    rows, unresolved = _classify(ok, results={"wave0": "success", "wave1": result})
+    assert (rows, unresolved) == ([row(DNS, [1], ok[0])], ["stacks/app / dev-eu"])
 
 
 def test_a_cancelled_wave_keeps_its_listed_cells_rows():
     """Only cells with no job read the wave's result. Mutation: write `Not run` for every cell
     of a cancelled wave -> APP loses its `cancelled` row."""
-    stopped = job("L0 / dev-eu / stacks/app", "cancelled")
-    rows, _ = _classify([stopped], {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"})
-    assert rows == [row(APP, [2, 3], stopped)]
+    stopped = cell("L0 / dev-eu / stacks/app", "cancelled", steps=REFUSED)
+    rows, _ = _classify(stopped, {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"})
+    assert rows == [row(APP, [2, 3], stopped[0])]
 
 
 def _write(conclusion, *, url="https://u/job/9", job_id=9, ids=(5,), repo="acme/demo"):
@@ -363,12 +507,67 @@ def test_a_job_id_that_is_not_an_integer_reads_nothing(annotations):
     assert annotations["calls"] == []
 
 
+#: The run page of run 999 of acme/demo.
+HELD_URL = "https://github.com/acme/demo/actions/runs/999"
+
+
+@pytest.fixture
+def run_env(monkeypatch):
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "999")
+
+
+def test_a_held_row_holds_each_check_in_progress_linked_to_the_run_page(run_env):
+    """Mutations: write `queued` -> the status differs; link the `save` job
+    (`<run page>/job/<id>`) -> the link differs; drop the `held` key -> `patch-checks` drops
+    the entry on a re-run."""
+    held_body = {"status": "in_progress", "details_url": HELD_URL}
+    assert apply_complete.writes(held(APP, [5, 6]), "acme/demo") == [
+        {"id": 5, "body": held_body, "title": "State not saved", "held": True},
+        {"id": 6, "body": held_body, "title": "State not saved", "held": True},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("link", "cause"),
+    [(HELD_URL, ("live", "999")), (HELD_URL + "/job/12", ("unknown", "5"))],
+    ids=["run-page", "job-page"],
+)
+def test_the_holder_reader_names_the_run_from_the_held_link(run_env, link, cause):
+    """The deploy reads the holding run from the link: it strips the run-page prefix and needs a
+    run id, so a job link reads `unknown`. Pins the reader's parse of both links; the held write's
+    link is pinned whole above. Mutation: link the `save` job -> the held write reads
+    `unknown`."""
+    entry = apply_complete.writes(held(APP, [5]), "acme/demo")[0]
+    assert entry["body"]["details_url"] == HELD_URL
+    check = {"id": 5, "details_url": link}
+    assert deploy_detect._holder("acme/demo", {}, check, {"999": ("live", [])}) == cause
+
+
+def test_merge_ranks_a_hold_below_a_success_and_above_any_other_row():
+    """A success from any attempt wins; else a hold from any attempt, over an earlier or later
+    failure and a later unresolved listing. Mutations: drop the held overlay -> APP takes the
+    unresolved row (no write); overlay holds after successes -> DNS is held."""
+    ok = job("L0 / dev-eu / stacks/dns / apply", "success")
+    failed = job("L0 / dev-eu / stacks/app / apply", "failure")
+    every = [
+        row(APP, [2, 3], failed),
+        held(APP, [2, 3]),
+        row(DNS, [1], ok),
+        row(APP, [2, 3], failed),
+        held(DNS, [1]),
+        {**row(APP, [2, 3]), "unresolved": True},
+    ]
+    assert apply_complete.merge(every) == [held(APP, [2, 3]), row(DNS, [1], ok)]
+
+
 def test_merge_keeps_a_success_any_attempt_saw_and_otherwise_the_last_row_seen():
     """Replicas differ: a later listing can lose a row an earlier one saw. Mutations: the last
     row wins whatever its conclusion -> DNS reads `Not run`; the first row wins -> APP keeps
     its failure; successes only (`out = {}`) -> APP and WEB have no row."""
-    ok = job("L0 / dev-eu / stacks/dns", "success")
-    failed = job("L0 / dev-eu / stacks/app", "failure")
+    ok = job("L0 / dev-eu / stacks/dns / apply", "success")
+    failed = job("L0 / dev-eu / stacks/app / apply", "failure")
     first = [row(DNS, [1], ok), row(APP, [2, 3], failed), row(WEB, [4], failed)]
     last = [row(DNS, [1]), row(APP, [2, 3])]
     assert apply_complete.merge(first + last) == [
@@ -382,7 +581,7 @@ def test_merge_withholds_an_earlier_outcome_a_later_attempt_lists_unresolved():
     """Attempt 1 wrote APP `Not run`; a later attempt lists APP's job without a conclusion, so
     APP gets no write. A success still wins over a later unresolved row. Mutation: drop the
     `unresolved` filter -> APP's unresolved row is returned (a `Not run` write)."""
-    ok = job("L0 / dev-eu / stacks/dns", "success")
+    ok = job("L0 / dev-eu / stacks/dns / apply", "success")
     later = [{**row(APP, [2, 3]), "unresolved": True}, {**row(DNS, [1]), "unresolved": True}]
     assert apply_complete.merge([row(APP, [2, 3]), row(DNS, [1], ok), *later]) == [
         row(DNS, [1], ok)
@@ -410,7 +609,7 @@ def test_main_refuses_wave_results_that_are_no_non_empty_object(results):
     Mutation: drop the check (a traceback for `""`, exit 0 for `[]` and `{}`)."""
     done = subprocess.run(
         [sys.executable, str(SCRIPTS / "apply-complete")],
-        input=jsonl(job("L0 / dev-eu / stacks/dns", "success")),
+        input=jsonl(OWN, *cell("L0 / dev-eu / stacks/dns", "success")),
         env={
             **os.environ,
             "SHIPMATE_BY_WAVE_JSON": json.dumps(BY_WAVE),
@@ -428,7 +627,7 @@ def test_main_refuses_wave_results_that_are_no_non_empty_object(results):
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
     """A missing cell of a wave that ran retries like a lagging one. Mutation: exit 0 when a
     cell is unresolved -> returncode 0."""
-    done = _run(BY_WAVE, RAN, [job("L0 / dev-eu / stacks/web", None)])
+    done = _run(BY_WAVE, RAN, [OWN, *cell("L0 / dev-eu / stacks/web", None, None)])
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
     assert done.stderr == (
         apply_complete.RETRY_PREFIX
@@ -441,15 +640,15 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
 
 
 def test_main_prints_the_rows_and_exits_zero_when_every_cell_resolved():
-    jobs = [
-        job("L0 / dev-eu / stacks/dns", "success"),
-        job("L0 / dev-eu / stacks/app", "failure"),
-    ]
-    done = _run(BY_WAVE, {**RAN, "wave2": "skipped"}, jobs)
+    dns, app = (
+        cell("L0 / dev-eu / stacks/dns", "success"),
+        cell("L0 / dev-eu / stacks/app", "failure"),
+    )
+    done = _run(BY_WAVE, {**RAN, "wave2": "skipped"}, [OWN, *dns, *app])
     assert (done.returncode, done.stderr) == (0, "")
     assert [json.loads(line) for line in done.stdout.splitlines()] == [
-        row(DNS, [1], jobs[0]),
-        row(APP, [2, 3], jobs[1]),
+        row(DNS, [1], dns[0]),
+        row(APP, [2, 3], app[0]),
         row(WEB, [4]),
     ]
 
@@ -458,8 +657,8 @@ def test_plan_mode_writes_the_merged_rows(tmp_path):
     """The last attempt's fetch failed, so it decided nothing; the earlier success and the
     earlier `Cancelled` are both written. Mutation: `merge` keeps successes only (`out = {}`)
     -> WEB gets no write."""
-    ok = job("L0 / dev-eu / stacks/dns", "success", jid=11)
-    stopped = job("L0 / dev-eu / stacks/web", "cancelled", jid=12)
+    ok = job("L0 / dev-eu / stacks/dns / apply", "success", jid=11)
+    stopped = job("L0 / dev-eu / stacks/web / apply", "cancelled", jid=12)
     every = tmp_path / "all.jsonl"
     every.write_text(jsonl(row(DNS, [1], ok), row(WEB, [4], stopped)), encoding="utf-8")
     done = subprocess.run(
@@ -476,6 +675,33 @@ def test_plan_mode_writes_the_merged_rows(tmp_path):
             "title": None,
         },
         {"id": 4, "body": {"status": "queued"}, "title": "Cancelled"},
+    ]
+
+
+def test_plan_mode_writes_a_hold_over_an_earlier_failure(tmp_path):
+    """Mutation: drop the held overlay in `merge` -> APP is written `Failed`."""
+    failed = {**job("L0 / dev-eu / stacks/app / apply", "failure"), "id": "app"}
+    every = tmp_path / "all.jsonl"
+    every.write_text(jsonl(held(APP, [2]), row(APP, [2], failed)), encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, str(SCRIPTS / "apply-complete"), "plan", str(every)],
+        env={
+            **os.environ,
+            "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_RUN_ID": "999",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert (done.returncode, done.stderr) == (0, "")
+    assert [json.loads(line) for line in done.stdout.splitlines()] == [
+        {
+            "id": 2,
+            "body": {"status": "in_progress", "details_url": HELD_URL},
+            "title": "State not saved",
+            "held": True,
+        }
     ]
 
 
@@ -497,11 +723,11 @@ LIST_ARGV = [
     "--paginate",
     "--jq",
     ".jobs[]",
-    "repos/acme/demo/actions/runs/999/jobs?per_page=100",
+    "repos/acme/demo/actions/runs/999/jobs?filter=all&per_page=100",
 ]
 LIST_CMD = (
     "command failed (1): gh api --paginate --jq .jobs[] "
-    "repos/acme/demo/actions/runs/999/jobs?per_page=100"
+    "repos/acme/demo/actions/runs/999/jobs?filter=all&per_page=100"
 )
 
 
@@ -515,7 +741,8 @@ def _list(tmp_path, **gh):
 def test_list_prints_the_listing_unchanged_from_one_gh_call(tmp_path):
     """Mutations: add `filter=latest` to the path; call through `gh_json`."""
     listing = jsonl(
-        job("L0 / dev-eu / dns", "success", jid=1), job("L0 / dev-eu / app", None, jid=2)
+        job("L0 / dev-eu / dns / apply", "success", jid=1),
+        job("L0 / dev-eu / app / apply", None, jid=2),
     )
     proc, calls = _list(tmp_path, listing=listing)
     assert (proc.returncode, proc.stdout, proc.stderr) == (0, listing, "")
@@ -544,6 +771,16 @@ def test_a_failed_list_prints_its_cause_once_escaped_and_retries(tmp_path):
     escaped = cause.replace("%", "%25")
     assert (proc.returncode, proc.stdout) == (apply_complete.UNRESOLVED_EXIT, "")
     assert proc.stderr == f"::error::{escaped}\n{apply_complete.RETRY_PREFIX}{cause}\n"
+    assert calls == [LIST_ARGV]
+
+
+@bash_only
+def test_a_permanent_list_failure_refuses_at_once(tmp_path):
+    """A 403 or a 404 is no lag: asking again only spends the retry budget. Mutation: exit 75
+    for every failure -> exit 75 and a `retry: ` line."""
+    proc, calls = _list(tmp_path, listing="", list_rc=1, list_stderr="gh: Not Found (HTTP 404)")
+    assert (proc.returncode, proc.stdout) == (1, "")
+    assert proc.stderr == f"::error::{LIST_CMD} | gh: Not Found (HTTP 404)\n"
     assert calls == [LIST_ARGV]
 
 
@@ -678,7 +915,7 @@ def _script_calls(tmp_path):
     return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
-def _select(tmp_path, listings, results=None, *, list_stderr="", list_rc=None):
+def _select(tmp_path, listings, results=None, *, list_stderr="HTTP 502", list_rc=None):
     """Execute the selection step with `listings[n]` served on attempt n; return the process,
     the `{id: entry}` write plan, the attempt count and the env.
 
@@ -724,8 +961,13 @@ def _select(tmp_path, listings, results=None, *, list_stderr="", list_rc=None):
     return proc, plan, attempts, env
 
 
+def _listing(*jobs):
+    """A listing of this completion job, `OWN`, and `jobs`."""
+    return jsonl(OWN, *jobs)
+
+
 def _all_success(*cells):
-    return jsonl(*(job(f"L0 / dev-eu / {c}", "success") for c in cells))
+    return _listing(*(j for c in cells for j in cell(f"L0 / dev-eu / {c}", "success")))
 
 
 def _outcomes(plan):
@@ -741,10 +983,10 @@ ALL_DONE = {11: "completed", 22: "completed", 33: "completed"}
 def test_the_listing_is_refetched_on_every_attempt(tmp_path):
     # The property that makes this a retry at all: hoisting the fetch above the `for` re-reads
     # one frozen snapshot on every attempt and sleeps the whole budget over it.
-    lagging = jsonl(
-        job("L0 / dev-eu / dns", "success"),
-        job("L0 / dev-eu / app", "success"),
-        job("L0 / dev-eu / web", None),
+    lagging = _listing(
+        *cell("L0 / dev-eu / dns", "success"),
+        *cell("L0 / dev-eu / app", "success"),
+        *cell("L0 / dev-eu / web", None, None),
     )
     proc, plan, attempts, _ = _select(
         tmp_path, [lagging, lagging, _all_success("dns", "app", "web")]
@@ -787,10 +1029,10 @@ def test_a_success_seen_by_one_attempt_survives_a_staler_later_listing(tmp_path)
     """Replicas differ, so a later read can be missing a row an earlier one had. A later read
     may add a completion; it may never revoke one. Mutation: feed `plan` the last attempt's
     `attempt-rows.jsonl` -> dns and app get no write."""
-    first = jsonl(
-        job("L0 / dev-eu / dns", "success"),
-        job("L0 / dev-eu / app", "success"),
-        job("L0 / dev-eu / web", None),
+    first = _listing(
+        *cell("L0 / dev-eu / dns", "success"),
+        *cell("L0 / dev-eu / app", "success"),
+        *cell("L0 / dev-eu / web", None, None),
     )
     staler = _all_success("web")  # dns and app have vanished from this replica.
     proc, plan, _, _ = _select(tmp_path, [first, staler])
@@ -804,10 +1046,7 @@ def test_a_wave_that_did_not_run_writes_not_run_at_once(tmp_path, result):
     """A failed release, or a cancel between the release and the wave, lists no cell job, only
     the wave's literal row under this job's level. Mutation: treat a `skipped` or `cancelled`
     wave as one that ran -> 14 attempts and no write."""
-    skipped = jsonl(
-        job("L0 / complete", None, jid=900),
-        job("L0 / ${{ matrix.environment }} / ${{ matrix.stack }}", result),
-    )
+    skipped = _listing(job(SKIPPED_L0, result))
     proc, plan, attempts, _ = _select(
         tmp_path, [skipped], results={"wave0": result, "wave1": "skipped"}
     )
@@ -821,10 +1060,12 @@ def test_a_failure_one_attempt_saw_survives_later_empty_listings(tmp_path):
     empty, so the retries run out. App still gets its `Failed` write. (A job id that is not an
     integer keeps the annotation read out of the step.) Mutation: the step feeds `plan` only
     the last attempt's `attempt-rows.jsonl` -> app gets no write."""
-    first = jsonl(
-        job("L0 / dev-eu / dns", "success"),
-        {**job("L0 / dev-eu / app", "failure"), "id": "app"},
-        job("L0 / dev-eu / web", None),
+    app = cell("L0 / dev-eu / app", "failure")
+    first = _listing(
+        *cell("L0 / dev-eu / dns", "success"),
+        {**app[0], "id": "app"},
+        app[1],
+        *cell("L0 / dev-eu / web", None, None),
     )
     proc, plan, attempts, _ = _select(tmp_path, [first, ""])
     assert (proc.returncode, attempts) == (0, 14), proc.stderr
@@ -842,9 +1083,9 @@ def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stra
     The waits back off from 2 s to a 110 s total, and the last attempt does not sleep.
     Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
     (`set -u` aborts on the missing delay); `attempts` drops its `+ 1`."""
-    lagging = jsonl(
-        job("L0 / dev-eu / dns", "success"),
-        job("L0 / dev-eu / web", None),
+    lagging = _listing(
+        *cell("L0 / dev-eu / dns", "success"),
+        *cell("L0 / dev-eu / web", None, None),
     )
     proc, plan, attempts, env = _select(tmp_path, [lagging])
     assert proc.returncode == 0, proc.stderr
@@ -883,7 +1124,7 @@ def test_a_listing_failing_after_one_resolved_cell_writes_it_and_fails_naming_th
     replaces the cause); drop the `cat` of `attempt-rows.jsonl` into `rows.jsonl` (no write); no
     escaping in the fail-over step (`%0A`); escape the cause in `list`'s `retry: ` line instead
     (the log line shows `%250A`)."""
-    first = jsonl(job("L0 / dev-eu / dns", "success"), job("L0 / dev-eu / web", None))
+    first = _listing(*cell("L0 / dev-eu / dns", "success"), *cell("L0 / dev-eu / web", None, None))
     proc, plan, attempts, env = _select(tmp_path, [first, None], list_stderr="HTTP 502 a%0Ab")
     assert (proc.returncode, attempts) == (0, 14), proc.stderr
     assert _outcomes(plan) == {11: "completed"}
@@ -932,6 +1173,15 @@ def test_the_fail_over_escapes_a_stranded_cell_name(tmp_path):
         "listing shows no conclusion for these cells of waves that ran: stacks/a%250Ab |  / "
         "dev-eu | the other\n"
     )
+
+
+@bash_only
+def test_a_permanent_list_failure_ends_the_loop_without_sleeping(tmp_path):
+    """The real `list` exits 1 on a 404, and the loop passes it on. Mutation: `list` exits 75
+    for every failure -> 14 attempts."""
+    proc, plan, attempts, _ = _select(tmp_path, [None], list_stderr="gh: Not Found (HTTP 404)")
+    assert (proc.returncode, attempts, plan) == (1, 1, {})
+    assert not (tmp_path / "sleeps").exists()
 
 
 @bash_only
@@ -1051,11 +1301,11 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
         "wave1": {APP: [2, 3], "apply / stacks/api / dev-eu": [5]},
         "wave2": BY_WAVE["wave2"],
     }
-    listed = job("L1 / dev-eu / stacks/api", "cancelled")
+    listed, saved = cell("deploy / L1 / dev-eu / stacks/api", "cancelled")
     rows, unresolved = apply_complete.classify(
         by_wave,
         {"wave1": "cancelled", "wave2": "cancelled"},
-        [OWN, listed, job(SKIPPED_ROW, "cancelled")],
+        [OWN_L1, listed, saved, job(SKIPPED_ROW, "cancelled")],
         "900",
     )
     assert (rows, unresolved) == (

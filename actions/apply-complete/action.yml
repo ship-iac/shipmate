@@ -1,5 +1,5 @@
 name: shipmate apply-complete
-description: Write the apply checks of the given waves from their cells' wave jobs in this run - completed on success, otherwise returned to queued and titled with the outcome. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and checks:read to read a failed job's annotations.
+description: Write the apply checks of the given waves from their cells' apply and save jobs in this run - completed on success, held in progress when an attempt's state may not be saved, otherwise returned to queued and titled with the outcome. Reads the job's GITHUB_TOKEN, which needs actions:read to list this run's jobs and checks:read to read a failed job's annotations.
 inputs:
   by-wave:
     description: JSON object, apply-snapshot's by_wave, mapping each wave key to its cells' apply-check ids.
@@ -11,7 +11,7 @@ inputs:
     description: This job's own check run id (`job.check_run_id`), whose listed name names its level.
     required: true
   deploy:
-    description: "`true` on the merge deploy. Otherwise a re-run writes only its `success` entries, and a merged pull request gets only its `success` writes."
+    description: "`true` on the merge deploy. Otherwise a re-run writes only its `success` and held entries, and a merged pull request gets only those."
     required: true
   pr-number:
     description: The pull request the run applies; read before a pre-merge write.
@@ -56,8 +56,8 @@ runs:
         for n in $(seq "$attempts"); do
           rc=0
           : > "$RUNNER_TEMP/attempt-rows.jsonl"
-          # A failed or empty listing exits 75 and is never classified: a truncated listing
-          # would write `Not run` over the cells of a skipped wave it lost.
+          # A transient failure or an empty listing exits 75, a permanent failure 1, and neither
+          # is classified: a truncated listing would write `Not run` over the cells it lost.
           if python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" list \
                > "$RUNNER_TEMP/jobs.jsonl" 2> "$RUNNER_TEMP/diagnostics.txt"; then
             python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" \
@@ -125,5 +125,4 @@ runs:
         set -euo pipefail
         if [ -s "$RUNNER_TEMP/stranded.txt" ]; then
           python3 "$GITHUB_ACTION_PATH/../../scripts/apply-complete" stranded "$RUNNER_TEMP/stranded.txt"
-          exit 1
         fi
