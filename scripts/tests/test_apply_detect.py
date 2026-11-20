@@ -712,6 +712,26 @@ def test_refuse_unreviewed_refuses_everything_else(decision, exempt):
     assert str(exc_info.value).startswith("::error::not authorized")
 
 
+@pytest.mark.parametrize(
+    ("decision", "kind"),
+    [
+        ("REVIEW_REQUIRED", ad.Refused),
+        ("CHANGES_REQUESTED", ad.Refused),
+        ("BANANA", SystemExit),
+        ("", SystemExit),
+    ],
+)
+def test_refuse_unreviewed_refuses_by_rule_only_on_a_known_decision(decision, kind):
+    """A missing review or requested changes read `refused`; an undetermined decision is a
+    failed read and reads `failed`.
+
+    Mutation: raise `Refused` for every reason -- `BANANA` and `""` red. Mutation: drop
+    `CHANGES_REQUESTED` from the refused set -- red."""
+    with pytest.raises(SystemExit) as exc_info:
+        ad.refuse_unreviewed("dev-eu", _gate(""), decision)
+    assert type(exc_info.value) is kind
+
+
 def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
     # One function decides review policy on all three call sites, and a second implementation
     # here would eventually disagree with comment-ops about the same pull request. The reason

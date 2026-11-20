@@ -404,7 +404,8 @@ def refuse_unreviewed(env, table, decision):
     decision the `review` job read server-side: comment-ops decided on the state
     at comment time, and an approval dismissed since then must not still apply.
     The run dies before any wave, the apply checks stay pending, and the gate stays
-    pending with them.
+    pending with them. Only REVIEW_REQUIRED and CHANGES_REQUESTED raise `Refused`; a decision
+    that cannot be determined raises plain `SystemExit`, because the reads failed.
 
     `table` must have been through `validate_structure`: `exempt_envs` reads only a
     boolean `false` as review-exempt, so a `review: no` would otherwise refuse as
@@ -412,7 +413,8 @@ def refuse_unreviewed(env, table, decision):
     exempt = bm.ec.exempt_envs(table)
     reason = az._review_reason(decision, env, exempt)
     if reason:
-        raise Refused(f"::error::{reason}")
+        refusal = Refused if decision in ("REVIEW_REQUIRED", "CHANGES_REQUESTED") else SystemExit
+        raise refusal(f"::error::{reason}")
 
 
 def refuse_actor(lines, app_id, actor, triggering_actor):
