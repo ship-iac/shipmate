@@ -114,9 +114,9 @@ def from_api(number, repository):
 
 
 def draft_now(repository, number):
-    """`"true"` or `"false"`: pull request `number`'s draft flag from one API read, for a payload
-    that said draft. A failed read or a `draft` that is not a bool keeps `"true"` and prints one
-    `::warning::` naming the cause, so the read never turns a plan into a skip."""
+    """`"true"`, `"false"` or `""`: pull request `number`'s draft flag from one API read, for a
+    payload that said draft. A failed read or a `draft` that is not a bool returns `""` and prints
+    one `::warning::` naming the cause; the caller treats `""` as a draft."""
     try:
         draft = _gh_json(f"repos/{repository}/pulls/{number}")["draft"]
     except READ_ERRORS as exc:
@@ -130,7 +130,7 @@ def draft_now(repository, number):
         f"({command_data(one_line(cause))}); this run skips as a draft",
         file=sys.stderr,
     )
-    return "true"
+    return ""
 
 
 def main():
@@ -138,12 +138,15 @@ def main():
     # refused rather than planned.
     payload = event_payload(os.environ.get("GITHUB_EVENT_PATH", ""))
     pr = payload.get("pull_request")
+    provenance = ""
     if isinstance(pr, dict) and pr:
         facts = _facts(pr, "false")
         if facts["is_draft"] == "true":
-            facts["is_draft"] = draft_now(
-                os.environ.get("GITHUB_REPOSITORY", ""), facts["pr_number"]
-            )
+            now = draft_now(os.environ.get("GITHUB_REPOSITORY", ""), facts["pr_number"])
+            # A failed read keeps the payload's draft, so the read can only turn a skip into a plan.
+            facts["is_draft"] = now or "true"
+            reread = f"draft={now}" if now else "failed"
+            provenance = f" (payload draft=true, re-read {reread})"
     else:
         number = str((payload.get("inputs") or {}).get("pr_number") or "").strip()
         if not number:
@@ -158,7 +161,8 @@ def main():
     write_outputs(**facts)
     print(
         f"pull request #{facts['pr_number']} at {facts['head_sha']} "
-        f"({facts['head_repo']}), draft={facts['is_draft']}, on-demand={facts['on_demand']}"
+        f"({facts['head_repo']}), draft={facts['is_draft']}{provenance}, "
+        f"on-demand={facts['on_demand']}"
     )
 
 

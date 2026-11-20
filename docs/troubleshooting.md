@@ -1854,8 +1854,12 @@ draft status: the ready run waits behind the draft run and plans after it. A
 run whose event says draft reads the draft flag again when it starts, so a run
 for a push made before the pull request was marked ready that reaches the
 `plan-<pr>` concurrency group after the ready run cancels the ready run and
-plans its own head. When that read fails, the run warns `could not re-read
-whether pull request #<n> is still a draft (<cause>); this run skips as a
+plans its own head. The `facts` step's log line names both values, for example
+`draft=false (payload draft=true, re-read draft=false)`, so a stale draft
+payload reads apart from a real draft. When that read fails or answers a draft
+flag that is not a boolean, the line reads
+`draft=true (payload draft=true, re-read failed)` and the run warns `could not
+re-read whether pull request #<n> is still a draft (<cause>); this run skips as a
 draft` and plans nothing; comment `shipmate plan` to recover (the gate's "mark
 it ready" remedy does not apply: the pull request is already ready).
 

@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **The `facts` log line names where a draft flag came from.** When a `pull_request` payload says draft, `pr-facts` logs the payload's value and the re-read's result, as `draft=false (payload draft=true, re-read draft=false)`, `draft=true (payload draft=true, re-read draft=true)` or `draft=true (payload draft=true, re-read failed)`, so a stale draft payload reads apart from a real draft. Its outputs are unchanged (`docs/troubleshooting.md`).
+
 ## [0.57.0] — 2026-11-18
 
 Tags `53afc4f`.
