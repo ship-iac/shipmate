@@ -1110,23 +1110,23 @@ def _shape_error(fields):
     return f"{bad[0]} is not the shape the comment reads" if bad else None
 
 
-def read_report(path, refused=False):
+def read_report(path, detect_errored=False):
     """(fields, unread) from apply-detect's report file at `path`. `fields` holds every
     `_REPORT_DEFAULTS` key, a missing one at its default: a behind refusal's report holds only
-    `behind` and `base`. Only a report `write_report` finished
-    carries `"complete": true`; an incomplete one is read only when the detect job `refused`
-    (failed with a refusal), whose report is the empty one written before any step (or what the
-    refusal wrote). `unread` is True, and `fields` all defaults, when the file is missing or
-    unreadable, is not a JSON object, is incomplete without a refusal (a crash, or a failure
-    that named no error), or holds a field the renderer cannot read
-    (`_shape_error`); one warning names the cause. The caller then never renders a green verdict:
-    empty fields alone would."""
+    `behind` and `base`. Only a report `write_report` finished carries `"complete": true`;
+    an incomplete one is read only when `detect_errored` (the detect job failed with an
+    `::error::`), whose report is the empty one written before any step (or what the failing
+    step wrote). `unread` is True, and `fields` all defaults, when the file is missing or
+    unreadable, is not a JSON object, is incomplete without that error (a crash, or a failure
+    that named no error), or holds a field the renderer cannot read (`_shape_error`); one
+    warning names the cause. The caller then never renders a green verdict: empty fields alone
+    would."""
     try:
         report = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
         if not isinstance(report, dict):
             raise ValueError("not a JSON object")
-        if report.get("complete") is not True and not refused:
-            raise ValueError("it is incomplete, and detect refused nothing")
+        if report.get("complete") is not True and not detect_errored:
+            raise ValueError("it is incomplete, and detect named no error")
         fields = {k: report.get(k, d) for k, d in _REPORT_DEFAULTS.items()}
         if cause := _shape_error(fields):
             raise ValueError(cause)
@@ -1148,7 +1148,7 @@ def main():
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "")
     r, unread = read_report(
         os.environ.get("SHIPMATE_REPORT_PATH", ""),
-        refused=os.environ.get("SHIPMATE_DETECT_RESULT") == "failure"
+        detect_errored=os.environ.get("SHIPMATE_DETECT_RESULT") == "failure"
         and bool(os.environ.get("SHIPMATE_DETECT_REFUSAL")),
     )
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
