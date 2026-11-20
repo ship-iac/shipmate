@@ -128,13 +128,22 @@ def cell_rows(jobs, level, stack, env):
     return rows
 
 
+def is_carried(row, jobs):
+    """Whether the listed job `row` is a copy of an earlier attempt's row in `jobs`: a re-run
+    lists a job it did not re-run again under the new attempt, with the same name and start and
+    no steps. A carried job ran in its original attempt only."""
+    attempt, key = row.get("run_attempt"), (row.get("name"), row.get("started_at"))
+    return isinstance(attempt, int) and any(
+        isinstance(j.get("run_attempt"), int)
+        and j["run_attempt"] < attempt
+        and (j.get("name"), j.get("started_at")) == key
+        for j in jobs
+    )
+
+
 def _applied(row, earlier):
-    """Whether the `apply` row `row` applied: True, False, or None when unknown. `earlier` maps
-    `(name, started_at)` of earlier attempts' rows to their verdicts: a re-run lists a job it did
-    not re-run again under the new attempt, with the same name and start and no steps."""
-    key = (row.get("name"), row.get("started_at"))
-    if key in earlier:
-        return earlier[key]
+    """Whether the `apply` row `row`, no carried copy, applied: True, False, or None when
+    unknown. `earlier` holds the names of earlier attempts' `apply` rows."""
     steps = row.get("steps")
     if steps == []:
         # A cell cancelled while pending ends with no steps and no earlier row; a queued, waiting
@@ -143,7 +152,7 @@ def _applied(row, earlier):
             "cancelled",
             "skipped",
         )
-        return False if ended and all(name != key[0] for name, _ in earlier) else None
+        return False if ended and row.get("name") not in earlier else None
     if not isinstance(steps, list):
         return None
 
@@ -156,21 +165,22 @@ def _applied(row, earlier):
 
 def attempts(jobs, stack, env):
     """`{attempt: {"applied": ..., "saved": ...}}` for the cell's rows in `jobs`, a
-    `filter=all` listing. `applied` is the attempt's `apply` rows' verdict (`_applied`), True
-    when any applied, None when none is listed or any is unknown. `saved` is True when a `save`
-    row of the attempt or a later one succeeded: a later save succeeds only after the earlier
-    attempts' state was found. None when no such row is listed, else False."""
+    `filter=all` listing. `applied` is the verdict (`_applied`) of the attempt's `apply` rows
+    that are no carried copy (`is_carried`): True when any applied, None when the attempt lists
+    no `apply` row or any is unknown, False when every row is carried or did not apply. `saved`
+    is True when a `save` row of the attempt or a later one succeeded: a later save succeeds only
+    after the earlier attempts' state was found. None when no such row is listed, else False."""
     rows = {}
     for job in jobs:
         part = cell_part(job.get("name", ""), stack, env)
         if part:
             rows.setdefault(job.get("run_attempt"), {"apply": [], "save": []})[part].append(job)
-    earlier, out = {}, {}
+    earlier, out = set(), {}
     for attempt in sorted(rows):
-        verdicts = [_applied(row, earlier) for row in rows[attempt]["apply"]]
-        for row, verdict in zip(rows[attempt]["apply"], verdicts, strict=True):
-            earlier.setdefault((row.get("name"), row.get("started_at")), verdict)
-        applied = True if True in verdicts else None if None in verdicts or not verdicts else False
+        listed = rows[attempt]["apply"]
+        verdicts = [_applied(row, earlier) for row in listed if not is_carried(row, jobs)]
+        earlier.update(row.get("name") for row in listed)
+        applied = True if True in verdicts else None if None in verdicts or not listed else False
         saves = [j for k in rows if k >= attempt for j in rows[k]["save"]]
         saved = any(j.get("conclusion") == "success" for j in saves) if saves else None
         out[attempt] = {"applied": applied, "saved": saved}

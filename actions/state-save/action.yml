@@ -47,7 +47,7 @@ runs:
           echo "go=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        echo "::error::shipmate/actions/state-save: the save decision (kind '$KIND', attempt '$ATTEMPT') is unknown or incomplete; nothing is saved or looked up."
+        echo "::error::shipmate/actions/state-save: the save decision (kind '$KIND', attempt '$ATTEMPT') is unknown or incomplete, so this cell's state is not known saved. Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge can apply this cell's reviewed plan again against the state from before the apply. Before applying or merging any plan of this stack in this environment, on any pull request, follow docs/troubleshooting.md section The apply step ran and its state was not saved."
         exit 1
     - name: Save or look up the state
       id: primary

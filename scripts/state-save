@@ -18,7 +18,7 @@ state key) and `path`. In order:
 "Unsaved" is `apply-gate.unsaved` over this run's `filter=all` listing, at this job's level. A
 `save` only ever writes this attempt's own state, so a `save` that succeeds after its earlier
 attempts were found clears them; a `lookup` never writes. An `apply` row a re-run carried from
-an earlier attempt (same name and `started_at`) is not this attempt's apply.
+an earlier attempt is not this attempt's apply (`apply-gate.is_carried`).
 
 Only `save` and `lookup` reach the runner check (`RUNNER_ENVIRONMENT` exactly
 `github-hosted`), right before the first artifact call: a `skip` succeeds on any runner. The
@@ -60,6 +60,14 @@ HOSTED_ONLY = (
     "what it saves. Use a GitHub-hosted runs_on or a remote backend"
 )
 MEMBER = "state.bundle"
+#: The remedy every refusal ends with; `actions/state-save` repeats it, pinned by
+#: `test_state_save.py` against this constant.
+REMEDY = (
+    "Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge "
+    "can apply this cell's reviewed plan again against the state from before the apply. Before "
+    "applying or merging any plan of this stack in this environment, on any pull request, follow "
+    "docs/troubleshooting.md section The apply step ran and its state was not saved."
+)
 NO_STATE = ("not-applied", "none")
 SKIP = ("skip", None, None)
 
@@ -71,11 +79,7 @@ def refuse(reason, attempts):
     keys = " and ".join(f"{prefix}{k} or {prefix}{k}-r1" for k in attempts)
     raise SystemExit(
         f"::error::{reason}, so the state of {env} / {stack} is not known saved under {keys}. "
-        "Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a "
-        "merge can apply this cell's reviewed plan again against the state from before the "
-        "apply. Before applying or merging any plan of this stack in this environment, on any "
-        "pull request, follow docs/troubleshooting.md section The apply step ran and its state "
-        "was not saved."
+        + REMEDY
     )
 
 
@@ -139,7 +143,7 @@ def _cell(stack, env, own):
     """`{"apply": [...], "save": [...]}`, the cell's rows at this job's level in the run's
     `filter=all` listing; refuses when the listing fails or does not list this job."""
     repo, run_id = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"]
-    jobs = listed_jobs(repo, run_id, job_filter="all")
+    jobs = listed_jobs(repo, run_id, counted=True, job_filter="all")
     level = ag.level_of(jobs or [], os.environ["JOB_ID"])
     if not level:
         refuse("the run's job listing failed or does not list this job", [own])
@@ -152,22 +156,6 @@ def _unsaved(cell, stack, env, own):
     if len(unsaved) > 1:
         refuse(_unsaved_reason(unsaved), unsaved)
     return unsaved
-
-
-def _own_started(cell, stack, env, own):
-    """Whether this attempt's own `apply` row may have started `Apply the cell`. A row carried
-    from an earlier attempt is not this attempt's apply; no row, or several, may have."""
-    mine = [r for r in cell["apply"] if r.get("run_attempt") == own]
-    if len(mine) != 1:
-        return True
-    earlier = {
-        (r.get("name"), r.get("started_at"))
-        for r in cell["apply"]
-        if isinstance(r.get("run_attempt"), int) and r["run_attempt"] < own
-    }
-    if (mine[0].get("name"), mine[0].get("started_at")) in earlier:
-        return False
-    return ag.attempts(mine, stack, env)[own]["applied"] is not False
 
 
 def _unsaved_reason(attempts):
@@ -194,7 +182,8 @@ def decide(stack, env, state, own):
     if own == 1 and value is not None:
         return SKIP
     cell = _cell(stack, env, own)
-    if value is None and _own_started(cell, stack, env, own):
+    own_apply = ag.attempts(cell["apply"] + cell["save"], stack, env).get(own, {})
+    if value is None and own_apply.get("applied") is not False:
         refuse(f"the apply job's state output reads {state!r} after its apply may have run", [own])
     unsaved = _unsaved(cell, stack, env, own) if own > 1 else []
     if not unsaved:

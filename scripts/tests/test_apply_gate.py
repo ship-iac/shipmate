@@ -168,33 +168,39 @@ _PENDING_CANCEL = {
 _RR = [_RR_APPLY_1, _RR_SAVE_1, _RR_APPLY_2, _RR_SAVE_2]
 
 
+def test_a_carried_row_is_a_copy_of_an_earlier_attempts_row():
+    """Mutations: `is_carried` matches on the name alone; it matches a later attempt's row."""
+    assert ag.is_carried(_RR_APPLY_2, _RR)
+    assert not ag.is_carried(_RR_APPLY_1, _RR)
+    assert not ag.is_carried({**_RR_APPLY_2, "started_at": "2026-11-17T19:52:18Z"}, _RR)
+
+
 def test_a_later_attempts_successful_save_credits_the_earlier_attempt():
     """Mutation: `saved` reads only the attempt's own `save` row."""
     credited = [*_RR[:3], {**_RR_SAVE_2, "conclusion": "success"}]
     assert ag.attempts(credited, "stacks/app", "dev-eu") == {
         1: {"applied": True, "saved": True},
-        2: {"applied": True, "saved": True},
+        2: {"applied": False, "saved": True},
     }
     assert ag.unsaved(credited, "stacks/app", "dev-eu") == []
 
 
 def test_a_later_attempts_failed_save_leaves_the_earlier_attempt_unsaved():
-    """Mutations: a carried `apply` row reads as not applied; `unsaved` counts `before`
-    itself."""
+    """A carried `apply` row is attempt 1's apply, not attempt 2's. Mutations: count a carried
+    row as an apply of its re-run attempt; `unsaved` counts `before` itself."""
     assert ag.attempts(_RR, "stacks/app", "dev-eu") == {
         1: {"applied": True, "saved": False},
-        2: {"applied": True, "saved": False},
+        2: {"applied": False, "saved": False},
     }
-    assert ag.unsaved(_RR, "stacks/app", "dev-eu") == [1, 2]
-    assert ag.unsaved(_RR, "stacks/app", "dev-eu", before=2) == [1]
+    assert ag.unsaved(_RR, "stacks/app", "dev-eu") == [1]
+    assert ag.unsaved(_RR, "stacks/app", "dev-eu", before=1) == []
     assert ag.unsaved(_RR, "stacks/us", "dev-eu") == []
 
 
 def test_steps_free_apply_rows_read_by_whether_an_earlier_row_explains_them():
-    """A row cancelled while pending reads not applied; a carried row takes the earlier row's
-    verdict; a steps-free row an earlier same-name row does not explain reads unknown, and an
-    unknown apply with no save is unsaved. Mutation: read every `steps: []` row as not
-    applied."""
+    """A row cancelled while pending reads not applied; a steps-free row an earlier same-name
+    row does not explain reads unknown, and an unknown apply with no save is unsaved. Mutation:
+    read every `steps: []` row as not applied."""
     assert ag.attempts([_PENDING_CANCEL], "stacks/app", "dev-eu") == {
         1: {"applied": False, "saved": None}
     }

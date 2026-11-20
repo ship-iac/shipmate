@@ -107,11 +107,7 @@ def _keys(*attempts):
 def _refusal(reason, *attempts):
     return (
         f"::error::{reason}, so the state of dev-eu / stacks/app is not known saved under "
-        f"{_keys(*attempts)}. Never re-run this job or its workflow run. A re-run, a shipmate "
-        "apply comment, or a merge can apply this cell's reviewed plan again against the state "
-        "from before the apply. Before applying or merging any plan of this stack in this "
-        "environment, on any pull request, follow docs/troubleshooting.md section The apply step "
-        "ran and its state was not saved."
+        f"{_keys(*attempts)}. {ss.REMEDY}"
     )
 
 
@@ -129,6 +125,7 @@ class _Job:
         jobs=None,
         artifacts=(),
         archives=None,
+        short=False,
         **env,
     ):
         self.calls = []
@@ -153,8 +150,8 @@ class _Job:
             monkeypatch.setenv(k, v)
 
         def listed(repo, run_id, run=None, *, counted=False, job_filter="latest"):
-            self.calls.append(("jobs", repo, run_id, job_filter))
-            return jobs
+            self.calls.append(("jobs", repo, run_id, job_filter, counted))
+            return None if counted and short else jobs
 
         def run(argv):
             self.calls.append(argv)
@@ -192,7 +189,7 @@ def _one(attempt=1, bundle=None):
     }
 
 
-JOBS_LISTED = ("jobs", "o/r", "77", "all")
+JOBS_LISTED = ("jobs", "o/r", "77", "all", True)
 
 
 @pytest.mark.parametrize(
@@ -410,11 +407,37 @@ _RERUN_FAILED = [_A1, _save(1, "failure"), _carried(2, _A1), _save(2, None)]
 def test_rerun_failed_jobs_looks_up_the_carried_attempt(monkeypatch, tmp_path, state):
     """ "Re-run failed jobs" after attempt 1 applied and its save failed: `apply` is carried,
     with its output or none. Mutations: compare the output's attempt with `<=` (an earlier
-    attempt's digest saves); drop the carried-row test (the carried row reads as this
-    attempt's apply, so an empty output refuses)."""
+    attempt's digest saves); count a carried row as an apply of its re-run attempt
+    (`apply-gate.attempts`), so an empty output refuses."""
     job = _Job(monkeypatch, tmp_path, state=state, attempt=2, jobs=_RERUN_FAILED, **_one())
     assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH})
     assert not (job.ws / PATH).exists()
+
+
+def test_a_second_rerun_of_failed_jobs_looks_up_only_the_attempt_that_applied(
+    monkeypatch, tmp_path
+):
+    """Attempt 1 applied and its save failed; attempts 2 and 3 each re-ran only the failed
+    `save`, carrying `apply`. Only attempt 1 applied. Mutation: count carried rows as applies
+    of their re-run attempt (`apply-gate.attempts`), which refuses naming attempts 1 and 2."""
+    jobs = [
+        _A1,
+        _save(1, "failure"),
+        _carried(2, _A1),
+        {**_save(2, "failure"), "id": 202},
+        _carried(3, _A1),
+        _save(3, None),
+    ]
+    job = _Job(monkeypatch, tmp_path, state="", attempt=3, jobs=jobs, **_one())
+    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH})
+
+
+def test_a_short_listing_refuses(monkeypatch, tmp_path):
+    """A listing short of its `total_count` could hide an unsaved attempt. Mutation: list with
+    `counted=False`."""
+    job = _Job(monkeypatch, tmp_path, state="", attempt=2, jobs=_RERUN_FAILED, short=True, **_one())
+    assert job() == (_refusal(_UNREADABLE, 2), {})
+    assert job.calls == [JOBS_LISTED]
 
 
 def test_a_carried_digest_binds_the_looked_up_bundle(monkeypatch, tmp_path):
@@ -723,11 +746,7 @@ def _call(mode, suffix, attempt="1"):
 
 NOT_FOUND = (
     "::error::the state of dev-eu / stacks/app was not found under state/stacks-app/dev-eu/77-1 "
-    "or state/stacks-app/dev-eu/77-1-r1. Never re-run this job or its workflow run. A re-run, a "
-    "shipmate apply comment, or a merge can apply this cell's reviewed plan again against the "
-    "state from before the apply. Before applying or merging any plan of this stack in this "
-    "environment, on any pull request, follow docs/troubleshooting.md section The apply step "
-    "ran and its state was not saved.\n"
+    f"or state/stacks-app/dev-eu/77-1-r1. {ss.REMEDY}\n"
 )
 
 
@@ -750,10 +769,15 @@ def test_a_skip_succeeds_with_no_cache_call(tmp_path):
     ids=["empty", "bogus", "lookup-no-attempt", "save-no-path"],
 )
 def test_an_unknown_or_incomplete_decision_fails_with_no_cache_call(tmp_path, fetched):
-    """Mutations: default an empty `kind` to `skip`; drop the empty-attempt test."""
+    """The refusal names the runbook section. Mutations: default an empty `kind` to `skip`; drop
+    the empty-attempt test; drop the remedy from the refusal."""
     failed, calls, log = _composite(tmp_path, fetched, {"": "true"})
     assert (failed, calls) == (True, [])
-    assert log.startswith("::error::shipmate/actions/state-save: the save decision ")
+    assert log == (
+        "::error::shipmate/actions/state-save: the save decision (kind "
+        f"'{fetched.get('kind', '')}', attempt '{fetched.get('attempt', '')}') is unknown or "
+        f"incomplete, so this cell's state is not known saved. {ss.REMEDY}\n"
+    )
 
 
 @bash_only
