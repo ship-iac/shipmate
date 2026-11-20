@@ -337,3 +337,50 @@ def test_an_unreadable_draft_flag_keeps_the_draft_skip_and_warns(
             "this run skips as a draft"
         )
     ]
+
+
+def _facts_line(draft):
+    return f"pull request #7 at {'a' * 40} (own/repo), draft={draft}, on-demand=false"
+
+
+def test_a_ready_payload_logs_its_draft_value_alone(monkeypatch, tmp_path, capsys):
+    """No re-read, so no provenance. Mutation: print the payload and re-read values on every
+    payload leg."""
+    text, _ = _main(monkeypatch, tmp_path, {"pull_request": _PAYLOAD_PR})
+    assert _facts_out(text)["is_draft"] == "false"
+    assert capsys.readouterr().out == _facts_line("false") + "\n"
+
+
+@pytest.mark.parametrize("now", ["false", "true"])
+def test_a_draft_payload_logs_the_payload_and_re_read_values(monkeypatch, tmp_path, capsys, now):
+    """A stale draft payload and a real draft read apart in the log. Mutation: log only the
+    final draft value."""
+    gh = _api(_PAYLOAD_PR | {"draft": now == "true"})
+    text, _ = _main(monkeypatch, tmp_path, _DRAFT_PAYLOAD, gh=gh)
+    assert _facts_out(text)["is_draft"] == now
+    assert capsys.readouterr().out == (
+        _facts_line(f"{now} (payload draft=true, re-read draft={now})") + "\n"
+    )
+
+
+def test_a_failed_re_read_logs_failed_and_skips_as_a_draft(monkeypatch, tmp_path, capsys):
+    """Mutations: map a failed read to `false`; log a failed read as `re-read draft=true`."""
+    text, _ = _main(monkeypatch, tmp_path, _DRAFT_PAYLOAD, gh=_fail)
+    assert _facts_out(text)["is_draft"] == "true"
+    captured = capsys.readouterr()
+    assert captured.out == _facts_line("true (payload draft=true, re-read failed)") + "\n"
+    assert captured.err == (
+        "::warning::could not re-read whether pull request #7 is still a draft "
+        "(command failed (1): gh api repos/own/repo/pulls/7 | HTTP 502); this run skips as a "
+        "draft\n"
+    )
+
+
+def test_the_dispatch_leg_logs_the_api_draft_value_alone(monkeypatch, tmp_path, capsys):
+    """The dispatch leg never re-reads, even for a draft. Mutation: print the payload and
+    re-read values on the dispatch leg."""
+    text, _ = _main(monkeypatch, tmp_path, {"inputs": {"pr_number": "42"}}, gh=_api(_API_PR))
+    assert _facts_out(text)["is_draft"] == "true"
+    assert capsys.readouterr().out == (
+        f"pull request #42 at {'c' * 40} (own/repo), draft=true, on-demand=true\n"
+    )
