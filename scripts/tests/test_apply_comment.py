@@ -668,16 +668,25 @@ def test_a_held_cell_is_named_linked_to_its_save_job_and_holds_the_retry():
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], "", "success", head_sha=SHA)
     assert body.split("\n\n")[-2] == (
         'state not saved: **@<!-- -->acme/db (dev-eu)** <a href="https://gh/job/save">save '
-        "log</a>. Their apply step may have run and their state is not known saved. Never re-run "
-        "these cells' jobs or their workflow run. A re-run, a `shipmate apply` comment, or a "
-        "merge can apply their reviewed plans again against the state from before the apply. "
-        "Before applying or merging any plan of a named stack in the environment named beside "
-        "it, on any pull request, follow docs/troubleshooting.md section "
-        "`The apply step ran and its state was not saved`.\n"
+        "log</a>. " + _HELD_SENTENCES + "\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply` once the "
         "cells under `state not saved:` are recovered, because it applies their reviewed plans "
         "again." + _LOST_POINTER
     )
+
+
+#: The `state not saved:` note after its cell list, hand-written. Mutation: restore the old
+#: sentence "A re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans
+#: again against the state from before the apply." -- both whole-comment tests red.
+_HELD_SENTENCES = (
+    "Their apply step may have run and their state is not known saved. Never re-run these "
+    "cells' jobs or their workflow run. While their apply checks are held, a `shipmate apply` "
+    "of this head and the merge deploy refuse them; once a check is returned by hand, an apply "
+    "applies its reviewed plan again against the state from before the apply. Before applying "
+    "or merging any plan of a named stack in the environment named beside it, on any pull "
+    "request, follow docs/troubleshooting.md section "
+    "`The apply step ran and its state was not saved`, which says when to return the checks."
+)
 
 
 def test_the_held_note_is_capped_and_absent_without_a_held_cell():
@@ -715,12 +724,7 @@ def test_an_applied_cell_with_a_held_check_is_never_not_recorded():
         "logs</a></summary>\n\n```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed."
         "\n```\n</details>\n\n"
         'state not saved: **stacks/app (dev-eu)** <a href="https://gh/job/save">save log</a>. '
-        "Their apply step may have run and their state is not known saved. Never re-run these "
-        "cells' jobs or their workflow run. A re-run, a `shipmate apply` comment, or a merge can "
-        "apply their reviewed plans again against the state from before the apply. Before "
-        "applying or merging any plan of a named stack in the environment named beside it, on "
-        "any pull request, follow docs/troubleshooting.md section "
-        "`The apply step ran and its state was not saved`."
+        + _HELD_SENTENCES
     )
 
 

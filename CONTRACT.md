@@ -4513,12 +4513,14 @@ job believed before its check was completed:
   `save` job when the run's job listing holds one, adds
   ``, whose apply checks are titled `State not saved` `` past 5, and says:
   their apply step may have run and their state is not known saved; never
-  re-run these cells' jobs or their workflow run; a re-run, a `shipmate apply`
-  comment, or a merge can apply their reviewed plans again against the state
-  from before the apply; before applying or merging any plan of a named stack
-  in the environment named beside it, on any pull request, follow
+  re-run these cells' jobs or their workflow run; while their apply checks are
+  held, a `shipmate apply` of this head and the merge deploy refuse them; once a
+  check is returned by hand, an apply applies its reviewed plan again against
+  the state from before the apply; before applying or merging any plan of a
+  named stack in the environment named beside it, on any pull request, follow
   `docs/troubleshooting.md`
-  §`The apply step ran and its state was not saved`, which holds the procedure.
+  §`The apply step ran and its state was not saved`, which says when to return
+  the checks.
   While it is present, the `not attempted:` note's retry command is to run
   once those cells are recovered. Every `not attempted:` note also says to
   follow that section first when a cell's `save` job log names it, because the
