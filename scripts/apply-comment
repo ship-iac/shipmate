@@ -540,11 +540,12 @@ def _verdict(
     or blocked row shows it), then `N waiting` when cells wait, `N locked` for the locked
     `held_cells`, `N held (base changed)` for the overlap ones not also locked, so a cell under
     both causes counts once, and `N environments pending` for the distinct environments of
-    `held` and `left`; the circle is the worst of the rows' and, when any of those four is
-    present, ⚪, or 🔴 for any outcome. Without rows: `🔴 <outcome>`, the held sentence, the
-    locked-or-overlap sentence when `held_cells` holds both causes, the locked sentence, the
-    overlap sentence, the waiting sentence, the left sentence when `left` names an environment
-    (left for a bare apply, `targeted` or skipped), or `🟢 no pending applies`. Then
+    `held` and `left`; the circle is the worst of the rows' and, when any of those four or
+    `result unknown` is present, ⚪, or 🔴 for any outcome. Without rows: `🔴 <outcome>`,
+    the held sentence, the locked-or-overlap sentence when `held_cells` holds both causes, the
+    locked sentence, the overlap sentence, the waiting sentence, the left sentence when `left`
+    names an environment (left for a bare apply, `targeted` or skipped), or
+    `🟢 no pending applies`. Then
     `provenance`. The circle is returned with the line so the footer decision reads it, never
     the rendered text. `unknown` (apply-detect's report was unread, so every set above is empty)
     keeps a run with no outcome off 🟢: with rows the counts end `result unknown` and ⚪

@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- **The apply result comment's verdict names a refused or cancelled run and counts the environments it left pending.** A run whose `detect` refused by rule (a cell behind the base, a targeted apply held for review), or whose `lock` job refused a cell another pull request or an unknown holder locks, reads `🔴 refused` (`🔴 refused, 1 not attempted` with rows) instead of `🔴 failed`; any other `detect` or `lock` error still reads `🔴 failed`. A run in which a job was cancelled and none failed reads `🔴 cancelled` (`🔴 cancelled, 1 not attempted, 2 applied` with rows). With rows, the counts end `N environments pending` (`1 environment pending`) for the distinct environments held for review, left to a bare apply, `targeted` or skipped, and add ⚪ to the circle: one applied cell with `prod` held reads `⚪ 1 applied, 1 environment pending`, not `🟢 1 applied`. `apply-detect` and `lock-acquire` output `refused_by_rule`, which `apply-summary` takes as `refused-by-rule` (`CONTRACT.md` §Apply result comment, `docs/troubleshooting.md`).
+
 ### Fixed
 
 - **The `facts` log line names where a draft flag came from.** When a `pull_request` payload says draft, `pr-facts` logs the payload's value and the re-read's result, as `draft=false (payload draft=true, re-read draft=false)`, `draft=true (payload draft=true, re-read draft=true)` or `draft=true (payload draft=true, re-read failed)`, so a stale draft payload reads apart from a real draft. Its outputs are unchanged (`docs/troubleshooting.md`).

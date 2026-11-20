@@ -47,10 +47,10 @@ def test_the_lock_job_acquires_every_level_with_the_engine_key():
 _LOCK_ACQUIRE_OUTPUTS = {
     "refusal": {
         "description": (
-            "The first error of the `::error::` message that failed the step (a refusal or a "
-            "failed API call), without the prefix, its lines joined into one; empty when the step "
-            "raised none. Set although the step fails. Branch-controlled text (it can name a stack "
-            "path), so a reader passes it through `env:`."
+            "The first error of the `::error::` message that failed the step (whatever its "
+            "cause, a failed API call included), without the prefix, its lines joined into one; "
+            "empty when the step raised none. Set although the step fails. Branch-controlled text "
+            "(it can name a stack path), so a reader passes it through `env:`."
         ),
         "value": "${{ steps.a.outputs.refusal }}",
     },

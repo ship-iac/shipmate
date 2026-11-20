@@ -309,9 +309,9 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     },
     "refusal": {
         "description": (
-            "The first error of the `::error::` message that failed the step (a refusal or a "
-            "failed tool or API call), without the prefix, its lines joined into one; empty when "
-            "the step raised none. Set "
+            "The first error of the `::error::` message that failed the step (whatever its "
+            "cause, a failed tool or API call included), without the prefix, its lines joined "
+            "into one; empty when the step raised none. Set "
             "although the step fails, and read by the apply result comment. Branch-controlled "
             "text (it can name a stack path), so a reader passes it through `env:`."
         ),
