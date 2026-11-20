@@ -137,8 +137,13 @@ def _applied(row, earlier):
         return earlier[key]
     steps = row.get("steps")
     if steps == []:
-        # A cell cancelled while pending lists no steps and no earlier row.
-        return False if all(name != key[0] for name, _ in earlier) else None
+        # A cell cancelled while pending ends with no steps and no earlier row; a queued, waiting
+        # or running row may still apply, so it reads unknown.
+        ended = row.get("status") == "completed" and row.get("conclusion") in (
+            "cancelled",
+            "skipped",
+        )
+        return False if ended and all(name != key[0] for name, _ in earlier) else None
     if not isinstance(steps, list):
         return None
 

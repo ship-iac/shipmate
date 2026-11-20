@@ -93,10 +93,8 @@ def test_held_names_are_the_newest_in_progress_runs_titled_held():
     assert ag.held_names(runs) == {_EU}
 
 
-# Rows copied from the jobs?filter=all listings of probe runs 44161778000 (arm `rr`: attempt 1
-# applied and its save failed; attempt 2 re-ran the failed save, carrying the apply row) and
-# 44164180908 (a cell cancelled while pending on its group). Only the names are re-keyed from the
-# probe's `chain / next / next / rr / s / {apply,saver}` to the cell grammar.
+# Rows copied from jobs?filter=all listings of runs 44161778000 (applied, save failed, failed
+# save re-run) and 44164180908 (cancelled while pending), names re-keyed to the cell grammar.
 _APPLY = "apply / run / L0 / dev-eu / stacks/app / apply"
 _SAVE = "apply / run / L0 / dev-eu / stacks/app / save"
 _PROBE_STEP = (
@@ -207,6 +205,26 @@ def test_steps_free_apply_rows_read_by_whether_an_earlier_row_explains_them():
         2: {"applied": None, "saved": None},
     }
     assert ag.unsaved([_RR_APPLY_1, unexplained], "stacks/app", "dev-eu") == [1, 2]
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion", "applied"),
+    [
+        ("completed", "cancelled", False),
+        ("completed", "skipped", False),
+        ("completed", "success", None),
+        ("queued", None, None),
+        ("waiting", None, None),
+        ("in_progress", None, None),
+    ],
+)
+def test_a_steps_free_row_with_no_earlier_row_reads_not_applied_only_once_it_ended(
+    status, conclusion, applied
+):
+    """Mutation: read a steps-free row with no earlier row as not applied whatever its status
+    and conclusion."""
+    row = {**_PENDING_CANCEL, "status": status, "conclusion": conclusion}
+    assert ag.attempts([row], "stacks/app", "dev-eu") == {1: {"applied": applied, "saved": None}}
 
 
 @pytest.mark.parametrize(

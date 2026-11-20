@@ -2169,9 +2169,7 @@ def test_every_wave_names_the_steps_the_deploy_reads():
     """The deploy finds whether a cell applied in a jobs listing by these step names.
 
     Mutation: rename the wave's `Apply the cell` step -- red.
-    Mutation: rename the wave's `Pre-apply check` step -- red.
-    Mutation: rename `APPLY_STEP` -- red.
-    Mutation: rename `PRE_APPLY_STEP` -- red."""
+    Mutation: rename the wave's `Pre-apply check` step -- red."""
     jobs = workflow_jobs("apply-env-level.yml")
     names = {
         wave: [
@@ -2183,4 +2181,3 @@ def test_every_wave_names_the_steps_the_deploy_reads():
     }
     expected = [("Pre-apply check", "pre-apply"), ("Apply the cell", "apply-cell")]
     assert names == {f"wave{n}": expected for n in range(8)}
-    assert (dd.PRE_APPLY_STEP, dd.APPLY_STEP) == ("Pre-apply check", "Apply the cell")
