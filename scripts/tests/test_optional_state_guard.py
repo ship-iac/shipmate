@@ -3,9 +3,9 @@
 The state path is what `scripts/state-path` read from the stack's `tofu init` record, never a
 caller input. An empty path means a backend other than `local` owns state, so every
 `actions/state` step is skipped: a restore that still ran would fail the cell, because no cache
-entry exists. `actions/cell-init` locates and restores state for every cell; only apply-cell
-saves, through `cell-init`'s outputs. The cell's call step is pinned whole in
-test_provider_cache.py.
+entry exists. `actions/cell-init` locates and restores state for every cell; no cell saves:
+apply-cell hands its sealed state to the cell's `save` job (test_apply_cell_state_save.py). The
+cell's call step is pinned whole in test_provider_cache.py.
 
 `actions/state` decrypts every restore that matched an entry with SHIPMATE_ENCRYPTION_KEY, and an
 empty encryption key refuses a restore. A save stores a file the caller already sealed, and a
@@ -51,23 +51,6 @@ _RESTORE = {
     },
 }
 
-#: always(), so a failed or cancelled apply's partial state persists; gated on the restore's
-#: success, so state never restored is never saved, and a remote backend's skipped restore skips
-#: the save too.
-_SAVE = {
-    "name": "Save state",
-    "id": "save-state",
-    "if": "${{ always() && steps.init.outputs.restore-outcome == 'success' }}",
-    "uses": local_action("state"),
-    "with": {
-        "stack-slug": "${{ steps.ids.outputs.slug }}",
-        "env": "${{ inputs.env }}",
-        "mode": "save",
-        "path": "${{ steps.init.outputs.state-path }}",
-        "encryption-key": "${{ inputs.encryption-key }}",
-    },
-}
-
 
 def test_locate_state_reads_the_init_record_inside_terramate_run():
     """A one-line `run:` fails the step on a non-zero init, so the default `success()` condition
@@ -80,12 +63,6 @@ def test_restore_state_uses_the_located_path():
     """Mutations: `if: always()` on the restore; `stack-slug: ${{ inputs.stack }}`; drop the
     `encryption-key` line, and every restore of local state refuses."""
     assert step_by(_INIT_ACTION, name="Restore state") == _RESTORE
-
-
-def test_apply_cell_saves_state_to_the_located_path():
-    """Mutations: drop `always()` from the `if`; save with `mode: restore`; drop the
-    `encryption-key` line."""
-    assert step_by("apply-cell", name="Save state") == _SAVE
 
 
 _REFUSAL = (

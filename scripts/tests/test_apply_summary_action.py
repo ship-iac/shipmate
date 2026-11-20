@@ -26,7 +26,6 @@ import re
 from _loader import (
     ACTIONS,
     ENGINE,
-    action_steps,
     action_yaml,
     bash_only,
     load_script,
@@ -183,7 +182,7 @@ def test_download_pattern_matches_apply_cell_upload_prefix():
     assert upload_step is not None, "no download-artifact step found"
     pattern = (upload_step.get("with") or {}).get("pattern")
 
-    upload_apply_cell_step = _find_step(action_steps("apply-cell"), uses_contains="upload-artifact")
+    upload_apply_cell_step = step_by("apply-cell", name="Upload apply summary")
     assert upload_apply_cell_step is not None, "apply-cell has no upload-artifact step"
     name = (upload_apply_cell_step.get("with") or {}).get("name", "")
     # From `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}`, take the literal

@@ -1,20 +1,17 @@
-"""The provider plugin cache is restored per stack from a committed lock file and saved by drift and
-apply cells and by the merge deploy's `warm` legs.
+"""The provider plugin cache is restored per stack from a committed lock file and saved by drift
+cells and by the merge deploy's `warm` legs.
 
 `actions/cell-init` holds the restore and the `tofu init` every plan, drift and apply cell runs, and
 each cell calls it as one step with `id: init`. It restores the entry keyed on the provider
 addresses and versions in the stack's own `.terraform.lock.hcl` (`scripts/provider-cache-key`),
 exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set. The
 entry name comes whole from that one script at every site, so a prefix change is one edit there.
-`drift-cell` and `apply-cell` save; plan cells never do. An apply cell already holds the
-environment's apply role, so its save reaches nothing that cell's applied HCL could not. The save
+`drift-cell` saves; plan and apply cells never do, since pull-request code runs in both. The save
 runs only after a restore that missed and an `init` that left at least one file in the cache, and it
 reuses the restore step's key, computed before `init -reconfigure` can rewrite the committed lock: a
 key computed after it could name a lock no restore reads. The cells read both through `cell-init`'s
 outputs. `warm` (`actions/warm`) runs the script itself and initializes through `cell-init` with
-`backend: "false"`, which skips the state steps. In `apply-cell` both steps follow `Save state` with
-no status function in their `if:`, so a failed apply saves nothing, and carry `continue-on-error:
-true`, so a failed save cannot fail an applied cell. When `init` fails installing a provider after a
+`backend: "false"`, which skips the state steps. When `init` fails installing a provider after a
 restore that hit, `cell-init` names the restored entry in one `::error::`, so a corrupt entry can be
 deleted by key; any other init failure (a backend or credentials) gets no cache remedy.
 
@@ -23,11 +20,11 @@ save added to another cell, a dropped guard or a widened key. Each value is comp
 hand-written constant.
 
 Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the
-`cache-hit` clause dropped from `apply-cell`'s check; `always() &&` prefixed to `apply-cell`'s check
-`if:`; drift's check `if:` reverted to `steps.provider-cache.outcome == 'success'`; the save's key
+`cache-hit` clause dropped from `drift-cell`'s check; drift's check `if:` reverted to
+`steps.provider-cache.outcome == 'success'`; the save's key
 rebuilt from the key step's digest; the restore's key rebuilt in YAML as `tofu-providers-${{
 runner.os }}-${{ runner.arch }}-<digest>`; `-backend=false` dropped from cell-init's no-backend
-init; the `if:` dropped from `Locate state`; `continue-on-error` dropped from `apply-cell`'s save;
+init; the `if:` dropped from `Locate state`; a `Save provider cache` step added to `apply-cell`;
 `-type f` dropped from the check's `find`; `restore-keys` added to the restore; `STACK` dropped from
 the key step's `env:`; `actions/cache/save` of the cache directory added to another action; the
 combined `actions/cache` action used anywhere; `failure() &&`, `steps.init.outcome == 'failure'` or
@@ -96,8 +93,8 @@ _INIT_STEP = {
 
 #: What each cell reads back. `init-outcome` is init's own outcome, not the composite's: a failed
 #: key or restore step skips init, and apply-cell-summary must not call that a failed init.
-#: `restore-outcome` is the state restore's own: apply-cell's `Save state` runs only on its
-#: `success`, so any other mapping could save state that was never restored.
+#: `restore-outcome` is the state restore's own: apply-cell-summary names a failed restore by it,
+#: so any other mapping would blame another step.
 _OUTPUTS = {
     "cache-hit": "${{ steps.provider-cache.outputs.cache-hit }}",
     "cache-primary-key": "${{ steps.provider-cache.outputs.cache-primary-key }}",
@@ -187,23 +184,13 @@ def test_each_cell_initializes_through_cell_init_under_id_init(cell):
     assert step_by(cell, name="Initialize the stack") == _CALL
 
 
-_SAVERS = ["apply-cell", "drift-cell"]
+def test_drift_checks_the_cache_only_after_a_restore_that_missed():
+    step = step_by("drift-cell", name="Check the provider cache")
+    assert {k: v for k, v in step.items() if k != "run"} == _CHECK
 
 
-def _expected(cell, step):
-    return {**step, "continue-on-error": True} if cell == "apply-cell" else step
-
-
-@pytest.mark.parametrize("cell", _SAVERS)
-def test_savers_check_the_cache_only_after_a_restore_that_missed(cell):
-    step = step_by(cell, name="Check the provider cache")
-    assert {k: v for k, v in step.items() if k != "run"} == _expected(cell, _CHECK)
-    assert step["run"] == step_by("drift-cell", name="Check the provider cache")["run"]
-
-
-@pytest.mark.parametrize("cell", _SAVERS)
-def test_savers_save_only_a_populated_cache_under_the_restore_key(cell):
-    assert _without_ref(step_by(cell, name="Save provider cache")) == _expected(cell, _SAVE)
+def test_drift_saves_only_a_populated_cache_under_the_restore_key():
+    assert _without_ref(step_by("drift-cell", name="Save provider cache")) == _SAVE
 
 
 def _uses_steps(node):
@@ -226,10 +213,10 @@ def _engine_tree():
 
 
 def test_every_cache_save_is_pinned_by_file_and_path():
-    """Every `actions/cache/save` in the engine, by file and path: apply's, drift's and warm's
-    provider saves, setup's Terramate and OpenTofu release saves, and the state save. Mutations: a
-    save step with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`; warm's
-    save `path:` spelled `${{ runner.temp }}/.tofu-plugin-cache`."""
+    """Every `actions/cache/save` in the engine, by file and path: drift's and warm's provider
+    saves, setup's Terramate and OpenTofu release saves, and the state save. Mutations: a save step
+    with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`; warm's save `path:`
+    spelled `${{ runner.temp }}/.tofu-plugin-cache`; re-add apply-cell's provider save."""
     saves = sorted(
         (name, (step.get("with") or {}).get("path"))
         for name, doc in _engine_tree().items()
@@ -237,7 +224,6 @@ def test_every_cache_save_is_pinned_by_file_and_path():
         if step["uses"].split("@")[0] == "actions/cache/save"
     )
     assert saves == [
-        ("apply-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
         ("drift-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
         ("setup", "${{ runner.temp }}/terramate-release"),
         ("setup", "${{ runner.temp }}/tofu-release"),
@@ -265,7 +251,6 @@ def test_every_provider_cache_site_takes_its_name_from_the_one_builder():
         and (step.get("with") or {}).get("path") == "${{ env.TF_PLUGIN_CACHE_DIR }}"
     )
     assert sites == [
-        ("apply-cell", "Save provider cache", _RESTORED),
         ("cell-init", "Restore provider cache", _ENTRY),
         ("drift-cell", "Save provider cache", _RESTORED),
         ("warm", "Look up the provider cache entry", _ENTRY),
