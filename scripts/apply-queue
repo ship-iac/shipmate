@@ -10,15 +10,15 @@ header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_
 `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
 `pull-requests: write`, and `actions: write` for the queue or `actions: read` for `waiters`).
 
-Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted
-run, read the head again. A trusted run whose title names another head is stale, and is
-cancelled only when its jobs listing is complete, both head reads agree, and its call's
-`review` waits for the group, or every unfinished job of the call is a wave cell `waiting` on
-an environment's approval. An incomplete runs listing or a failed head read cancels nothing, and
-a failed first head read skips the jobs reads. Only a run whose own listed `ref` is the live
-head cancels: a run not at the live head is stale itself and leaves stale runs to a run at the
-live head; a run missing from its own listing cancels nothing. An untrusted run is never
-cancelled. A queue reply naming the holder starts with this run's `waits_marker`.
+Order: list the apply runs (`apply_runs`), read the live head, read the jobs of each trusted run,
+read the head again. A trusted run whose title names another head is stale, and is cancelled only
+when its jobs listing is complete, both head reads agree, and its call's `review` waits for the
+group, or every unfinished job of the call is a cell's `apply` `waiting` on an environment's
+approval or that cell's `save` listing no steps. An incomplete runs listing or a failed head read
+cancels nothing, and a failed first head read skips the jobs reads. Only a run whose own listed
+`ref` is the live head cancels: a run not at the live head is stale itself and leaves stale runs to
+a run at the live head; a run missing from its own listing cancels nothing. An untrusted run is
+never cancelled. A queue reply naming the holder starts with this run's `waits_marker`.
 
 `waiters` tells each App-dispatched run with a command comment whose call waits for the group,
 once per run across `queue`, `review` and `summary`: a run whose `waits_marker` starts a comment
@@ -31,7 +31,6 @@ and tidy, so a failed read, cancel or reply warns and exits 0; the replies are i
 """
 
 import os
-import re
 import sys
 
 from _shipmate import (
@@ -49,15 +48,13 @@ from _shipmate import (
     run_jobs,
 )
 
+ag = _load("apply-gate")
 rc = _load("reply-comment")
 uc = _load("upsert-comment")
 
 #: In a jobs listing, a job of the `run` call (`<caller> / run / review`); `guard`, `queue` and
 #: `outcome` sit outside the group, so their status says nothing about it.
 _IN_CALL = " / run / "
-#: A wave cell of the call is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments;
-#: a caller job name containing ` / ` never matches, so such a run is kept.
-_LEVEL = re.compile(r"L[0-9]+")
 
 
 def in_call(jobs):
@@ -80,10 +77,14 @@ def _is_review(job):
     return len(segments) == 3 and segments[1:] == ["run", "review"]
 
 
-def _is_cell(job):
-    """Whether `job` is a wave cell of the call, `<caller> / run / L<n> / <env> / <stack>`."""
+def _cell_part(job):
+    """`"apply"` or `"save"` when `job` is that job of a cell of the call, exactly
+    `<caller> / run / L<n> / <env> / <stack> / <part>`, six segments; else None. A caller job
+    name containing ` / ` never matches, so such a run is kept."""
     segments = _segments(job)
-    return len(segments) == 5 and segments[1] == "run" and _LEVEL.fullmatch(segments[2]) is not None
+    if len(segments) != 6 or segments[1] != "run":
+        return None
+    return ag.cell_part(job["name"], segments[4], segments[3])
 
 
 def _in_group_wait(jobs):
@@ -94,14 +95,24 @@ def _in_group_wait(jobs):
 
 def idle(jobs):
     """Whether a run whose `jobs` listing is complete may be cancelled: its call waits for the
-    group, or every unfinished job of its call is a wave cell `waiting` on an environment's
-    approval. Any other unfinished job keeps the run: a `pending` cell or `summary` waits on its
-    own concurrency group mid-run, and a cancelled `summary` drops the apply comment and the
-    gate refresh."""
+    group, or every unfinished job of its call is a cell's `apply` `waiting` on an environment's
+    approval, or that cell's `save` listing no steps. Any other unfinished job keeps the run: a
+    `pending` cell or `summary` waits on its own concurrency group mid-run, a started `save`
+    writes the state, and a cancelled `summary` drops the apply comment and the gate refresh."""
     if _in_group_wait(jobs):
         return True
     unfinished = _unfinished(jobs)
-    return bool(unfinished) and all(_is_cell(j) and j["status"] == "waiting" for j in unfinished)
+    waiting = {
+        j["name"] for j in unfinished if _cell_part(j) == "apply" and j["status"] == "waiting"
+    }
+
+    def held(job):
+        if job["name"] in waiting:
+            return True
+        save = _cell_part(job) == "save" and not job.get("steps")
+        return save and job["name"].removesuffix("save") + "apply" in waiting
+
+    return bool(unfinished) and all(held(j) for j in unfinished)
 
 
 def holds(jobs):
