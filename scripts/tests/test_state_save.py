@@ -137,7 +137,6 @@ class _Job:
             "RUNNER_ENVIRONMENT": "github-hosted",
             "STACK": "stacks/app",
             "ENV_NAME": "dev-eu",
-            "SLUG": "stacks-app",
             "STATE": state,
             "JOB_ID": str(OWN_ID),
             "GITHUB_RUN_ATTEMPT": str(attempt),
@@ -225,7 +224,10 @@ def test_only_an_artifact_of_the_cells_name_whose_bytes_match_is_saved(
     )
     code, out = job()
     if ok:
-        assert (code, out) == (0, {"kind": "save", "attempt": "1", "path": PATH})
+        assert (code, out) == (
+            0,
+            {"kind": "save", "attempt": "1", "path": PATH, "slug": "stacks-app"},
+        )
         assert (job.ws / PATH).read_bytes() == CIPHER
     else:
         no_match = f"no artifact of this run named {_name(1)} holds the cell's state bundle"
@@ -248,6 +250,33 @@ def test_the_listing_asks_for_the_cells_artifact_name(monkeypatch, tmp_path):
             f"repos/o/r/actions/runs/77/artifacts?name={_name(1)}&per_page=100",
         ]
     ]
+
+
+def test_the_slug_comes_from_the_stack_path(monkeypatch, tmp_path):
+    """The `apply` job runs pull-request code, so the slug is derived from the trusted stack,
+    as `apply-cell` derives it. Mutation: drop the `/` to `-` replace."""
+    path = "stacks/dns/.state/dev-eu/terraform.tfstate"
+    bundle = _bundle(path=path)
+    job = _Job(
+        monkeypatch,
+        tmp_path,
+        state=f"{_digest(bundle)} attempt=1",
+        artifacts=[{"id": 1, "name": "state.dev-eu.stacks-dns.1"}],
+        archives={1: _zip(bundle)},
+        STACK="stacks/dns",
+    )
+    assert job() == (0, {"kind": "save", "attempt": "1", "path": path, "slug": "stacks-dns"})
+    assert job.artifact_calls()[0][-1] == (
+        "repos/o/r/actions/runs/77/artifacts?name=state.dev-eu.stacks-dns.1&per_page=100"
+    )
+
+
+@pytest.mark.parametrize("stack", ["stacks/a b", "stacks/a$b", ""])
+def test_a_stack_outside_the_slug_charset_refuses_before_any_call(monkeypatch, tmp_path, stack):
+    """Mutation: drop the charset test."""
+    job = _Job(monkeypatch, tmp_path, state=f"{DIGEST} attempt=1", STACK=stack, **_one())
+    assert job() == ("::error::stack path produced invalid slug", {})
+    assert job.calls == []
 
 
 def test_a_name_holding_query_characters_lists_its_artifact(monkeypatch):
@@ -290,9 +319,9 @@ def test_the_root_stacks_path_is_passed_on_as_the_restore_names_it(monkeypatch, 
         artifacts=[{"id": 1, "name": "state.dev-eu...1"}],
         archives={1: _zip(bundle)},
         STACK=".",
-        SLUG=".",
     )
-    assert job() == (0, {"kind": "save", "attempt": "1", "path": "./terraform.tfstate"})
+    out = {"kind": "save", "attempt": "1", "path": "./terraform.tfstate", "slug": "."}
+    assert job() == (0, out)
     assert (job.ws / "terraform.tfstate").read_bytes() == CIPHER
 
 
@@ -332,7 +361,6 @@ def test_the_saver_takes_no_encryption_key():
     assert set(action_yaml("state-save")["inputs"]) == {
         "stack",
         "environment",
-        "slug",
         "state",
         "job-id",
     }
@@ -410,7 +438,7 @@ def test_rerun_failed_jobs_looks_up_the_carried_attempt(monkeypatch, tmp_path, s
     attempt's digest saves); count a carried row as an apply of its re-run attempt
     (`apply-gate.attempts`), so an empty output refuses."""
     job = _Job(monkeypatch, tmp_path, state=state, attempt=2, jobs=_RERUN_FAILED, **_one())
-    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH})
+    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH, "slug": "stacks-app"})
     assert not (job.ws / PATH).exists()
 
 
@@ -429,7 +457,7 @@ def test_a_second_rerun_of_failed_jobs_looks_up_only_the_attempt_that_applied(
         _save(3, None),
     ]
     job = _Job(monkeypatch, tmp_path, state="", attempt=3, jobs=jobs, **_one())
-    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH})
+    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH, "slug": "stacks-app"})
 
 
 def test_a_short_listing_refuses(monkeypatch, tmp_path):
@@ -480,7 +508,7 @@ def test_rerun_all_jobs_looks_up_the_unsaved_attempt(monkeypatch, tmp_path):
     attempt 1 is still unsaved. Mutation: `skip` on `not-applied` whatever the attempt."""
     jobs = [_A1, _save(1, "failure"), _apply(2, NOT_STARTED, conclusion="failure"), _save(2, None)]
     job = _Job(monkeypatch, tmp_path, state="not-applied attempt=2", attempt=2, jobs=jobs, **_one())
-    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH})
+    assert job() == (0, {"kind": "lookup", "attempt": "1", "path": PATH, "slug": "stacks-app"})
 
 
 def test_two_unsaved_earlier_attempts_refuse_naming_both(monkeypatch, tmp_path):
@@ -514,7 +542,7 @@ def test_an_own_digest_over_saved_attempts_saves(monkeypatch, tmp_path):
     """Mutation: refuse every own digest past attempt 1."""
     jobs = [_A1, _save(1, "success"), _apply(2), _save(2, None)]
     job = _Job(monkeypatch, tmp_path, state=f"{DIGEST} attempt=2", attempt=2, jobs=jobs, **_one(2))
-    assert job() == (0, {"kind": "save", "attempt": "2", "path": PATH})
+    assert job() == (0, {"kind": "save", "attempt": "2", "path": PATH, "slug": "stacks-app"})
 
 
 _REMOTE = [_A1, _save(1, "success"), _apply(2), _save(2, None)]
@@ -589,7 +617,7 @@ def test_a_download_keeps_the_archives_bytes(monkeypatch):
 
 
 _STATE_WITH = {
-    "stack-slug": "${{ inputs.slug }}",
+    "stack-slug": "${{ steps.fetch.outputs.slug }}",
     "env": "${{ inputs.environment }}",
     "mode": "${{ steps.fetch.outputs.kind }}",
     "path": "${{ steps.fetch.outputs.path }}",
@@ -605,7 +633,6 @@ _STEPS = [
             "GH_TOKEN": "${{ github.token }}",
             "STACK": "${{ inputs.stack }}",
             "ENV_NAME": "${{ inputs.environment }}",
-            "SLUG": "${{ inputs.slug }}",
             "STATE": "${{ inputs.state }}",
             "JOB_ID": "${{ inputs.job-id }}",
         },
@@ -619,6 +646,7 @@ _STEPS = [
             "KIND": "${{ steps.fetch.outputs.kind }}",
             "ATTEMPT": "${{ steps.fetch.outputs.attempt }}",
             "STATE_PATH": "${{ steps.fetch.outputs.path }}",
+            "SLUG": "${{ steps.fetch.outputs.slug }}",
         },
     },
     {
@@ -649,7 +677,7 @@ _STEPS = [
             "RETRY_SAVED": "${{ steps.retry.outputs.saved }}",
             "STACK": "${{ inputs.stack }}",
             "ENV_NAME": "${{ inputs.environment }}",
-            "SLUG": "${{ inputs.slug }}",
+            "SLUG": "${{ steps.fetch.outputs.slug }}",
             "ATTEMPT": "${{ steps.fetch.outputs.attempt }}",
         },
     },
@@ -688,7 +716,7 @@ def _if(expr, ctx, failed):
     return value and not failed if implicit else value
 
 
-INPUTS = {"stack": "stacks/app", "environment": "dev-eu", "slug": "stacks-app"}
+INPUTS = {"stack": "stacks/app", "environment": "dev-eu"}
 
 
 def _resolve(value, ctx):
@@ -763,10 +791,11 @@ def test_a_skip_succeeds_with_no_cache_call(tmp_path):
     [
         {},
         {"kind": "bogus", "attempt": "1", "path": PATH},
-        {"kind": "lookup", "attempt": "", "path": PATH},
-        {"kind": "save", "attempt": "1", "path": ""},
+        {"kind": "lookup", "attempt": "", "path": PATH, "slug": "stacks-app"},
+        {"kind": "save", "attempt": "1", "path": "", "slug": "stacks-app"},
+        {"kind": "save", "attempt": "1", "path": PATH, "slug": ""},
     ],
-    ids=["empty", "bogus", "lookup-no-attempt", "save-no-path"],
+    ids=["empty", "bogus", "lookup-no-attempt", "save-no-path", "save-no-slug"],
 )
 def test_an_unknown_or_incomplete_decision_fails_with_no_cache_call(tmp_path, fetched):
     """The refusal names the runbook section. Mutations: default an empty `kind` to `skip`; drop
@@ -797,7 +826,7 @@ def test_a_branch_passes_only_on_a_found_entry(tmp_path, kind, saved, suffixes, 
     a missing one refuses. Mutations: accept any non-empty `PRIMARY_SAVED`; run the retry when
     the primary found the entry; drop the never-re-run instruction."""
     failed, calls, log = _composite(
-        tmp_path, {"kind": kind, "attempt": "1", "path": PATH}, dict(saved)
+        tmp_path, {"kind": kind, "attempt": "1", "path": PATH, "slug": "stacks-app"}, dict(saved)
     )
     assert (failed, calls) == (not ok, [_call(kind, s) for s in suffixes])
     assert log == ("" if ok else NOT_FOUND)

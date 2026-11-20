@@ -7,9 +7,6 @@ inputs:
   environment:
     description: The cell's environment.
     required: true
-  slug:
-    description: The cell's stack slug.
-    required: true
   state:
     description: The apply job's state output, possibly empty.
     required: true
@@ -26,7 +23,6 @@ runs:
         GH_TOKEN: ${{ github.token }}
         STACK: ${{ inputs.stack }}
         ENV_NAME: ${{ inputs.environment }}
-        SLUG: ${{ inputs.slug }}
         STATE: ${{ inputs.state }}
         JOB_ID: ${{ inputs.job-id }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/state-save"
@@ -39,11 +35,12 @@ runs:
         KIND: ${{ steps.fetch.outputs.kind }}
         ATTEMPT: ${{ steps.fetch.outputs.attempt }}
         STATE_PATH: ${{ steps.fetch.outputs.path }}
+        SLUG: ${{ steps.fetch.outputs.slug }}
       run: |
         if [ "$KIND" = skip ]; then
           exit 0
         fi
-        if { [ "$KIND" = save ] || [ "$KIND" = lookup ]; } && [ -n "$ATTEMPT" ] && [ -n "$STATE_PATH" ]; then
+        if { [ "$KIND" = save ] || [ "$KIND" = lookup ]; } && [ -n "$ATTEMPT" ] && [ -n "$STATE_PATH" ] && [ -n "$SLUG" ]; then
           echo "go=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
@@ -56,7 +53,7 @@ runs:
       if: ${{ steps.check.outputs.go == 'true' }}
       uses: $/actions/state
       with:
-        stack-slug: ${{ inputs.slug }}
+        stack-slug: ${{ steps.fetch.outputs.slug }}
         env: ${{ inputs.environment }}
         mode: ${{ steps.fetch.outputs.kind }}
         path: ${{ steps.fetch.outputs.path }}
@@ -67,7 +64,7 @@ runs:
       if: ${{ !cancelled() && steps.check.outputs.go == 'true' && steps.primary.outputs.saved != 'true' }}
       uses: $/actions/state
       with:
-        stack-slug: ${{ inputs.slug }}
+        stack-slug: ${{ steps.fetch.outputs.slug }}
         env: ${{ inputs.environment }}
         mode: ${{ steps.fetch.outputs.kind }}
         path: ${{ steps.fetch.outputs.path }}
@@ -82,7 +79,7 @@ runs:
         RETRY_SAVED: ${{ steps.retry.outputs.saved }}
         STACK: ${{ inputs.stack }}
         ENV_NAME: ${{ inputs.environment }}
-        SLUG: ${{ inputs.slug }}
+        SLUG: ${{ steps.fetch.outputs.slug }}
         ATTEMPT: ${{ steps.fetch.outputs.attempt }}
       run: |
         if [ "$PRIMARY_SAVED" = true ] || [ "$RETRY_SAVED" = true ]; then

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Decide what one cell's `save` job does with its state, and fetch the sealed bundle it needs.
 
-Runs as the first step of `actions/state-save` with `STACK`, `ENV_NAME`, `SLUG`, `STATE` (the
-`apply` job's `state` output from `state-handoff`, possibly empty) and `JOB_ID` (this job's
-check run id). Writes `kind`, and for `save` and `lookup` also `attempt` (the attempt in the
-state key) and `path`. In order:
+Runs as the first step of `actions/state-save` with `STACK`, `ENV_NAME`, `STATE` (the `apply`
+job's `state` output from `state-handoff`, possibly empty) and `JOB_ID` (this job's check run
+id). Writes `kind`, and for `save` and `lookup` also `attempt` (the attempt in the state key),
+`path` and `slug`. The slug comes from the trusted `STACK` by `apply-cell`'s rule (`slug_of`),
+never from the `apply` job, which runs pull-request code. In order:
 
 | Attempt | `STATE` | Result |
 | --- | --- | --- |
@@ -22,7 +23,7 @@ an earlier attempt is not this attempt's apply (`apply-gate.is_carried`).
 
 Only `save` and `lookup` reach the runner check (`RUNNER_ENVIRONMENT` exactly
 `github-hosted`), right before the first artifact call: a `skip` succeeds on any runner. The
-bundle comes from the artifact `state-handoff.artifact_name(ENV_NAME, SLUG, attempt)`: for
+bundle comes from the artifact `state-handoff.artifact_name(ENV_NAME, slug, attempt)`: for
 `save`, and for a `lookup` whose `STATE` carries that attempt's digest, only a copy hashing to
 the digest; otherwise the first copy that parses, since a forged path only makes the exact-key
 lookup miss. Its path is checked with `state-path.validate`; `save` writes the ciphertext to
@@ -69,13 +70,23 @@ REMEDY = (
     "docs/troubleshooting.md section The apply step ran and its state was not saved."
 )
 NO_STATE = ("not-applied", "none")
+SLUG = re.compile(r"[A-Za-z0-9._-]+")
 SKIP = ("skip", None, None)
+
+
+def slug_of(stack):
+    """The stack path with `/` as `-`, as `apply-cell`'s `Stack slug` step derives it; refuses
+    any other character, since the slug names the artifact and the state key."""
+    slug = stack.replace("/", "-")
+    if not SLUG.fullmatch(slug):
+        raise SystemExit("::error::stack path produced invalid slug")
+    return slug
 
 
 def refuse(reason, attempts):
     """Raise the refusal naming the state keys of `attempts` and the runbook section."""
     env, stack = os.environ["ENV_NAME"], os.environ["STACK"]
-    prefix = f"state/{os.environ['SLUG']}/{env}/{os.environ['GITHUB_RUN_ID']}-"
+    prefix = f"state/{slug_of(stack)}/{env}/{os.environ['GITHUB_RUN_ID']}-"
     keys = " and ".join(f"{prefix}{k} or {prefix}{k}-r1" for k in attempts)
     raise SystemExit(
         f"::error::{reason}, so the state of {env} / {stack} is not known saved under {keys}. "
@@ -192,7 +203,8 @@ def decide(stack, env, state, own):
 
 
 def main():
-    stack, env, slug = os.environ["STACK"], os.environ["ENV_NAME"], os.environ["SLUG"]
+    stack, env = os.environ["STACK"], os.environ["ENV_NAME"]
+    slug = slug_of(stack)
     own = int(os.environ["GITHUB_RUN_ATTEMPT"])
     kind, attempt, digest = decide(stack, env, os.environ.get("STATE", ""), own)
     if kind == "skip":
@@ -221,7 +233,7 @@ def main():
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with open(target, "wb") as fh:
             fh.write(ciphertext)
-    write_outputs(kind=kind, attempt=attempt, path=path)
+    write_outputs(kind=kind, attempt=attempt, path=path, slug=slug)
     print(f"state-save: {name} matched; mode {kind}")
 
 
