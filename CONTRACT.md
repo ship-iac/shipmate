@@ -4343,8 +4343,9 @@ names an error. A job that failed without an `::error::` renders no fence.
   The outcome word: `refused` when the run failed on a refusal by rule: a
   cell behind the base (bare or targeted), a targeted apply's review refusal,
   or a cell another pull request or an unknown holder locks, refused by the
-  `lock` job and with every lock that job took released again. Any other
-  refusal, a lock refusal that left a lock behind, and a failed setup, tool or
+  `lock` job with every lock that job created released again; locks it
+  re-entered stay held. Any other refusal, a lock refusal that left a lock it
+  created behind, and a failed setup, tool or
   API call read `failed`, as does any other failed job. `cancelled` when no
   job failed and a job ended `cancelled` while the run did not (§Comment-ops
   names which); a cancelled run posts no result comment, and `outcome`
