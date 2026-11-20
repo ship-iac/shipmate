@@ -114,9 +114,9 @@ def from_api(number, repository):
 
 
 def draft_now(repository, number):
-    """`"true"` or `"false"`: pull request `number`'s draft flag from one API read, for a payload
-    that said draft. A failed read or a `draft` that is not a bool returns `""` and prints one
-    `::warning::` naming the cause."""
+    """`"true"`, `"false"` or `""`: pull request `number`'s draft flag from one API read, for a
+    payload that said draft. A failed read or a `draft` that is not a bool returns `""` and prints
+    one `::warning::` naming the cause; the caller treats `""` as a draft."""
     try:
         draft = _gh_json(f"repos/{repository}/pulls/{number}")["draft"]
     except READ_ERRORS as exc:
@@ -143,7 +143,7 @@ def main():
         facts = _facts(pr, "false")
         if facts["is_draft"] == "true":
             now = draft_now(os.environ.get("GITHUB_REPOSITORY", ""), facts["pr_number"])
-            # A failed read skips as a draft, so the read never turns a plan into a skip.
+            # A failed read keeps the payload's draft, so the read can only turn a skip into a plan.
             facts["is_draft"] = now or "true"
             reread = f"draft={now}" if now else "failed"
             provenance = f" (payload draft=true, re-read {reread})"
