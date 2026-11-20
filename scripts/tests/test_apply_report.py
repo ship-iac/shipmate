@@ -144,6 +144,7 @@ def test_the_report_renders_the_comment_the_eleven_inputs_rendered(monkeypatch, 
     """`fixtures/apply-report/<name>.md` and `.out` are the comment and stdout `apply-comment.main`
     rendered from the same fields as eleven separate env vars, captured raw at engine commit
     `27dab46f`, before they became one report file; the complete file renders them byte for byte.
+    The `N environments pending` verdict token, which postdates that capture, was added by hand.
     A refused detect leaves the empty report its job wrote first, which renders as every field
     empty.
 

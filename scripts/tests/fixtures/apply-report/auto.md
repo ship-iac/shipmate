@@ -1,6 +1,6 @@
 ### shipmate apply
 
-⚪ 1 applied, 1 held (base changed) at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) in [run #7](https://github.com/acme/repo/actions/runs/42)
+⚪ 1 applied, 1 held (base changed), 2 environments pending at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) in [run #7](https://github.com/acme/repo/actions/runs/42)
 
 dispatched as an `apply_mode: auto` apply, after an autoplan triggered by @<!-- -->`k3np`
 
