@@ -147,6 +147,7 @@ def test_the_report_renders_the_comment_the_eleven_inputs_rendered(monkeypatch, 
     `auto.md` and `bare-every-kind.md` were re-captured raw at engine commit `e717a8c3`, for the
     `N environments pending` token: this file's `_render` per scenario under pytest on Windows,
     `comment.md` copied byte for byte (a file sink, no TTY); `.gitattributes` stores it as LF.
+    Those two therefore pin the current renderer, not what the eleven inputs rendered.
     A refused detect leaves the empty report its job wrote first, which renders as every field
     empty.
 
@@ -294,11 +295,12 @@ def test_an_unread_report_over_applied_rows_is_never_green(monkeypatch, tmp_path
     ]
 
 
-def test_a_refused_detect_reads_its_incomplete_report(monkeypatch, tmp_path):
-    """A refusal leaves the report incomplete (the empty one its job wrote, or what the refusal
-    wrote); with the detect job failed it renders as read, no red line.
+def test_an_errored_detect_reads_its_incomplete_report(monkeypatch, tmp_path):
+    """A detect job that failed with a captured error (its `refusal` output) leaves the report
+    incomplete (the empty one its job wrote, or what the failing step wrote); it renders as
+    read, no red line.
 
-    Mutation: ignore `refused` in `read_report` -- the red line appears, red."""
+    Mutation: ignore `detect_errored` in `read_report` -- the red line appears, red."""
     held = [{"stack": "stacks/a", "environment": "dev", "cause": "overlap"}]
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", {}, json.dumps({"held_cells": held}))
     assert _UNREAD not in body

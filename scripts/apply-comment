@@ -1115,12 +1115,12 @@ def read_report(path, detect_errored=False):
     `_REPORT_DEFAULTS` key, a missing one at its default: a behind refusal's report holds only
     `behind` and `base`. Only a report `write_report` finished carries `"complete": true`;
     an incomplete one is read only when `detect_errored` (the detect job failed with an
-    `::error::`), whose report is the empty one written before any step (or what the failing
-    step wrote). `unread` is True, and `fields` all defaults, when the file is missing or
-    unreadable, is not a JSON object, is incomplete without that error (a crash, or a failure
-    that named no error), or holds a field the renderer cannot read (`_shape_error`); one
-    warning names the cause. The caller then never renders a green verdict: empty fields alone
-    would."""
+    `::error::` that setup or apply-detect wrote as its `refusal` output), whose report is the
+    empty one written before any step (or what the failing step wrote). `unread` is True, and
+    `fields` all defaults, when the file is missing or unreadable, is not a JSON object, is
+    incomplete without that error (a crash, or a failure that named no error), or holds a field
+    the renderer cannot read (`_shape_error`); one warning names the cause. The caller then
+    never renders a green verdict: empty fields alone would."""
     try:
         report = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
         if not isinstance(report, dict):

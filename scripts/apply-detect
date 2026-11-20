@@ -404,8 +404,9 @@ def refuse_unreviewed(env, table, decision):
     decision the `review` job read server-side: comment-ops decided on the state
     at comment time, and an approval dismissed since then must not still apply.
     The run dies before any wave, the apply checks stay pending, and the gate stays
-    pending with them. Only REVIEW_REQUIRED and CHANGES_REQUESTED raise `Refused`; a decision
-    that cannot be determined raises plain `SystemExit`, because the reads failed.
+    pending with them. Only REVIEW_REQUIRED and CHANGES_REQUESTED raise `Refused`. Any other
+    decision raises plain `SystemExit`: it never arrived or has an unknown value, an engine
+    fault rather than a rule (a failed review read fails the `review` job before this runs).
 
     `table` must have been through `validate_structure`: `exempt_envs` reads only a
     boolean `false` as review-exempt, so a `review: no` would otherwise refuse as
