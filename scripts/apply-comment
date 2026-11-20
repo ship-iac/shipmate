@@ -397,17 +397,15 @@ def apply_check_state(rows, present, done, held):
     The pending apply checks ARE the work queue, so they -- not the per-cell
     artifact -- are the authority on whether a unit is done. `Compose cell
     summary` runs `if: always()`, and the trailing `complete` job completes the
-    check only for a cell whose job succeeded, so an `applied` artifact can
-    coexist with a pending check (the state was not saved, the job was cancelled,
-    or the `complete` job failed); and the continue-on-error upload can drop,
+    check only for a cell whose `apply` and `save` jobs succeeded, so an `applied`
+    artifact can coexist with a pending check (the `complete` job failed, or a
+    newer plan re-created the check); and the continue-on-error upload can drop,
     leaving an applied cell with no artifact.
     Two directions, therefore:
 
     - applied + pending check -> `unrecorded`: the apply succeeded but was not
-      recorded, the gate stays pending, and the stack needs a re-plan. A cell
-      whose state was not saved is also named by the `state not saved:` note,
-      because its reviewed .otplan still matches the restored state and would
-      apply again; so neither note says re-apply.
+      recorded, the gate stays pending, and the stack needs a re-plan; the note
+      never says re-apply.
     - not_attempted + done check -> `applied`: the check proves the apply
       landed; apply_text stays None so the row renders its bare line.
 

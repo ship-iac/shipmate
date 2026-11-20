@@ -2243,9 +2243,10 @@ def test_a_deploy_rerun_refuses_a_cell_its_earlier_attempt_left_unsaved(
     tmp_path, monkeypatch, check
 ):
     """Attempt 2 of this deploy lists its own run: attempt 1 applied `stacks/app` and its `save`
-    failed. Whatever the check reads, the deploy refuses naming this run.
+    failed. Whatever the check reads, the deploy refuses naming this run's earlier attempt.
 
-    Mutation: skip the own-run read on attempt 2 -- deploys, red."""
+    Mutation: skip the own-run read on attempt 2 -- deploys, red.
+    Mutation: key the cell `ended` in `_own_unsaved` -- the ended-run text, red."""
     with pytest.raises(SystemExit) as exc:
         _two_cells(
             tmp_path,
@@ -2255,10 +2256,8 @@ def test_a_deploy_rerun_refuses_a_cell_its_earlier_attempt_left_unsaved(
             attempt="2",
         )
     assert str(exc.value) == (
-        "::error::deploy refused: stacks/app / dev-eu were left in progress by run 900, which "
-        "ended after their apply may have started, so their state may not be saved. "
-        + _TROUBLESHOOT_LOST
-        + _OTHERS
+        "::error::deploy refused: stacks/app / dev-eu may have been applied by an earlier attempt "
+        "of this deploy, run 900, without saving their state. " + _TROUBLESHOOT_LOST + _OTHERS
     )
 
 

@@ -58,7 +58,8 @@ jobs:
 
   # Flips one wave's apply checks to in_progress right before it; the wave needs it, so no flip
   # lands after the completion. Each earlier wave and release must be success or skipped:
-  # `!cancelled()` alone would run past a failure.
+  # `!cancelled()` alone would run past a failure. A flip reads no check first: one landing
+  # seconds after another writer completed the check can reopen it until a later write.
   wave0-release:
     needs: [snapshot]
     if: ${{ !cancelled() && needs.snapshot.result == 'success' && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}

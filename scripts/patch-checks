@@ -29,7 +29,9 @@ fails (a permanent failure at once, a transient one once its retries are exhaust
 rate-limited one once the process's rate-limit waits are spent) stops the loop with
 `::error::failed to write apply check <id>`, then run's `command failed (1): gh api ...`
 line, then gh's own error line; exit 1. Stopping there means the slim runner's time cap is never
-spent once per id.
+spent once per id. At 256 checks a completion job stays inside `ubuntu-slim`'s 15 minutes: about
+2 minutes of listing retries, one read and one write per check at about 1.7 a second, one
+annotation read per failed cell, and the 3-minute rate budget.
 """
 
 import functools

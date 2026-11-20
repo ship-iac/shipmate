@@ -90,7 +90,7 @@ def test_the_cell_summary_reads_the_hosted_and_apply_outcomes_and_no_lost_save()
 
 
 _HOSTED_REFUSAL = (
-    "::error::the state saver runs only on GitHub-hosted runners; a reused self-hosted runner "
+    "::error::the save job runs only on GitHub-hosted runners; a reused self-hosted runner "
     "could alter what it saves. Use a GitHub-hosted runs_on or a remote backend.\n"
 )
 
@@ -187,8 +187,6 @@ def test_the_troubleshooting_entry_states_the_re_lookup():
     heading = "### `The apply step ran and its state was not saved`\n"
     entry = " ".join(text[text.index(heading) :].split("\n### ", 1)[0].split())
     assert (
-        "When the first exact-key lookup finds no entry, the action looks up the same key up to "
-        "four more times over about 30 s before it reports the state not saved; a failed, "
-        "cancelled or skipped save runs no lookup and reports at once, and a run cancelled "
-        "after the save reports the state not saved although the entry may exist."
+        "When the first lookup after a save finds no entry, the job looks the same key up to four "
+        "more times over about 30 s."
     ) in entry

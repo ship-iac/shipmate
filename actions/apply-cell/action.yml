@@ -190,7 +190,7 @@ runs:
         STATE_PATH: ${{ steps.init.outputs.state-path }}
       run: |
         if [ -n "$STATE_PATH" ] && [ "$RUNNER_ENVIRONMENT" != github-hosted ]; then
-          echo "::error::the state saver runs only on GitHub-hosted runners; a reused self-hosted runner could alter what it saves. Use a GitHub-hosted runs_on or a remote backend."
+          echo "::error::the save job runs only on GitHub-hosted runners; a reused self-hosted runner could alter what it saves. Use a GitHub-hosted runs_on or a remote backend."
           exit 1
         fi
 

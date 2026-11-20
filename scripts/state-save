@@ -57,7 +57,7 @@ sp = _load("state-path")
 
 STATE = re.compile(r"(not-applied|none|missing|[0-9a-f]{64}) attempt=([1-9][0-9]{0,3})")
 HOSTED_ONLY = (
-    "the state saver runs only on GitHub-hosted runners; a reused self-hosted runner could alter "
+    "the save job runs only on GitHub-hosted runners; a reused self-hosted runner could alter "
     "what it saves. Use a GitHub-hosted runs_on or a remote backend"
 )
 MEMBER = "state.bundle"

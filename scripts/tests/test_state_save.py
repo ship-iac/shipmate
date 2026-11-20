@@ -104,6 +104,13 @@ def _keys(*attempts):
     )
 
 
+#: `ss.HOSTED_ONLY` written out, so a reworded refusal reddens the two runner tests.
+_HOSTED_ONLY = (
+    "the save job runs only on GitHub-hosted runners; a reused self-hosted runner could alter "
+    "what it saves. Use a GitHub-hosted runs_on or a remote backend"
+)
+
+
 def _refusal(reason, *attempts):
     return (
         f"::error::{reason}, so the state of dev-eu / stacks/app is not known saved under "
@@ -341,7 +348,7 @@ def test_a_save_on_a_runner_not_exactly_github_hosted_refuses_before_any_call(
     job = _Job(
         monkeypatch, tmp_path, state=f"{DIGEST} attempt=1", RUNNER_ENVIRONMENT=runner, **_one()
     )
-    assert job() == (_refusal(ss.HOSTED_ONLY, 1), {})
+    assert job() == (_refusal(_HOSTED_ONLY, 1), {})
     assert job.calls == []
 
 
@@ -576,7 +583,7 @@ def test_a_lookup_on_a_self_hosted_runner_refuses_before_any_artifact_call(monke
         RUNNER_ENVIRONMENT="self-hosted",
         **_one(),
     )
-    assert job() == (_refusal(ss.HOSTED_ONLY, 1), {})
+    assert job() == (_refusal(_HOSTED_ONLY, 1), {})
     assert job.calls == [JOBS_LISTED]
 
 

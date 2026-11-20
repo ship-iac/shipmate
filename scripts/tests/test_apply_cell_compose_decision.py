@@ -152,7 +152,7 @@ _ALL_SUCCESS = {
         pytest.param("restore", "state restore failed", id="restore_state"),
         pytest.param(
             "hosted",
-            "local-backend state needs a GitHub-hosted runner, which the state saver runs on",
+            "local-backend state needs a GitHub-hosted runner, which the save job runs on",
             id="hosted",
         ),
         pytest.param(

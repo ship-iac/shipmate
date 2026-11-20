@@ -223,7 +223,7 @@ def refuse_in_flight(repo, lines, app_id, pending):
 def _own_unsaved(repo, pending, held):
     """On a re-run (`GITHUB_RUN_ATTEMPT` above 1), which runs `detect` again, add to `held` each
     `pending` cell an earlier attempt of this run applied, or may have, without saving its state
-    (`ag.unsaved`) as `ended`; or every pending cell as `unreadable` when this run's jobs cannot
+    (`ag.unsaved`) as `own`; or every pending cell as `unreadable` when this run's jobs cannot
     be listed completely, since this run always lists its own `detect`."""
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     if attempt < 2 or not pending:
@@ -235,7 +235,7 @@ def _own_unsaved(repo, pending, held):
         if not readable:
             key = ("unreadable", own)
         elif ad.ag.unsaved(jobs, c["stack"], c["environment"], before=attempt):
-            key = ("ended", own)
+            key = ("own", own)
         else:
             continue
         cells = held.setdefault(key, [])
@@ -256,11 +256,19 @@ def _held(cause, ident, cells):
             "ends, re-run this deploy: a cell whose check that run left in progress deploys if "
             "the run never applied it and is refused otherwise."
         )
+    lost = (
+        "Follow docs/troubleshooting.md section The apply step ran and its state was not saved "
+        "before applying them again."
+    )
     if cause == "ended":
         return (
             f"{names} were left in progress by run {ident}, which ended after their apply may "
-            "have started, so their state may not be saved. Follow docs/troubleshooting.md "
-            "section The apply step ran and its state was not saved before applying them again."
+            f"have started, so their state may not be saved. {lost}"
+        )
+    if cause == "own":
+        return (
+            f"{names} may have been applied by an earlier attempt of this deploy, run {ident}, "
+            f"without saving their state. {lost}"
         )
     return ad.held_text(cause, ident, names, "re-run this deploy")
 

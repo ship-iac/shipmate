@@ -74,47 +74,8 @@ fits, the summary is that link alone. No later write changes the summary; a
 completion restores the title (§Apply check lifecycle). A no-change cell's check is created completed and `neutral`, titled
 `no changes`, with no plan text.
 
-The apply-env-level wave job is named like the plan cell job, `<env> / <stack>`,
-and two scripts find a cell's wave job by that name: `apply-gate.is_cell_job`
-matches `L<n> / <env> / <stack>`, the env-level job of `apply-run.yml` or
-`deploy.yml` and its cell job, as the whole job name or as a suffix after a
-` / ` boundary, since the consumer's calling job prepends its own name. The
-`L<n>` segment keeps out any other job whose name ends in ` / <env> / <stack>`,
-such as `apply / run / detect` for env `run` and root stack `detect`. `scripts/apply-comment`
-(see Apply result comment, below) resolves each cell line's log link this way,
-building the name forward from the row's stack and environment. No match falls
-back to the workflow-run URL. The names and the matcher are locked together by
-two source-derived tests, `test_apply_comment.py::test_wave_job_name_matches_the_cell_job_grammar`
-(every wave job's name, and the matcher on a nested name) and
-`test_apply_comment.py::test_every_env_level_job_is_named_for_its_level` (every
-`L<n>` name in `apply-run.yml` and `deploy.yml`), because a rename of either would degrade
-every link to the run URL silently — that fallback being the designed behaviour, no
-observable would fail. A rename that leaves no wave job matching also fails
-`apply-complete`, which retries the listing and then fails the run.
-
-`scripts/apply-complete` is the second reader: given the pre-flight snapshot of
-check ids a run may write, it reads each snapshotted `apply / <stack> / <env>`
-check name back to its stack and environment (`apply-gate.parse_check_name`; an
-environment name holds no ` / `) and matches that cell's wave job in the same
-run's job-name listing with the same matcher, to decide each check's write from
-the run's own job conclusions. A rename of the apply-env-level job's `name:`
-would leave every cell of a wave that ran unmatched, so the completion retries,
-writes none of them and fails the level (§Apply check lifecycle).
-
-Job display names in the apply/deploy path nest: a called reusable workflow's
-job displays as `<caller job> / <callee job>`, applied at every level, and GHA
-cannot suppress a level. The deploy leaf is therefore three deep, e.g.
-`deploy / L0 / <env> / <stack>`, and the apply leaf four, e.g.
-`apply / run / L0 / <env> / <stack>`, because `apply.yml`'s `run` job calls
-`apply-run.yml`. The intermediate names are kept short (`run`, and `L0`..`L3`
-for env-levels in `apply-run.yml` / `deploy.yml`); the consumer's
-calling job supplies the verb as the outermost segment (`deploy` on the deploy
-path, `apply` or `auto` on a dispatched apply). Its file is named `shipmate`, so the
-pull request's checks UI renders that workflow name and then the job path
-(`shipmate / plan / facts`); the check-run names the engine matches on start
-after the workflow name. The leaf and the `L<n>` level name are
-load-bearing (`is_cell_job` requires both); the outermost name is
-display-only, and the job ids are what `needs:` refers to.
+The calling job's display name in `shipmate.yml` is display only on the apply
+and deploy paths.
 
 In addition to the per-unit checks, one aggregate commit status rolls up
 the full fan-out into a single required status, named verbatim:
@@ -192,163 +153,110 @@ gate"):
 
 ### Apply check lifecycle
 
-`apply-env-level.yml` writes an `apply / <stack> / <env>` check only through the
-check-run ids `actions/apply-snapshot` recorded for that name in the `snapshot`
-job, before the first wave, and only ids whose check was not yet `completed`: a
-completed same-head duplicate is never relinked or retitled. An id is also
-recorded only when its check's record names the wave row's plan run and
-plan-text digest, or an older plan run and no behind record: a check a newer
-plan, or a plan that found the cell behind the base, published after `detect`
-is never completed by this run, while an older plan's unfinished duplicate is
-completed with the cell. A cell with no check recording the wave row's plan
-refuses the run before wave0.
+An apply run writes an `apply / <stack> / <env>` check only while it is not
+`completed`, and only when its record names the wave row's plan, or an older
+plan and no behind record: a check that a newer plan, or a plan that found the
+cell behind the base, published after the run's detect is never written by that
+run, and a completed same-head duplicate is never relinked or retitled. A cell
+with no check recording the wave row's plan refuses the run before any cell
+applies.
 
-1. Created `queued` by `actions/summary`, titled with the plan's counts, its
-   summary the plan. Its `external_id` is a compact JSON record of the id of
-   the plan run that produced the cell (`plan_run`), the number of the pull
-   request that run planned (`pr`), the digest of that cell's plan text
-   (`plan_sha256`), the number of cells that run planned (`cells`), the plan
-   run's event action (`action`, empty when its payload names none, as a
-   `shipmate plan` dispatch's does; §`apply_mode: auto` reads it) and the
-   check's title (`title`). GitHub keeps 255 characters of an `external_id`, so
-   a record over that refuses the plan summary. A behind cell (§Plan comment,
-   Behind cells) gets a `queued` check titled `Behind <base>: update the branch`,
-   its summary naming the base commits that changed the stack; its record is
-   `{plan_run, pr, cells, action, behind: true}`, with no digest, since no plan
-   exists, and no title, which no apply restores. A run's `cells` counts its
-   planned cells and its behind cells, in every record it writes.
-2. Flipped to `in_progress` by the wave's `waveN-release` job right before the
-   wave, its details link set to the apply run. The flip writes the status and
-   the link only, one check at a time. Each wave needs its release, and each
-   completion job needs its wave, so no flip lands after the completion that
-   answers it. A release runs only when every earlier wave and release succeeded
-   or was skipped, so a failed release skips its wave and every later one.
-3. Written once the cell's wave job has a result, by that wave's
-   `waveN-complete` job and again by `complete`, from the job's state in the run's
-   jobs listing. The summary is never rewritten; the error goes in the title.
+1. Created `queued` by the plan run, titled with the plan's counts, its summary
+   the plan. A behind cell (§Plan comment, Behind cells) gets a `queued` check
+   titled `Behind <base>: update the branch`, its summary naming the base
+   commits that changed the stack. Each check's `external_id` holds the plan's
+   record; GitHub keeps 255 characters of an `external_id`, so a record over
+   that refuses the plan summary.
+2. Flipped to `in_progress` when its wave is released, linked to the apply run.
+3. Written once the cell's outcome is read. The summary is never rewritten; the
+   error goes in the title.
 
-| Cell's wave job | Write |
+| Cell outcome | Write |
 | --- | --- |
-| `success` | `completed` / `success`, linked to the cell's job, titled with the record's `title`. A check whose record has none, created before the record carried it, keeps its current title, so one retitled `Failed: ...` keeps that title after a later success |
-| `failure` | `queued`, titled `Failed: <first error line>`, linked to the cell's job |
-| `cancelled` | `queued`, titled `Cancelled` |
-| `skipped`, or no job in a wave that ended `skipped`, or in one that ended `cancelled` when the listing shows a `cancelled` literal `${{ matrix.environment }} / ${{ matrix.stack }}` row under the completion job's own level and no cell of that wave | `queued`, titled `Not run` |
+| applied, state saved | `completed` / `success`, linked to the cell's apply job, titled with the plan's counts. A check created before its record carried a title keeps its current title, so one retitled `Failed: ...` keeps that title after a later success |
+| failed | `queued`, titled `Failed: <first error line>`, linked to the failed job: the cell's apply job, or its `save` job when the apply never ran |
+| cancelled | `queued`, titled `Cancelled` |
+| not run: its wave did not run | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
-| no conclusion yet, or any other missing job (a wave that ran, or a cancelled one that may have started) | retried for about two minutes; then the outcome an earlier listing attempt saw, unless a later attempt listed the cell's job without a conclusion, else no write; the job fails |
+| held: in some attempt of the run, the apply may have run and its state is not known saved | `in_progress`, titled `State not saved`, linked to the run page. The apply result comment names the cell under `state not saved:`, links its `save` job's log and names [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran and its state was not saved` |
+| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply run writes it |
 
-A write other than `success` reads the check first and leaves it alone when it
-reads `completed`: another writer, such as a merge deploy, completed it. A
-`success` write rewrites a completed check, since `complete` repeats each
-completion job's writes.
+A write other than `success` leaves alone a check another writer, such as a
+merge deploy, has completed. The first error line is the message of the failed
+job's first `failure` annotation: its first line, control characters stripped,
+cut at 120 characters, or `Failed` alone when there is none or it cannot be
+read.
 
-The first error line is the message of the cell job's first `failure`
-annotation: its first line, control characters stripped, cut at 120 characters.
-`Failed` alone when there is none or the annotation read fails. The title only
-names the error; the outcome comes from the job's conclusion in the listing.
+A pre-merge apply run reads its pull request before it writes. Once the pull
+request has merged, the run writes only its `success` and held writes and
+flips nothing, since the merge deploy owns the pending checks; a failed read
+writes nothing and fails the run.
 
-A completion job runs only for a wave that ended `success` or `failure`;
-`complete` runs after every release, wave and completion job, rewrites the whole
-snapshot with the same writes, and is the only writer on a cancelled run. A
-completion job's failure never fails the level (job-level
-`continue-on-error: true`): `complete` handles every snapshot check of the level again.
-`complete` fails the level, and leaves a cell's check as it was (`in_progress`
-when it was flipped), when the jobs listing never shows that cell's job in a wave
-that ran, or in a cancelled wave whose other cells it lists; the gate stays pending, and the next run's `snapshot` writes it again.
-A success from any listing attempt is kept, so a later, staler listing never
-turns a completed check back to `queued`. Otherwise the last outcome any attempt
-saw for a cell is written, so a later failed or lagging listing does not drop a
-`failure`, `cancelled` or not-run outcome an earlier attempt saw, unless a later
-attempt listed the cell's job without a conclusion: then the cell gets no write. "Re-run failed jobs" skips `snapshot`
-and reuses its outputs.
-
-Every flip and completion write retries a transient failure and waits out
-GitHub's secondary rate limit (three 60 s waits per process); the summary and
-record read before a write does too. At 256 checks a completion job stays inside
-`ubuntu-slim`'s 15-minute cap: about 2 minutes of listing retries, one read and
-one write per check at about 1.7 a second, one annotation read per failed cell,
-and the 3-minute rate budget. A job that still runs out fails, and `complete` or
-the next run's `snapshot` recovers.
-
-A pre-merge release or completion job reads the pull request once before
-writing; a merge deploy reads none. A merged pull request gets only its
-`success` writes, since the merge deploy owns its pending checks, so a release
-flips nothing and logs one notice; a closed or open one gets every write; a
-failed read writes nothing and fails the job, and a failed release skips its
-wave.
-
-**Re-runs.** On a pre-merge apply run whose `GITHUB_RUN_ATTEMPT` is above 1, each
-wave cell's pre-apply check refuses:
+**Re-runs.** On a pre-merge apply run whose `GITHUB_RUN_ATTEMPT` is above 1,
+each cell refuses:
 ``an apply is never re-run (run attempt '<n>'): comment `shipmate apply` ``.
-Its release jobs write nothing, and its completion jobs write only `success`: a
-later run may have completed the same checks, and any other write would reopen
-them, but re-running a completion job can still complete a cell an earlier
-listing missed. A merge deploy's re-run is allowed. On a merge deploy, "Re-run
-failed jobs" re-runs the failed wave and its dependents: a later wave's release,
-skipped the first time, runs then and flips its checks. On a merge deploy, "Re-run
-all jobs" re-runs `snapshot` and every release, so it starts from the checks that
-are still open. A retried cell whose release is not re-run applies while its check reads `queued`
-with the first attempt's title (`Failed: ...`), and the re-run's completion jobs
-and `complete` write its outcome.
+The re-run writes only `success` and held writes: a later run may have
+completed the same checks. A merge deploy's re-run is allowed, unless an
+earlier attempt of the deploy may have applied a cell without saving its
+state. Then the deploy refuses:
+``deploy refused: <cells> may have been applied by an earlier attempt of this deploy, run <id>, without saving their state. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.``,
+and a cell re-run on its own refuses before it applies:
+``apply aborted for `<env>` / `<stack>`: run attempt <n> of this deploy may have applied this cell without saving its state; follow docs/troubleshooting.md section The apply step ran and its state was not saved``
+(`run attempts <n>, <m>` for more than one). A re-run of a merge deploy starts
+from the checks that are still open. A cell's state is saved only by the
+attempt that applied it: a re-run of a cell's `save` job alone saves nothing,
+and fails unless it finds the state an earlier attempt saved.
 
-**Dead runs.** `apply-snapshot`, `deploy-detect`, `apply-detect`,
-`unlock-detect` and the gate read any check that is not `completed` as pending,
-`in_progress` included. A run that dies after a flip (a lost runner, a second
-cancel that also stops `complete`) leaves its checks `in_progress`; the gate
-stays pending, and the next apply run's `snapshot` takes them as pending and
-writes them again. Apply runs of one pull request run one at a time, so an
-`in_progress` check that a pre-merge `snapshot` sees belongs to a dead run.
+**Dead runs.** A run that ends after a flip without writing its checks (a lost
+runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
+The next apply of the cell reads the run that holds the check: it applies the
+cell again only when that run never applied it, and refuses otherwise.
 
-**In-progress checks on a merge deploy.** The merge deploy refuses the whole run
-over a pending cell with an App apply check `in_progress` under another run
-that may have applied the cell or may still apply it, whether that check is the
-cell's newest or an older one under a newer re-plan check: a live holding run may
-still apply it, and an ended one may have applied it without saving its state.
-This refusal runs after the stranded-check and behind-check refusals and before
-the deploy reads any plan run. The check's details link names the holding run
-only when it is exactly `<server>/<owner>/<repo>/actions/runs/<id>` of this
-repository. A link to the deploy's own run passes, so a re-run of the deploy
-proceeds over its own flips. `detect` reads the holding run and, once it reads
-`completed`, that run's jobs listing across every attempt, then the run again,
-through the job token's `actions: read`:
+**In-progress checks.** A pre-merge apply and a merge deploy read every App
+apply check of a pending cell that is `in_progress` under another run, whether
+that check is the cell's newest or an older one under a newer re-plan check; a
+pre-merge apply reads only its pull request's head. The check's details link
+names the holding run only when it is exactly
+`<server>/<owner>/<repo>/actions/runs/<id>` of this repository. A link to the
+run's own page passes, so a merge deploy's re-run proceeds over its own flips.
+A held check is `in_progress` under the run that held it, so every apply form
+refuses a held cell.
 
-| Holding run | Deploy |
-| --- | --- |
-| not `completed`; or its listing's newest attempt is not the attempt read, or it is not the same completed attempt when read again after the listing (a re-run between the reads, or a stale listing); or a job of the cell is not `completed` | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand |
-| `completed` on the same attempt on both reads, that attempt the listing's newest, and no job of the cell applied: each lists no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check` (after which `apply-cell` only refuses); or no job of the cell is listed | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it``: the run that holds the check has ended and writes nothing more to it |
-| `completed` on the same attempt on both reads, that attempt the listing's newest, and it lists a job of the cell that does not show it never applied | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` |
-| the run or its jobs listing could not be read completely | refuses: ``<cells>: run <id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.`` |
-| the link names no run of this repository | refuses: ``<stack> / <env>: apply check <check id> is in progress with no run named; follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` |
+| Holding run | Merge deploy | Pre-merge apply |
+| --- | --- | --- |
+| still running, or a job of the cell has not completed | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand | refuses: ``<cells> are held in progress by run <id>, which is still running. Wait for it to end, then re-run `shipmate apply`.`` |
+| ended, never applied the cell | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it`` | applies the cell |
+| ended, may have applied the cell without saving its state | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` | refuses: ``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then re-plan.`` |
+| ended, applied the cell and saved its state | refuses: ``<cells> were left in progress by run <id>, which applied them and saved their state. Follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
+| the run or its jobs listing could not be read completely | refuses: ``<cells>: run <id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.`` | refuses with the same text, ``re-run `shipmate apply` `` in place of `re-run this deploy` |
+| the link names no run of this repository | refuses: ``<cells>: apply check <check id> is in progress with no run named; follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
 
-Each refusal starts `deploy refused:`, applies nothing, and names every other
-pending cell of the merge, which stays unapplied too
+Each deploy refusal starts `deploy refused:`, applies nothing, and names every
+other pending cell of the merge, which stays unapplied too
 ([`docs/troubleshooting.md`](docs/troubleshooting.md) §A merge deploy refused an
-apply check another run holds in progress).
+apply check another run holds in progress). Each pre-merge refusal starts
+`apply refused:` and applies nothing.
 
 Accepted limits:
 
-- When every cell of a cancelled wave is missing from the listing while the
-  level's literal row is listed, its cells are written `Not run`, even if a cell
-  started before the cancel; the check returns to `queued` either way (fail
-  closed), and only the title differs.
+- When every cell of a cancelled wave is missing from the run's jobs listing,
+  its cells are written `Not run`, even if a cell started before the cancel;
+  the check returns to `queued` either way (fail closed), and only the title
+  differs.
 - `in_progress` marks the wave's release, not the cell's start, and lands after
-  a runner delay: a cell waiting on an environment approval, or on a concurrency
-  group inside its wave, already reads `in_progress`.
-- The cell job rows and the `<env>-apply` deployments stay under the default
+  a runner delay: a cell waiting on an environment approval, or for another run
+  of the same cell to finish, already reads `in_progress`.
+- The cells' job rows and the `<env>-apply` deployments stay under the default
   branch's commit, where the dispatched run is; the pull request shows only the
   App apply checks.
-- A release flip reads no check before it writes. On a check another writer has
-  completed, its status-only flip leaves the check `completed` and replaces only
-  the details link (probed: a status or `details_url` write to a settled completed
-  check keeps it completed). A flip landing within seconds of that completion can
-  reopen it, and the gate then stays pending until a later write.
 - A release flip or a completion write can race a merge that bypasses the gate:
-  one pull request read per pre-merge release or completion job, so a merge
-  landing after that read is not seen. The merge
-  deploy's `snapshot` reads such a check as pending and applies or rewrites it;
-  a cell lock the dead pre-merge run left is released with `shipmate unlock`.
-- A plan re-run can create a fresh duplicate apply check after the snapshot; it
-  is left pending (its plan was not applied by this run), which keeps
-  `shipmate / gate` from greening on a plan the apply never used.
+  the run reads the pull request before it writes, so a merge landing after
+  that read is not seen. The merge deploy reads such a check under the
+  in-progress rules above; a cell lock the dead pre-merge run left is released
+  with `shipmate unlock`.
+- A plan re-run can create a fresh duplicate apply check after the run's
+  detect; it is left pending (its plan was not applied by this run), which
+  keeps `shipmate / gate` from greening on a plan the apply never used.
 
 ## Env model
 
@@ -419,10 +327,10 @@ Accepted limits:
   `<env>-apply` by default and the bare `<env>` under `split: false`.
 - **Detect resolves the binding, and every cell job reads it from its row.**
   `scripts/env-config` computes `env_binding` from the default-branch table
-  when detect stamps each matrix row, and the eight wave jobs of
-  `apply-env-level.yml`, engine `unlock.yml`'s `unlock` job, engine `plan.yml`'s
-  `plan` job and engine `drift.yml`'s `drift` job all bind it with the same
-  expression:
+  when detect stamps each matrix row. Engine `unlock.yml`'s `unlock` job,
+  engine `plan.yml`'s `plan` job and engine `drift.yml`'s `drift` job bind it
+  with this expression, and each apply cell's `apply` job binds the same field
+  of the row it is passed:
 
   ```yaml
   environment: ${{ matrix.env_binding }}
@@ -1090,27 +998,33 @@ the repository root, or none:
 | any other `type` | any | none: the backend owns its state |
 
 - **A path** — a local backend. The cell restores that path through
-  `actions/state` before it plans or applies, and `apply-cell` saves it after the
-  apply (`plan-cell` and `drift-cell` restore only; neither writes state). The
+  `actions/state` before it plans or applies, and the cell's `save` job saves
+  the state its apply left (`plan-cell` and `drift-cell` restore only; neither
+  writes state). The `save` job runs on the cell's `runs_on` runner and runs no
+  pull-request code. A local-backend apply cell on a runner that is not
+  GitHub-hosted refuses before it applies:
+  ``the save job runs only on GitHub-hosted runners; a reused self-hosted runner could alter what it saves. Use a GitHub-hosted runs_on or a remote backend.``
+  The
   cached file is encrypted with `SHIPMATE_ENCRYPTION_KEY` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
   restore a default-branch cache entry. An empty encryption key refuses the restore
-  and the save. An entry that fails authentication and an openssl
-  or disk failure on the runner each fail the restore naming the matched cache
-  key, so tofu never reads it and the cell skips its save. An encryption key
+  and the apply's hand-off of its state. An entry that fails authentication and
+  an openssl or disk failure on the runner each fail the restore naming the
+  matched cache key, so tofu never reads it and nothing is applied. An encryption key
   rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
   truncated or altered entry, and one copied under another stack's or
   environment's key each fail authentication; `docs/troubleshooting.md`
   §`state cache entry ... failed authentication` tells them apart.
-  The save is verified: `actions/state` looks its entry up by the exact save
-  key, with no `restore-keys`, and after a miss up to four more times over
-  about 30 s; its `saved` output is `true` only when a lookup finds it,
-  because `actions/cache/save` warns and succeeds when the cache stores
-  nothing. `Save state` does not fail on a miss. `apply-cell`'s
-  `Warn that the applied state was not saved` step fails the cell's job, so its
-  apply check stays pending, whenever an apply step that ran over a restored
-  state is followed by a save that failed, was cancelled, was not found, or was
-  skipped for an absent or empty state file; `docs/troubleshooting.md`
+  The save is verified: the `save` job looks its entry up by the exact key,
+  `state/<stack-slug>/<env>/<run_id>-<run_attempt>`, with no `restore-keys`,
+  and after a miss up to four more times over about 30 s, because
+  `actions/cache/save` warns and succeeds when the cache stores nothing; when
+  that save is not found it saves and looks up the same key with `-r1`. The
+  apply's sealed state stays in the run's artifact
+  `state.<env>.<stack-slug>.<run_attempt>` for the repository's artifact
+  retention. A `save` job that finds neither entry, or whose apply left no state
+  file, fails naming both keys, and the cell's apply check is held
+  (§Apply check lifecycle); `docs/troubleshooting.md`
   §`The apply step ran and its state was not saved` has the recovery.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
@@ -1168,15 +1082,15 @@ cell names, not who may assume it.
 With no role resolving — no identity named, or no entry for the environment —
 the credentials step is skipped and the job holds no cloud credential at all,
 which is how the sample repos run credential-free. Every cell-running job on
-every path is wired the same way: the wave jobs of `apply-env-level.yml`,
+every path is wired the same way: each apply cell's `apply` job,
 `unlock.yml`'s unlock job, `plan.yml`'s `plan` job and `drift.yml`'s `drift`
 job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
 except that a shared environment (`split: false`) resolves `aws.apply` on
-every path. The `snapshot`, `waveN-complete` and `complete` jobs deliberately
-get no cloud credential.
+every path. The `snapshot`, `waveN-complete` and `complete` jobs and each apply
+cell's `save` job deliberately get no cloud credential.
 
 On the apply path the engine passes through whatever role the environment
 resolves, and nothing more: which role that is — and whether two environments'
@@ -1691,11 +1605,11 @@ the second run waits in `shipmate-apply-<pr_number>` until the first ends
 ("One apply run per pull request"), and its `detect` then finds the checks the
 first run applied completed, so it applies none of them. A cell the first run
 left pending (failed, cancelled or not run) is pending for the second run too,
-which takes it up as a later `shipmate apply` would. The exception is a first
-run whose `Save state` failed on a local backend: the second run restores the
-pre-apply state and applies the plan again, the same risk a second `shipmate
-apply` comment already carries; `docs/troubleshooting.md` §`The apply step ran
-and its state was not saved` is the recovery. A double replan costs one extra
+which takes it up as a later `shipmate apply` would. The exception is a cell
+the first run may have applied without saving its state: its apply check is
+held, and the second run refuses (§Apply check lifecycle, In-progress checks);
+`docs/troubleshooting.md` §`The apply step ran and its state was not saved` is
+the recovery. A double replan costs one extra
 plan run and one minimized comment, and a double `unlock` finds no lock and
 exits green.
 
@@ -2003,8 +1917,8 @@ cancel`). GitHub cancels the run's call into `apply-run.yml` when the call
 arrives at a full queue (`run` ends `cancelled`; `guard` stays green and
 `outcome` replies); that is GitHub's documented `queue: max` behaviour, not
 probed for this group. A job of the run can
-also end `cancelled` while the run is not: a wave job evicted by its cell's
-concurrency group, a job timeout, or a `summary` at a full gate-writer queue
+also end `cancelled` while the run is not: a cell that arrived at a full queue
+of its cell's concurrency group, a job timeout, or a `summary` at a full gate-writer queue
 (§Outcome reply says which text each selects). A run cancelled while
 it waits in the queue runs no job of `apply-run.yml`: its apply checks and
 `shipmate / gate` stay as they were, and `outcome` posts the cancelled reply.
@@ -2023,18 +1937,20 @@ is stale, and `queue` cancels it only when this run's own listed `ref` is the
 live head (a run whose own title is not listed at the live head cancels nothing;
 stale runs stay until a run at the live head cancels them or they reach `review`,
 which refuses the moved head), its jobs listing is complete, both head reads agree, and its `run` call (jobs listed `<caller> / run / ...`; a
-cell is exactly `<caller> / run / L<n> / <env> / <stack>`, five segments, so a
-caller job name containing ` / ` never matches and such a run is kept) either:
+cell's jobs are exactly `<caller> / run / L<n> / <env> / <stack> / apply` and
+`... / save`, six segments, so a caller job name containing ` / ` never matches
+and such a run is kept) either:
 
 - (a) waits for `shipmate-apply-<pr_number>`: its job named exactly
   `<caller> / run / review` is `pending`, so no job of this attempt inside the
   call has run (a full re-run's earlier attempt may have applied); or
-- (b) waits on environment approval: every unfinished job of the call is a wave
-  cell (`<caller> / run / L<n> / <env> / <stack>`) listed `waiting`.
+- (b) waits on environment approval: every unfinished job of the call is a
+  cell's `apply` job listed `waiting`, or that cell's `save` job, which has not
+  started.
 
 Anything else keeps the run, whatever its status. A run past `review` with a job
 `pending` on its own concurrency group is kept: the engine cancels only a run
-whose call has not started or whose only unfinished jobs are wave cells waiting
+whose call has not started or whose only unfinished jobs are cells waiting
 on approval. `guard`, `claim`, `queue` and `outcome` sit outside the group and are not
 counted. A runs listing with a failed or malformed page or a
 malformed run (an `id` that is not a number, a title or event that is not text),
@@ -2431,9 +2347,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
     apply checks pending, so no refresh greens the gate until they apply;
   - a deploy `summary`: the merged head keeps its last gate and the merged pull
     request keeps the cell locks that run owed; re-run that deploy, as for any
-    superseded deploy, unless a cell's job log shows
-    `The apply step ran and its state was not saved` (`docs/troubleshooting.md`
-    has the section of that name).
+    superseded deploy, unless a cell's apply check is titled `State not saved`
+    or its `save` job failed (`docs/troubleshooting.md`
+    §`The apply step ran and its state was not saved`).
 
   Plan runs of one head can write out of order. An older run's `summary` that
   writes after a newer run of the head published apply checks or a hold writes
@@ -2513,13 +2429,13 @@ namespace it takes only the `github-actions` rows, because a mirrored copy
 shares a name with the autoplan check it was copied from and carries none of
 its annotations.
 
-`shipmate apply` and `deploy.yml` share the same per-env, per-stack
-`apply-<env>-<stack>` concurrency group, declared with
-`cancel-in-progress: false` on every wave job (§Fan-out), so exactly one apply
-ever runs against a given stack × environment at a time, regardless of whether
-it was triggered by a pre-merge comment or a post-merge push. A second apply for
-the same cell queues behind the first rather than racing or cancelling it, and
-is then refused by the exact-plan fail-safe if the first advanced the state.
+One apply, merge deploy or `shipmate unlock` of a stack in an environment runs
+at a time, from the start of its apply through its state save, whether a
+pre-merge comment or a merge started it. Later ones wait in arrival order, which
+GitHub does not guarantee, up to 100 waiting; one arriving at a full queue is
+cancelled. A cell waiting for environment approval holds the cell for the whole
+wait. A waiting apply never cancels the one before it, and is refused by the
+exact-plan fail-safe if that one advanced the state.
 
 ## Cell locks
 
@@ -2608,7 +2524,7 @@ merges or closes, or another pull request evicts them with
 **Every apply cell runs a pre-apply check.** "Re-run failed jobs" re-runs the failed wave
 jobs and neither `detect` nor `lock`, and a first attempt's wave can wait hours on an
 environment approval. So on every attempt each pre-merge apply cell first runs the
-pre-apply check, read-only, as the wave job's first step, before its cloud
+pre-apply check, read-only, as the first step of the cell's `apply` job, before its cloud
 credentials. It refuses unless the pull request holds the cell's lock (an eviction,
 or a release after a close, takes it away), with
 `` apply aborted for `<env>` / `<stack>`: pull request #<pr> no longer holds its
@@ -3534,9 +3450,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   again until it is deleted. A job with `tofu: "false"` restores and saves no
   OpenTofu entry. A job saves an entry after a restore that missed and only
   after the tool installed; a failed save does not fail the job.
-  `plan.yml` and `unlock.yml` declare `cache-mode: read`, so their jobs
-  restore only and pass `setup` `cache-save: "false"`. Entries come from the
-  apply, deploy and drift runs, which save in the default branch's cache scope
+  `plan.yml` and `unlock.yml` declare `cache-mode: read`, as does each apply
+  cell's `apply` job, so their jobs restore only and pass `setup`
+  `cache-save: "false"`. Entries come from the other jobs of the apply, deploy
+  and drift runs, which save in the default branch's cache scope
   that a pull request's plan reads, so a repository that has run none of them
   downloads the release files in every plan job. Each leg of a deploy run's
   `warm` job (§Terramate safeguards, "Lock files and the provider cache")
@@ -4412,8 +4329,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   | blocked | ⚪ | `blocked: <reason>` |
   | not attempted | 🟡 | `not attempted` |
 
-  `<url>` is the cell's job, or the workflow-run URL when the job is not
-  listed. An applied, failed or not-recorded row with apply output renders as a
+  Each cell line links its apply job's log, or the workflow run when the job
+  is not found. An applied, failed or not-recorded row with apply output renders as a
   fold-out (`<details><summary>` + its line + `</summary>`, then the output in
   a plain code fence); every other row is its bare line. An expected cell whose
   artifact never arrived (its wave/env-level was skipped after an upstream
@@ -4426,7 +4343,7 @@ names an error. A job that failed without an `::error::` renders no fence.
   plan, then apply.``, naming each failed cell whose apply output holds
   OpenTofu's `│ Error: Saved plan is stale` line once its colour is stripped,
   at most five then `and <n> more`; `state not saved:`, naming
-  the cells whose state was not saved; `not recorded:`, naming the
+  the cells whose apply check is held; `not recorded:`, naming the
   not-recorded cells; and ``not attempted: the apply checks stay pending;
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
   covered all environments), qualified to run after the `state not saved:`
@@ -4553,12 +4470,11 @@ job believed before its check was completed:
 
 - 🟢 **applied** — the apply succeeded and its check is recorded.
 - 🟠 **not recorded** — the apply succeeded but its check is still
-  pending, because the check was not completed after the apply: the cell's
-  job did not succeed (its state was not saved, or it was cancelled), the
-  `complete` job failed, or a newer plan re-created the check.
+  pending, because the check was not completed after the apply: the run's
+  completion of the check failed, or a newer plan re-created the check. A held
+  cell is never not recorded (`state not saved`, below).
   `shipmate / gate` stays pending, and the stack needs a re-plan. The
-  `not recorded:` note ends `Re-plan.` and never says re-apply: a cell whose
-  state was not saved is also named by the `state not saved:` note below. The
+  `not recorded:` note ends `Re-plan.` and never says re-apply. The
   `not recorded:` note names the affected cells — capped, with
   any remainder summarized as a count, since notes are part of the comment the
   size fallback cannot shed and the usual cause strands a whole matrix at once;
@@ -4572,41 +4488,35 @@ job believed before its check was completed:
   failed row against a completed check means some other run applied that cell:
   the row over-reports, nothing is stranded, and downgrading it would let an
   unrelated run's completed check hide a real failure in this one. A failed
-  apply can still have changed resources, and a failed cell whose state was
-  not saved is named by the `state not saved:` note.
-- **state not saved** is a note, not a status: `apply-cell-summary` writes
-  `state_lost` into `cell.json`, true unless the cell's
-  `Warn that the applied state was not saved` step's outcome is `success` or
-  `skipped`, so a cancelled or unknown outcome counts as lost. That step fires
-  when the apply step ran, the state was restored, and `actions/state` did not
-  report `saved`. The `state not saved:` note names up to 5 of those cells
-  and counts the rest, whose job logs show
-  `The apply step ran and its state was not saved`, and says: the apply step
-  ran and its state was not saved or not verified; never re-run the cells'
-  jobs or their workflow run; a re-run, a `shipmate apply` comment, or a merge
-  can apply their reviewed plans again against the state from before the
-  apply; before applying or merging any plan of a named stack in the
-  environment named beside it, on any pull request, follow
+  apply can still have changed resources, and a failed cell whose check is
+  held is named by the `state not saved:` note.
+- **state not saved** is a note, not a status: it names each cell whose apply
+  check is held, titled `State not saved` (§Apply check lifecycle). Such a
+  cell's row line ends `, state not saved`, and it is never not recorded. The
+  note names up to 5 of those cells, each followed by a `save log` link to its
+  `save` job when the run's job listing holds one, adds
+  ``, whose apply checks are titled `State not saved` `` past 5, and says:
+  their apply step may have run and their state is not known saved; never
+  re-run these cells' jobs or their workflow run; a re-run, a `shipmate apply`
+  comment, or a merge can apply their reviewed plans again against the state
+  from before the apply; before applying or merging any plan of a named stack
+  in the environment named beside it, on any pull request, follow
   `docs/troubleshooting.md`
   §`The apply step ran and its state was not saved`, which holds the procedure.
   While it is present, the `not attempted:` note's retry command is to run
-  once those cells are recovered, because any apply covering them applies
-  their reviewed plans again. Every `not attempted:` note also carries a
-  cause-agnostic pointer to that section, because the upload is best-effort: a
-  lost cell whose artifact did not upload renders as not attempted and no note
-  names it. The marker reaches only the
-  comment of the run that lost the state; a later run's comment, and the
-  remedies it renders, do not know. Nothing refuses a later apply of the cell.
-  The warning step's `exit 1`, not the artifact, keeps the cell's apply check
-  pending.
+  once those cells are recovered. Every `not attempted:` note also says to
+  follow that section first when a cell's `save` job log names it, because the
+  note reads the apply checks: a failed check scan leaves a held cell in no
+  note. The held check, not the comment, stops a later apply: every apply form
+  refuses a held cell (§Apply check lifecycle, In-progress checks).
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
 which means *unknown*, and the comment falls back to artifact-only status.
 Absence never manufactures a not-recorded row.
 
-`cell.json` holds the strings `stack`, `environment`, `result` and `reason`,
-and the boolean `state_lost`; the validator refuses a cell missing any of them
+`cell.json` holds the strings `stack`, `environment`, `result` and `reason`;
+the validator refuses a cell missing any of them
 or carrying another type. Its `result` grammar is `applied | failed | blocked`. Not recorded
 is a display status derived at render time, never a value `apply-cell` writes,
 so the validator still rejects an out-of-enum `result`.
@@ -4722,8 +4632,8 @@ refused text, and the reply still needs its own key check, mint and post. The re
 
 `summary` runs after a run cancel once `review` succeeded, and posts the
 result, so the cancelled text appears only when the run was cancelled before
-`review` ended or `summary`'s post failed. One known limit: a wave job evicted by its cell's
-concurrency group, in a run whose `summary` post failed, gets the cancelled
+`review` ended or `summary`'s post failed. One known limit: a cell cancelled at a full queue of
+its cell's concurrency group, in a run whose `summary` post failed, gets the cancelled
 text.
 
 **Plan.** `outcome` runs under `!cancelled()`, so a cancelled `shipmate plan`
@@ -5339,9 +5249,9 @@ environment of that level (§Fan-out), before any env-level-1 apply starts, and 
 on. A failure anywhere in an env-level skips every successor level's applies
 for that deploy run — the failed environment's stacks stay pending, and
 downstream environments are not touched until it is fixed and re-run. A cell
-whose job log shows `The apply step ran and its state was not saved` is fixed
-by `docs/troubleshooting.md` §`The apply step ran and its state was not saved`,
-never by a re-run, which applies it again.
+whose apply check is held, titled `State not saved`, is fixed by
+`docs/troubleshooting.md` §`The apply step ran and its state was not saved`,
+never by a re-run, which refuses it.
 `MAX_ENV_LEVELS` is `4`; an env-order graph that would span more levels than
 that fails validation of the table, naming one longest chain, rather than silently
 truncating.
@@ -5407,9 +5317,9 @@ its environment's other cells still apply. An environment with a waiting cell is
 applying, so its `needs` successors are skipped, and each new skip can make
 more cells wait; the bare form computes both to one fixpoint.
 Completed cells skip idempotently, so re-commenting `shipmate apply` resumes
-where the previous run stopped, except for a cell whose job log shows
-`The apply step ran and its state was not saved`: its check is pending, so a
-re-comment applies it again (`docs/troubleshooting.md`
+where the previous run stopped, except for a cell whose apply check is held,
+titled `State not saved`: a re-comment refuses it until it is recovered
+(`docs/troubleshooting.md`
 §`The apply step ran and its state was not saved`).
 
 An `auto` apply is the bare form over the `apply_mode: auto` environments

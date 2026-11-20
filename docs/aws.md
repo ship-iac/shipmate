@@ -221,8 +221,8 @@ Beyond the schema:
 **The consumer writes no credentials step on any path.** Every engine job that
 runs a cell carries `aws-actions/configure-aws-credentials` itself — after
 `actions/setup`, before the cell action, gated on a role resolving non-empty. It
-reads the role and the region the detect resolved onto the row. That is the
-wave jobs of `apply-env-level.yml` and `unlock.yml`'s unlock job on the apply
+reads the role and the region the detect resolved onto the row. That is each
+apply cell's `apply` job and `unlock.yml`'s unlock job on the apply
 side, reading `<env>-apply` (or the bare `<env>` under `split: false`), and
 `plan.yml`'s `plan` job and `drift.yml`'s `drift` job on the plan side, reading
 `<env>-plan` (or that same bare `<env>`). A consumer job's only obligation is
@@ -233,7 +233,7 @@ The plan-side role is the identity's `aws.plan`. A shared environment resolves
 `aws.apply` on both paths instead, so plan-time branch code holds the apply role
 ([`hardening.md`](hardening.md) §7–9).
 
-**The plan and drift steps resolve a workload role too**, like the wave jobs:
+**The plan and drift steps resolve a workload role too**, like the apply cells:
 an `aws.plan` map or a `{workload}` in it gives each listed workload its own
 plan role.
 
@@ -267,9 +267,9 @@ engine job but thirty-one:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
-- `apply-run.yml` and `deploy.yml`: `detect`, the apply cells in
-  `apply-env-level.yml`, to which both pass `runs_on` (`apply.yml` passes it
-  to `apply-run.yml`), `lock` in `apply-run.yml`, and `warm` and `replan` in
+- `apply-run.yml` and `deploy.yml`: `detect`, each apply cell's `apply` and
+  `save` jobs in `cell.yml`, which `apply-env-level.yml` calls with the
+  `runs_on` both pass (`apply.yml` passes it to `apply-run.yml`), `lock` in `apply-run.yml`, and `warm` and `replan` in
   `deploy.yml`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.

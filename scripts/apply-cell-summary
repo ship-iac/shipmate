@@ -72,7 +72,7 @@ FAILSAFES = [
     ("RESTORE_OUTCOME", "state restore failed"),
     (
         "HOSTED_OUTCOME",
-        "local-backend state needs a GitHub-hosted runner, which the state saver runs on",
+        "local-backend state needs a GitHub-hosted runner, which the save job runs on",
     ),
     (
         "PLAN_DIGEST_OUTCOME",
