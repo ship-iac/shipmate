@@ -473,7 +473,7 @@ def test_a_cell_waiting_on_an_approval_with_its_save_row_is_cancelled(gh):
 
 
 def test_a_save_listing_a_step_keeps_the_run(gh):
-    """Mutation: drop `not job.get("steps")` from `idle` -- red (cancelled)."""
+    """Mutation: drop `job.get("steps") == []` from `idle` -- red (cancelled)."""
     gh.runs, gh.jobs = _stale(
         [
             _rv("completed"),
@@ -481,6 +481,16 @@ def test_a_save_listing_a_step_keeps_the_run(gh):
             _save("L0 / prod / app", "pending", ["Set up job"]),
         ]
     )
+    gh.go()
+    assert gh.cancels == []
+
+
+def test_a_save_listed_without_steps_keeps_the_run(gh):
+    """A listing that omits `steps` does not show the `save` unstarted. Mutation: read a
+    missing `steps` as none (`not job.get("steps")`) -- red (cancelled)."""
+    save = _save("L0 / prod / app", "pending")
+    del save["steps"]
+    gh.runs, gh.jobs = _stale([_rv("completed"), _job("L0 / prod / app / apply", "waiting"), save])
     gh.go()
     assert gh.cancels == []
 

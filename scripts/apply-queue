@@ -84,6 +84,8 @@ def _cell_part(job):
     segments = _segments(job)
     if len(segments) != 6 or segments[1] != "run":
         return None
+    # The env and stack come from the name itself, so this checks only the `L<n>` segment and
+    # the part, through the grammar's one owner.
     return ag.cell_part(job["name"], segments[4], segments[3])
 
 
@@ -109,7 +111,7 @@ def idle(jobs):
     def held(job):
         if job["name"] in waiting:
             return True
-        save = _cell_part(job) == "save" and not job.get("steps")
+        save = _cell_part(job) == "save" and job.get("steps") == []
         return save and job["name"].removesuffix("save") + "apply" in waiting
 
     return bool(unfinished) and all(held(j) for j in unfinished)

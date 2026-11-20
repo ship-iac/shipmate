@@ -990,14 +990,14 @@ def _verify_earlier_attempts(repo, env, stack, where, run):
         level = ag.level_of(jobs or [], os.environ.get("JOB_ID", ""))
         if not level:
             raise SystemExit("the run's job listing failed or does not list this job")
-        return ag.cell_rows(jobs, level, stack, env)
+        rows = ag.cell_rows(jobs, level, stack, env)
+        return ag.unsaved(rows["apply"] + rows["save"], stack, env, before=int(attempt))
 
     what = "which earlier attempts of this deploy applied this cell"
-    rows = _confirm(where, what, read, _DEPLOY_RETRY)
-    unsaved = ag.unsaved(rows["apply"] + rows["save"], stack, env, before=int(attempt))
+    unsaved = _confirm(where, what, read, _DEPLOY_RETRY)
     if unsaved:
         raise SystemExit(
-            f"::error::apply aborted for {where}: run attempt "
+            f"::error::apply aborted for {where}: run attempt{'s' * (len(unsaved) > 1)} "
             f"{', '.join(map(str, unsaved))} of this deploy may have applied this cell without "
             "saving its state; follow docs/troubleshooting.md section The apply step ran and its "
             "state was not saved"
