@@ -14,7 +14,7 @@ inputs:
     required: false
     default: "true"
   cache-save:
-    description: '"false" where the workflow declares cache-mode: read, whose token cannot save; a save there only warns.'
+    description: '"false" where the workflow or job declares cache-mode: read, whose token cannot save; a save there only warns.'
     required: false
     default: "true"
 outputs:

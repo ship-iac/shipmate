@@ -135,7 +135,13 @@ DETECT_OUTPUTS = {
 
 #: Named so a failure says which one leaked in.
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
-APPLY_FAMILY_WORKFLOW = ".github/workflows/apply-env-level.yml"
+
+#: Every workflow each verb's file reaches through the `uses:` of its jobs, whole: `apply.yml`
+#: reaches `apply-cell` only through this chain, and `unlock.yml` reaches no workflow at all.
+REACHED_WORKFLOWS = {
+    APPLY: ["apply-run.yml", "apply-env-level.yml", "cell.yml"],
+    UNLOCK: [],
+}
 
 #: The whole `if:` of each `envlevel*` job. The mode clause went with the input, and it must not
 #: come back as a verb clause either.
@@ -199,6 +205,22 @@ def _uses(job):
 
 def _runs(job):
     return [s for s in (job.get("steps") or []) if s.get("run")]
+
+
+def _reached(workflow):
+    """`(workflows, actions)`: every workflow `workflow` calls, transitively and in first-call
+    order, and every step `uses:` (SHA dropped) of its jobs and theirs."""
+    workflows, actions = [], set()
+    for job in workflow_jobs(workflow).values():
+        actions |= {u.split("@")[0] for u in _uses(job)}
+        called = str(job.get("uses", ""))
+        if not called.startswith("./.github/workflows/"):
+            continue
+        name = called.removeprefix("./.github/workflows/")
+        more, more_actions = _reached(name)
+        workflows += [w for w in [name, *more] if w not in workflows]
+        actions |= more_actions
+    return workflows, actions
 
 
 def test_the_apply_workflow_declares_no_mode_rail():
@@ -288,15 +310,18 @@ def test_the_unlock_workflow_applies_nothing():
         "step is invisible to the `uses:` comparison above, and a `tofu apply` in the "
         "unlock job would run with the apply environment bound and its role assumed"
     )
-    callers = {
-        job_id: job["uses"]
-        for job_id, job in jobs.items()
-        if APPLY_FAMILY_WORKFLOW in str(job.get("uses", ""))
-    }
-    assert not callers, (
-        f"{UNLOCK} calls the apply wave engine from {callers} -- that workflow applies "
-        "every cell it is handed"
-    )
+
+
+@pytest.mark.parametrize("workflow", sorted(REACHED_WORKFLOWS))
+def test_each_verb_reaches_exactly_these_workflows(workflow):
+    """`apply.yml` reaches `apply-cell` through `apply-run.yml`, `apply-env-level.yml` and
+    `cell.yml`; `unlock.yml` calls no workflow, so neither the wave engine nor the cell that
+    applies. Mutations: point `unlock.yml`'s `unlock` job at `./.github/workflows/cell.yml`;
+    point `apply-env-level.yml`'s `wave3` at `./.github/workflows/unlock.yml`; point
+    `cell.yml`'s `Apply the cell` step at `$/actions/plan-cell`."""
+    workflows, actions = _reached(workflow)
+    assert workflows == REACHED_WORKFLOWS[workflow]
+    assert (local_action("apply-cell") in actions) == (workflow == APPLY)
 
 
 def test_each_unlock_job_requests_exactly_these_permissions():

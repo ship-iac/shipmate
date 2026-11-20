@@ -1364,8 +1364,9 @@ def test_job_url_falls_back_to_run_url_when_no_job_matches():
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    """A job named "apply / L0 / dev-eu / stacks/app" must not match env `eu`'s cell job
-    "eu / stacks/app" through a naive str.endswith; only a ` / `-boundary suffix counts.
+    """A job named "apply / run / L0 / dev-eu / stacks/app / apply" must not match env `eu`'s
+    cell job "eu / stacks/app / apply" through a naive str.endswith; only a ` / `-boundary
+    suffix counts.
     Mutation: `apply-gate.cell_part`'s pattern becomes `.*<env> / <stack> / (apply|save)` --
     red."""
     row = _row(environment="eu", stack="stacks/app")

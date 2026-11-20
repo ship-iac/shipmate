@@ -3,8 +3,8 @@ on:
   workflow_call:
     inputs:
       # One wave matrix row, serialized with toJSON. `environment` and `stack` repeat two of its
-      # fields because the concurrency group reads only inputs (test_apply_cell_concurrency_guard.py
-      # pins the caller's `with:`).
+      # fields because the concurrency group reads only inputs (test_cell_workflow.py pins the
+      # caller's `with:`).
       cell: { required: true, type: string }
       environment: { required: true, type: string }
       stack: { required: true, type: string }

@@ -2141,7 +2141,9 @@ _BAD_ATTEMPTS = [None, True, "2"]
         ({**_holder("completed"), JOBS_PATH: _GH_500}, (1, 3)),
         (_holder("completed", []), (1, 1)),
         (
-            _holder("completed", [_job(name="apply / run / L0 / dev-eu / stacks/web")], total=2),
+            _holder(
+                "completed", [_job(name="apply / run / L0 / dev-eu / stacks/web / apply")], total=2
+            ),
             (1, 1),
         ),
         ({RUN_PATH: json.dumps({"id": 77, "run_attempt": 1})}, (1, 0)),

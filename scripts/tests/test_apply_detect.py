@@ -1746,11 +1746,13 @@ def test_a_targeted_apply_refuses_a_cell_another_run_holds_unless_it_never_appli
     monkeypatch, tmp_path, link, run, jobs, refusal
 ):
     """Run 77 holds `stacks/app / dev-eu`'s apply check `in_progress`: a live run, an ended
-    run that applied it unsaved or saved, an unreadable run and a link naming no run refuse the
-    whole apply; an ended run that never applied it leaves it to apply.
+    run that applied it unsaved or saved, an unreadable run or jobs listing and a link naming no
+    run refuse the whole apply; an ended run that never applied it leaves it to apply.
 
     Mutation: drop the `refuse_held` call in `main` (the held check reads as pending, as before)
-    -- every refusing case applies, red."""
+    -- every refusing case applies, red. Mutation: `counted=False` in `_holding_run` -- short
+    listing, red. Mutation: `if jobs is None` for `if newest is None` in `_holding_run` --
+    empty listing, red."""
     out = _apply_env(monkeypatch, tmp_path)
     answers = [*base_answers("acme/iac"), *holder_answers("acme/iac", run, jobs)]
     _stub_apply(

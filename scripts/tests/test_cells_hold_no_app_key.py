@@ -74,7 +74,7 @@ def test_only_snapshot_and_completion_jobs_read_the_app_key():
     wave does.
 
     Mutations: remove `snapshot`'s `private-key` wiring; remove `wave4-complete`'s; remove
-    `wave2-release`'s.
+    `wave2-release`'s; map `SHIPMATE_APP_PRIVATE_KEY` in `wave0`'s `&cell-secrets`.
     """
     # Parse, do not string-split: the secret stays declared at the top of the file, because the
     # these jobs consume it and test_gate_name_consistency requires reusable targets called

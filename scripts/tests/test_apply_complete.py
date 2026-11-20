@@ -753,7 +753,7 @@ def test_list_prints_the_listing_unchanged_from_one_gh_call(tmp_path):
 def test_list_does_not_validate_the_jobs(tmp_path):
     """The classifier reads what the listing holds, as the `jq` call did. Mutation: validate
     the jobs as `listed_jobs` does (exit 75 on a job with no `name` or `status`)."""
-    listing = '{"id": 1}\n{"name": "L0 / dev-eu / dns"}\n'
+    listing = '{"id": 1}\n{"name": "L0 / dev-eu / dns / apply"}\n'
     proc, _ = _list(tmp_path, listing=listing)
     assert (proc.returncode, proc.stdout) == (0, listing)
 

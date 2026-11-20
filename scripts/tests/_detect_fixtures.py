@@ -399,17 +399,24 @@ def cell_job(part, steps=(("Apply the cell", "success"),), conclusion="success")
 
 def holder_answers(repo, run, jobs=None):
     """`(path, body)` pairs answering run `HOLDER` of `repo`: `run`, the run object's keys
-    beside its id, on every run read, and `jobs`, when given, as its one-page jobs listing."""
+    beside its id, on every run read, and `jobs`, when given, as its one-page jobs listing (a
+    string is the listing's whole body)."""
     path = f"repos/{repo}/actions/runs/{HOLDER}"
     answers = [(path, json.dumps({"id": int(HOLDER), **run}))]
     if jobs is not None:
-        listing = json.dumps({"total_count": len(jobs), "jobs": jobs})
+        listing = (
+            jobs if isinstance(jobs, str) else json.dumps({"total_count": len(jobs), "jobs": jobs})
+        )
         answers.append((f"{path}/jobs?filter=all&per_page=100&page=1", listing))
     return answers
 
 
 _ENDED = {"status": "completed", "run_attempt": 1}
 _BY_HAND = "docs/troubleshooting.md section Return an in-progress apply check by hand"
+_UNREADABLE = (
+    "::error::apply refused: stacks/app / dev-eu: run 77 could not be read completely; "
+    f"re-run `shipmate apply`. If it fails the same way, follow {_BY_HAND}."
+)
 #: `(link, run, jobs, refusal)` per cause a holder of `held_check` reads as, hand-written: the
 #: whole refusal of an apply, or None when the cell applies.
 HELD_CASES = {
@@ -451,10 +458,14 @@ HELD_CASES = {
         "",
         {"status": "completed"},
         None,
-        (
-            "::error::apply refused: stacks/app / dev-eu: run 77 could not be read completely; "
-            f"re-run `shipmate apply`. If it fails the same way, follow {_BY_HAND}."
-        ),
+        _UNREADABLE,
+    ),
+    "empty listing": ("", _ENDED, [], _UNREADABLE),
+    "short listing": (
+        "",
+        _ENDED,
+        json.dumps({"total_count": 2, "jobs": [cell_job("apply")]}),
+        _UNREADABLE,
     ),
     "no run named": (
         "/job/12",

@@ -2264,7 +2264,8 @@ def test_harvest_pending_counts_a_queued_github_actions_apply_job():
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
         _QUEUED_APP_APPLY,
         (
-            '{"id": 4, "name": "apply / L0 / dev-eu / app", "app_slug": "github-actions", '
+            '{"id": 4, "name": "apply / run / L0 / dev-eu / app / apply", '
+            '"app_slug": "github-actions", '
             '"status": "queued"}'
         ),
     ]

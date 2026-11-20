@@ -155,7 +155,7 @@ def _jobs(page):
 def test_run_jobs_reads_every_page():
     """Mutation: stop after the first page -- red (the `in_progress` job lost)."""
     first = [{"name": f"j{i}", "status": "completed"} for i in range(100)]
-    second = [{"name": "apply / run / L0 / dev / app", "status": "in_progress"}]
+    second = [{"name": "apply / run / L0 / dev / app / apply", "status": "in_progress"}]
     pages = {
         _jobs(1): {"total_count": 101, "jobs": first},
         _jobs(2): {"total_count": 101, "jobs": second},
