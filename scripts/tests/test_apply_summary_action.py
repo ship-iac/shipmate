@@ -135,6 +135,7 @@ _RENDER_ENV = {
     "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
     "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_LOCK_REFUSAL": "${{ inputs.lock-refusal }}",
+    "SHIPMATE_REFUSED_BY_RULE": "${{ inputs.refused-by-rule }}",
     "SHIPMATE_AUTO": "${{ inputs.auto }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
@@ -157,6 +158,8 @@ def test_render_step_env_block_matches_the_expected_mapping():
     never names the refusal -- red.
     Mutation: drop `SHIPMATE_LOCK_REFUSAL` from the render step, so a refused lock job's comment
     never names the refusal -- red.
+    Mutation: drop `SHIPMATE_REFUSED_BY_RULE` from the render step, so a refusal by rule reads
+    failed -- red.
     Mutation: drop `SHIPMATE_AUTO` from the render step, so an auto run's comment never says
     so -- red."""
     render_step = _find_step(

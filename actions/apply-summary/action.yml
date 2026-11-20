@@ -163,6 +163,7 @@ runs:
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_LOCK_REFUSAL: ${{ inputs.lock-refusal }}
+        SHIPMATE_REFUSED_BY_RULE: ${{ inputs.refused-by-rule }}
         SHIPMATE_AUTO: ${{ inputs.auto }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
