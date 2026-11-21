@@ -90,6 +90,7 @@ from _shipmate import (
     deploy_mode,
     gh_json,
     holder_dispatch_runs,
+    is_env_name,
     is_head_sha,
     is_run_id,
     listed_jobs,
@@ -105,7 +106,6 @@ from _shipmate import (
 
 ag = _load("apply-gate")
 az = _load("authorize")
-ec = _load("env-config")
 
 LOCKS = "refs/shipmate/locks/"
 ZERO = "0" * 40
@@ -165,7 +165,7 @@ def _record(ref, text):
 
 
 def _env(env):
-    if not ec.is_env_name(env):
+    if not is_env_name(env):
         raise SystemExit(f"::error::{env!r} is not an environment name ({ENV_NAME_RULE})")
     return env
 

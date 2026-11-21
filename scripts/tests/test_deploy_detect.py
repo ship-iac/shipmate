@@ -1212,27 +1212,44 @@ def test_a_stack_holding_the_separator_is_not_its_first_segment_s_check(tmp_path
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
-def test_a_stack_first_or_unparsable_open_name_does_not_refuse():
-    """A check named stack first, `apply / <stack> / <env>`, is outside the grammar, so
-    `stacks/app` losing its `env/dev` tag strands it with nothing said. Mutations:
-    `parse_check_name` reads the stack-first order as a fallback (refuses); index a None
-    parse instead of skipping it (raises)."""
-    assert (
-        dd.refuse_stranded_checks([], ["stacks/app"], {"apply / stacks/app / dev", "apply / x"}, [])
-        is None
+_PLANS_AFRESH = (
+    "(any edit that `terramate list --changed` marks, such as a comment line). It plans the "
+    "current default branch for all of them, this merged change included, and its cells are "
+    "applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` "
+    "for a `targeted` environment), or by its deploy otherwise. Re-running this deploy checks "
+    "out the same commit and refuses again. This deploy's apply checks are never read again and "
+    "stay open on the merged pull request."
+)
+
+
+def test_an_open_stack_first_name_refuses_naming_the_cells_left_unapplied():
+    """An open `apply / stacks/app / dev`, written before the upgrade, is outside the grammar, so
+    no cell can be read from it and the deploy refuses, naming it and the pending cells. Mutation:
+    skip a name `parse_check_name` cannot read again -- the call returns None."""
+    with pytest.raises(SystemExit) as exc_info:
+        dd.refuse_stranded_checks(
+            [], [], {"apply / stacks/app / dev", "apply / x"}, [_cell("stacks/app", "dev-eu")]
+        )
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / stacks/app / dev, apply / x: each is an apply check "
+        "written before the upgrade that named apply checks env first, so no cell can be read "
+        "from it and its reviewed change was not applied. This deploy applies nothing, so these "
+        "other cells of this merge are not applied either: stacks/app / dev-eu. Open a new pull "
+        "request that changes each of their stacks and every other listed stack " + _PLANS_AFRESH
     )
 
 
-def test_an_env_first_stranded_name_refuses_naming_only_itself():
-    """The open names outside the grammar beside it go unnamed. Mutations: `parse_check_name`
-    reads the stack-first order as a fallback (`apply / stacks/app / dev` is named too); index
-    a None parse instead of skipping it (raises)."""
-    names = {"apply / dev / stacks/app", "apply / stacks/app / dev", "apply / x"}
+def test_an_unreadable_name_refuses_before_a_stranded_one():
+    """Mutation: compute the stranded names first -- the stranded refusal fires, naming
+    `apply / dev / stacks/app`."""
+    names = {"apply / dev / stacks/app", "apply / stacks/app / dev"}
     with pytest.raises(SystemExit) as exc_info:
         dd.refuse_stranded_checks([], ["stacks/app"], names, [])
     assert str(exc_info.value) == (
-        "::error::deploy aborted: apply / dev / stacks/app: the stack of each lost its env/* tag "
-        "after this pull request was planned, so its reviewed change was not applied. " + _REMEDY
+        "::error::deploy aborted: apply / stacks/app / dev: each is an apply check written before "
+        "the upgrade that named apply checks env first, so no cell can be read from it and its "
+        "reviewed change was not applied. Open a new pull request that changes each of their "
+        "stacks and every other listed stack " + _PLANS_AFRESH
     )
 
 

@@ -15,9 +15,11 @@ section below names the SHA the release tags.
 - **The apply check is named `apply / <env> / <stack>`, in the order of the plan check and every cell job, instead of `apply / <stack> / <env>`.** `shipmate apply` and the merge deploy do not read an apply check written before the upgrade, while `shipmate / gate` still counts it. On a pull request planned before the upgrade:
   - `shipmate apply` applies none of its cells.
   - The gate keeps the state it had: pending while any cell is unapplied, green when all were applied before the upgrade. A same-head `shipmate plan` leaves the earlier checks open and the gate pending.
-  - Its merge deploy refuses with `no plan run recorded`, also when every cell was applied before the upgrade.
-  - A stack that lost its `env/*` tag after planning is skipped by the deploy without the stranded-check refusal.
-  - The merge releases every lock the pull request holds, so another pull request can take and apply those cells, and a base push no longer re-plans it for a changed stack.
+  - Its merge deploy refuses, naming each open apply check that it cannot read as a cell: one whose stack is not an environment name, such as `apply / stacks/app / dev`. The remedy is a new pull request that changes each named stack. Otherwise, with a cell pending, it refuses with `no plan run recorded`, also when every cell was applied before the upgrade.
+  - A stack whose name fits the environment-name charset, such as `app`, that lost its `env/*` tag after planning is skipped by the deploy with no refusal, and its reviewed change is not applied.
+  - The merge releases every lock the pull request holds, so another pull request can take and apply those cells.
+  - A push to the default branch re-plans no open pull request planned before the upgrade, including for a change outside every stack.
+  - `shipmate unlock <env>` and `shipmate unlock <env> --evict` reach none of its cells.
   - Where a stack is named like an environment and that environment like the stack, the old check of one cell carries the new name of the other and is read as that cell, which can then be skipped as applied.
 
   Upgrade in a pull request that changes no stack. After it merges, push a commit to every open pull request before merging any of them: the new commit's plan writes new-order checks, and none of the above applies. Update any rule or script outside shipmate that matches apply check names (`CONTRACT.md` §Check names).
