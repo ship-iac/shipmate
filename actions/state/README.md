@@ -8,42 +8,49 @@ Persists per-(stack × environment) OpenTofu local state across CI runs, using
 backend's `path` for the default workspace, or
 `<workspace_dir>/<workspace>/terraform.tfstate` for a named one, relative to
 the repository root. A backend other than `local` yields no path, and the cell
-skips both steps.
+skips the restore. `actions/cache` keys an entry's version on the path string,
+so the cell's `save` job passes the restore's exact string (`./terraform.tfstate` for the
+root stack).
 
 Cache keys are scoped per stack and env and delimited with `/` so one env
-name cannot prefix-match another. The save key is
-`state/<stack-slug>/<env>/<run_id>-<run_attempt>`. A restore tries that exact
-key first, then the `state/<stack-slug>/<env>/` prefix as `restore-keys` — the
-usual cross-run case — so a run picks up the most recent state for that
-stack × env. `run_attempt` is in the key so a GitHub "re-run" writes a fresh
-key rather than colliding with the immutable original, which
-`actions/cache/save` would refuse to overwrite.
+name cannot prefix-match another. The key is
+`state/<stack-slug>/<env>/<run_id>-<attempt><key-suffix>`: `attempt` defaults
+to the job's `run_attempt` and is otherwise 1 to 4 digits with no leading zero;
+`key-suffix` is empty or `-r1`, and anything else refuses. A restore tries the
+exact key first, then the `state/<stack-slug>/<env>/` prefix as `restore-keys`,
+the usual cross-run case, so a run picks up the most recent entry for that
+stack × env, a `-r1` entry included. The attempt is in the key so a GitHub
+"re-run" writes a fresh key rather than colliding with the immutable original,
+which `actions/cache/save` would refuse to overwrite.
 
-Invalid `mode` fails loud: the action validates `mode` is exactly `restore`
-or `save` before anything else, so a typo cannot silently skip both steps.
+Invalid `mode` fails loud: the action validates `mode` is exactly `restore`,
+`save` or `lookup` before anything else, so a typo cannot silently skip every
+step.
 
-**State is encrypted at rest with `encryption-key`**, the consumer's
-`SHIPMATE_ENCRYPTION_KEY`, through `scripts/plan-crypt` (the same cipher as
-the plan artifact). An empty `encryption-key` refuses both modes before any cache
-call.
+**State is encrypted at rest with `SHIPMATE_ENCRYPTION_KEY`** through
+`scripts/plan-crypt` (the same cipher as the plan artifact), bound to the key's
+`state/<stack-slug>/<env>/` prefix. The apply cell seals the file; this action
+never encrypts.
 
-- Save: the file is encrypted in place, then saved. An absent or 0-byte file is
-  not saved; the step prints a notice instead. `actions/cache/save` warns and
-  succeeds when the cache stores nothing, so a lookup of the exact save key, with
-  no `restore-keys`, verifies the save; after a miss it looks again up to four
-  times over about 30 s. The `saved` output is `true` only when a lookup finds
-  the entry, and `false` otherwise. The action does not fail on a miss;
-  `apply-cell` reads `saved` and fails the cell when an apply ran.
-- Restore: a matched entry is authenticated, then decrypted in place, before
-  tofu reads it. A cache miss restores nothing and runs no decrypt. An entry
-  that fails authentication (another encryption key, a corrupt, truncated or altered
+- `restore`: needs `encryption-key`; empty refuses before any cache call. A
+  matched entry is authenticated, then decrypted in place, before tofu reads
+  it. A cache miss restores nothing and runs no decrypt. An entry that fails
+  authentication (another encryption key, a corrupt, truncated or altered
   entry, or one copied under another stack's or environment's key) fails it
   naming the matched cache key and no command: `docs/troubleshooting.md` tells
   the causes apart. An openssl or disk failure on the runner fails it too;
-  re-run the job instead. A failed restore makes the cell skip its state save,
-  so the entry is never overwritten.
-- The save leaves ciphertext in the workspace, so no step after it reads the
-  state file.
+  re-run the job instead.
+- `save`: saves the file at `path` as it is. `cell.yml`'s `save` job calls it
+  through `actions/state-save`, which runs no pull-request code, with the sealed
+  state the cell's `apply` job handed off. A file that is absent, shorter
+  than a sealed file, or without the cipher's header refuses before the save.
+  `actions/cache/save` warns and succeeds when the cache stores nothing, so a
+  lookup of the exact key, with no `restore-keys`, verifies the save; after a
+  miss it looks again up to four times over about 30 s.
+- `lookup`: runs the same exact-key lookups and never saves.
+- `save` and `lookup` read no encryption key. The `saved` output is `true` only
+  when a lookup finds the entry, and `false` otherwise; the action does not
+  fail on a miss. The `save` job of `cell.yml` reads `saved`.
 
 **The cache is not durable storage**: GitHub evicts entries by last access,
 those unused past the repository's retention period (7 days by default) and the
@@ -52,9 +59,9 @@ only the newest entry under a prefix, so older entries usually go first; once
 the newest is evicted, a restore usually finds none and the next plan
 re-creates every resource the stack holds: harmless for the local-backend samples' `random_pet`
 (and `terraform_data` in `repo-example-stacks`), a duplicate or collision for a
-real resource. A save that fails or is not verified after an apply fails the
-apply cell: `docs/troubleshooting.md` §`The apply step ran and its state was
-not saved`. The small window for concurrent
-read/modify/write races is closed by the per-stack x environment `concurrency`
-group that serializes applies and unlocks; `actions/state` itself makes no
-locking guarantees.
+real resource. A state the `save` job could not save fails that job, and the
+cell's apply check is held `in_progress`, titled `State not saved`:
+`docs/troubleshooting.md` §`The apply step ran and its state was not saved`.
+Concurrent read/modify/write races are closed by `cell.yml`'s per-stack x
+environment `concurrency` group, held from the apply through the save and shared
+with unlocks; `actions/state` itself makes no locking guarantees.

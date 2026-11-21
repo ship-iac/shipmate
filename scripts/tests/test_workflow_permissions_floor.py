@@ -9,7 +9,14 @@ from _loader import workflow_yaml
 
 #: Every engine workflow whose empty workflow-level floor is pinned. Hand-written, never globbed:
 #: a glob would pin whatever the directory holds.
-_FLOORED = ["apply-env-level.yml", "comment-ops.yml", "drift.yml", "plan.yml", "unlock.yml"]
+_FLOORED = [
+    "apply-env-level.yml",
+    "cell.yml",
+    "comment-ops.yml",
+    "drift.yml",
+    "plan.yml",
+    "unlock.yml",
+]
 
 
 @pytest.mark.parametrize("name", _FLOORED)

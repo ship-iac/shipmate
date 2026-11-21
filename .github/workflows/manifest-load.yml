@@ -81,6 +81,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/state@main
       - if: false
+        uses: ship-iac/shipmate/actions/state-save@main
+      - if: false
         uses: ship-iac/shipmate/actions/summary@main
       - if: false
         uses: ship-iac/shipmate/actions/unlock-cell@main

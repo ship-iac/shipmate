@@ -86,11 +86,13 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.cells) }}
     environment: ${{ matrix.env_binding }}
-    # The wave jobs' group (scripts/tests/test_apply_cell_concurrency_guard.py): an unlock queues
+    # cell.yml's group (scripts/tests/test_apply_cell_concurrency_guard.py): an unlock queues
     # behind a live apply for the cell, so the lock is gone or orphaned by the time it runs.
+    # Without `queue: max`, an unlock arriving behind a waiting cell evicts it.
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
+      queue: max
     name: ${{ matrix.environment }} / ${{ matrix.stack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,7 +101,8 @@ jobs:
         with: { cache-save: "false", versions: "${{ needs.detect.outputs.tools }}" }
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.
-      # Byte-identical to the wave jobs' step (scripts/tests/test_aws_oidc_wiring_guard.py).
+      # Byte-identical to cell.yml's step but for the row's spelling
+      # (scripts/tests/test_aws_oidc_wiring_guard.py).
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0

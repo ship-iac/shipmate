@@ -58,7 +58,9 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   tip comparison is whole-branch: any base merge refuses every cell still to apply in this run.
   With `SHIPMATE_DEPLOY` `true` (a merge deploy's wave) it runs no other check and refuses only
   when a pull request other than `SHIPMATE_PR_NUMBER`, the merged one (empty on a push, read as
-  `0`), holds the cell's lock: one taken after the deploy's detect.
+  `0`), holds the cell's lock: one taken after the deploy's detect, and, on a run attempt above
+  1, when an earlier attempt of this run may have applied the cell without saving its state
+  (`_verify_earlier_attempts`).
 """
 
 import collections
@@ -974,6 +976,34 @@ def _verify_deploy(repo, pr, env, stack, where, run):
     )
 
 
+def _verify_earlier_attempts(repo, env, stack, where, run):
+    """On a re-run of the deploy, refuse when `ag.unsaved` names an earlier attempt of this cell
+    at this job's level (`JOB_ID`, its check run id) in the run's `filter=all` listing: a
+    re-run restores the state that attempt's apply may have replaced. A listing that fails, is
+    short of its count, or does not list this job refuses too."""
+    attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    if attempt == "1":
+        return
+
+    def read():
+        jobs = listed_jobs(repo, os.environ["GITHUB_RUN_ID"], run, counted=True, job_filter="all")
+        level = ag.level_of(jobs or [], os.environ.get("JOB_ID", ""))
+        if not level:
+            raise SystemExit("the run's job listing failed or does not list this job")
+        rows = ag.cell_rows(jobs, level, stack, env)
+        return ag.unsaved(rows["apply"] + rows["save"], stack, env, before=int(attempt))
+
+    what = "which earlier attempts of this deploy applied this cell"
+    unsaved = _confirm(where, what, read, _DEPLOY_RETRY)
+    if unsaved:
+        raise SystemExit(
+            f"::error::apply aborted for {where}: run attempt{'s' * (len(unsaved) > 1)} "
+            f"{', '.join(map(str, unsaved))} of this deploy may have applied this cell without "
+            "saving its state; follow docs/troubleshooting.md section The apply step ran and its "
+            "state was not saved"
+        )
+
+
 def _verify_pull(repo, pr, head, where, run):
     """The pull request, refused unless it is open at `head`."""
 
@@ -1172,6 +1202,7 @@ def _verify_cmd(repo, _, run):
     pr = 0 if deploy and not os.environ.get("SHIPMATE_PR_NUMBER") else int(ag.env_pr_number())
     if deploy:
         _verify_deploy(repo, pr, env, stack, where, run)
+        _verify_earlier_attempts(repo, env, stack, where, run)
         return
     head, auto, provenance, base, plan_run, digest = _wave_inputs(where)
     # "Re-run failed jobs" reuses the passed detect, skipping its actor check, and a re-run's

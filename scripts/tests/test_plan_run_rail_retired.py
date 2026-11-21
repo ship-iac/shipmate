@@ -3,7 +3,8 @@
 Each wave cell carries its own `plan_run_id`, read from that cell's own apply
 check, so no workflow needs to thread one id down for every cell in the run.
 Two properties, because a rail can come back at either end: no workflow declares
-the input, and every wave job reads the value off its matrix row.
+the input, and every wave job hands `cell.yml` its whole matrix row, from which
+`apply-cell` reads the value.
 """
 
 import re
@@ -30,6 +31,21 @@ EXPECTED_INPUTS = {
         ]
     },
     "apply.yml": {"workflow_call": ["auto", "environment", "pr_number", "ref", "runs_on"]},
+    "cell.yml": {
+        "workflow_call": [
+            "auto",
+            "base_sha",
+            "cell",
+            "deploy",
+            "environment",
+            "head_sha",
+            "pr_number",
+            "provenance_run",
+            "runs_on",
+            "stack",
+            "tools",
+        ]
+    },
     "apply-run.yml": {"workflow_call": ["auto", "environment", "pr_number", "ref", "runs_on"]},
     "ci.yml": {},
     "comment-ops.yml": {"workflow_call": ["runs_on"]},
@@ -47,7 +63,8 @@ EXPECTED_INPUTS = {
 #: exists is correct" is not enough.
 EXPECTED_WAVE_JOBS = ["wave0", "wave1", "wave2", "wave3", "wave4", "wave5", "wave6", "wave7"]
 
-PER_CELL_PLAN_RUN = "${{ matrix.plan_run_id }}"
+PER_CELL_PLAN_RUN = "${{ fromJSON(inputs.cell).plan_run_id }}"
+WHOLE_ROW = "${{ toJSON(matrix) }}"
 
 
 def _inputs(spec):
@@ -68,12 +85,12 @@ def test_no_engine_workflow_declares_a_plan_run_id_input():
 
 
 def test_every_wave_job_takes_the_plan_run_id_from_its_matrix_cell():
+    """Mutations: pass `cell: ${{ toJSON(inputs) }}` on `wave4`; read `plan-run-id` from
+    `inputs.provenance_run` in `cell.yml`."""
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     wave_jobs = sorted(j for j in jobs if re.fullmatch(r"wave[0-9]+", j))
     assert wave_jobs == EXPECTED_WAVE_JOBS, f"wave fan-out changed: {wave_jobs}"
-    for job_id in wave_jobs:
-        cell = [s for s in jobs[job_id]["steps"] if "actions/apply-cell" in (s.get("uses") or "")]
-        assert len(cell) == 1, f"{job_id} calls apply-cell {len(cell)} times, expected once"
-        assert cell[0]["with"]["plan-run-id"] == PER_CELL_PLAN_RUN, (
-            f"{job_id} passes plan-run-id: {cell[0]['with']['plan-run-id']!r}"
-        )
+    assert {j: jobs[j]["with"]["cell"] for j in wave_jobs} == dict.fromkeys(wave_jobs, WHOLE_ROW)
+    steps = workflow_yaml("cell.yml")["jobs"]["apply"]["steps"]
+    cell = [s for s in steps if "actions/apply-cell" in (s.get("uses") or "")]
+    assert [s["with"]["plan-run-id"] for s in cell] == [PER_CELL_PLAN_RUN]

@@ -8,14 +8,14 @@ grow with the cell count and an `ubuntu-slim` job stops at 15 minutes; `deploy.y
 takes it for the same reason, its calls growing with the open pull requests. The other control
 jobs take the 1-CPU `ubuntu-slim` image. `deploy.yml`'s `warm` saves the provider and OpenTofu
 cache entries the cells restore, whose keys carry the runner's OS and architecture, so it takes the
-cells' runner.
-`apply.yml`'s `run` calls a workflow and takes no runner. Engine CI (`ci.yml`, `manifest-load.yml`)
-stays on `ubuntu-latest`. A new job, a moved job or a flipped label fails here. Mutations:
-`apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`; `plan.yml` `summary` to `ubuntu-slim`;
-`plan.yml` `facts` to `${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to
-`ubuntu-latest`; `comment-ops.yml` `ops` to `ubuntu-slim`; `unlock.yml` `unlock` to `ubuntu-latest`;
-`apply-run.yml` `lock` to `ubuntu-slim`; `release.yml` `release` to `ubuntu-slim`; `deploy.yml`
-`warm` to `ubuntu-slim`; `deploy.yml` `replan` to `ubuntu-slim`.
+cells' runner, as `cell.yml`'s `save` does for the state entry `apply` restores.
+`apply.yml`'s `run` and `apply-env-level.yml`'s waves call a workflow and take no runner. Engine
+CI (`ci.yml`, `manifest-load.yml`) stays on `ubuntu-latest`. A new job, a moved job or a flipped
+label fails here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`;
+`plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to `${{ inputs.runs_on }}`; the
+`cell.yml` `save` job to `ubuntu-latest`; `comment-ops.yml` `ops` to `ubuntu-slim`; `unlock.yml`
+`unlock` to `ubuntu-latest`; `apply-run.yml` `lock` to `ubuntu-slim`; `release.yml` `release`
+to `ubuntu-slim`; `deploy.yml` `warm` to `ubuntu-slim`; `deploy.yml` `replan` to `ubuntu-slim`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -26,10 +26,11 @@ INPUT = "${{ inputs.runs_on }}"
 
 EXPECTED = {
     ("apply-env-level.yml", "snapshot"): SLIM,
-    **{("apply-env-level.yml", f"wave{n}"): INPUT for n in range(8)},
     **{("apply-env-level.yml", f"wave{n}-complete"): SLIM for n in range(8)},
     **{("apply-env-level.yml", f"wave{n}-release"): SLIM for n in range(8)},
     ("apply-env-level.yml", "complete"): SLIM,
+    ("cell.yml", "apply"): INPUT,
+    ("cell.yml", "save"): INPUT,
     ("apply.yml", "guard"): SLIM,
     ("apply.yml", "claim"): SLIM,
     ("apply.yml", "queue"): SLIM,

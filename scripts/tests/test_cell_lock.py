@@ -2143,7 +2143,8 @@ WARMING = {
     "detect": "completed",
     "warm / stacks/app": "in_progress",
     "warm / tools": "queued",
-    "L0 / dev / stacks/app": "completed",
+    "L0 / dev / stacks/app / apply": "completed",
+    "L0 / dev / stacks/app / save": "completed",
     "summary": "completed",
 }
 
@@ -2191,7 +2192,7 @@ def test_evict_proceeds_past_a_deploy_run_only_warming(monkeypatch, tmp_path, ca
     ("job", "status"),
     [
         pytest.param("detect", "in_progress", id="detect"),
-        pytest.param("L0 / dev / stacks/app", "waiting", id="cell"),
+        pytest.param("L0 / dev / stacks/app / apply", "waiting", id="cell"),
         pytest.param("summary", "queued", id="summary"),
         pytest.param("summary", None, id="summary-not-listed"),
     ],
@@ -2980,12 +2981,136 @@ def test_verify_deploy_passes_a_cell_the_merge_holds_or_nobody_locks(monkeypatch
     assert gh.drained()
 
 
-def test_verify_deploy_passes_a_later_run_attempt(monkeypatch, tmp_path):
+OWN_JOBS = ["gh", "api", f"repos/{REPO}/actions/runs/900/jobs?filter=all&per_page=100&page=1"]
+_CELL = "deploy / L0 / dev / stacks/auth"
+#: This attempt's own `apply` row, whose id the pre-apply step receives as `JOB_ID`.
+OWN_ROW = {
+    "id": 7,
+    "run_attempt": 2,
+    "name": f"{_CELL} / apply",
+    "status": "in_progress",
+    "started_at": "2026-11-17T20:00:00Z",
+    "steps": [{"name": "Pre-apply check", "status": "in_progress", "conclusion": None}],
+}
+RERUN = {**DEPLOY, "GITHUB_RUN_ATTEMPT": "2", "JOB_ID": "7"}
+
+
+def _own_jobs(save):
+    """The run's `filter=all` listing: attempt 1 applied the cell and its `save` ended with
+    conclusion `save`; attempt 2 is this job."""
+    applied = [
+        {"name": n, "status": "completed", "conclusion": "success"}
+        for n in ("Pre-apply check", "Apply the cell")
+    ]
+    jobs = [
+        {
+            "id": 5,
+            "run_attempt": 1,
+            "name": f"{_CELL} / apply",
+            "status": "completed",
+            "conclusion": "success",
+            "started_at": "2026-11-17T19:44:19Z",
+            "steps": applied,
+        },
+        {
+            "id": 6,
+            "run_attempt": 1,
+            "name": f"{_CELL} / save",
+            "status": "completed",
+            "conclusion": save,
+            "started_at": "2026-11-17T19:44:46Z",
+            "steps": [],
+        },
+        OWN_ROW,
+    ]
+    return json.dumps({"total_count": len(jobs), "jobs": jobs})
+
+
+def test_verify_deploy_passes_a_later_run_attempt_whose_earlier_attempts_saved(
+    monkeypatch, tmp_path
+):
     """A merge deploy is recovered by re-running it. Mutation: check the attempt before the
-    deploy branch returns (refuses)."""
-    gh = Gh().on(ref_read(AUTH_REF), "[]")
-    assert _verify(monkeypatch, tmp_path, gh, {**DEPLOY, "GITHUB_RUN_ATTEMPT": "2"}) == {}
+    deploy branch returns (refuses). Mutation: drop `before=` from the `unsaved` call (this
+    attempt's own unsaved row refuses)."""
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, _own_jobs("success"))
+    assert _verify(monkeypatch, tmp_path, gh, RERUN) == {}
     assert gh.drained()
+
+
+def test_verify_deploy_refuses_a_cell_an_earlier_attempt_applied_unsaved(monkeypatch, tmp_path):
+    """Mutation: skip the earlier-attempt read (passes)."""
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, _own_jobs("failure"))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, RERUN) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: run attempt 1 of this deploy may "
+        "have applied this cell without saving its state; follow docs/troubleshooting.md "
+        "section The apply step ran and its state was not saved"
+    )
+
+
+def test_verify_deploy_names_every_earlier_attempt_that_applied_unsaved(monkeypatch, tmp_path):
+    """Mutation: write `run attempt` whatever the count -- red."""
+    first = json.loads(_own_jobs("failure"))["jobs"][:2]
+    second = [
+        {
+            **j,
+            "id": j["id"] + 10,
+            "run_attempt": 2,
+            "started_at": j["started_at"].replace("19", "20"),
+        }
+        for j in first
+    ]
+    jobs = [*first, *second, {**OWN_ROW, "run_attempt": 3}]
+    listing = json.dumps({"total_count": len(jobs), "jobs": jobs})
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, {**RERUN, "GITHUB_RUN_ATTEMPT": "3"}) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: run attempts 1, 2 of this deploy may "
+        "have applied this cell without saving its state; follow docs/troubleshooting.md "
+        "section The apply step ran and its state was not saved"
+    )
+
+
+def test_verify_deploy_refuses_a_listing_whose_attempts_cannot_be_ordered(monkeypatch, tmp_path):
+    """A cell row whose `run_attempt` is not a number beside one that is cannot be ordered;
+    it refuses through the listing's remedy. Mutation: call `ag.unsaved` outside `_confirm`'s
+    read -- a traceback, red."""
+    jobs = json.loads(_own_jobs("failure"))["jobs"]
+    jobs[1] = {**jobs[1], "run_attempt": "1"}
+    listing = json.dumps({"total_count": len(jobs), "jobs": jobs})
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, RERUN) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which earlier "
+        "attempts of this deploy applied this cell (TypeError(\"'<' not supported between "
+        "instances of 'str' and 'int'\")); re-run the failed deploy jobs"
+    )
+
+
+def test_verify_deploy_reads_no_jobs_on_the_first_attempt(monkeypatch, tmp_path):
+    """Mutation: list the run's jobs on attempt 1 too (an unexpected call)."""
+    gh = Gh().on(ref_read(AUTH_REF), "[]")
+    assert _verify(monkeypatch, tmp_path, gh, {**DEPLOY, "JOB_ID": "7"}) == {}
+    assert gh.log == [ref_read(AUTH_REF)]
+
+
+@pytest.mark.parametrize(
+    ("listing", "job_id"),
+    [
+        pytest.param(FAIL, "7", id="failed"),
+        pytest.param(json.dumps({"total_count": 4, "jobs": [OWN_ROW]}), "7", id="short"),
+        pytest.param(json.dumps({"total_count": 1, "jobs": [OWN_ROW]}), "8", id="not-listed"),
+        pytest.param(json.dumps({"total_count": 1, "jobs": [OWN_ROW]}), "", id="no-job-id"),
+    ],
+)
+def test_verify_deploy_refuses_a_rerun_whose_attempts_it_cannot_read(
+    monkeypatch, tmp_path, listing, job_id
+):
+    """Mutation: drop the `if not level` refusal (an unreadable listing reads as no rows) --
+    every case passes. Mutation: drop `counted=True` -- short passes."""
+    gh = Gh().on(ref_read(AUTH_REF), "[]").on(OWN_JOBS, listing)
+    assert _verify_refusal(monkeypatch, tmp_path, gh, {**RERUN, "JOB_ID": job_id}) == (
+        "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which earlier "
+        "attempts of this deploy applied this cell (the run's job listing failed or does not "
+        "list this job); re-run the failed deploy jobs"
+    )
 
 
 def test_verify_deploy_names_the_cells_environment(monkeypatch, tmp_path):

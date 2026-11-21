@@ -28,7 +28,6 @@ def _cell(**kw):
         "environment": "dev-eu",
         "result": "applied",
         "reason": "",
-        "state_lost": False,
     }
     base.update(kw)
     return base
@@ -47,7 +46,7 @@ def _row(**kw):
         "stack": "stacks/app",
         "status": "applied",
         "reason": "",
-        "state_lost": False,
+        "held": False,
         "apply_text": "Apply complete! Resources: 1 added, 0 changed, 0 destroyed.",
     }
     base.update(kw)
@@ -114,10 +113,10 @@ HINT = "Comment `shipmate help` for the available commands."
 #: repeats an apply whose state was not saved.
 _UNRECORDED_REMEDY = "Re-plan."
 
-#: What the `not attempted:` note appends when no row carries the lost-save marker: the lost cell's
-#: artifact can be missing, so the retry is never prescribed without the pointer.
+#: What the `not attempted:` note appends when no row is held: a failed check scan leaves a held
+#: cell unnamed, so the retry is never prescribed without the pointer.
 _LOST_POINTER = (
-    " If a cell's job log shows `The apply step ran and its state was not saved`, follow "
+    " If a cell's `save` job log names `The apply step ran and its state was not saved`, follow "
     "docs/troubleshooting.md section of that name first."
 )
 #: `provenance(SHA)` under `_run_context`, hand-written.
@@ -234,8 +233,8 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     Mutation: append a `gate: pending until every environment is applied` line to
     `_footer_parts` -- red."""
     jobs = [
-        _job("apply / L0 / dev-eu / stacks/app", "https://gh/job/app-eu"),
-        _job("apply / L0 / dev-eu / stacks/db", "https://gh/job/db-eu"),
+        _job("apply / run / L0 / dev-eu / stacks/app / apply", "https://gh/job/app-eu"),
+        _job("apply / run / L0 / dev-eu / stacks/db / apply", "https://gh/job/db-eu"),
     ]
     rows = [
         _row(),
@@ -649,55 +648,92 @@ def test_the_not_attempted_note_names_the_targeted_env_escaped():
     assert ac._not_attempted_note([_row()], "prod") == ""
 
 
-def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recovered():
-    """A cell whose state was not saved gets its own note, and the not-attempted note keeps its
-    retry command but runs it only after those cells are recovered, because any apply covering
-    them applies their reviewed plans again.
+def test_a_held_cell_is_named_linked_to_its_save_job_and_holds_the_retry():
+    """A cell whose apply check is held gets its own note, linked to its `save` job's log, and the
+    not-attempted note keeps its retry command but runs it only after those cells are recovered,
+    because any apply covering them applies their reviewed plans again.
 
-    Mutations: return "" from `_state_lost_note`; drop the state-lost branch from
-    `_not_attempted_note`; drop the job-log pointer from that branch; name the cell
-    `**<stack> / <env>**`; drop the merge from `_state_lost_note`'s vectors; drop its re-run
-    ban -- red."""
+    Mutations: return "" from `_held_note`; drop the held branch from `_not_attempted_note`; drop
+    the job-log pointer from that branch; name the cell `**<stack> / <env>**`; link the cell's
+    `apply` job from the note; drop the merge from `_held_note`'s vectors; drop its re-run ban
+    -- red."""
     rows = [
-        _row(stack="@acme/db", status="failed", apply_text="Error: x", state_lost=True),
+        _row(stack="@acme/db", status="failed", apply_text="Error: x", held=True),
         _row(environment="prod", stack="stacks/dns", status="not_attempted", apply_text=None),
     ]
-    sections = _comment(rows, env="").split("\n\n")
-    assert sections[-2] == (
-        "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply step ran and its state was "
-        "not saved or not verified. Never re-run these cells' jobs or their workflow run. A "
-        "re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans again "
-        "against the state from before the apply. Before applying or merging any plan of a "
-        "named stack in the environment named beside it, on any pull request, follow "
-        "docs/troubleshooting.md section "
-        "`The apply step ran and its state was not saved`.\n"
+    jobs = [
+        _job("apply / run / L0 / dev-eu / @acme/db / apply", "https://gh/job/apply"),
+        _job("apply / run / L0 / dev-eu / @acme/db / save", "https://gh/job/save"),
+    ]
+    body = ac.build_comment(rows, jobs, RUN_URL, [], [], "", "success", head_sha=SHA)
+    assert body.split("\n\n")[-2] == (
+        'state not saved: **@<!-- -->acme/db (dev-eu)** <a href="https://gh/job/save">save '
+        "log</a>. " + _HELD_SENTENCES + "\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply` once the "
         "cells under `state not saved:` are recovered, because it applies their reviewed plans "
         "again." + _LOST_POINTER
     )
 
 
-def test_the_state_lost_note_is_capped_and_absent_without_a_lost_cell():
-    """The unnamed cells are counted and pointed at their job logs.
+#: The `state not saved:` note after its cell list, hand-written. Mutation: restore the old
+#: sentence "A re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans
+#: again against the state from before the apply." -- both whole-comment tests red.
+_HELD_SENTENCES = (
+    "Their apply step may have run and their state is not known saved. Never re-run these "
+    "cells' jobs or their workflow run. While their apply checks are held, a `shipmate apply` "
+    "of this head and the merge deploy refuse them; once a check is returned by hand, an apply "
+    "applies its reviewed plan again against the state from before the apply. Before applying "
+    "or merging any plan of a named stack in the environment named beside it, on any pull "
+    "request, follow docs/troubleshooting.md section "
+    "`The apply step ran and its state was not saved`, which says when to return the checks."
+)
 
-    Mutation: name every cell in `named` from `_state_lost_note` -- red.
-    Mutation: drop the job-log clause after the count -- red.
-    Mutation: add the clause at the cap (`>=`) -- red."""
-    rows = [_row(status="failed", stack=f"s{i}", state_lost=True) for i in range(6)]
-    assert ac._state_lost_note(rows).startswith(
+
+def test_the_held_note_is_capped_and_absent_without_a_held_cell():
+    """The unnamed cells are counted and pointed at their held checks' title; a cell whose `save`
+    job is not listed is named without a link.
+
+    Mutation: name every cell in `named` from `_held_note` -- red.
+    Mutation: drop the check-title clause after the count -- red.
+    Mutation: add the clause at the cap (`>=`) -- red.
+    Mutation: link the run page when no `save` job is listed -- red."""
+    rows = [_row(status="failed", stack=f"s{i}", held=True) for i in range(6)]
+    assert ac._held_note(rows, []).startswith(
         "state not saved: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
-        "**s4 (dev-eu)**, and 1 more, whose job logs show `The apply step ran and its state "
-        "was not saved`. The apply step ran"
+        "**s4 (dev-eu)**, and 1 more, whose apply checks are titled `State not saved`. Their "
+        "apply step"
     )
-    assert "whose job logs" not in ac._state_lost_note(rows[:5])
-    assert ac._state_lost_note([_row()]) == ""
+    assert "whose apply checks" not in ac._held_note(rows[:5], [])
+    assert ac._held_note([_row()], []) == ""
 
 
-def test_load_cells_refuses_a_non_boolean_state_lost(tmp_path):
-    """Mutation: drop the `state_lost` type check -- red."""
-    _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(state_lost="false"))
-    with pytest.raises(SystemExit, match="key 'state_lost' must be a boolean"):
-        ac.load_cells(str(tmp_path))
+def test_an_applied_cell_with_a_held_check_is_never_not_recorded():
+    """Apply succeeded and save failed: the row stays applied, its line says the state is not
+    saved, and only the `state not saved:` note names it, because the `not recorded:` note's
+    re-plan would re-create the check pending and erase the hold.
+
+    Mutations: drop the held skip from `apply_check_state`; drop `, state not saved` from
+    `_state` -- red."""
+    name = "apply / stacks/app / dev-eu"
+    rows = ac.apply_check_state([_row()], {name}, set(), {name})
+    jobs = [_job("apply / run / L0 / dev-eu / stacks/app / save", "https://gh/job/save")]
+    body = ac.build_comment(rows, jobs, RUN_URL, [], [], "dev-eu", "success", head_sha=SHA)
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n#### dev-eu: 1 cell, 1 applied\n\n"
+        '<details><summary>🟢 stacks/app: +1 ~0 -0, state not saved <a href="https://gh/run/1">'
+        "logs</a></summary>\n\n```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed."
+        "\n```\n</details>\n\n"
+        'state not saved: **stacks/app (dev-eu)** <a href="https://gh/job/save">save log</a>. '
+        + _HELD_SENTENCES
+    )
+
+
+def test_load_cells_reads_a_cell_without_state_lost(tmp_path):
+    """The held note reads the apply checks, not the cell. Mutation: keep `state_lost` in
+    `CELL_KEYS` -- red (the cell reads as pin skew)."""
+    _write_cell(tmp_path, "dev-eu", "stacks-app", _cell())
+    [(cell, _)] = ac.load_cells(str(tmp_path))
+    assert cell == _cell()
 
 
 def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
@@ -949,7 +985,9 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
                 apply_text=None,
             )
         )
-        jobs.append(_job(f"apply / L0 / {env} / {path}", _JOB_URL.format(23456789000 + i)))
+        jobs.append(
+            _job(f"apply / run / L0 / {env} / {path} / apply", _JOB_URL.format(23456789000 + i))
+        )
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], env, "failure", head_sha=SHA)
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
@@ -998,7 +1036,7 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     targeted = [f"targeted-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
+        _job(f"apply / run / L0 / {e} / stacks/app / apply", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     body = ac.build_comment(
@@ -1319,22 +1357,26 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
 
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("apply / L0 / dev-eu / stacks/app", "https://gh/job/1")]
+    jobs = [_job("apply / run / L0 / dev-eu / stacks/app / apply", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def test_job_url_falls_back_to_run_url_when_no_job_matches():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("apply / L0 / dev-us / stacks/db", "https://gh/job/1")]
+    jobs = [_job("apply / run / L0 / dev-us / stacks/db / apply", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    """A job named "apply / L0 / dev-eu / stacks/app" must not match env `eu`'s cell job
-    "eu / stacks/app" through a naive str.endswith; only a ` / `-boundary suffix counts.
-    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
+    """A job named "apply / run / L0 / dev-eu / stacks/app / apply" must not match env `eu`'s
+    cell job "eu / stacks/app / apply" through a naive str.endswith; only a ` / `-boundary
+    suffix counts.
+    Mutation: `apply-gate.cell_part`'s pattern becomes `.*<env> / <stack> / (apply|save)` --
+    red."""
     row = _row(environment="eu", stack="stacks/app")
-    jobs = [_job("apply / L0 / dev-eu / stacks/app", "https://gh/job/should-not-match")]
+    jobs = [
+        _job("apply / run / L0 / dev-eu / stacks/app / apply", "https://gh/job/should-not-match")
+    ]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
@@ -1379,7 +1421,9 @@ def test_apply_summary_artifact_name_matches_contract():
 APP_ID = "12345"
 
 
-def _check(name, *, status="completed", conclusion="success", run_id=1, app_id=int(APP_ID)):
+def _check(
+    name, *, status="completed", conclusion="success", run_id=1, app_id=int(APP_ID), title=None
+):
     # `run_id`, not `id`: shadowing the builtin in a parameter name is a lint
     # finding, and the JSON key stays `id` either way.
     return {
@@ -1388,6 +1432,7 @@ def _check(name, *, status="completed", conclusion="success", run_id=1, app_id=i
         "conclusion": conclusion,
         "id": run_id,
         "app": {"id": app_id},
+        "output": {"title": title},
     }
 
 
@@ -1402,7 +1447,7 @@ def _check_maps(tmp_path, *checks):
 
 
 def test_load_check_maps_splits_present_and_done(tmp_path):
-    present, done = _check_maps(
+    present, done, _ = _check_maps(
         tmp_path,
         _check("apply / stacks/app / dev-eu", run_id=1),
         _check("apply / stacks/db / dev-eu", status="in_progress", conclusion=None, run_id=2),
@@ -1411,11 +1456,31 @@ def test_load_check_maps_splits_present_and_done(tmp_path):
     assert done == {"apply / stacks/app / dev-eu"}
 
 
+def test_load_check_maps_reads_a_held_check_by_its_title(tmp_path):
+    """The held set is the checks `apply-gate.held_names` reads: newest run `in_progress` and
+    titled `State not saved`. Mutation: return `set()` for the held set from `load_check_maps`
+    -- red."""
+    held = "apply / stacks/app / dev-eu"
+    _, _, out = _check_maps(
+        tmp_path,
+        _check(held, status="in_progress", conclusion=None, title="State not saved"),
+        _check("apply / stacks/db / dev-eu", status="in_progress", conclusion=None, title="x"),
+    )
+    assert out == {held}
+
+
+def test_apply_check_state_marks_the_held_rows():
+    """Mutation: drop the `row["held"]` assignment from `apply_check_state` -- red."""
+    rows = [_row(), _row(stack="stacks/db")]
+    ac.apply_check_state(rows, set(), set(), {"apply / stacks/app / dev-eu"})
+    assert [r["held"] for r in rows] == [True, False]
+
+
 def test_load_check_maps_ignores_checks_from_another_app_identity(tmp_path):
     # Security-relevant: a same-name check created by any other identity must
     # not be able to paint an applied cell as stranded (nor green a pending
     # one). Same posture as the gate's own from_app filter.
-    present, done = _check_maps(
+    present, done, _ = _check_maps(
         tmp_path,
         _check("apply / stacks/app / dev-eu", status="in_progress", conclusion=None, app_id=15368),
     )
@@ -1427,7 +1492,7 @@ def test_load_check_maps_judges_the_newest_run_per_name(tmp_path):
     # A duplicate apply check created mid-apply is deliberately left pending by
     # apply-cell; the newest run per name (highest id) must win, so the cell
     # reads pending even though an older completed run exists.
-    present, done = _check_maps(
+    present, done, _ = _check_maps(
         tmp_path,
         _check("apply / stacks/app / dev-eu", run_id=1),
         _check("apply / stacks/app / dev-eu", status="queued", conclusion=None, run_id=2),
@@ -1444,7 +1509,7 @@ def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys
     warning embeds it)."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
-    assert ac.load_check_maps(str(p), "") == (set(), set())
+    assert ac.load_check_maps(str(p), "") == (set(), set(), set())
     assert capsys.readouterr().out == (
         f"::warning::{p} could not be read as apply checks (SHIPMATE_APP_ID is empty; "
         "set the SHIPMATE_APP_ID repo/org variable to the shipmate App id (see "
@@ -1456,7 +1521,9 @@ def test_apply_check_state_applied_with_done_check_stays_applied():
     """A done check is not a pending one, though its name is in both sets. Mutation: drop
     `and name not in done` from apply_check_state."""
     rows = [_row(status="applied", stack="stacks/app")]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
+    ac.apply_check_state(
+        rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"}, set()
+    )
     assert rows[0]["status"] == "applied"
 
 
@@ -1465,7 +1532,7 @@ def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
     # apply check failed (or the job was cancelled) after the cell summary was composed
     # and uploaded.
     rows = [_row(status="applied", stack="stacks/app")]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set(), set())
     assert rows[0]["status"] == "unrecorded"
 
 
@@ -1474,7 +1541,9 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
     # cosmetic (continue-on-error) artifact upload dropped, so no cell.json
     # arrived and the row would otherwise claim the check stays pending.
     rows = [_row(status="not_attempted", stack="stacks/app", apply_text=None)]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
+    ac.apply_check_state(
+        rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"}, set()
+    )
     assert rows[0]["status"] == "applied"
     assert rows[0]["apply_text"] is None  # No output to show, so it renders its bare line.
 
@@ -1486,7 +1555,7 @@ def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
         _row(status="applied", stack="stacks/app"),
         _row(status="not_attempted", stack="stacks/db", apply_text=None),
     ]
-    ac.apply_check_state(rows, set(), set())
+    ac.apply_check_state(rows, set(), set(), set())
     assert [r["status"] for r in rows] == ["applied", "not_attempted"]
 
 
@@ -1499,7 +1568,7 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
         _row(status="failed", stack="stacks/app"),
         _row(status="blocked", stack="stacks/db", reason="state restore failed"),
     ]
-    ac.apply_check_state(rows, done, done)
+    ac.apply_check_state(rows, done, done, set())
     assert [r["status"] for r in rows] == ["failed", "blocked"]
 
 
@@ -1507,21 +1576,20 @@ def test_load_check_maps_missing_file_warns_and_is_no_data(tmp_path, capsys):
     """The scan step always writes checks.jsonl, so absence is a failure: no data and a warning,
     not a crash and not silence. Mutation: restore `except FileNotFoundError: return set(), set()`
     ahead of the catch-all."""
-    present, done = ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID)
-    assert (present, done) == (set(), set())
+    assert ac.load_check_maps(str(tmp_path / "nope.jsonl"), APP_ID) == (set(), set(), set())
     assert "::warning::" in capsys.readouterr().out
 
 
 def test_load_check_maps_empty_file_is_no_data(tmp_path):
     p = tmp_path / "checks.jsonl"
     p.write_text("", encoding="utf-8")
-    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set())
 
 
 def test_load_check_maps_reads_jsonl(tmp_path):
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
-    present, done = ac.load_check_maps(str(p), APP_ID)
+    present, done, _ = ac.load_check_maps(str(p), APP_ID)
     assert present == done == {"apply / stacks/app / dev-eu"}
 
 
@@ -1531,7 +1599,7 @@ def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys
     # a warning rather than propagate.
     p = tmp_path / "checks.jsonl"
     p.write_text("not json\n", encoding="utf-8")
-    assert ac.load_check_maps(str(p), APP_ID) == (set(), set())
+    assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set())
     assert "::warning::" in capsys.readouterr().out
 
 
@@ -1545,7 +1613,7 @@ def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, ca
     `int()` here rather than pinned as a literal."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
-    assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
+    assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set(), set())
     with pytest.raises(ValueError) as exc:
         int("Iv1.notanumericid")
     assert capsys.readouterr().out == (
@@ -1632,7 +1700,7 @@ def test_load_check_maps_malformed_shape_degrades_with_a_warning(tmp_path, capsy
     for payload in reaching:
         p = tmp_path / "checks.jsonl"
         p.write_text(payload, encoding="utf-8")
-        assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
+        assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set()), payload
         assert "::warning::" in capsys.readouterr().out, payload
 
 
@@ -1643,7 +1711,7 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
     for payload in ({"status": "completed"}, {"name": "apply / stacks/app / dev-eu"}):
         p = tmp_path / "checks.jsonl"
         p.write_text(json.dumps(payload), encoding="utf-8")
-        assert ac.load_check_maps(str(p), APP_ID) == (set(), set()), payload
+        assert ac.load_check_maps(str(p), APP_ID) == (set(), set(), set()), payload
         assert "::warning::" not in capsys.readouterr().out, payload
 
 
@@ -1670,12 +1738,12 @@ def test_check_name_grammar_matches_apply_cells_construction():
     }
     assert snap.snapshot(waves, [run], APP_ID) == {"apply / stacks/app / dev-eu": [7]}
     rows = [_row(environment="dev-eu", stack="stacks/app")]
-    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set(), set())
     assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
 def test_every_env_level_job_is_named_for_its_level():
-    """`apply-gate.is_cell_job` requires the `L<n>` segment, so every env-level job of
+    """`apply-gate.cell_part` requires the `L<n>` segment, so every env-level job of
     `apply-run.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
     up to `waves.MAX_ENV_LEVELS`, compared whole. Mutation: rename deploy.yml's `name: L0` to
     `level 0`."""
@@ -1687,46 +1755,40 @@ def test_every_env_level_job_is_named_for_its_level():
 
 
 def test_wave_job_name_matches_the_cell_job_grammar():
-    """Coupling: `_job_url` and `apply-complete` find a cell's wave job by matching
-    `apply-gate.is_cell_job`'s `L<n> / <env> / <stack>` as the whole job name or a suffix after
-    a ` / ` boundary, which works only because every wave job's `name:` renders `<env> /
-    <stack>` and the env-level job holding it is named `L<n>`. Nothing else enforces it, and a
-    rename downgrades every link to the run URL and leaves every apply check pending.
+    """Coupling: `_job_url` finds a cell's job by `apply-gate.cell_part`'s
+    `L<n> / <env> / <stack> / <part>`, whole or after a ` / ` boundary, which works only because
+    every wave job's `name:` renders `<env> / <stack>`, hands `cell.yml` the same matrix keys,
+    the env-level job holding it is named `L<n>`, and `cell.yml`'s job ids are `apply` and
+    `save` with no `name:` of their own. A rename downgrades every log link to the run URL.
 
-    Mutation: swap the two matrix keys on wave0's `name: &wave-name`, or replace one wave's
-    `name: *wave-name` or `steps: *wave-steps` with a variant, or feed apply-cell's `stack:` from
-    another matrix key, or rename deploy.yml's `name: L0` to `level 0`."""
+    Mutations: swap the two matrix keys on wave0's `name: &wave-name`; feed the wave's `stack:`
+    from another matrix key; rename `cell.yml`'s `apply` job to `run`; give it a `name:`;
+    rename deploy.yml's `name: L0` to `level 0`; link the `save` job from `_job_url` by
+    default -- red."""
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    expected = "${{ matrix.environment }} / ${{ matrix.stack }}"
-    # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
-    max_waves = wv.MAX_WAVES
-    waves = [f"wave{i}" for i in range(max_waves)]
+    waves = [f"wave{i}" for i in range(wv.MAX_WAVES)]
     names = [jobs[w].get("name") for w in waves]
-    assert names == [expected] * max_waves, (
-        f"all {max_waves} wave job display names must stay byte-identical to the "
-        "'<env> / <stack path>' cell-job grammar -- scripts/apply-comment's "
-        f"_job_url matches it as a job-name suffix (got: {sorted(set(names))})"
-    )
-    # The two literals agree only if the wave job hands apply-cell the same matrix keys it
-    # renders from.
-    wired = [
-        (step["with"]["stack"], step["with"]["env"])
-        for w in waves
-        for step in jobs[w]["steps"]
-        if str(step.get("uses", "")).endswith("/actions/apply-cell")
-    ]
-    assert wired == [("${{ matrix.stack }}", "${{ matrix.environment }}")] * max_waves, (
-        "every wave job must pass apply-cell the same matrix keys its display name "
-        "renders (`stack: ${{ matrix.stack }}`, `env: ${{ matrix.environment }}`) -- "
-        "apply-cell builds the check name from those two inputs, so a different source "
-        f"for either silently breaks the check-name/job-name match (got: {sorted(set(wired))})"
-    )
-    # The reader's half, exercised: a nested-display job name built from deploy.yml's own
-    # level name and that grammar must resolve, for the row's own stack and environment.
+    assert names == ["${{ matrix.environment }} / ${{ matrix.stack }}"] * wv.MAX_WAVES
+    wired = [(jobs[w]["with"]["stack"], jobs[w]["with"]["environment"]) for w in waves]
+    assert wired == [("${{ matrix.stack }}", "${{ matrix.environment }}")] * wv.MAX_WAVES
+    cell = workflow_yaml("cell.yml")["jobs"]
+    assert [j.get("name") for j in cell.values()] == [None] * len(cell)
+    # Built from the sources: deploy.yml's level name and cell.yml's job ids.
     level = workflow_yaml("deploy.yml")["jobs"]["envlevel0"]["name"]
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job(f"deploy / {level} / dev-eu / stacks/app", "https://gh/job/1")]
-    assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
+    listed = [
+        _job(f"deploy / {level} / dev-eu / stacks/app / {p}", f"https://gh/{p}") for p in cell
+    ]
+    assert {p: ac._job_url(row, listed, RUN_URL, p) for p in cell} == {
+        "apply": "https://gh/apply",
+        "save": "https://gh/save",
+    }
+    # The literal case: a cell's log link is its `apply` job.
+    literal = [
+        _job("deploy / L0 / dev-eu / stacks/app / save", "https://gh/job/2"),
+        _job("deploy / L0 / dev-eu / stacks/app / apply", "https://gh/job/1"),
+    ]
+    assert ac._job_url(row, literal, RUN_URL) == "https://gh/job/1"
 
 
 def _set_report(monkeypatch, tmp_path, report):
@@ -2205,7 +2267,7 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
     targeted = [f"targeted-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
+        _job(f"apply / run / L0 / {e} / stacks/app / apply", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     waiting = [

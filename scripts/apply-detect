@@ -19,7 +19,8 @@ pending cells, bucketed into env-levels by the entries' `needs`, after the
 exclusions its docstring names.
 
 The bare and targeted forms refuse the whole run when a cell they would apply is behind the
-base (`refuse_behind`).
+base (`refuse_behind`). Every form refuses it when another run holds the apply check of a cell
+it would apply `in_progress` and may still apply that cell, or may have (`refuse_held`).
 
 A named environment selects the targeted form, scoped to that ONE environment.
 It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
@@ -42,15 +43,21 @@ branch changes or whose apply check records that its plan found the base changed
 import json
 import os
 import pathlib
+import sys
 import time
 
 from _shipmate import (
+    READ_ERRORS,
     Refused,
     _load,
     _run,
     check_runs,
+    command_data,
+    current_run_url,
     exit_text,
     gh_json,
+    is_run_id,
+    listed_jobs,
     named,
     one_line,
     run_annotated,
@@ -344,6 +351,163 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
             return sorted(skipped), run, waiting
         last = (skipped, waiting)
         unavailable = stopped | skipped | lock_envs | {w["environment"] for w in waiting}
+
+
+def _read_run(repo, run_id):
+    """`(status, run_attempt)` of run `run_id`, or None, with one warning naming the cause, when
+    the read fails, the status is not a string or the attempt not an int."""
+    try:
+        read = gh_json(f"repos/{repo}/actions/runs/{run_id}", _run)
+        status, attempt = read["status"], read["run_attempt"]
+    except READ_ERRORS as e:
+        why = exit_text(e) if isinstance(e, SystemExit) else repr(e)
+        sys.stderr.write(f"::warning::{command_data(one_line(why))}\n")
+        return None
+    if not isinstance(status, str):
+        sys.stderr.write(f"::warning::run {run_id} has status {command_data(repr(status))}\n")
+        return None
+    if type(attempt) is not int:
+        sys.stderr.write(f"::warning::run {run_id} has run_attempt {command_data(repr(attempt))}\n")
+        return None
+    return status, attempt
+
+
+def newest_attempt(run_id, jobs):
+    """The highest `run_attempt` of run `run_id`'s listed `jobs`, or None, with one warning
+    naming the cause, when it lists no job or a job whose attempt is not an int."""
+    if not jobs:
+        sys.stderr.write(f"::warning::run {run_id} lists no job\n")
+        return None
+    bad = [j.get("run_attempt") for j in jobs if type(j.get("run_attempt")) is not int]
+    if bad:
+        found = command_data(repr(bad[0]))
+        sys.stderr.write(f"::warning::run {run_id} lists a job with run_attempt {found}\n")
+        return None
+    return max(j["run_attempt"] for j in jobs)
+
+
+def _holding_run(repo, run_id):
+    """`("live", None)` while run `run_id` is not `completed`, when its listing's newest attempt
+    is not the first read's, or when read again after its jobs listing it is not the same
+    completed attempt: a re-run between the reads may not list its jobs yet, or may list them
+    before the run read shows it, and a listing below the run's attempt is stale.
+    `("ended", jobs)` otherwise, with every job of every attempt. `("unreadable", None)` when a
+    run read or the jobs listing could not be read completely, a job's `run_attempt` included;
+    each cause prints as one warning."""
+    first = _read_run(repo, run_id)
+    if first is None:
+        return "unreadable", None
+    if first[0] != "completed":
+        return "live", None
+    jobs = listed_jobs(repo, run_id, _run, counted=True, job_filter="all")
+    newest = None if jobs is None else newest_attempt(run_id, jobs)
+    if newest is None:
+        return "unreadable", None
+    if newest != first[1]:
+        return "live", None
+    again = _read_run(repo, run_id)
+    if again is None:
+        return "unreadable", None
+    if again != first:
+        return "live", None
+    return "ended", jobs
+
+
+def holder_state(repo, cell, check, runs):
+    """`(cause, id)` for `cell`, whose apply check `check` another run holds `in_progress`.
+    `("unknown", <check id>)` when `details_url` is not exactly a run page of this repository,
+    else `(<cause>, <run id>)`, the run's state read through `_holding_run` once per run and kept
+    in `runs`: `live` or `unreadable` as it reads, or, once it ended, `live` while a job of
+    the cell it lists is not `completed`; `ended` when `ag.unsaved` names an attempt or the
+    run lists no job of the cell, so a job name it does not read never reads as never applied;
+    `saved` when an attempt applied and every applying attempt's state is saved; `deploy`
+    when no attempt applied."""
+    url, page = check.get("details_url") or "", current_run_url("")
+    run_id = url.removeprefix(page) if url.startswith(page) else ""
+    if not is_run_id(run_id):
+        return "unknown", str(check["id"])
+    if run_id not in runs:
+        runs[run_id] = _holding_run(repo, run_id)
+    state, jobs = runs[run_id]
+    if state != "ended":
+        return state, run_id
+    stack, env = cell["stack"], cell["environment"]
+    mine = [j for j in jobs if ag.cell_part(j.get("name", ""), stack, env)]
+    if any(j["status"] != "completed" for j in mine):
+        return "live", run_id
+    if not mine or ag.unsaved(jobs, stack, env):
+        return "ended", run_id
+    verdicts = ag.attempts(jobs, stack, env).values()
+    return ("deploy" if all(v["applied"] is False for v in verdicts) else "saved"), run_id
+
+
+#: The troubleshooting section that returns an in-progress apply check to `queued` by hand.
+BY_HAND = "Return an in-progress apply check by hand"
+
+
+def held_by_others(repo, lines, app_id, cells):
+    """`{(cause, id): [cell]}` for each of `cells` with an App apply check in `lines`, any of
+    them and not only the newest, `in_progress` under a run other than this one, keyed by that
+    check's `holder_state`. A same-head re-plan queues a newer check over a held one."""
+    own, flipped = current_run_url(), {}
+    for check in ag.app_runs(lines, app_id):
+        if check["status"] == "in_progress" and check.get("details_url") != own:
+            flipped.setdefault(check["name"], []).append(check)
+    runs, held = {}, {}
+    for c in cells:
+        for check in flipped.get(ag.check_name(c["stack"], c["environment"]), []):
+            listed = held.setdefault(holder_state(repo, c, check, runs), [])
+            if c not in listed:
+                listed.append(c)
+    return held
+
+
+def refuse_held(repo, lines, app_id, cells):
+    """Refuse the whole apply when another run holds a check of one of `cells` and that run may
+    still apply the cell, may have applied it, or cannot be read (`held_by_others`); a cell an
+    ended run never applied applies. Only this head's checks are read. A plain `SystemExit`,
+    not `Refused`: infrastructure and its saved state may disagree, which no rule explains."""
+    held = {k: v for k, v in held_by_others(repo, lines, app_id, cells).items() if k[0] != "deploy"}
+    if held:
+        sentences = [_held_text(cause, ident, c) for (cause, ident), c in sorted(held.items())]
+        raise SystemExit(f"::error::apply refused: {' '.join(sentences)}")
+
+
+def _held_text(cause, ident, cells):
+    """The apply refusal's sentence for `cells`, held for `cause` by run or check `ident`."""
+    names = ", ".join(sorted(f"{c['stack']} / {c['environment']}" for c in cells))
+    if cause == "live":
+        return (
+            f"{names} are held in progress by run {ident}, which is still running. Wait for it "
+            "to end, then re-run `shipmate apply`."
+        )
+    if cause == "ended":
+        return (
+            f"{names} may have been applied by run {ident} without saving their state; follow "
+            "docs/troubleshooting.md section The apply step ran and its state was not saved, "
+            "then re-plan."
+        )
+    return held_text(cause, ident, names, "re-run `shipmate apply`")
+
+
+def held_text(cause, ident, names, rerun):
+    """The refusal's sentence for the cells `names` held for `cause` `saved`, `unknown` or
+    `unreadable` by run or check `ident`, which the apply and the deploy share; `rerun` is
+    the remedy's last step."""
+    if cause == "saved":
+        return (
+            f"{names} were left in progress by run {ident}, which applied them and saved their "
+            f"state. Follow docs/troubleshooting.md section {BY_HAND}, then {rerun}."
+        )
+    if cause == "unknown":
+        return (
+            f"{names}: apply check {ident} is in progress with no run named; follow "
+            f"docs/troubleshooting.md section {BY_HAND}, then {rerun}."
+        )
+    return (
+        f"{names}: run {ident} could not be read completely; {rerun}. If it fails the same "
+        f"way, follow docs/troubleshooting.md section {BY_HAND}."
+    )
 
 
 def _check_run_lines(repo, head_sha):
@@ -781,6 +945,7 @@ def bare_main(auto=False):
     # cell's check stays pending by design for a later apply, and that apply refuses on its own
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
+    refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
     auto_outputs, auto_report = {"base_sha": base_sha}, {}
     if auto:
@@ -903,6 +1068,7 @@ def main():
     # Locked and waiting cells drop before `with_plan_runs`: their checks stay pending for a later
     # apply, which refuses on its own over a record-less cell.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
+    refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
 
     # Before the padding, whose over-depth refusal is where this line helps most.

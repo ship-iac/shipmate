@@ -14,7 +14,7 @@ inputs:
     description: sha256 of the reviewed plan text, recorded on the apply check by the trusted summary job. The apply re-renders the stored plan and refuses if it does not match.
     required: true
   encryption-key:
-    description: Encryption key to decrypt the .otplan artifact and the cached local state, and to encrypt the saved state; must match plan-cell's. Required; empty refuses the apply.
+    description: Encryption key to decrypt the .otplan artifact and the cached local state, and to seal the state the cell hands to its save job; must match plan-cell's. Required; empty refuses the apply.
     required: false
     default: ""
   tf-vars:
@@ -29,12 +29,16 @@ inputs:
     required: false
     default: ""
   pre-apply-outcome:
-    description: The outcome of the wave job's pre-apply check (pre-apply), which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
+    description: The outcome of the apply job's pre-apply check (pre-apply), which runs before the cloud credentials. Anything but success or skipped refuses the apply, an empty value included.
     required: true
   pre-apply-refusal:
     description: The pre-apply check's refusal, which becomes the cell's blocked reason. Empty falls back to a reason that names no cause.
     required: false
     default: ""
+outputs:
+  state:
+    description: "`<value> attempt=<run attempt>` from scripts/state-handoff, which the cell's `save` job reads; empty when the handoff failed before writing it."
+    value: ${{ steps.handoff.outputs.state }}
 runs:
   using: composite
   steps:
@@ -177,6 +181,19 @@ runs:
         slug: ${{ steps.ids.outputs.slug }}
         encryption-key: ${{ inputs.encryption-key }}
 
+    # The save job saves local state only on a GitHub-hosted runner, so a cell that would leave
+    # state it cannot save refuses here, before anything applies.
+    - name: Refuse local-backend state on a runner that is not GitHub-hosted
+      id: hosted
+      shell: bash
+      env:
+        STATE_PATH: ${{ steps.init.outputs.state-path }}
+      run: |
+        if [ -n "$STATE_PATH" ] && [ "$RUNNER_ENVIRONMENT" != github-hosted ]; then
+          echo "::error::the save job runs only on GitHub-hosted runners; a reused self-hosted runner could alter what it saves. Use a GitHub-hosted runs_on or a remote backend."
+          exit 1
+        fi
+
     - name: Verify the stored plan renders as the reviewed plan text
       id: plan-digest
       shell: bash
@@ -219,7 +236,7 @@ runs:
         set -euo pipefail
         echo "::group::terramate apply: $STACK"
         # Exit on tofu's own PIPESTATUS[0], not pipefail: a `tee` failure alone would fail a
-        # successful apply whose advanced state `Save state` persists, leaving a re-run on the
+        # successful apply whose advanced state the `save` job persists, leaving a re-run on the
         # stale-plan fail-safe with no way back.
         set +e
         # No `-auto-approve`: inert on a stored plan, and its absence is a backstop. Were
@@ -231,57 +248,31 @@ runs:
         echo "::endgroup::"
         exit "$status"
 
-    - name: Save state
-      id: save-state
-      # always(): a failed or cancelled apply still mutated state; dropping it orphans resources.
-      # Each run_id-run_attempt key is fresh and commits only whole: a torn save loses the delta,
-      # never last-good state. Cancelled, the check stays pending (CONTRACT.md §Apply result
-      # comment). Skips unrestored state.
-      if: ${{ always() && steps.init.outputs.restore-outcome == 'success' }}
-      uses: $/actions/state
-      with:
-        stack-slug: ${{ steps.ids.outputs.slug }}
-        env: ${{ inputs.env }}
-        mode: save
-        path: ${{ steps.init.outputs.state-path }}
-        encryption-key: ${{ inputs.encryption-key }}
-
-    - name: Warn that the applied state was not saved
-      id: lost-save
-      # always(): failure() is false in a cancelled run. A failed, cancelled, unverified or skipped
-      # save after an apply that ran fails the job, so its apply check stays pending; the exit also
-      # skips the provider-cache steps below through their implied success().
-      if: ${{ always() && steps.apply.outcome != 'skipped' && steps.init.outputs.restore-outcome == 'success' && steps.save-state.outputs.saved != 'true' }}
+    # always(): a failed or cancelled apply still mutated state; dropping it orphans resources.
+    - name: Hand off the state
+      id: handoff
+      if: always()
       shell: bash
-      run: |
-        echo "::error::The apply step ran and its state was not saved or not verified. Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge can apply this cell's reviewed plan again against the state from before the apply. Before applying or merging any plan of this stack in this environment, on any pull request, follow docs/troubleshooting.md section The apply step ran and its state was not saved."
-        exit 1
+      env:
+        APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        STATE_PATH: ${{ steps.init.outputs.state-path }}
+        SLUG: ${{ steps.ids.outputs.slug }}
+        ENV: ${{ inputs.env }}
+        ENCRYPTION_KEY: ${{ inputs.encryption-key }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/state-handoff"
 
-    - name: Check the provider cache
-      id: provider-cache-files
-      # No status function in this `if:` or the save's: the implied success() skips both after a
-      # failed apply. continue-on-error, as on `Compose cell summary`, keeps a cache failure from
-      # stranding an applied cell's check pending.
-      if: ${{ steps.init.outputs.cache-primary-key != '' && steps.init.outputs.cache-hit != 'true' }}
-      continue-on-error: true
-      shell: bash
-      run: |
-        if [ -n "$(find "$TF_PLUGIN_CACHE_DIR" -type f -print -quit)" ]; then
-          echo "populated=true" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Save provider cache
-      if: ${{ steps.provider-cache-files.outputs.populated == 'true' }}
-      continue-on-error: true
-      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    # No `overwrite`: a later same-named upload could replace the bundle. A failed upload is not
+    # caught here; `save` finds no artifact matching the handed-off digest and refuses.
+    - name: Upload the state
+      if: ${{ always() && steps.handoff.outputs.bundle == 'true' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-        key: ${{ steps.init.outputs.cache-primary-key }}
+        name: ${{ steps.handoff.outputs.name }}
+        path: ${{ runner.temp }}/state.bundle
 
     - name: Compose cell summary
       # always(): every attempted or blocked cell needs a result. Env vars only: author text is never
-      # shell- or JSON-spliced. Reviewer-facing (continue-on-error); the warning step's exit 1, not
-      # LOST_SAVE_OUTCOME here, is what keeps a lost save's apply check pending.
+      # shell- or JSON-spliced. Reviewer-facing (continue-on-error).
       if: always()
       continue-on-error: true
       shell: bash
@@ -298,10 +289,9 @@ runs:
         INIT_OUTCOME: ${{ steps.init.outputs.init-outcome }}
         LOCATE_OUTCOME: ${{ steps.init.outputs.locate-outcome }}
         RESTORE_OUTCOME: ${{ steps.init.outputs.restore-outcome }}
+        HOSTED_OUTCOME: ${{ steps.hosted.outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
-        # `failure` when the warning fired (it ends exit 1); anything but success or skipped is lost.
-        LOST_SAVE_OUTCOME: ${{ steps.lost-save.outcome }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"

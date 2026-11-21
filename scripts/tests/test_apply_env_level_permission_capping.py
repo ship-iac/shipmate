@@ -21,6 +21,7 @@ from _loader import WORKFLOWS, workflow_yaml
 CALLEES = {
     "apply-env-level.yml": re.compile(r"/apply-env-level\.yml(?:@|$)"),
     "apply-run.yml": re.compile(r"/apply-run\.yml(?:@|$)"),
+    "cell.yml": re.compile(r"/cell\.yml(?:@|$)"),
 }
 
 # GitHub's permission scale for a single scope: absence and `none` grant nothing, `read` and
@@ -66,6 +67,7 @@ EXPECTED_CALLERS = {
     "apply-env-level.yml": {("apply-run.yml", f"envlevel{n}") for n in range(4)}
     | {("deploy.yml", f"envlevel{n}") for n in range(4)},
     "apply-run.yml": {("apply.yml", "run")},
+    "cell.yml": {("apply-env-level.yml", f"wave{n}") for n in range(8)},
 }
 
 
@@ -80,7 +82,9 @@ def test_each_callee_has_exactly_its_callers(callee):
 
 @pytest.mark.parametrize("callee", sorted(CALLEES))
 def test_every_caller_grants_at_least_the_callees_permission_union(callee):
-    """Mutation: add `issues: write` to `apply-run.yml`'s `detect` -- red for `apply-run.yml`."""
+    """Mutations: add `issues: write` to `apply-run.yml`'s `detect` -- red for `apply-run.yml`;
+    drop `actions: read` from `apply-env-level.yml`'s `&wave-permissions` -- red for
+    `cell.yml`."""
     ceiling = _callee_permission_union(callee)
     assert ceiling, f"{callee} declares no job permissions -- guard is vacuous"
     for wf_name, job_id, job in _callers(callee):

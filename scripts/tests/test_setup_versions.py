@@ -163,7 +163,7 @@ _EXPECTED_INPUTS = {
     },
     "cache-save": {
         "description": (
-            '"false" where the workflow declares cache-mode: read, whose token cannot save; '
+            '"false" where the workflow or job declares cache-mode: read, whose token cannot save; '
             "a save there only warns."
         ),
         "required": False,

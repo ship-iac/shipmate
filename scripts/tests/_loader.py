@@ -75,6 +75,11 @@ ENGINE_CALL_SECRETS = {
     "apply-run.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "deploy.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "apply-env-level.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    # A cell writes no check, so it takes no App key.
+    "cell.yml": {
+        **_CONSUMER_SECRETS,
+        "SHIPMATE_ENCRYPTION_KEY": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
+    },
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
     # from a plain TF_VAR_*.

@@ -475,9 +475,10 @@ cell — the right recovery when nothing moved (a credentials failure, a rate li
 a cancelled run). If the apply partially succeeded, the state serial advanced
 and the stored plan no longer matches it, so that retry is refused here instead.
 Re-plan first; the two recoveries are not interchangeable. On a local backend,
-a cell whose job log shows `The apply step ran and its state was not saved` is
-the exception: the cache restores the state from before the apply, so a retry
-applies the plan again unrefused. Follow
+a cell whose apply check is titled `State not saved` is the exception: every
+apply of that head refuses it while the check is held, and once the check is returned the
+cache restores the state from before the apply, so a retry applies the plan
+again unrefused. Follow
 §`The apply step ran and its state was not saved` instead.
 
 A cancelled run has one further failure mode a bare retry cannot clear: it can
@@ -1374,43 +1375,87 @@ the refusal. What to do depends on the step that refused:
   applied. Re-plan once the runner works; a transient hosted-runner disk
   failure clears on its own, and a self-hosted runner needs its openssl or disk
   fixed.
-- **An apply cell's `Save state`.** See
-  §`The apply step ran and its state was not saved`, which says when a re-run
-  of the job is safe.
+- **An apply cell's `Hand off the state`.** The state was not handed off to
+  the cell's `save` job: see §`The apply step ran and its state was not saved`.
+
+### `the save job runs only on GitHub-hosted runners`
+
+A local-backend stack's apply cell ran on a runner whose `RUNNER_ENVIRONMENT`
+is not `github-hosted`. The cell refuses before its apply step, so nothing was
+applied, and its apply check returns to `queued`. Set the caller's `runs_on`
+to a GitHub-hosted label, or move the stack to a remote backend
+(`CONTRACT.md` §State backend). When a cell's `save` job prints the same text,
+its apply may have run: follow §`The apply step ran and its state was not saved`.
 
 ### `The apply step ran and its state was not saved`
 
-An apply cell on a local backend ran its `Apply the stored plan` step (status
-`success`, `failure` or `cancelled`), and `Save state` did not store the state
-that step left: the save failed or was cancelled, the exact-key lookups after it
-found no entry, or there was no state file to save. When the first exact-key
-lookup finds no entry, the action looks up the same key up to four more times
-over about 30 s before it reports the state not saved; a failed, cancelled or
-skipped save runs no lookup and reports at once, and a run cancelled after the
-save reports the state not saved although the entry may exist. The warning
-step fails the cell's job, so its apply check stays pending. An apply run that was not
-cancelled posts an apply comment; its row reads not recorded when its apply
-succeeded, otherwise failed, and its `state not saved:` note names up to 5
-lost cells whose summary artifact uploaded and counts the rest. Without that
-artifact the row reads not attempted, and the pointer every `not attempted:`
-note carries leads here. A cancelled run and the merge deploy post no comment, and a later run's comment does not
-know the state was lost: the job log and the pending check are the signal.
+An apply cell on a local backend may have run its `Apply the stored plan` step
+(status `success`, `failure` or `cancelled`, or a job that ended before the
+step reported), and its state is not known saved. The cell's `save` job failed
+or was cancelled. A failed `save` job's `::error::` ends with this section's
+name, in one of these forms:
+
+- ``the state of <env> / <stack> was not found under <key> or <key>-r1. ...``:
+  the save under the cell's key, and the save under the same key with `-r1`,
+  left no entry an exact-key lookup found. When the first lookup after a save
+  finds no entry, the job looks the same key up to four more times over about
+  30 s. A `save` job cancelled before a lookup found the entry reports the
+  state not saved although the entry may exist; step 1 below checks.
+- ``<reason>, so the state of <env> / <stack> is not known saved under <key> or <key>-r1. ...``,
+  naming each attempt's two keys, where `<reason>` is one of:
+  - `the apply step ran and left no state file`;
+  - `no artifact of this run named state.<env>.<stack-slug>.<attempt> holds the cell's state bundle`:
+    the apply's upload of its sealed state failed, or the artifact expired;
+  - `the run's artifacts could not be listed (...)`, or
+    `the run's job listing failed or does not list this job`;
+  - `the apply job's state output reads '<value>' after its apply may have run`:
+    the `apply` job ended before it handed its state off, for example on a
+    lost runner;
+  - `run attempts <n>, <m> of this cell may have applied unsaved`;
+  - `the save job runs only on GitHub-hosted runners; ...`.
+- ``shipmate/actions/state-save: the save decision (...) is unknown or incomplete, ...``.
+
+A cell on a remote backend is held the same way when its `apply` job ends
+before it hands its state off, for example on a lost runner: the `save` job
+cannot tell the backend without that output. Its state is in the backend, which
+shipmate never saves, so the steps below do not apply. Return or complete its
+check as in
+[Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand).
+
+A `save` job whose apply never ran saves nothing and succeeds. When an earlier
+attempt may have applied the cell without saving, a re-run's `save` job looks
+up that attempt's two keys, never saves them, and fails when neither exists. The state the apply left stays, sealed, in the run's
+artifact `state.<env>.<stack-slug>.<attempt>` until the repository's artifact
+retention expires it.
+
+The cell's apply check is held: `in_progress`, titled `State not saved`, linked
+to the run page. While it is held, a `shipmate apply` comment of the same head,
+that head's merge deploy and a re-run of the deploy refuse the cell. A check
+holds only its own head: after a push, an apply of the new head, another pull
+request's apply and a merge deploy of a later head do not see it, and apply the
+cell over the state from before the lost apply. Return or complete it as in
+[Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
+only when the steps below say so; nothing else clears it. An apply run that was
+not cancelled posts an apply comment whose `state not saved:` note names the
+cell and links its `save` job's log. A cancelled run and the merge deploy post
+no comment: the held check and the `save` job log are the signal.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
 before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
-apply that OpenTofu refused before writing anything warns too, and this page
+apply that OpenTofu refused before writing anything is held too, and this page
 does not tell it apart: a log without completion lines does not prove nothing
 changed, because an interrupted apply can create a resource before OpenTofu
 logs or records it.
 
-When the same job's `Apply the stored plan` step is `skipped`, nothing was
-applied, this warning is not printed, and a re-run of the job is safe. In every
-other case, re-plan and reconcile against the provider:
+When the cell's `apply` job shows `Apply the stored plan` `skipped` in every
+attempt, nothing was applied and the check is not held. In every other case,
+re-plan and reconcile against the provider:
 
 1. Check whether the save stored the entry after all:
    `gh cache list --key <key> --json key --jq '.[] | select(.key == "<key>")' --repo <owner>/<repo>`,
-   with the exact `key` the `Save state` step log shows (`--key` alone matches
-   by prefix). When it is printed, the save worked and only the lookups missed it:
+   for each key the `save` job's error names, `state/<stack-slug>/<env>/<run_id>-<run_attempt>`
+   and the same with `-r1` (`--key` alone matches by prefix). When one is
+   printed, the save worked and only the lookups missed it:
    re-plan (step 4) and never re-run the job; the re-plan reads the saved
    state. After a successful apply it shows no changes. After a failed or
    cancelled apply, OpenTofu may not have recorded, and the step log may not
@@ -1426,21 +1471,19 @@ other case, re-plan and reconcile against the provider:
    the object the lost apply created; the `Apply the stored plan` log names it
    only if it shows `Creation complete … [id=…]` for that address. On the open
    pull request, a re-plan by comment on the same head publishes a newer apply
-   check for the cell. An older check of the cell that a run left `in_progress`
-   on that head stays so, and a merge deploy can refuse over it: return or
-   complete it as in
+   check for the cell. The held check stays `in_progress`, and every apply of
+   that head refuses over it: return or complete it as in
    [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand)
-   before merging.
+   before applying or merging.
    After the merge, a new pull request's plan completes only its own head's
    check. The merged head's check stays pending, and nothing reads it again:
    a later deploy takes only the pending checks of its own merge's pull
    request. Never re-run that deploy, which reads it. When nothing is printed,
    continue.
-2. Never re-run the job or its workflow run, the deploy included: a re-run
-   applies the run's reviewed plan again whatever the check says. A
-   `shipmate apply` comment, bare or for the cell's environment, and a merge of
-   the pull request, whose deploy takes the pending check, apply the plan the
-   cell's pending apply check holds, which is the reviewed plan until a re-plan
+2. Never re-run the job or its workflow run, the deploy included. Once the held
+   check is returned to `queued`, a `shipmate apply` comment, bare or for the
+   cell's environment, and a merge of the pull request, whose deploy takes the
+   pending check, apply the plan the cell's pending apply check holds, which is the reviewed plan until a re-plan
    replaces it. Steps 1 and 4 decide whether a re-plan is safe to apply or
    merge. After the merge, the merged head's check stays pending (step 1) and
    its deploy is never re-run. The reviewed plan was made against the state
@@ -2171,9 +2214,9 @@ stays pending and the rest of the run applied. Follow the remedy:
   for, apply a `targeted` one with `shipmate apply <env>`, then comment
   `shipmate apply`.
 
-Before any of these, check the run for a cell whose job log shows
-`The apply step ran and its state was not saved`: any apply that covers its
-environment applies that cell again. Follow
+Before any of these, check the run for a cell whose apply check is titled
+`State not saved`: any apply of that head that covers its environment refuses
+while the check is held, and applies that cell again once it is returned. Follow
 §`The apply step ran and its state was not saved` for it first.
 
 A targeted apply names the lock's remedy or `shipmate apply <env>`, even when
@@ -3304,21 +3347,36 @@ that run is live, or a run that ended before its completion wrote the check,
 leaves the check `in_progress` on the merged head. The deploy reads the linked
 run before it applies the cell: a live run may still apply it, and an ended one
 may have applied it without saving its state (`CONTRACT.md` §Apply check
-lifecycle, In-progress checks on a merge deploy).
+lifecycle, In-progress checks).
 
 | The annotation says | Do |
 | --- | --- |
 | `are held in progress by run <id>, which is still running` | Once run `<id>` ends, re-run this deploy. A cell whose check that run left in progress deploys if the run never applied it and is refused otherwise, with the next row's text. If the run's page shows it ended and the deploy still refuses with this text, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
-| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | A job of the cell in run `<id>` does not show that it never applied (no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`), so it may have changed infrastructure, and the cell's checks that run holds were never completed. Read that run's cell job log. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return each of those checks to `queued`, or complete each when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
+| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | Run `<id>` lists no job of the cell under the names this engine reads, as a run of an older engine does, or an `apply` job of the cell in it does not show that it never applied (no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`), and no `save` job of the cell saved its state, so it may have changed infrastructure that no saved state records. A held check (`State not saved`) reads this way too. Read that run's cell `apply` and `save` job logs. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact. Then return each of those checks to `queued`, or complete each when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
+| `were left in progress by run <id>, which applied them and saved their state` | Run `<id>` applied the cell and saved its state, and ended without completing the check. Complete each such check as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand), or return it to `queued` when the cell should apply again, then re-run this deploy. |
+| `may have been applied by an earlier attempt of this deploy, run <id>, without saving their state` | An earlier attempt of this deploy may have applied the cell, and its state is not known saved. A cell re-run on its own refuses the same way, with ``run attempt <n> of this deploy may have applied this cell without saving its state``. Every re-run of this deploy refuses the same way, whatever the checks read. Follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved), and apply the stack through a new pull request touching it. |
 | `run <id> could not be read completely` | The run or its jobs listing could not be read completely; a warning above the annotation names the cause. Re-run this deploy. If it fails the same way, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 | `apply check <check id> is in progress with no run named` | The check's details link is not exactly a run page of this repository, `<server>/<owner>/<repo>/actions/runs/<id>`, so the deploy cannot tell which run holds the cell or whether that run applied it. A renamed or transferred repository is one way a link stops matching. Follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
 
-A cell whose holding run ended without applying it is not refused: its job lists
-no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`, after which
+A cell whose holding run ended without applying it is not refused: its `apply`
+job lists no steps, `Apply the cell` `skipped`, or a failed `Pre-apply check`, after which
 `apply-cell` only refuses; or the run lists no job of the cell. The deploy
 queues the cell and prints ``::warning::<stack> / <env>: run <id> ended before
 applying this cell and left its apply check in progress; this deploy queues
 it``. A later refusal of the same deploy can still stop it.
+
+### A `shipmate apply` refused an apply check another run holds in progress
+
+A `shipmate apply` reads the App apply checks of its pull request's head the
+same way a merge deploy does, and refuses the whole run with `apply refused:`
+and the sentences of §A merge deploy refused an apply check another run holds
+in progress, ending ``re-run `shipmate apply` `` where the deploy's end
+`re-run this deploy`. Two differ: a live run ends
+``Wait for it to end, then re-run `shipmate apply`.``, and an ended run that may
+have applied the cell without saving its state reads
+``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then re-plan.``
+Follow the same table, with `shipmate apply` in place of a deploy re-run. A
+cell whose holding run ended without applying it applies.
 
 ### Return an in-progress apply check by hand
 
@@ -3365,7 +3423,10 @@ it``. A later refusal of the same deploy can still stop it.
    re-run deploy applies the cell from it. When the change is already applied
    and its state saved, complete that newer check the same way too; when the
    cell should be applied again, leave it queued.
-5. Re-run this deploy.
+5. Start the apply again: re-run the deploy that refused, or, before the merge,
+   comment `shipmate apply`. A deploy that refused because an earlier attempt
+   of its own run may have applied unsaved refuses on every re-run; apply that
+   stack through a new pull request touching it instead.
 
 ### The post-merge deploy was dropped as superseded
 
@@ -3391,6 +3452,6 @@ behind; it begins no dispatch once its 10-minute budget is spent, and its
 A deploy whose `summary` job was cancelled, for example at a full gate-writer
 queue for the head, leaves the merged head's gate at its last write before the
 cancel.
-Re-run that deploy the same way, unless one of its cells' job logs shows
-`The apply step ran and its state was not saved`: the re-run applies that cell
-again. Follow §`The apply step ran and its state was not saved` first.
+Re-run that deploy the same way, unless one of its cells' apply checks is
+titled `State not saved`: the re-run refuses and applies nothing. Follow
+§`The apply step ran and its state was not saved` first.

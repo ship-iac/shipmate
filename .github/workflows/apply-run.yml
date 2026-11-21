@@ -233,8 +233,9 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   envlevel0:
-    # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name
-    # is load-bearing: renaming it strands apply checks pending. deploy.yml repeats it.
+    # `apply-gate.cell_part` matches a cell job as `L<n> / <env> / <stack> / apply` or `/ save`, so
+    # this `L<n>` name is load-bearing: renaming it strands apply checks pending. deploy.yml
+    # repeats it.
     name: L0
     # `review` is listed so its failure reaches `!failure()`: otherwise a failed one skips
     # `detect`, whose outputs then read as '' -- which `!= 'true'` fans out on, over

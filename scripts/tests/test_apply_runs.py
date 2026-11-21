@@ -155,7 +155,7 @@ def _jobs(page):
 def test_run_jobs_reads_every_page():
     """Mutation: stop after the first page -- red (the `in_progress` job lost)."""
     first = [{"name": f"j{i}", "status": "completed"} for i in range(100)]
-    second = [{"name": "apply / run / L0 / dev / app", "status": "in_progress"}]
+    second = [{"name": "apply / run / L0 / dev / app / apply", "status": "in_progress"}]
     pages = {
         _jobs(1): {"total_count": 101, "jobs": first},
         _jobs(2): {"total_count": 101, "jobs": second},
@@ -302,6 +302,40 @@ def test_listed_jobs_warns_of_a_job_with_no_string_name(capsys):
     assert capsys.readouterr().err == (
         "::warning::run 5 lists a job with no string status or name\n"
     )
+
+
+def _full_jobs(pages):
+    return {
+        _jobs(p): {"jobs": [{"name": f"j{p}-{i}", "status": "completed"} for i in range(100)]}
+        for p in range(1, pages + 1)
+    }
+
+
+def test_listed_jobs_reads_up_to_forty_pages():
+    """39 full pages and a short 40th are 3,999 jobs. Mutation: `JOB_PAGES = 10` -- red."""
+    pages = _full_jobs(39)
+    pages[_jobs(40)] = {"jobs": [{"name": f"j40-{i}", "status": "completed"} for i in range(99)]}
+    got = _shipmate.listed_jobs("o/r", 5, run=_Gh(pages))
+    assert got == [job for p in range(1, 41) for job in pages[_jobs(p)]["jobs"]]
+    assert len(got) == 3999
+
+
+def test_listed_jobs_past_forty_full_pages_is_none():
+    """A 41st page may hold more jobs. Mutation: return after the last full page -- red."""
+    run = _Gh(_full_jobs(40))
+    assert _shipmate.listed_jobs("o/r", 5, run=run) is None
+    assert run.calls == [_jobs(p) for p in range(1, 41)]
+
+
+def test_a_runs_listing_past_ten_full_pages_is_incomplete():
+    """Only job listings read 40 pages. Mutation: pass `JOB_PAGES` to every `_pages` call --
+    red."""
+    pages = {
+        _listing("pending", p): {"workflow_runs": [_apply(p * 100 + i, pr="8") for i in range(100)]}
+        for p in range(1, 11)
+    }
+    pages[_listing("pending", 11)] = {"workflow_runs": [_apply(5000, pr="8")]}
+    assert _call(pages) == ([], False)
 
 
 @pytest.mark.parametrize("bad", [True, -5, "123"], ids=["bool", "negative", "string"])
