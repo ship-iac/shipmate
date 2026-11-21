@@ -3058,6 +3058,13 @@ Each of those `if:` expressions is a contract literal, not a style choice:
 each one whole, because a wrong expression sends a verb nowhere and produces a dispatched run
 that completes with every job skipped — green, and no work done.
 
+The `plan` job's `concurrency` is a contract literal too: group `plan-<pr>`,
+with `cancel-in-progress` true only for the first attempt of a
+`pull_request_target` run other than `ready_for_review`. So only a first-attempt
+push, open or reopen run cancels the plan run in flight. Every re-run of a plan
+run, a ready run and a dispatched `shipmate plan` wait in `plan-<pr>`, and a
+later arrival replaces a waiting run. The probe compares the mapping whole.
+
 The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
@@ -3224,6 +3231,35 @@ The eight jobs:
   dispatches `shipmate plan` for the live head when the pull request is open and
   not a draft and no run of that head planned it or is about to (§Plan
   comment).
+  After it writes the gate, a `shipmate plan` run whose plan job succeeded
+  re-runs the failed jobs of the head's newest autoplan run when all of these
+  hold:
+  - that autoplan run is `completed`;
+  - no other `shipmate plan` run of the pull request is live, and their listing
+    is complete;
+  - its latest attempt's jobs are listed whole, and it planned;
+  - each of its jobs ended `success`, `skipped` or `failure`, so a cancelled or
+    timed-out autoplan is not re-run;
+  - a plan cell this run also planned failed in it, and every failed job is such
+    a cell or `plan / summary`;
+  - none of its failed cells uploaded its plan or cell summary;
+  - it ran the same engine `plan.yml` commit as this run.
+
+  Each read runs once, unretried. The first unmet condition, or a failed read,
+  logs the notice `no autoplan re-run: <reason>`. A re-run logs
+  `re-ran the failed jobs of autoplan run <id>, superseded by this plan`; a
+  failed token mint or request warns `could not re-run the failed jobs of
+  autoplan run <id>; its failed plan checks stay red until a push plans a new
+  head`. None of these fails the run. The re-run plans its failed cells again,
+  so each such cell carries two green `plan / <env> / <stack>` checks: this
+  run's mirror and the autoplan's. The re-run attempt's `summary` finds this
+  newer run's gate, writes nothing, and ends green at its hold step; when that
+  read fails, it holds the gate ("re-plan this pull request (comment shipmate
+  plan or push): its plan run ended before writing a final gate"), which a
+  re-plan clears. One limit: a `shipmate plan` dispatched after this run last
+  lists the live plan runs and before it requests the re-run, or one that
+  listing missed, waits in `plan-<pr>`, is replaced by the re-run, and ends
+  cancelled with no reply (§Outcome reply). Comment `shipmate plan` again.
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact about this pull request it decides on from
@@ -3276,12 +3312,13 @@ The eight jobs:
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — whether each file parses as YAML, stale engine
 pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
-and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:`, `pull_request_target` types and `run-name` observe whether the plan comment's
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring, event routing, the `auto` job's `with:`, the `unlock` job's grant, `pull_request_target` types, `run-name` and the `plan` job's `concurrency` observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
 whether the job it reaches is the one that verb names, whether the autoplan's
-dispatch runs the auto form, whether every pull
-request event the fence routes starts a run, and whether shipmate can identify a
-pull request's apply runs by their titles, and whose seventh
+dispatch runs the auto form, whether an unlock run can start, whether every pull
+request event the fence routes starts a run, whether shipmate can identify a
+pull request's apply runs by their titles, and whether a plan re-run waits for
+the plan run in flight, and whose ninth
 check reports a drift job in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
@@ -3936,7 +3973,8 @@ and `lost` outputs, which the same rule reads.
   earlier autoplan run, ascending run id: `⚪ <n> check(s) from autoplan run
   [#<run>](<run url>) still read red on this head; this run's plan supersedes
   them, and they stay until a push plans a new head or a re-run of that run
-  replaces them.` A check
+  replaces them.` The same run may start that re-run (§Post-plan topology,
+  `summary`). A check
   counts when its job belongs to one of the head's `pull_request_target` runs
   of `.github/workflows/shipmate.yml`, its name starts with `plan / `, it is the
   newest check of that name among those runs' checks, and it completed with a
@@ -4251,7 +4289,8 @@ ends green and runs none of its later steps. For a cancelled autoplan,
 checks only when none of them had already uploaded its plan; a full re-run
 (`gh run rerun <id>`) fails every cell that already uploaded its plan,
 successful ones included, because the artifact names carry no attempt and the
-upload does not overwrite. The `summary` job's apply-check publish and its final gate write
+upload does not overwrite. A re-run waits in `plan-<pr>` for the plan run in
+flight (§Post-plan topology). The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` ended
 `cancelled` and the run was not cancelled, for example at a full gate-writer
@@ -4712,7 +4751,10 @@ not posted leaves the check `in_progress`.
 
 **Plan.** `outcome` runs under `!cancelled()`, so a cancelled `shipmate plan`
 run posts nothing: a push cancels a dispatched plan through the fence's
-`cancel-in-progress`, and the push's autoplan answers. It runs only on an
+`cancel-in-progress`, and the push's autoplan answers. A `shipmate plan` run
+replaced while it waits in `plan-<pr>`, by a later arrival such as an autoplan
+re-run (§Post-plan topology, `summary`), ends cancelled and posts nothing
+either; comment `shipmate plan` again. It runs only on an
 on-demand run, under `summary`'s fork clause, when `summary` did not output
 `superseded` as `true` and its comment write printed neither `created` nor
 `moved`. A superseded run posts nothing, and neither does a run whose pull
