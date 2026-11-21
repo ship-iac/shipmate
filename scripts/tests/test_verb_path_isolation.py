@@ -268,7 +268,8 @@ def test_every_summary_step_runs_on_every_apply_dispatch():
     """A gate refresh that finds a hold once every check is done, or hits an API error, fails
     its step; the result comment, the run check's finish and the reply to waiting runs still
     run. Mutations: delete the comment step's `if:` (the default `success()` skips it) -- red;
-    delete the waiting-runs step's `if:` -- red."""
+    delete the run check's finish step's `if:` -- red; delete the waiting-runs step's `if:` --
+    red."""
     steps = _job(APPLY_RUN, "summary")["steps"]
     assert len(steps) == 4, f"summary no longer has exactly four steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]

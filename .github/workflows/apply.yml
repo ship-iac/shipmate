@@ -163,7 +163,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       # Display only: nothing reads the check, so a failure here must not fail outcome.
-      - name: Show the running apply on the pull request
+      - name: End the running apply check
         if: ${{ always() && steps.reply.outputs.posted == 'true' }}
         uses: $/actions/apply-run-check
         continue-on-error: true

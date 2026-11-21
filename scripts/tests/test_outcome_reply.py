@@ -348,7 +348,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
                 },
             },
             {
-                "name": "Show the running apply on the pull request",
+                "name": "End the running apply check",
                 "if": "${{ always() && steps.reply.outputs.posted == 'true' }}",
                 "uses": "$/actions/apply-run-check",
                 "continue-on-error": True,

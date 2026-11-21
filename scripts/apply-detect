@@ -48,6 +48,7 @@ import time
 
 from _shipmate import (
     READ_ERRORS,
+    RUN_CHECK,
     Refused,
     _load,
     _run,
@@ -584,10 +585,11 @@ def refuse_actor(lines, app_id, actor, triggering_actor):
     the head's checks.
 
     The whole string, never a `[bot]` suffix: a `GITHUB_TOKEN` dispatch runs as
-    `github-actions[bot]`. The slug comes from the App-authored check runs, so a head with
-    none refuses. A human's "Re-run all jobs" keeps `actor` and makes the human
-    `triggering_actor`, so a re-run refuses."""
-    slugs = {(r.get("app") or {}).get("slug") for r in ag.app_runs(lines, app_id)}
+    `github-actions[bot]`. The slug comes from the App-authored check runs but `RUN_CHECK`,
+    which an apply run creates, so a head with none refuses. A human's "Re-run all jobs"
+    keeps `actor` and makes the human `triggering_actor`, so a re-run refuses."""
+    runs = [r for r in ag.app_runs(lines, app_id) if r.get("name") != RUN_CHECK]
+    slugs = {(r.get("app") or {}).get("slug") for r in runs}
     if not slugs:
         raise SystemExit(
             "::error::auto apply refused: no check run on the head is authored by the shipmate "

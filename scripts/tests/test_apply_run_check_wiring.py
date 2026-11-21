@@ -12,7 +12,8 @@ constant.
 from _loader import action_yaml, workflow_jobs
 
 USES = "$/actions/apply-run-check"
-NAME = "Show the running apply on the pull request"
+START = "Show the running apply on the pull request"
+FINISH = "End the running apply check"
 
 
 def _with(mode):
@@ -75,7 +76,7 @@ STEPS = [
 #: `review`'s step, whole: after `rd`, with the default `if:`, so only a review that bound
 #: `ref` to the head starts a check.
 REVIEW_STEP = {
-    "name": NAME,
+    "name": START,
     "uses": USES,
     "continue-on-error": True,
     "timeout-minutes": 1,
@@ -84,7 +85,7 @@ REVIEW_STEP = {
 
 #: `summary`'s step, whole: after the apply comment, and run after a failed gate refresh.
 SUMMARY_STEP = {
-    "name": NAME,
+    "name": FINISH,
     "if": "${{ always() && steps.result.outputs.posted == 'true' }}",
     "uses": USES,
     "continue-on-error": True,
@@ -94,7 +95,7 @@ SUMMARY_STEP = {
 
 #: `outcome`'s step, whole: after the no-result reply, only when it posted.
 OUTCOME_STEP = {
-    "name": NAME,
+    "name": FINISH,
     "if": "${{ always() && steps.reply.outputs.posted == 'true' }}",
     "uses": USES,
     "continue-on-error": True,
