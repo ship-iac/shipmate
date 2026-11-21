@@ -3074,8 +3074,9 @@ The plan run started by marking the pull request ready for review shows
 notice reads "plan run <id> planned and published <sha>; this ready-for-review
 run plans nothing": the push run of that head was planning when the pull
 request was marked ready, and its plan comment, apply checks and
-`shipmate / gate` stand. That push run started no auto apply, so comment
-`shipmate apply` for an environment that applies automatically. To plan the
+`shipmate / gate` stand. That push run usually started no auto apply, so
+comment `shipmate apply` for an environment that applies automatically; its
+`summary` log says whether it dispatched one. To plan the
 head again, comment `shipmate plan`.
 
 A `shipmate plan` comment made while that push run planned can be replaced in

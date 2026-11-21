@@ -3197,9 +3197,9 @@ The eight jobs:
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
   (comment shipmate plan or push): its plan summary was cancelled before it
   published". A `summary` refused by its fork `if:`, or skipped after
-  `defer` named an earlier run, is `skipped`, not `cancelled`, so `gate-hold` holds the App key only for a head `summary`
-  admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes, as
-  `facts` does.
+  `defer` named an earlier run, is `skipped`, not `cancelled`, so `gate-hold`
+  holds the App key only for a head `summary` admitted. It runs on
+  `ubuntu-slim` whatever `runs_on` the caller passes, as `facts` does.
 - **`outcome`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
   posts the outcome reply when a `shipmate plan` run ends without writing its
   plan comment (§Outcome reply). Its `if:` carries `summary`'s fork clause, so
