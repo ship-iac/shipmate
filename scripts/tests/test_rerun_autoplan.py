@@ -24,6 +24,7 @@ ENV = {
     "SHIPMATE_HEAD_SHA": HEAD,
     "SHIPMATE_PLANNED_CELLS_NAMES": json.dumps(CELLS),
     "SHIPMATE_ENGINE_REPO": "acme/engine",
+    "SHIPMATE_ENGINE_SHA": ENGINE_SHA,
 }
 
 AUTOPLANS = autoplans_read(REPO, HEAD)
@@ -59,7 +60,7 @@ def run_read(rid):
 
 
 def happy_calls(rid=9):
-    return [AUTOPLANS, *DISPATCH, jobs_read(rid), artifacts_read(rid), run_read(rid), run_read(999)]
+    return [AUTOPLANS, *DISPATCH, jobs_read(rid), artifacts_read(rid), run_read(rid)]
 
 
 def job(name, conclusion, attempt=1):
@@ -140,7 +141,7 @@ def stub(
     calls = []
     autoplans = [autoplan()] if autoplans is None else autoplans
     jobs = JOBS if jobs is None else jobs
-    refs = {9: REFS, 12: REFS, 999: REFS} if refs is None else refs
+    refs = {9: REFS, 12: REFS} if refs is None else refs
     pages = artifact_pages(ARTIFACTS if artifacts is None else artifacts)
     answers = {json.dumps(AUTOPLANS): "".join(json.dumps(r) + "\n" for r in autoplans)}
     for i, read in enumerate(DISPATCH):
@@ -409,35 +410,55 @@ _OLD = {"path": "acme/engine/.github/workflows/plan.yml-old@main", "sha": ENGINE
 _CELL_ONLY = [REFS[0]]
 
 
+def plan_yml_at(sha):
+    return [REFS[0], {"path": PLAN_YML, "sha": sha}]
+
+
 @pytest.mark.parametrize(
-    ("refs", "theirs", "ours"),
+    ("refs", "theirs"),
     [
-        pytest.param(
-            {9: REFS, 999: [REFS[0], {"path": PLAN_YML, "sha": "e" * 40}]},
-            ENGINE_SHA,
-            "e" * 40,
-            id="shas-differ",
-        ),
-        pytest.param({9: [REFS[0], _OLD], 999: REFS}, None, ENGINE_SHA, id="other-path"),
-        pytest.param({9: _CELL_ONLY, 999: _CELL_ONLY}, None, None, id="no-entry"),
+        pytest.param({9: plan_yml_at("e" * 40)}, "e" * 40, id="shas-differ"),
+        pytest.param({9: plan_yml_at("c" * 39 + "e")}, "c" * 39 + "e", id="last-char"),
+        pytest.param({9: plan_yml_at("c" * 7)}, "c" * 7, id="prefix"),
+        pytest.param({9: [REFS[0], _OLD]}, None, id="other-path"),
+        pytest.param({9: _CELL_ONLY}, None, id="no-entry"),
     ],
 )
-def test_an_engine_plan_yml_pin_that_differs_blocks(slept, monkeypatch, capsys, refs, theirs, ours):
-    """The re-run must plan with the engine this run planned with. Mutations: match the path by
-    `startswith` -- other-path prints the run id; compare only when both entries exist --
-    no-entry prints the run id."""
+def test_an_engine_plan_yml_pin_that_differs_blocks(slept, monkeypatch, capsys, refs, theirs):
+    """The re-run must plan with the engine this run planned with, `SHIPMATE_ENGINE_SHA`; only
+    the autoplan run's `referenced_workflows` is read. Mutations: match the path by
+    `startswith` -- other-path; compare only when an entry exists -- other-path and no-entry;
+    compare the first 12 characters -- last-char; `ours.startswith(theirs)` -- prefix; read this
+    run's `referenced_workflows` for `ours` again -- every case calls run 999. Each but the last
+    prints the run id."""
     calls = stub(monkeypatch, refs=refs)
     assert (cli("decide"), capsys.readouterr(), calls) == (
         0,
-        ("", notice(f"autoplan run 9 ran engine plan.yml at {theirs} and this run at {ours}")),
+        (
+            "",
+            notice(f"autoplan run 9 ran engine plan.yml at {theirs} and this run at {ENGINE_SHA}"),
+        ),
         happy_calls(),
+    )
+
+
+@pytest.mark.parametrize("sha", ["", "C" * 40, "c" * 39], ids=["empty", "upper", "short"])
+def test_a_malformed_engine_sha_refuses_before_any_call(slept, monkeypatch, capsys, sha):
+    """The autoplan's pin equals the malformed value, so only the format check refuses.
+    Mutation: drop the `is_head_sha` check -- every case reads and prints the run id."""
+    monkeypatch.setenv("SHIPMATE_ENGINE_SHA", sha)
+    calls = stub(monkeypatch, refs={9: plan_yml_at(sha)})
+    assert (cli("decide"), capsys.readouterr(), calls) == (
+        0,
+        ("", notice(f"SHIPMATE_ENGINE_SHA is not a 40-char hex SHA (got: {sha!r})")),
+        [],
     )
 
 
 def test_a_failed_read_prints_one_notice_and_exits_0(slept, monkeypatch, capsys):
     """Mutation: catch only `ValueError` -- the gh `SystemExit` exits non-zero."""
     calls = stub(
-        monkeypatch, fail=[(run_read(999), SystemExit("command failed (1): gh api x\nHTTP 404"))]
+        monkeypatch, fail=[(run_read(9), SystemExit("command failed (1): gh api x\nHTTP 404"))]
     )
     assert (cli("decide"), capsys.readouterr(), calls) == (
         0,
@@ -481,20 +502,14 @@ _TRANSIENT_WARNING = "::warning::command failed (1): gh api x | HTTP 502\n"
             [*_UP_TO_ARTIFACTS, run_read(9)],
             id="autoplan-run",
         ),
-        pytest.param(
-            run_read(999),
-            notice("a read failed: command failed (1): gh api x | HTTP 502"),
-            happy_calls(),
-            id="this-run",
-        ),
     ],
 )
 def test_decide_retries_no_read(slept, monkeypatch, capsys, site, stderr, calls):
     """The summary holds the head's gate-writer group, so a read fails once into a notice.
     Mutations, each reddening its case: pass `retry=True` (or drop the pass-through in
     `newest_autoplan`) -- autoplans; in `other_live_plan_run` -- live; in `attempt_jobs` --
-    jobs; in the artifacts `_pages` -- artifacts; in `_engine_sha` -- autoplan-run and
-    this-run. Each reads the site twice after a sleep and prints the run id."""
+    jobs; in the artifacts `_pages` -- artifacts; in `_engine_sha` -- autoplan-run. Each reads
+    the site twice after a sleep and prints the run id."""
     got = stub(monkeypatch, fail=[(site, SystemExit(_TRANSIENT))])
     assert (cli("decide"), capsys.readouterr(), got, slept) == (0, ("", stderr), calls, [])
 

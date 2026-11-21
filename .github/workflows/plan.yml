@@ -202,11 +202,13 @@ jobs:
     steps:
       - uses: $/actions/summary
         id: summary
-        # `scripts/doctor`'s probes need the engine slug. `job` is unavailable in a job-level `env:`
-        # (GitHub rejects the file) and `github.action_repository` is empty for a `$/` action, so
-        # the step passes it; composite `run` steps inherit the caller's env.
+        # `scripts/doctor`'s probes need the engine slug, and `scripts/rerun-autoplan` the slug and
+        # this run's engine sha. `job` is unavailable in a job-level `env:` (GitHub rejects the
+        # file) and `github.action_repository` is empty for a `$/` action, so the step passes them;
+        # composite `run` steps inherit the caller's env.
         env:
           SHIPMATE_ENGINE_REPO: ${{ job.workflow_repository }}
+          SHIPMATE_ENGINE_SHA: ${{ job.workflow_sha }}
         with:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}

@@ -620,6 +620,12 @@ LATER_STEP_IFS = {
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_MOVED,
     GATE: NOT_MOVED,
+    "Decide whether to re-run the superseded autoplan": (
+        "${{ inputs.on-demand == 'true' && inputs.plan-result == 'success' && "
+        "steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}"
+    ),
+    "Mint the autoplan re-run token": "${{ steps.rerundecide.outputs.run != '' }}",
+    "Re-run the superseded autoplan's failed jobs": "${{ steps.rerundecide.outputs.run != '' }}",
     "Check whether the live head needs a plan": (
         "${{ steps.hold.outputs.moved == 'true' || steps.upsert.outputs.result == 'moved' }}"
     ),

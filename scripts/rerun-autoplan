@@ -7,8 +7,10 @@ stop reading red.
 
 Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID` (this run), `SHIPMATE_PR_NUMBER`, and for
 `decide` also `SHIPMATE_HEAD_SHA`, `SHIPMATE_PLANNED_CELLS_NAMES` (detect's `cells` JSON, the
-cells this run planned) and `SHIPMATE_ENGINE_REPO` (`<owner>/<repo>` of the engine). A malformed
-environment or `<id>` exits 1 with `::error::` before any API call.
+cells this run planned), `SHIPMATE_ENGINE_REPO` (`<owner>/<repo>` of the engine) and
+`SHIPMATE_ENGINE_SHA` (`job.workflow_sha`: the sha of the engine `plan.yml` this run uses). A
+malformed environment or `<id>` exits 1 with `::error::` before any API call, except an empty or
+malformed `SHIPMATE_ENGINE_SHA`, which prints row 9's notice before any API call.
 
 `decide` prints the head's newest autoplan run id (`apply-gate.newest_autoplan`) when every row
 below holds, read in this order; the first that fails prints one `::notice::` on stderr naming
@@ -28,8 +30,9 @@ it, and nothing on stdout:
 8. the run's artifacts are listed whole and hold neither `plan.<env>.<slug>` nor
    `cell-summary.<env>.<slug>` of a failed cell (`<slug>` is the stack with `/` as `-`): a
    second upload of either fails;
-9. the run and this run each reference the engine's `plan.yml` (`referenced_workflows`, the
-   path before the last `@` equal to `<engine>/.github/workflows/plan.yml`) at the same `sha`.
+9. the run references the engine's `plan.yml` (`referenced_workflows`, the path before the
+   last `@` equal to `<engine>/.github/workflows/plan.yml`) at `SHIPMATE_ENGINE_SHA`, compared
+   whole.
 
 `post <id>` lists the live plan runs again, counted, and sends nothing when row 3 fails; it
 then sends `POST runs/<id>/rerun-failed-jobs` once and prints the notice line, or the warning
@@ -52,6 +55,7 @@ from _shipmate import (
     command_data,
     exit_text,
     gh_json,
+    is_head_sha,
     is_run_id,
     one_line,
     other_live_plan_run,
@@ -143,16 +147,15 @@ def _uploaded(repo, rid, what, failed):
     return None
 
 
-def _engine_moved(repo, rid, what, engine):
+def _engine_moved(repo, rid, what, engine, ours):
     """Row 9's reason, or None."""
     theirs = _engine_sha(repo, rid, engine)
-    ours = _engine_sha(repo, os.environ["GITHUB_RUN_ID"], engine)
-    if theirs is None or ours is None or theirs != ours:
+    if theirs != ours:
         return f"{what} ran engine plan.yml at {theirs} and this run at {ours}"
     return None
 
 
-def _reason(repo, head, pr, cells, engine):
+def _reason(repo, head, pr, cells, engine, ours):
     """`(run id, None)` when every row holds, else `(run id or None, the first failing row's
     reason)`."""
     newest = ag.newest_autoplan(repo, head, run=run, retry=False)
@@ -168,7 +171,7 @@ def _reason(repo, head, pr, cells, engine):
     failed = _jobs_reason(repo, newest, what, cells)
     if isinstance(failed, str):
         return rid, failed
-    return rid, _uploaded(repo, rid, what, failed) or _engine_moved(repo, rid, what, engine)
+    return rid, _uploaded(repo, rid, what, failed) or _engine_moved(repo, rid, what, engine, ours)
 
 
 def decide():
@@ -181,8 +184,12 @@ def decide():
     if cells is None:
         raise SystemExit("::error::SHIPMATE_PLANNED_CELLS_NAMES is not a JSON list of cells")
     engine = _env("SHIPMATE_ENGINE_REPO")
+    ours = os.environ.get("SHIPMATE_ENGINE_SHA", "")
+    if not is_head_sha(ours):
+        _notice(f"no autoplan re-run: SHIPMATE_ENGINE_SHA is not a 40-char hex SHA (got: {ours!r})")
+        return
     try:
-        rid, reason = _reason(repo, head, pr, cells, engine)
+        rid, reason = _reason(repo, head, pr, cells, engine, ours)
     except READ_ERRORS as exc:
         _notice(f"no autoplan re-run: a read failed: {_cause(exc)}")
         return

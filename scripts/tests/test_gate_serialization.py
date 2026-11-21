@@ -91,6 +91,7 @@ QUEUE_IGNORE = 'unexpected key "queue" for "concurrency" section'
 EXPECTED_WORKFLOW_IGNORES = [
     r'specifying action "\$/actions/[a-z-]+" in invalid format because ref is missing',
     'property "workflow_repository" is not defined in object type',
+    'property "workflow_sha" is not defined in object type',
     'unexpected key "cache-mode" for "workflow" section',
     QUEUE_IGNORE,
 ]
