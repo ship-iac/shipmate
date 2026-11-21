@@ -151,7 +151,8 @@ jobs:
       # An output that did not arrive reads empty, never the refused text. A call cancelled or
       # skipped before `review` reported counts as a cancel; a call that failed before it
       # reported gets the ended text.
-      - uses: $/actions/outcome-reply
+      - id: reply
+        uses: $/actions/outcome-reply
         with:
           verb: apply
           environment: ${{ inputs.environment }}
@@ -159,5 +160,16 @@ jobs:
           review-result: ${{ needs.run.outputs.review_result }}
           summary-result: ${{ needs.run.outputs.summary_result }}
           run-cancelled: ${{ needs.run.outputs.run_cancelled == 'true' || ((needs.run.result == 'cancelled' || needs.run.result == 'skipped') && needs.run.outputs.review_result == '') }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      # Display only: nothing reads the check, so a failure here must not fail outcome.
+      - name: End the running apply check
+        if: ${{ always() && steps.reply.outputs.posted == 'true' }}
+        uses: $/actions/apply-run-check
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          mode: finish
+          head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

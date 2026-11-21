@@ -2311,6 +2311,36 @@ def test_harvest_pending_counts_a_queued_app_run_outside_the_apply_checks():
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
 
 
+def _run_check(app, status, name="shipmate / apply run"):
+    owner = '"app_slug": "shipmate", "app": {"id": 999}' if app else '"app_slug": "github-actions"'
+    return f'{{"id": 7, "name": "{name}", {owner}, "status": "{status}"}}'
+
+
+def test_harvest_pending_ignores_the_apps_running_apply_run_check():
+    """The App holds `shipmate / apply run` in progress for a whole apply run.
+
+    Mutation: no skip for it -- True."""
+    lines = ['{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED]
+    assert (
+        doctor.harvest_pending([*lines, _run_check(True, "in_progress")], app_id=_APP_ID) is False
+    )
+
+
+def test_harvest_pending_counts_a_queued_github_actions_run_named_as_the_run_check():
+    """Mutation: skip `shipmate / apply run` whoever authored it -- False."""
+    lines = ['{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED]
+    assert doctor.harvest_pending([*lines, _run_check(False, "queued")], app_id=_APP_ID) is True
+
+
+def test_harvest_pending_counts_a_queued_app_run_only_prefixed_like_the_run_check():
+    """Mutation: skip every App run starting with `shipmate / ` -- False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        _run_check(True, "queued", name="shipmate / apply runs"),
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
 def test_harvest_pending_counts_a_queued_run_ranked_below_a_completed_one():
     """A queued run has no `started_at`, so newest-per-name ranks it below a completed run
     of the same name.

@@ -98,6 +98,7 @@ _SITES = {
     ACTIONS / "outcome-reply" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-queue" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-waiters" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "apply-run-check" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "claim" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "plan-defer" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     WORKFLOWS / "apply-run.yml": (("jobs", "review", "steps"), _WORKFLOW_WITH),

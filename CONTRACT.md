@@ -63,6 +63,9 @@ the full fan-out into a single required status, named verbatim:
 
 - `shipmate / gate`
 
+An apply run also shows as the App's `shipmate / apply run` check while it
+runs (§Apply run check).
+
 Branch protection rules should require `shipmate / gate`, not the
 individual per-unit checks, so that the set of required checks does not
 need to be edited every time a stack or environment is added or removed.
@@ -231,7 +234,7 @@ Accepted limits:
   of the same cell to finish, already reads `in_progress`.
 - The cells' job rows and the `<env>-apply` deployments stay under the default
   branch's commit, where the dispatched run is; the pull request shows only the
-  App apply checks.
+  App apply checks and the run's `shipmate / apply run` check (§Apply run check).
 - A release flip or a completion write can race a merge that bypasses the gate:
   the run reads the pull request before it writes, so a merge landing after
   that read is not seen. The merge deploy reads such a check under the
@@ -249,6 +252,38 @@ Accepted limits:
 - A plan re-run can create a fresh duplicate apply check after the run's
   detect; it is left pending (its plan was not applied by this run), which
   keeps `shipmate / gate` from greening on a plan the apply never used.
+
+### Apply run check
+
+An apply run (targeted, bare or `auto`) shows on the pull request head as one
+more App check run, named verbatim:
+
+- `shipmate / apply run`
+
+`apply-run.yml`'s `review` creates it `in_progress`, titled `Apply running` and
+linked to the run, once `ref` reads as the pull request's head. `summary`
+completes it `neutral`, titled `Apply ended`, once its result comment posted;
+otherwise `apply.yml`'s `outcome` does after posting its reply (§Outcome
+reply). The name is outside `apply / `, so no apply-check reader selects it. It
+is not a commit status, never writes or holds `shipmate / gate`, and is not a
+required check. It is display only: nothing reads it to decide, and a failed
+write fails no job. The merge deploy writes none.
+
+| Case | Check |
+| --- | --- |
+| `guard` refuses, the claim reads taken, the run is cancelled while it waits in `shipmate-apply-<pr_number>`, or `review` refuses | none is created |
+| the App key is missing or the token mint fails | `review` fails first, so none is created |
+| `review` passes | created `in_progress`, linked to the run |
+| `summary` posts the result comment, after a run cancel included | `summary` completes it `neutral` |
+| `summary` posts no result comment (it failed, was cancelled at a full gate-writer queue, or its post failed) and `outcome` posts its reply | `outcome` completes it `neutral` |
+| neither the result comment nor the reply is posted | stays `in_progress`: no result exists |
+| a second cancel, a lost runner, or a failed completion | stays `in_progress` |
+
+A check left `in_progress` is completed `neutral` by the next apply run of the
+same head when that run starts and reads the linked run as ended. It keeps its
+link to the run that left it, titled `Apply ended`. On a head the pull request
+has moved past, no later apply run starts, and the check stays `in_progress`
+off the pull request's checks list.
 
 ## Env model
 
@@ -2389,6 +2424,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
 - **The outcome reply** — posted by `actions/outcome-reply` in the `outcome`
   job of `plan.yml` and `apply.yml`, both bound to `shipmate-engine`
   (§Outcome reply).
+- **The apply run check** — created by `actions/apply-run-check`, which mints
+  an App token with `checks: write` and `actions: read`, in
+  `apply-run.yml`'s `review` job and completed by it in `apply-run.yml`'s
+  `summary` or `apply.yml`'s `outcome` job, all bound to `shipmate-engine`
+  (§Apply run check).
 - **The queue reply** — posted by `actions/apply-queue` in `apply.yml`'s `queue`
   job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
   request").
@@ -2425,7 +2465,9 @@ cell names nor `plan / facts` / `plan / detect` fall inside the
 the one other reader, and it skips them for the same reason: outside that
 namespace it takes only the `github-actions` rows, because a mirrored copy
 shares a name with the autoplan check it was copied from and carries none of
-its annotations.
+its annotations. The harvest also skips the App's `shipmate / apply run`
+check (§Apply run check), so an apply in progress, or a check a dead run left
+`in_progress`, never reads as an unfinished run.
 
 One apply, merge deploy or `shipmate unlock` of a stack in an environment runs
 at a time, from the start of its apply through its state save, whether a
@@ -2746,8 +2788,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
 - **Actor.** The run's `github.actor` and `github.triggering_actor` must each
   equal `<slug>[bot]`, compared whole, where `<slug>` is the shipmate App's
   slug, read here from the `app.slug` of the App-authored check runs on the
-  head (the gate read takes it from its token mint, §Comment-ops, "The
-  aggregate gate"); a head with no App-authored check refuses. A
+  head other than `shipmate / apply run` (the gate read takes it from its token
+  mint, §Comment-ops, "The aggregate gate"); a head with no such check refuses. A
   `GITHUB_TOKEN` dispatch runs as `github-actions[bot]`, which the
   `guard` job admits and this check refuses. A human's "Re-run all jobs" of an
   `auto` run makes the human its triggering actor, so the re-run refuses;
@@ -3027,7 +3069,7 @@ check out the pull request's own head and hold no App credential. `claim`, `defe
 `summary`, `gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
 `deployment: false`, like every engine job binding it, and none
 checks anything out. Every App-authored
-surface listed above (apply checks, the gate, the plan, doctor and apply result
+surface listed above (apply checks, the apply run check, the gate, the plan, doctor and apply result
 comments, the outcome reply, drift issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
 satisfies its default-branch-only policy for a different reason.
@@ -4288,9 +4330,11 @@ names an error. A job that failed without an `::error::` renders no fence.
   re-entered stay held. Any other refusal, a lock refusal that left a lock it
   created behind, and a failed setup, tool or
   API call read `failed`, as does any other failed job. `cancelled` when no
-  job failed and a job ended `cancelled` while the run did not (§Comment-ops
-  names which); a cancelled run posts no result comment, and `outcome`
-  replies (§Outcome reply). `refused` and
+  job failed and a job ended `cancelled`, whether the run was cancelled or
+  only the job was (§Comment-ops names the causes). A run cancelled after
+  `review` succeeded posts its result comment with `cancelled`; `outcome`
+  replies only when the run was cancelled before `review` ended or the post
+  failed (§Outcome reply). `refused` and
   `cancelled` always lead the counts. `failed` leads them when no row is
   failed or blocked, so an apply run that dies before any cell reports (a
   missing/denied apply environment) still surfaces a failure signal. A
@@ -4619,11 +4663,11 @@ verdict line, a blank line, and the footer
 where `<url>` links the run that posts the reply and `<verb>` is `apply` or
 `plan`. The verdict line is one of:
 
-- refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
-- cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
-- summary cancelled: ``🔴 failed: [the <verb> run](<url>) posted no result: its summary was cancelled before it posted a result.``,
+- refused: ``🔴 refused: its review check stopped the apply run before any cell applied; the reason is in that run's log.``
+- cancelled: ``🔴 failed: the apply run was cancelled before it posted a result.``
+- summary cancelled: ``🔴 failed: the <verb> run posted no result: its summary was cancelled before it posted a result.``,
   followed for `apply` by `` Its cells' results are on their apply checks.``
-- ended before a result: ``🔴 failed: [the <verb> run](<url>) ended before it posted a result; the reason is in that run's log.``
+- ended before a result: ``🔴 failed: the <verb> run ended before it posted a result; the reason is in that run's log.``
 
 **Apply.** `outcome` sits in `apply.yml`, outside the pull request's apply
 queue (§Comment-ops, "One apply run per pull request"), and reads the inner run
@@ -4661,6 +4705,10 @@ result, so the cancelled text appears only when the run was cancelled before
 `review` ended or `summary`'s post failed. One known limit: a cell cancelled at a full queue of
 its cell's concurrency group, in a run whose `summary` post failed, gets the cancelled
 text.
+
+After posting its reply, an apply run's `outcome` completes the run's
+`shipmate / apply run` check `neutral` (§Apply run check). A reply that was
+not posted leaves the check `in_progress`.
 
 **Plan.** `outcome` runs under `!cancelled()`, so a cancelled `shipmate plan`
 run posts nothing: a push cancels a dispatched plan through the fence's

@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Create and complete the `shipmate / apply run` check: `apply-run-check start|finish <sha>`.
+
+`start` creates the check on `<sha>` `in_progress`, linked to this run's page, then completes
+every open check of that name linked to another run of this repository whose read says
+`completed`: a run cancelled before its `finish` leaves its check open. `finish` completes the
+open checks linked to this run's page; when its first listing finds none it lists once more
+after `RELIST_DELAY` seconds, because check-run reads lag writes. Both complete `neutral`.
+
+Reads `GH_TOKEN` (an App token with `checks: write`), `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
+`GITHUB_RUN_ID` and `SHIPMATE_APP_ID`; only checks the App created are listed. Any other mode,
+and under `start` a `<sha>` that is not a head SHA or an empty `SHIPMATE_APP_ID`, refuses
+before any call. Under `finish` a `<sha>` that is not a head SHA exits 0 silently: `finish`
+also runs after a refusal that never checked it, and no check can exist on it.
+
+A failed listing or create exits 1. A failed run read or completion of one check prints one
+`::warning::` naming the check and the error's first line, and the next check follows. Each
+write is sent once, never retried: a failed write may have landed, and a duplicate open check is
+what `start`'s sweep ends. The check is display only: nothing reads it to decide.
+"""
+
+import json
+import os
+import sys
+import time
+
+from _shipmate import (
+    READ_ERRORS,
+    RUN_CHECK,
+    _load,
+    check_runs,
+    current_run_url,
+    exit_text,
+    gh_json,
+    is_head_sha,
+    is_run_id,
+    run,
+    run_annotated,
+    validate_head_sha,
+    warn,
+)
+
+ag = _load("apply-gate")
+
+JQ = ".check_runs[] | {id, name, status, details_url, app: {id: .app.id}}"
+#: A check-run read lagged its write by about 1 s when probed.
+RELIST_DELAY = 10
+_sleep = time.sleep
+_USAGE = "::error::usage: apply-run-check start|finish <sha>"
+
+
+def _open(repo, sha):
+    """The App's checks named `RUN_CHECK` on `sha` that are not completed."""
+    lines = check_runs(repo, sha, JQ, name=RUN_CHECK).splitlines()
+    checks = ag.app_runs(lines, os.environ.get("SHIPMATE_APP_ID", ""))
+    return [c for c in checks if c["status"] != "completed"]
+
+
+def _warn(check, exc):
+    text = exit_text(exc) if isinstance(exc, SystemExit) else repr(exc)
+    warn(f"check run {check['id']} left open: {(text.splitlines() or [''])[0]}")
+
+
+def _complete(repo, check, body):
+    args = ["gh", "api", "-X", "PATCH", f"repos/{repo}/check-runs/{check['id']}", "--input", "-"]
+    try:
+        run(args, stdin=json.dumps(body))
+    except SystemExit as exc:
+        _warn(check, exc)
+
+
+def _ended(repo, check):
+    """Whether `check` links to another run of this repository whose read says `completed`."""
+    prefix = current_run_url("")
+    url = check.get("details_url") or ""
+    run_id = url.removeprefix(prefix)
+    if url == current_run_url() or not url.startswith(prefix) or not is_run_id(run_id):
+        return False
+    try:
+        return gh_json(f"repos/{repo}/actions/runs/{run_id}")["status"] == "completed"
+    except READ_ERRORS as exc:
+        _warn(check, exc)
+        return False
+
+
+def start(repo, sha):
+    validate_head_sha(sha, "head SHA")
+    # The listing refuses an empty App id only after the POST; refuse it before.
+    ag.from_app([], os.environ.get("SHIPMATE_APP_ID", ""))
+    url = current_run_url()
+    body = {
+        "name": RUN_CHECK,
+        "head_sha": sha,
+        "status": "in_progress",
+        "details_url": url,
+        "output": {
+            "title": "Apply running",
+            "summary": f"[The apply run]({url}) is running. "
+            "This check ends when the run posts its result on the pull request.",
+        },
+    }
+    args = ["gh", "api", "-X", "POST", f"repos/{repo}/check-runs", "--input", "-"]
+    try:
+        run(args, stdin=json.dumps(body))
+    except SystemExit as exc:
+        raise SystemExit(f"::error::{exit_text(exc)}") from None
+    sweep = {
+        "status": "completed",
+        "conclusion": "neutral",
+        "output": {
+            "title": "Apply ended",
+            "summary": "The linked apply run ended without ending this check. "
+            f"[A later apply run]({url}) ended it.",
+        },
+    }
+    for check in [c for c in _open(repo, sha) if _ended(repo, c)]:
+        _complete(repo, check, sweep)
+
+
+def _mine(repo, sha, url):
+    return [c for c in _open(repo, sha) if c.get("details_url") == url]
+
+
+def finish(repo, sha):
+    if not is_head_sha(sha):
+        return
+    url = current_run_url()
+    mine = _mine(repo, sha, url)
+    if not mine:
+        _sleep(RELIST_DELAY)
+        mine = _mine(repo, sha, url)
+    body = {
+        "status": "completed",
+        "conclusion": "neutral",
+        "details_url": url,
+        "output": {
+            "title": "Apply ended",
+            "summary": f"[The apply run]({url}) ended. Its result is on the pull request.",
+        },
+    }
+    for check in mine:
+        _complete(repo, check, body)
+
+
+def main(argv):
+    modes = {"start": start, "finish": finish}
+    if len(argv) != 2 or argv[0] not in modes:
+        raise SystemExit(_USAGE)
+    modes[argv[0]](os.environ["GITHUB_REPOSITORY"], argv[1])
+
+
+if __name__ == "__main__":
+    run_annotated(main, sys.argv[1:])

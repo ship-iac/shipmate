@@ -544,6 +544,24 @@ def test_forged_newer_completed_duplicate_cannot_green_a_pending_name():
     assert ag.verdict(runs) == "pending"
 
 
+def test_the_running_apply_run_check_never_holds_the_verdict():
+    """The App's `shipmate / apply run` stays in progress while the gate is refreshed.
+
+    Mutation: `latest_by_name(check_runs, prefix="")` in `verdict` -- `pending`."""
+    done = _run_obj("apply / dev-eu / stacks/app", id=1)
+    running = _run_obj("shipmate / apply run", status="in_progress", conclusion=None, id=2)
+    assert ag.verdict([done, running]) == "complete"
+    assert ag.latest_by_name([done, running]) == {
+        "apply / dev-eu / stacks/app": {
+            "name": "apply / dev-eu / stacks/app",
+            "status": "completed",
+            "conclusion": "success",
+            "id": 1,
+            "app": {"id": 999},
+        }
+    }
+
+
 def test_from_app_empty_app_id_fails_loud():
     # An unset SHIPMATE_APP_ID renders as '', and int('') must not raw-traceback with a
     # ValueError that takes down the whole detect, gate or apply run. It fails loud with a

@@ -283,6 +283,7 @@ as above, and step 5 runs in every consumer repository.
   `apply / <env> / <stack>` check (create pending, completed after the wave
   that applied its cell, or in the final `complete` job when that wave was
   cancelled), the
+  `shipmate / apply run` check that shows an apply run is running, the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome
   reply of a plan or apply run that ends without its result, the queue reply

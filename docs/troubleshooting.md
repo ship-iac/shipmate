@@ -2226,8 +2226,8 @@ receives no held or skipped environments. A run with no cell result rows, not ev
 
 - `🔴 refused`: `detect` refused by rule: a cell is behind the base, or a
   targeted apply's environment is held for review.
-- `🔴 cancelled`: a job ended `cancelled` while the run did not, and none
-  failed: `detect` ended `cancelled`, for example on a job timeout.
+- `🔴 cancelled`: a job ended `cancelled` and none failed: `detect` ended
+  `cancelled`, for example on a job timeout.
 - `🔴 failed`: the run failed for any other cause.
 - `⚪ nothing applied, environments are held for review`.
 - `⚪ nothing applied, pending cells are locked or the base also changed their
@@ -2265,13 +2265,13 @@ plan, then comment `shipmate apply` again.
 A run refused or cancelled in `review`, or cancelled while it waited in the
 pull request's apply queue, posts no apply comment and leaves the gate as it
 was. It posts a `🔴` reply on the pull request instead, which links
-the run: `its review check stopped [the apply run](<url>) before any cell
-applied` for a refusal, `[the apply run](<url>) was cancelled before it posted a
+the run: `its review check stopped the apply run before any cell
+applied` for a refusal, `the apply run was cancelled before it posted a
 result` for a cancel (`CONTRACT.md` §Outcome reply).
 
 An apply run whose `summary` job was cancelled before it posted, for example
 at a full gate-writer queue for the head, also posts no apply comment. It
-replies `[the apply run](<url>) posted no result: its summary was cancelled
+replies `the apply run posted no result: its summary was cancelled
 before it posted a result. Its cells' results are on their apply checks.` Its
 results and its waiting cells show only on that run's page. The head's gate
 keeps its last write until the head's next gate writer writes it.
@@ -2470,13 +2470,14 @@ comment `shipmate apply`.
 
 The `auto` run's `detect` refused before any wave, and nothing applied. An
 `auto` run must run as the shipmate App's bot login, `<slug>[bot]` compared
-whole, where `<slug>` comes from the App-authored check runs on the head. Only a
+whole, where `<slug>` comes from the App-authored check runs on the head other
+than `shipmate / apply run`. Only a
 plan run's `summary` job dispatches `verb: auto`, with an App token; a run whose
 actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
 included, was dispatched by something else. A "Re-run all jobs" of an `auto` run
 runs with the re-runner as its triggering actor and refuses; do not re-run an
 `auto` run. "Re-run failed jobs" keeps the passed `detect`, so each wave cell
-refuses instead with `an apply is never re-run (run attempt '<n>')`. With no App-authored check on the head there is no slug to compare.
+refuses instead with `an apply is never re-run (run attempt '<n>')`. With no such check on the head there is no slug to compare.
 Comment `shipmate apply` on the pull request, or push when the head carries no
 apply checks yet.
 

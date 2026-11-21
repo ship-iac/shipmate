@@ -365,6 +365,28 @@ def test_a_head_without_an_app_check_refuses(tmp_path, monkeypatch):
     )
 
 
+def _app_run(name):
+    return json.dumps({"id": 9, "name": name, "app": APP})
+
+
+def test_a_head_whose_only_app_check_is_the_apply_run_check_refuses():
+    """The apply run check is created by an apply run, not by an autoplan.
+
+    Mutation: read the slug from every App run -- the refusal does not fire."""
+    with pytest.raises(SystemExit) as e:
+        aad.refuse_actor([_app_run("shipmate / apply run")], APP_ID, BOT, BOT)
+    assert str(e.value) == (
+        "::error::auto apply refused: no check run on the head is authored by the shipmate "
+        f"App, so its bot login is unknown. {REMEDY}"
+    )
+
+
+def test_another_app_check_beside_the_apply_run_check_names_the_bot():
+    """Mutation: drop every App run starting with `shipmate / ` -- refused."""
+    lines = [_app_run("shipmate / apply run"), _app_run("shipmate / other")]
+    assert aad.refuse_actor(lines, APP_ID, BOT, BOT) is None
+
+
 def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypatch):
     """A `shipmate plan` run is a `workflow_dispatch`, never in the `pull_request_target`
     listing, which holds the head's earlier autoplan.

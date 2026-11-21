@@ -35,6 +35,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/apply-release@main
       - if: false
+        uses: ship-iac/shipmate/actions/apply-run-check@main
+      - if: false
         uses: ship-iac/shipmate/actions/apply-snapshot@main
       - if: false
         uses: ship-iac/shipmate/actions/apply-summary@main

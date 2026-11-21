@@ -27,6 +27,10 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+outputs:
+  posted:
+    description: "`true` when the reply was posted; empty otherwise."
+    value: ${{ steps.reply.outputs.posted }}
 runs:
   using: composite
   steps:
@@ -46,6 +50,7 @@ runs:
         permission-pull-requests: write
     # Reads inputs only, never a status function: see `run-cancelled`.
     - name: Reply that the run posted no result
+      id: reply
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -57,7 +62,7 @@ runs:
         RUN_CANCELLED: ${{ inputs.run-cancelled }}
         SUMMARY_RESULT: ${{ inputs.summary-result }}
       run: |
-        run="[the $SHIPMATE_REPLY_VERB run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+        run="the $SHIPMATE_REPLY_VERB run"
         if [ "$REVIEW_RESULT" = failure ]; then
           outcome=refused text="its review check stopped $run before any cell applied; the reason is in that run's log."
         elif [ "$RUN_CANCELLED" = true ]; then
@@ -68,5 +73,9 @@ runs:
         else
           outcome=failed text="$run ended before it posted a result; the reason is in that run's log."
         fi
-        SHIPMATE_REPLY_OUTCOME=$outcome SHIPMATE_REPLY_TEXT=$text \
-          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the no-result reply"
+        if SHIPMATE_REPLY_OUTCOME=$outcome SHIPMATE_REPLY_TEXT=$text \
+          python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"; then
+          echo "posted=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::could not post the no-result reply"
+        fi
