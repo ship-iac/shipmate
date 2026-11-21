@@ -26,7 +26,7 @@ WF = WORKFLOWS / "plan.yml"
 #: passes whatever the file says.
 EXPECTED_IF = (
     "${{ !cancelled() && needs.facts.outputs.head-repo != '' && "
-    "needs.facts.outputs.head-repo == github.repository }}"
+    "needs.facts.outputs.head-repo == github.repository && needs.defer.outputs.run == '' }}"
 )
 #: The whole job, as an ordered list of what each step runs. A checkout step, a `run:`
 #: step, or any extra step at all changes this list, where a substring scan would miss every one
@@ -75,7 +75,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "behind": "${{ steps.matrix.outputs.behind }}",
     "tools": "${{ steps.setup.outputs.tools }}",
 }
-EXPECTED_JOB_IDS = ["claim", "facts", "detect", "plan", "summary", "gate-hold", "outcome"]
+EXPECTED_JOB_IDS = ["claim", "facts", "defer", "detect", "plan", "summary", "gate-hold", "outcome"]
 
 
 def _summary_job():
@@ -99,7 +99,8 @@ def test_the_trusted_job_refuses_forks():
     job, and gate-state writes its gate pending with the reason.
 
     Mutation: restore `&& (needs.facts.outputs.is-draft == 'false' ||
-    needs.facts.outputs.on-demand == 'true')`.
+    needs.facts.outputs.on-demand == 'true')`. Mutation: drop `needs.defer.outputs.run == ''` (a
+    ready run publishes again over the head an earlier autoplan published).
     """
     job, _ = _summary_job()
     assert " ".join(job["if"].split()) == EXPECTED_IF

@@ -51,6 +51,7 @@ EXPECTED = {
     ("manifest-load.yml", "load"): LATEST,
     ("plan.yml", "claim"): SLIM,
     ("plan.yml", "facts"): SLIM,
+    ("plan.yml", "defer"): SLIM,
     ("plan.yml", "detect"): INPUT,
     ("plan.yml", "plan"): INPUT,
     ("plan.yml", "summary"): INPUT,

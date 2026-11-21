@@ -27,6 +27,9 @@ which needs no App token at all, down with it. The other is `base-push-plan`, th
 display-only re-plan of open pull requests: its mint is `continue-on-error: true`, its next step
 warns on an empty token, and an aborting check would fail the deploy's `summary` job over a
 step that must never fail it.
+
+`plan-defer` carries the call, `continue-on-error: true`: it decides only whether a ready run
+repeats a plan, so a missing key plans, and its read step warns on the empty token.
 """
 
 from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
@@ -96,10 +99,15 @@ _SITES = {
     ACTIONS / "apply-queue" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "apply-waiters" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "claim" / "action.yml": (("runs", "steps"), _ACTION_WITH),
+    ACTIONS / "plan-defer" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     WORKFLOWS / "apply-run.yml": (("jobs", "review", "steps"), _WORKFLOW_WITH),
     ACTIONS / "comment-ops" / "action.yml": None,
     ACTIONS / "base-push-plan" / "action.yml": None,
 }
+
+
+#: Sites whose call degrades instead of aborting; the module docstring says why.
+_DEGRADING = {ACTIONS / "plan-defer" / "action.yml"}
 
 
 def _minting_files():
@@ -129,13 +137,14 @@ def test_the_mint_sites_are_the_ones_this_guard_knows_about():
 
 def test_every_mint_site_verifies_the_key_arrived():
     """Mutations: delete the call from one site, or wire its `private-key` to the app id; move
-    `apply-snapshot`'s call after its `snap` step."""
+    `apply-snapshot`'s call after its `snap` step; drop `plan-defer`'s `continue-on-error`."""
     for path, site in _SITES.items():
         if site is None:
             continue
         keys, with_ = site
         step = _steps(path, keys)[0]
-        assert step == _call(with_), (
+        expected = _call(with_) | ({"continue-on-error": True} if path in _DEGRADING else {})
+        assert step == expected, (
             f"{path.name} must open with the App-key precondition call verbatim; got {step!r}"
         )
 

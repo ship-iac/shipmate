@@ -1,0 +1,73 @@
+name: shipmate plan-defer
+description: >-
+  On a ready-for-review autoplan, output the earlier autoplan run that planned and published the
+  same head (scripts/gate-status published), so this run plans nothing. Every failure, a missing
+  App key or a failed read included, warns and leaves `run` empty: the run plans.
+inputs:
+  head-sha:
+    description: PR head SHA this run would plan.
+    required: true
+  pr-number:
+    description: Pull request number whose plan comment names the earlier run.
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+outputs:
+  run:
+    description: The earlier run's id, or empty when this run plans.
+    value: ${{ steps.published.outputs.run }}
+runs:
+  using: composite
+  steps:
+    # Both degrade: this action decides only whether to repeat a plan, so every failure plans,
+    # and no gate depends on its output.
+    - name: Verify the App key arrived
+      continue-on-error: true
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+    - name: Mint App installation token
+      id: token
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: read
+        permission-statuses: read
+        permission-pull-requests: read
+
+    - name: Read the earlier plan run
+      id: published
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        if [ -z "$GH_TOKEN" ]; then
+          echo "::warning::no App token to read whether an earlier plan run published $HEAD_SHA; this run plans"
+          exit 0
+        fi
+        err=$(mktemp)
+        rc=0
+        run=$(python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" published "$HEAD_SHA" "$PR_NUMBER" 2>"$err") || rc=$?
+        cat "$err" >&2
+        if [ "$rc" != 0 ]; then
+          cause=$(tail -n 1 "$err")
+          echo "::warning::could not read whether an earlier plan run published $HEAD_SHA: ${cause//%/%25}; this run plans"
+          exit 0
+        fi
+        if [ -n "$run" ]; then
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "::notice::plan run $run planned and published $HEAD_SHA; this ready-for-review run plans nothing"
+        fi

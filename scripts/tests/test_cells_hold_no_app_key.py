@@ -20,6 +20,7 @@ from _loader import (
     WORKFLOWS,
     action_steps,
     action_yaml,
+    checkouts,
     strings,
     workflow_jobs,
     workflow_yaml,
@@ -41,9 +42,11 @@ APP_KEY_ENV = "SHIPMATE_APP_PRIVATE_KEY"
 LEVEL = WORKFLOWS / "apply-env-level.yml"
 
 PLAN_WF = WORKFLOWS / "plan.yml"
-#: Every job in plan.yml that runs repository content. `summary` and `gate-hold` are
-#: deliberately absent: they hold the key, and neither checks anything out.
+#: Every job in plan.yml that runs repository content. The key holders are absent: they hold
+#: the key, and none checks anything out.
 UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
+#: Every job in plan.yml that references the App key, hand-written.
+PLAN_KEY_HOLDERS = ("claim", "defer", "summary", "gate-hold", "outcome")
 
 
 @pytest.mark.parametrize("action", CELLS)
@@ -110,6 +113,16 @@ def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
     assert not hits, f"plan.yml job `{job_id}` references the App key: {hits}"
 
 
+def test_plan_workflow_key_holders_are_exactly_these_and_check_out_nothing():
+    """Under `pull_request_target` a checkout takes the pull request head, so a key holder that
+    checks out runs fork-authored or branch content beside the key. Mutations: add an
+    `actions/checkout` step to `defer`; pass the key to `detect`."""
+    jobs = workflow_jobs(PLAN_WF)
+    holders = tuple(n for n, j in jobs.items() if any(APP_KEY_ENV in s for s in strings(j)))
+    assert holders == PLAN_KEY_HOLDERS
+    assert {n: checkouts(jobs[n]["steps"]) for n in holders} == dict.fromkeys(holders, [])
+
+
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
 def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
     """`shipmate-engine` alone, not every credentialed environment: the `plan` job binds a shared
@@ -159,6 +172,7 @@ ENGINE_BOUND_JOBS = {
     ("deploy.yml", "replan"),
     ("drift.yml", "issues"),
     ("plan.yml", "claim"),
+    ("plan.yml", "defer"),
     ("plan.yml", "summary"),
     ("plan.yml", "gate-hold"),
     ("plan.yml", "outcome"),
