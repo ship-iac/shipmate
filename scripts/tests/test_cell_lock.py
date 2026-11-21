@@ -9,7 +9,13 @@ import json
 
 import _shipmate
 import pytest
-from _detect_fixtures import autoplans_read, dispatched_plan, listed_autoplan, plan_jobs
+from _detect_fixtures import (
+    autoplans_read,
+    deferred_jobs,
+    dispatched_plan,
+    listed_autoplan,
+    plan_jobs,
+)
 from _loader import github_outputs, jsonl, load_script
 
 cl = load_script("cell-lock")
@@ -2704,17 +2710,48 @@ def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
     ("autoplans", "newest"),
     [
         pytest.param(_autoplans(RUN, "4243"), "run 4243", id="newer"),
+        pytest.param(
+            _autoplans(RUN, "4243", status="completed", conclusion="success", run_attempt=1),
+            "run 4243",
+            id="newer-ended",
+        ),
         pytest.param(_autoplans(), "not listed", id="none"),
     ],
 )
 def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
     """Mutation: `min` for `max` in `newest_autoplan` (newer passes). Mutation: skip the
-    comparison when nothing is listed (`newest is not None and ...`: none passes)."""
+    comparison when nothing is listed (`newest is not None and ...`: none passes). Mutation:
+    `deferred` returns True (newer-ended's planned jobs read run 4243 past, and run `RUN`
+    passes)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
+    if '"completed"' in autoplans:
+        gh.on(jobs_listing(4243), plan_jobs(4243))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the newest autoplan of {HEAD} is {newest}, not plan run {RUN}, which "
         f"this auto apply applies; {RETRY}"
     )
+
+
+def test_verify_auto_passes_the_push_run_under_a_ready_run_that_deferred(monkeypatch, tmp_path):
+    """Ready run 4243 ended `success` and its jobs show it deferred, so push run `RUN` stays the
+    newest autoplan and its pusher's permission is read. Mutation: revert `newest_autoplan`'s
+    skip (run 4243 refuses as newer)."""
+    clicked = {"login": "octocat"}
+    ready = listed_autoplan(
+        4243,
+        HEAD,
+        status="completed",
+        conclusion="success",
+        run_attempt=1,
+        actor=clicked,
+        triggering_actor=clicked,
+    )
+    autoplans = _autoplans(RUN) + "\n" + json.dumps(ready)
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
+    gh.on(jobs_listing(4243), deferred_jobs()).on(RECORD_READ, _records(RUN))
+    gh.on(PLANS_READ, _plans()).on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
+    assert gh.drained()
 
 
 @pytest.mark.parametrize(

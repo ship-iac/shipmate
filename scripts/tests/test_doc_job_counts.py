@@ -9,8 +9,8 @@ Each count is derived from the reusable engine workflows in `.github/workflows/`
 ids as a multiset; which workflow a job sits under is not checked. Threat model: a job added,
 moved or relabelled without the prose following it.
 
-Mutations, each red: `thirty-one` to `thirty` at each of `CONTRACT.md`'s two sites, `docs/aws.md`'s
-two sites and `docs/getting-started.md`'s; `thirty-three` to `thirty-two` in
+Mutations, each red: `thirty-two` to `thirty-one` at each of `CONTRACT.md`'s two sites,
+`docs/aws.md`'s two sites and `docs/getting-started.md`'s; `thirty-four` to `thirty-three` in
 `docs/troubleshooting.md`; drop `and `result`` from the `unlock.yml` entry of the `CONTRACT.md`
 and `docs/aws.md` lists; drop `and `replan`` from `docs/troubleshooting.md`'s list; with
 `ci.yml`'s job moved to `ubuntu-slim`, drop the `workflow_call` filter.
@@ -53,8 +53,8 @@ ENGINE_BOUND = _jobs(_binds_engine)
 
 def test_the_derived_counts_are_the_documented_ones():
     """The counts the prose states, hand-written. Mutation: count every workflow with
-    `ci.yml`'s job on `ubuntu-slim` -- 32, red."""
-    assert (len(SLIM), len(ENGINE_BOUND)) == (31, 33)
+    `ci.yml`'s job on `ubuntu-slim` -- 33, red."""
+    assert (len(SLIM), len(ENGINE_BOUND)) == (32, 34)
 
 
 def _doc(name):

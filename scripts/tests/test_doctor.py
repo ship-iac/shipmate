@@ -1856,6 +1856,33 @@ def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
     ]
 
 
+def test_a_completed_check_outranks_a_later_skipped_one_of_the_same_name():
+    """A deferred run's skipped `plan / detect` starts after the earlier run's, which
+    holds the annotations, so the completed row must win whatever its `started_at`.
+
+    Mutation: drop the skipped ranking from `latest_check_ids` -- the skipped row wins."""
+    ga = ', "app_slug": "github-actions", "app": {"id": 15368}}'
+    lines = [
+        '{"id": 1, "name": "plan / detect", "status": "completed", "conclusion": "success", '
+        '"started_at": "2026-07-26T10:00:00Z"' + ga,
+        '{"id": 2, "name": "plan / detect", "status": "completed", "conclusion": "skipped", '
+        '"started_at": "2026-07-26T11:00:00Z"' + ga,
+    ]
+    assert doctor.latest_check_ids(lines) == [(1, "plan / detect")]
+
+
+def test_two_skipped_checks_of_the_same_name_keep_the_newest():
+    """Mutation: rank skipped rows by `id` in `latest_check_ids` -- the older row wins."""
+    ga = ', "app_slug": "github-actions", "app": {"id": 15368}}'
+    lines = [
+        '{"id": 2, "name": "plan / summary", "status": "completed", "conclusion": "skipped", '
+        '"started_at": "2026-07-26T10:00:00Z"' + ga,
+        '{"id": 1, "name": "plan / summary", "status": "completed", "conclusion": "skipped", '
+        '"started_at": "2026-07-26T11:00:00Z"' + ga,
+    ]
+    assert doctor.latest_check_ids(lines) == [(1, "plan / summary")]
+
+
 def test_the_app_is_matched_on_its_nested_app_id_alone():
     """An App row carries no `app_slug` here, so only `app.id` can keep the `apply / ` run.
 

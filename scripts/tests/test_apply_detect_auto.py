@@ -12,6 +12,7 @@ from _detect_fixtures import (
     _apply_check,
     autoplans_read,
     behind_check,
+    deferred_jobs,
     dispatched_plan,
     forbid_shared_runner,
     held,
@@ -872,7 +873,13 @@ def test_the_shipmate_plan_listing_is_one_read_from_the_plan_runs_creation(tmp_p
 @pytest.mark.parametrize(
     "entries",
     [
-        pytest.param((int(RUN), 123999), id="zero-cell"),
+        pytest.param(
+            (
+                int(RUN),
+                {"id": 123999, "status": "completed", "conclusion": "success", "run_attempt": 1},
+            ),
+            id="zero-cell",
+        ),
         pytest.param(
             (int(RUN), {"id": 123999, "status": "in_progress", "conclusion": None}),
             id="in-progress",
@@ -880,15 +887,72 @@ def test_the_shipmate_plan_listing_is_one_read_from_the_plan_runs_creation(tmp_p
     ],
 )
 def test_a_newer_autoplan_still_refuses_before_any_plan_listing(tmp_path, monkeypatch, entries):
-    """A newer autoplan of the head, one that recorded no cell or one still running, refuses as
-    before, and the `shipmate plan` listing is not read. Mutation: drop `provenance_reason`'s
-    `newer` clause (both apply)."""
+    """A newer autoplan of the head, one that ended planning no cell or one still running,
+    refuses as before, and the `shipmate plan` listing is not read. Mutation: drop
+    `provenance_reason`'s `newer` clause (both apply). Mutation: `deferred` returns True
+    (zero-cell's planned jobs read it past, and run `RUN` applies)."""
     calls = []
-    assert _refusal(tmp_path, monkeypatch, listing=entries, calls=calls) == (
+    jobs = {123999: plan_jobs(123999)}
+    assert _refusal(tmp_path, monkeypatch, listing=entries, calls=calls, jobs=jobs) == (
         f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
         f"(run 123999 is). {REMEDY}"
     )
     assert not [c for c in calls if "event=workflow_dispatch" in c]
+
+
+#: Push run E (`RUN`) and a later ready-for-review run R by its clicker, both ended `success`.
+_PUSHED = {"status": "completed", "conclusion": "success", "run_attempt": 1}
+_CLICKED = {"login": "octocat"}
+_READY = {"id": 123999, **_PUSHED, "actor": _CLICKED, "triggering_actor": _CLICKED}
+
+
+def test_a_ready_run_that_deferred_leaves_the_push_run_applying_as_its_pusher(
+    tmp_path, monkeypatch
+):
+    """R's jobs show it deferred to E, so `refuse_provenance` returns E's whole listed object,
+    `authorize.pusher_reason` reads E's pusher's permission (k3np), and the cell applies.
+    Mutation: revert `newest_autoplan`'s skip (R is newest and refuses `newer`). Mutation: pass
+    `refuse_pusher` the listing's greatest-id run (octocat's permission is read)."""
+    returned, calls = [], []
+    real = aad.refuse_provenance
+    monkeypatch.setattr(
+        aad, "refuse_provenance", lambda *a: returned.append(real(*a)) or returned[-1]
+    )
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        listing=(_PUSHED, _READY),
+        jobs={123999: deferred_jobs()},
+        calls=calls,
+    )
+    assert _applied(parsed) == [("stacks/app", "dev-eu")]
+    assert returned == [
+        {
+            "id": int(RUN),
+            "event": "pull_request_target",
+            "head_sha": HEAD,
+            "created_at": "2026-11-15T22:47:48Z",
+            "actor": {"login": "k3np"},
+            "triggering_actor": {"login": "k3np"},
+            "status": "completed",
+            "conclusion": "success",
+            "run_attempt": 1,
+        }
+    ]
+    assert [c for c in calls if "/collaborators/" in c] == [
+        "repos/o/r/collaborators/k3np/permission"
+    ]
+
+
+def test_a_cancelled_ready_run_is_the_newest_autoplan_and_refuses(tmp_path, monkeypatch):
+    """A cancelled R did not defer, whatever its jobs. Mutation: read past any completed run
+    without its jobs (E applies)."""
+    ready = {**_READY, "conclusion": "cancelled"}
+    jobs = {123999: deferred_jobs()}
+    assert _refusal(tmp_path, monkeypatch, listing=(_PUSHED, ready), jobs=jobs) == (
+        f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
+        f"(run 123999 is). {REMEDY}"
+    )
 
 
 @pytest.mark.parametrize(

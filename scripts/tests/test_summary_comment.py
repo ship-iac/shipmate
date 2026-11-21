@@ -6,6 +6,7 @@ import pathlib
 
 import _shipmate
 import pytest
+from _detect_fixtures import deferred_jobs, plan_jobs
 from _loader import (
     ACTIONS,
     action_steps,
@@ -3383,6 +3384,36 @@ def test_main_names_the_superseded_autoplan_checks_of_a_commanded_plan(tmp_path,
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
         HEAD + f"⚪ nothing planned {MAIN_AT}\n\n" + _superseded(1, 42)
     )
+
+
+def test_a_commanded_plan_names_every_listed_autoplan_s_red_checks_past_a_deferred_run(
+    tmp_path, monkeypatch
+):
+    """Autoplan 41 (failed, its own red cell), push run 42 (published, red) and ready run 43
+    (deferred) are listed; both red runs get a line and only the listing is read. Mutation: pass
+    `{ag.newest_autoplan(...)["id"]}` (42) for every listed id (41's line is gone)."""
+    monkeypatch.setenv("SHIPMATE_ON_DEMAND", "true")
+    ended = {"event": "pull_request_target", "head_sha": SHA, "status": "completed"}
+    login = {"login": "a"}
+    rows = [
+        ended | {"id": i, "conclusion": c, "run_attempt": 1, "actor": login}
+        for i, c in ((41, "failure"), (42, "success"), (43, "success"))
+    ]
+    listing = "".join(json.dumps(r | {"triggering_actor": login}) + "\n" for r in rows)
+    jobs = {42: plan_jobs(42), 43: deferred_jobs()}
+    calls = []
+
+    def fake(args):
+        calls.append(args)
+        return listing if args == _AUTOPLAN_ARGV else jobs[int(args[2].split("/")[5])]
+
+    monkeypatch.setattr(sc, "_run", fake)
+    stdin = _FAILED_42 + json.dumps(_job(41, "plan / dev-eu / stacks/db", "failure", 2)) + "\n"
+    _run_main(tmp_path, monkeypatch, [], stdin=stdin)
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        HEAD + f"⚪ nothing planned {MAIN_AT}\n\n" + _superseded(1, 41) + "\n" + _superseded(1, 42)
+    )
+    assert calls == [_AUTOPLAN_ARGV]
 
 
 def test_a_transient_listing_failure_is_retried(tmp_path, monkeypatch):

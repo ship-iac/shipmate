@@ -2490,6 +2490,10 @@ def _parse_check_run(line, app_id):
     return run
 
 
+def _check_rank(run):
+    return (run.get("conclusion") != "skipped", run.get("started_at") or "")
+
+
 def latest_check_ids(lines, app_id=""):
     """[(id, name)] -- newest run per check name among shipmate-relevant
     authors, App-authored rows outside the `apply / ` namespace excluded.
@@ -2497,7 +2501,9 @@ def latest_check_ids(lines, app_id=""):
     apply-gate.latest_by_name): a job's queued run has no `started_at` and no
     annotations to harvest, so ranking it BELOW a completed run is wanted. An
     App apply check carries no annotations, queued or completed, so its rank
-    changes nothing.
+    changes nothing. A `skipped` run ranks below any other run of its name, whatever
+    skipped it (a deferred or draft plan run, a fork refusal): a skipped check carries
+    no annotations, so the newest completed check of the name is the one with findings.
 
     Carries the consumer file's skipped router jobs too — they are
     `github-actions`-authored, so four rows per report (comment, deploy, apply,
@@ -2514,7 +2520,7 @@ def latest_check_ids(lines, app_id=""):
         if run.get("app_slug") != "github-actions" and not name.startswith(ag.APPLY_PREFIX):
             continue
         prev = newest.get(name)
-        if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
+        if prev is None or _check_rank(run) >= _check_rank(prev):
             newest[name] = run
     out = []
     for name in sorted(newest):

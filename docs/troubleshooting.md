@@ -2492,7 +2492,9 @@ carry the commenter, so there is no pusher to authorize. Comment
 Otherwise a newer autoplan of the same head exists. One started by a push
 dispatches its own `auto` apply once it completes with apply checks; one started
 by marking the pull request ready or reopening it never dispatches one, so
-comment `shipmate apply`. When it published no apply check, push.
+comment `shipmate apply`. When it published no apply check, push. A
+ready-for-review run that completed after deferring to an earlier plan ("A
+ready-for-review run planned nothing") is never the newest.
 
 The same check refuses, each ending ``Comment `shipmate apply` on the pull
 request to apply it.``:
@@ -3065,6 +3067,23 @@ diff it prints. The run still starts once the apply queue frees.
 Open the Actions tab and filter the runs whose title starts `shipmate · apply`
 or `shipmate · auto` (`CONTRACT.md` §Check names) to see the others.
 
+### A ready-for-review run planned nothing
+
+The plan run started by marking the pull request ready for review shows
+`plan / facts` and `plan / defer` green and every other plan job skipped. The `plan / defer`
+notice reads "plan run <id> planned and published <sha>; this ready-for-review
+run plans nothing": the push run of that head was planning when the pull
+request was marked ready, and its plan comment, apply checks and
+`shipmate / gate` stand. That push run usually started no auto apply, so
+comment `shipmate apply` for an environment that applies automatically; its
+`summary` log says whether it dispatched one. To plan the
+head again, comment `shipmate plan`. A re-run of the ready-for-review run defers
+again, and the earlier plan stays; a push plans the new head.
+
+A `shipmate plan` comment made while that push run planned can be replaced in
+the `plan-<pr>` queue by the ready-for-review run. The comment then shows only
+👀 and no reply, and the push run's plan, published after the comment, stands.
+
 ### A cancelled autoplan left red checks on the pull request
 
 A newer plan run of the same pull request (a push, open or reopen, or a re-run
@@ -3151,8 +3170,8 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-three jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`claim`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `claim`, `queue` and `outcome`,
+All thirty-four jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`claim`, `defer`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `claim`, `queue` and `outcome`,
 `apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
 `wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,

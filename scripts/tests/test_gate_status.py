@@ -858,7 +858,7 @@ def test_a_head_read_without_a_sha_and_draft_flag_exits_1(
     assert (_cli(cmd, SHA, "7"), capsys.readouterr(), calls) == (message, ("", ""), [_PULL_READ])
 
 
-@pytest.mark.parametrize("cmd", ["moved", "replan"])
+@pytest.mark.parametrize("cmd", ["moved", "replan", "published"])
 def test_a_pr_that_is_not_a_number_is_refused_annotated_before_any_call(
     in_process, monkeypatch, capsys, cmd
 ):
@@ -871,7 +871,7 @@ def test_a_pr_that_is_not_a_number_is_refused_annotated_before_any_call(
     )
 
 
-@pytest.mark.parametrize("cmd", ["moved", "replan"])
+@pytest.mark.parametrize("cmd", ["moved", "replan", "published"])
 def test_a_malformed_sha_is_refused_unannotated_before_any_call(
     in_process, monkeypatch, capsys, cmd
 ):
@@ -976,6 +976,28 @@ def test_replan_a_succeeded_autoplan_that_planned_blocks(in_process, monkeypatch
     word of the text."""
     runs = _row(11, "completed", "success") + _row(9, "completed", "success")
     calls = _live_head(monkeypatch, runs=runs, jobs={9: _ZERO_CELL, 11: _ZERO_CELL})
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls, in_process) == (
+        (
+            "",
+            (
+                f"pull request #7 moved to {_LIVE}, whose autoplan run 9 succeeded; "
+                "nothing dispatched\n"
+            ),
+        ),
+        [_PULL_READ, _RUNS_READ, *_DISPATCH_READS, _jobs_read(9)],
+        [],
+    )
+
+
+def test_replan_an_earlier_autoplan_that_planned_blocks_under_a_deferred_ready_run(
+    in_process, monkeypatch, capsys
+):
+    """Push run 9 planned (zero-cell capture); ready run 11 deferred to it (`plan / detect`
+    skipped). The log names run 9. Mutation: `_succeeded` reads only the greatest-id run (11
+    did not plan, so the replan waits and prints the head)."""
+    runs = _row(9, "completed", "success") + _row(11, "completed", "success")
+    calls = _live_head(monkeypatch, runs=runs, jobs={9: _ZERO_CELL, 11: _captured_jobs("deferred")})
     assert _cli("replan", SHA, "7") == 0
     assert (capsys.readouterr(), calls, in_process) == (
         (
@@ -1940,3 +1962,276 @@ def test_a_rate_limited_refuse_newer_read_is_not_waited_out_as_the_write(in_proc
     with pytest.raises(SystemExit) as exc:
         gs.main(["post", SHA, "pending", "the reason"])
     assert (exc.value.code, calls, in_process) == (limited, [_POST, _USER, _READ], [2])
+
+
+_E = "41"
+#: Before both captures' `plan / summary` completed (00:45:31 draft-skipped, 00:46:58 zero-cell).
+_BEFORE = "2026-11-16T00:45:00Z"
+_PUB_RUNS_READ = autoplans_read("acme/demo", SHA)
+_OWN_READ = ["gh", "api", "repos/acme/demo/actions/runs/999"]
+_COMMENTS_JQ = '.[] | {login: .user.login, lines: ((.body // "") | split("\\n")[0:4])}'
+
+
+def _comments_read(pr="7"):
+    return [
+        "gh",
+        "api",
+        "--paginate",
+        "--jq",
+        _COMMENTS_JQ,
+        f"repos/acme/demo/issues/{pr}/comments?per_page=100",
+    ]
+
+
+def _plan_comment(run_id, login="shipmate-test[bot]"):
+    """One projected comment line: a plan comment's first four lines, hand-written in the shape a
+    zero-cell plan comment carries, naming run `run_id`."""
+    verdict = (
+        f"⚪ nothing planned at [{SHA[:7]}](https://example.invalid/acme/demo/commit/{SHA}) "
+        f"in [run #1789](https://example.invalid/acme/demo/actions/runs/{run_id})"
+    )
+    lines = ["<!-- shipmate:summary -->", "### shipmate plan", "", verdict]
+    return json.dumps({"login": login, "lines": lines}) + "\n"
+
+
+def _published_row(run_id, conclusion="success", attempt=1):
+    keys = {"status": "completed", "conclusion": conclusion, "run_attempt": attempt}
+    return json.dumps(listed_autoplan(int(run_id), SHA, **keys)) + "\n"
+
+
+def _own(created):
+    return json.dumps({"id": 999, "created_at": created})
+
+
+def _with_summary(drop=(), **summary):
+    """The zero-cell capture with its `plan / summary` job's fields replaced by `summary` and the
+    keys in `drop` removed."""
+    body = json.loads(_captured_jobs(_ZERO_CELL))
+    for job in body["jobs"]:
+        if job["name"] == "plan / summary":
+            job.update(summary)
+            for key in drop:
+                del job[key]
+    return json.dumps(body)
+
+
+def _publish_gh(
+    monkeypatch,
+    gate=("pending", _E),
+    statuses=None,
+    runs=None,
+    jobs=_ZERO_CELL,
+    own=None,
+    comments=None,
+):
+    """`gs._run` and `gs.run` answering a head on which every rule holds by default: a `pending`
+    gate by run `_E`, `_E` listed completed success with zero-cell jobs (any run's jobs read
+    answers `jobs`), `_E`'s plan comment on pull request 7, and this run created at `_BEFORE`.
+    `statuses` and `own` override the statuses and own-run answers, `comments` maps a pull
+    request to its answer; a `SystemExit` answer is raised. Returns the calls."""
+    calls = []
+    gates = "" if gate is None else _lines(_status(_GATE, gate[0], _run_url(gate[1])))
+    answers = {
+        json.dumps(_USER): GATE_USER,
+        json.dumps(_READ): gates if statuses is None else statuses,
+        json.dumps(_PUB_RUNS_READ): _published_row(_E) if runs is None else runs,
+        json.dumps(_OWN_READ): _own(_BEFORE) if own is None else own,
+        **{
+            json.dumps(_comments_read(pr)): body
+            for pr, body in ({"7": _plan_comment(_E)} if comments is None else comments).items()
+        },
+    }
+
+    def fake(args):
+        calls.append(args)
+        if "/jobs?" in args[-1]:
+            return _jobs_answer(jobs)
+        answer = answers.get(json.dumps(args))
+        if answer is None:
+            raise AssertionError(f"unexpected gh call: {args}")
+        return _raised(answer)
+
+    monkeypatch.setattr(gs, "_run", fake)
+    monkeypatch.setattr(gs, "run", fake)
+    return calls
+
+
+_GATE_READS = [_USER, _READ]
+_ALL_READS = [*_GATE_READS, _PUB_RUNS_READ, _jobs_read(41), _comments_read(), _OWN_READ]
+
+
+@pytest.mark.parametrize("state", ["pending", "success"], ids=["a-pending", "b-success"])
+def test_published_prints_the_earlier_run_that_planned_and_published(
+    in_process, monkeypatch, capsys, state
+):
+    """(a) a `pending` gate by E, (b) a `success` one, each over a zero-cell plan (raw capture):
+    every rule holds, E prints. Mutations: return before printing -- both red; require
+    `pending` -- (b) red."""
+    calls = _publish_gh(monkeypatch, gate=(state, _E))
+    assert (_cli("published", SHA, "7"), capsys.readouterr(), calls) == (
+        0,
+        ("41\n", ""),
+        _ALL_READS,
+    )
+
+
+@pytest.mark.parametrize(
+    ("fakes", "pr", "reads"),
+    [
+        pytest.param({"gate": ("failure", _E)}, "7", _GATE_READS, id="c-failure-gate"),
+        pytest.param(
+            {
+                "gate": ("pending", "999"),
+                "runs": _published_row("999"),
+                "comments": {"7": _plan_comment("999")},
+            },
+            "7",
+            _GATE_READS,
+            id="d-own-run",
+        ),
+        pytest.param(
+            {"gate": ("pending", "77"), "comments": {"7": _plan_comment("77")}},
+            "7",
+            [*_GATE_READS, _PUB_RUNS_READ],
+            id="e-not-listed",
+        ),
+        pytest.param(
+            {"runs": _published_row(_E, "failure")},
+            "7",
+            [*_GATE_READS, _PUB_RUNS_READ],
+            id="f-failed-run",
+        ),
+        pytest.param(
+            {"jobs": _DRAFT_SKIPPED},
+            "7",
+            [*_GATE_READS, _PUB_RUNS_READ, _jobs_read(41)],
+            id="g-draft-skipped",
+        ),
+        pytest.param(
+            {"jobs": _with_detect(attempt=2)},
+            "7",
+            [*_GATE_READS, _PUB_RUNS_READ, _jobs_read(41)],
+            id="i-other-attempt",
+        ),
+        pytest.param({"gate": None}, "7", _GATE_READS, id="j-no-gate"),
+        pytest.param(
+            {"comments": {"7": _plan_comment(_E), "8": ""}},
+            "8",
+            [*_ALL_READS[:4], _comments_read("8")],
+            id="l-other-pull-request",
+        ),
+        pytest.param(
+            {"comments": {"7": _plan_comment(_E), "8": ""}, "own": _own("2026-11-16T09:00:00Z")},
+            "8",
+            [*_ALL_READS[:4], _comments_read("8")],
+            id="m-closed-then-ready",
+        ),
+        pytest.param(
+            {"comments": {"7": _plan_comment(_E) + _plan_comment("50")}},
+            "7",
+            _ALL_READS[:5],
+            id="n-newer-comment",
+        ),
+        pytest.param(
+            {"comments": {"7": _plan_comment(_E, login="other-app[bot]")}},
+            "7",
+            _ALL_READS[:5],
+            id="o-other-bot",
+        ),
+        pytest.param(
+            {"own": _own("2026-11-16T00:48:00Z")}, "7", _ALL_READS, id="p-published-earlier"
+        ),
+        pytest.param({"own": _own("2026-11-16T00:46:58Z")}, "7", _ALL_READS, id="q-same-second"),
+    ],
+)
+def test_published_prints_nothing_when_a_rule_fails(
+    in_process, monkeypatch, capsys, fakes, pr, reads
+):
+    """Every other read answers as if its rule held, so each mutation prints the run.
+
+    Mutations: drop the state check -- (c) prints 41; drop the own-run check -- (d) prints 999;
+    pick any listed run, not `G`'s -- (e) prints 77; drop the conclusion check -- (f) prints
+    41; drop `_planned` -- (g) prints 41; drop the attempt check -- (i) prints 41; exit 1 on an
+    empty statuses answer -- (j) red; drop rule 5 -- (l) prints 41, (m) still prints nothing,
+    since rule 6 holds (red only by its extra own-run read), and dropping rule 6 too prints 41;
+    keep the first App plan comment, not the newest -- (n) prints 41; match any `[bot]` login --
+    (o) prints 41; drop rule 6 -- (p) and (q) print 41; compare with `>=` -- (q) prints 41."""
+    calls = _publish_gh(monkeypatch, **fakes)
+    assert (_cli("published", SHA, pr), capsys.readouterr(), calls) == (0, ("", ""), reads)
+
+
+_FAILED = SystemExit("command failed (1): gh api x\nHTTP 404")
+_FAILED_LINE = "command failed (1): gh api x | HTTP 404"
+
+
+@pytest.mark.parametrize(
+    ("fakes", "message", "reads"),
+    [
+        pytest.param(
+            {"jobs": _with_summary(conclusion="failure")},
+            "autoplan run 41 succeeded with summary jobs [('completed', 'failure')]",
+            _ALL_READS[:4],
+            id="h-summary-failed",
+        ),
+        pytest.param(
+            {"statuses": SystemExit(f"::error::{_FAILED.code}")},
+            _FAILED_LINE,
+            _GATE_READS,
+            id="statuses-failed",
+        ),
+        pytest.param(
+            {"statuses": _lines(json.dumps({"context": _GATE, "state": "pending"}))},
+            f"a statuses row of {SHA} has no 'creator'",
+            _GATE_READS,
+            id="no-creator",
+        ),
+        pytest.param(
+            {"runs": _FAILED}, _FAILED_LINE, [*_GATE_READS, _PUB_RUNS_READ], id="listing-failed"
+        ),
+        pytest.param(
+            {"jobs": '{"total_count": 0, "jobs": []}'},
+            "the jobs of autoplan run 41 could not be listed",
+            _ALL_READS[:4],
+            id="jobs-incomplete",
+        ),
+        pytest.param(
+            {"jobs": _with_summary(drop=("completed_at",))},
+            "autoplan run 41's summary completed at None",
+            _ALL_READS[:4],
+            id="no-completed-at",
+        ),
+        pytest.param(
+            {"comments": {"7": _FAILED}}, _FAILED_LINE, _ALL_READS[:5], id="comments-failed"
+        ),
+        pytest.param({"own": _FAILED}, _FAILED_LINE, _ALL_READS, id="own-run-failed"),
+        pytest.param(
+            {"own": json.dumps({"id": 999})},
+            "run 999 was created at None",
+            _ALL_READS,
+            id="no-created-at",
+        ),
+    ],
+)
+def test_published_an_unreadable_answer_exits_1_on_one_unannotated_line(
+    in_process, monkeypatch, capsys, fakes, message, reads
+):
+    """The caller warns and the ready run plans. Mutations: drop the summary check -- (h) prints
+    41; let `newest_gate`'s `KeyError` escape -- no-creator is a traceback; return from
+    `_published_gate`'s `SystemExit` handler -- statuses-failed exits 0 printing nothing;
+    re-raise a read's `SystemExit` raw -- two lines or `::error::`."""
+    calls = _publish_gh(monkeypatch, **fakes)
+    assert (_cli("published", SHA, "7"), capsys.readouterr(), calls) == (message, ("", ""), reads)
+
+
+def test_published_without_the_slug_exits_1_unannotated_before_any_call(
+    in_process, monkeypatch, capsys
+):
+    """Mutation: re-raise `_require_slug`'s exit raw from `_published_gate` -- an `::error::`
+    line."""
+    monkeypatch.setenv("SHIPMATE_APP_SLUG", "")
+    calls = _publish_gh(monkeypatch)
+    assert (_cli("published", SHA, "7"), capsys.readouterr(), calls) == (
+        _SLUG_ERROR.removeprefix("::error::").removesuffix("\n"),
+        ("", ""),
+        [],
+    )

@@ -1,5 +1,6 @@
 import io
 import json
+import pathlib
 
 import pytest
 from _detect_fixtures import AUTOPLAN_CREATED, autoplans_read, listed_autoplan
@@ -1053,6 +1054,162 @@ def test_newest_autoplan_selects_by_id_not_by_creation():
         json.dumps(listed_autoplan(12, _HEAD, created_at="2026-11-15T22:47:48Z")),
     )
     assert newest["id"] == 12
+
+
+_JOBS_DIR = pathlib.Path(__file__).parent / "fixtures"
+
+
+def _jobs_body(kind, **over):
+    """`fixtures/jobs-<kind>.json`, each job with `over` set on it. `deferred` is hand-built
+    from the `draft-skipped` capture: `plan / defer` `success`, `plan / summary` `skipped`; no
+    run had a `defer` job then. Replace it with a raw capture once the live check records one."""
+    body = json.loads((_JOBS_DIR / f"jobs-{kind}.json").read_text(encoding="utf-8"))
+    body["jobs"] = [job | over for job in body["jobs"]]
+    return json.dumps(body)
+
+
+def _jobs_argv(run_id):
+    return ["gh", "api", f"repos/o/r/actions/runs/{run_id}/jobs?filter=latest&per_page=100&page=1"]
+
+
+def _walk(rows, jobs=None):
+    """`newest_autoplan` over listing `rows`, each jobs read of run id `k` answered by
+    `jobs[k]`, and every argv it ran."""
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in rows)
+        return (jobs or {})[int(args[2].split("/")[5])]
+
+    return ag.newest_autoplan("o/r", _HEAD, run=run), argv
+
+
+def _ended(run_id, conclusion="success", status="completed"):
+    return listed_autoplan(run_id, _HEAD, status=status, conclusion=conclusion, run_attempt=1)
+
+
+_EARLIER, _READY = _ended(5), _ended(9)
+
+
+def test_newest_autoplan_reads_past_a_deferred_ready_run():
+    """Mutation: drop the skip (return the newest run, R)."""
+    newest, argv = _walk([_EARLIER, _READY], {9: _jobs_body("deferred")})
+    assert newest == {
+        "id": 5,
+        "event": "pull_request_target",
+        "head_sha": _HEAD,
+        "created_at": AUTOPLAN_CREATED,
+        "actor": {"login": "k3np"},
+        "triggering_actor": {"login": "k3np"},
+        "status": "completed",
+        "conclusion": "success",
+        "run_attempt": 1,
+    }
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9)]
+
+
+def test_newest_autoplan_returns_a_cancelled_ready_run_without_reading_its_jobs():
+    """Mutation: read jobs for any completed run (R's deferred jobs skip it, E returns)."""
+    ready = _ended(9, conclusion="cancelled")
+    newest, argv = _walk([_EARLIER, ready], {9: _jobs_body("deferred")})
+    assert (newest, argv) == (ready, [autoplans_read("o/r", _HEAD)])
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress"])
+def test_newest_autoplan_returns_a_live_ready_run_without_reading_its_jobs(status):
+    """Mutation: skip any run whose jobs show `plan / defer` success, whatever its listed state
+    (R's deferred jobs skip it, E returns)."""
+    ready = _ended(9, conclusion=None, status=status)
+    newest, argv = _walk([_EARLIER, ready], {9: _jobs_body("deferred")})
+    assert (newest, argv) == (ready, [autoplans_read("o/r", _HEAD)])
+
+
+def test_newest_autoplan_returns_a_ready_run_that_did_not_defer():
+    """A draft-skipped run lists `plan / detect` skipped but no `plan / defer`. Mutation:
+    `deferred` reads only `detect` skipped (R is skipped, E returns)."""
+    newest, argv = _walk([_EARLIER, _READY], {9: _jobs_body("draft-skipped")})
+    assert (newest, argv) == (_READY, [autoplans_read("o/r", _HEAD), _jobs_argv(9)])
+
+
+def test_newest_autoplan_returns_a_ready_run_whose_jobs_carry_another_attempt():
+    """A re-run made the deferred run live again. Mutation: drop the attempt comparison."""
+    newest, argv = _walk([_EARLIER, _READY], {9: _jobs_body("deferred", run_attempt=2)})
+    assert (newest, argv) == (_READY, [autoplans_read("o/r", _HEAD), _jobs_argv(9)])
+
+
+def test_newest_autoplan_reads_jobs_at_another_attempt_again():
+    """Jobs at another attempt than the listing (a lagging read) are not cached: the next walk
+    reads them again and, now at the listed attempt, reads past the deferred run. Mutation:
+    cache the verdict whatever the jobs' attempt (the second walk returns run 9 unread)."""
+    argv, answers = [], [_jobs_body("deferred", run_attempt=2), _jobs_body("deferred")]
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in [_EARLIER, _READY])
+        return answers.pop(0)
+
+    newest = [ag.newest_autoplan("o/r", _HEAD, run=run) for _ in range(2)]
+    assert newest == [_READY, _EARLIER]
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9)] * 2
+
+
+def test_newest_autoplan_raises_value_error_on_an_incomplete_jobs_listing():
+    """The listing counts one job more than it returns. Mutation: read an incomplete listing as
+    not deferred (R returns)."""
+    body = json.loads(_jobs_body("deferred"))
+    body["total_count"] += 1
+    with pytest.raises(ValueError, match=r"^the jobs of autoplan run 9 could not be listed$"):
+        _walk([_EARLIER, _READY], {9: json.dumps(body)})
+
+
+def test_newest_autoplan_returns_a_newest_run_that_did_not_defer_after_one_jobs_read():
+    """Mutation: return a completed successful run before reading its jobs (the argv lacks the
+    read)."""
+    newest, argv = _walk([_ended(3), _EARLIER], {5: _jobs_body("zero-cell")})
+    assert (newest, argv) == (_EARLIER, [autoplans_read("o/r", _HEAD), _jobs_argv(5)])
+
+
+def test_newest_autoplan_reads_past_two_deferred_runs():
+    """Mutation: skip at most one run (run 7 returns)."""
+    deferred = _jobs_body("deferred")
+    newest, argv = _walk([_EARLIER, _READY, _ended(7)], {9: deferred, 7: deferred})
+    assert newest == _EARLIER
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9), _jobs_argv(7)]
+
+
+def test_newest_autoplan_reads_an_ended_runs_jobs_once_per_process():
+    """Two walks of one listing read the listing twice and run 9's jobs once: a wave cell
+    re-reads the newest autoplan. Mutation: read the jobs on every call (the cache unread)."""
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in [_EARLIER, _READY])
+        return _jobs_body("deferred")
+
+    newest = [ag.newest_autoplan("o/r", _HEAD, run=run) for _ in range(2)]
+    assert newest == [_EARLIER, _EARLIER]
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9), autoplans_read("o/r", _HEAD)]
+
+
+def test_newest_autoplan_returns_a_lone_completed_run_without_reading_its_jobs():
+    """A deferred run always has an earlier one. Mutation: drop the older-sibling condition (the
+    deferred jobs skip the only run and None returns)."""
+    newest, argv = _walk([_READY], {9: _jobs_body("deferred")})
+    assert (newest, argv) == (_READY, [autoplans_read("o/r", _HEAD)])
+
+
+@pytest.mark.parametrize("name", ["plan / defer", "plan / detect"])
+def test_deferred_raises_value_error_on_two_jobs_of_one_name(name):
+    """Mutation: drop the count check (two `defer` jobs read as deferred, two `detect` as
+    not)."""
+    jobs = json.loads(_jobs_body("deferred"))["jobs"]
+    with pytest.raises(ValueError):
+        ag.deferred([*jobs, next(j for j in jobs if j["name"] == name)])
 
 
 def test_newer_plan_names_a_counted_run_over_an_incomplete_listing():

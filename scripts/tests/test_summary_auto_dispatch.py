@@ -11,6 +11,7 @@ import os
 import re
 
 import pytest
+from _detect_fixtures import deferred_jobs
 from _loader import (
     ACTIONS,
     bash_only,
@@ -631,6 +632,33 @@ def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab
             "the Actions tab before commenting `shipmate apply`"
         ),
     ]
+
+
+@pytest.mark.parametrize(
+    ("status", "conclusion", "newer", "reads"),
+    [
+        pytest.param("completed", "success", None, 1, id="deferred"),
+        pytest.param("in_progress", None, 1000, 0, id="ready-in-progress"),
+    ],
+)
+def test_a_re_run_of_the_push_run_reads_past_a_deferred_ready_run_only(
+    monkeypatch, status, conclusion, newer, reads
+):
+    """Run 999 is the push run on attempt 2 and 1000 a ready run whose jobs show it deferred: an
+    ended 1000 leaves 999 the newest (a re-run, so nothing dispatches), a live one is newer and
+    its jobs are not read. Mutation: read past any run whose `defer` job succeeded, whatever the
+    run's status (ready-in-progress returns None)."""
+    ready = _autoplan(1000) | {"status": status, "conclusion": conclusion, "run_attempt": 1}
+    listing = jsonl(_autoplan(999) | {"run_attempt": 2}, ready)
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return deferred_jobs() if "/actions/runs/1000/jobs?" in args[2] else listing
+
+    monkeypatch.setattr(ad, "_run", run)
+    assert ad.newer_autoplan("acme/demo", HEAD_SHA, "999") == newer
+    assert len(calls) == 1 + reads
 
 
 @pytest.mark.parametrize("code", [None, 1], ids=["none", "int"])

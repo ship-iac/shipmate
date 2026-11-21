@@ -2,7 +2,8 @@ name: plan
 on:
   workflow_call:
     inputs:
-      # `detect`, the plan cells and `summary` take it; `facts` and `gate-hold` run on ubuntu-slim.
+      # `detect`, the plan cells and `summary` take it; `claim`, `facts`, `defer`, `gate-hold` and
+      # `outcome` run on ubuntu-slim.
       runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
       # Both `required: false`, for apply.yml's reason: the `summary` job binds
@@ -64,11 +65,30 @@ jobs:
       - id: facts
         uses: $/actions/pr-facts
 
-  detect:
+  # A ready-for-review run races the push run of the same head. When that run already planned and
+  # published the head, this job names it, and `detect` and `summary` skip rather than plan twice.
+  defer:
     needs: facts
+    if: ${{ !cancelled() && github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review' && needs.facts.result == 'success' && needs.facts.outputs.is-draft == 'false' && needs.facts.outputs.head-repo == github.repository }}
+    runs-on: ubuntu-slim
+    environment: { name: shipmate-engine, deployment: false }
+    permissions: {}
+    outputs:
+      run: ${{ steps.defer.outputs.run }}
+    steps:
+      - id: defer
+        uses: $/actions/plan-defer
+        with:
+          head-sha: ${{ needs.facts.outputs.head-sha }}
+          pr-number: ${{ needs.facts.outputs.pr-number }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+
+  detect:
+    needs: [facts, defer]
     # Autoplan skips drafts; `shipmate plan` on a draft is an explicit request and plans it. The
     # implicit `success()` reads every ancestor, the skipped `claim` of an autoplan included.
-    if: ${{ !cancelled() && needs.facts.result == 'success' && (needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}
+    if: ${{ !cancelled() && needs.facts.result == 'success' && needs.defer.outputs.run == '' && (needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}
     runs-on: ${{ inputs.runs_on }}
     permissions:
       contents: read
@@ -153,17 +173,17 @@ jobs:
           expected-head: ${{ needs.facts.outputs.head-sha }}
           encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
 
-  # Holds the App key, as `gate-hold` and `outcome` do. None checks anything out, so none runs
-  # consumer repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust,
-  # reading only `facts`, the one producer of pull-request facts.
+  # Holds the App key, as `claim`, `defer`, `gate-hold` and `outcome` do. None checks anything
+  # out, so none runs consumer repository content: that makes `pull_request_target` safe here. Its
+  # own `if:` decides trust, reading only `facts`, the one producer of pull-request facts.
   summary:
-    needs: [facts, detect, plan]
+    needs: [facts, defer, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
     # content. A draft is not skipped here: `detect` skips it, and gate-state writes the gate
     # pending with the reason, so the pull request says why nothing was planned.
     if: >-
       ${{ !cancelled() && needs.facts.outputs.head-repo != '' &&
-      needs.facts.outputs.head-repo == github.repository }}
+      needs.facts.outputs.head-repo == github.repository && needs.defer.outputs.run == '' }}
     runs-on: ${{ inputs.runs_on }}
     # One gate writer per head at a time, across the plan, apply and deploy runs; up to 100 wait.
     # An arrival at a full queue is cancelled, and `gate-hold` then holds the gate.
@@ -211,8 +231,8 @@ jobs:
 
   # Holds the gate when `summary` ended `cancelled` and the run was not cancelled, for example at
   # a full gate-writer queue for the head; it writes outside the group, since a hold only closes
-  # the gate. A `summary` whose fork `if:` refused the head is `skipped`, not `cancelled`, so this
-  # job never holds the App key for a head `summary` refused.
+  # the gate. A `summary` that its fork `if:` refused or `defer` skipped is `skipped`, not
+  # `cancelled`, so this job never holds the App key for a head `summary` refused.
   gate-hold:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
