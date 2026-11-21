@@ -209,18 +209,18 @@ def _reusable_caller_offense(wf_name, job_name, job, workflow_docs):
         # The target lives outside this glob, which should not happen for the engine's own
         # reusable workflows, so there is nothing to check here.
         return None
+    if not _declares_app_private_key_secret(target_doc):
+        # Flag any reusable target missing the secret declaration, so a future caller does
+        # not silently lose the credential thread.
+        return (
+            f"{wf_name}:{job_name} -> {target} missing "
+            "SHIPMATE_APP_PRIVATE_KEY in on.workflow_call.secrets"
+        )
     expected = ENGINE_CALL_SECRETS.get(target)
     if expected is None:
         return (
             f"{wf_name}:{job_name} -> {target}: _loader.ENGINE_CALL_SECRETS holds no "
             "expected secrets block for this callee -- add its whole block there"
-        )
-    # A callee the registry gives the App key must declare it, so a future caller does not
-    # silently lose the credential thread; `cell.yml` writes no check and takes none.
-    if "SHIPMATE_APP_PRIVATE_KEY" in expected and not _declares_app_private_key_secret(target_doc):
-        return (
-            f"{wf_name}:{job_name} -> {target} missing "
-            "SHIPMATE_APP_PRIVATE_KEY in on.workflow_call.secrets"
         )
     if job.get("secrets") != expected:
         return (
@@ -263,10 +263,9 @@ def test_credentialed_action_steps_thread_app_credentials():
 
     A job that is itself a reusable-workflow caller (`uses:` points at another
     `.github/workflows/*.yml`) threads the credential through the `secrets:` block rather than a
-    `with:` input, so the assertion there is that the caller passes the whole block
-    `_loader.ENGINE_CALL_SECRETS` names for that callee, and that a callee whose block holds
-    `SHIPMATE_APP_PRIVATE_KEY` declares it under `on.workflow_call.secrets`. Mutation: drop
-    `SHIPMATE_APP_PRIVATE_KEY` from `apply-env-level.yml`'s declared secrets.
+    `with:` input, so the assertion there is that the called workflow declares
+    `SHIPMATE_APP_PRIVATE_KEY` under `on.workflow_call.secrets` and that the caller passes the
+    whole block `_loader.ENGINE_CALL_SECRETS` names for that callee.
 
     Never `secrets: inherit`, including on these engine-internal hops. The files sit in one
     organization but the run belongs to the consumer, and inherit is evaluated against the run:

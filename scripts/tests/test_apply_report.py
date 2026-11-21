@@ -106,6 +106,7 @@ def _render(monkeypatch, tmp_path, name, report_env, report=None):
             "environment": env,
             "result": "applied",
             "reason": "",
+            "state_lost": False,
         }
         (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
     checks = tmp_path / "checks.jsonl"

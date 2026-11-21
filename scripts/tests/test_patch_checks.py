@@ -153,51 +153,7 @@ def test_a_pre_merge_re_run_writes_only_its_successes(monkeypatch, calls, capsys
     assert ([a for a, _ in recorded], reads["calls"]) == ([_argv("1")], [])
     assert capsys.readouterr() == (
         "1\n",
-        "::notice::run attempt 2 of a pre-merge apply writes only its successes and held checks\n",
-    )
-
-
-_HELD = {"status": "in_progress", "details_url": "https://github.com/acme/demo/actions/runs/7"}
-_HELD_OUTPUT = {**_HELD, "output": {"title": "State not saved", "summary": _SUMMARY}}
-
-
-def _held(cid, **extra):
-    return _entry(cid, _HELD, title="State not saved", **extra)
-
-
-def test_a_pre_merge_re_run_writes_its_held_checks(monkeypatch, calls):
-    """A held check names a state loss; a re-run keeps it. Only the `held` key marks it, not the
-    body. Mutations: filter held entries through `_succeeds` -> 3 is not written; match held
-    entries by body or title -> 4 is written."""
-    recorded, _, reads = calls
-    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
-    reads[f"repos/{_REPO}/check-runs/3"] = _check()
-    _main(monkeypatch, [_entry(1), _held(3, held=True), _held(4)])
-    assert [a for a, _ in recorded] == [_argv("1"), _argv("3")]
-    assert json.loads(recorded[1][1]) == _HELD_OUTPUT
-
-
-def test_a_merged_pull_request_gets_its_held_writes(monkeypatch, calls):
-    """The merge deploy must refuse over a held check, and the result comment reads its title.
-    Mutation: drop the held exception in the merged branch -> 3 is not written."""
-    recorded, _, reads = calls
-    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
-    reads[f"repos/{_REPO}/pulls/31"] = _pr(True)
-    reads[f"repos/{_REPO}/check-runs/3"] = _check()
-    _main(monkeypatch, [_entry(1), _held(3, held=True)])
-    assert [a for a, _ in recorded] == [_argv("1"), _argv("3")]
-    assert json.loads(recorded[1][1]) == _HELD_OUTPUT
-
-
-def test_a_held_entry_never_reopens_a_completed_check(monkeypatch, calls, capsys):
-    """Mutation: exempt held entries from the completed-check skip -> 4 is written."""
-    recorded, _, reads = calls
-    reads[f"repos/{_REPO}/check-runs/4"] = {**_check(), "status": "completed"}
-    _main(monkeypatch, [_held(4, held=True)])
-    assert recorded == []
-    assert capsys.readouterr() == (
-        "",
-        "::notice::apply check 4 is already completed; left as it is\n",
+        "::notice::run attempt 2 of a pre-merge apply writes only its successes\n",
     )
 
 

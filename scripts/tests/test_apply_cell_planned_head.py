@@ -66,7 +66,6 @@ def test_the_step_is_attributable_in_the_cell_summary():
         "INIT_OUTCOME",
         "LOCATE_OUTCOME",
         "RESTORE_OUTCOME",
-        "HOSTED_OUTCOME",
         "PLAN_DIGEST_OUTCOME",
     ]
 

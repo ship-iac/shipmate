@@ -52,7 +52,7 @@ li = _load("lock-info")
 wv = _load("waves")
 
 _STR_KEYS = ("stack", "environment", "result", "reason")
-CELL_KEYS = _STR_KEYS
+CELL_KEYS = (*_STR_KEYS, "state_lost")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
 # (circle, verdict word) per display status, in verdict token order. A SUPERSET of cell.json's
 # `result` enum: `unrecorded` is derived at render time (apply_check_state), never written,
@@ -88,46 +88,40 @@ def _not_attempted_note(rows, env_name):
 
     The retry applies every pending cell it covers, a cell whose state was not saved
     included. With a `state not saved:` note the retry waits for those cells' recovery. The
-    job-log pointer stays in both forms: the note reads the apply checks, so a failed check scan
-    leaves a held cell in no note."""
+    job-log pointer stays in both forms: a lost cell whose artifact did not upload (the upload
+    is best-effort) reads not attempted and is in no note."""
     if not any(r["status"] == "not_attempted" for r in rows):
         return ""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
     retry = f"retry with `{cmd}`."
-    if any(r["held"] for r in rows):
+    if any(r["state_lost"] for r in rows):
         retry = (
             f"retry with `{cmd}` once the cells under `state not saved:` are recovered, because "
             "it applies their reviewed plans again."
         )
     return (
-        f"not attempted: the apply checks stay pending; {retry} If a cell's `save` job log names "
+        f"not attempted: the apply checks stay pending; {retry} If a cell's job log shows "
         f"{_LOST_LOG}, follow docs/troubleshooting.md section of that name first."
     )
 
 
-def _held_note(rows, jobs):
-    """The 'state not saved' note: every cell whose apply check is held (`ag.held_names`),
-    named in **bold** + `_md_name` like `_unrecorded_note` and linked to its `save` job's log
-    when the listing holds one, capped for its reason."""
-    cells = []
-    for r in rows:
-        if r["held"]:
-            url = _job_url(r, jobs, None, "save")
-            cells.append(f"{_bold_cell(r)} {sc.link(url, 'save log')}" if url else _bold_cell(r))
+def _state_lost_note(rows):
+    """The 'state not saved' note: every cell whose apply ran and whose state was not saved,
+    named in **bold** + `_md_name` like `_unrecorded_note`, capped for its reason."""
+    cells = [_bold_cell(r) for r in rows if r["state_lost"]]
     if not cells:
         return ""
     listed = named(cells, _NAMED)
     if len(cells) > _NAMED:
-        listed += f", whose apply checks are titled `{ag.HELD_TITLE}`"
+        listed += f", whose job logs show {_LOST_LOG}"
     return (
-        f"state not saved: {listed}. Their apply step may have run and their state is not "
-        "known saved. Never re-run these cells' jobs or their workflow run. While their apply "
-        "checks are held, a `shipmate apply` of this head and the merge deploy refuse them; once "
-        "a check is returned by hand, an apply applies its reviewed plan again against the state "
-        "from before the apply. Before applying or merging any plan of a named stack in the "
-        "environment named beside it, on any pull request, follow docs/troubleshooting.md "
-        "section `The apply step ran and its state was not saved`, which says when to return "
-        "the checks."
+        f"state not saved: {listed}. The apply step ran and its state "
+        "was not saved or not verified. Never re-run these cells' jobs or their workflow run. A "
+        "re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans again "
+        "against the state from before the apply. Before applying or merging any plan of a "
+        "named stack in the environment named beside it, on any pull request, follow "
+        "docs/troubleshooting.md section "
+        "`The apply step ran and its state was not saved`."
     )
 
 
@@ -243,6 +237,8 @@ def _validate_cell(cell, path):
     for k in _STR_KEYS:
         if type(cell[k]) is not str:
             raise SystemExit(f"::error::cell summary {path} key {k!r} must be a string")
+    if type(cell["state_lost"]) is not bool:
+        raise SystemExit(f"::error::cell summary {path} key 'state_lost' must be a boolean")
     if cell["result"] not in _RESULTS:
         raise SystemExit(
             f"::error::cell summary {path} key 'result' must be one of "
@@ -340,7 +336,7 @@ def build_rows(expected, downloaded):
             "stack": cell["stack"],
             "status": cell["result"],
             "reason": cell["reason"],
-            "held": False,
+            "state_lost": cell["state_lost"],
             "apply_text": text,
         }
         for cell, text in downloaded
@@ -353,7 +349,7 @@ def build_rows(expected, downloaded):
                 "stack": stack,
                 "status": "not_attempted",
                 "reason": "",
-                "held": False,
+                "state_lost": False,
                 "apply_text": None,
             },
         )
@@ -361,13 +357,13 @@ def build_rows(expected, downloaded):
 
 
 def load_check_maps(path, app_id):
-    """(present, done, held) apply-check name sets from the scan step's check-runs JSONL file,
+    """(present, done) apply-check name sets from the scan step's check-runs JSONL file,
     tolerating failure.
 
     `present` is every App-authored `apply / ...` check name on the head SHA
     (newest run per name); `done` is the subset whose newest run completed with
-    a good conclusion; `held` the subset `ag.held_names` reads as held because the cell's
-    state may not be saved. All come from `apply-gate`, per this module's COUPLING note.
+    a good conclusion. Both come from `apply-gate`, per this module's COUPLING
+    note.
 
     Every failure degrades to no data with a warning, never propagates: for
     comment-ops the comment IS the feedback channel, so losing this one display
@@ -380,7 +376,7 @@ def load_check_maps(path, app_id):
     try:
         with open(path, encoding="utf-8") as fh:
             runs = ag.app_runs(fh, app_id)
-            return set(ag.latest_by_name(runs)), ag.done_names(runs), ag.held_names(runs)
+            return set(ag.latest_by_name(runs)), ag.done_names(runs)
     except (OSError, SystemExit, ValueError, KeyError, TypeError, AttributeError) as exc:
         # from_app's refusal is written for a step that fails; inside a warning its own
         # `::error::` prefix would read as a second annotation.
@@ -389,24 +385,26 @@ def load_check_maps(path, app_id):
             f"::warning::{path} could not be read as apply checks ({reason}) -- "
             "the apply result comment falls back to artifact-only status"
         )
-        return set(), set(), set()
+        return set(), set()
 
 
-def apply_check_state(rows, present, done, held):
+def apply_check_state(rows, present, done):
     """Re-derive display status from the real apply-check state (in place).
 
     The pending apply checks ARE the work queue, so they -- not the per-cell
     artifact -- are the authority on whether a unit is done. `Compose cell
     summary` runs `if: always()`, and the trailing `complete` job completes the
-    check only for a cell whose `apply` and `save` jobs succeeded, so an `applied`
-    artifact can coexist with a pending check (the `complete` job failed, or a
-    newer plan re-created the check); and the continue-on-error upload can drop,
+    check only for a cell whose job succeeded, so an `applied` artifact can
+    coexist with a pending check (the state was not saved, the job was cancelled,
+    or the `complete` job failed); and the continue-on-error upload can drop,
     leaving an applied cell with no artifact.
     Two directions, therefore:
 
     - applied + pending check -> `unrecorded`: the apply succeeded but was not
-      recorded, the gate stays pending, and the stack needs a re-plan; the note
-      never says re-apply.
+      recorded, the gate stays pending, and the stack needs a re-plan. A cell
+      whose state was not saved is also named by the `state not saved:` note,
+      because its reviewed .otplan still matches the restored state and would
+      apply again; so neither note says re-apply.
     - not_attempted + done check -> `applied`: the check proves the apply
       landed; apply_text stays None so the row renders its bare line.
 
@@ -418,16 +416,9 @@ def apply_check_state(rows, present, done, held):
     `failed`/`blocked` are never re-derived. A red row against a done check
     means some other run applied that cell -- over-reporting, nothing
     stranded -- and downgrading on check state would let an unrelated run's
-    green check hide a real failure in this one.
-
-    Each row's `held` is whether its check is in `held`. A held row is never `unrecorded`:
-    that note's re-plan re-creates the check pending and so erases the hold, which only the
-    `state not saved:` note's procedure may lift."""
+    green check hide a real failure in this one."""
     for row in rows:
         name = ag.check_name(row["stack"], row["environment"])
-        row["held"] = name in held
-        if row["held"]:
-            continue
         if row["status"] == "applied" and name in present and name not in done:
             row["status"] = "unrecorded"
         elif row["status"] == "not_attempted" and name in done:
@@ -446,31 +437,28 @@ def _resources(text):
 
 def _state(row):
     """A row's state text: applied counts (or `applied`), the same plus `, not recorded`,
-    `failed`, `blocked: <reason>` (escaped: cell.json is untrusted), `not attempted`; a held
-    row's text ends `, state not saved`."""
+    `failed`, `blocked: <reason>` (escaped: cell.json is untrusted), `not attempted`."""
     status = row["status"]
     word = _STATUS[status][1]
     if status == "blocked":
-        text = f"{word}: {sc._md_escape(row['reason'])}"
-    elif status in ("applied", "unrecorded"):
+        return f"{word}: {sc._md_escape(row['reason'])}"
+    if status in ("applied", "unrecorded"):
         counts = _resources(row["apply_text"]) or "applied"
-        text = counts if status == "applied" else f"{counts}, {word}"
-    else:
-        text = word
-    return f"{text}, state not saved" if row.get("held") else text
+        return counts if status == "applied" else f"{counts}, {word}"
+    return word
 
 
 def _cell_line(row, url, env=None):
     return sc.cell_line(_STATUS[row["status"]][0], row["stack"], env, _state(row), url, "logs")
 
 
-def _job_url(row, jobs, run_url, part="apply"):
-    """Per-cell log link: the row's cell job `part` (`apply` or `save`), the job
-    `apply-gate.cell_part` matches by its `L<n> / <env> / <stack> / <part>` name. No match ->
-    the workflow-run URL."""
+def _job_url(row, jobs, run_url):
+    """Per-cell log link: the job `apply-gate.is_cell_job` matches to the row's
+    cell, by its FORWARD-built `L<n> / <env> / <stack>` name. No match -> the
+    workflow-run URL."""
     url = None
     for job in jobs:
-        if ag.cell_part(job.get("name", ""), row["stack"], row["environment"]) == part:
+        if ag.is_cell_job(job.get("name", ""), row["stack"], row["environment"]):
             url = job.get("html_url") or url
     return url or run_url
 
@@ -1011,7 +999,7 @@ def build_comment(
     notes = (
         _lock_note(rows, env_name),
         _stale_note(rows),
-        _held_note(rows, jobs),
+        _state_lost_note(rows),
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )
@@ -1152,11 +1140,11 @@ def main():
     jobs = ag.parse_jsonl(sys.stdin)
     downloaded = load_cells(os.environ.get("CELLS", "cells"))
     expected = _expected_cells()
-    present, done, held = load_check_maps(
+    present, done = load_check_maps(
         os.environ.get("SHIPMATE_CHECKS", "checks.jsonl"),
         os.environ.get("SHIPMATE_APP_ID", ""),
     )
-    rows = apply_check_state(build_rows(expected, downloaded), present, done, held)
+    rows = apply_check_state(build_rows(expected, downloaded), present, done)
     env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "")
     r, unread = read_report(
         os.environ.get("SHIPMATE_REPORT_PATH", ""),

@@ -595,19 +595,15 @@ LIVE_RUN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
 #: GitHub's page size cap; a listing longer than `_MAX_PAGES` pages counts as incomplete.
 _PAGE = 100
 _MAX_PAGES = 10
-#: A 256-cell deploy lists about 881 jobs per run attempt and `filter=all` lists every attempt, so
-#: 40 pages (at most 3,999 jobs: 39 full pages and a short one) cover attempt 4; attempt 5 reads
-#: as unreadable.
-JOB_PAGES = 40
 
 
-def _pages(path, field, run, *, counted=False, max_pages=_MAX_PAGES):
+def _pages(path, field, run, *, counted=False):
     """Every item of `field` across the pages of listing `path`, or None when a page fails, is
-    malformed, or the listing runs past `max_pages` pages; the cause prints as one warning.
+    malformed, or the listing runs past `_MAX_PAGES` pages; the cause prints as one warning.
     With `counted`, also None unless every page advertises an int `total_count` equal to the
     items returned: a listing that hides an item it counts is incomplete."""
     items, totals = [], []
-    for page in range(1, max_pages + 1):
+    for page in range(1, _MAX_PAGES + 1):
         sep = "&" if "?" in path else "?"
         try:
             body = gh_json(f"{path}{sep}per_page={_PAGE}&page={page}", run)
@@ -629,7 +625,7 @@ def _pages(path, field, run, *, counted=False, max_pages=_MAX_PAGES):
                 )
                 return None
             return items
-    sys.stderr.write(f"::warning::{command_data(path)} runs past {max_pages} pages\n")
+    sys.stderr.write(f"::warning::{command_data(path)} runs past {_MAX_PAGES} pages\n")
     return None
 
 
@@ -829,11 +825,7 @@ def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest"):
     no string `status` or `name`, so no caller sees a partial listing, or, with `counted`, when
     `_pages` finds the count short. Each None prints its cause as one warning."""
     jobs = _pages(
-        f"repos/{repo}/actions/runs/{run_id}/jobs?filter={job_filter}",
-        "jobs",
-        run,
-        counted=counted,
-        max_pages=JOB_PAGES,
+        f"repos/{repo}/actions/runs/{run_id}/jobs?filter={job_filter}", "jobs", run, counted=counted
     )
     if jobs is None:
         return None

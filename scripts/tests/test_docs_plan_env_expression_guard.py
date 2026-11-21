@@ -71,11 +71,8 @@ def test_every_page_documents_the_cell_job_expression():
 
 
 def test_the_engine_binds_the_documented_expression():
-    """`cell.yml` reads the same row field from its `cell` input
-    (`test_apply_env_binding_guard.py`). Mutation: bind `${{ matrix.environment }}` in
-    `plan.yml`'s `plan`."""
-    spec = workflow_yaml("plan.yml")
-    assert spec["jobs"]["plan"]["environment"] == CELL_ENV, (
-        "plan.yml's cell binding and the documented expression have "
+    spec = workflow_yaml("apply-env-level.yml")
+    assert spec["jobs"]["wave0"]["environment"] == CELL_ENV, (
+        "apply-env-level.yml's wave binding and the documented expression have "
         "diverged -- one of the two was updated alone"
     )

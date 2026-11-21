@@ -1,14 +1,13 @@
 """Guards how every job that touches a cell's state binds a GitHub Environment.
 
 Invariants:
-- every cell job -- `plan`, `drift`, `unlock` and `cell.yml`'s `apply` -- binds the row's
-  `env_binding` (`${{ matrix.env_binding }}`, or `fromJSON(inputs.cell)`'s in `cell.yml`) and
-  nothing else; the eight waves that call `cell.yml` bind none, which a calling job cannot.
-  `env-config`'s `resolve` stamps that value on every detect row, so the binding is decided in
-  one place, from the default branch's environment table; a job that computes its own is the
-  regression. Where the bound environment does not exist, snapshot's pre-flight refuses the
-  run: the fingerprint pins nothing about the binding, because plan and apply resolve a cell's
-  variables from the same table (CONTRACT.md §Env model);
+- every cell job -- `plan`, `drift`, `unlock` and the eight waves -- binds
+  `${{ matrix.env_binding }}` and nothing else. `env-config`'s `resolve` stamps that value on
+  every detect row, so the binding is decided in one place, from the default branch's
+  environment table; a job that computes its own is the regression. Where the bound
+  environment does not exist, snapshot's pre-flight refuses the run: the fingerprint pins
+  nothing about the binding, because plan and apply resolve a cell's variables from the same
+  table (CONTRACT.md §Env model);
 - snapshot and complete each bind shipmate-engine, the environment holding the App key both
   mint from: a job that gains an env-derived binding is the regression;
 - snapshot runs the environment pre-flight before it snapshots the apply checks,
@@ -32,21 +31,20 @@ it.
 from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, local_action, workflow_jobs
 
 CELL_ENV = "${{ matrix.env_binding }}"
-CALLED_CELL_ENV = "${{ fromJSON(inputs.cell).env_binding }}"
 WAVES = [f"wave{i}" for i in range(8)]
 
 #: The apply cell, and the matrix field carrying the digest of the plan text a reviewer approved.
 #: A composite action's `required: true` is not enforced, so a dropped `with:` line arrives as the
 #: empty string; apply-cell refuses that, which turns a wiring slip into eight failed applies.
 APPLY_CELL = local_action("apply-cell")
-PLAN_SHA256 = "${{ fromJSON(inputs.cell).plan_sha256 }}"
+PLAN_SHA256 = "${{ matrix.plan_sha256 }}"
 
-#: (workflow file, job) -> binding, for every job that binds a cell's environment, by hand.
+#: (workflow file, job) for every job that binds a cell's environment, written by hand.
 CELL_BOUND = {
-    ("plan.yml", "plan"): CELL_ENV,
-    ("drift.yml", "drift"): CELL_ENV,
-    ("unlock.yml", "unlock"): CELL_ENV,
-    ("cell.yml", "apply"): CALLED_CELL_ENV,
+    ("plan.yml", "plan"),
+    ("drift.yml", "drift"),
+    ("unlock.yml", "unlock"),
+    *(("apply-env-level.yml", w) for w in WAVES),
 }
 
 #: snapshot's steps, in order, by action path: a reorder must redden this.
@@ -57,34 +55,31 @@ SNAPSHOT_STEPS = [
 
 
 def test_every_cell_job_binds_the_resolved_environment():
-    """Mutations: bind `${{ fromJSON(inputs.cell).environment }}` in `cell.yml`'s `apply`; bind
-    `${{ matrix.environment }}` in `unlock.yml`."""
-    for (workflow, job_id), binding in sorted(CELL_BOUND.items()):
+    """Mutations: restore the ternary in one wave; bind `${{ matrix.environment }}` in `wave7`."""
+    for workflow, job_id in sorted(CELL_BOUND):
         jobs = workflow_jobs(workflow)
         assert job_id in jobs, f"{workflow} no longer declares {job_id!r} (update CELL_BOUND)"
-        assert jobs[job_id].get("environment") == binding, (
+        assert jobs[job_id].get("environment") == CELL_ENV, (
             f"{workflow} job {job_id!r} must bind the environment detect resolved -- the "
             "reviewer gate, the OIDC claim split and the environment secrets live there"
         )
 
 
-#: Matrix jobs that bind no environment, written by hand. `warm` runs `init -backend=false` on
-#: the merged commit to fill the provider cache: no backend, no credentials, and a protected apply
-#: environment would hold each leg for a reviewer. The waves call `cell.yml`, whose `apply` binds.
-UNBOUND_MATRIX = {("deploy.yml", "warm"), *(("apply-env-level.yml", w) for w in WAVES)}
+#: Matrix jobs that touch no cell's state and bind no environment, written by hand. `warm` runs
+#: `init -backend=false` on the merged commit to fill the provider cache: no backend, no
+#: credentials, and a protected apply environment would hold each leg for a reviewer.
+UNBOUND_MATRIX = {("deploy.yml", "warm")}
 
 
 def test_the_unbound_matrix_jobs_bind_no_environment():
-    """Mutations: add `environment: ${{ matrix.env_binding }}` to `deploy.yml`'s `warm`, then to
-    `apply-env-level.yml`'s `wave2`."""
+    """Mutation: add `environment: ${{ matrix.env_binding }}` to `deploy.yml`'s `warm`."""
     for workflow, job_id in sorted(UNBOUND_MATRIX):
         assert "environment" not in workflow_jobs(workflow)[job_id]
 
 
 def test_the_cell_jobs_are_exactly_the_hand_written_set():
-    """Derived from every workflow file against the hand-written sets, so a new matrix job
-    reddens here rather than binding whatever it computes. `cell.yml`'s `apply` is no matrix
-    job: its binding is pinned above.
+    """Derived from every workflow file against the hand-written sets, so a twelfth cell job
+    reddens here rather than binding whatever it computes.
 
     Mutation: add a job with a `strategy.matrix` and no `environment:`.
     """
@@ -94,7 +89,7 @@ def test_the_cell_jobs_are_exactly_the_hand_written_set():
         for job_id, job in workflow_jobs(path.name).items()
         if (job.get("strategy") or {}).get("matrix") is not None
     }
-    assert found == (set(CELL_BOUND) - {("cell.yml", "apply")}) | UNBOUND_MATRIX
+    assert found == CELL_BOUND | UNBOUND_MATRIX
 
 
 def test_snapshot_and_complete_bind_the_engine_environment():
@@ -126,16 +121,17 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
 
 
 def test_every_apply_cell_invocation_passes_the_reviewed_plan_digest():
-    """Every workflow, so an apply-cell step outside `cell.yml` reddens too. Mutation: drop
-    `plan-sha256` from `cell.yml`'s apply-cell step."""
-    found = [
-        (path.name, job_id, (step.get("with") or {}).get("plan-sha256"))
-        for path in sorted(WORKFLOWS.glob("*.yml"))
-        for job_id, job in workflow_jobs(path.name).items()
+    """The count and the per-site input, together: a count alone is satisfied by eight steps of
+    which one dropped the digest, and a per-site check alone is satisfied by seven sites plus a
+    ninth wave that never got one."""
+    steps = [
+        step
+        for job in workflow_jobs("apply-env-level.yml").values()
         for step in (job.get("steps") or [])
         if (step.get("uses") or "").split("@")[0] == APPLY_CELL
     ]
-    assert found == [("cell.yml", "apply", PLAN_SHA256)], (
-        "an apply-cell invocation does not pass the row's plan_sha256 -- apply-cell refuses an "
-        "empty digest, so no cell can apply at all"
+    assert len(steps) == 8, f"apply-env-level.yml invokes apply-cell {len(steps)} times, not 8"
+    assert [(s.get("with") or {}).get("plan-sha256") for s in steps] == [PLAN_SHA256] * 8, (
+        "an apply-cell invocation does not pass matrix.plan_sha256 -- apply-cell refuses an "
+        "empty digest, so that wave's cells cannot apply at all"
     )

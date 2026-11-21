@@ -10,11 +10,6 @@ paths:
       # actionlint 1.7.12 types the `jobs` context of `workflow_call` outputs without `result`,
       # which GitHub fills (measured live). The regex names the property: a typo still fails.
       - 'property "result" is not defined in object type \{outputs: '
-  .github/workflows/cell.yml:
-    ignore:
-      # actionlint 1.7.12 has no job-level `cache-mode` key (GitHub, 2026-09-10). Remove when a
-      # release parses it. test_workflow_cache_mode.py pins every job's value whole.
-      - 'unexpected key "cache-mode" for "job" section'
   .github/workflows/*.yml:
     ignore:
       # actionlint 1.7.12 has no `$/` self-repository syntax (GitHub, 2026-07-30) and reads

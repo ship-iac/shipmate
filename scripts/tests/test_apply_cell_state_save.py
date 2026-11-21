@@ -1,131 +1,95 @@
-"""apply-cell hands its state to the cell's `save` job and saves nothing itself.
+"""apply-cell must save state after a *cancelled* apply, not only a failed one.
 
-Threat model: an accidental edit to `actions/apply-cell` that (a) skips the handoff after a
-failed or cancelled apply, whose partial state then never reaches `save`; (b) lets a later
-upload replace the bundle; (c) saves a cache entry from the cell, where pull-request code runs;
-(d) applies local-backend state on a runner `save` refuses. A hostile edit to the engine file is
-out of scope: it is SHA-pinned and reviewed. Whole parsed values are compared to hand-written
-constants.
+A cancelled `tofu apply` (manual cancel, or `apply-<env>-<stack>` concurrency
+displacement) mutates local state per-resource exactly like a failed apply. If
+`Save state` is guarded by `!cancelled()`, that partial state is discarded, the
+next run restores the pre-apply state, and retries orphan resources / duplicate
+creates.
+
+The state sink is `actions/cache`, commit-on-complete and keyed per `run_id-run_attempt`: a
+torn-down upload never commits and cannot clobber the last-good entry, so saving on cancellation
+is safe. The correct guard is therefore `always()`, still gated on a successful restore so that a
+state which was never restored is never saved. Mutation: regress that guard to `!cancelled()`.
 """
 
-import os
+import re
 
-from _loader import ENGINE, action_steps, action_yaml, bash_only, run_step, step_by
-
-_HANDOFF = {
-    "name": "Hand off the state",
-    "id": "handoff",
-    "if": "always()",
-    "shell": "bash",
-    "env": {
-        "APPLY_OUTCOME": "${{ steps.apply.outcome }}",
-        "STATE_PATH": "${{ steps.init.outputs.state-path }}",
-        "SLUG": "${{ steps.ids.outputs.slug }}",
-        "ENV": "${{ inputs.env }}",
-        "ENCRYPTION_KEY": "${{ inputs.encryption-key }}",
-    },
-    "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/state-handoff"',
-}
-
-_UPLOAD = {
-    "name": "Upload the state",
-    "if": "${{ always() && steps.handoff.outputs.bundle == 'true' }}",
-    "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
-    "with": {
-        "name": "${{ steps.handoff.outputs.name }}",
-        "path": "${{ runner.temp }}/state.bundle",
-    },
-}
+from _loader import ENGINE, action_steps, action_yaml, step_by
 
 
-def test_the_handoff_runs_after_every_apply_outcome():
-    """A failed or cancelled apply still mutated state, so the `if:` is exactly `always()`.
-    Mutations: `if: success()`; drop `APPLY_OUTCOME` from the `env`; read
-    `steps.plan-digest.outcome` as `APPLY_OUTCOME`."""
-    assert step_by("apply-cell", name="Hand off the state") == _HANDOFF
-
-
-def test_the_state_output_is_the_handoffs():
-    """`save` reads the cell's state from this output. Mutation: read
-    `steps.apply.outputs.state`."""
-    assert action_yaml("apply-cell")["outputs"] == {
-        "state": {
-            "description": (
-                "`<value> attempt=<run attempt>` from scripts/state-handoff, which the cell's "
-                "`save` job reads; empty when the handoff failed before writing it."
-            ),
-            "value": "${{ steps.handoff.outputs.state }}",
-        }
-    }
-
-
-def test_the_upload_takes_the_handoffs_bundle_and_name_without_overwrite():
-    """`overwrite: true` would let a later same-named upload replace the bundle.
-    Mutations: `overwrite: true`; `if: success()`; a name built in the YAML instead of the
-    handoff's `name` output."""
-    step = step_by("apply-cell", name="Upload the state")
-    assert {**step, "uses": step["uses"].split(" ")[0]} == _UPLOAD
-
-
-def test_no_apply_cell_step_saves_a_cache_entry():
-    """Pull-request code runs in the cell, so the cell saves nothing. Mutations: restore
-    `Save provider cache` (`actions/cache/save`); restore `Save state` (`actions/state`,
-    `mode: save`)."""
+def _save_state_step():
     saves = [
-        s.get("name")
+        s
         for s in action_steps("apply-cell")
-        if s.get("uses", "").split("@")[0] == "actions/cache/save"
-        or (s.get("with") or {}).get("mode") == "save"
+        if s.get("name") == "Save state" and "state" in str(s.get("uses", ""))
     ]
-    assert saves == []
+    assert len(saves) == 1, f"expected exactly one 'Save state' step, got {len(saves)}"
+    return saves[0]
 
 
-def test_the_cell_summary_reads_the_hosted_and_apply_outcomes_and_no_lost_save():
-    """Mutations: keep `LOST_SAVE_OUTCOME` in the env; map `HOSTED_OUTCOME` to
-    `steps.plan-digest.outcome`; map `APPLY_OUTCOME` to `steps.plan-digest.outcome`."""
-    env = step_by("apply-cell", name="Compose cell summary")["env"]
-    assert "LOST_SAVE_OUTCOME" not in env
-    assert env["HOSTED_OUTCOME"] == "${{ steps.hosted.outcome }}"
-    assert env["APPLY_OUTCOME"] == "${{ steps.apply.outcome }}"
+def _guard(step):
+    """The step's `if:` with the ${{ }} wrapper stripped and whitespace collapsed."""
+    raw = str(step.get("if", "")).strip()
+    inner = re.sub(r"^\$\{\{\s*|\s*\}\}$", "", raw)
+    return re.sub(r"\s+", " ", inner).strip()
 
 
-_HOSTED_REFUSAL = (
-    "::error::the save job runs only on GitHub-hosted runners; a reused self-hosted runner "
-    "could alter what it saves. Use a GitHub-hosted runs_on or a remote backend.\n"
-)
+def test_save_state_runs_on_cancellation():
+    # always(), not !cancelled(), so a cancelled apply's partial state persists.
+    assert (
+        _guard(_save_state_step()) == "always() && steps.init.outputs.restore-outcome == 'success'"
+    )
 
 
-def _hosted(tmp_path, runner_env, state_path):
-    step = step_by("apply-cell", id="hosted")
-    assert step["env"] == {"STATE_PATH": "${{ steps.init.outputs.state-path }}"}
-    env = {**os.environ, "STATE_PATH": state_path, "RUNNER_ENVIRONMENT": runner_env}
-    r = run_step(tmp_path, step["run"], env)
-    return r.returncode, r.stdout
+def test_save_state_not_gated_by_not_cancelled():
+    # The whole defect: !cancelled() drops the cancelled apply's mutated state.
+    assert "!cancelled()" not in _guard(_save_state_step())
 
 
-@bash_only
-def test_a_local_backend_cell_refuses_a_runner_that_is_not_github_hosted(tmp_path):
-    """Mutation: refuse only on `= self-hosted`, and an empty `RUNNER_ENVIRONMENT` passes."""
-    for runner_env in ("self-hosted", ""):
-        assert _hosted(tmp_path, runner_env, "stacks/app/terraform.tfstate") == (
-            1,
-            _HOSTED_REFUSAL,
-        ), runner_env
+def test_save_state_still_requires_successful_restore():
+    # Never save a state that was never restored, the restore itself having failed.
+    assert "steps.init.outputs.restore-outcome == 'success'" in _guard(_save_state_step())
 
 
-@bash_only
-def test_a_hosted_runner_or_a_remote_backend_passes(tmp_path):
-    """Mutation: drop `[ -n "$STATE_PATH" ] &&`, and a remote-backend cell on a self-hosted
-    runner refuses."""
-    assert _hosted(tmp_path, "github-hosted", "stacks/app/terraform.tfstate") == (0, "")
-    assert _hosted(tmp_path, "self-hosted", "") == (0, "")
+_LOST_SAVE_WARNING = {
+    "name": "Warn that the applied state was not saved",
+    "id": "lost-save",
+    "if": (
+        "${{ always() && steps.apply.outcome != 'skipped' "
+        "&& steps.init.outputs.restore-outcome == 'success' "
+        "&& steps.save-state.outputs.saved != 'true' }}"
+    ),
+    "shell": "bash",
+    "run": (
+        'echo "::error::The apply step ran and its state was not saved or not verified. Never '
+        "re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge can "
+        "apply this cell's reviewed plan again against the state from before the apply. Before "
+        "applying or merging any plan of "
+        "this stack in this environment, on any pull request, follow docs/troubleshooting.md "
+        "section The apply step ran and its state "
+        'was not saved."\n'
+        "exit 1\n"
+    ),
+}
 
 
-def test_the_hosted_refusal_comes_after_init_and_before_the_plan_digest():
-    """The state path is known only after init; before the digest, so a refusal applies nothing.
-    Mutation: move the refusal after `Apply the stored plan`."""
-    ids = [s.get("id") for s in action_steps("apply-cell")]
-    assert ids.index("init") + 1 == ids.index("hosted") == ids.index("plan-digest") - 1
+def test_an_unsaved_state_after_an_apply_fails_the_cell_and_warns_against_a_re_run():
+    """The warning fires whenever an apply step ran over restored state and the save is not
+    verified (failed, cancelled, not found, or skipped for an absent file), a cancelled run
+    included, where failure() is false; it fails the job so the apply check stays pending. Its
+    text bans a re-run, names a re-run, a `shipmate apply` comment and a merge as able to
+    apply the reviewed plan again, with no condition, and points every plan of the stack and
+    environment at the troubleshooting section.
+
+    Mutations: `steps.save-state.outputs.saved != 'true'` to `steps.save-state.outcome ==
+    'failure'`; drop the `exit 1`; drop the re-run ban; drop the merge from the vectors; drop
+    "or merging".
+    """
+    steps = action_steps("apply-cell")
+    names = [s.get("name") for s in steps]
+    warning = steps[names.index("Warn that the applied state was not saved")]
+    assert warning == _LOST_SAVE_WARNING
+    assert steps[names.index("Save state")]["id"] == "save-state"
 
 
 _STATE_KEY = "${{ steps.key.outputs.key }}"
@@ -133,7 +97,7 @@ _STATE_KEY = "${{ steps.key.outputs.key }}"
 _LOOKUP_STEP = {
     "name": "Look up the saved entry",
     "id": "verify",
-    "if": "${{ inputs.mode != 'restore' }}",
+    "if": "${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}",
     "uses": "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
     "with": {"path": "${{ inputs.path }}", "key": _STATE_KEY, "lookup-only": "true"},
 }
@@ -146,29 +110,28 @@ def test_the_state_save_is_verified_by_an_exact_key_lookup():
     Every lookup uses the same pinned `actions/cache/restore`; `test_optional_state_guard.py`
     pins the rest of each retry.
 
-    `lookup` mode runs the same lookups without the save.
-
-    Mutations: add `restore-keys` to the lookup; change the lookup's key; change the save's key
-    to `${{ steps.key.outputs.prefix }}`; narrow the lookup's `if:` to `inputs.mode == 'save'`;
-    change the SHA of `verify4`.
+    Mutations: add `restore-keys` to the lookup; change the lookup's key; give the lookup an
+    `if:` other than the save's; change the SHA of `verify4`.
     """
     lookup = step_by("state", id="verify")
     assert lookup == _LOOKUP_STEP
     save = step_by("state", name="Save state")
     assert save["with"]["key"] == _STATE_KEY
+    assert save["if"] == _LOOKUP_STEP["if"]
     for step_id in ("verify2", "verify3", "verify4", "verify5"):
         assert step_by("state", id=step_id)["uses"] == _LOOKUP_STEP["uses"], step_id
 
 
-def test_saved_is_true_only_on_an_exact_key_hit():
-    """Mutations: `value: 'true'`; read `saved` from `verify5` only."""
+def test_saved_is_true_only_on_the_lookups_exact_hit():
+    """Mutations: `value: 'true'`; `value: ${{ steps.encrypt.outputs.skip }}`; read `saved` from
+    `verify5` only."""
     assert action_yaml("state")["outputs"] == {
         "saved": {
             "description": (
-                "`true` only when a `save` or `lookup` found the entry under its exact key: the "
-                "first lookup, or one of up to four more about 3, 10, 20 and 30 s after a miss. "
-                "Anything else means no entry was found: the save failed, was cancelled or "
-                "skipped, or no lookup found the entry."
+                "`true` only when a save-mode lookup found the entry this run saved under its "
+                "exact key: the first lookup, or one of up to four more about 3, 10, 20 and 30 s "
+                "after a miss. Anything else means the state was not saved: the save failed, was "
+                "cancelled or skipped, or no lookup found the entry."
             ),
             "value": (
                 "${{ steps.verify.outputs.cache-hit == 'true' "
@@ -187,6 +150,19 @@ def test_the_troubleshooting_entry_states_the_re_lookup():
     heading = "### `The apply step ran and its state was not saved`\n"
     entry = " ".join(text[text.index(heading) :].split("\n### ", 1)[0].split())
     assert (
-        "When the first lookup after a save finds no entry, the job looks the same key up to four "
-        "more times over about 30 s."
+        "When the first exact-key lookup finds no entry, the action looks up the same key up to "
+        "four more times over about 30 s before it reports the state not saved; a failed, "
+        "cancelled or skipped save runs no lookup and reports at once, and a run cancelled "
+        "after the save reports the state not saved although the entry may exist."
     ) in entry
+
+
+def test_the_cell_summary_reads_the_lost_save_warnings_outcome():
+    """`state_lost` in cell.json comes from the outcome of the warning step itself, so the
+    comment names exactly the cells whose job printed the lost-save error.
+
+    Mutations: drop `LOST_SAVE_OUTCOME` from `Compose cell summary`'s env; map it to
+    `steps.save-state.outcome`; map `APPLY_OUTCOME` to `steps.plan-digest.outcome`."""
+    env = step_by("apply-cell", name="Compose cell summary")["env"]
+    assert env.get("LOST_SAVE_OUTCOME") == "${{ steps.lost-save.outcome }}"
+    assert env.get("APPLY_OUTCOME") == "${{ steps.apply.outcome }}"

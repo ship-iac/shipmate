@@ -26,6 +26,7 @@ import re
 from _loader import (
     ACTIONS,
     ENGINE,
+    action_steps,
     action_yaml,
     bash_only,
     load_script,
@@ -182,7 +183,7 @@ def test_download_pattern_matches_apply_cell_upload_prefix():
     assert upload_step is not None, "no download-artifact step found"
     pattern = (upload_step.get("with") or {}).get("pattern")
 
-    upload_apply_cell_step = step_by("apply-cell", name="Upload apply summary")
+    upload_apply_cell_step = _find_step(action_steps("apply-cell"), uses_contains="upload-artifact")
     assert upload_apply_cell_step is not None, "apply-cell has no upload-artifact step"
     name = (upload_apply_cell_step.get("with") or {}).get("name", "")
     # From `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}`, take the literal
@@ -305,10 +306,7 @@ def test_token_mint_precedes_the_scan_render_and_post_steps():
 
 
 #: The scan step's check-runs projection, hand-written.
-_SCAN_JQ = (
-    ".check_runs[] | {name, status, conclusion, id, app: {id: .app.id}, "
-    "output: {title: .output.title}}"
-)
+_SCAN_JQ = ".check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}"
 _SCAN_LISTING = (
     '{"name": "apply / a / dev", "status": "completed", "conclusion": "success", "id": 1, '
     '"app": {"id": 7}}\n'
@@ -347,8 +345,7 @@ def _run_scan(tmp_path, checks_rc=0):
 @bash_only
 def test_scan_step_writes_the_listing_to_the_file_the_render_step_reads(tmp_path):
     """Mutations: redirect to `check.jsonl` -> the render step's file is absent; drop
-    `app: {id: .app.id}` or `output: {title: .output.title}` from the projection -> the stub
-    refuses the call and the argv differs."""
+    `app: {id: .app.id}` from the projection -> the stub refuses the call and the argv differs."""
     proc, calls, checks = _run_scan(tmp_path)
     assert proc.returncode == 0, proc.stderr
     assert calls == [
