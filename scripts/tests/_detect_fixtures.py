@@ -336,6 +336,14 @@ def dispatched_plan(run_id, pr, status="in_progress", **keys):
     return run | keys
 
 
+def deferred_jobs():
+    """`fixtures/jobs-deferred.json`: the jobs listing of a ready-for-review autoplan that
+    deferred to an earlier plan of its head, every job at run attempt 1."""
+    return (pathlib.Path(__file__).parent / "fixtures" / "jobs-deferred.json").read_text(
+        encoding="utf-8"
+    )
+
+
 def plan_jobs(run_id, detect="success", attempt=1, names=None, total=None):
     """The jobs listing body of dispatched plan run `run_id`, shaped like `gh api
     'repos/ship-iac/repo-example-stacks/actions/runs/43638853580/jobs?filter=latest&per_page=100'`

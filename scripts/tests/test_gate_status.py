@@ -990,6 +990,28 @@ def test_replan_a_succeeded_autoplan_that_planned_blocks(in_process, monkeypatch
     )
 
 
+def test_replan_an_earlier_autoplan_that_planned_blocks_under_a_deferred_ready_run(
+    in_process, monkeypatch, capsys
+):
+    """Push run 9 planned (zero-cell capture); ready run 11 deferred to it (`plan / detect`
+    skipped). The log names run 9. Mutation: `_succeeded` reads only the greatest-id run (11
+    did not plan, so the replan waits and prints the head)."""
+    runs = _row(9, "completed", "success") + _row(11, "completed", "success")
+    calls = _live_head(monkeypatch, runs=runs, jobs={9: _ZERO_CELL, 11: _captured_jobs("deferred")})
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls, in_process) == (
+        (
+            "",
+            (
+                f"pull request #7 moved to {_LIVE}, whose autoplan run 9 succeeded; "
+                "nothing dispatched\n"
+            ),
+        ),
+        [_PULL_READ, _RUNS_READ, *_DISPATCH_READS, _jobs_read(9)],
+        [],
+    )
+
+
 def _with_detect(drop=(), attempt=1, **detect):
     """The zero-cell capture with its `plan / detect` job's fields replaced by `detect` and the
     keys in `drop` removed, every job at run attempt `attempt`."""
