@@ -3246,7 +3246,9 @@ The eight jobs:
   - it ran the same engine `plan.yml` commit as this run.
 
   Each read runs once, unretried. The first unmet condition, or a failed read,
-  logs the notice `no autoplan re-run: <reason>`. A re-run logs
+  logs the notice `no autoplan re-run: <reason>`; when the decision itself
+  fails, `summary` warns `could not decide whether to re-run the superseded
+  autoplan; no re-run started`. A re-run logs
   `re-ran the failed jobs of autoplan run <id>, superseded by this plan`; a
   failed token mint or request warns `could not re-run the failed jobs of
   autoplan run <id>; its failed plan checks stay red until a push plans a new
