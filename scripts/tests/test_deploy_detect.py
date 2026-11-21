@@ -1216,8 +1216,7 @@ _PLANS_AFRESH = (
     "(any edit that `terramate list --changed` marks, such as a comment line). It plans the "
     "current default branch for all of them, this merged change included, and its cells are "
     "applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` "
-    "for a `targeted` environment), or by its deploy otherwise. For a named stack that no longer "
-    "exists, return its check by hand instead. Re-running this deploy checks "
+    "for a `targeted` environment), or by its deploy otherwise. Re-running this deploy checks "
     "out the same commit and refuses again. This deploy's apply checks are never read again and "
     "stay open on the merged pull request."
 )
@@ -1236,7 +1235,8 @@ def test_an_open_stack_first_name_refuses_naming_the_cells_left_unapplied():
         "written before the upgrade that named apply checks env first, so no cell can be read "
         "from it and its reviewed change was not applied. This deploy applies nothing, so these "
         "other cells of this merge are not applied either: stacks/app / dev-eu. Open a new pull "
-        "request that changes each of their stacks and every other listed stack " + _PLANS_AFRESH
+        "request that changes each of their stacks that still exists and every other listed stack "
+        + _PLANS_AFRESH
     )
 
 
@@ -1250,7 +1250,7 @@ def test_an_unreadable_name_refuses_before_a_stranded_one():
         "::error::deploy aborted: apply / stacks/app / dev: each is an apply check written before "
         "the upgrade that named apply checks env first, so no cell can be read from it and its "
         "reviewed change was not applied. Open a new pull request that changes each of their "
-        "stacks and every other listed stack " + _PLANS_AFRESH
+        "stacks that still exists and every other listed stack " + _PLANS_AFRESH
     )
 
 
