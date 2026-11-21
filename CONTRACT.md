@@ -5173,7 +5173,8 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   `apply-cell` never do. A plan run,
   from an autoplan or a command, an unlock run and an apply cell hold the
   default branch's cache scope while they run the pull request's HCL, so
-  `plan.yml`, `unlock.yml` and each apply cell's `apply` job declare
+  `plan.yml`, `unlock.yml`, each apply cell's `apply` job and an apply run's
+  `detect` job declare
   `cache-mode: read`, and their token cannot save an entry whatever the cell's
   HCL runs. A drift cell saves after a restore that missed, and only when
   `init` left a file in the cache; a failed save does not fail the cell.

@@ -1295,8 +1295,8 @@ Three properties of these jobs bound what that code reaches:
   removes only the token's copy in the checkout's git configuration. Treat the
   job token in the table as held by the pull request's code.
 - **Plan, unlock and apply cells cannot write the Actions cache.** `plan.yml`
-  and `unlock.yml` declare `cache-mode: read`, as does each apply cell's
-  `apply` job, and the cache service enforces it on the job's token: a save
+  and `unlock.yml` declare `cache-mode: read`, as do each apply cell's
+  `apply` job and an apply run's `detect` job, and the cache service enforces it on the job's token: a save
   that got past `actions/cache` was refused (measured). An apply cell's state
   reaches the cache only through the cell's `save` job, which runs no
   pull-request code and saves only the bytes whose digest the `apply` job
