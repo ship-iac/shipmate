@@ -62,7 +62,7 @@ runs:
         RUN_CANCELLED: ${{ inputs.run-cancelled }}
         SUMMARY_RESULT: ${{ inputs.summary-result }}
       run: |
-        run="[the $SHIPMATE_REPLY_VERB run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+        run="the $SHIPMATE_REPLY_VERB run"
         if [ "$REVIEW_RESULT" = failure ]; then
           outcome=refused text="its review check stopped $run before any cell applied; the reason is in that run's log."
         elif [ "$RUN_CANCELLED" = true ]; then

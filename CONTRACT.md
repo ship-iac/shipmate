@@ -4619,11 +4619,11 @@ verdict line, a blank line, and the footer
 where `<url>` links the run that posts the reply and `<verb>` is `apply` or
 `plan`. The verdict line is one of:
 
-- refused: ``🔴 refused: its review check stopped [the apply run](<url>) before any cell applied; the reason is in that run's log.``
-- cancelled: ``🔴 failed: [the apply run](<url>) was cancelled before it posted a result.``
-- summary cancelled: ``🔴 failed: [the <verb> run](<url>) posted no result: its summary was cancelled before it posted a result.``,
+- refused: ``🔴 refused: its review check stopped the apply run before any cell applied; the reason is in that run's log.``
+- cancelled: ``🔴 failed: the apply run was cancelled before it posted a result.``
+- summary cancelled: ``🔴 failed: the <verb> run posted no result: its summary was cancelled before it posted a result.``,
   followed for `apply` by `` Its cells' results are on their apply checks.``
-- ended before a result: ``🔴 failed: [the <verb> run](<url>) ended before it posted a result; the reason is in that run's log.``
+- ended before a result: ``🔴 failed: the <verb> run ended before it posted a result; the reason is in that run's log.``
 
 **Apply.** `outcome` sits in `apply.yml`, outside the pull request's apply
 queue (§Comment-ops, "One apply run per pull request"), and reads the inner run

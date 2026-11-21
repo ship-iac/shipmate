@@ -47,7 +47,7 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 refused: its review check stopped [the apply run]({URL}) before any cell applied; "
+            f"🔴 refused: its review check stopped the apply run before any cell applied; "
             "the reason is in that run's log.\n\n"
             f"[apply run]({URL}). {HINT}"
         ),
@@ -62,7 +62,7 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 refused: its review check stopped [the apply run]({URL}) before any cell applied; "
+            f"🔴 refused: its review check stopped the apply run before any cell applied; "
             "the reason is in that run's log.\n\n"
             f"[apply run]({URL}). {HINT}"
         ),
@@ -77,7 +77,7 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
+            f"🔴 failed: the apply run was cancelled before it posted a result.\n\n"
             f"[apply run]({URL}). {HINT}"
         ),
     ),
@@ -91,7 +91,7 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) posted no result: its summary was cancelled "
+            f"🔴 failed: the apply run posted no result: its summary was cancelled "
             "before it posted a result. Its cells' results are on their apply checks.\n\n"
             f"[apply run]({URL}). {HINT}"
         ),
@@ -106,7 +106,7 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) was cancelled before it posted a result.\n\n"
+            f"🔴 failed: the apply run was cancelled before it posted a result.\n\n"
             f"[apply run]({URL}). {HINT}"
         ),
     ),
@@ -114,7 +114,7 @@ SELECTIONS = {
         {"verb": "plan", "summary-result": "cancelled", "run-cancelled": "false"},
         (
             "### shipmate plan\n\n"
-            f"🔴 failed: [the plan run]({URL}) posted no result: its summary was cancelled "
+            f"🔴 failed: the plan run posted no result: its summary was cancelled "
             "before it posted a result.\n\n"
             f"[plan run]({URL}). {HINT}"
         ),
@@ -129,7 +129,7 @@ SELECTIONS = {
         },
         (
             "### shipmate apply dev-eu\n\n"
-            f"🔴 failed: [the apply run]({URL}) ended before it posted a result; the reason is in "
+            f"🔴 failed: the apply run ended before it posted a result; the reason is in "
             "that run's log.\n\n"
             f"[apply run]({URL}). {HINT}"
         ),
@@ -138,7 +138,7 @@ SELECTIONS = {
         {"verb": "plan", "summary-result": "success", "run-cancelled": "false"},
         (
             "### shipmate plan\n\n"
-            f"🔴 failed: [the plan run]({URL}) ended before it posted a result; the reason is in "
+            f"🔴 failed: the plan run ended before it posted a result; the reason is in "
             "that run's log.\n\n"
             f"[plan run]({URL}). {HINT}"
         ),
@@ -201,7 +201,8 @@ def test_each_case_posts_its_whole_body(tmp_path, case):
     review reads as ended); drop the `verb` check from the
     summary-cancelled text; post with `github.token` in place of the minted token; drop
     `SHIPMATE_REPLY_LABEL` from the step (the footer reads `comment run`); read the label as a
-    constant `comment run` in `reply-comment`."""
+    constant `comment run` in `reply-comment`; link the run in the verdict line as well as the
+    footer."""
     inputs, body = SELECTIONS[case]
     proc, calls, _ = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
