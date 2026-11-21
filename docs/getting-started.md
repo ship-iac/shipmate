@@ -118,7 +118,7 @@ set. [`../CONTRACT.md`](../CONTRACT.md) §Env model has the rule and the
 
 This tier gets you a plan per changed stack × environment on every pull request,
 and — because the engine plan workflow's `summary` job creates them — the pending
-`apply / <stack> / <env>` checks and the `shipmate / gate` commit status that
+`apply / <env> / <stack>` checks and the `shipmate / gate` commit status that
 branch protection will require.
 
 **This tier is not usable alone.** The `summary` job mints a GitHub App
@@ -815,7 +815,7 @@ first ([`../CONTRACT.md`](../CONTRACT.md) §Cell locks).
 
 **The two are coupled.** If you require `shipmate / gate` as a
 branch-protection check — tier 3 — then applies have to happen pre-merge, because
-the gate stays non-green while any `apply / <stack> / <env>` check is pending. A
+the gate stays non-green while any `apply / <env> / <stack>` check is pending. A
 repository that only ever reaches the `deploy` job can never green the gate, so
 the merge that would trigger it deadlocks. Post-merge deploys alone are
 therefore sufficient only for a repository that does *not* require the gate.
@@ -951,7 +951,7 @@ Two reasons, and the second one is a hard failure:
   replaced the secrets context wholesale. So "add the environment and keep
   `inherit`" does not work; the App key never arrives, and every App-authored
   surface silently fails to exist — no `shipmate / gate`, no pending
-  `apply / <stack> / <env>` checks, no plan comment.
+  `apply / <env> / <stack>` checks, no plan comment.
 
 Pass only what each callee declares. `comment-ops.yml` declares
 `SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan

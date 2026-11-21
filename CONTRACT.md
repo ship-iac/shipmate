@@ -12,59 +12,40 @@ Every plan and apply unit of work reports as its own GitHub check, using
 these names verbatim:
 
 - plan job check-run: `plan / <env> / <stack>`
-- apply check-run: `apply / <stack> / <env>`
+- apply check-run: `apply / <env> / <stack>`
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate stack path (as emitted by
 `terramate list` / `experimental run-graph --label stack.dir`, e.g.
 `stacks/network`) for that unit of work (for example,
 `plan / staging / stacks/network` and
-`apply / stacks/network / staging`). Both lead with their verb. The plan check
-is a job's name and ends in the stack, so the cells of one environment differ in
-their last segment, and every cell job name (plan, drift, apply wave, unlock)
-follows the same `<env> / <stack>` order. The apply check keeps
-`apply / <stack> / <env>` on purpose: it is the App's own check, built by
-`apply-gate.check_name`, not a job's name, so the two orders differ by design.
-The check name uses
-the stack path, never a display name — so the code that *creates* the apply
-check (`pending-checks`, run by `actions/summary`),
-*completes* it (`scripts/apply-complete`, run by `actions/apply-complete` in
-`apply-env-level.yml`'s `waveN-complete` and `complete` jobs), *filters the still-pending queue*
-(`deploy-detect` / `apply-detect` / `unlock-detect`, which
-only ever have the path), and *reports it* (`apply-comment`) all reconstruct the identical name
-from the one value they share.
+`apply / staging / stacks/network`). Both name a cell `<env> / <stack>`, the
+order every cell job name uses. The check name uses the stack path, never a
+display name.
+
+An apply check named in the earlier `apply / <stack> / <env>` order is not
+read, with one exception: the old name of stack `A` in environment `B`,
+`apply / A / B`, is the new name of stack `B` in environment `A`, and is read
+as that cell.
 
 The engine creates no plan check: it is the plan matrix job's own
 auto-generated check-run, whose name is the job's `name:` (`<env> / <stack>`),
 and GitHub names a called workflow's check runs `<caller job> / <callee job>`.
 The consumer's plan-calling job is named `plan`, so the check is
 `plan / <env> / <stack>`; the same rule makes the engine plan workflow's
-summary job report as `plan / summary`. `scripts/apply-gate` builds the cell
-job name (`cell_job_name`) and the plan check name (`plan_check_name`) for
-every reader that looks one up.
+summary job report as `plan / summary`.
 
 That job name is a contract element a consumer must match. `shipmate doctor`
-reports a plan-calling job carrying another name; until it is fixed,
-`summary-comment` — which resolves each cell line's plan link by an exact
-`plan / <env> / <stack>` lookup across every check run on the head SHA —
-finds no match and every `plan` link falls back to the workflow-run URL.
+reports a plan-calling job carrying another name; until it is fixed, every
+`plan` link in the plan comment falls back to the workflow-run URL.
 
 The consumer's `shipmate.yml` gates seven jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
 not run, named by that job's display name — `release`, `comment`, `deploy`,
 `apply`, `auto`, `unlock` on a plan run — with conclusion `skipped`. They are display
-artefacts of the file's shape, and nothing functional depends on them:
-`shipmate / gate` is the required check, `scripts/summary-comment` resolves plan
-links by an exact three-segment name, and `scripts/mirror-checks` copies only
-names beginning `plan / `. `shipmate doctor`'s annotation harvest is the
-one reader that does see them — it takes every `github-actions` run on the
-commit — and takes nothing from them: a skipped run carries no annotations, and
-it counts as completed, so it holds no all-clear back.
+artefacts of the file's shape, and nothing depends on them: `shipmate / gate` is
+the required check.
 
-The apply check keeps its `apply / ` verb prefix: it is created pending (by
-`actions/summary`) on the same head SHA that carries the plan job's check, and
-it is what keeps `apply-gate` / `scripts/gate-status`, which select the pending-apply
-queue by the `apply / ` prefix, from ever picking up a plan check.
 A changed cell's apply check carries its plan: the title is the plan's counts
 (`+a ~c -d`, `+? ~? -?` when no tally line can be read), and the summary is the
 rendered `plan.txt` in a `diff` fence, cut at a line boundary to 65,535 UTF-8
@@ -141,11 +122,11 @@ queue for the head, and is completed to success by whichever of these happens fi
 gate"):
 
 - the plan run's own `summary`, right after it writes `pending`, when it
-  published no queued apply check, found no behind cell, and every `apply / <stack> /
-  <env>` check on the PR head is already complete (an apply's refresh ran before that
+  published no queued apply check, found no behind cell, and every `apply / <env> /
+  <stack>` check on the PR head is already complete (an apply's refresh ran before that
   write);
 - the pre-merge apply path (`gate-refresh`, called from the apply
-  workflow's summary job) once every `apply / <stack> / <env>` check on
+  workflow's summary job) once every `apply / <env> / <stack>` check on
   the PR head is complete — a targeted `shipmate apply <env>` of only some
   environments leaves the gate pending;
 - the post-merge deploy, which completes the gate on the merged PR's head
@@ -153,7 +134,7 @@ gate"):
 
 ### Apply check lifecycle
 
-An apply run writes an `apply / <stack> / <env>` check only while it is not
+An apply run writes an `apply / <env> / <stack>` check only while it is not
 `completed`, and only when its record names the wave row's plan, or an older
 plan and no behind record: a check that a newer plan, or a plan that found the
 cell behind the base, published after the run's detect is never written by that
@@ -1338,7 +1319,7 @@ body contains `shipmate` in any case; every other comment starts no runner.
 `shipmate unlock <env> --evict` is its own route, `evict`, answered inside the
 comment-handling run and never dispatched. It deletes each cell lock in `<env>`
 that another pull request (or an unknown holder) holds on a stack whose
-App-authored `apply / <stack> / <env>` check on this pull request's head is
+App-authored `apply / <env> / <stack>` check on this pull request's head is
 pending: its newest run is not completed `success` or `neutral` (no change), so
 a failed or cancelled cell counts and an applied one does not. It comments once
 on each holder's pull request, `` 🔓 <cells> released by
@@ -1806,7 +1787,7 @@ in `.github/shipmate-config.yml` and environments held for review (below). In bo
 forms a cell that runs after a pending cell not applying in that run waits and
 stays pending (see Env apply order). `targeted`
 environments (typically production) must always be named: their
-`apply / <stack> / <env>` checks stay pending under a bare apply — so
+`apply / <env> / <stack>` checks stay pending under a bare apply — so
 `shipmate / gate` keeps gating the merge — until someone runs
 `shipmate apply <env>` for them. An entry without `apply_mode`, or with
 `apply_mode: bare` or `auto`, is part of a bare apply. Any value but
@@ -1822,7 +1803,7 @@ environment's required reviewers — which a shared environment cannot carry (se
 §Env model) — not this setting. The asymmetry is deliberate:
 after merge the pull request is closed, and the apply requirements above include
 mergeable, so a deploy that honoured the exclusion would strand those cells
-with no path to apply at all: their `apply / <stack> / <env>` checks would sit
+with no path to apply at all: their `apply / <env> / <stack>` checks would sit
 pending forever.
 
 A parsed `shipmate apply <env>` command is authorized only when it satisfies
@@ -1858,7 +1839,7 @@ its own actionable rejection reason:
   an absent or empty decision — fails closed with a wiring-error reason. An
   environment whose entry holds `review: false` is exempt from this requirement,
   and from no other (below);
-- **undiverged**: at least one `apply / <stack> / <env>` check on the pull
+- **undiverged**: at least one `apply / <env> / <stack>` check on the pull
   request's current head names the plan run its plan came from (each check
   records that run at plan time). The records are read from that head's own
   check runs, so no plan run reached here can belong to another head and none is
@@ -2141,7 +2122,7 @@ engine-owned scripts read it.
   no decision holds every one.
 
 A held environment travels the path `targeted`-environment exclusions already
-travel: dropped before env-levels are built, its `apply / <stack> / <env>`
+travel: dropped before env-levels are built, its `apply / <env> / <stack>`
 checks left pending — so `shipmate / gate` stays pending and the merge
 stays blocked — and environments ordered after it are skipped. The apply run
 names both halves: its result comment names the environments held for review,
@@ -2196,7 +2177,7 @@ otherwise create the environment on demand with no reviewers, no wait timer and
 no branch policy, and keep it: an unlock into a missing environment would retire
 the reviewer gate for every later apply of that env.
 
-Its queue is the cells in that environment whose `apply / <stack> / <env>` check
+Its queue is the cells in that environment whose `apply / <env> / <stack>` check
 is still pending, not the reviewed plan artifacts: a state lock outlives the run
 that stranded it, and those artifacts may be long expired. Each queued cell runs
 `tofu init`, then a probe (`tofu plan -input=false -refresh=false`, which takes
@@ -2305,7 +2286,7 @@ section) and reading the apply checks that name the
 reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
-- **Apply checks** (`apply / <stack> / <env>`) — created pending by
+- **Apply checks** (`apply / <env> / <stack>`) — created pending by
   `actions/summary`, completed by `actions/apply-complete` in
   `apply-env-level.yml`'s `waveN-complete` jobs and its `complete` job (all
   bound to `shipmate-engine`) — both mint an App installation token, so completion works across the create/complete
@@ -2497,11 +2478,11 @@ not this deleter's lock, and done; still on the same commit refuses.
 | --- | --- | --- |
 | `shipmate apply`, bare or targeted | `apply-run.yml` `detect` | Refuses the whole run first when a cell it would apply is behind the base (§`apply_mode: auto`, Behind the base, bare and targeted). Reads the locks of the pending cells' environments; a bare apply reads none in an environment held for review or excluded as targeted. A pending cell another pull request, or an unknown holder, locks stays pending and out of the waves, exactly like a waiting cell: the cells that run after it wait, and on a bare apply the environments `needs` orders after its environment are skipped (§Env apply order). The apply result comment names it on a locked line (§Apply result comment) |
 | the same run | `apply-run.yml` `lock`, after `detect` and before the first env-level | Locks every cell the env-levels will apply. A cell this pull request already holds is re-entered: its ref is moved to this run's new commit, conditional on the commit read, so a release still running against the old commit cannot delete it. Any other holder refuses the run (below) |
-| merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <stack> / <env>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it |
+| merge | consumer `release` job (`release.yml`) | Deletes every lock the pull request holds except those whose `apply / <env> / <stack>` check is still pending on its head, including locks on cells the pull request applied and then dropped from its diff. A cell planned behind the base keeps its lock: its check stays open, the merge deploy refuses the cell, and the next pull request's `--evict` releases it |
 | merge deploy | `deploy.yml` `detect` | Reads the locks of the pending cells' environments. A pending cell another pull request, or an unknown holder, locks refuses the whole run before any env-level, and no cell applies (below) |
 | merge deploy | `deploy.yml` wave cell | Refuses the cell when a pull request other than the merged one, or an unknown holder, holds its lock (below) |
 | merge deploy | `deploy.yml` `summary` | After the env-levels, even when one failed or was skipped, deletes every lock the merged pull request holds whose cell has no pending apply check. A cell whose apply failed keeps its lock through its pending check. After `detect` refused over another pull request's lock, it deletes every lock the merged pull request holds, pending cells' included |
-| close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <stack> / <env>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
+| close without merge | consumer `release` job (`release.yml`) | Lists the pull request's locks, then reads its state. Still closed, it deletes every one of them; merged since, it applies the merge rule: every one but those whose `apply / <env> / <stack>` check is still pending on the head it merged at; reopened since, only those whose commit is no newer than the close. A state that cannot be read refuses and deletes none |
 | `shipmate unlock <env> --evict` | comment-ops `ops` | Deletes the other pull requests' locks on this pull request's cells in `<env>` whose apply check is pending on its head and is no behind record, a cell this pull request cannot apply; refuses, deleting none and naming every such holder in the run log (the reply may summarise past 4,000 characters), when a holder is stacked on this pull request at any depth, its walk is cut short or it cannot be read, or while a run that may still apply a holder's cells is live or the runs cannot all be read (§Comment-ops) |
 | plan | `plan.yml` `summary` | Ends each changed cell's plan comment line that another pull request locks with `🔒 locked by #<n>` (`🔒 locked by an unknown holder` for an unknown holder). When #<n> is stacked on this pull request, the marker goes on `, stacked on this pull request`, one line under the verdict per stacked holder names its chain and says to retarget it to <default branch> and merge it first, and a pending gate reads `stacked #<n> holds <k> cell(s); retarget it to <default branch> and merge it first`; a holder whose walk is cut short gets a `could not tell` line instead and leaves the gate alone (§Plan comment) |
 
@@ -3171,7 +3152,7 @@ The seven jobs:
 - **`summary`** (engine, bound to `shipmate-engine`) — it calls
   `actions/summary`, which downloads this same run's cell summaries and, under
   an App token minted inside that environment, publishes the results. This is
-  what creates the pending `apply / <stack> / <env>` checks, the plan
+  what creates the pending `apply / <env> / <stack>` checks, the plan
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
   mirror of this run's completed `plan / ` checks onto the pull request's
   head and the `⚪ nothing planned` comment when no cell was planned. It
@@ -4483,7 +4464,7 @@ log text holds every line:
   approval count of 0.
 
 Row status is derived from both the per-cell artifact and the real state of
-that cell's `apply / <stack> / <env>` check on the head SHA, which
+that cell's `apply / <env> / <stack>` check on the head SHA, which
 `actions/apply-summary` reads with its own App installation token (only checks
 authored by the shipmate App count, judged by the newest run per name — the
 same predicate the gate and both detects use). The pending apply checks are the
@@ -4596,7 +4577,7 @@ would exceed GitHub's cap.
 The data feeding the comment ships in the per-cell artifact
 `apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell
 log links resolve against the run's job-name listing using the
-`apply / <stack> / <env>` check-name grammar (see Check names, above), and
+`apply / <env> / <stack>` check-name grammar (see Check names, above), and
 degrade to the workflow-run URL on no match.
 
 ## Outcome reply
@@ -4776,7 +4757,7 @@ than cells. A "Re-run all jobs" attempt of the same run that plans a different
 cell set adds checks beside the first attempt's, so the run has more checks than
 one count, or records that disagree on it. Either way an apply of the published
 checks can lose an `after` ordering to a cell it cannot see. A run is complete
-only when every App-authored `apply / <stack> / <env>` check whose record names it,
+only when every App-authored `apply / <env> / <stack>` check whose record names it,
 across all of the head's check runs and of any status, declares one `cells`
 integer and that integer equals the number of distinct check names. A record
 with no `cells`, written before the field existed, makes its run incomplete. The

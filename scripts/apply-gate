@@ -44,6 +44,7 @@ from _shipmate import (
 
 ec = _load("env-config")
 
+#: The prefix keeps the gate's pending-apply queue off the plan checks on the same head.
 APPLY_PREFIX = "apply / "
 #: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
 #: check runs `<caller job> / <callee job>`. `shipmate doctor` reports a job carrying another
@@ -74,7 +75,8 @@ def check_name(stack, env):
     """The apply check's name, `apply / <env> / <stack>`; `parse_check_name` inverts it.
     The format changes only in a breaking release: after a merge, an open check's name is the
     only record of an env its stack lost, and a check written in another format is not read.
-    `stack` is the stack path, so a deploy that knows only the path rebuilds it exactly."""
+    `stack` is the stack path, so every reader builds the name forward from the path, a
+    deploy that knows only the path included."""
     return f"{APPLY_PREFIX}{env} / {stack}"
 
 

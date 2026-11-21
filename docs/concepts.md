@@ -92,7 +92,7 @@ repository's environment table on the default branch.
 A plan cell runs branch-authored code, so it holds no App credential. A
 trusted `summary` job, bound to the `shipmate-engine` GitHub Environment and
 checking out nothing, holds the App key and authors what the pull request
-shows: the pending `apply / <stack> / <env>` checks, the plan comment
+shows: the pending `apply / <env> / <stack>` checks, the plan comment
 and `shipmate / gate` ([`github-app.md`](github-app.md) §Key-exposure
 boundary). Its sibling `gate-hold`, bound and checking out nothing the same way,
 also holds the App key and writes the gate: a hold when the plan run's
@@ -103,7 +103,7 @@ that one run of that comment does the work. Fork pull requests are refused befor
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check, and
-in each changed cell's `apply / <stack> / <env>` check, titled with the plan's
+in each changed cell's `apply / <env> / <stack>` check, titled with the plan's
 counts and cut to the check's 65,535-byte cap. The aggregate `gate` is a commit
 status, not a check-run: a status is commit-scoped, so it cannot be
 misattributed to a stale check-suite when a commit carries two plan runs
