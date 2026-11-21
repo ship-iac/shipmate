@@ -617,8 +617,9 @@ def refuse_provenance(repo, head, runnable, actions, pr_number):
     refuses while live, or once it planned: it rewrites the head's records, so applying the
     older plan under it would apply what the reviewer no longer sees. A newer autoplan of the
     head that recorded no cell must not leave an older one applying. A ready-for-review or
-    reopen autoplan dispatches no auto apply yet becomes the newest autoplan, and its clicker is
-    no pusher; a record with no action is an older engine's."""
+    reopen autoplan dispatches no auto apply yet becomes the newest autoplan, unless a
+    ready-for-review run deferred to an earlier plan, and its clicker is no pusher; a record
+    with no action is an older engine's."""
     runs = sorted({c["plan_run_id"] for c in runnable}, key=int)
     if len(runs) > 1:
         listed = "; ".join(

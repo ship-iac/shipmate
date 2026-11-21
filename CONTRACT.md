@@ -428,7 +428,7 @@ Accepted limits:
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
-  `claim`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
+  `claim`, `defer`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
   `claim`, `queue` and `outcome`, `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
   `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete`,
@@ -2684,8 +2684,11 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 - this run is the head's newest autoplan run, as `apply-gate.newest_autoplan`
   lists them, the check the `auto` run's provenance check repeats: a
   ready-for-review run of the same head is never an `auto` source, yet it is
-  the newest, and an `auto` run from the older push's plan would refuse it as
-  `newer`. A newer run logs "autoplan run <id> of <head> is newer than this run;
+  the newest unless it deferred to an earlier plan (§Post-plan topology,
+  `defer`), and an `auto` run from the older push's plan would refuse it as
+  `newer`. So a push run of a head marked ready for review while it ran starts
+  no `auto` run: the ready-for-review run is still waiting behind it, and
+  `shipmate apply` applies that plan. A newer run logs "autoplan run <id> of <head> is newer than this run;
   no auto apply started; comment shipmate apply to apply". A listing that holds
   no run as new as this one lags it and dispatches with the warning "autoplan
   run <id> of <head> is not listed yet; dispatching the auto apply, whose own
@@ -2778,8 +2781,9 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   binding of the bare and targeted forms cannot see (§Apply-match
   fingerprint). Every cell's record must also name the
   event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
-  of the head dispatches nothing yet becomes its newest autoplan, and whoever
-  clicked is no pusher. A record with no action refuses too:
+  of the head dispatches nothing yet becomes its newest autoplan, unless it is a
+  ready-for-review run that deferred to an earlier plan, and whoever clicked is
+  no pusher. A record with no action refuses too:
   ``auto apply refused: the plan records of <cells> name no push event action
   (opened or synchronize), so no push started that plan.`` The wave pre-apply
   check repeats this on the cell's newest record.
@@ -2833,7 +2837,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   @<triggering actor>, so it was re-run, and auto authorizes only the push
   itself; a writer comments `shipmate apply`.`` The listed run carries no event
   action, so a ready-for-review or reopen autoplan is kept out by the dispatch
-  condition above, not here. The permission is read with the `detect` job's `GITHUB_TOKEN` from
+  condition above, not here; a ready-for-review run that deferred is never the
+  listed run. The permission is read with the `detect` job's `GITHUB_TOKEN` from
   `collaborators/<login>/permission` and decided by
   `authorize._permission_reason`, the function that decides a commenter:
   ``not authorized: `shipmate apply` needs write access to this repository, and
@@ -3015,11 +3020,11 @@ The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
-Engine `plan.yml` is seven jobs: `claim`, `facts`, `detect`, `plan`, `summary`,
-`gate-hold`, `outcome`. `facts` is `actions/pr-facts`, the single producer of every
+Engine `plan.yml` is eight jobs: `claim`, `facts`, `defer`, `detect`, `plan`,
+`summary`, `gate-hold`, `outcome`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
-check out the pull request's own head and hold no App credential. `claim`, `summary`,
-`gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
+check out the pull request's own head and hold no App credential. `claim`, `defer`,
+`summary`, `gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
 `deployment: false`, like every engine job binding it, and none
 checks anything out. Every App-authored
 surface listed above (apply checks, the gate, the plan, doctor and apply result
@@ -3086,19 +3091,19 @@ attaches to the dispatch ref rather than to the pull request — which is why th
 `summary` job mirrors this run's completed `plan / ` checks onto the head
 commit on an `on-demand` run.
 
-**Requirement: no job in engine `plan.yml` other than `claim`, `summary`, `gate-hold` and
+**Requirement: no job in engine `plan.yml` other than `claim`, `defer`, `summary`, `gate-hold` and
 `outcome` may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
 a ref the environment's policy admits — the base ref, or the ref the plan was
 dispatched on — and the `plan` job's `environment:` is chosen by
 branch-authored `env/*` tags, so the file naming no such secret outside
-`claim`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
+`claim`, `defer`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
 `plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
 that copy of the file is the base branch's or the default branch's — never the
 pull request's own.
 
-The seven jobs:
+The eight jobs:
 
 - **`claim`** (engine, a `workflow_dispatch` carrying a `comment_id` only,
   bound to `shipmate-engine`, `permissions: {}`) — claims the command comment
@@ -3112,10 +3117,10 @@ The seven jobs:
   reads: a dispatched run's payload carries no pull request, and the number it
   was dispatched with is the only thing it can look one up by; and a
   pull-request event whose payload says draft reads the pull request's draft
-  flag once more (the draft clause below). Besides `claim`, and `outcome`, which
-  falls
-  back to the dispatch's `pr_number` when `facts` failed, nothing else in the
-  file reads the event payload, and nothing anywhere reads a head SHA or a head repository from a
+  flag once more (the draft clause below). Besides `claim`; `outcome`, which
+  falls back to the dispatch's `pr_number` when `facts` failed; and `defer`,
+  whose `if:` reads the event action, nothing else in the file reads the event
+  payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
   about its own head repository. Its outputs are `head-sha`, `head-repo`,
   `head-ref` (the head branch), `base-sha`, `base-ref` (the base branch, which
@@ -3124,6 +3129,17 @@ The seven jobs:
   optional: it only decides whether a lock holder is stacked on this pull
   request (§Plan comment), so a pull request naming no head branch emits it
   empty and nothing refuses.
+- **`defer`** (engine, a `pull_request_target` `ready_for_review` run of a
+  pull request that is not a draft and not from a fork, bound to
+  `shipmate-engine`, `permissions: {}`) — when the pull request's push run
+  planned and published this head while the ready click waited, this run plans
+  nothing and posts nothing: `plan / defer` succeeds with the notice "plan run
+  <id> planned and published <sha>; this ready-for-review run plans nothing",
+  and `detect`, `plan`, `summary`, `gate-hold` and `outcome` are skipped. That
+  run's plan comment, apply checks and gate stand. When it cannot tell, a
+  missing App key or a failed read included, it warns and the run plans. It
+  checks nothing out and runs on `ubuntu-slim` whatever `runs_on` the caller
+  passes.
 - **`detect` and `plan`** (engine, either trigger) — they upload plan artifacts
   and cell summaries; they author nothing and mint no App token. `detect` binds
   no environment; `plan` binds only the plan environment for the cell it is
@@ -3180,8 +3196,8 @@ The seven jobs:
   aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
   (comment shipmate plan or push): its plan summary was cancelled before it
-  published". A `summary` refused by its fork `if:` is `skipped`, not
-  `cancelled`, so `gate-hold` holds the App key only for a head `summary`
+  published". A `summary` refused by its fork `if:`, or skipped after
+  `defer` named an earlier run, is `skipped`, not `cancelled`, so `gate-hold` holds the App key only for a head `summary`
   admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes, as
   `facts` does.
 - **`outcome`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
@@ -3263,7 +3279,8 @@ The job has no draft clause, because skipping a draft is autoplan's economy
 rather than a trust decision. The draft flag is the pull request's when `facts`
 ran: on a payload that says draft, `actions/pr-facts` reads the pull request
 once more and takes its `draft`, so a pull request marked ready in the seconds
-after a push plans that push's head; every other fact stays the payload's. A
+after a push plans that push's head, and the ready-for-review run that follows
+plans nothing (`defer`); every other fact stays the payload's. A
 failed read, or a `draft` that is not a boolean, keeps the draft with a
 warning naming the cause; the read can only turn a skip into a plan. A draft's
 autoplan skips `detect` and `plan` and still reaches `summary`, which writes
@@ -3287,7 +3304,8 @@ failed detect or plan must still produce a red gate with an explanation, because
 no gate at all is a pull request nobody can diagnose. `detect` and `plan` keep
 the draft skip as their own condition — not a draft, *or* named on demand —
 which is a cost control (it stops a draft burning runners), not a security
-property, and is why a requested plan runs on a draft at all.
+property, and is why a requested plan runs on a draft at all. They also skip
+a run `defer` named an earlier run for, the same economy.
 
 Why `summary` is bound to `shipmate-engine` rather than trusting the trigger
 alone: `docs/hardening.md` §Contributors without push access for a fork's run,
@@ -3371,14 +3389,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-one, which run on
-  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `gate-hold`
-  and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
+  every engine job but thirty-two, which run on
+  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
+  `gate-hold` and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-one
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-two
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -4051,8 +4069,8 @@ in this order, and stops at the first run that blocks:
    whose `plan / detect` job succeeded planned, and blocks. A succeeded
    autoplan that planned counts, zero cells included: a second plan would write
    newer plan records, and an auto apply waiting on that autoplan would then
-   refuse. Every other completed run blocks nothing: a draft-skipped run (its
-   `plan / detect` skipped), a `closed`-event run, a cancelled or failed one.
+   refuse. Every other completed run blocks nothing: a draft or deferred run
+   (its `plan / detect` skipped), a `closed`-event run, a cancelled or failed one.
 4. When nothing blocks, the push that moved the head can still be seconds from
    listing its autoplan, so the autoplan runs are listed again every 5 s for
    15 s. Each listing is judged whole as in 1 and 3: a re-run keeps its run id

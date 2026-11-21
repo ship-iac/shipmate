@@ -358,7 +358,7 @@ actual work here:
   bare `<env>` for a `split: false` entry). Detect refuses the name
   `shipmate-engine`, so no cell binds the engine's own environment. What makes
   the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
-  is named only in the `claim`, `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
+  is named only in the `claim`, `defer`, `summary`, `gate-hold` and `outcome` jobs of engine `plan.yml`,
   none of which checks anything out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
   names the secret in the `secrets:` block of each job that passes it, and
   `pull_request_target` runs the base copy of that file rather than the pull
@@ -369,7 +369,7 @@ actual work here:
   never by anything the pull request writes.
 
   **The constraint that follows: no job in engine `plan.yml` other than
-  `claim`, `summary`, `gate-hold` and `outcome` may reference a `shipmate-engine` secret.** Adding one hands it to a
+  `claim`, `defer`, `summary`, `gate-hold` and `outcome` may reference a `shipmate-engine` secret.** Adding one hands it to a
   plan cell whose environment the branch chooses.
   `scripts/tests/test_cells_hold_no_app_key.py` is the guard.
 - **A `push` to a non-default branch cannot reach the key.** Measured, not

@@ -490,10 +490,11 @@ def planned(jobs):
     """Whether a plan run planned, from `jobs`: a complete, counted jobs listing
     (`_shipmate.listed_jobs(..., counted=True)`) of a run attempt that has ended, every job of that
     attempt, which the caller checks. It planned when exactly one job is named `CALLER_PREFIX +
-    "detect"`, `completed` with conclusion `success`. A draft-skipped run lists that job `skipped`,
-    a `closed`-event run and a run cancelled before `detect` list none, and a zero-cell plan lists
-    it `success`. Raises `ValueError` when it cannot tell: two such jobs, or one whose `status` is
-    not a str or not `completed`, or `completed` with a `conclusion` that is not a str."""
+    "detect"`, `completed` with conclusion `success`. A draft-skipped or deferred run lists that job
+    `skipped`, a `closed`-event run and a run cancelled before `detect` list none, and a zero-cell
+    plan lists it `success`. Raises `ValueError` when it cannot tell: two such jobs, or one whose
+    `status` is not a str or not `completed`, or `completed` with a `conclusion` that is not a
+    str."""
     detects = [j for j in jobs if j.get("name") == CALLER_PREFIX + "detect"]
     if len(detects) > 1:
         raise ValueError(f"{len(detects)} jobs are named {CALLER_PREFIX}detect")

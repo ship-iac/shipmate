@@ -99,7 +99,9 @@ also holds the App key and writes the gate: a hold when the plan run's
 `summary` was cancelled before it published and the run was not cancelled. A third, `outcome`, holds it to
 reply when a `shipmate plan` run ends without writing its plan comment, and a
 fourth, `claim`, holds it to add the App's 🚀 to a `shipmate plan` comment, so
-that one run of that comment does the work. Fork pull requests are refused before any plan cell starts
+that one run of that comment does the work. A fifth, `defer`, holds it to read
+whether a ready-for-review run's head was already planned and published, so
+that run plans nothing. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check, and

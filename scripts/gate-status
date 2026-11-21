@@ -45,8 +45,8 @@ stderr when the head moved. It reads, stopping at the first run that blocks:
 3. the jobs of each autoplan run `completed` with conclusion `success`: one that planned
    (`apply-gate.planned`) blocks. Jobs that carry another run attempt than the listing (a re-run
    between the two reads) are read again on the next listing and, on the last, cannot judge.
-   Any other completed run blocks nothing: a draft-skipped run, a `closed`-event run, a
-   cancelled or failed one.
+   Any other completed run blocks nothing: a draft-skipped or deferred run, a `closed`-event
+   run, a cancelled or failed one.
 4. When nothing blocks, the autoplan runs are listed again every `REPLAN_POLL` seconds up to
    `REPLAN_WAIT`, since the push that moved the head can take seconds to list its autoplan.
    Each listing is judged whole as in 1 and 3: a re-run keeps its run id and can turn queued.

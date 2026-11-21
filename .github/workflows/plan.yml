@@ -231,8 +231,8 @@ jobs:
 
   # Holds the gate when `summary` ended `cancelled` and the run was not cancelled, for example at
   # a full gate-writer queue for the head; it writes outside the group, since a hold only closes
-  # the gate. A `summary` whose fork `if:` refused the head is `skipped`, not `cancelled`, so this
-  # job never holds the App key for a head `summary` refused.
+  # the gate. A `summary` that its fork `if:` refused or `defer` skipped is `skipped`, not
+  # `cancelled`, so this job never holds the App key for a head `summary` refused.
   gate-hold:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
