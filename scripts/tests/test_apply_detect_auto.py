@@ -872,7 +872,13 @@ def test_the_shipmate_plan_listing_is_one_read_from_the_plan_runs_creation(tmp_p
 @pytest.mark.parametrize(
     "entries",
     [
-        pytest.param((int(RUN), 123999), id="zero-cell"),
+        pytest.param(
+            (
+                int(RUN),
+                {"id": 123999, "status": "completed", "conclusion": "success", "run_attempt": 1},
+            ),
+            id="zero-cell",
+        ),
         pytest.param(
             (int(RUN), {"id": 123999, "status": "in_progress", "conclusion": None}),
             id="in-progress",
@@ -880,11 +886,13 @@ def test_the_shipmate_plan_listing_is_one_read_from_the_plan_runs_creation(tmp_p
     ],
 )
 def test_a_newer_autoplan_still_refuses_before_any_plan_listing(tmp_path, monkeypatch, entries):
-    """A newer autoplan of the head, one that recorded no cell or one still running, refuses as
-    before, and the `shipmate plan` listing is not read. Mutation: drop `provenance_reason`'s
-    `newer` clause (both apply)."""
+    """A newer autoplan of the head, one that ended planning no cell or one still running,
+    refuses as before, and the `shipmate plan` listing is not read. Mutation: drop
+    `provenance_reason`'s `newer` clause (both apply). Mutation: `deferred` returns True
+    (zero-cell's planned jobs read it past, and run `RUN` applies)."""
     calls = []
-    assert _refusal(tmp_path, monkeypatch, listing=entries, calls=calls) == (
+    jobs = {123999: plan_jobs(123999)}
+    assert _refusal(tmp_path, monkeypatch, listing=entries, calls=calls, jobs=jobs) == (
         f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
         f"(run 123999 is). {REMEDY}"
     )

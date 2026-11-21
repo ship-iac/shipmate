@@ -2704,13 +2704,22 @@ def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
     ("autoplans", "newest"),
     [
         pytest.param(_autoplans(RUN, "4243"), "run 4243", id="newer"),
+        pytest.param(
+            _autoplans(RUN, "4243", status="completed", conclusion="success", run_attempt=1),
+            "run 4243",
+            id="newer-ended",
+        ),
         pytest.param(_autoplans(), "not listed", id="none"),
     ],
 )
 def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
     """Mutation: `min` for `max` in `newest_autoplan` (newer passes). Mutation: skip the
-    comparison when nothing is listed (`newest is not None and ...`: none passes)."""
+    comparison when nothing is listed (`newest is not None and ...`: none passes). Mutation:
+    `deferred` returns True (newer-ended's planned jobs read run 4243 past, and run `RUN`
+    passes)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
+    if '"completed"' in autoplans:
+        gh.on(jobs_listing(4243), plan_jobs(4243))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the newest autoplan of {HEAD} is {newest}, not plan run {RUN}, which "
         f"this auto apply applies; {RETRY}"

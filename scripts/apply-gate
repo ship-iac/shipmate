@@ -40,6 +40,7 @@ from _shipmate import (
     plan_runs_since,
     retried,
     run_annotated,
+    run_jobs,
 )
 
 #: The prefix keeps the gate's pending-apply queue off the plan checks on the same head.
@@ -462,9 +463,27 @@ def autoplan_runs(repo, head, *, run):
 
 
 def newest_autoplan(repo, head, *, run):
-    """The `autoplan_runs` entry with the greatest `id`, or None when none is listed. Retries and
-    raises as `autoplan_runs` does."""
-    return max(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], default=None)
+    """The `autoplan_runs` entry with the greatest `id` that did not defer, or None when none
+    is listed. Walking down by id, a run is read past only when it is listed `completed` with
+    conclusion `success`, an older run is listed, and its jobs (`run_jobs`, through `run`), every
+    one at the listed `run_attempt`, are `deferred`: it planned nothing and left the head the
+    older run's plan. Jobs at another attempt are not deferred, as a re-run turned the run live.
+    Retries and raises as `autoplan_runs` does, and raises `ValueError` on an incomplete jobs
+    listing or one `deferred` cannot read."""
+    runs = sorted(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], reverse=True)
+    for listed in runs[:-1]:
+        if not _deferred_run(repo, listed, run):
+            return listed
+    return runs[-1] if runs else None
+
+
+def _deferred_run(repo, listed, run):
+    if (listed.get("status"), listed.get("conclusion")) != ("completed", "success"):
+        return False
+    jobs, complete = run_jobs(repo, listed["id"], run)
+    if not complete:
+        raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
+    return all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs) and deferred(jobs)
 
 
 def planned(jobs):
@@ -484,6 +503,20 @@ def planned(jobs):
     if status != "completed":
         raise ValueError(f"job {CALLER_PREFIX}detect is {status!r} in a run that has ended")
     return conclusion == "success"
+
+
+def deferred(jobs):
+    """Whether a plan run deferred to an earlier plan of its head, from `jobs`, a listing as
+    `planned` takes: exactly one `CALLER_PREFIX + "defer"` job `completed` `success` and exactly
+    one `CALLER_PREFIX + "detect"` job `completed` `skipped`. A draft-skipped run lists `defer`
+    skipped. Raises `ValueError` on two jobs of either name."""
+    found = {}
+    for name in ("defer", "detect"):
+        named = [j for j in jobs if j.get("name") == CALLER_PREFIX + name]
+        if len(named) > 1:
+            raise ValueError(f"{len(named)} jobs are named {CALLER_PREFIX}{name}")
+        found[name] = [(j.get("status"), j.get("conclusion")) for j in named]
+    return found == {"defer": [("completed", "success")], "detect": [("completed", "skipped")]}
 
 
 def status_and_conclusion(listed, what):
