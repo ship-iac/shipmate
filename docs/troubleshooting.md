@@ -2470,13 +2470,14 @@ comment `shipmate apply`.
 
 The `auto` run's `detect` refused before any wave, and nothing applied. An
 `auto` run must run as the shipmate App's bot login, `<slug>[bot]` compared
-whole, where `<slug>` comes from the App-authored check runs on the head. Only a
+whole, where `<slug>` comes from the App-authored check runs on the head other
+than `shipmate / apply run`. Only a
 plan run's `summary` job dispatches `verb: auto`, with an App token; a run whose
 actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
 included, was dispatched by something else. A "Re-run all jobs" of an `auto` run
 runs with the re-runner as its triggering actor and refuses; do not re-run an
 `auto` run. "Re-run failed jobs" keeps the passed `detect`, so each wave cell
-refuses instead with `an apply is never re-run (run attempt '<n>')`. With no App-authored check on the head there is no slug to compare.
+refuses instead with `an apply is never re-run (run attempt '<n>')`. With no such check on the head there is no slug to compare.
 Comment `shipmate apply` on the pull request, or push when the head carries no
 apply checks yet.
 
