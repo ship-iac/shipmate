@@ -13,11 +13,11 @@ from _loader import step_by
 _ACTION = "setup"
 
 _TM_KEY = (
-    "shipmate-tools-${{ runner.os }}-${{ runner.arch }}-terramate-"
+    "shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-terramate-"
     "${{ steps.versions.outputs.terramate }}"
 )
 _TOFU_KEY = (
-    "shipmate-tools-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}"
+    "shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}"
 )
 _TM_WITH = {"path": "${{ runner.temp }}/terramate-release", "key": _TM_KEY}
 _TOFU_WITH = {"path": "${{ runner.temp }}/tofu-release", "key": _TOFU_KEY}
@@ -39,7 +39,7 @@ _EXPECTED = {
     "Save the Terramate release": {
         "name": "Save the Terramate release",
         "if": (
-            "${{ inputs.cache-save != 'false' && "
+            "${{ inputs.cache-save == 'true' && "
             "steps.terramate-cache.outputs.cache-hit != 'true' }}"
         ),
         "continue-on-error": True,
@@ -49,7 +49,7 @@ _EXPECTED = {
     "Save the OpenTofu release": {
         "name": "Save the OpenTofu release",
         "if": (
-            "${{ inputs.tofu != 'false' && inputs.cache-save != 'false' && "
+            "${{ inputs.tofu != 'false' && inputs.cache-save == 'true' && "
             "steps.tofu-cache.outputs.cache-hit != 'true' }}"
         ),
         "continue-on-error": True,
@@ -67,7 +67,8 @@ def test_each_cache_step_is_pinned_whole(name):
     Mutations: add `restore-keys: shipmate-tools-` to a restore; drop
     `-${{ steps.versions.outputs.tofu }}` from a key; change one save's `path:` so it no longer
     equals its restore's; drop `continue-on-error` from a save; drop the `cache-hit` clause from
-    a save `if:`; prefix `always() &&` to a save `if:`.
+    a save `if:`; prefix `always() &&` to a save `if:`; `== 'true'` -> `!= 'false'` in the
+    Terramate save `if:`.
     """
     step = dict(step_by(_ACTION, name=name))
     step["uses"] = step["uses"].split("@")[0]

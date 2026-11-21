@@ -1294,9 +1294,10 @@ Three properties of these jobs bound what that code reaches:
   it.** Each of the three checkouts sets `persist-credentials: false`, which
   removes only the token's copy in the checkout's git configuration. Treat the
   job token in the table as held by the pull request's code.
-- **Plan, unlock and apply cells cannot write the Actions cache.** `plan.yml`
-  and `unlock.yml` declare `cache-mode: read`, as does each apply cell's
-  `apply` job, and the cache service enforces it on the job's token: a save
+- **Plan and unlock runs, apply cells and an apply run's `detect` job cannot
+  write the Actions cache.** `plan.yml` and `unlock.yml` declare
+  `cache-mode: read`, as do each apply cell's `apply` job and an apply run's
+  `detect` job, and the cache service enforces it on the job's token: a save
   that got past `actions/cache` was refused (measured). An apply cell's state
   reaches the cache only through the cell's `save` job, which runs no
   pull-request code and saves only the bytes whose digest the `apply` job
@@ -1394,17 +1395,18 @@ The engine's own fork handling does not change: a fork's pull request starts `fa
   planted tool entry costs each job a download until it is deleted, never an
   unverified release file. `actions/cache` restores an entry with `tar -P`,
   though, so a crafted tool or provider entry can write files outside its cache
-  directory, which nothing verifies; writing one takes a job that
-  saves in the default branch's scope: a job of an apply, deploy or drift run
-  other than an apply cell's `apply` job.
+  directory, which nothing verifies. Only jobs running the default branch's
+  merged code write tool and provider entries (a merge deploy's `detect` and
+  `warm` jobs and drift cells), so a crafted entry takes a merge or write
+  access to the default branch.
   `setup` replaces a restored release directory or file that is a symlink,
   unreadable or not a regular file; that handles a corrupt or stale entry and is
   no defence here, because the extraction has already run.
-  Plan and unlock runs and apply cells' `apply` jobs cannot save
-  (`cache-mode: read`). Reaching this takes
-  write access and such an environment, or the App private key, which can
-  approve a pull request and so opens any environment gated only by an approval
-  count (see "The gate is an assertion, not a proof"). The cache is per
+  Plan and unlock runs, an apply run's `detect` and apply cells' `apply` jobs
+  cannot save (`cache-mode: read`). Planting a state entry takes write access
+  and such an environment, or the App private key, which can approve a pull
+  request and so opens any environment gated only by an approval count (see
+  "The gate is an assertion, not a proof"). The cache is per
   repository: put the environments that apply without approval in their own
   repository to keep it from reaching the cells of your other environments.
   Reading an entry is not this

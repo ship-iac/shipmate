@@ -67,7 +67,10 @@ APPLY_RUN_OUTPUTS = {
 }
 
 #: Hand-written: the `apply-run.yml` actionlint ignore list, whole.
-APPLY_RUN_IGNORES = [r'property "result" is not defined in object type \{outputs: ']
+APPLY_RUN_IGNORES = [
+    r'property "result" is not defined in object type \{outputs: ',
+    'unexpected key "cache-mode" for "job" section',
+]
 #: actionlint 1.7.12's message for `jobs.review.result` in a `workflow_call` output, and for a
 #: misspelt property in the same place, copied from runs of the release binary.
 ACTIONLINT_RESULT_MESSAGE = (
@@ -101,9 +104,10 @@ def test_apply_run_exports_exactly_these_outputs():
     assert workflow_yaml("apply-run.yml")["on"]["workflow_call"]["outputs"] == APPLY_RUN_OUTPUTS
 
 
-def test_actionlint_ignores_only_the_result_property_in_apply_run():
-    """Python `re.search` stands in for actionlint's Go regexp; the entry uses no syntax where
-    they differ. Mutation: widen the entry to `'property "[a-z]+" is not defined'` -- red."""
+def test_actionlint_ignores_only_result_and_cache_mode_in_apply_run():
+    """Python `re.search` stands in for actionlint's Go regexp; the entries use no syntax where
+    they differ. Mutations: widen the first entry to `'property "[a-z]+" is not defined'` -- red;
+    drop the `cache-mode` entry -- red."""
     config = workflow_yaml(ENGINE / ".github" / "actionlint.yaml")
     ignores = config["paths"][".github/workflows/apply-run.yml"]["ignore"]
     assert ignores == APPLY_RUN_IGNORES

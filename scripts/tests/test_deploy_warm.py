@@ -48,7 +48,10 @@ EXPECTED_WARM = {
             "uses": _CHECKOUT,
             "with": {"ref": "${{ github.sha }}", "persist-credentials": False},
         },
-        {"uses": "$/actions/setup", "with": {"versions": "${{ needs.detect.outputs.tools }}"}},
+        {
+            "uses": "$/actions/setup",
+            "with": {"cache-save": "true", "versions": "${{ needs.detect.outputs.tools }}"},
+        },
         {
             "if": "${{ matrix.stack != '' }}",
             "uses": "$/actions/warm",
@@ -68,7 +71,7 @@ def test_warm_is_a_degrade_matrix_over_detects_rows():
     tools-only row needs; drop the checkout's `if:`, which a tools-only row skips; drop
     `max-parallel`; drop `fail-fast: false`; drop `continue-on-error`; `runs-on: ubuntu-slim`;
     `permissions: {}`; drop the checkout's `ref:`; add `tofu: "false"` to its setup step; drop
-    `consumer-secrets` from its warm step."""
+    `cache-save: "true"` from its setup step; drop `consumer-secrets` from its warm step."""
     assert workflow_jobs("deploy.yml").get("warm") == EXPECTED_WARM
 
 
