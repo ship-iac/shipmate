@@ -130,14 +130,14 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
 
     A check names its env only in its name, and after the merge no env set holds the one a
     stack lost (under `folder` or `workspace` a table may declare none), so the env is read
-    back with `parse_check_name`, taken only when it is an env name."""
+    back with `parse_check_name`; a name outside its grammar is skipped."""
     cells = {(c["stack"], c["environment"]) for c in tree}
     scanned = {s for s, _ in cells} | set(unmanaged)
     stranded = [
         name
         for name in open_names
-        for stack, env in [ad.ag.parse_check_name(name)]
-        if stack in scanned and bm.ec.is_env_name(env) and (stack, env) not in cells
+        for parsed in [ad.ag.parse_check_name(name)]
+        if parsed and parsed[0] in scanned and parsed not in cells
     ]
     if not stranded:
         return

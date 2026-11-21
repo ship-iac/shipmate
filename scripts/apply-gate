@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Judge the `apply / <stack> / <env>` checks on a commit.
+"""Judge the `apply / <env> / <stack>` checks on a commit.
 
 Reads check-runs as JSON Lines on stdin (one check-run object per line, as
 emitted by `gh api --paginate ... --jq '.check_runs[]'`) and prints the run
@@ -30,6 +30,7 @@ import sys
 import urllib.parse
 
 from _shipmate import (
+    _load,
     decoded,
     gh_json,
     is_head_sha,
@@ -40,6 +41,8 @@ from _shipmate import (
     retried,
     run_annotated,
 )
+
+ec = _load("env-config")
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
@@ -68,17 +71,23 @@ def env_pr_number():
 
 
 def check_name(stack, env):
-    """The apply check's name, `apply / <stack> / <env>`; `parse_check_name` inverts it.
-    The format persists: after a merge, the env a stack lost exists only in its check's name.
+    """The apply check's name, `apply / <env> / <stack>`; `parse_check_name` inverts it.
+    The format changes only in a breaking release: after a merge, an open check's name is the
+    only record of an env its stack lost, and a check written in another format is not read.
     `stack` is the stack path, so a deploy that knows only the path rebuilds it exactly."""
-    return f"{APPLY_PREFIX}{stack} / {env}"
+    return f"{APPLY_PREFIX}{env} / {stack}"
 
 
 def parse_check_name(name):
-    """`(stack, env)` of the apply check name `name`. An env name holds no ` / `, so the env
-    is the text after the last one."""
-    stack, _, env = name.removeprefix(APPLY_PREFIX).rpartition(" / ")
-    return stack, env
+    """`(stack, env)` of the apply check name `name`, or None when `name` is outside the
+    grammar: no `APPLY_PREFIX`, a first segment that is no env name, or an empty stack. An env
+    name holds no ` / ` and a stack path may, so the env is the text before the first one.
+    Shape cannot tell an old-order one-segment name from a new one: `apply / dns / dev-us`
+    parses as stack `dev-us` in env `dns`."""
+    if not name.startswith(APPLY_PREFIX):
+        return None
+    env, _, stack = name.removeprefix(APPLY_PREFIX).partition(" / ")
+    return (stack, env) if ec.is_env_name(env) and stack else None
 
 
 def cell_job_name(stack, env):

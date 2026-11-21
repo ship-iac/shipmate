@@ -18,20 +18,51 @@ def _run(name, status, conclusion, started_at="2026-07-18T10:00:00Z", run_id=1):
     }
 
 
-_EU = "apply / stacks/app / dev-eu"
-_US = "apply / stacks/app / dev-us"
+_EU = "apply / dev-eu / stacks/app"
+_US = "apply / dev-us / stacks/app"
 
 
 def test_the_cell_names_are_these_whole_values():
-    """Mutations: `parse_check_name` returns `(env, stack)` or keeps the `apply / ` prefix;
-    `plan_check_name` drops `CALLER_PREFIX`; a step name or the held title changes."""
-    assert ag.parse_check_name("apply / stacks/app / dev-eu") == ("stacks/app", "dev-eu")
+    """Mutations: `check_name` returns `<stack> / <env>`; `parse_check_name` returns
+    `(env, stack)`, keeps the `apply / ` prefix or splits on the last ` / ` (a stack holding
+    ` / ` then misparses); `plan_check_name` drops `CALLER_PREFIX`; a step name or the held
+    title changes."""
+    assert ag.check_name("stacks/app", "dev-eu") == "apply / dev-eu / stacks/app"
+    assert ag.parse_check_name("apply / dev-eu / stacks/app") == ("stacks/app", "dev-eu")
+    assert ag.parse_check_name("apply / dev / stacks/a / x") == ("stacks/a / x", "dev")
     assert ag.plan_check_name("stacks/app", "dev-eu") == "plan / dev-eu / stacks/app"
     assert (ag.PRE_APPLY_STEP, ag.APPLY_STEP, ag.HELD_TITLE) == (
         "Pre-apply check",
         "Apply the cell",
         "State not saved",
     )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "apply / stacks/app / dev-eu",
+        "plan / dev-eu / stacks/app",
+        "apply / dev-eu",
+        "apply / dev-eu / ",
+        "apply / Dev / stacks/app",
+        "dev-eu / stacks/app",
+        "",
+    ],
+)
+def test_a_name_outside_the_grammar_parses_to_none(name):
+    """An old-order name, a plan check name, a name without a stack, an environment outside
+    the charset, a name without the prefix and the empty string each parse to None.
+    Mutations: fall back to the old order when the first segment is no environment name; drop
+    the `is_env_name` check; drop the prefix check; drop the empty-stack check."""
+    assert ag.parse_check_name(name) is None
+
+
+def test_a_one_segment_stack_parses_env_first():
+    """A one-segment stack parses like any other. An old-order one-segment name, `apply / dns
+    / dev-us`, parses the same way, as stack `dev-us` in environment `dns`: shape cannot tell
+    the two orders apart. Mutation: reject a stack without `/`."""
+    assert ag.parse_check_name("apply / dev-us / dns") == ("dns", "dev-us")
 
 
 @pytest.mark.parametrize(
@@ -87,8 +118,8 @@ def test_held_names_are_the_newest_in_progress_runs_titled_held():
         {**_run(_EU, "in_progress", None, run_id=1), **held},
         {**_run(_US, "in_progress", None, run_id=2), **held},
         _run(_US, "completed", "success", run_id=3),
-        {**_run("apply / stacks/db / dev-eu", "completed", "failure", run_id=4), **held},
-        {**_run("apply / stacks/net / dev-eu", "in_progress", None, run_id=5), "output": None},
+        {**_run("apply / dev-eu / stacks/db", "completed", "failure", run_id=4), **held},
+        {**_run("apply / dev-eu / stacks/net", "in_progress", None, run_id=5), "output": None},
     ]
     assert ag.held_names(runs) == {_EU}
 
@@ -337,29 +368,29 @@ def test_verdict(runs, expected):
 
 
 def test_done_names_excludes_completed_failure():
-    runs = [_run("apply / stacks/app / dev-eu", "completed", "failure")]
+    runs = [_run("apply / dev-eu / stacks/app", "completed", "failure")]
     assert ag.done_names(runs) == set()
 
 
 def test_done_names_includes_completed_success_and_neutral():
     runs = [
-        _run("apply / stacks/app / dev-eu", "completed", "success"),
-        _run("apply / stacks/app / dev-us", "completed", "neutral"),
+        _run("apply / dev-eu / stacks/app", "completed", "success"),
+        _run("apply / dev-us / stacks/app", "completed", "neutral"),
     ]
-    assert ag.done_names(runs) == {"apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"}
+    assert ag.done_names(runs) == {"apply / dev-eu / stacks/app", "apply / dev-us / stacks/app"}
 
 
 def test_done_names_uses_latest_run_per_name():
     runs = [
         _run(
-            "apply / stacks/app / dev-eu",
+            "apply / dev-eu / stacks/app",
             "completed",
             "success",
             started_at="2026-07-18T10:00:00Z",
             run_id=1,
         ),
         _run(
-            "apply / stacks/app / dev-eu",
+            "apply / dev-eu / stacks/app",
             "queued",
             None,
             started_at="2026-07-18T11:00:00Z",
@@ -392,14 +423,14 @@ def test_latest_by_name_handles_missing_started_at_key():
     # latest_by_name must tolerate its absence.
     runs = [
         {
-            "name": "apply / stacks/app / dev-eu",
+            "name": "apply / dev-eu / stacks/app",
             "status": "completed",
             "conclusion": "success",
             "id": 1,
         },
     ]
     latest = ag.latest_by_name(runs)
-    assert latest["apply / stacks/app / dev-eu"]["id"] == 1
+    assert latest["apply / dev-eu / stacks/app"]["id"] == 1
 
 
 def test_latest_by_name_handles_missing_id_key():
@@ -407,14 +438,14 @@ def test_latest_by_name_handles_missing_id_key():
     # becomes a plain `run["id"]`.
     runs = [
         {
-            "name": "apply / stacks/app / dev-eu",
+            "name": "apply / dev-eu / stacks/app",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",
         },
     ]
     latest = ag.latest_by_name(runs)
-    assert latest["apply / stacks/app / dev-eu"]["started_at"] == "2026-07-18T10:00:00Z"
+    assert latest["apply / dev-eu / stacks/app"]["started_at"] == "2026-07-18T10:00:00Z"
 
 
 def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
@@ -426,21 +457,21 @@ def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
     run's real timestamp, the completed run wins, and unapplied work is silently marked
     done."""
     older_completed = {
-        "name": "apply / stacks/app / dev-eu",
+        "name": "apply / dev-eu / stacks/app",
         "status": "completed",
         "conclusion": "success",
         "started_at": "2026-07-18T10:00:00Z",
         "id": 1,
     }
     newer_queued_null = {
-        "name": "apply / stacks/app / dev-eu",
+        "name": "apply / dev-eu / stacks/app",
         "status": "queued",
         "conclusion": None,
         "started_at": None,
         "id": 2,
     }
     latest = ag.latest_by_name([older_completed, newer_queued_null])
-    assert latest["apply / stacks/app / dev-eu"]["id"] == 2
+    assert latest["apply / dev-eu / stacks/app"]["id"] == 2
     assert ag.done_names([older_completed, newer_queued_null]) == set()
 
 
@@ -461,10 +492,10 @@ def test_latest_by_name_empty_prefix_gathers_all_latest_per_name():
     runs = [
         {"name": "plan / dev-eu / stacks/app", "id": 1, "html_url": "u1"},
         {"name": "plan / dev-eu / stacks/app", "id": 3, "html_url": "u3"},
-        {"name": "apply / stacks/app / dev-eu", "id": 2, "html_url": "u2"},
+        {"name": "apply / dev-eu / stacks/app", "id": 2, "html_url": "u2"},
     ]
     latest = ag.latest_by_name(runs, prefix="")
-    assert set(latest) == {"plan / dev-eu / stacks/app", "apply / stacks/app / dev-eu"}
+    assert set(latest) == {"plan / dev-eu / stacks/app", "apply / dev-eu / stacks/app"}
     assert latest["plan / dev-eu / stacks/app"]["html_url"] == "u3"
 
 
@@ -472,13 +503,13 @@ def test_latest_by_name_default_prefix_unchanged():
     runs = [
         {"name": "stacks/app / dev-eu", "id": 1},
         {
-            "name": "apply / stacks/app / dev-eu",
+            "name": "apply / dev-eu / stacks/app",
             "id": 2,
             "status": "completed",
             "conclusion": "success",
         },
     ]
-    assert set(ag.latest_by_name(runs)) == {"apply / stacks/app / dev-eu"}
+    assert set(ag.latest_by_name(runs)) == {"apply / dev-eu / stacks/app"}
 
 
 def _run_obj(name, status="completed", conclusion="success", id=1, app_id=999):
@@ -492,10 +523,10 @@ def _run_obj(name, status="completed", conclusion="success", id=1, app_id=999):
 
 
 def test_from_app_filters_foreign_and_missing_app():
-    ours = _run_obj("apply / stacks/app / dev-eu", app_id=999)
-    foreign = _run_obj("apply / stacks/app / dev-eu", id=2, app_id=15368)
+    ours = _run_obj("apply / dev-eu / stacks/app", app_id=999)
+    foreign = _run_obj("apply / dev-eu / stacks/app", id=2, app_id=15368)
     no_app = {
-        "name": "apply / stacks/app / dev-eu",
+        "name": "apply / dev-eu / stacks/app",
         "status": "completed",
         "conclusion": "success",
         "id": 3,
@@ -505,9 +536,9 @@ def test_from_app_filters_foreign_and_missing_app():
 
 def test_forged_newer_completed_duplicate_cannot_green_a_pending_name():
     pending = _run_obj(
-        "apply / stacks/app / dev-eu", status="queued", conclusion=None, id=10, app_id=999
+        "apply / dev-eu / stacks/app", status="queued", conclusion=None, id=10, app_id=999
     )
-    forged = _run_obj("apply / stacks/app / dev-eu", id=11, app_id=15368)
+    forged = _run_obj("apply / dev-eu / stacks/app", id=11, app_id=15368)
     runs = ag.from_app([pending, forged], "999")
     assert ag.verdict(runs) == "pending"
 
@@ -516,7 +547,7 @@ def test_from_app_empty_app_id_fails_loud():
     # An unset SHIPMATE_APP_ID renders as '', and int('') must not raw-traceback with a
     # ValueError that takes down the whole detect, gate or apply run. It fails loud with a
     # message naming the variable instead.
-    runs = [_run_obj("apply / stacks/app / dev-eu")]
+    runs = [_run_obj("apply / dev-eu / stacks/app")]
     with pytest.raises(SystemExit, match="SHIPMATE_APP_ID"):
         ag.from_app(runs, "")
 
@@ -526,11 +557,11 @@ def test_app_done_names_excludes_foreign_app_completed():
     internally must redden here. A foreign-App completed check (15368, github-actions) must
     never appear in the result, even though an App-authored one (999) for a different name
     does."""
-    ours = json.dumps(_run_obj("apply / stacks/app / dev-eu", id=1, app_id=999))
-    foreign = json.dumps(_run_obj("apply / stacks/app / dev-us", id=2, app_id=15368))
+    ours = json.dumps(_run_obj("apply / dev-eu / stacks/app", id=1, app_id=999))
+    foreign = json.dumps(_run_obj("apply / dev-us / stacks/app", id=2, app_id=15368))
     names = ag.app_done_names([ours, foreign], "999")
-    assert names == {"apply / stacks/app / dev-eu"}
-    assert "apply / stacks/app / dev-us" not in names
+    assert names == {"apply / dev-eu / stacks/app"}
+    assert "apply / dev-us / stacks/app" not in names
 
 
 def _ext(name, id, external_id, app_id=999, started_at="2026-07-18T10:00:00Z"):
@@ -558,19 +589,19 @@ def test_plan_records_newest_app_run_supplies_the_record():
     the higher id wins although it started earlier. Mutation: iterate
     `{r["name"]: r for r in app_runs(...)}` (last seen per name) instead of latest_by_name."""
     older = _ext(
-        "apply / stacks/app / dev-eu",
+        "apply / dev-eu / stacks/app",
         1,
         _record(plan_run="111", plan_sha256="a" * 64),
         started_at="2026-07-18T12:00:00Z",
     )
     newer = _ext(
-        "apply / stacks/app / dev-eu",
+        "apply / dev-eu / stacks/app",
         2,
         _record(plan_run="222", plan_sha256="b" * 64),
         started_at="2026-07-18T09:00:00Z",
     )
     assert ag.plan_records([newer, older], "999") == {
-        "apply / stacks/app / dev-eu": ("222", "b" * 64, "8")
+        "apply / dev-eu / stacks/app": ("222", "b" * 64, "8")
     }
 
 
@@ -583,28 +614,28 @@ def test_behind_names_reads_only_a_newest_app_record_whose_behind_is_true():
     Mutation: parse the lines without `from_app` -- `e` is listed, red."""
     behind = _record(behind=True, cells=1)
     lines = [
-        _ext("apply / a / dev-eu", 1, behind),
-        _ext("apply / b / dev-eu", 2, behind),
-        _ext("apply / b / dev-eu", 3, _record(plan_sha256="a" * 64)),
-        _ext("apply / c / dev-eu", 4, _record(behind="true")),
-        _ext("apply / d / dev-eu", 5, _record(behind=1)),
-        _ext("apply / e / dev-eu", 6, _record(plan_sha256="a" * 64)),
-        _ext("apply / e / dev-eu", 7, behind, app_id=15368),
+        _ext("apply / dev-eu / a", 1, behind),
+        _ext("apply / dev-eu / b", 2, behind),
+        _ext("apply / dev-eu / b", 3, _record(plan_sha256="a" * 64)),
+        _ext("apply / dev-eu / c", 4, _record(behind="true")),
+        _ext("apply / dev-eu / d", 5, _record(behind=1)),
+        _ext("apply / dev-eu / e", 6, _record(plan_sha256="a" * 64)),
+        _ext("apply / dev-eu / e", 7, behind, app_id=15368),
     ]
-    assert ag.behind_names(lines, "999") == {"apply / a / dev-eu"}
+    assert ag.behind_names(lines, "999") == {"apply / dev-eu / a"}
 
 
 def test_plan_records_ignores_foreign_app_even_when_newest():
     """Mutation: iterate `parse_jsonl(check_run_lines)` instead of `app_runs(...)`."""
-    ours = _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="111", plan_sha256="a" * 64))
+    ours = _ext("apply / dev-eu / stacks/app", 1, _record(plan_run="111", plan_sha256="a" * 64))
     foreign = _ext(
-        "apply / stacks/app / dev-eu",
+        "apply / dev-eu / stacks/app",
         2,
         _record(plan_run="222", plan_sha256="b" * 64),
         app_id=15368,
     )
     assert ag.plan_records([ours, foreign], "999") == {
-        "apply / stacks/app / dev-eu": ("111", "a" * 64, "8")
+        "apply / dev-eu / stacks/app": ("111", "a" * 64, "8")
     }
 
 
@@ -615,7 +646,7 @@ def test_plan_records_ignores_foreign_app_even_when_newest():
 def test_plan_records_unusable_external_id_is_absent(external_id):
     """Mutations: drop the `except json.JSONDecodeError` arm (the non-JSON cases raise); drop
     the `isinstance(record, dict)` guard (`"1" * 64` raises on `.get`)."""
-    line = _ext("apply / stacks/app / dev-eu", 1, external_id)
+    line = _ext("apply / dev-eu / stacks/app", 1, external_id)
     assert ag.plan_records([line], "999") == {}
 
 
@@ -631,24 +662,24 @@ def test_plan_records_unusable_external_id_is_absent(external_id):
 def test_plan_records_bad_plan_run_value_reads_as_none(record):
     """Mutation: keep any truthy `plan_run` (`plan_run if plan_run else None`); `"12x4"` and
     `1234` turn red."""
-    line = _ext("apply / stacks/app / dev-eu", 1, json.dumps(record))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": (None, None, None)}
+    line = _ext("apply / dev-eu / stacks/app", 1, json.dumps(record))
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": (None, None, None)}
 
 
 def test_plan_records_only_apply_prefixed_names():
     """latest_by_name's default prefix must not be overridden: a plan check with a well-formed
     record contributes nothing. Mutation: `latest_by_name(..., prefix="")`."""
-    apply_line = _ext("apply / stacks/app / dev-eu", 1, _record())
+    apply_line = _ext("apply / dev-eu / stacks/app", 1, _record())
     plan_line = _ext("stacks/app / dev-eu", 2, _record())
     assert ag.plan_records([apply_line, plan_line], "999") == {
-        "apply / stacks/app / dev-eu": ("111", None, "8")
+        "apply / dev-eu / stacks/app": ("111", None, "8")
     }
 
 
 def test_plan_records_reads_the_recorded_digest():
     """Mutation: read the digest from `record.get("fingerprint")`, also 64 lowercase hex."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", "c" * 64, "8")}
+    line = _ext("apply / dev-eu / stacks/app", 1, _record(plan_sha256="c" * 64))
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": ("111", "c" * 64, "8")}
 
 
 # 64 chars where the value is merely not lowercase hex, so a length-only substitute for the
@@ -660,30 +691,30 @@ def test_plan_records_reads_the_recorded_digest():
 )
 def test_plan_records_unusable_digest_reads_as_none(digest):
     """Mutation: the digest pattern `.{64}`; `"z" * 64` and `"C" * 64` turn red."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256=digest))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, "8")}
+    line = _ext("apply / dev-eu / stacks/app", 1, _record(plan_sha256=digest))
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": ("111", None, "8")}
 
 
 def test_plan_records_uppercase_digest_reads_as_none():
     """Explicit literal beside the parametrization: sha256sum on the runner prints lowercase,
     and the comparison at apply is a string equality, so an uppercase record would never match
     anyway. Mutation: the digest pattern `.{64}`."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="ABCDEF" + "a" * 58))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, "8")}
+    line = _ext("apply / dev-eu / stacks/app", 1, _record(plan_sha256="ABCDEF" + "a" * 58))
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": ("111", None, "8")}
 
 
 def test_plan_records_missing_digest_reads_as_none():
     """A record that carries no digest; with_plan_runs refuses on a falsy digest, so the slot
     is None, not a placeholder. Mutation: `else ""` for the digest slot."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record())
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, "8")}
+    line = _ext("apply / dev-eu / stacks/app", 1, _record())
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": ("111", None, "8")}
 
 
 @pytest.mark.parametrize("pr", ["8", "1", "4096"])
 def test_plan_records_reads_the_recorded_pull_request(pr):
     """Mutation: read the pull request from `record.get("plan_run")`, also decimal -- red."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64, pr=pr))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", "c" * 64, pr)}
+    line = _ext("apply / dev-eu / stacks/app", 1, _record(plan_sha256="c" * 64, pr=pr))
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": ("111", "c" * 64, pr)}
 
 
 # Each value is truthy or a non-string: "0" and "012" are not pull request numbers, 8 is a JSON
@@ -694,17 +725,17 @@ def test_plan_records_unusable_pull_request_reads_as_none(pr):
     """Mutation: keep any truthy `pr` (`pr if pr else None`); `"0"`, `"012"`, `"12a"`, `8` and
     `True` turn red. Mutation: drop the `isinstance(pr, str)` guard; `8` and `True` raise.
     Mutation: `re.fullmatch(r"[1-9][0-9]*", pr)` for `is_pr_number(pr)`; `"12345678901"` red."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64, pr=pr))
+    line = _ext("apply / dev-eu / stacks/app", 1, _record(plan_sha256="c" * 64, pr=pr))
     assert ag.plan_records([line], "999") == {
-        "apply / stacks/app / dev-eu": ("111", "c" * 64, None)
+        "apply / dev-eu / stacks/app": ("111", "c" * 64, None)
     }
 
 
 def test_plan_records_zero_pull_request_reads_as_none():
     """Explicit literal beside the parametrization: `"0"` is a decimal string, so only the
     leading-digit rule refuses it. Mutation: the pattern `[0-9]+`."""
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(pr="0"))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, None)}
+    line = _ext("apply / dev-eu / stacks/app", 1, _record(pr="0"))
+    assert ag.plan_records([line], "999") == {"apply / dev-eu / stacks/app": ("111", None, None)}
 
 
 def _plan_runs_stdout(monkeypatch, capsys, *lines):
@@ -722,14 +753,14 @@ def test_main_prints_the_run_projection(monkeypatch, capsys):
     out = _plan_runs_stdout(
         monkeypatch,
         capsys,
-        _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="777")),
-        _ext("apply / stacks/api / dev-eu", 2, LEGACY_HEX),
-        _ext("apply / stacks/dns / dev-eu", 3, json.dumps({"plan_sha256": "c" * 64})),
+        _ext("apply / dev-eu / stacks/app", 1, _record(plan_run="777")),
+        _ext("apply / dev-eu / stacks/api", 2, LEGACY_HEX),
+        _ext("apply / dev-eu / stacks/dns", 3, json.dumps({"plan_sha256": "c" * 64})),
         _ext(
-            "apply / stacks/web / dev-eu", 4, _record(plan_run="778", plan_sha256="c" * 64, pr=None)
+            "apply / dev-eu / stacks/web", 4, _record(plan_run="778", plan_sha256="c" * 64, pr=None)
         ),
     )
-    assert out == '{"apply / stacks/app / dev-eu": "777", "apply / stacks/web / dev-eu": "778"}\n'
+    assert out == '{"apply / dev-eu / stacks/app": "777", "apply / dev-eu / stacks/web": "778"}\n'
 
 
 def test_main_is_identical_with_and_without_a_digest(monkeypatch, capsys):
@@ -737,9 +768,9 @@ def test_main_is_identical_with_and_without_a_digest(monkeypatch, capsys):
     its record carries no digest, or an operator is told their plan does not exist. Both
     outputs are compared whole against the same hand-written literal. Mutation: project only
     records carrying both a run and a digest -- the digest-less one prints `{}`, red."""
-    expected = '{"apply / stacks/app / dev-eu": "111"}\n'
-    with_hash = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
-    without_hash = _ext("apply / stacks/app / dev-eu", 1, _record())
+    expected = '{"apply / dev-eu / stacks/app": "111"}\n'
+    with_hash = _ext("apply / dev-eu / stacks/app", 1, _record(plan_sha256="c" * 64))
+    without_hash = _ext("apply / dev-eu / stacks/app", 1, _record())
     assert _plan_runs_stdout(monkeypatch, capsys, with_hash) == expected
     assert _plan_runs_stdout(monkeypatch, capsys, without_hash) == expected
 
@@ -759,7 +790,7 @@ def _counted(name, id, plan_run, cells=_MISSING, status="queued", app_id=999):
     return json.dumps(run)
 
 
-_A, _B, _C = "apply / a / dev", "apply / b / dev", "apply / c / dev"
+_A, _B, _C = "apply / dev / a", "apply / dev / b", "apply / dev / c"
 
 
 @pytest.mark.parametrize(
