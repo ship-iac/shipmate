@@ -135,19 +135,23 @@ def stub(
 ):
     """`ra.run` over the head's autoplan runs (`autoplans`: listing rows, default run 9), the
     live dispatches (`dispatched`: runs, or a dict of `DISPATCH` index to a whole page), the
-    `jobs` of runs 9 and 12, their `artifacts` (names, or a list of whole pages), and each run's
-    `referenced_workflows` (`refs`, by run id). `fail` pairs an argv with a `SystemExit`
-    raised on its first call only. Returns the calls."""
+    `jobs` of runs 9 and 12 (one listing for both, or a dict by run id), their `artifacts`
+    (names, or a list of whole pages), and each run's `referenced_workflows` (`refs`, by run
+    id). `fail` pairs an argv with a `SystemExit` raised on its first call only. Returns the
+    calls."""
     calls = []
     autoplans = [autoplan()] if autoplans is None else autoplans
     jobs = JOBS if jobs is None else jobs
+    jobs = jobs if isinstance(jobs, dict) else {9: jobs, 12: jobs}
     refs = {9: REFS, 12: REFS} if refs is None else refs
     pages = artifact_pages(ARTIFACTS if artifacts is None else artifacts)
     answers = {json.dumps(AUTOPLANS): "".join(json.dumps(r) + "\n" for r in autoplans)}
     for i, read in enumerate(DISPATCH):
         answers[json.dumps(read)] = json.dumps(dispatch_page(dispatched, i))
     for rid in (9, 12):
-        answers[json.dumps(jobs_read(rid))] = json.dumps({"total_count": len(jobs), "jobs": jobs})
+        listed = jobs.get(rid, JOBS)
+        page = {"total_count": len(listed), "jobs": listed}
+        answers[json.dumps(jobs_read(rid))] = json.dumps(page)
         for n, page in enumerate(pages, 1):
             answers[json.dumps(artifacts_read(rid, n))] = json.dumps(page)
     for rid, listed in refs.items():
@@ -196,6 +200,55 @@ def test_the_newest_of_two_autoplan_runs_is_the_one_judged(slept, monkeypatch, c
     """Mutation: `min` for `max` in `newest_autoplan` -- run 9 prints."""
     calls = stub(monkeypatch, autoplans=[autoplan(9), autoplan(12)])
     assert (cli("decide"), capsys.readouterr(), calls) == (0, ("12\n", ""), happy_calls(12))
+
+
+#: A ready run that deferred to an earlier autoplan of its head, shaped as `deferred` reads it.
+DEFERRED = [
+    job("plan / claim", "skipped"),
+    job("plan / facts", "success"),
+    job("plan / defer", "success"),
+    job("plan / detect", "skipped"),
+    job("plan / summary", "skipped"),
+    job("plan / outcome", "skipped"),
+    job("plan / gate-hold", "skipped"),
+]
+
+
+def test_a_deferred_newest_autoplan_yields_to_the_older_run(slept, monkeypatch, capsys):
+    """Run 12 deferred and planned nothing, so run 9 holds the head's plan. Mutation: return the
+    newest listed run in `newest_autoplan` -- run 12 is judged and `did not plan`."""
+    calls = stub(
+        monkeypatch,
+        autoplans=[autoplan(9), autoplan(12, conclusion="success")],
+        jobs={9: JOBS, 12: DEFERRED},
+    )
+    assert (cli("decide"), capsys.readouterr(), calls, slept) == (
+        0,
+        ("9\n", ""),
+        [AUTOPLANS, jobs_read(12), *DISPATCH, jobs_read(9), artifacts_read(9), run_read(9)],
+        [],
+    )
+
+
+def test_the_deferred_run_read_is_not_retried(slept, monkeypatch, capsys):
+    """Mutation: drop `retry` at `newest_autoplan`'s `_deferred_run` call -- run 12's jobs are
+    read twice after a sleep and run 9 prints."""
+    calls = stub(
+        monkeypatch,
+        autoplans=[autoplan(9), autoplan(12, conclusion="success")],
+        jobs={9: JOBS, 12: DEFERRED},
+        fail=[(jobs_read(12), SystemExit(_TRANSIENT))],
+    )
+    assert (cli("decide"), capsys.readouterr(), calls, slept) == (
+        0,
+        (
+            "",
+            _TRANSIENT_WARNING
+            + notice("a read failed: the jobs of autoplan run 12 could not be listed"),
+        ),
+        [AUTOPLANS, jobs_read(12)],
+        [],
+    )
 
 
 def test_an_unfinished_newest_autoplan_is_not_re_run(slept, monkeypatch, capsys):
@@ -442,6 +495,22 @@ def test_an_engine_plan_yml_pin_that_differs_blocks(slept, monkeypatch, capsys, 
     )
 
 
+@pytest.mark.parametrize(
+    ("engine", "path"),
+    [
+        pytest.param("Acme/Engine", PLAN_YML, id="engine-cased"),
+        pytest.param("acme/engine", "ACME/Engine/.github/workflows/plan.yml@main", id="path-cased"),
+    ],
+)
+def test_the_engine_slug_matches_in_any_case(slept, monkeypatch, capsys, engine, path):
+    """`job.workflow_repository` may spell the slug otherwise than the caller's `uses:`.
+    Mutations: drop `.lower()` from `engine` -- engine-cased; from the referenced path's
+    `<owner>/<repo>` -- path-cased. Each reads the pin as missing."""
+    monkeypatch.setenv("SHIPMATE_ENGINE_REPO", engine)
+    calls = stub(monkeypatch, refs={9: [REFS[0], {"path": path, "sha": ENGINE_SHA}]})
+    assert (cli("decide"), capsys.readouterr(), calls) == (0, ("9\n", ""), happy_calls())
+
+
 @pytest.mark.parametrize("sha", ["", "C" * 40, "c" * 39], ids=["empty", "upper", "short"])
 def test_a_malformed_engine_sha_refuses_before_any_call(slept, monkeypatch, capsys, sha):
     """The autoplan's pin equals the malformed value, so only the format check refuses.
@@ -506,10 +575,10 @@ _TRANSIENT_WARNING = "::warning::command failed (1): gh api x | HTTP 502\n"
 )
 def test_decide_retries_no_read(slept, monkeypatch, capsys, site, stderr, calls):
     """The summary holds the head's gate-writer group, so a read fails once into a notice.
-    Mutations, each reddening its case: pass `retry=True` (or drop the pass-through in
-    `newest_autoplan`) -- autoplans; in `other_live_plan_run` -- live; in `attempt_jobs` --
-    jobs; in the artifacts `_pages` -- artifacts; in `_engine_sha` -- autoplan-run. Each reads
-    the site twice after a sleep and prints the run id."""
+    Mutations, each reddening its case: pass `retry=True` (or drop the pass-through at
+    `newest_autoplan`'s `autoplan_runs` call) -- autoplans; in `other_live_plan_run` -- live;
+    in `attempt_jobs` -- jobs; in the artifacts `_pages` -- artifacts; in `_engine_sha` --
+    autoplan-run. Each reads the site twice after a sleep and prints the run id."""
     got = stub(monkeypatch, fail=[(site, SystemExit(_TRANSIENT))])
     assert (cli("decide"), capsys.readouterr(), got, slept) == (0, ("", stderr), calls, [])
 

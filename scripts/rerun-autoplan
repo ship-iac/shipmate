@@ -32,7 +32,7 @@ it, and nothing on stdout:
    second upload of either fails;
 9. the run references the engine's `plan.yml` (`referenced_workflows`, the path before the
    last `@` equal to `<engine>/.github/workflows/plan.yml`) at `SHIPMATE_ENGINE_SHA`, compared
-   whole.
+   whole, the `<engine>` part in any case.
 
 `post <id>` lists the live plan runs again, counted, and sends nothing when row 3 fails; it
 then sends `POST runs/<id>/rerun-failed-jobs` once and prints the notice line, or the warning
@@ -102,8 +102,15 @@ def _engine_sha(repo, run_id, engine):
     """The `sha` of run `run_id`'s one `referenced_workflows` entry for the engine's `plan.yml`,
     or None."""
     refs = gh_json(f"repos/{repo}/actions/runs/{run_id}", run, retry=False)["referenced_workflows"]
-    path = f"{engine}/.github/workflows/plan.yml"
-    shas = [r["sha"] for r in refs if r["path"].rpartition("@")[0] == path]
+    # GitHub matches `<owner>/<repo>` in any case, and `job.workflow_repository` need not
+    # spell it as the caller's `uses:` does.
+    want = (engine.lower(), ".github/workflows/plan.yml")
+
+    def key(path):
+        parts = path.rpartition("@")[0].split("/", 2)
+        return "/".join(parts[:2]).lower(), parts[2] if len(parts) == 3 else ""
+
+    shas = [r["sha"] for r in refs if key(r["path"]) == want]
     return shas[0] if len(shas) == 1 and isinstance(shas[0], str) else None
 
 
