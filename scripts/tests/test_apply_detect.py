@@ -60,9 +60,8 @@ def test_workset_is_the_graph_paths_whose_apply_check_is_present():
 
 def test_workset_forward_constructs_the_name_and_never_parses_it():
     """Both paths must resolve. `components/app` contains the '/' that makes a split-on-'/'
-    parse wrong, and `a / b` is ambiguous under any rsplit of `apply / dev-eu / a / b` -- is
-    the stack "a" or "a / b"? Forward construction never has to decide, so neither path can be
-    misresolved."""
+    parse wrong, and `a / b` holds the ' / ' separator itself. Construction from the path binds
+    each cell to its own check, so neither path can be misresolved."""
     graph_paths = ["components/app", "a / b", "stacks/unplanned"]
     names = {"apply / dev-eu / components/app", "apply / dev-eu / a / b"}
     assert ad.paths_with_checks("dev-eu", graph_paths, names) == ["components/app", "a / b"]

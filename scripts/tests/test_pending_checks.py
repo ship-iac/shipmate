@@ -800,7 +800,8 @@ def test_each_changed_cells_plan_text_is_read_once(tmp_path, monkeypatch):
 
 
 #: sha256 of each body, serialized with sorted keys, that the engine published before
-#: `pending-checks` read each plan text once: captured off the tree, from the previous revision.
+#: `pending-checks` read each plan text once: the previous revision's bodies, recomputed with the
+#: check name env first after they reproduced the captured digests under the stack-first name.
 _BODY_DIGESTS = {
     "crlf": "cbf902fe3d0e606ae7a29ba009014ad43827722d9e7404ae257d4cc5f4ce1bd1",
     "cr": "d4412dc338c302eb4631edfbccdb3ef7308ff8f24c83852655caab7830d859c7",

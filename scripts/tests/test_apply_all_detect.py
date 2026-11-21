@@ -62,9 +62,8 @@ def test_cells_are_the_tree_candidates_whose_check_is_on_the_head_in_every_env()
 
 
 def test_cells_forward_construct_the_check_name_and_never_parse_it():
-    # `components/app` contains the '/' that makes a split-on-'/' parse wrong, and `a / b` is
-    # ambiguous under any rsplit of `apply / dev-eu / a / b` -- is the stack "a" or "a / b"?
-    # Forward construction never has to decide.
+    # `components/app` contains the '/' that makes a split-on-'/' parse wrong, and `a / b` holds
+    # the ' / ' separator itself. Construction from the path binds each cell to its own check.
     stacks_by_env = {"dev-eu": ["components/app", "a / b", "stacks/unplanned"]}
     names = {"apply / dev-eu / components/app", "apply / dev-eu / a / b"}
     cells = aad.cells_from_checks(names, stacks_by_env, dict.fromkeys(stacks_by_env["dev-eu"], []))

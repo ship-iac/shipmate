@@ -1138,22 +1138,46 @@ def test_main_skips_an_open_check_on_a_stack_the_scan_does_not_cover(tmp_path, m
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
-def test_a_name_whose_rest_is_no_env_name_is_not_the_stack_s_check(tmp_path, monkeypatch):
-    """`apply / dev-eu / stacks/app / x` is the check of a stack `stacks/app / x`, absent from
-    the scan; read against `stacks/app` its rest `x / dev-eu` is no env name. Mutation: drop
-    the `is_env_name` check -- the deploy refuses it."""
+def test_a_stack_holding_the_separator_is_not_its_first_segment_s_check(tmp_path, monkeypatch):
+    """`apply / prod / stacks/app / x` is the check of a stack `stacks/app / x`, absent from
+    the scan, not a `prod` check of `stacks/app`. Mutation: `parse_check_name` takes the
+    stack as `rest.split(" / ")[1]` -- the deploy refuses it as `stacks/app`'s stranded check."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
         cells=[],
         checks=[
             _apply_check("stacks/app", cells=2),
-            _apply_check("stacks/app / x", "dev-eu", cells=2),
+            _apply_check("stacks/app / x", "prod", cells=2),
         ],
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
+
+
+def test_a_stack_first_or_unparsable_open_name_does_not_refuse():
+    """A check named stack first, `apply / <stack> / <env>`, is outside the grammar, so
+    `stacks/app` losing its `env/dev` tag strands it with nothing said. Mutations:
+    `parse_check_name` reads the stack-first order as a fallback (refuses); index a None
+    parse instead of skipping it (raises)."""
+    assert (
+        dd.refuse_stranded_checks([], ["stacks/app"], {"apply / stacks/app / dev", "apply / x"}, [])
+        is None
+    )
+
+
+def test_an_env_first_stranded_name_refuses_naming_only_itself():
+    """The open names outside the grammar beside it go unnamed. Mutations: `parse_check_name`
+    reads the stack-first order as a fallback (`apply / stacks/app / dev` is named too); index
+    a None parse instead of skipping it (raises)."""
+    names = {"apply / dev / stacks/app", "apply / stacks/app / dev", "apply / x"}
+    with pytest.raises(SystemExit) as exc_info:
+        dd.refuse_stranded_checks([], ["stacks/app"], names, [])
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / dev / stacks/app: the stack of each lost its env/* tag "
+        "after this pull request was planned, so its reviewed change was not applied. " + _REMEDY
+    )
 
 
 def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path, monkeypatch):

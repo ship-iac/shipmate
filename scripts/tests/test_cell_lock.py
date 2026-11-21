@@ -709,17 +709,18 @@ def test_evict_cli_writes_both_sets_then_refuses(monkeypatch, tmp_path):
     assert gh.drained()
 
 
-def test_evict_stacks_round_trip_through_check_name():
-    """Mutations: drop the ` / <env>` strip (a stack keeps its env); accept another env's
-    name."""
+def test_evict_stacks_reads_only_its_envs_names_in_the_check_grammar():
+    """A stack-first name, another env's name and a plan check name evict nothing. Mutations:
+    `parse_check_name` reads the stack-first order as a fallback (`stacks/c` appears); drop
+    the env filter (`stacks/b` appears); index a None parse instead of skipping it (raises)."""
     names = {
         "apply / dev / stacks/a",
         "apply / dev / stacks/a / dev / x",
         "apply / dev-eu / stacks/b",
+        "apply / stacks/c / dev",
+        "plan / dev / stacks/d",
     }
-    stacks = cl.evict_stacks(names, "dev")
-    assert stacks == {"stacks/a", "stacks/a / dev / x"}
-    assert {ag.check_name(s, "dev") for s in stacks} == names - {"apply / dev-eu / stacks/b"}
+    assert cl.evict_stacks(names, "dev") == {"stacks/a", "stacks/a / dev / x"}
 
 
 def _all_locks(*entries):
