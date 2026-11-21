@@ -14,7 +14,7 @@ inputs:
     required: false
     default: "true"
   cache-save:
-    description: '"true" saves each release whose restore missed. Only jobs that run no pull-request code pass it.'
+    description: '"true" saves each release whose restore missed. Only jobs that run the default branch''s merged code pass it.'
     required: false
     default: "false"
 outputs:

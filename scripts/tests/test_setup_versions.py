@@ -163,8 +163,8 @@ _EXPECTED_INPUTS = {
     },
     "cache-save": {
         "description": (
-            '"true" saves each release whose restore missed. Only jobs that run no pull-request '
-            "code pass it."
+            '"true" saves each release whose restore missed. Only jobs that run the default '
+            "branch's merged code pass it."
         ),
         "required": False,
         "default": "false",
