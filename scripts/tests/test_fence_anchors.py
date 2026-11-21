@@ -61,13 +61,13 @@ def test_engine_secrets_are_chosen_once_and_unlock_and_release_keep_their_own():
     }
 
 
-def test_a_ready_or_dispatched_plan_run_queues_behind_the_run_in_flight():
-    """Mutations: `cancel-in-progress` restored to `github.event.action != 'ready_for_review'`;
-    `==` turned to `!=` in the `event_name` clause."""
+def test_a_ready_dispatched_or_rerun_plan_run_queues_behind_the_run_in_flight():
+    """Mutations: the `run_attempt` clause dropped; `'2'` for `'1'`; `!=` for its `==`;
+    `||` for the `&&` before it."""
     assert _jobs("shipmate")["plan"]["concurrency"] == {
         "group": "plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}",
         "cancel-in-progress": "${{ github.event_name == 'pull_request_target'"
-        " && github.event.action != 'ready_for_review' }}",
+        " && github.event.action != 'ready_for_review' && github.run_attempt == '1' }}",
     }
 
 
