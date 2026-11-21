@@ -153,9 +153,10 @@ def pusher_reason(repo, plan_run, *, run):
     push either, though the listed run does not say which event action started it (the
     dispatching summary admits only `opened` and `synchronize`); a ready-for-review run that
     completed after deferring to an earlier plan is never the listed run. A bot login has no
-    collaborator permission to read and refuses. Otherwise `collaborators/<login>/permission`, read through
-    `run`, is decided by `_permission_reason`; a failed or malformed read is an unreadable
-    permission. A missing or empty login refuses first. `plan_run` must be a mapping."""
+    collaborator permission to read and refuses. Otherwise `collaborators/<login>/permission`,
+    read through `run`, is decided by `_permission_reason`; a failed or malformed read is an
+    unreadable permission. A missing or empty login refuses first. `plan_run` must be a
+    mapping."""
     actor, trigger = (_login(plan_run.get(k)) for k in ("actor", "triggering_actor"))
     if not (actor and trigger):
         return (
