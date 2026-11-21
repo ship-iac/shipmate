@@ -1815,7 +1815,7 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
         # The shipmate App's own check runs (the apply checks) are kept via `app.id`.
         (
-            '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
+            '{"id": 4, "name": "apply / dev-eu / app", "started_at": "2026-07-26T10:00:00Z", '
             '"app_slug": "shipmate", "app": {"id": 999}}'
         ),
         # Third-party apps are dropped: they are outside the harvest's scope.
@@ -1826,7 +1826,7 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == [
         (2, "app / dev-eu"),
-        (4, "apply / app / dev-eu"),
+        (4, "apply / dev-eu / app"),
         (3, "dns / dev-eu"),
     ]
 
@@ -1847,11 +1847,11 @@ def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
         '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     apply_check = (
-        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "2026-07-26T11:30:00Z", '
+        '{"id": 3, "name": "apply / dev-eu / app", "started_at": "2026-07-26T11:30:00Z", '
         '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     assert doctor.latest_check_ids([autoplan, mirror, apply_check], app_id="999") == [
-        (3, "apply / app / dev-eu"),
+        (3, "apply / dev-eu / app"),
         (1, "plan / dev-eu / app"),
     ]
 
@@ -1862,16 +1862,16 @@ def test_the_app_is_matched_on_its_nested_app_id_alone():
     Mutation: match `run.get("app_id")` in `_parse_check_run` -- the apply row is lost."""
     lines = [
         '{"id": 2, "name": "app / dev-eu", "started_at": "t", "app": {"id": 999}}',
-        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "t", "app": {"id": 999}}',
+        '{"id": 3, "name": "apply / dev-eu / app", "started_at": "t", "app": {"id": 999}}',
     ]
-    assert doctor.latest_check_ids(lines, app_id="999") == [(3, "apply / app / dev-eu")]
+    assert doctor.latest_check_ids(lines, app_id="999") == [(3, "apply / dev-eu / app")]
 
 
 def test_a_check_run_whose_app_is_not_an_object_is_skipped_without_raising():
     """Mutation: read `run["app"]["id"]` unguarded in `_parse_check_run` -- TypeError."""
     lines = [
-        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "t", "app": "shipmate"}',
-        '{"id": 4, "name": "apply / db / dev-eu", "started_at": "t"}',
+        '{"id": 3, "name": "apply / dev-eu / app", "started_at": "t", "app": "shipmate"}',
+        '{"id": 4, "name": "apply / dev-eu / db", "started_at": "t"}',
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == []
     assert doctor.harvest_pending(lines, app_id="999") is False
@@ -2241,7 +2241,7 @@ def test_harvest_pending_ignores_third_party_check_runs():
 
 
 _QUEUED_APP_APPLY = (
-    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
+    '{"id": 3, "name": "apply / dev-eu / app", "app_slug": "shipmate", "app": {"id": 999}, '
     '"status": "queued"}'
 )
 
@@ -2525,7 +2525,7 @@ def test_each_call_carries_its_own_token(monkeypatch, tmp_path):
         {
             _HEAD_ARGV: _HEAD + "\n",
             _LISTING_ARGV: jsonl(
-                _workflow_run(1, "app / dev-eu"), _apply_check(9, "apply / app / dev-eu", "1281")
+                _workflow_run(1, "app / dev-eu"), _apply_check(9, "apply / dev-eu / app", "1281")
             ),
             _ann_argv(1): "[]",
             _ann_argv(9): "[]",
@@ -2562,7 +2562,7 @@ def test_a_check_run_in_the_projected_shape_yields_its_plan_run():
     line = json.dumps(
         {
             "id": 7,
-            "name": "apply / stacks/app / dev-eu",
+            "name": "apply / dev-eu / stacks/app",
             "status": "completed",
             "started_at": "2026-08-24T00:00:00Z",
             "external_id": json.dumps({"plan_run": "1281", "pr": "8"}),
@@ -2570,7 +2570,7 @@ def test_a_check_run_in_the_projected_shape_yields_its_plan_run():
         }
     )
     mapping = load_script("apply-gate").plan_records([line], "4326562")
-    assert mapping == {"apply / stacks/app / dev-eu": ("1281", None, "8")}
+    assert mapping == {"apply / dev-eu / stacks/app": ("1281", None, "8")}
 
 
 def test_the_plan_records_are_read_from_the_listing_before_any_download(monkeypatch, tmp_path):
@@ -2586,7 +2586,7 @@ def test_the_plan_records_are_read_from_the_listing_before_any_download(monkeypa
         return real(lines, app_id)
 
     monkeypatch.setattr(doctor.ag, "plan_records", recording)
-    listing = jsonl(_apply_check(9, "apply / app / dev-eu", "1281"))
+    listing = jsonl(_apply_check(9, "apply / dev-eu / app", "1281"))
     calls = _run_check_ids(
         monkeypatch,
         tmp_path,
@@ -2649,21 +2649,21 @@ def test_unreadable_plan_records_skip_the_downloads(monkeypatch, tmp_path, capsy
 #: check carries a legacy bare-hex record, naming no plan run.
 _PLANNED = [
     (
-        "apply / stacks/app / dev-eu",
+        "apply / dev-eu / stacks/app",
         1,
         json.dumps({"plan_run": "1281", "pr": "8"}),
     ),
     (
-        "apply / stacks/app / dev-eu",
+        "apply / dev-eu / stacks/app",
         2,
         json.dumps({"plan_run": "1290", "pr": "8"}),
     ),
     (
-        "apply / stacks/db / dev-us",
+        "apply / dev-us / stacks/db",
         3,
         json.dumps({"plan_run": "1281", "pr": "8"}),
     ),
-    ("apply / stacks/cache / dev-ap", 4, "b" * 64),
+    ("apply / dev-ap / stacks/cache", 4, "b" * 64),
 ]
 #: What each run's `cell-summary.<env>.<slug>` artifact holds. The two copies of the replanned
 #: cell differ only in the plan they describe, exactly as two runs of the same cell do.
@@ -7541,8 +7541,8 @@ def test_a_run_named_only_by_a_behind_record_is_not_downloaded(monkeypatch, tmp_
     Mutation: drop the behind filter -- 1300 is downloaded, red."""
     behind = {"pr": "8", "cells": 2, "behind": True}
     extra = (
-        ("apply / stacks/web / dev-eu", 5, json.dumps({"plan_run": "1300", **behind})),
-        ("apply / stacks/api / dev-eu", 6, json.dumps({"plan_run": "1290", **behind})),
+        ("apply / dev-eu / stacks/web", 5, json.dumps({"plan_run": "1300", **behind})),
+        ("apply / dev-eu / stacks/api", 6, json.dumps({"plan_run": "1290", **behind})),
     )
     _, run_ids = _download_cells(monkeypatch, tmp_path, extra=extra)
     assert run_ids == "plan_run_ids=1281 1290"

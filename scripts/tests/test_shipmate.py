@@ -294,7 +294,7 @@ def test_check_runs_narrows_to_one_name_url_encoded():
     """A name holds spaces and slashes. Mutations, each run: drop the `name` query; quote the
     name with the default `safe="/"`."""
     calls, run = _recording()
-    check_runs("o/r", _SHA, run=run, name="apply / stacks/a / dev")
+    check_runs("o/r", _SHA, run=run, name="apply / dev / stacks/a")
     assert calls == [
         [
             "gh",
@@ -302,7 +302,7 @@ def test_check_runs_narrows_to_one_name_url_encoded():
             "--paginate",
             (
                 f"repos/o/r/commits/{_SHA}/check-runs?filter=all&per_page=100"
-                "&check_name=apply%20%2F%20stacks%2Fa%20%2F%20dev"
+                "&check_name=apply%20%2F%20dev%20%2F%20stacks%2Fa"
             ),
             "--jq",
             ".check_runs[]",

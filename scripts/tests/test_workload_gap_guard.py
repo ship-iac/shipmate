@@ -68,7 +68,7 @@ def _spy(monkeypatch, bm):
 
 
 def _done(stack, env="dev-eu"):
-    return check_run(name=f"apply / {stack} / {env}")
+    return check_run(name=f"apply / {env} / {stack}")
 
 
 def test_the_plan_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
@@ -163,7 +163,7 @@ def test_the_unlock_refuses_over_the_queue_only(monkeypatch, tmp_path):
     tud._stub_unlock_tree(
         monkeypatch,
         tud._DEV_EU_CELLS,
-        [check_run(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None)],
+        [check_run(name="apply / dev-eu / stacks/app", status="in_progress", conclusion=None)],
     )
     tud.ud.main()
     assert calls == [
@@ -269,7 +269,7 @@ def test_the_unlock_refuses_an_outside_tag_only_on_a_queued_cell(monkeypatch, tm
     tud._stub_unlock_tree(
         monkeypatch,
         [{"stack": "stacks/app", "environment": "dev-eu", "workload": "app"}],
-        [check_run(name="apply / stacks/app / dev-eu", **status)],
+        [check_run(name="apply / dev-eu / stacks/app", **status)],
     )
     if pending:
         with pytest.raises(SystemExit) as exc:

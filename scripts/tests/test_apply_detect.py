@@ -49,9 +49,9 @@ def test_workset_is_the_graph_paths_whose_apply_check_is_present():
     # an artifact but carrying no check is not applied, and a check for another env is not this
     # env's work.
     names = {
-        "apply / stacks/app / dev-eu",
-        "apply / stacks/dns / dev-eu",
-        "apply / stacks/platform / dev-us",
+        "apply / dev-eu / stacks/app",
+        "apply / dev-eu / stacks/dns",
+        "apply / dev-us / stacks/platform",
         "plan / stacks/platform / dev-eu",
     }
     graph_paths = ["stacks/app", "stacks/dns", "stacks/platform"]
@@ -60,11 +60,11 @@ def test_workset_is_the_graph_paths_whose_apply_check_is_present():
 
 def test_workset_forward_constructs_the_name_and_never_parses_it():
     """Both paths must resolve. `components/app` contains the '/' that makes a split-on-'/'
-    parse wrong, and `a / b` is ambiguous under any rsplit of `apply / a / b / dev-eu` -- is
+    parse wrong, and `a / b` is ambiguous under any rsplit of `apply / dev-eu / a / b` -- is
     the stack "a" or "a / b"? Forward construction never has to decide, so neither path can be
     misresolved."""
     graph_paths = ["components/app", "a / b", "stacks/unplanned"]
-    names = {"apply / components/app / dev-eu", "apply / a / b / dev-eu"}
+    names = {"apply / dev-eu / components/app", "apply / dev-eu / a / b"}
     assert ad.paths_with_checks("dev-eu", graph_paths, names) == ["components/app", "a / b"]
 
 
@@ -147,7 +147,7 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
             pr_number=PR_NUMBER,
         )
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu: "
+        "::error::apply aborted: no plan-text digest recorded for apply / dev-eu / stacks/dns: "
         "the reviewed plan text cannot be checked against the plan that would be applied, so "
         "this apply is refused rather than run unverified. Re-plan these stacks on their pull "
         "request, then apply again; if that pull request has already merged, a new pull "
@@ -164,7 +164,7 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, _lines(_APP_CHECK), APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu: the "
+        "::error::apply aborted: no plan run recorded for apply / dev-eu / stacks/dns: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "
         "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
         "then apply again; if that pull request has already merged, a new pull request "
@@ -177,7 +177,7 @@ def test_filter_pending_drops_completed():
         {"stack": "stacks/app", "environment": "dev-eu"},
         {"stack": "stacks/dns", "environment": "dev-eu"},
     ]
-    completed = {"apply / stacks/dns / dev-eu"}
+    completed = {"apply / dev-eu / stacks/dns"}
     kept = ad.filter_pending(cells, completed)
     assert [c["stack"] for c in kept] == ["stacks/app"]
 
@@ -358,7 +358,7 @@ def test_workset_never_resolves_a_slug_back_to_a_stack():
     is in the workset. A pull request adding `a-b` beside an unchanged `a/b` never shows the
     pair to build-matrix's plan-time collision guard, since `a/b` is not in `terramate list
     --changed`, so this is the whole protection: nothing here resolves a name back to a path."""
-    assert ad.paths_with_checks("dev-eu", ["a/b", "a-b"], {"apply / a-b / dev-eu"}) == ["a-b"]
+    assert ad.paths_with_checks("dev-eu", ["a/b", "a-b"], {"apply / dev-eu / a-b"}) == ["a-b"]
 
 
 def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
@@ -415,7 +415,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
         {"stacks/app": set()},
         [
             _apply_check("stacks/app", cells=1),
-            _check(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
+            _check(name="apply / dev-eu / stacks/app", id=2, app={"id": 15368}),
         ],
     )
     ad.main()
@@ -433,7 +433,7 @@ def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_
         {"stacks/app": set(), "stacks/dns": set()},
         [
             _apply_check("stacks/app", plan_run="42", cells=1),
-            _check(name="apply / stacks/dns / dev-eu", external_id="b" * 64),
+            _check(name="apply / dev-eu / stacks/dns", external_id="b" * 64),
         ],
     )
     ad.main()
@@ -452,7 +452,7 @@ def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
         {"stacks/app": set()},
         [
             _check(
-                name="apply / stacks/app / dev-eu",
+                name="apply / dev-eu / stacks/app",
                 conclusion="failure",
                 external_id=_record("42", cells=1),
             )
@@ -602,14 +602,14 @@ def test_duplicate_run_newer_queued_stays_pending():
     cells = [{"stack": "stacks/app", "environment": "dev-eu"}]
     checks = [
         {
-            "name": "apply / stacks/app / dev-eu",
+            "name": "apply / dev-eu / stacks/app",
             "status": "completed",
             "conclusion": "success",
             "started_at": "2026-07-18T10:00:00Z",
             "id": 1,
         },
         {
-            "name": "apply / stacks/app / dev-eu",
+            "name": "apply / dev-eu / stacks/app",
             "status": "queued",
             "conclusion": None,
             "started_at": "2026-07-18T11:00:00Z",
@@ -1002,8 +1002,8 @@ def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number="8")
     assert str(exc_info.value) == foreign_message(
-        "apply / stacks/app / dev-eu (plan run 41, pull request #7), "
-        "apply / stacks/dns / dev-eu (plan run 42, records no pull request)"
+        "apply / dev-eu / stacks/app (plan run 41, pull request #7), "
+        "apply / dev-eu / stacks/dns (plan run 42, records no pull request)"
     )
 
 
@@ -1014,7 +1014,7 @@ def test_a_record_with_no_plan_run_refuses_before_its_pull_request_is_compared()
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number="8")
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-eu: the "
+        "::error::apply aborted: no plan run recorded for apply / dev-eu / stacks/app: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "
         "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
         "then apply again; if that pull request has already merged, a new pull request "
@@ -1049,8 +1049,8 @@ def test_a_pull_request_number_is_compared_whole(recorded, dispatched):
         )
 
 
-_APP = "apply / stacks/app / dev-eu"
-_DNS = "apply / stacks/dns / dev-eu"
+_APP = "apply / dev-eu / stacks/app"
+_DNS = "apply / dev-eu / stacks/dns"
 
 
 def test_a_run_that_published_part_of_its_checks_refuses():
@@ -1284,7 +1284,7 @@ def test_main_refuses_a_pending_cell_recorded_for_another_pull_request(monkeypat
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value) == foreign_message(
-        "apply / stacks/app / dev-eu (plan run 123456, pull request #7)"
+        "apply / dev-eu / stacks/app (plan run 123456, pull request #7)"
     )
 
 
@@ -1298,7 +1298,7 @@ def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):
         {"stacks/app": set(), "stacks/dns": set()},
         [
             _apply_check("stacks/app", cells=1),
-            _check(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7", cells=1)),
+            _check(name="apply / dev-eu / stacks/dns", external_id=_record("42", pr="7", cells=1)),
         ],
     )
     ad.main()
@@ -1356,7 +1356,7 @@ def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, 
 def test_a_completed_upstream_in_another_environment_does_not_hold_a_cell(monkeypatch, tmp_path):
     """Mutation: drop the `not in completed_names` filter from `pending_tuples`, so every
     check name counts -- the completed `dns/dev-us` holds `platform`."""
-    checks = [_apply_check("stacks/platform", cells=1), _check(name="apply / stacks/dns / dev-us")]
+    checks = [_apply_check("stacks/platform", cells=1), _check(name="apply / dev-us / stacks/dns")]
     assert _zigzag(monkeypatch, tmp_path, checks) == (["stacks/platform"], [])
 
 
@@ -1381,7 +1381,7 @@ def test_a_waiting_cell_whose_check_records_no_plan_run_does_not_refuse(monkeypa
     Mutation: call `with_plan_runs` before dropping the waiting cells -- the missing-plan-run
     refusal fires."""
     checks = [
-        _check(name="apply / stacks/platform / dev-eu", status="queued", conclusion=None),
+        _check(name="apply / dev-eu / stacks/platform", status="queued", conclusion=None),
         _apply_check("stacks/dns", "dev-us", cells=1),
     ]
     assert _zigzag(monkeypatch, tmp_path, checks) == ([], _PLATFORM_WAITS)
@@ -1582,7 +1582,7 @@ def test_a_behind_refusal_writes_the_refusal_output_whole(monkeypatch, tmp_path)
 def test_a_targeted_apply_with_nothing_pending_reads_no_pull_request(monkeypatch, tmp_path):
     """Mutation: read the pull request with an empty selection -- two more reads, red."""
     out = _apply_env(monkeypatch, tmp_path)
-    done = _check(name="apply / stacks/app / dev-eu", external_id=_record("1", cells=1))
+    done = _check(name="apply / dev-eu / stacks/app", external_id=_record("1", cells=1))
     urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [done])
     ad.main()
     assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
@@ -1806,7 +1806,7 @@ def test_the_held_check_apply_complete_writes_refuses_the_next_apply(monkeypatch
         {**cell_job("save", steps=(), conclusion="failure"), "id": 7},
     ]
     rows, _ = ac.classify(
-        {"wave0": {"apply / stacks/app / dev-eu": [1]}}, {"wave0": "success"}, listing, "5"
+        {"wave0": {"apply / dev-eu / stacks/app": [1]}}, {"wave0": "success"}, listing, "5"
     )
     [entry] = ac.writes(rows[0], "acme/iac")
     base = _apply_check("stacks/app", cells=1, id=entry["id"])

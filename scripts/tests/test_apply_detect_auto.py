@@ -337,7 +337,7 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     calls = []
     checks = [_check("stacks/app", "dev-eu", action=action)]
     assert _refusal(tmp_path, monkeypatch, checks=checks, calls=calls) == (
-        f"::error::auto apply refused: the plan records of apply / stacks/app / dev-eu "
+        f"::error::auto apply refused: the plan records of apply / dev-eu / stacks/app "
         f"({action!r}) name no push event action (opened or synchronize), so no push started "
         f"that plan. {REMEDY}"
     )
@@ -434,7 +434,7 @@ def test_cells_recording_two_runs_refuse(tmp_path, monkeypatch):
     code = _refusal(tmp_path, monkeypatch, auto=("dev-eu", "prod"), checks=checks, listing=(222,))
     assert code == (
         "::error::auto apply refused: the cells to apply record different plan runs (plan run "
-        "111: apply / stacks/app / dev-eu; plan run 222: apply / stacks/app / prod), so no one "
+        "111: apply / dev-eu / stacks/app; plan run 222: apply / prod / stacks/app), so no one "
         f"autoplan planned them all. {REMEDY}"
     )
 

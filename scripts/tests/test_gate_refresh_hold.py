@@ -23,7 +23,7 @@ HEAD_SHA = "a" * 40
 RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
 DONE = json.dumps(
     {
-        "name": "apply / a / dev",
+        "name": "apply / dev / a",
         "status": "completed",
         "conclusion": "success",
         "id": 1,

@@ -25,9 +25,9 @@ apply_complete = load_script("apply-complete")
 deploy_detect = load_script("deploy-detect")
 
 BY_WAVE = {
-    "wave0": {"apply / stacks/dns / dev-eu": [1]},
-    "wave1": {"apply / stacks/app / dev-eu": [2, 3]},
-    "wave2": {"apply / stacks/web / dev-eu": [4]},
+    "wave0": {"apply / dev-eu / stacks/dns": [1]},
+    "wave1": {"apply / dev-eu / stacks/app": [2, 3]},
+    "wave2": {"apply / dev-eu / stacks/web": [4]},
 }
 #: Every wave ran.
 RAN = {"wave0": "success", "wave1": "success", "wave2": "success"}
@@ -92,9 +92,9 @@ def _classify(jobs, by_wave=BY_WAVE, results=RAN, own=OWN):
     return apply_complete.classify(by_wave, results, [own, *jobs], str(own["id"]))
 
 
-DNS = "apply / stacks/dns / dev-eu"
-APP = "apply / stacks/app / dev-eu"
-WEB = "apply / stacks/web / dev-eu"
+DNS = "apply / dev-eu / stacks/dns"
+APP = "apply / dev-eu / stacks/app"
+WEB = "apply / dev-eu / stacks/web"
 #: A skipped wave's one listing row: GitHub never expands a skipped job's matrix.
 SKIPPED_ROW = "deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}"
 SKIPPED_L0 = "L0 / ${{ matrix.environment }} / ${{ matrix.stack }}"
@@ -128,7 +128,7 @@ def test_matches_the_cell_jobs_under_this_jobs_level(level):
     other = cell(f"{level} / dev-us / stacks/app", "success")
     assert _classify(mine, by_wave, own=own) == ([row(APP, [2, 3], mine[0])], [])
     assert _classify([*other, *mine], by_wave, own=own) == ([row(APP, [2, 3], mine[0])], [])
-    assert _classify(other, by_wave, own=own) == ([], ["stacks/app / dev-eu"])
+    assert _classify(other, by_wave, own=own) == ([], ["dev-eu / stacks/app"])
 
 
 def test_a_cell_of_another_level_is_not_this_jobs():
@@ -137,14 +137,14 @@ def test_a_cell_of_another_level_is_not_this_jobs():
     by_wave = {"wave1": BY_WAVE["wave1"]}
     assert _classify(cell("L1 / dev-eu / stacks/app", "success"), by_wave) == (
         [],
-        ["stacks/app / dev-eu"],
+        ["dev-eu / stacks/app"],
     )
 
 
 @pytest.mark.parametrize(
     ("by_wave", "prefix"),
     [
-        ({"wave0": {"apply / detect / run": [5]}}, "apply / run / detect"),
+        ({"wave0": {"apply / run / detect": [5]}}, "apply / run / detect"),
         (BY_WAVE, "apply / verify / dev-eu / stacks/app"),
     ],
     ids=["orchestration-job", "non-wave-cell-job"],
@@ -184,7 +184,7 @@ def test_a_job_of_a_longer_env_name_cannot_complete_or_hold_the_cell_it_shadows(
     count. Same idiom as scripts/apply-comment's _job_url, pinned in
     test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
     Mutation: `apply-gate.cell_part` drops its ` / ` boundary -> the cell is held."""
-    by_wave = {"wave0": {"apply / stacks/dns / eu": [1]}}
+    by_wave = {"wave0": {"apply / eu / stacks/dns": [1]}}
     assert _classify(cell("L0 / dev-eu / stacks/dns", "success", "failure"), by_wave)[0] == []
 
 
@@ -193,7 +193,7 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     substring with each without naming them: a different stack ("stacks/my-app") and a
     different env ("prod-dev-eu"). None of it may complete or hold anything.
     Mutation: `apply-gate.cell_part` drops its ` / ` boundary -> both cells are held."""
-    by_wave = {"wave0": {"apply / stacks/app / dev-eu": [2, 3], "apply / app / dev-eu": [99]}}
+    by_wave = {"wave0": {"apply / dev-eu / stacks/app": [2, 3], "apply / dev-eu / app": [99]}}
     jobs = [
         *cell("L0 / dev-eu / stacks/my-app", "success", "failure"),
         *cell("L0 / prod-dev-eu / stacks/app", "success", "failure"),
@@ -213,7 +213,7 @@ def test_a_job_present_without_a_conclusion_is_unresolved_and_gets_an_unresolved
             *cell("L0 / dev-eu / stacks/web", "success"),
         ]
     )
-    assert unresolved == ["stacks/dns / dev-eu"]
+    assert unresolved == ["dev-eu / stacks/dns"]
     assert _by_check(rows)[DNS] == {**row(DNS, [1]), "unresolved": True}
     assert sorted(_by_check(rows)) == [APP, DNS, WEB]
 
@@ -232,7 +232,7 @@ def test_a_lagging_save_is_unresolved_not_held(listed):
     rows, unresolved = _classify(listed, {"wave1": BY_WAVE["wave1"]})
     assert (rows, unresolved) == (
         [{**row(APP, [2, 3]), "unresolved": True}],
-        ["stacks/app / dev-eu"],
+        ["dev-eu / stacks/app"],
     )
 
 
@@ -307,7 +307,7 @@ def test_an_ended_apply_with_no_save_listed_is_unresolved(steps):
     rows, unresolved = _classify([ended], {"wave1": BY_WAVE["wave1"]})
     assert (rows, unresolved) == (
         [{**row(APP, [2, 3]), "unresolved": True}],
-        ["stacks/app / dev-eu"],
+        ["dev-eu / stacks/app"],
     )
 
 
@@ -364,7 +364,7 @@ def test_a_missing_cell_of_a_cancelled_wave_that_may_have_started_is_unresolved(
     rows, unresolved = apply_complete.classify(
         {"wave1": BY_WAVE["wave1"]}, {"wave1": "cancelled"}, listed, "900"
     )
-    assert (rows, unresolved) == ([], ["stacks/app / dev-eu"])
+    assert (rows, unresolved) == ([], ["dev-eu / stacks/app"])
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "", "weird"])
@@ -374,7 +374,7 @@ def test_a_missing_cell_of_a_wave_that_ran_is_unresolved_and_never_not_run(resul
     run` for any missing cell -> APP gets a row."""
     ok = cell("L0 / dev-eu / stacks/dns", "success")
     rows, unresolved = _classify(ok, results={"wave0": "success", "wave1": result})
-    assert (rows, unresolved) == ([row(DNS, [1], ok[0])], ["stacks/app / dev-eu"])
+    assert (rows, unresolved) == ([row(DNS, [1], ok[0])], ["dev-eu / stacks/app"])
 
 
 def test_a_cancelled_wave_keeps_its_listed_cells_rows():
@@ -632,7 +632,7 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
     assert done.stderr == (
         apply_complete.RETRY_PREFIX
         + "the jobs listing shows no conclusion for these cells of waves that ran: "
-        + "stacks/app / dev-eu, stacks/dns / dev-eu, stacks/web / dev-eu\n"
+        + "dev-eu / stacks/app, dev-eu / stacks/dns, dev-eu / stacks/web\n"
     )
     assert [json.loads(line) for line in done.stdout.splitlines()] == [
         {**row(WEB, [4]), "unresolved": True}
@@ -884,8 +884,8 @@ echo '{"status": "in_progress"}'
 """
 
 HARNESS_BY_WAVE = {
-    "wave0": {"apply / dns / dev-eu": [11], "apply / app / dev-eu": [22]},
-    "wave1": {"apply / web / dev-eu": [33]},
+    "wave0": {"apply / dev-eu / dns": [11], "apply / dev-eu / app": [22]},
+    "wave1": {"apply / dev-eu / web": [33]},
 }
 HARNESS_RAN = {"wave0": "success", "wave1": "success"}
 
@@ -1098,8 +1098,8 @@ def test_exhaustion_keeps_the_decided_writes_and_then_fails_naming_only_the_stra
     assert fail.returncode == 1
     assert fail.stderr == (
         "::error::the retries were exhausted and these apply checks are left pending: the jobs "
-        "listing shows no conclusion for these cells of waves that ran: app / dev-eu, "
-        "web / dev-eu\n"
+        "listing shows no conclusion for these cells of waves that ran: dev-eu / app, "
+        "dev-eu / web\n"
     )
 
 
@@ -1298,7 +1298,7 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
     wave2's, which never expanded. Mutation: drop the expanded-sibling condition -> wave1's
     missing cell gets a `Not run` row."""
     by_wave = {
-        "wave1": {APP: [2, 3], "apply / stacks/api / dev-eu": [5]},
+        "wave1": {APP: [2, 3], "apply / dev-eu / stacks/api": [5]},
         "wave2": BY_WAVE["wave2"],
     }
     listed, saved = cell("deploy / L1 / dev-eu / stacks/api", "cancelled")
@@ -1309,6 +1309,6 @@ def test_a_cancelled_wave_with_a_listed_cell_started_so_its_missing_sibling_is_u
         "900",
     )
     assert (rows, unresolved) == (
-        [row("apply / stacks/api / dev-eu", [5], listed), row(WEB, [4])],
-        ["stacks/app / dev-eu"],
+        [row("apply / dev-eu / stacks/api", [5], listed), row(WEB, [4])],
+        ["dev-eu / stacks/app"],
     )

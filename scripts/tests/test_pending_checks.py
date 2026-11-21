@@ -97,7 +97,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         '"action":"synchronize","title":"+? ~? -?"}'
     )
     assert body == {
-        "name": "apply / stacks/app / dev-eu",
+        "name": "apply / dev-eu / stacks/app",
         "head_sha": HEAD,
         "status": "queued",
         "output": {
@@ -304,7 +304,7 @@ def test_cells_sorted_and_multiple(tmp_path):
         changed=True,
     )
     names = [b["name"] for b in _emit(tmp_path)]
-    assert names == ["apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"]
+    assert names == ["apply / dev-eu / stacks/app", "apply / dev-us / stacks/app"]
 
 
 def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
@@ -326,7 +326,7 @@ def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
     )
     (tmp_path / "plan.txt").write_bytes(PLAN_A)
     (body,) = _emit(tmp_path)
-    assert body["name"] == "apply / stacks/auth / dev-eu"
+    assert body["name"] == "apply / dev-eu / stacks/auth"
     assert body["status"] == "queued"
 
 
@@ -425,14 +425,14 @@ def test_only_names_this_run_recorded_count_as_published(monkeypatch):
     count every recorded name (`run == this_run` -> `True`) -> `older` counts."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     lines = [
-        _record_line(1, "apply / done / dev", _ext("10")),
-        _record_line(2, "apply / queued / dev", _ext("10"), status="queued"),
-        _record_line(3, "apply / older / dev", _ext("9")),
-        _record_line(4, "apply / other-app / dev", _ext("10"), app=15368),
-        _record_line(5, "apply / no-id / dev", None),
-        _record_line(6, "apply / not-json / dev", "not json"),
+        _record_line(1, "apply / dev / done", _ext("10")),
+        _record_line(2, "apply / dev / queued", _ext("10"), status="queued"),
+        _record_line(3, "apply / dev / older", _ext("9")),
+        _record_line(4, "apply / dev / other-app", _ext("10"), app=15368),
+        _record_line(5, "apply / dev / no-id", None),
+        _record_line(6, "apply / dev / not-json", "not json"),
     ]
-    assert pc.published(lines, APP_ID, "10") == {"apply / done / dev", "apply / queued / dev"}
+    assert pc.published(lines, APP_ID, "10") == {"apply / dev / done", "apply / dev / queued"}
 
 
 def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monkeypatch, capsys):
@@ -440,15 +440,15 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
     Mutations: drop the newer-run refusal -> `published` returns `a`; `NEWER_RUN = 1` -> red."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     lines = [
-        _record_line(1, "apply / a / dev", _ext("10")),
-        _record_line(2, "apply / gone / dev", _ext("11"), status="queued"),
-        _record_line(3, "apply / b / dev", _ext("9")),
+        _record_line(1, "apply / dev / a", _ext("10")),
+        _record_line(2, "apply / dev / gone", _ext("11"), status="queued"),
+        _record_line(3, "apply / dev / b", _ext("9")),
     ]
     with pytest.raises(SystemExit) as exc_info:
         pc.published(lines, APP_ID, "10")
     refusal = (
         "::error::plan run 11, newer than this run (10), published apply checks on this head "
-        "(apply / gone / dev); this run publishes nothing over them. That run's summary writes "
+        "(apply / dev / gone); this run publishes nothing over them. That run's summary writes "
         "the gate; if it did not finish, re-plan this pull request (comment shipmate plan or "
         "push).\n"
     )
@@ -470,7 +470,7 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
         )
     listing = tmp_path / "apply-check-runs.jsonl"
     listing.write_text(
-        _record_line(1, "apply / stacks/app / dev-eu", _ext(RUN_ID)) + "\n", encoding="utf-8"
+        _record_line(1, "apply / dev-eu / stacks/app", _ext(RUN_ID)) + "\n", encoding="utf-8"
     )
     monkeypatch.setenv("SHIPMATE_HEAD_SHA", HEAD)
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
@@ -482,7 +482,7 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
     printed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert [(b["name"], json.loads(b["external_id"])) for b in printed] == [
         (
-            "apply / stacks/dns / dev-eu",
+            "apply / dev-eu / stacks/dns",
             {
                 "plan_run": RUN_ID,
                 "plan_sha256": SHA_A,
@@ -576,11 +576,11 @@ def test_a_newer_run_refuses_before_the_evidence_check(tmp_path, monkeypatch, ca
             tmp_path,
             monkeypatch,
             plan_result="failure",
-            records=[_record_line(1, "apply / stacks/c0 / dev", _ext("11"))],
+            records=[_record_line(1, "apply / dev / stacks/c0", _ext("11"))],
         )
     refusal = (
         "::error::plan run 11, newer than this run (10), published apply checks on this head "
-        "(apply / stacks/c0 / dev); this run publishes nothing over them. That run's summary "
+        "(apply / dev / stacks/c0); this run publishes nothing over them. That run's summary "
         "writes the gate; if it did not finish, re-plan this pull request (comment shipmate plan "
         "or push).\n"
     )
@@ -609,7 +609,7 @@ def test_two_cells_publish_only_over_complete_evidence(
     publishes."""
     _main(tmp_path, monkeypatch, plan_result=plan_result, planned=planned)
     printed = [json.loads(line)["name"] for line in capsys.readouterr().out.splitlines()]
-    assert printed == ([] if held else ["apply / stacks/c0 / dev", "apply / stacks/c1 / dev"])
+    assert printed == ([] if held else ["apply / dev / stacks/c0", "apply / dev / stacks/c1"])
 
 
 def test_an_older_run_refuses_before_reading_any_plan_text(tmp_path, monkeypatch):
@@ -623,7 +623,7 @@ def test_an_older_run_refuses_before_reading_any_plan_text(tmp_path, monkeypatch
             tmp_path,
             monkeypatch,
             plan_text=None,
-            records=[_record_line(1, "apply / stacks/c0 / dev", _ext("11"))],
+            records=[_record_line(1, "apply / dev / stacks/c0", _ext("11"))],
         )
     assert exc_info.value.code == 3
 
@@ -802,11 +802,11 @@ def test_each_changed_cells_plan_text_is_read_once(tmp_path, monkeypatch):
 #: sha256 of each body, serialized with sorted keys, that the engine published before
 #: `pending-checks` read each plan text once: captured off the tree, from the previous revision.
 _BODY_DIGESTS = {
-    "crlf": "5cb4770a291cdf848c0492bfce355ba9535b24f7c70a937ef03eee7af1a23505",
-    "cr": "7b34956d987f92cbe653fc43197d2cece98bb48cc26e055a6b25624a8d56a34e",
-    "big": "8ce3716ead43ee9f8d67db21941e197a0030adfd463e9a5d577ede94422b29fd",
-    "cr_tally": "62c8782e275448639f0c69d7c763de98cba7f1144b2b098c89d17b2d1e624094",
-    "edge": "ed9d3132c3f63355624b93c60f9f8bca1a5744b6b2adf3b3ce45d33e7a6ca16d",
+    "crlf": "cbf902fe3d0e606ae7a29ba009014ad43827722d9e7404ae257d4cc5f4ce1bd1",
+    "cr": "d4412dc338c302eb4631edfbccdb3ef7308ff8f24c83852655caab7830d859c7",
+    "big": "c2728b545ad768b0b1159e860098745c810cbad97a3dd6a35ff79f0a8e490bf8",
+    "cr_tally": "a751c742b1ba871f069d6d43d012ce4d2e322984c37a02e39bd6d2835b12199b",
+    "edge": "c7fbf811bc3fb96d6949772df7239805c2c0c6c98663b9681fffaf806bc7b27a",
 }
 _RIDER_TEXTS = {
     "crlf": b"  # a will be created\r\n  + x = 1\r\n\r\n"
@@ -832,7 +832,7 @@ def test_a_plan_text_with_cr_line_ends_publishes_the_same_body_as_before(tmp_pat
     d.mkdir()
     (d / "plan.txt").write_bytes(_RIDER_TEXTS[name])
     body = pc.body(
-        "apply / stacks/app / dev-eu",
+        "apply / dev-eu / stacks/app",
         d / "cell.json",
         CHANGED,
         "a" * 40,
@@ -945,7 +945,7 @@ def test_a_behind_cell_gets_a_queued_check_with_a_record_and_no_digest(tmp_path,
     assert [json.loads(b["external_id"])["cells"] for b in bodies] == [3, 3, 3]
     workers = bodies[1]
     assert workers == {
-        "name": "apply / stacks/workers / dev-eu",
+        "name": "apply / dev-eu / stacks/workers",
         "head_sha": HEAD,
         "status": "queued",
         "external_id": (
@@ -953,7 +953,7 @@ def test_a_behind_cell_gets_a_queued_check_with_a_record_and_no_digest(tmp_path,
         ),
         "output": {"title": "Behind main: update the branch", "summary": _WORKERS_SUMMARY},
     }
-    assert bodies[2]["name"] == "apply / modules/net / prod"
+    assert bodies[2]["name"] == "apply / prod / modules/net"
 
 
 def _as_check_runs(bodies):
@@ -969,8 +969,8 @@ def test_the_behind_record_reads_back_through_the_apply_readers(tmp_path, monkey
     `cells` -- the run is incomplete, red."""
     runs = _as_check_runs(_emit_behind(tmp_path, monkeypatch))
     assert pc.ag.behind_names(runs, APP_ID) == {
-        "apply / stacks/workers / dev-eu",
-        "apply / modules/net / prod",
+        "apply / dev-eu / stacks/workers",
+        "apply / prod / modules/net",
     }
     assert pc.ag.incomplete_runs(runs, APP_ID) == {}
 
@@ -982,14 +982,14 @@ def test_a_published_behind_check_is_not_published_again(tmp_path, monkeypatch):
     Mutation: publish every behind cell whatever `published` says -- two bodies, red."""
     mine = _record_line(
         9,
-        "apply / stacks/workers / dev-eu",
+        "apply / dev-eu / stacks/workers",
         json.dumps({"plan_run": RUN_ID, "behind": True}),
         status="queued",
     )
     bodies = _emit_behind(tmp_path, monkeypatch, records=[mine])
-    assert [b["name"] for b in bodies] == ["apply / stacks/c0 / dev", "apply / modules/net / prod"]
+    assert [b["name"] for b in bodies] == ["apply / dev / stacks/c0", "apply / prod / modules/net"]
     newer = _record_line(
-        10, "apply / stacks/workers / dev-eu", _ext(str(int(RUN_ID) + 1)), status="queued"
+        10, "apply / dev-eu / stacks/workers", _ext(str(int(RUN_ID) + 1)), status="queued"
     )
     with pytest.raises(SystemExit) as e:
         _emit_behind(tmp_path / "again", monkeypatch, records=[newer])
@@ -1028,14 +1028,14 @@ def test_an_earlier_attempts_plan_check_does_not_stand_for_a_behind_cell(tmp_pat
     Mutation: skip every name this run published (`not in done`) -- no behind body, red."""
     earlier = _record_line(
         9,
-        "apply / stacks/workers / dev-eu",
+        "apply / dev-eu / stacks/workers",
         json.dumps({"plan_run": RUN_ID, "plan_sha256": SHA_A, "pr": PR}),
     )
     bodies = _emit_behind(tmp_path, monkeypatch, records=[earlier])
     assert [b["name"] for b in bodies] == [
-        "apply / stacks/c0 / dev",
-        "apply / stacks/workers / dev-eu",
-        "apply / modules/net / prod",
+        "apply / dev / stacks/c0",
+        "apply / dev-eu / stacks/workers",
+        "apply / prod / modules/net",
     ]
 
 
@@ -1047,15 +1047,15 @@ def test_a_cell_an_earlier_attempt_found_behind_gets_a_plan_check(tmp_path, monk
     red."""
     earlier = _record_line(
         9,
-        "apply / stacks/c0 / dev",
+        "apply / dev / stacks/c0",
         json.dumps({"plan_run": RUN_ID, "behind": True}),
         status="queued",
     )
     bodies = _emit_behind(tmp_path, monkeypatch, records=[earlier])
     assert [b["name"] for b in bodies] == [
-        "apply / stacks/c0 / dev",
-        "apply / stacks/workers / dev-eu",
-        "apply / modules/net / prod",
+        "apply / dev / stacks/c0",
+        "apply / dev-eu / stacks/workers",
+        "apply / prod / modules/net",
     ]
     assert bodies[0]["status"] == "queued"
     assert "behind" not in json.loads(bodies[0]["external_id"])
