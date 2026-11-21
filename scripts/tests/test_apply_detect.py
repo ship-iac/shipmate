@@ -1752,7 +1752,8 @@ def test_a_targeted_apply_refuses_a_cell_another_run_holds_unless_it_never_appli
     Mutation: drop the `refuse_held` call in `main` (the held check reads as pending, as before)
     -- every refusing case applies, red. Mutation: `counted=False` in `_holding_run` -- short
     listing, red. Mutation: `if jobs is None` for `if newest is None` in `_holding_run` --
-    empty listing, red."""
+    empty listing, red. Mutation: drop `not mine or` in `holder_state` -- a listing with no
+    row of the cell's job grammar (an older engine's `L0 / <env> / <stack>`) applies, red."""
     out = _apply_env(monkeypatch, tmp_path)
     answers = [*base_answers("acme/iac"), *holder_answers("acme/iac", run, jobs)]
     _stub_apply(

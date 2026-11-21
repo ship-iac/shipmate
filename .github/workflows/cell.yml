@@ -41,10 +41,9 @@ jobs:
     outputs:
       state: ${{ steps.cell.outputs.state }}
     steps:
-      # Every attempt: a wave can wait hours on an environment approval, and "Re-run failed
-      # jobs" skips `detect` and `lock`. A failure skips the cloud credentials; apply-cell runs
-      # only to refuse. `deploy-detect` reads this step's listed name and `Apply the cell`'s
-      # to tell whether an ended run applied a cell.
+      # Every attempt: an approval wait can last hours and a failed-jobs re-run skips `detect` and
+      # `lock`. A failure skips the credentials and apply-cell only refuses. apply-gate reads this
+      # step's name and `Apply the cell`'s (PRE_APPLY_STEP, APPLY_STEP): keep them in step.
       - name: Pre-apply check
         id: pre-apply
         if: ${{ inputs.pr_number != '' || inputs.deploy }}
@@ -91,10 +90,9 @@ jobs:
           pre-apply-outcome: ${{ steps.pre-apply.outcome }}
           pre-apply-refusal: ${{ steps.pre-apply.outputs.refusal }}
 
-  # Runs no pull-request code: no checkout, no environment, no secret. It is the only job that
-  # writes the cell's state entry, so it runs whatever `apply` ended with; a cancelled or failed
-  # apply may still have changed the state. Same runner as `apply`: a cache entry's version
-  # includes its compression method.
+  # No pull-request code, environment or secret. The only writer of the cell's state entry, it runs
+  # however `apply` ended, since a cancelled or failed apply may have changed the state. Same
+  # runner as `apply`: a cache entry's version includes its compression method.
   save:
     needs: [apply]
     if: ${{ always() }}

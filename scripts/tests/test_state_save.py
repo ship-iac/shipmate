@@ -119,7 +119,9 @@ _REMEDY = (
     "another pull request is not held and applies its reviewed plan again against the state "
     "from before the apply. Before applying or merging any plan of this stack in this "
     "environment, on any pull request, follow docs/troubleshooting.md section The apply step "
-    "ran and its state was not saved."
+    "ran and its state was not saved. On a remote backend the state is in the backend, which "
+    "shipmate does not save: follow docs/troubleshooting.md section Return an in-progress apply "
+    "check by hand instead."
 )
 
 
@@ -412,15 +414,18 @@ def _empty_reason(state):
         (NOT_STARTED, "failure", (0, {"kind": "skip"})),
         ([], "cancelled", (0, {"kind": "skip"})),
         (STARTED, "failure", (_refusal(_empty_reason(""), 1), {})),
-        ([], "failure", (_refusal(_empty_reason(""), 1), {})),
+        ([], "failure", (0, {"kind": "skip"})),
+        ([], "success", (_refusal(_empty_reason(""), 1), {})),
     ],
-    ids=["skipped", "cancelled-pending", "started", "no-steps-failed"],
+    ids=["skipped", "cancelled-pending", "started", "rejected-deployment", "no-steps-success"],
 )
 def test_attempt_one_with_an_empty_output_reads_the_apply_row(
     monkeypatch, tmp_path, steps, conclusion, expected
 ):
-    """An empty output after `Apply the cell` started refuses. Mutations: read a missing output
-    as `not-applied`; read `steps: []` as never started (`apply-gate._applied`)."""
+    """An empty output after `Apply the cell` started refuses; an `apply` job that failed with
+    no steps, as one whose `<env>-apply` deployment was rejected, never started and skips.
+    Mutations: read a missing output as `not-applied`; read `steps: []` as never started
+    (`apply-gate._applied`); drop `failure` from the conclusions `_applied` reads as ended."""
     jobs = [_apply(1, steps, conclusion=conclusion), _save(1, None)]
     job = _Job(monkeypatch, tmp_path, state="", jobs=jobs)
     assert job() == expected
@@ -611,12 +616,22 @@ def test_an_empty_or_malformed_output_after_an_own_apply_refuses(monkeypatch, tm
     assert job() == (_refusal(_empty_reason(state), 2), {})
 
 
-def test_a_steps_less_own_row_that_failed_refuses(monkeypatch, tmp_path):
-    """An own `apply` row with no steps that is no carried copy may have applied. Mutation:
-    read `steps: []` as never started (`apply-gate._applied`)."""
-    jobs = [_A1, _save(1, "success"), _apply(2, [], conclusion="failure"), _save(2, None)]
+def test_a_steps_less_own_row_that_succeeded_refuses(monkeypatch, tmp_path):
+    """An own `apply` row with no steps that is no carried copy and succeeded may have applied.
+    Mutation: read `steps: []` as never started (`apply-gate._applied`)."""
+    jobs = [_A1, _save(1, "success"), _apply(2, [], conclusion="success"), _save(2, None)]
     job = _Job(monkeypatch, tmp_path, state="", attempt=2, jobs=jobs)
     assert job() == (_refusal(_empty_reason(""), 2), {})
+
+
+def test_a_rerun_cell_cancelled_while_pending_skips(monkeypatch, tmp_path):
+    """Attempt 1 applied and saved; attempt 2 ran its own `apply` again, cancelled before it
+    started, so it lists no steps under a new start. Mutation: read a steps-free row whose name an
+    earlier attempt lists as unknown (`apply-gate._applied`) -- refuses, red."""
+    pending = _apply(2, [], conclusion="cancelled")
+    jobs = [_A1, _save(1, "success"), pending, _save(2, None)]
+    job = _Job(monkeypatch, tmp_path, state="", attempt=2, jobs=jobs)
+    assert job() == (0, {"kind": "skip"})
 
 
 def test_a_download_keeps_the_archives_bytes(monkeypatch):

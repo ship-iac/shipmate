@@ -448,6 +448,16 @@ HELD_CASES = {
             f"applied them and saved their state. Follow {_BY_HAND}, then re-run `shipmate apply`."
         ),
     ),
+    "old job shape": (
+        "",
+        _ENDED,
+        [{**cell_job("apply"), "name": "apply / run / L0 / dev-eu / stacks/app"}],
+        (
+            "::error::apply refused: stacks/app / dev-eu may have been applied by run 77 without "
+            "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
+            "state was not saved, then re-plan."
+        ),
+    ),
     "ended never applied": (
         "",
         _ENDED,

@@ -218,6 +218,7 @@ def test_steps_free_apply_rows_read_by_whether_an_earlier_row_explains_them():
     [
         ("completed", "cancelled", False),
         ("completed", "skipped", False),
+        ("completed", "failure", False),
         ("completed", "success", None),
         ("queued", None, None),
         ("waiting", None, None),
@@ -227,10 +228,23 @@ def test_steps_free_apply_rows_read_by_whether_an_earlier_row_explains_them():
 def test_a_steps_free_row_with_no_earlier_row_reads_not_applied_only_once_it_ended(
     status, conclusion, applied
 ):
-    """Mutation: read a steps-free row with no earlier row as not applied whatever its status
-    and conclusion."""
+    """`failure` is a job that never started: the probe's group-conflict job failed with no
+    steps and no runner, as an `<env>-apply` deployment rejected at the job's start does (that
+    shape is unprobed). Mutations: read a steps-free row as not applied whatever its status and
+    conclusion; drop `failure` from the ended conclusions."""
     row = {**_PENDING_CANCEL, "status": status, "conclusion": conclusion}
     assert ag.attempts([row], "stacks/app", "dev-eu") == {1: {"applied": applied, "saved": None}}
+
+
+def test_a_rerun_row_cancelled_while_pending_reads_not_applied():
+    """Attempt 2 re-ran the cell's `apply`, cancelled before it started: its own row, under a
+    new start, is no carried copy and never applied. Mutation: read a steps-free row whose name an
+    earlier attempt lists as unknown -- attempt 2 reads None, red."""
+    pending = {**_PENDING_CANCEL, "run_attempt": 2}
+    assert ag.attempts([_RR_APPLY_1, pending], "stacks/app", "dev-eu") == {
+        1: {"applied": True, "saved": None},
+        2: {"applied": False, "saved": None},
+    }
 
 
 @pytest.mark.parametrize(

@@ -69,7 +69,9 @@ REMEDY = (
     "another pull request is not held and applies its reviewed plan again against the state "
     "from before the apply. Before applying or merging any plan of this stack in this "
     "environment, on any pull request, follow docs/troubleshooting.md section The apply step "
-    "ran and its state was not saved."
+    "ran and its state was not saved. On a remote backend the state is in the backend, which "
+    "shipmate does not save: follow docs/troubleshooting.md section Return an in-progress apply "
+    "check by hand instead."
 )
 NO_STATE = ("not-applied", "none")
 SLUG = re.compile(r"[A-Za-z0-9._-]+")

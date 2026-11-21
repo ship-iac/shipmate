@@ -418,9 +418,10 @@ def holder_state(repo, cell, check, runs):
     `("unknown", <check id>)` when `details_url` is not exactly a run page of this repository,
     else `(<cause>, <run id>)`, the run's state read through `_holding_run` once per run and kept
     in `runs`: `live` or `unreadable` as it reads, or, once it ended, `live` while a job of
-    the cell it lists is not `completed`; `ended` when `ag.unsaved` names an attempt;
+    the cell it lists is not `completed`; `ended` when `ag.unsaved` names an attempt or the
+    run lists no job of the cell, so a job name it does not read never reads as never applied;
     `saved` when an attempt applied and every applying attempt's state is saved; `deploy`
-    when no attempt applied, or the run lists no job of the cell."""
+    when no attempt applied."""
     url, page = check.get("details_url") or "", current_run_url("")
     run_id = url.removeprefix(page) if url.startswith(page) else ""
     if not is_run_id(run_id):
@@ -434,7 +435,7 @@ def holder_state(repo, cell, check, runs):
     mine = [j for j in jobs if ag.cell_part(j.get("name", ""), stack, env)]
     if any(j["status"] != "completed" for j in mine):
         return "live", run_id
-    if ag.unsaved(jobs, stack, env):
+    if not mine or ag.unsaved(jobs, stack, env):
         return "ended", run_id
     verdicts = ag.attempts(jobs, stack, env).values()
     return ("deploy" if all(v["applied"] is False for v in verdicts) else "saved"), run_id

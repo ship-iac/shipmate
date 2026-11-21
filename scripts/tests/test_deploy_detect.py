@@ -753,7 +753,16 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
             _apply_check("stacks/app", "dev-eu", plan_run="42", cells=2),
             _in_flight("stacks/app", "dev-us", plan_run="42", cells=2, id=2),
         ],
-        runs=_holder("completed", [_job(name="apply / run / detect", steps=[])]),
+        runs=_holder(
+            "completed",
+            [
+                _job(
+                    name="deploy / L0 / dev-us / stacks/app / apply",
+                    steps=[],
+                    conclusion="cancelled",
+                )
+            ],
+        ),
     )
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
 
@@ -1957,7 +1966,6 @@ def test_a_stuck_job_of_another_cell_does_not_hold_the_cell(tmp_path, monkeypatc
 _NOT_STARTED = {
     "skipped": [_job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")])],
     "cancelled while pending": [_CANCELLED, _save("skipped")],
-    "no job": [_job(name=WEB_APPLY)],
     "pre-apply failed, apply failed": [
         _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "failure")]),
         _save("failure"),
@@ -1977,8 +1985,8 @@ def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
     tmp_path, monkeypatch, capsys, jobs
 ):
     """Run 77 ended and no attempt's `apply` job applied the cell: `Apply the cell` `skipped`,
-    cancelled while pending with no steps (also as attempt 2's carried copy), no job for the
-    cell, or a failed `Pre-apply check`, after which `Apply the cell` runs only to refuse.
+    cancelled while pending with no steps (also as attempt 2's carried copy), or a failed
+    `Pre-apply check`, after which `Apply the cell` runs only to refuse.
     Probe (runs 43968821022 and 43968821153): a leg that started `Apply the cell` never lists it
     `skipped`, and a pre-apply failure lists it `success`. Nothing writes the check again, so
     the deploy queues it and warns.
@@ -2008,6 +2016,8 @@ _STARTED = {
         _job(steps=[("Pre-apply check", "success"), ("Apply the cell", "failure")]),
         _save("failure"),
     ],
+    "no job": [_job(name=WEB_APPLY)],
+    "older job shape": [_job(name=APP_APPLY.removesuffix(" / apply"))],
     "attempt 1 unsaved, attempt 2 refused": [
         _job(),
         _save("failure"),
@@ -2022,10 +2032,12 @@ def test_an_ended_run_whose_apply_may_have_started_refuses(tmp_path, monkeypatch
     """Run 77 ended and an attempt's `apply` job lists `Apply the cell` as started (any
     conclusion but `skipped`) after a `Pre-apply check` that did not fail, or lists steps
     without either (an older engine), or one of two jobs did, and no `save` of that attempt or a
-    later one succeeded: the cell may have applied without saving its state, so the deploy
-    refuses and names the procedure.
+    later one succeeded; or the run lists no job of the cell under the job names this engine
+    reads: the cell may have applied without saving its state, so the deploy refuses and names
+    the procedure.
 
     Mutation: deploy every ended run -- deploys, red.
+    Mutation: drop `not mine or` in `holder_state` -- the no-job cases deploy, red.
     Mutation: treat only `success` as started -- the other started cases deploy, red.
     Mutation: count any `Pre-apply check` conclusion as not started -- the pre-apply-passed case
     deploys, red.
@@ -2043,7 +2055,7 @@ def test_an_ended_run_whose_apply_may_have_started_refuses(tmp_path, monkeypatch
 
 _SAVED = {
     "applied, saved": [_job(), _save()],
-    "unknown, saved": [_job(steps=[], conclusion="failure"), _save()],
+    "unknown, saved": [_job(steps=[]), _save()],
     "saved by a later attempt": [
         _job(),
         _save("failure"),

@@ -141,18 +141,19 @@ def is_carried(row, jobs):
     )
 
 
-def _applied(row, earlier):
+def _applied(row):
     """Whether the `apply` row `row`, no carried copy, applied: True, False, or None when
-    unknown. `earlier` holds the names of earlier attempts' `apply` rows."""
+    unknown."""
     steps = row.get("steps")
     if steps == []:
-        # A cell cancelled while pending ends with no steps and no earlier row; a queued, waiting
-        # or running row may still apply, so it reads unknown.
+        # Ended with no steps: cancelled while pending, or failed before it started (a rejected
+        # deployment, a group conflict). A queued, waiting, running or successful one is unknown.
         ended = row.get("status") == "completed" and row.get("conclusion") in (
             "cancelled",
             "skipped",
+            "failure",
         )
-        return False if ended and row.get("name") not in earlier else None
+        return False if ended else None
     if not isinstance(steps, list):
         return None
 
@@ -175,11 +176,10 @@ def attempts(jobs, stack, env):
         part = cell_part(job.get("name", ""), stack, env)
         if part:
             rows.setdefault(job.get("run_attempt"), {"apply": [], "save": []})[part].append(job)
-    earlier, out = set(), {}
+    out = {}
     for attempt in sorted(rows):
         listed = rows[attempt]["apply"]
-        verdicts = [_applied(row, earlier) for row in listed if not is_carried(row, jobs)]
-        earlier.update(row.get("name") for row in listed)
+        verdicts = [_applied(row) for row in listed if not is_carried(row, jobs)]
         applied = True if True in verdicts else None if None in verdicts or not listed else False
         saves = [j for k in rows if k >= attempt for j in rows[k]["save"]]
         saved = any(j.get("conclusion") == "success" for j in saves) if saves else None
