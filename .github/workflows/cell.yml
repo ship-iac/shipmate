@@ -63,9 +63,8 @@ jobs:
           job-id: ${{ job.check_run_id }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.head_sha }}", persist-credentials: false }
-      # A read-only job's cache save warns; setup's save is skipped instead.
       - uses: $/actions/setup
-        with: { versions: "${{ inputs.tools }}", cache-save: "false" }
+        with: { versions: "${{ inputs.tools }}" }
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.
       - name: Configure cloud credentials (AWS OIDC)

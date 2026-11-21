@@ -163,18 +163,18 @@ _EXPECTED_INPUTS = {
     },
     "cache-save": {
         "description": (
-            '"false" where the workflow or job declares cache-mode: read, whose token cannot save; '
-            "a save there only warns."
+            '"true" saves each release whose restore missed. Only jobs that run no pull-request '
+            "code pass it."
         ),
         "required": False,
-        "default": "true",
+        "default": "false",
     },
 }
 
 
 def test_the_inputs_are_the_mode_and_the_tofu_and_cache_save_switches():
-    """Mutations: `tofu` `default: "true"` -> `"false"`; `cache-save` `default: "true"` ->
-    `"false"`; add a `tofu-version` input; `resolve` `default: ""` -> `"true"`; `tofu`'s
+    """Mutations: `tofu` `default: "true"` -> `"false"`; `cache-save` `default: "false"` ->
+    `"true"`; add a `tofu-version` input; `resolve` `default: ""` -> `"true"`; `tofu`'s
     description back to `"false" for jobs that never run it.`"""
     assert action_yaml(_ACTION).get("inputs") == _EXPECTED_INPUTS
 
@@ -188,7 +188,7 @@ def test_each_steps_if_is_pinned():
     Mutations: `!=` -> `==` in the `Install OpenTofu` step's `if:`; remove the `if:` on
     `Verify OpenTofu checksums`; add `if: ${{ inputs.tofu != 'false' }}` to `Install Terramate`;
     add one to the python-yaml step; drop `inputs.tofu != 'false' &&` from the OpenTofu save;
-    remove the `if:` on the OpenTofu restore.
+    remove the `if:` on the OpenTofu restore; `== 'true'` -> `!= 'false'` in the Terramate save.
     """
     tofu = "${{ inputs.tofu != 'false' }}"
     got = {s.get("name") or s.get("uses"): s.get("if") for s in action_steps(_ACTION)}
@@ -202,11 +202,11 @@ def test_each_steps_if_is_pinned():
         "Install OpenTofu": tofu,
         "Install Terramate": None,
         "Save the Terramate release": (
-            "${{ inputs.cache-save != 'false' && "
+            "${{ inputs.cache-save == 'true' && "
             "steps.terramate-cache.outputs.cache-hit != 'true' }}"
         ),
         "Save the OpenTofu release": (
-            "${{ inputs.tofu != 'false' && inputs.cache-save != 'false' && "
+            "${{ inputs.tofu != 'false' && inputs.cache-save == 'true' && "
             "steps.tofu-cache.outputs.cache-hit != 'true' }}"
         ),
         "Provider plugin cache": None,

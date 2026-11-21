@@ -14,9 +14,9 @@ inputs:
     required: false
     default: "true"
   cache-save:
-    description: '"false" where the workflow or job declares cache-mode: read, whose token cannot save; a save there only warns.'
+    description: '"true" saves each release whose restore missed. Only jobs that run no pull-request code pass it.'
     required: false
-    default: "true"
+    default: "false"
 outputs:
   refusal:
     description: The first error of the `::error::` message that failed `Resolve versions` (a refusal of the table, of `tools` or of the `resolve` and `versions` inputs, or a failed read) or a verify or install step (a download, signature, digest or install failure), without the prefix, its lines joined into one; empty when none failed. Set although the step fails, and read through the `refusal` output of plan.yml's and apply-run.yml's `detect` jobs into the gate description and the apply result comment. Branch-controlled text, so a reader passes it through `env:`.
@@ -180,14 +180,14 @@ runs:
     # Degrade steps: a save only decides whether a later job downloads, and nothing on the gate
     # path reads it, so a failed save must not fail the job before its cells run.
     - name: Save the Terramate release
-      if: ${{ inputs.cache-save != 'false' && steps.terramate-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.cache-save == 'true' && steps.terramate-cache.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/terramate-release
         key: shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-terramate-${{ steps.versions.outputs.terramate }}
     - name: Save the OpenTofu release
-      if: ${{ inputs.tofu != 'false' && inputs.cache-save != 'false' && steps.tofu-cache.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.tofu != 'false' && inputs.cache-save == 'true' && steps.tofu-cache.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:

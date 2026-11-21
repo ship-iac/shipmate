@@ -40,7 +40,7 @@ jobs:
         with: { fetch-depth: 0, filter: "blob:none" }
       - id: setup
         uses: $/actions/setup
-        with: { tofu: "false", resolve: "true" }
+        with: { tofu: "false", cache-save: "true", resolve: "true" }
       - id: d
         uses: $/actions/deploy-detect
         with:
@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ github.sha }}", persist-credentials: false }
       - uses: $/actions/setup
-        with: { versions: "${{ needs.detect.outputs.tools }}" }
+        with: { cache-save: "true", versions: "${{ needs.detect.outputs.tools }}" }
       - if: ${{ matrix.stack != '' }}
         uses: $/actions/warm
         with:

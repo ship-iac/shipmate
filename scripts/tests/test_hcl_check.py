@@ -389,7 +389,7 @@ DETECT_STEPS = [
     {
         "id": "setup",
         "uses": "$/actions/setup",
-        "with": {"tofu": "false", "cache-save": "false", "resolve": "true"},
+        "with": {"tofu": "false", "resolve": "true"},
     },
     {
         "id": "matrix",
