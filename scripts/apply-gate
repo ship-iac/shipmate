@@ -487,8 +487,10 @@ def _deferred_run(repo, listed, run):
         jobs, complete = run_jobs(repo, listed["id"], run)
         if not complete:
             raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
-        attempt = all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs)
-        _shipmate.deferred_runs[key] = attempt and deferred(jobs)
+        # Jobs at another attempt are a lagging read or a re-run: not deferred, and read again.
+        if not all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs):
+            return False
+        _shipmate.deferred_runs[key] = deferred(jobs)
     return _shipmate.deferred_runs[key]
 
 

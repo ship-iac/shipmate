@@ -1061,7 +1061,8 @@ _JOBS_DIR = pathlib.Path(__file__).parent / "fixtures"
 
 def _jobs_body(kind, **over):
     """`fixtures/jobs-<kind>.json`, each job with `over` set on it. `deferred` is hand-built
-    from the `draft-skipped` capture: `plan / defer` `success`, `plan / summary` `skipped`."""
+    from the `draft-skipped` capture: `plan / defer` `success`, `plan / summary` `skipped`; no
+    run had a `defer` job then. Replace it with a raw capture once the live check records one."""
     body = json.loads((_JOBS_DIR / f"jobs-{kind}.json").read_text(encoding="utf-8"))
     body["jobs"] = [job | over for job in body["jobs"]]
     return json.dumps(body)
@@ -1136,6 +1137,23 @@ def test_newest_autoplan_returns_a_ready_run_whose_jobs_carry_another_attempt():
     """A re-run made the deferred run live again. Mutation: drop the attempt comparison."""
     newest, argv = _walk([_EARLIER, _READY], {9: _jobs_body("deferred", run_attempt=2)})
     assert (newest, argv) == (_READY, [autoplans_read("o/r", _HEAD), _jobs_argv(9)])
+
+
+def test_newest_autoplan_reads_jobs_at_another_attempt_again():
+    """Jobs at another attempt than the listing (a lagging read) are not cached: the next walk
+    reads them again and, now at the listed attempt, reads past the deferred run. Mutation:
+    cache the verdict whatever the jobs' attempt (the second walk returns run 9 unread)."""
+    argv, answers = [], [_jobs_body("deferred", run_attempt=2), _jobs_body("deferred")]
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in [_EARLIER, _READY])
+        return answers.pop(0)
+
+    newest = [ag.newest_autoplan("o/r", _HEAD, run=run) for _ in range(2)]
+    assert newest == [_READY, _EARLIER]
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9)] * 2
 
 
 def test_newest_autoplan_raises_value_error_on_an_incomplete_jobs_listing():

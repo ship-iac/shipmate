@@ -2493,8 +2493,8 @@ Otherwise a newer autoplan of the same head exists. One started by a push
 dispatches its own `auto` apply once it completes with apply checks; one started
 by marking the pull request ready or reopening it never dispatches one, so
 comment `shipmate apply`. When it published no apply check, push. A
-ready-for-review run that deferred to an earlier plan ("A ready-for-review run
-planned nothing") is never the newest.
+ready-for-review run that completed after deferring to an earlier plan ("A
+ready-for-review run planned nothing") is never the newest.
 
 The same check refuses, each ending ``Comment `shipmate apply` on the pull
 request to apply it.``:
