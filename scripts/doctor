@@ -1864,7 +1864,7 @@ def _plan_concurrency_finding(doc, name, engine):
 
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
-    "the workflow file's job name, dispatch wiring, event routing and drift call",
+    "the workflow file's job name, dispatch wiring, event routing, concurrency and drift call",
     _SHIPMATE_YML,
 )
 # Dispatch wiring reads no engine slug, so it is not in this subject.
