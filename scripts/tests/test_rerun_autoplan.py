@@ -288,8 +288,13 @@ _UP_TO_JOBS = [AUTOPLANS, *DISPATCH, jobs_read(9)]
         ),
         pytest.param(
             with_job("plan / outcome", conclusion="cancelled"),
-            "autoplan run 9 has a cancelled job",
+            "autoplan run 9: its job plan / outcome ended cancelled",
             id="cancelled",
+        ),
+        pytest.param(
+            with_job("plan / gate-hold", conclusion="timed_out"),
+            "autoplan run 9: its job plan / gate-hold ended timed_out",
+            id="timed-out",
         ),
         pytest.param(
             with_job("plan / gate-hold", conclusion="failure"),
@@ -312,12 +317,13 @@ _UP_TO_JOBS = [AUTOPLANS, *DISPATCH, jobs_read(9)]
 def test_a_job_listing_outside_the_re_run_bound_is_not_re_run(
     slept, monkeypatch, capsys, jobs, reason
 ):
-    """Re-run failed jobs re-runs failed and cancelled jobs and their dependents; the bound is
-    failed cells this run planned plus `plan / summary`. Mutations, each reddening its case:
-    drop the `run_attempt` comparison -- attempt; skip `planned` -- detect-failed; drop the
-    no-`cancelled` rule -- cancelled; allow any `plan / ` job -- gate-hold; build the allowed
-    set from the job listing -- unplanned-cell; require any failed job instead of a failed cell
-    -- summary-only. Each prints the run id."""
+    """Re-run failed jobs re-runs failed, cancelled and timed-out jobs and their dependents; the
+    bound is failed cells this run planned plus `plan / summary`. Mutations, each reddening its
+    case: drop the `run_attempt` comparison -- attempt; skip `planned` -- detect-failed; drop
+    the conclusion rule -- cancelled and timed-out; refuse only `cancelled` -- timed-out; allow
+    any `plan / ` job -- gate-hold; build the allowed set from the job listing --
+    unplanned-cell; require any failed job instead of a failed cell -- summary-only. Each
+    prints the run id."""
     calls = stub(monkeypatch, jobs=jobs)
     assert (cli("decide"), capsys.readouterr(), calls) == (0, ("", notice(reason)), _UP_TO_JOBS)
 

@@ -21,7 +21,8 @@ it, and nothing on stdout:
    in the consumer's `plan-<pr>` concurrency group;
 4. its latest attempt's jobs are listed whole, every one at the run's listed `run_attempt`;
 5. it planned (`apply-gate.planned`);
-6. no job's conclusion is `cancelled`;
+6. every job's conclusion is `success`, `skipped` or `failure`: GitHub's re-run of failed jobs
+   also re-runs `cancelled` and `timed_out` ones, outside the bound of row 7;
 7. at least one plan cell job of a cell this run planned failed, and every failed job is such a
    cell job or `plan / summary`;
 8. the run's artifacts are listed whole and hold neither `plan.<env>.<slug>` nor
@@ -63,6 +64,9 @@ from _shipmate import (
 ag = _load("apply-gate")
 
 SUMMARY_JOB = ag.CALLER_PREFIX + "summary"
+#: The job conclusions a re-run of failed jobs leaves alone (`success`, `skipped`) or re-runs
+#: within row 7's bound (`failure`).
+_BOUNDED = ("success", "skipped", "failure")
 
 
 def _notice(text):
@@ -117,8 +121,8 @@ def _jobs_reason(repo, newest, what, cells):
         return f"{what} is listed at attempt {newest['run_attempt']!r} and its jobs at {attempts}"
     if not ag.planned(jobs):
         return f"{what} did not plan"
-    if any(j.get("conclusion") == "cancelled" for j in jobs):
-        return f"{what} has a cancelled job"
+    if odd := next((j for j in jobs if j.get("conclusion") not in _BOUNDED), None):
+        return f"{what}: its job {odd['name']} ended {odd.get('conclusion')}"
     failed = _failed_cells(jobs, cells)
     return f"{what}: {failed}" if isinstance(failed, str) else failed
 
