@@ -177,6 +177,7 @@ LOCAL_ACTIONS = {
     "apply-cell",
     "apply-complete",
     "apply-release",
+    "apply-run-check",
     "apply-detect",
     "apply-queue",
     "apply-snapshot",

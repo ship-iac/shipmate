@@ -73,20 +73,20 @@ def test_the_action_runs_the_waiters_mode_with_both_actors():
     assert step["run"] == 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-queue" waiters'
 
 
-def test_review_ends_with_the_waiters_step_after_rd():
+def test_review_ends_with_the_waiters_step_after_the_run_check():
     """Mutations: drop `continue-on-error` -- red; drop `timeout-minutes` -- red; move the step
-    before `rd` -- red; give it `if: always()` -- red."""
+    before the run check -- red; give it `if: always()` -- red."""
     steps = _steps("review")
     assert steps[-1] == REVIEW_STEP
-    assert steps[-2]["id"] == "rd"
+    assert steps[-2]["uses"] == "$/actions/apply-run-check"
 
 
-def test_summary_ends_with_the_waiters_step_after_the_apply_comment():
+def test_summary_ends_with_the_waiters_step_after_the_run_check():
     """Mutations: drop `continue-on-error` -- red; drop `timeout-minutes` -- red; move the step
-    before `Post apply result comment` -- red."""
+    before the run check -- red."""
     steps = _steps("summary")
     assert steps[-1] == SUMMARY_STEP
-    assert steps[-2]["id"] == "result"
+    assert steps[-2]["uses"] == "$/actions/apply-run-check"
 
 
 def test_review_and_summary_job_tokens_stay_as_they_were():

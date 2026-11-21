@@ -103,7 +103,7 @@ def start(repo, sha):
     try:
         run(args, stdin=json.dumps(body))
     except SystemExit as exc:
-        raise SystemExit(f"::error::{exc.code}") from None
+        raise SystemExit(f"::error::{exit_text(exc)}") from None
     sweep = {
         "status": "completed",
         "conclusion": "neutral",

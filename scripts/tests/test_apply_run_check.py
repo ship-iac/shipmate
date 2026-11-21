@@ -84,12 +84,13 @@ def gh(monkeypatch):
     """`apply-run-check` in run 99 of acme/demo, App 42. `calls` records each call as
     `(argv, parsed stdin)` and each relist sleep as `("sleep", seconds)`; `listings` answers the
     listings in turn; `runs` maps a run id to the status its read answers, None for a 404;
-    `fail` holds the check ids whose PATCH fails."""
+    `fail` holds the check ids whose PATCH fails; a `post` other than None is the code the
+    POST's `SystemExit` carries."""
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
     monkeypatch.setenv("GITHUB_RUN_ID", "99")
     monkeypatch.setenv("SHIPMATE_APP_ID", "42")
-    state = SimpleNamespace(calls=[], listings=[], runs={}, fail=set())
+    state = SimpleNamespace(calls=[], listings=[], runs={}, fail=set(), post=None)
     not_found = "gh: Not Found (HTTP 404)"
 
     def run(args, secrets=(), stdin=None, *, env=None):
@@ -97,6 +98,8 @@ def gh(monkeypatch):
         if args[2] == "--paginate":
             return "".join(json.dumps(c) + "\n" for c in state.listings.pop(0))
         if args[2] == "-X":
+            if args[3] == "POST" and state.post is not None:
+                raise SystemExit(state.post)
             if args[3] == "PATCH" and args[4].rsplit("/", 1)[1] in state.fail:
                 raise SystemExit(f"command failed (1): {' '.join(args)}\n{not_found}")
             return "{}"
@@ -233,6 +236,30 @@ def test_start_refuses_before_any_call(gh, monkeypatch, argv, app_id, refusal):
         arc.main(argv)
     assert exc.value.code == refusal
     assert gh.calls == []
+
+
+@pytest.mark.parametrize(
+    ("code", "annotation"),
+    [
+        (
+            "command failed (1): gh api -X POST repos/acme/demo/check-runs --input -\nHTTP 500",
+            (
+                "::error::command failed (1): gh api -X POST repos/acme/demo/check-runs "
+                "--input -%0AHTTP 500\n"
+            ),
+        ),
+        (1, "::error::gh failed\n"),
+    ],
+)
+def test_a_failed_post_exits_1_before_any_listing(gh, capsys, code, annotation):
+    """Mutations: swallow the POST failure -> no exit and the listing runs; `exc.code` in place
+    of `exit_text(exc)` -> `::error::1`."""
+    gh.post = code
+    with pytest.raises(SystemExit) as exc:
+        _shipmate.run_annotated(arc.main, ["start", _SHA])
+    assert exc.value.code == 1
+    assert gh.calls == [_POST]
+    assert capsys.readouterr() == ("", annotation)
 
 
 def test_finish_on_a_non_sha_exits_quietly(gh, capsys):

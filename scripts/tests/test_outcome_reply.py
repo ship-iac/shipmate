@@ -164,13 +164,16 @@ def _render(value, inputs):
 
 
 def _run(tmp_path, inputs, *, rc=0):
-    """Run the reply step with its env rendered for `inputs`; return (process, gh calls)."""
+    """Run the reply step with its env rendered for `inputs`; return (process, gh calls, the
+    step's `GITHUB_OUTPUT` text)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
     (bin_dir / "gh").write_text(_GH, encoding="utf-8", newline="\n")
     (bin_dir / "gh").chmod(0o755)
     step = step_by(ACTION, name=REPLY)
+    output = tmp_path / "output"
+    output.write_text("", encoding="utf-8")
     inputs = {"pr-number": "42", **inputs}
     env = {
         **os.environ,
@@ -178,6 +181,7 @@ def _run(tmp_path, inputs, *, rc=0):
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "CALLS": str(tmp_path / "calls"),
         "REPLY_BODY": str(tmp_path / "reply.md"),
+        "GITHUB_OUTPUT": str(output),
         "FAKE_RC": str(rc),
         "GITHUB_ACTION_PATH": str(ACTIONS / ACTION),
         "GITHUB_REPOSITORY": "acme/demo",
@@ -185,7 +189,7 @@ def _run(tmp_path, inputs, *, rc=0):
         "GITHUB_RUN_ID": "999",
     }
     proc = run_step(tmp_path, step["run"], env)
-    return proc, read_calls(tmp_path / "calls")
+    return proc, read_calls(tmp_path / "calls"), output.read_text(encoding="utf-8")
 
 
 @bash_only
@@ -199,7 +203,7 @@ def test_each_case_posts_its_whole_body(tmp_path, case):
     `SHIPMATE_REPLY_LABEL` from the step (the footer reads `comment run`); read the label as a
     constant `comment run` in `reply-comment`."""
     inputs, body = SELECTIONS[case]
-    proc, calls = _run(tmp_path, inputs)
+    proc, calls, _ = _run(tmp_path, inputs)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert calls == [["api", "-X", "POST", "repos/acme/demo/issues/42/comments", "-F", "body=@-"]]
     assert (tmp_path / "reply.md").read_text(encoding="utf-8") == body
@@ -218,10 +222,38 @@ def test_the_steps_run_in_order():
 
 @bash_only
 def test_a_failed_post_warns_once_and_exits_zero(tmp_path):
-    """Mutation: drop the `||` degrade (the step exits 1)."""
-    proc, _ = _run(tmp_path, SELECTIONS["apply ended"][0], rc=1)
+    """Mutations: drop the `else` warning (no warning); `exit 1` after it (the step fails)."""
+    proc, _, _ = _run(tmp_path, SELECTIONS["apply ended"][0], rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert proc.stdout.splitlines().count("::warning::could not post the no-result reply") == 1
+
+
+@bash_only
+def test_a_posted_reply_writes_posted_true(tmp_path):
+    """Mutation: drop the `posted=true` write -- red."""
+    proc, _, output = _run(tmp_path, SELECTIONS["apply ended"][0])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert output == "posted=true\n"
+
+
+@bash_only
+def test_a_failed_post_writes_no_output(tmp_path):
+    """Mutations: write `posted=true` before the POST; write it in both branches -- each red."""
+    proc, _, output = _run(tmp_path, SELECTIONS["apply ended"][0], rc=1)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert output == ""
+
+
+def test_the_action_outputs_posted_from_the_reply_step():
+    """`apply.yml`'s `outcome` finishes the apply run check only after a posted reply.
+    Mutations: drop the reply step's `id: reply`; read another step's output -- each red."""
+    assert action_yaml(ACTION)["outputs"] == {
+        "posted": {
+            "description": "`true` when the reply was posted; empty otherwise.",
+            "value": "${{ steps.reply.outputs.posted }}",
+        }
+    }
+    assert step_by(ACTION, name=REPLY)["id"] == "reply"
 
 
 def test_the_composite_mints_only_a_pull_request_write_token():
@@ -298,6 +330,7 @@ def test_the_apply_outcome_job_is_wired_exactly():
         "permissions": {},
         "steps": [
             {
+                "id": "reply",
                 "uses": "$/actions/outcome-reply",
                 "with": {
                     "verb": "apply",
@@ -313,7 +346,20 @@ def test_the_apply_outcome_job_is_wired_exactly():
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
                 },
-            }
+            },
+            {
+                "name": "Show the running apply on the pull request",
+                "if": "${{ always() && steps.reply.outputs.posted == 'true' }}",
+                "uses": "$/actions/apply-run-check",
+                "continue-on-error": True,
+                "timeout-minutes": 1,
+                "with": {
+                    "mode": "finish",
+                    "head-sha": "${{ inputs.ref }}",
+                    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+                },
+            },
         ],
     }
 
