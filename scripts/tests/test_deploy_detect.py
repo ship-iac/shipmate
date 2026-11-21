@@ -741,6 +741,62 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu"]
 
 
+def test_main_refuses_a_cell_whose_only_check_is_named_stack_first(tmp_path, monkeypatch):
+    """A completed `apply / stacks/app / dev` with a valid record is not the cell's check, so the
+    cell stays pending and refuses for want of a record. Mutation: `filter_pending` also treats
+    `apply / <stack> / <env>` as done -- the deploy applies nothing and does not refuse."""
+    old = {
+        **_apply_check("stacks/app", "dev", plan_run="42", cells=1),
+        "name": "apply / stacks/app / dev",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(tmp_path, monkeypatch, cells=[_cell("stacks/app", "dev")], checks=[old])
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan run recorded for apply / dev / stacks/app: the "
+        "apply check names no plan run to apply from (post-merge, the cell may have no apply "
+        "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
+        "then apply again; if that pull request has already merged, a new pull request "
+        "touching them plans and applies them afresh."
+    )
+
+
+def test_a_transposed_one_segment_cell_reads_the_stack_first_check_as_its_own(
+    tmp_path, monkeypatch
+):
+    """Pins a stated limit so that any change to it is seen: `apply / dns / dev-us`, written
+    stack first for stack `dns` in `dev-us`, is also the env-first name of stack `dev-us` in
+    env `dns`, so that cell reads as applied and the deploy neither applies nor refuses it.
+    Records carry no cell identity, so nothing tells the two apart. Mutation: `filter_pending`
+    keeps the `dev-us` / `dns` cell pending -- the whole output changes."""
+    done = {
+        **_apply_check("dev-us", "dns", plan_run="42", cells=1),
+        "status": "completed",
+        "conclusion": "success",
+    }
+    parsed = _run_main(tmp_path, monkeypatch, cells=[_cell("dev-us", "dns")], checks=[done])
+    empty = (
+        '{"wave0": [], "wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], '
+        '"wave6": [], "wave7": []}'
+    )
+    assert parsed == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": '{"stacks": ["dev-us"], "outside": true}',
+        "envlevel0_waves": empty,
+        "envlevel0_empty": "true",
+        "envlevel1_waves": empty,
+        "envlevel1_empty": "true",
+        "envlevel2_waves": empty,
+        "envlevel2_empty": "true",
+        "envlevel3_waves": empty,
+        "envlevel3_empty": "true",
+        "warm": '[{"stack": "", "tf_vars": {}}]',
+        "max_parallel": "10",
+    }
+
+
 def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
     """A pre-merge release flips a check to `in_progress`; a run that ended before applying its
     cell leaves it there, and the merge deploy owns it. Mutation: `ag.done_names` counts any

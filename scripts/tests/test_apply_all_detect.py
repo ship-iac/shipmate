@@ -96,6 +96,17 @@ def test_cells_take_the_workload_from_the_tags():
     ]
 
 
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [("apply / stacks/app / dev", []), ("apply / dev / stacks/app", [("dev", "stacks/app")])],
+)
+def test_only_the_env_first_check_enrols_a_cell(name, expected):
+    """A pending check named stack first is not read. Mutation: `paths_with_checks` also
+    matches `apply / <path> / <env>` -- the stack-first case yields the cell."""
+    cells = aad.cells_from_checks({name}, {"dev": ["stacks/app"]}, {"stacks/app": []})
+    assert [(c["environment"], c["stack"]) for c in cells] == expected
+
+
 def test_env_without_a_check_contributes_nothing():
     cells = aad.cells_from_checks(
         {"apply / dev-eu / stacks/app"},

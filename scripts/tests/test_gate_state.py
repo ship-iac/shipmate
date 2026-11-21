@@ -639,6 +639,14 @@ def test_an_earlier_attempt_of_this_run_counts_as_open(tmp_path, monkeypatch):
     assert _open_older(tmp_path, [_check(1, "apply / dev / a", plan_run="7")]) == 1
 
 
+def test_open_older_counts_a_stack_first_check_this_run_does_not_republish(tmp_path):
+    """A same-head re-plan publishes `apply / dev / stacks/app` and leaves the older
+    `apply / stacks/app / dev` queued, so the gate holds until a new commit. Mutation: keep only
+    names `apply-gate.parse_check_name` reads -- 0, red."""
+    checks = [_check(1, "apply / stacks/app / dev"), _check(2, "apply / dev / stacks/app")]
+    assert _open_older(tmp_path, checks, bodies=["apply / dev / stacks/app"]) == 1
+
+
 @pytest.mark.parametrize("missing", ["c", "b"])
 def test_open_older_is_unknown_without_either_file(tmp_path, missing):
     """Mutation: read a missing listing as no check (`return 0`) -- red."""
