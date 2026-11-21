@@ -30,9 +30,9 @@ import sys
 import urllib.parse
 
 from _shipmate import (
-    _load,
     decoded,
     gh_json,
+    is_env_name,
     is_head_sha,
     is_pr_number,
     is_run_id,
@@ -41,8 +41,6 @@ from _shipmate import (
     retried,
     run_annotated,
 )
-
-ec = _load("env-config")
 
 #: The prefix keeps the gate's pending-apply queue off the plan checks on the same head.
 APPLY_PREFIX = "apply / "
@@ -89,7 +87,7 @@ def parse_check_name(name):
     if not name.startswith(APPLY_PREFIX):
         return None
     env, _, stack = name.removeprefix(APPLY_PREFIX).partition(" / ")
-    return (stack, env) if ec.is_env_name(env) and stack else None
+    return (stack, env) if is_env_name(env) and stack else None
 
 
 def cell_job_name(stack, env):

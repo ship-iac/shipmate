@@ -15,13 +15,20 @@ import os
 import re
 import sys
 
-from _shipmate import _load, current_run_url, run_annotated, write_outputs
+from _shipmate import (
+    _ENV_ENTRY,
+    ENV_NAME_RULE,
+    _load,
+    current_run_url,
+    run_annotated,
+    write_outputs,
+)
 
 ec = _load("env-config")
 
-# `shipmate` as a whole word, a verb, then an optional env in env-config's `_ENV_ENTRY` charset.
-_CMD = re.compile(rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{ec._ENV_ENTRY.pattern}))?$")
-_EVICT = re.compile(rf"^shipmate unlock (?P<env>{ec._ENV_ENTRY.pattern}) --evict$")
+# `shipmate` as a whole word, a verb, then an optional env in the `_ENV_ENTRY` charset.
+_CMD = re.compile(rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{_ENV_ENTRY.pattern}))?$")
+_EVICT = re.compile(rf"^shipmate unlock (?P<env>{_ENV_ENTRY.pattern}) --evict$")
 _SHIPMATE_LINE = re.compile(r"^shipmate\b")
 _HELP_HINT = " (try `shipmate help`)"
 
@@ -114,7 +121,7 @@ def _malformed_error(line):
         token = f"unexpected `{extra[0]}`" if _quotable(extra[0]) else "an unexpected token"
         return f"{token} after the environment{_HELP_HINT}"
     name = f"environment `{env}`" if _quotable(env) else "the environment name"
-    return f"{name} is not {ec.ENV_NAME_RULE}{_HELP_HINT}"
+    return f"{name} is not {ENV_NAME_RULE}{_HELP_HINT}"
 
 
 def parse(body):

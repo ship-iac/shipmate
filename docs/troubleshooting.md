@@ -1207,8 +1207,9 @@ a merged pull request:
   repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request. If it never
   does, or the commit was a direct push, open a pull request that changes the
   unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
-  environment the refusal names (the `<env>` after the last ` / ` of each
-  `<stack> / <env>` cell or `apply / <env> / <stack>` check). The eviction
+  environment the refusal names (the text after the last ` / ` of each
+  `<stack> / <env>` cell, and the segment after `apply / ` of each
+  `apply / <env> / <stack>` check). The eviction
   releases every pull request's lock on those pending cells, so wait for any
   pull request still open that holds one to merge or close, and for the apply,
   auto and deploy runs of each pull request holding one to end, first, then

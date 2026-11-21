@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 
+import _shipmate
 import pytest
 from _loader import load_script
 
@@ -157,11 +158,10 @@ def test_a_malformed_line_names_its_cause(body, error):
     }
 
 
-def test_the_env_group_is_env_configs_charset():
+def test_the_env_group_is_the_env_charset():
     """Mutation: copy `[a-z0-9][a-z0-9-]*` into `_CMD` in place of `_ENV_ENTRY.pattern`."""
-    ec = load_script("env-config")
     assert cp._CMD.pattern == (
-        rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{ec._ENV_ENTRY.pattern}))?$"
+        rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{_shipmate._ENV_ENTRY.pattern}))?$"
     )
 
 

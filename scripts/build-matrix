@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 
 from _shipmate import (
+    _ENV_ENTRY,
     BEHIND_SHAS,
     _load,
     _run,
@@ -230,7 +231,7 @@ def select_cells(full, tags_by_stack, query, all_stacks):
 
 
 _ZERO_SHA = "0" * 40
-_ENV_TAG_LITERAL = re.compile(f'"env/({ec._ENV_ENTRY.pattern})"')
+_ENV_TAG_LITERAL = re.compile(f'"env/({_ENV_ENTRY.pattern})"')
 
 
 def _list_stacks(all_stacks, base, tree=None):
