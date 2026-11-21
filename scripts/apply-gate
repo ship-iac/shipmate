@@ -29,6 +29,7 @@ import re
 import sys
 import urllib.parse
 
+import _shipmate
 from _shipmate import (
     decoded,
     gh_json,
@@ -480,10 +481,15 @@ def newest_autoplan(repo, head, *, run):
 def _deferred_run(repo, listed, run):
     if (listed.get("status"), listed.get("conclusion")) != ("completed", "success"):
         return False
-    jobs, complete = run_jobs(repo, listed["id"], run)
-    if not complete:
-        raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
-    return all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs) and deferred(jobs)
+    # An ended attempt's jobs do not change, so one read per attempt serves the process.
+    key = (repo, listed["id"], listed.get("run_attempt"))
+    if key not in _shipmate.deferred_runs:
+        jobs, complete = run_jobs(repo, listed["id"], run)
+        if not complete:
+            raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
+        attempt = all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs)
+        _shipmate.deferred_runs[key] = attempt and deferred(jobs)
+    return _shipmate.deferred_runs[key]
 
 
 def planned(jobs):

@@ -106,6 +106,8 @@ def test_a_published_head_outputs_the_earlier_run(tmp_path):
 
 @bash_only
 def test_no_earlier_run_outputs_nothing(tmp_path):
+    """An empty answer plans, with no output and no notice. Mutation: write `run=` and the
+    notice without the `-n` test -> `run=` is written and the notice printed."""
     proc, output, calls = _run(tmp_path)
     assert (proc.returncode, proc.stdout, proc.stderr, output) == (0, "", "", "")
     assert calls == [GATE_STATUS, "published", HEAD_SHA, "42"]

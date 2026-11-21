@@ -101,7 +101,6 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
-sc = _load("summary-comment")
 
 _RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
 #: The fields `apply-gate` judges.
@@ -494,6 +493,8 @@ def _created_at(run_id):
 def _newest_plan_comment(pr):
     """The first four lines of the newest comment on `pr` by the shipmate App's bot user whose
     first line is `summary-comment.MARKER`, or None."""
+    # Loaded here, not at import: no other command depends on summary-comment.
+    marker = _load("summary-comment").MARKER
     login = f"{_require_slug()}[bot]"
     args = ["gh", "api", "--paginate", "--jq", _COMMENTS_JQ]
     args.append(f"repos/{_repo()}/issues/{pr}/comments?per_page=100")
@@ -506,7 +507,7 @@ def _newest_plan_comment(pr):
         try:
             row = json.loads(line)
             lines = row["lines"]
-            if row["login"] == login and lines[0] == sc.MARKER:
+            if row["login"] == login and lines[0] == marker:
                 newest = lines
         except (ValueError, LookupError, TypeError) as exc:
             raise SystemExit(

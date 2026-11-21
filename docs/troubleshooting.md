@@ -3077,7 +3077,8 @@ request was marked ready, and its plan comment, apply checks and
 `shipmate / gate` stand. That push run usually started no auto apply, so
 comment `shipmate apply` for an environment that applies automatically; its
 `summary` log says whether it dispatched one. To plan the
-head again, comment `shipmate plan`.
+head again, comment `shipmate plan`. A re-run of the ready-for-review run defers
+again, and the earlier plan stays; a push plans the new head.
 
 A `shipmate plan` comment made while that push run planned can be replaced in
 the `plan-<pr>` queue by the ready-for-review run. The comment then shows only

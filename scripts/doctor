@@ -2501,8 +2501,9 @@ def latest_check_ids(lines, app_id=""):
     apply-gate.latest_by_name): a job's queued run has no `started_at` and no
     annotations to harvest, so ranking it BELOW a completed run is wanted. An
     App apply check carries no annotations, queued or completed, so its rank
-    changes nothing. A `skipped` run ranks below any other run of its name: a
-    deferred plan run's skipped jobs start after the earlier run's annotated ones.
+    changes nothing. A `skipped` run ranks below any other run of its name, whatever
+    skipped it (a deferred or draft plan run, a fork refusal): a skipped check carries
+    no annotations, so the newest completed check of the name is the one with findings.
 
     Carries the consumer file's skipped router jobs too — they are
     `github-actions`-authored, so four rows per report (comment, deploy, apply,

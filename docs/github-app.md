@@ -402,8 +402,8 @@ actual work here:
   ref like the autoplan, and checks out nothing either: it reads only the event
   payload (`docs/hardening.md` §Contributors without push access).
 - **The plan-run jobs that hold the key run no consumer repository content.**
-  `claim`, which runs only on a commented `shipmate plan` dispatch, the
-  `summary` job, `gate-hold`, which runs only when `summary` ended
+  `claim`, which runs only on a commented `shipmate plan` dispatch, `defer`,
+  which carries `summary`'s fork clause in its own `if:`, the `summary` job, `gate-hold`, which runs only when `summary` ended
   `cancelled` and the run was not cancelled, for example at a full gate-writer
   queue for the head, and `outcome`, which carries `summary`'s fork clause,
   check out nothing, and a consumer

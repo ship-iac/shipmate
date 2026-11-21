@@ -20,11 +20,11 @@ from the environment:
 - this run (`GITHUB_RUN_ID`) is the newest autoplan run of `SHIPMATE_HEAD_SHA` that
   `apply-gate.newest_autoplan` lists in `GITHUB_REPOSITORY`, the check the `auto` run's own
   provenance check repeats: a ready-for-review run of the same head is never an `auto` source,
-  yet it is the newest unless it deferred (`apply-gate.deferred`), so a push run whose ready
-  click came while it ran dispatches nothing. Read only once every other condition holds and an
-  `auto` environment holds a change. A listing with no run as new as this one (the listing
-  lagging this run) dispatches with a warning; a failed or malformed listing exits `UNREAD` with
-  one `::error::` line, and the summary replies that no auto apply started.
+  yet it is the newest unless it completed after deferring (`apply-gate.deferred`), so a push
+  run whose ready click came while it ran dispatches nothing. Read only once every other
+  condition holds and an `auto` environment holds a change. A listing with no run as new as this
+  one (the listing lagging this run) dispatches with a warning; a failed or malformed listing
+  exits `UNREAD` with one `::error::` line, and the summary replies that no auto apply started.
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.

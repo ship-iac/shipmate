@@ -247,6 +247,9 @@ RATE_LIMIT_WAIT = 60
 #: The waits one process may spend across all its `create_retried` and `write_retried` writes.
 RATE_LIMIT_WAITS = 3
 _rate_limit_waits = 0
+#: `apply-gate`'s deferred verdict per `(repo, run id, run attempt)` of an ended autoplan run.
+#: It lives here, the one module every loaded script shares, so each process reads once.
+deferred_runs = {}
 
 
 def is_rate_limited(exc):

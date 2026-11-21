@@ -2684,8 +2684,8 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
 - this run is the head's newest autoplan run, as `apply-gate.newest_autoplan`
   lists them, the check the `auto` run's provenance check repeats: a
   ready-for-review run of the same head is never an `auto` source, yet it is
-  the newest unless it deferred to an earlier plan (§Post-plan topology,
-  `defer`), and an `auto` run from the older push's plan would refuse it as
+  the newest unless it completed after deferring to an earlier plan
+  (§Post-plan topology, `defer`), and an `auto` run from the older push's plan would refuse it as
   `newer`. So a push run of a head marked ready for review while it ran starts
   no `auto` run: the ready-for-review run is still waiting behind it, and
   `shipmate apply` applies that plan. A newer run logs "autoplan run <id> of <head> is newer than this run;
@@ -2782,8 +2782,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   fingerprint). Every cell's record must also name the
   event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
   of the head dispatches nothing yet becomes its newest autoplan, unless it is a
-  ready-for-review run that deferred to an earlier plan, and whoever clicked is
-  no pusher. A record with no action refuses too:
+  ready-for-review run that completed after deferring to an earlier plan, and
+  whoever clicked is no pusher. A record with no action refuses too:
   ``auto apply refused: the plan records of <cells> name no push event action
   (opened or synchronize), so no push started that plan.`` The wave pre-apply
   check repeats this on the cell's newest record.
@@ -2837,8 +2837,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   @<triggering actor>, so it was re-run, and auto authorizes only the push
   itself; a writer comments `shipmate apply`.`` The listed run carries no event
   action, so a ready-for-review or reopen autoplan is kept out by the dispatch
-  condition above, not here; a ready-for-review run that deferred is never the
-  listed run. The permission is read with the `detect` job's `GITHUB_TOKEN` from
+  condition above, not here; a ready-for-review run that completed after
+  deferring is never the listed run. The permission is read with the `detect` job's `GITHUB_TOKEN` from
   `collaborators/<login>/permission` and decided by
   `authorize._permission_reason`, the function that decides a commenter:
   ``not authorized: `shipmate apply` needs write access to this repository, and
@@ -3136,10 +3136,11 @@ The eight jobs:
   nothing and posts nothing: `plan / defer` succeeds with the notice "plan run
   <id> planned and published <sha>; this ready-for-review run plans nothing",
   and `detect`, `plan`, `summary`, `gate-hold` and `outcome` are skipped. That
-  run's plan comment, apply checks and gate stand. When it cannot tell, a
-  missing App key or a failed read included, it warns and the run plans. It
-  checks nothing out and runs on `ubuntu-slim` whatever `runs_on` the caller
-  passes.
+  run's plan comment, apply checks and gate stand. A re-run of this run defers
+  again, so the earlier plan stays; a push plans the new head. When it cannot
+  tell, a missing App key or a failed read included, it warns and the run
+  plans. It checks nothing out and runs on `ubuntu-slim` whatever `runs_on` the
+  caller passes.
 - **`detect` and `plan`** (engine, either trigger) — they upload plan artifacts
   and cell summaries; they author nothing and mint no App token. `detect` binds
   no environment; `plan` binds only the plan environment for the cell it is

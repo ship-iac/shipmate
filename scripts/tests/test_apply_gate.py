@@ -1162,6 +1162,22 @@ def test_newest_autoplan_reads_past_two_deferred_runs():
     assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9), _jobs_argv(7)]
 
 
+def test_newest_autoplan_reads_an_ended_runs_jobs_once_per_process():
+    """Two walks of one listing read the listing twice and run 9's jobs once: a wave cell
+    re-reads the newest autoplan. Mutation: read the jobs on every call (the cache unread)."""
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in [_EARLIER, _READY])
+        return _jobs_body("deferred")
+
+    newest = [ag.newest_autoplan("o/r", _HEAD, run=run) for _ in range(2)]
+    assert newest == [_EARLIER, _EARLIER]
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(9), autoplans_read("o/r", _HEAD)]
+
+
 def test_newest_autoplan_returns_a_lone_completed_run_without_reading_its_jobs():
     """A deferred run always has an earlier one. Mutation: drop the older-sibling condition (the
     deferred jobs skip the only run and None returns)."""
