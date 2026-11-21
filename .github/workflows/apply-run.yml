@@ -139,6 +139,8 @@ jobs:
     needs: [review]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ inputs.runs_on }}
+    # It checks out the pull request's tree, so it restores and saves nothing.
+    cache-mode: read
     permissions: { contents: read, checks: read, actions: read, pull-requests: read }
     # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
     outputs:

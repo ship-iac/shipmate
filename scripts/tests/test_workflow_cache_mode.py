@@ -7,11 +7,13 @@ on a job that saves state or providers denies the save with the step still green
 
 `cell.yml`'s `apply` runs pull-request code with `read`; its `save`, which runs none, writes the
 state entry. A caller's job-level `cache-mode` applies to every job it calls, so a `read` on a
-wave job fails `save` at startup.
+wave job fails `save` at startup. `apply-run.yml`'s `detect` checks out the pull request's tree
+and restores only.
 
 Mutations: delete `cache-mode: read` from `unlock.yml`; set `plan.yml`'s to `none`; add a
 job-level `cache-mode: write` to `plan.yml`'s `plan` job; add a job-level `cache-mode: read` to
-`apply-env-level.yml`'s `wave0` job; set `cell.yml`'s `save` to `read`; add a new
+`apply-env-level.yml`'s `wave0` job; delete `apply-run.yml`'s `detect` `cache-mode: read`;
+move it to `apply-run.yml`'s `envlevel0` job; set `cell.yml`'s `save` to `read`; add a new
 `.github/workflows/probe.yaml`; add an empty top-level `cache-mode:` to `apply.yml`.
 """
 
@@ -23,7 +25,7 @@ _ABSENT = object()
 #: Hand-written: every workflow file by name, so a new file reds until its mode is decided.
 _EXPECTED = {
     "apply-env-level.yml": (_ABSENT, {}),
-    "apply-run.yml": (_ABSENT, {}),
+    "apply-run.yml": (_ABSENT, {"detect": "read"}),
     "apply.yml": (_ABSENT, {}),
     "cell.yml": (_ABSENT, {"apply": "read", "save": "write"}),
     "ci.yml": (_ABSENT, {}),
