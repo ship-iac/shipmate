@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the plan comment step leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and no run of that head planned it or is about to, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment, and that is the head's newest autoplan run, dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a listed shipmate.yml run may be this dispatch's or none can be ruled out (for the plan, an App-dispatched run with this pull request's comment-less plan title created at or after t0, five seconds before the first attempt; for the auto verb, any workflow_dispatch run created at or after t0).
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the plan comment step leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and no run of that head planned it or is about to, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push (event action opened or synchronize), whose gate is pending over a changed cell of an apply_mode auto environment, and that is the head's newest autoplan run, dispatches the auto verb to shipmate.yml, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a listed shipmate.yml run may be this dispatch's or none can be ruled out (for the plan, an App-dispatched run with this pull request's comment-less plan title created at or after t0, five seconds before the first attempt; for the auto verb, any workflow_dispatch run created at or after t0). After the gate is written, a successful on-demand plan re-runs, through scripts/rerun-autoplan, the failed plan cells of the head's newest autoplan run when that run is done and every condition the script lists holds, logging a notice naming the first that does not, and warning when the decision, the token mint or the re-run request fails.
 inputs:
   pr-number:
     description: Pull request number.
@@ -601,6 +601,64 @@ runs:
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi
+
+    - name: Decide whether to re-run the superseded autoplan
+      # After `Create/refresh gate`, with no `always()`: a failed publish or gate write ends the
+      # job first. The engine slug and sha come from the calling step's env: a composite cannot
+      # read `job`.
+      if: ${{ inputs.on-demand == 'true' && inputs.plan-result == 'success' && steps.hold.outputs.superseded != 'true' && steps.upsert.outputs.result != 'moved' }}
+      id: rerundecide
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}
+      run: |
+        set -euo pipefail
+        # Degrades: the gate is already written, and a re-run only changes what the superseded
+        # autoplan's checks show.
+        if ! rid=$(python3 "$GITHUB_ACTION_PATH/../../scripts/rerun-autoplan" decide 2>rerun.err); then
+          sed 's/^::error::/::warning::/' rerun.err >&2
+          echo "::warning::could not decide whether to re-run the superseded autoplan; no re-run started"
+          exit 0
+        fi
+        cat rerun.err >&2
+        if [ -n "$rid" ]; then echo "run=$rid" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Mint the autoplan re-run token
+      if: ${{ steps.rerundecide.outputs.run != '' }}
+      id: reruntoken
+      # Degrades: a failed mint leaves the token empty, which the re-run step reports.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+
+    - name: Re-run the superseded autoplan's failed jobs
+      if: ${{ steps.rerundecide.outputs.run != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.reruntoken.outputs.token }}
+        SHIPMATE_RERUN: ${{ steps.rerundecide.outputs.run }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
+      run: |
+        set -euo pipefail
+        # Degrades: a failed mint or re-run leaves only the superseded autoplan's checks red.
+        not_rerun() {
+          echo "::warning::could not re-run the failed jobs of autoplan run $SHIPMATE_RERUN; its failed plan checks stay red until a push plans a new head"
+          exit 0
+        }
+        [ -n "${GH_TOKEN:-}" ] || not_rerun
+        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/rerun-autoplan" post "$SHIPMATE_RERUN" 2>post.err; then
+          sed 's/^::error::/::warning::/' post.err >&2
+          not_rerun
+        fi
+        cat post.err >&2
 
     - name: Check whether the live head needs a plan
       if: ${{ steps.hold.outputs.moved == 'true' || steps.upsert.outputs.result == 'moved' }}

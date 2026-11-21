@@ -1788,6 +1788,12 @@ RUN_NAME = (
     "|| github.event_name == 'pull_request_target' && 'plan' "
     "|| github.event_name == 'issue_comment' && 'comment' || 'deploy') }}"
 )
+#: The `plan` job `concurrency` `docs/getting-started.md` publishes.
+PLAN_CONCURRENCY = {
+    "group": "plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request_target'"
+    " && github.event.action != 'ready_for_review' && github.run_attempt == '1' }}",
+}
 #: A single-quoted expression literal. An escaped quote (`''`) splits one literal into two
 #: adjacent ones, which leaves the same text outside them.
 _QUOTED = re.compile(r"('[^']*')")
@@ -1826,13 +1832,45 @@ def _run_name_finding(doc, name):
     ]
 
 
+def _plan_concurrency_finding(doc, name, engine):
+    """One finding when the job calling the engine's `plan.yml` has a `concurrency` that is not
+    `PLAN_CONCURRENCY`, each value compared once `_normalize_expr`ed."""
+
+    def published(found):
+        return (
+            isinstance(found, dict)
+            and found.keys() == PLAN_CONCURRENCY.keys()
+            and all(
+                isinstance(found[k], str) and _normalize_expr(found[k]) == _normalize_expr(v)
+                for k, v in PLAN_CONCURRENCY.items()
+            )
+        )
+
+    if all(published(job.get("concurrency")) for _, job in _engine_calls(doc, engine, "plan.yml")):
+        return []
+    return [
+        (
+            WARNING,
+            (
+                f"`{name}`'s `plan` job `concurrency` is not the published one, so a re-run of a "
+                "plan run cancels the plan run in flight instead of waiting, and a `shipmate plan` "
+                "over a failed autoplan ends cancelled. Re-pin the file with the engine's "
+                "`scripts/repin` and its `--write-fence` flag, after reading the diff it prints "
+                "(docs/getting-started.md)."
+            ),
+        )
+    ]
+
+
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
-    "the workflow file's job name, dispatch wiring, event routing and drift call",
+    "the workflow file's job name, dispatch wiring, event routing, concurrency and drift call",
     _SHIPMATE_YML,
 )
 # Dispatch wiring reads no engine slug, so it is not in this subject.
-SHIPMATE_YML_NO_ENGINE = _no_engine("the workflow file's job name, event routing and drift call")
+SHIPMATE_YML_NO_ENGINE = _no_engine(
+    "the workflow file's job name, event routing, concurrency and drift call"
+)
 
 
 SHIPMATE_YML_CALLS_DRIFT = (
@@ -1848,9 +1886,9 @@ SHIPMATE_YML_CALLS_DRIFT = (
 
 def _shipmate_yml_warnings(ctx):
     """The job-name, dispatch-wiring, routing, `auto` `with:`, `unlock` grant, trigger-types,
-    run-name and drift-call findings over the consumer's `shipmate.yml` alone, in that order,
-    from one read at the commit under examination (`_contents_ref`): a pull request that fixes
-    the file must not still be reported for the old state.
+    run-name, plan-concurrency and drift-call findings over the consumer's `shipmate.yml` alone,
+    in that order, from one read at the commit under examination (`_contents_ref`): a pull
+    request that fixes the file must not still be reported for the old state.
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
@@ -1860,7 +1898,7 @@ def _shipmate_yml_warnings(ctx):
     receives no dispatch. A file that does not parse is `_workflow_parse_warnings`' one
     finding and draws none here.
 
-    Without the engine repository the five engine-anchored findings give way to one notice:
+    Without the engine repository the six engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring,
     the trigger types and the run name read no engine slug and still run."""
     ref = _contents_ref(ctx)
@@ -1888,6 +1926,7 @@ def _shipmate_yml_warnings(ctx):
         *_unlock_grant_finding(doc, name, engine),
         *_pr_target_types_finding(doc, name),
         *_run_name_finding(doc, name),
+        *_plan_concurrency_finding(doc, name, engine),
         *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]
 

@@ -1364,6 +1364,10 @@ _SHIPMATE_WF = (
     "    name: plan\n"
     "    if: (github.event_name == 'pull_request_target' && github.event.action != 'closed') "
     "|| (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')\n"
+    "    concurrency:\n"
+    "      group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}\n"
+    "      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && "
+    "github.event.action != 'ready_for_review' && github.run_attempt == '1' }}\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
     "    permissions: { contents: read, pull-requests: read, id-token: write }\n"
     "    secrets:\n"
@@ -4708,7 +4712,8 @@ def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wi
         (
             "notice",
             (
-                "the workflow file's job name, event routing and drift call not verified: "
+                "the workflow file's job name, event routing, concurrency and drift call not "
+                "verified: "
                 "the engine repository could not be determined."
             ),
         ),
@@ -4829,14 +4834,14 @@ def test_the_workflow_directory_degrades_read_as_written():
             "notice",
             (
                 "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
-                "dispatch wiring, event routing and drift call not verified."
+                "dispatch wiring, event routing, concurrency and drift call not verified."
             ),
         ),
         (
             "notice",
             (
-                "the workflow file's job name, dispatch wiring, event routing and drift call "
-                "not verified: the commit under examination could not be determined."
+                "the workflow file's job name, dispatch wiring, event routing, concurrency and "
+                "drift call not verified: the commit under examination could not be determined."
             ),
         ),
     )
@@ -7482,7 +7487,8 @@ def test_the_shipmate_yml_probe_runs_the_trigger_types_finder(monkeypatch):
         (
             "notice",
             (
-                "the workflow file's job name, event routing and drift call not verified: "
+                "the workflow file's job name, event routing, concurrency and drift call not "
+                "verified: "
                 "the engine repository could not be determined."
             ),
         ),
@@ -7584,8 +7590,116 @@ def test_the_shipmate_yml_probe_reports_the_run_name_with_and_without_the_engine
         (
             "notice",
             (
-                "the workflow file's job name, event routing and drift call not verified: "
+                "the workflow file's job name, event routing, concurrency and drift call not "
+                "verified: "
                 "the engine repository could not be determined."
+            ),
+        ),
+    ]
+
+
+# The plan concurrency finding, hand-written and whole.
+_PLAN_CONCURRENCY_TEXT = (
+    "`shipmate.yml`'s `plan` job `concurrency` is not the published one, so a re-run of a plan "
+    "run cancels the plan run in flight instead of waiting, and a `shipmate plan` over a failed "
+    "autoplan ends cancelled. Re-pin the file with the engine's `scripts/repin` and its "
+    "`--write-fence` flag, after reading the diff it prints (docs/getting-started.md)."
+)
+_PLAN_CONCURRENCY_BLOCK = (
+    "    concurrency:\n"
+    "      group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}\n"
+    "      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && "
+    "github.event.action != 'ready_for_review' && github.run_attempt == '1' }}\n"
+)
+
+
+def _with_plan_concurrency(block):
+    assert _PLAN_CONCURRENCY_BLOCK in _SHIPMATE_WF
+    return _SHIPMATE_WF.replace(_PLAN_CONCURRENCY_BLOCK, block, 1)
+
+
+def test_the_plan_concurrency_matches_the_documented_workflow_file():
+    """The fence's `plan` job `concurrency`, doctor's `PLAN_CONCURRENCY` and this hand-written
+    mapping are one value.
+
+    Mutation: drop the `run_attempt` clause from `PLAN_CONCURRENCY` -- red."""
+    expected = {
+        "group": "plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}",
+        "cancel-in-progress": "${{ github.event_name == 'pull_request_target'"
+        " && github.event.action != 'ready_for_review' && github.run_attempt == '1' }}",
+    }
+    documented = load_workflow_text(_documented_workflow_file())["jobs"]["plan"]["concurrency"]
+    assert documented == expected
+    assert expected == doctor.PLAN_CONCURRENCY
+
+
+def test_the_published_plan_concurrency_draws_no_finding():
+    """Mutation: drop the `run_attempt` clause from `PLAN_CONCURRENCY` -- red."""
+    doc = _doc(_SHIPMATE_WF)
+    assert doctor._plan_concurrency_finding(doc, "shipmate.yml", _ENGINE_REPO) == []
+
+
+def test_the_pre_release_plan_concurrency_is_reported():
+    """The block without the `run_attempt` clause cancels the run in flight on a re-run.
+
+    Mutations: compare `group` only -- red; return `[]` when `cancel-in-progress` differs --
+    red."""
+    old = _with_plan_concurrency(
+        "    concurrency:\n"
+        "      group: plan-${{ github.event.pull_request.number ||"
+        " github.event.inputs.pr_number }}\n"
+        "      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && "
+        "github.event.action != 'ready_for_review' }}\n"
+    )
+    assert doctor._plan_concurrency_finding(_doc(old), "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _PLAN_CONCURRENCY_TEXT)
+    ]
+
+
+@pytest.mark.parametrize(
+    "block",
+    ["", "    concurrency: plan-${{ github.event.pull_request.number }}\n"],
+    ids=["missing", "scalar"],
+)
+def test_a_missing_or_scalar_plan_concurrency_is_reported(block):
+    """Mutation: return `[]` when `concurrency` is not a mapping -- red."""
+    doc = _doc(_with_plan_concurrency(block))
+    assert doctor._plan_concurrency_finding(doc, "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _PLAN_CONCURRENCY_TEXT)
+    ]
+
+
+def test_a_reflowed_plan_concurrency_draws_no_finding():
+    """The same expression on two lines. Mutation: compare without `_normalize_expr` -- red."""
+    doc = _doc(
+        _with_plan_concurrency(
+            "    concurrency:\n"
+            "      group: plan-${{ github.event.pull_request.number ||"
+            " github.event.inputs.pr_number }}\n"
+            "      cancel-in-progress: |-\n"
+            "        ${{ github.event_name == 'pull_request_target'\n"
+            "        && github.event.action != 'ready_for_review' && github.run_attempt == '1' }}\n"
+        )
+    )
+    assert doctor._plan_concurrency_finding(doc, "shipmate.yml", _ENGINE_REPO) == []
+
+
+def test_the_shipmate_yml_probe_reports_the_plan_concurrency_only_with_the_engine_repo(
+    monkeypatch,
+):
+    """The finding selects the plan job by the engine slug, so the no-engine branch leaves it to
+    its notice.
+
+    Mutation: drop `_plan_concurrency_finding` from the engine branch -- red."""
+    responses = _fork_responses({"shipmate.yml": _with_plan_concurrency("")})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == [(doctor.WARNING, _PLAN_CONCURRENCY_TEXT)]
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo="")) == [
+        (
+            "notice",
+            (
+                "the workflow file's job name, event routing, concurrency and drift call not "
+                "verified: the engine repository could not be determined."
             ),
         ),
     ]

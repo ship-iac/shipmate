@@ -469,8 +469,8 @@ through them, and doctor does not check them. Keep the job ids, though:
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
-the job name, dispatch wiring, event routing, trigger types, the `run-name` and a
-drift job, on it. A
+the job name, dispatch wiring, event routing, trigger types, the `run-name`, the
+`plan` job's `concurrency` and a drift job, on it. A
 file under another name is reached by nothing. A drift file's name matters to
 nothing: nothing dispatches it, and doctor finds a drift file by its call of
 `drift.yml`.
@@ -551,9 +551,9 @@ jobs:
     if: (github.event_name == 'pull_request_target' && github.event.action != 'closed') || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-      # A ready run and a dispatched plan wait for the run in flight; a push, open
-      # or reopen run, or a re-run of one, cancels it.
-      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'ready_for_review' }}
+      # A ready run, a dispatched plan and any re-run wait for the run in flight;
+      # a push, open or reopen run cancels it.
+      cancel-in-progress: ${{ github.event_name == 'pull_request_target' && github.event.action != 'ready_for_review' && github.run_attempt == '1' }}
     uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
     # Required: the callee is capped by these; fewer kills the run with no log.
     permissions:

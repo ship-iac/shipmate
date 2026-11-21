@@ -99,11 +99,11 @@ combining fourteen live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds eight checks, so an unreadable file
-  leaves all eight unverified together. A call counts only when it names the
+  the commit under examination, feeds nine checks, so an unreadable file
+  leaves all nine unverified together. A call counts only when it names the
   engine repository doctor runs from, in any letter case: a fork, a renamed
   engine or a wrapper workflow does not count. When that repository could not
-  be determined, the job-name, routing, `auto` `with:`, `unlock` grant and drift-call checks are a note
+  be determined, the job-name, routing, `auto` `with:`, `unlock` grant, concurrency and drift-call checks are a note
   saying so, and the dispatch, trigger-types and `run-name` checks still run:
   - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
@@ -163,6 +163,12 @@ combining fourteen live probes.
     without naming it, `shipmate unlock <env> --evict` refuses while a run with
     such a title is live, and a commented dispatch whose response was lost is
     retried, which may start the command twice. Re-pin the file with
+    `python <engine>/scripts/repin <consumer> <tag> --write-fence`.
+  - Whether its `plan` job's `concurrency` is the fence's, each value compared
+    with whitespace collapsed outside quoted literals. Without it a re-run of a
+    plan run cancels the plan run in flight instead of waiting, and a
+    `shipmate plan` over a failed autoplan ends cancelled when it re-runs that
+    autoplan. Re-pin the file with
     `python <engine>/scripts/repin <consumer> <tag> --write-fence`.
   - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
     runs on that file's triggers. Move the drift job to a workflow file of its
@@ -1961,15 +1967,14 @@ A run held for its plan job or its cell count also publishes no apply check.
 Checks an earlier plan run of the same head published stay; on a head with none,
 a `shipmate apply` replies "no reviewed plan for the current PR head".
 
-"Re-run failed jobs" on the plan run is safe only when that run is the newest
-plan run of the head. The re-run re-enters the `plan-<pr>` concurrency group,
-which cancels the run in progress only when the arriving run is a
-`pull_request_target` run other than `ready_for_review` (a push, open or reopen,
-or a re-run of one). A re-run of such a run cancels a newer run in flight, and a
-push, open or reopen run, or a re-run of one, arriving while the re-run is in
-flight cancels the re-run. A `ready_for_review` run or a `shipmate plan` dispatch waits instead,
-and a later arrival replaces a waiting run; whether a re-run of a
-`ready_for_review` run or of a dispatched run waits is not verified. A re-run
+A re-run of a plan run ("Re-run failed jobs" or a full re-run) re-enters the
+`plan-<pr>` concurrency group and waits for the run in flight. Only a
+first-attempt push, open or reopen run cancels the run in progress, a re-run in
+flight included; a `ready_for_review` run and a `shipmate plan` dispatch wait
+too, and a later arrival replaces a waiting run. A `shipmate plan` whose plan
+job succeeded re-runs the failed jobs of the head's newest autoplan run itself
+when the conditions in `CONTRACT.md` §Post-plan topology hold; each unmet
+condition logs the notice `no autoplan re-run: <reason>`. A re-run
 summary publishes no apply check its own run already published, so it leaves
 alone a check an apply completed or is completing. It refuses before writing
 anything when its hold step finds the pull request moved past its head, or
@@ -3087,8 +3092,8 @@ the `plan-<pr>` queue by the ready-for-review run. The comment then shows only
 
 ### A cancelled autoplan left red checks on the pull request
 
-A newer plan run of the same pull request (a push, open or reopen, or a re-run
-of one) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
+A newer plan run of the same pull request (a first-attempt push, open or reopen
+run) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, the `plan / <env> / <stack>` matrix check) stay red or
 cancelled on its head. `plan / gate-hold` shows skipped: it runs only when
 `summary` was cancelled and the run was not.
@@ -3106,12 +3111,11 @@ required check, so the merge gates on `shipmate / gate` alone.
 When a newer head's run cancelled it, those checks sit on a head the pull
 request has left, and the merge gates on the live head alone: nothing needs
 recovering. A re-run
-of it writes nothing on its head and ends green at its hold step, with the
-notice "pull request #<n> has moved past <sha>; this run writes no comment,
-apply check or gate on it". When that re-run cancelled the live head's autoplan
-in flight (below), it dispatches `shipmate plan` for the live head, whose
-cancelled autoplan run blocks no replan; that plan is on demand, so no auto
-apply follows it.
+of it waits for any plan run in flight, then writes nothing on its head and
+ends green at its hold step, with the notice "pull request #<n> has moved past
+<sha>; this run writes no comment, apply check or gate on it". It dispatches
+`shipmate plan` for the live head only when no run of the live head planned it
+or is about to (below); that plan is on demand, so no auto apply follows it.
 
 A push, open or reopen run of an older head that arrives while the live head's
 autoplan runs cancels that autoplan. When that older run's summary finds the
@@ -3123,27 +3127,26 @@ comment `shipmate plan` if the plan comment does not show the live head, then
 `shipmate apply` for an environment that applies automatically: an on-demand
 plan starts no auto apply.
 
-When a run on the same head cancelled it (open, reopen, or a re-run), a re-run
-of the cancelled run can clear its checks. "Re-run failed jobs"
+When a run on the same head cancelled it (open or reopen), a re-run of the
+cancelled run can clear its checks. A `shipmate plan` does not start that
+re-run: it re-runs only the head's newest autoplan run, only when none of its
+jobs was cancelled, only cells that uploaded nothing, and only a run of the
+same engine pin (`CONTRACT.md` §Post-plan topology). Re-run any other case by
+hand. "Re-run failed jobs"
 (`gh run rerun <id> --failed`) re-runs every failed or cancelled job, so it
 clears the checks only when none of them had already uploaded its plan; a full
 re-run (`gh run rerun <id>`) fails every cell that already uploaded its plan,
 successful ones included, because the artifact names carry no attempt and the
-upload does not overwrite. Re-run only after the newer plan run has finished. Not
-before: the re-run re-enters the `plan-<pr>`
-concurrency group, which cancels the run in progress only when the arriving
-run is a `pull_request_target` run other than `ready_for_review` (a push, open or
-reopen, or a re-run of one), so the re-run of such a run cancels a newer run
-still in flight. Whether a re-run of a `ready_for_review` run or of a dispatched
-run waits instead is not verified. When the newer run holds the gate or
+upload does not overwrite. The re-run waits in the `plan-<pr>` concurrency
+group for any plan run in flight. When the newer run holds the gate or
 published apply checks on the head, the re-run's `summary` writes nothing and
 ends green at its hold step, with a notice naming that run ("plan run <id>
 holds the gate of <sha> and is newer than this run", or "plan run <id>, newer
 than this run (<id>), published apply checks on this head"). A plan run of the
 same pull request that starts while the re-run is in flight cancels the re-run
-when it is a push, open or reopen run, or a re-run of one, as it cancelled the
-autoplan; a `ready_for_review` run or a `shipmate plan` dispatch waits for the
-re-run instead, and a later arrival replaces a waiting run.
+when it is a first-attempt push, open or reopen run, as it cancelled the
+autoplan; any other plan run waits for the re-run instead, and a later arrival
+replaces a waiting run.
 Whatever the re-run ends with, pushing a commit after the newer plan run has
 finished clears the red checks: a new head carries only fresh checks.
 

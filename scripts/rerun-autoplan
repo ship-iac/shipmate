@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""Re-run the failed plan cells of the autoplan run a commanded plan superseded, so their checks
+stop reading red.
+
+    rerun-autoplan decide       print the autoplan run id to re-run, or nothing
+    rerun-autoplan post <id>    ask GitHub to re-run run <id>'s failed jobs
+
+Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID` (this run), `SHIPMATE_PR_NUMBER`, and for
+`decide` also `SHIPMATE_HEAD_SHA`, `SHIPMATE_PLANNED_CELLS_NAMES` (detect's `cells` JSON, the
+cells this run planned), `SHIPMATE_ENGINE_REPO` (`<owner>/<repo>` of the engine) and
+`SHIPMATE_ENGINE_SHA` (`job.workflow_sha`: the sha of the engine `plan.yml` this run uses). A
+malformed environment or `<id>` exits 1 with `::error::` before any API call, except an empty or
+malformed `SHIPMATE_ENGINE_SHA`, which prints row 9's notice before any API call.
+
+`decide` prints the head's newest autoplan run id (`apply-gate.newest_autoplan`) when every row
+below holds, read in this order; the first that fails prints one `::notice::` on stderr naming
+it, and nothing on stdout:
+
+1. an autoplan run of the head is listed;
+2. it is `completed`;
+3. no live `shipmate plan` run of the pull request other than this one is listed, and the
+   listing is complete (`_shipmate.other_live_plan_run`): a re-run would replace a waiting run
+   in the consumer's `plan-<pr>` concurrency group;
+4. its latest attempt's jobs are listed whole, every one at the run's listed `run_attempt`;
+5. it planned (`apply-gate.planned`);
+6. every job's conclusion is `success`, `skipped` or `failure`: GitHub's re-run of failed jobs
+   also re-runs `cancelled` and `timed_out` ones, outside the bound of row 7;
+7. at least one plan cell job of a cell this run planned failed, and every failed job is such a
+   cell job or `plan / summary`;
+8. the run's artifacts are listed whole and hold neither `plan.<env>.<slug>` nor
+   `cell-summary.<env>.<slug>` of a failed cell (`<slug>` is the stack with `/` as `-`): a
+   second upload of either fails;
+9. the run references the engine's `plan.yml` (`referenced_workflows`, the path before the
+   last `@` equal to `<engine>/.github/workflows/plan.yml`) at `SHIPMATE_ENGINE_SHA`, compared
+   whole, the `<engine>` part in any case.
+
+`post <id>` lists the live plan runs again, counted, and sends nothing when row 3 fails; it
+then sends `POST runs/<id>/rerun-failed-jobs` once and prints the notice line, or the warning
+line when the POST fails.
+
+Every read and the POST run once, unretried: the summary holds the head's gate-writer group while
+it runs. A failed or malformed read is the notice of its row. Both commands exit 0 after any API
+call, because the re-run only changes what the autoplan's checks show.
+"""
+
+import os
+import sys
+
+from _shipmate import (
+    READ_ERRORS,
+    _load,
+    _pages,
+    attempt_jobs,
+    cell_names,
+    command_data,
+    exit_text,
+    gh_json,
+    is_head_sha,
+    is_run_id,
+    one_line,
+    other_live_plan_run,
+    run,
+    run_annotated,
+    status_text,
+    validate_head_sha,
+)
+
+ag = _load("apply-gate")
+
+SUMMARY_JOB = ag.CALLER_PREFIX + "summary"
+#: The job conclusions a re-run of failed jobs leaves alone (`success`, `skipped`) or re-runs
+#: within row 7's bound (`failure`).
+_BOUNDED = ("success", "skipped", "failure")
+
+
+def _notice(text):
+    sys.stderr.write(f"::notice::{command_data(one_line(text))}\n")
+
+
+def _env(name):
+    value = os.environ.get(name, "")
+    if not value:
+        raise SystemExit(f"::error::{name} is empty")
+    return value
+
+
+def _cause(exc):
+    if isinstance(exc, SystemExit):
+        return exit_text(exc)
+    return str(exc) if isinstance(exc, ValueError) else repr(exc)
+
+
+def _other_plan(repo, pr):
+    """Row 3's reason, or None."""
+    r = other_live_plan_run(repo, pr, os.environ["GITHUB_RUN_ID"], run, counted=True, retry=False)
+    if r is None:
+        return None
+    return f"shipmate plan run {r['id']} of pull request #{pr} is {status_text(r.get('status'))}"
+
+
+def _engine_sha(repo, run_id, engine):
+    """The `sha` of run `run_id`'s one `referenced_workflows` entry for the engine's `plan.yml`,
+    or None."""
+    refs = gh_json(f"repos/{repo}/actions/runs/{run_id}", run, retry=False)["referenced_workflows"]
+    # GitHub matches `<owner>/<repo>` in any case, and `job.workflow_repository` need not
+    # spell it as the caller's `uses:` does.
+    want = (engine.lower(), ".github/workflows/plan.yml")
+
+    def key(path):
+        parts = path.rpartition("@")[0].split("/", 2)
+        return "/".join(parts[:2]).lower(), parts[2] if len(parts) == 3 else ""
+
+    shas = [r["sha"] for r in refs if key(r["path"]) == want]
+    return shas[0] if len(shas) == 1 and isinstance(shas[0], str) else None
+
+
+def _failed_cells(jobs, cells):
+    """Row 7: the planned cells whose plan job failed, or a reason string."""
+    checks = {ag.plan_check_name(c["stack"], c["environment"]): c for c in cells}
+    failed = {j["name"] for j in jobs if j.get("conclusion") == "failure"}
+    if stray := sorted(failed - set(checks) - {SUMMARY_JOB}):
+        return f"its failed job {stray[0]} is no plan cell this run planned"
+    if not failed & set(checks):
+        return "no plan cell this run planned failed in it"
+    return [checks[name] for name in sorted(failed & set(checks))]
+
+
+def _jobs_reason(repo, newest, what, cells):
+    """Rows 4 to 7: the failed planned cells, or the first failing row's reason, a str."""
+    jobs, attempts = attempt_jobs(repo, newest["id"], what, run, retry=False)
+    if attempts != [newest["run_attempt"]]:
+        return f"{what} is listed at attempt {newest['run_attempt']!r} and its jobs at {attempts}"
+    if not ag.planned(jobs):
+        return f"{what} did not plan"
+    if odd := next((j for j in jobs if j.get("conclusion") not in _BOUNDED), None):
+        return f"{what}: its job {odd['name']} ended {odd.get('conclusion')}"
+    failed = _failed_cells(jobs, cells)
+    return f"{what}: {failed}" if isinstance(failed, str) else failed
+
+
+def _uploaded(repo, rid, what, failed):
+    """Row 8's reason, or None."""
+    artifacts = _pages(
+        f"repos/{repo}/actions/runs/{rid}/artifacts", "artifacts", run, counted=True, retry=False
+    )
+    if artifacts is None:
+        return f"the artifacts of {what} could not be listed"
+    names = {a.get("name") for a in artifacts}
+    for c in failed:
+        slug = c["stack"].replace("/", "-")
+        for kind in ("plan", "cell-summary"):
+            if (name := f"{kind}.{c['environment']}.{slug}") in names:
+                return f"{what} already uploaded {name}"
+    return None
+
+
+def _engine_moved(repo, rid, what, engine, ours):
+    """Row 9's reason, or None."""
+    theirs = _engine_sha(repo, rid, engine)
+    if theirs != ours:
+        return f"{what} ran engine plan.yml at {theirs} and this run at {ours}"
+    return None
+
+
+def _reason(repo, head, pr, cells, engine, ours):
+    """`(run id, None)` when every row holds, else `(run id or None, the first failing row's
+    reason)`."""
+    newest = ag.newest_autoplan(repo, head, run=run, retry=False)
+    if newest is None:
+        return None, f"no autoplan run of {head} is listed"
+    rid = newest["id"]
+    what = f"autoplan run {rid}"
+    status, _ = ag.status_and_conclusion(newest, what)
+    if status != "completed":
+        return rid, f"{what} is {status_text(status)}"
+    if other := _other_plan(repo, pr):
+        return rid, f"{other}, and a re-run would replace it"
+    failed = _jobs_reason(repo, newest, what, cells)
+    if isinstance(failed, str):
+        return rid, failed
+    return rid, _uploaded(repo, rid, what, failed) or _engine_moved(repo, rid, what, engine, ours)
+
+
+def decide():
+    repo, pr = _env("GITHUB_REPOSITORY"), ag.env_pr_number()
+    if not is_run_id(os.environ.get("GITHUB_RUN_ID", "")):
+        raise SystemExit("::error::GITHUB_RUN_ID must be a decimal run id")
+    head = os.environ.get("SHIPMATE_HEAD_SHA", "")
+    validate_head_sha(head)
+    cells = cell_names(os.environ.get("SHIPMATE_PLANNED_CELLS_NAMES", ""))
+    if cells is None:
+        raise SystemExit("::error::SHIPMATE_PLANNED_CELLS_NAMES is not a JSON list of cells")
+    engine = _env("SHIPMATE_ENGINE_REPO")
+    ours = os.environ.get("SHIPMATE_ENGINE_SHA", "")
+    if not is_head_sha(ours):
+        _notice(f"no autoplan re-run: SHIPMATE_ENGINE_SHA is not a 40-char hex SHA (got: {ours!r})")
+        return
+    try:
+        rid, reason = _reason(repo, head, pr, cells, engine, ours)
+    except READ_ERRORS as exc:
+        _notice(f"no autoplan re-run: a read failed: {_cause(exc)}")
+        return
+    if reason:
+        _notice(f"no autoplan re-run: {reason}")
+        return
+    print(rid)
+
+
+def post(rid):
+    repo, pr = _env("GITHUB_REPOSITORY"), ag.env_pr_number()
+    if not is_run_id(os.environ.get("GITHUB_RUN_ID", "")):
+        raise SystemExit("::error::GITHUB_RUN_ID must be a decimal run id")
+    if not is_run_id(rid):
+        raise SystemExit(f"::error::<id> must be a decimal run id (got: {rid!r})")
+    try:
+        other = _other_plan(repo, pr)
+    except READ_ERRORS as exc:
+        other = f"a read failed: {_cause(exc)}"
+    if other:
+        _notice(f"no re-run of autoplan run {rid}: {other}")
+        return
+    try:
+        run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{rid}/rerun-failed-jobs"])
+    except SystemExit as exc:
+        sys.stderr.write(
+            f"::warning::could not re-run the failed jobs of autoplan run {rid}; its failed plan "
+            "checks stay red until a push plans a new head\n"
+        )
+        sys.stderr.write(command_data(one_line(exit_text(exc))) + "\n")
+        return
+    sys.stderr.write(
+        f"::notice title=rerun::re-ran the failed jobs of autoplan run {rid}, superseded by this "
+        "plan\n"
+    )
+
+
+def main(argv):
+    if argv == ["decide"]:
+        decide()
+    elif len(argv) == 2 and argv[0] == "post":
+        post(argv[1])
+    else:
+        raise SystemExit(f"::error::usage: rerun-autoplan decide | post <id> (got {argv})")
+
+
+if __name__ == "__main__":
+    run_annotated(main, sys.argv[1:])

@@ -81,19 +81,19 @@ from _shipmate import (
     GATE_CONTEXT,
     _load,
     _run,
+    attempt_jobs,
     check_runs,
     current_run_url,
     exit_text,
     gh_json,
     is_pr_number,
     is_run_id,
-    live_plan_runs,
     one_line,
+    other_live_plan_run,
     pr_head,
     retried,
     run,
     run_annotated,
-    run_jobs,
     sleep,
     status_text,
     validate_head_sha,
@@ -351,19 +351,10 @@ def _unfinished(runs):
 
 
 def _jobs(run_id):
-    """`(jobs, attempts)`: run `run_id`'s latest attempt's jobs and the sorted run attempts they
-    carry, each an int."""
-    jobs, complete = run_jobs(_repo(), run_id, run)
-    if not complete:
-        raise SystemExit(f"the jobs of autoplan run {run_id} could not be listed")
-    attempts = sorted(
-        {j.get("run_attempt") for j in jobs}, key=lambda a: (type(a) is not int, repr(a))
-    )
-    if not all(type(a) is int for a in attempts):
-        raise SystemExit(
-            one_line(f"the jobs of autoplan run {run_id} carry run attempts {attempts}")
-        )
-    return jobs, attempts
+    try:
+        return attempt_jobs(_repo(), run_id, f"autoplan run {run_id}", run)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 def _planned(run_id, jobs):
@@ -421,15 +412,14 @@ def _changed(pr, live):
 
 
 def _dispatched(pr):
-    runs, complete = live_plan_runs(_repo(), pr, run)
-    if not complete:
-        raise SystemExit(f"the live shipmate plan runs of pull request #{pr} could not be listed")
-    own = os.environ.get("GITHUB_RUN_ID", "")
-    for r in runs:
-        if str(r["id"]) != own:
-            status = status_text(r.get("status"))
-            return f"; its shipmate plan run {r['id']} is {status} and plans the live head"
-    return None
+    try:
+        r = other_live_plan_run(_repo(), pr, os.environ.get("GITHUB_RUN_ID", ""), run)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    if r is None:
+        return None
+    status = status_text(r.get("status"))
+    return f"; its shipmate plan run {r['id']} is {status} and plans the live head"
 
 
 def _replan(sha, pr):

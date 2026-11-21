@@ -111,13 +111,16 @@ def test_every_job_running_an_engine_action_is_counted():
 
 
 #: The steps that run an engine action calling `scripts/doctor`, and so must hand it the
-#: engine's own slug. Hand-written whole-set, never derived from the workflows.
+#: engine's own slug, each with its whole `env:`. The summary also runs
+#: `scripts/rerun-autoplan`, which compares the engine sha. Hand-written, never derived from the
+#: workflows.
+ENGINE_REPO_ENV = {"SHIPMATE_ENGINE_REPO": "${{ job.workflow_repository }}"}
+SUMMARY_ENV = ENGINE_REPO_ENV | {"SHIPMATE_ENGINE_SHA": "${{ job.workflow_sha }}"}
 DOCTOR_STEPS = {
-    "comment-ops.yml:ops:" + local_action("comment-ops"),
-    "plan.yml:summary:" + local_action("summary"),
+    "comment-ops.yml:ops:" + local_action("comment-ops"): ENGINE_REPO_ENV,
+    "plan.yml:summary:" + local_action("summary"): SUMMARY_ENV,
 }
 DOCTOR_ACTIONS = {local_action("comment-ops"), local_action("summary")}
-ENGINE_REPO_ENV = {"SHIPMATE_ENGINE_REPO": "${{ job.workflow_repository }}"}
 
 
 def test_the_doctor_steps_pass_the_engine_repository():
@@ -126,8 +129,9 @@ def test_the_doctor_steps_pass_the_engine_repository():
     rejects such a workflow file at load, measured on this branch. The calling step carries it
     instead, and the composite's `run` steps inherit it. Both sets are compared whole, so a step
     that gains a doctor action without the env entry, or keeps the entry after losing the action,
-    reddens. Mutation: delete the `env:` block from plan.yml's summary step."""
-    runs_doctor, carries_env = set(), set()
+    reddens. Mutations: delete the `env:` block from plan.yml's summary step; `github.workflow_sha`
+    for `job.workflow_sha` there."""
+    runs_doctor, carries_env = set(), {}
     for name, doc in _docs():
         if name == MANIFEST_LOAD:
             continue
@@ -136,9 +140,9 @@ def test_the_doctor_steps_pass_the_engine_repository():
                 where = f"{name}:{job_name}:{_uses(step)}"
                 if _uses(step) in DOCTOR_ACTIONS:
                     runs_doctor.add(where)
-                if (step.get("env") or {}) == ENGINE_REPO_ENV:
-                    carries_env.add(where)
-    assert runs_doctor == DOCTOR_STEPS
+                if "SHIPMATE_ENGINE_REPO" in (step.get("env") or {}):
+                    carries_env[where] = step["env"]
+    assert runs_doctor == set(DOCTOR_STEPS)
     assert carries_env == DOCTOR_STEPS
 
 
