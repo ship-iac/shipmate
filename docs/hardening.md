@@ -1401,7 +1401,8 @@ The engine's own fork handling does not change: a fork's pull request starts `fa
   `setup` replaces a restored release directory or file that is a symlink,
   unreadable or not a regular file; that handles a corrupt or stale entry and is
   no defence here, because the extraction has already run.
-  Plan and unlock runs and apply cells' `apply` jobs cannot save
+  Plan and unlock runs, an apply run's `detect` and apply cells' `apply` jobs
+  cannot save
   (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval
