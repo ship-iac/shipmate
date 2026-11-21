@@ -3440,7 +3440,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   fails until an engine release ships the new key.
 - `setup` keeps each tool's three release files (checksum file, signature,
   archive) in the Actions cache, one entry per tool, version, runner OS and
-  runner architecture, keyed `shipmate-tools-<os>-<arch>-<tool>-<version>`,
+  runner architecture, keyed `shipmate-tools-v2-<os>-<arch>-<tool>-<version>`,
   exact match. Every job restores the entry and verifies every restored file as
   it would a download: the checksum file against its signature and the
   committed key, the archive against the verified digest. When a restored file
@@ -3450,14 +3450,16 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   warns `Tool cache entry failed verification`, naming those files, the
   entry's key and its `gh cache delete` command; the entry stays, so every later job downloads
   again until it is deleted. A job with `tofu: "false"` restores and saves no
-  OpenTofu entry. A job saves an entry after a restore that missed and only
-  after the tool installed; a failed save does not fail the job.
-  `plan.yml` and `unlock.yml` declare `cache-mode: read`, as does each apply
-  cell's `apply` job, so their jobs restore only and pass `setup`
-  `cache-save: "false"`. Entries come from the other jobs of the apply, deploy
-  and drift runs, which save in the default branch's cache scope
-  that a pull request's plan reads, so a repository that has run none of them
-  downloads the release files in every plan job. Each leg of a deploy run's
+  OpenTofu entry. Only a merge deploy's `detect` job (Terramate), its `warm`
+  job (both tools) and a drift run's cells (both tools) save an entry, after a
+  restore that missed and only after the tool installed; a failed save does not
+  fail the job. They save in the default branch's cache scope, which every run
+  reads. Plan, unlock and apply runs save no tool or provider entry. Until one
+  of those jobs saves an entry for a tool version, runner OS and architecture,
+  every job that needs it downloads and verifies the release files. Parallel
+  legs of one `warm` job or drift run that miss the same key each save; one
+  stores the entry and the others log `Unable to reserve cache` without an
+  annotation. Each leg of a deploy run's
   `warm` job (§Terramate safeguards, "Lock files and the provider cache")
   installs OpenTofu at the versions its `detect` resolved, so a merge deploy
   saves the entry for the deploy runner's operating system and architecture,
@@ -5167,7 +5169,8 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   are not in the key: stacks whose locks name the same providers at the same
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
-- `drift-cell` saves it; `plan-cell` and `apply-cell` never do. A plan run,
+- `drift-cell` and a merge deploy's `warm` job save it; `plan-cell` and
+  `apply-cell` never do. A plan run,
   from an autoplan or a command, an unlock run and an apply cell hold the
   default branch's cache scope while they run the pull request's HCL, so
   `plan.yml`, `unlock.yml` and each apply cell's `apply` job declare

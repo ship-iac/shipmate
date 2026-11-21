@@ -1798,9 +1798,9 @@ the warning names the first of them. The entry is corrupt, stale or was altered
 ([`../CONTRACT.md`](../CONTRACT.md) §Runner prerequisites).
 
 1. Run the `gh cache delete` command the warning prints. The key starts
-   `shipmate-tools-`.
-2. Re-run the job only if it failed. The next apply, deploy or drift job that
-   misses saves a fresh entry.
+   `shipmate-tools-v2-`.
+2. Re-run the job only if it failed. The next merge deploy or drift run saves
+   a fresh entry.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 
@@ -1820,11 +1820,10 @@ the cause: the backend, credentials or the configuration.
 1. Read the key from the cell's error annotation, `OpenTofu's init failed
    after restoring provider cache entry <key>`, or from the line
    `Cache restored from key: <key>` in its `Initialize the stack` step log.
-   It starts `tofu-providers-`.
+   It starts `tofu-providers-v2-`.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
-   drift or apply cell, or the next merge deploy's `warm` job, saves a fresh
-   entry.
+   drift cell or merge deploy `warm` leg saves a fresh entry.
 
 ### `Provider cache entry not saved`
 
