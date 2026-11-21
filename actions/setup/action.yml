@@ -43,14 +43,14 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/terramate-release
-        key: shipmate-tools-${{ runner.os }}-${{ runner.arch }}-terramate-${{ steps.versions.outputs.terramate }}
+        key: shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-terramate-${{ steps.versions.outputs.terramate }}
     - name: Restore the OpenTofu release
       id: tofu-cache
       if: ${{ inputs.tofu != 'false' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/tofu-release
-        key: shipmate-tools-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}
+        key: shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}
     # Each verify step checks the release's checksum file against a signer key committed in this
     # repository, never fetched, and outputs the Linux digests only once the signature holds.
     - name: Verify Terramate checksums
@@ -185,14 +185,14 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/terramate-release
-        key: shipmate-tools-${{ runner.os }}-${{ runner.arch }}-terramate-${{ steps.versions.outputs.terramate }}
+        key: shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-terramate-${{ steps.versions.outputs.terramate }}
     - name: Save the OpenTofu release
       if: ${{ inputs.tofu != 'false' && inputs.cache-save != 'false' && steps.tofu-cache.outputs.cache-hit != 'true' }}
       continue-on-error: true
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/tofu-release
-        key: shipmate-tools-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}
+        key: shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}
     - name: Provider plugin cache
       shell: bash
       run: |

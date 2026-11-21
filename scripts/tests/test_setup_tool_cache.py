@@ -13,11 +13,11 @@ from _loader import step_by
 _ACTION = "setup"
 
 _TM_KEY = (
-    "shipmate-tools-${{ runner.os }}-${{ runner.arch }}-terramate-"
+    "shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-terramate-"
     "${{ steps.versions.outputs.terramate }}"
 )
 _TOFU_KEY = (
-    "shipmate-tools-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}"
+    "shipmate-tools-v2-${{ runner.os }}-${{ runner.arch }}-tofu-${{ steps.versions.outputs.tofu }}"
 )
 _TM_WITH = {"path": "${{ runner.temp }}/terramate-release", "key": _TM_KEY}
 _TOFU_WITH = {"path": "${{ runner.temp }}/tofu-release", "key": _TOFU_KEY}

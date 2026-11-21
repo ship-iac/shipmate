@@ -22,7 +22,7 @@ hand-written constant.
 Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the
 `cache-hit` clause dropped from `drift-cell`'s check; drift's check `if:` reverted to
 `steps.provider-cache.outcome == 'success'`; the save's key
-rebuilt from the key step's digest; the restore's key rebuilt in YAML as `tofu-providers-${{
+rebuilt from the key step's digest; the restore's key rebuilt in YAML as `tofu-providers-v2-${{
 runner.os }}-${{ runner.arch }}-<digest>`; `-backend=false` dropped from cell-init's no-backend
 init; the `if:` dropped from `Locate state`; a `Save provider cache` step added to `apply-cell`;
 `-type f` dropped from the check's `find`; `restore-keys` added to the restore; `STACK` dropped from
@@ -151,7 +151,7 @@ def test_the_key_is_computed_from_the_stacks_own_lock_file():
 
 
 def test_the_restore_is_keyed_on_the_stacks_own_lock_file():
-    """Mutation: add `restore-keys: tofu-providers-` to the restore."""
+    """Mutation: add `restore-keys: tofu-providers-v2-` to the restore."""
     assert _without_ref(step_by(_INIT_ACTION, name="Restore provider cache")) == _RESTORE
 
 
@@ -240,9 +240,10 @@ def test_every_provider_cache_site_takes_its_name_from_the_one_builder():
     """Every `actions/cache` step on the provider cache directory, by file, step and key, and
     every step running `scripts/provider-cache-key`. Each key is that script's `entry` output, read
     directly or through `cell-init`'s `cache-primary-key` (the restore's own key), and no key in
-    the engine spells the `tofu-providers-` prefix. Mutations: restore cell-init's key as
-    `tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest
-    }}`; key warm's save on `${{ steps.init.outputs.cache-primary-key }}`."""
+    the engine spells the `tofu-providers-v2-` prefix. Mutations: restore cell-init's key as
+    `tofu-providers-v2-${{ runner.os }}-${{ runner.arch }}-${{
+    steps.provider-cache-key.outputs.digest }}`; key warm's save on
+    `${{ steps.init.outputs.cache-primary-key }}`."""
     sites = sorted(
         (name, step.get("name"), (step.get("with") or {}).get("key"))
         for name, doc in _engine_tree().items()

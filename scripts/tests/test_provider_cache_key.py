@@ -1,12 +1,12 @@
 """`scripts/provider-cache-key` prints the whole provider cache entry name,
-`tofu-providers-<RUNNER_OS>-<RUNNER_ARCH>-<digest>`, digesting a lock file's provider addresses and
-versions and nothing else, and prints an empty name rather than failing when there is nothing to
+`tofu-providers-v2-<RUNNER_OS>-<RUNNER_ARCH>-<digest>`, digesting a lock file's provider addresses
+and versions and nothing else, and prints an empty name rather than failing when there is nothing to
 digest.
 
 Mutations that red this module: `sorted(pairs)` replaced by `pairs`; the constraints line
 captured into the digest input; `except OSError` narrowed to `except FileNotFoundError`;
 `errors="replace"` dropped from the lock read; `RUNNER_ARCH` replaced by a literal `X64`; the
-`tofu-providers-` prefix changed.
+`tofu-providers-v2-` prefix changed.
 """
 
 import os
@@ -50,7 +50,7 @@ _HEADER = (
 
 def _entry(found, arch="X64"):
     """The output line for digest `found`, written out whole: the name every site restores."""
-    return f"entry=tofu-providers-Linux-{arch}-{found}\n"
+    return f"entry=tofu-providers-v2-Linux-{arch}-{found}\n"
 
 
 def _run(tmp_path, lock=None, *, lock_is_dir=False, arch="X64"):
