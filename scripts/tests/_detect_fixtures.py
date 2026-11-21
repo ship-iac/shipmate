@@ -124,7 +124,7 @@ def stub_base_changed(monkeypatch, bm, changed=(), calls=None):
 def check_run(**kw):
     """One check-run object as the detects' `--jq` projection emits it."""
     base = {
-        "name": "apply / stacks/app / dev-eu",
+        "name": "apply / dev-eu / stacks/app",
         "status": "completed",
         "conclusion": "success",
         "started_at": "2026-07-18T10:00:00Z",
@@ -164,7 +164,7 @@ def _apply_check(
 ):
     """A pending App-authored apply check carrying its plan-run record."""
     return check_run(
-        name=f"apply / {stack} / {env}",
+        name=f"apply / {env} / {stack}",
         status="queued",
         conclusion=None,
         external_id=_record(plan_run, plan_sha256, pr, cells=cells, action=action),
@@ -178,7 +178,7 @@ def behind_check(stack, env="dev-eu", plan_run="123457", *, cells, **kw):
     true."""
     record = {"plan_run": plan_run, "pr": PR_NUMBER, "cells": cells, "action": "synchronize"}
     return check_run(
-        name=f"apply / {stack} / {env}",
+        name=f"apply / {env} / {stack}",
         status="queued",
         conclusion=None,
         external_id=json.dumps({**record, "behind": True}),

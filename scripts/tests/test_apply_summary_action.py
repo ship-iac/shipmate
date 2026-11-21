@@ -310,7 +310,7 @@ _SCAN_JQ = (
     "output: {title: .output.title}}"
 )
 _SCAN_LISTING = (
-    '{"name": "apply / a / dev", "status": "completed", "conclusion": "success", "id": 1, '
+    '{"name": "apply / dev / a", "status": "completed", "conclusion": "success", "id": 1, '
     '"app": {"id": 7}}\n'
 )
 _HEAD = "c" * 40

@@ -94,7 +94,8 @@ def open_pulls(repo, base):
 def check_stacks(repo, sha, app_id):
     """The stacks the App's apply checks on `sha` name, whatever their state."""
     lines = check_runs(repo, sha).splitlines()
-    return {ag.parse_check_name(n)[0] for n in ag.latest_by_name(ag.app_runs(lines, app_id))}
+    parsed = map(ag.parse_check_name, ag.latest_by_name(ag.app_runs(lines, app_id)))
+    return {p[0] for p in parsed if p}
 
 
 def candidates(repo, pulls, stacks, outside, app_id):

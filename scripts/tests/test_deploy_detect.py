@@ -626,7 +626,7 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
             ],
         )
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us: "
+        "::error::apply aborted: no plan-text digest recorded for apply / dev-us / stacks/app: "
         "the reviewed plan text cannot be checked against the plan that would be applied, so "
         "this apply is refused rather than run unverified. Re-plan these stacks on their pull "
         "request, then apply again; if that pull request has already merged, a new pull "
@@ -652,7 +652,7 @@ def test_main_refuses_a_run_that_declares_more_cells_than_it_published(tmp_path,
         )
     assert str(exc_info.value) == partial_message(
         "plan run 42 published 2 apply checks for 3 planned cells, holding back "
-        "apply / stacks/app / dev-eu, apply / stacks/dns / dev-eu",
+        "apply / dev-eu / stacks/app, apply / dev-eu / stacks/dns",
         rerun=True,
         merged=True,
     )
@@ -670,7 +670,7 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
             checks=[
                 _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
                 _check(
-                    name="apply / stacks/app / dev-us",
+                    name="apply / dev-us / stacks/app",
                     status="queued",
                     conclusion=None,
                     external_id="b" * 64,
@@ -678,7 +678,7 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
             ],
         )
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-us: the "
+        "::error::apply aborted: no plan run recorded for apply / dev-us / stacks/app: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "
         "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
         "then apply again; if that pull request has already merged, a new pull request "
@@ -705,7 +705,7 @@ def test_main_warns_of_an_unmapped_merge_before_refusing_its_record_less_cell(
             cells=[_cell("stacks/app")],
             checks=[
                 _check(
-                    name="apply / stacks/app / dev-eu",
+                    name="apply / dev-eu / stacks/app",
                     status="queued",
                     conclusion=None,
                     external_id="b" * 64,
@@ -718,7 +718,7 @@ def test_main_warns_of_an_unmapped_merge_before_refusing_its_record_less_cell(
         f"::warning::could not map {HEAD} to a merged pull request (commits/{HEAD}/pulls stayed "
         "empty and no recently closed pull request records it as its merge commit); deploying "
         "it as a push to main\n"
-        "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-eu: the "
+        "::error::apply aborted: no plan run recorded for apply / dev-eu / stacks/app: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "
         "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
         "then apply again; if that pull request has already merged, a new pull request "
@@ -735,10 +735,66 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
         checks=[
             _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
-            _check(name="apply / stacks/app / dev-us", external_id="b" * 64),
+            _check(name="apply / dev-us / stacks/app", external_id="b" * 64),
         ],
     )
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu"]
+
+
+def test_main_refuses_a_cell_whose_only_check_is_named_stack_first(tmp_path, monkeypatch):
+    """A completed `apply / stacks/app / dev` with a valid record is not the cell's check, so the
+    cell stays pending and refuses for want of a record. Mutation: `filter_pending` also treats
+    `apply / <stack> / <env>` as done -- the deploy applies nothing and does not refuse."""
+    old = {
+        **_apply_check("stacks/app", "dev", plan_run="42", cells=1),
+        "name": "apply / stacks/app / dev",
+        "status": "completed",
+        "conclusion": "success",
+    }
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(tmp_path, monkeypatch, cells=[_cell("stacks/app", "dev")], checks=[old])
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan run recorded for apply / dev / stacks/app: the "
+        "apply check names no plan run to apply from (post-merge, the cell may have no apply "
+        "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
+        "then apply again; if that pull request has already merged, a new pull request "
+        "touching them plans and applies them afresh."
+    )
+
+
+def test_a_transposed_one_segment_cell_reads_the_stack_first_check_as_its_own(
+    tmp_path, monkeypatch
+):
+    """Pins a stated limit so that any change to it is seen: `apply / dns / dev-us`, written
+    stack first for stack `dns` in `dev-us`, is also the env-first name of stack `dev-us` in
+    env `dns`, so that cell reads as applied and the deploy neither applies nor refuses it.
+    Records carry no cell identity, so nothing tells the two apart. Mutation: `filter_pending`
+    keeps the `dev-us` / `dns` cell pending -- the whole output changes."""
+    done = {
+        **_apply_check("dev-us", "dns", plan_run="42", cells=1),
+        "status": "completed",
+        "conclusion": "success",
+    }
+    parsed = _run_main(tmp_path, monkeypatch, cells=[_cell("dev-us", "dns")], checks=[done])
+    empty = (
+        '{"wave0": [], "wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], '
+        '"wave6": [], "wave7": []}'
+    )
+    assert parsed == {
+        "head_sha": HEAD,
+        "pr_number": "7",
+        "push": '{"stacks": ["dev-us"], "outside": true}',
+        "envlevel0_waves": empty,
+        "envlevel0_empty": "true",
+        "envlevel1_waves": empty,
+        "envlevel1_empty": "true",
+        "envlevel2_waves": empty,
+        "envlevel2_empty": "true",
+        "envlevel3_waves": empty,
+        "envlevel3_empty": "true",
+        "warm": '[{"stack": "", "tf_vars": {}}]',
+        "max_parallel": "10",
+    }
 
 
 def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
@@ -777,7 +833,7 @@ def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/dns", "dev-eu")],
         checks=[
             _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
-            _check(name="apply / stacks/dns / dev-eu"),
+            _check(name="apply / dev-eu / stacks/dns"),
         ],
     )
     assert (
@@ -798,7 +854,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
         cells=[_cell("stacks/app")],
         checks=[
             _apply_check("stacks/app", cells=1),
-            _check(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
+            _check(name="apply / dev-eu / stacks/app", id=2, app={"id": 15368}),
         ],
     )
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
@@ -1014,13 +1070,13 @@ def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monk
                 _apply_check("stacks/app", cells=3),
                 _apply_check("stacks/gone", "dev-eu", cells=3),
                 _apply_check("stacks/gone", "dev-us", cells=3),
-                _check(name="apply / stacks/gone / prod"),
+                _check(name="apply / prod / stacks/gone"),
             ],
             stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
             deps={"stacks/app": set(), "stacks/gone": set()},
         )
     assert str(exc_info.value) == (
-        "::error::deploy aborted: apply / stacks/gone / dev-eu, apply / stacks/gone / dev-us: "
+        "::error::deploy aborted: apply / dev-eu / stacks/gone, apply / dev-us / stacks/gone: "
         "the stack of each lost its env/* tag after this pull request was planned, so its "
         "reviewed change was not applied. This deploy applies nothing, so these other cells of "
         "this merge are not applied either: stacks/app / dev-eu. " + _REMEDY
@@ -1043,7 +1099,7 @@ def test_the_refusal_names_a_pending_cell_that_has_no_apply_check(tmp_path, monk
             deps={"stacks/app": set(), "stacks/new": set(), "stacks/gone": set()},
         )
     assert str(exc_info.value) == (
-        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "::error::deploy aborted: apply / dev-eu / stacks/gone: the stack of each lost its "
         "env/* tag after this pull request was planned, so its reviewed change was not "
         "applied. This deploy applies nothing, so these other cells of this merge are not "
         "applied either: stacks/app / dev-eu, stacks/new / dev-eu. " + _REMEDY
@@ -1063,14 +1119,14 @@ def test_a_refusal_with_no_other_cell_names_none(tmp_path, monkeypatch):
             deps={"stacks/gone": set()},
         )
     assert str(exc_info.value) == (
-        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "::error::deploy aborted: apply / dev-eu / stacks/gone: the stack of each lost its "
         "env/* tag after this pull request was planned, so its reviewed change was not "
         "applied. " + _REMEDY
     )
 
 
 _PARTIAL_UNTAG_MESSAGE = (
-    "::error::deploy aborted: apply / stacks/app / prod: the stack of each lost its env/* tag "
+    "::error::deploy aborted: apply / prod / stacks/app: the stack of each lost its env/* tag "
     "after this pull request was planned, so its reviewed change was not applied. This deploy "
     "applies nothing, so these other cells of this merge are not applied either: "
     "stacks/app / dev-eu. " + _REMEDY
@@ -1093,7 +1149,7 @@ def test_main_refuses_a_pending_apply_check_on_a_stack_moved_to_local(tmp_path, 
             deps={"stacks/gone": set()},
         )
     assert str(exc_info.value) == (
-        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "::error::deploy aborted: apply / dev-eu / stacks/gone: the stack of each lost its "
         "env/* tag after this pull request was planned, so its reviewed change was not "
         "applied. " + _REMEDY
     )
@@ -1138,22 +1194,64 @@ def test_main_skips_an_open_check_on_a_stack_the_scan_does_not_cover(tmp_path, m
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
-def test_a_name_whose_rest_is_no_env_name_is_not_the_stack_s_check(tmp_path, monkeypatch):
-    """`apply / stacks/app / x / dev-eu` is the check of a stack `stacks/app / x`, absent from
-    the scan; read against `stacks/app` its rest `x / dev-eu` is no env name. Mutation: drop
-    the `is_env_name` check -- the deploy refuses it."""
+def test_a_stack_holding_the_separator_is_not_its_first_segment_s_check(tmp_path, monkeypatch):
+    """`apply / prod / stacks/app / x` is the check of a stack `stacks/app / x`, absent from
+    the scan, not a `prod` check of `stacks/app`. Mutation: `parse_check_name` takes the
+    stack as `rest.split(" / ")[1]` -- the deploy refuses it as `stacks/app`'s stranded check."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
         cells=[],
         checks=[
             _apply_check("stacks/app", cells=2),
-            _apply_check("stacks/app / x", "dev-eu", cells=2),
+            _apply_check("stacks/app / x", "prod", cells=2),
         ],
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
+
+
+_PLANS_AFRESH = (
+    "(any edit that `terramate list --changed` marks, such as a comment line). It plans the "
+    "current default branch for all of them, this merged change included, and its cells are "
+    "applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` "
+    "for a `targeted` environment), or by its deploy otherwise. Re-running this deploy checks "
+    "out the same commit and refuses again. This deploy's apply checks are never read again and "
+    "stay open on the merged pull request."
+)
+
+
+def test_an_open_stack_first_name_refuses_naming_the_cells_left_unapplied():
+    """An open `apply / stacks/app / dev`, written before the upgrade, is outside the grammar, so
+    no cell can be read from it and the deploy refuses, naming it and the pending cells. Mutation:
+    skip a name `parse_check_name` cannot read again -- the call returns None."""
+    with pytest.raises(SystemExit) as exc_info:
+        dd.refuse_stranded_checks(
+            [], [], {"apply / stacks/app / dev", "apply / x"}, [_cell("stacks/app", "dev-eu")]
+        )
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / stacks/app / dev, apply / x: each is an apply check "
+        "written before the upgrade that named apply checks env first, so no cell can be read "
+        "from it and its reviewed change was not applied. This deploy applies nothing, so these "
+        "other cells of this merge are not applied either: stacks/app / dev-eu. Open a new pull "
+        "request that changes each of their stacks that still exists and every other listed stack "
+        + _PLANS_AFRESH
+    )
+
+
+def test_an_unreadable_name_refuses_before_a_stranded_one():
+    """Mutation: compute the stranded names first -- the stranded refusal fires, naming
+    `apply / dev / stacks/app`."""
+    names = {"apply / dev / stacks/app", "apply / stacks/app / dev"}
+    with pytest.raises(SystemExit) as exc_info:
+        dd.refuse_stranded_checks([], ["stacks/app"], names, [])
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / stacks/app / dev: each is an apply check written before "
+        "the upgrade that named apply checks env first, so no cell can be read from it and its "
+        "reviewed change was not applied. Open a new pull request that changes each of their "
+        "stacks that still exists and every other listed stack " + _PLANS_AFRESH
+    )
 
 
 def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path, monkeypatch):
@@ -1163,7 +1261,7 @@ def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path,
         tmp_path,
         monkeypatch,
         cells=[],
-        checks=[_apply_check("stacks/app", cells=1), _check(name="apply / stacks/gone / dev-eu")],
+        checks=[_apply_check("stacks/app", cells=1), _check(name="apply / dev-eu / stacks/gone")],
         stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
         deps={"stacks/app": set(), "stacks/gone": set()},
     )
@@ -1272,7 +1370,7 @@ def test_a_cycle_refusal_with_no_pending_cell_lists_none(tmp_path, monkeypatch):
             tmp_path,
             monkeypatch,
             cells=_AB_CELLS,
-            checks=[_check(name=f"apply / {c['stack']} / {c['environment']}") for c in _AB_CELLS],
+            checks=[_check(name=f"apply / {c['environment']} / {c['stack']}") for c in _AB_CELLS],
             dot=run_graph_capture("cycle-two"),
         )
     assert str(exc_info.value) == (
@@ -1474,7 +1572,7 @@ def test_a_merge_with_no_pending_cell_reads_no_lock(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         cells=[_cell("stacks/app")],
-        checks=[_check(name="apply / stacks/app / dev-eu")],
+        checks=[_check(name="apply / dev-eu / stacks/app")],
         urls=urls,
         locks={("stacks/dns", "dev-eu"): 9},
     )
@@ -1667,7 +1765,7 @@ def test_a_stranded_check_refuses_before_a_behind_one(tmp_path, monkeypatch):
             deps={"stacks/app": set(), "stacks/gone": set()},
         )
     assert str(exc.value) == (
-        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "::error::deploy aborted: apply / dev-eu / stacks/gone: the stack of each lost its "
         "env/* tag after this pull request was planned, so its reviewed change was not "
         "applied. This deploy applies nothing, so these other cells of this merge are not "
         "applied either: stacks/app / dev-eu. " + _REMEDY
@@ -2108,12 +2206,12 @@ def test_the_held_check_apply_complete_writes_refuses_as_a_state_loss(tmp_path, 
         {**_save("failure"), "id": 7},
     ]
     rows, unresolved = ac.classify(
-        {"wave0": {"apply / stacks/app / dev-eu": [1]}}, {"wave0": "success"}, listing, "5"
+        {"wave0": {"apply / dev-eu / stacks/app": [1]}}, {"wave0": "success"}, listing, "5"
     )
     assert (rows, unresolved) == (
         [
             {
-                "check": "apply / stacks/app / dev-eu",
+                "check": "apply / dev-eu / stacks/app",
                 "ids": [1],
                 "conclusion": None,
                 "job_id": None,
@@ -2376,7 +2474,7 @@ def test_a_stranded_check_refuses_before_an_in_flight_one(tmp_path, monkeypatch)
             deps={"stacks/app": set(), "stacks/gone": set()},
             runs=_holder("in_progress"),
         )
-    assert str(exc.value).startswith("::error::deploy aborted: apply / stacks/gone / dev-eu: ")
+    assert str(exc.value).startswith("::error::deploy aborted: apply / dev-eu / stacks/gone: ")
 
 
 def test_an_in_flight_check_refuses_before_its_missing_digest(tmp_path, monkeypatch):

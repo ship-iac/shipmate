@@ -55,7 +55,7 @@ CHECKS_ARGV = [
 ]
 DONE = json.dumps(
     {
-        "name": "apply / a / dev",
+        "name": "apply / dev / a",
         "status": "completed",
         "conclusion": "success",
         "id": 1,
@@ -96,7 +96,7 @@ _DRAFT_NOT_WRITTEN = (
 
 #: A no-changes body, as `pending-checks` writes it: completed, so the refresh still runs.
 NO_CHANGES_BODY = json.dumps(
-    {"name": "apply / b / dev", "status": "completed", "conclusion": "neutral"}
+    {"name": "apply / dev / b", "status": "completed", "conclusion": "neutral"}
 )
 
 

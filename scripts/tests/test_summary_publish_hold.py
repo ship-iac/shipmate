@@ -171,7 +171,7 @@ def _gate(state, run):
 def _record(cid, slug, plan_run, status="completed"):
     return json.dumps(
         {
-            "name": f"apply / stacks/{slug} / dev",
+            "name": f"apply / dev / stacks/{slug}",
             "status": status,
             "id": cid,
             "app": {"id": int(APP_ID)},
@@ -197,7 +197,7 @@ def _check_post(slug, cells):
     """The whole POST argv and body pending-checks emits for a changed cell `slug` of a run that
     planned `cells` cells."""
     body = {
-        "name": f"apply / stacks/{slug} / dev",
+        "name": f"apply / dev / stacks/{slug}",
         "head_sha": HEAD_SHA,
         "status": "queued",
         "external_id": json.dumps(
@@ -485,7 +485,7 @@ def _write_bodies(tmp_path, text):
 def test_a_newer_runs_hold_refuses_the_apply_checks(tmp_path):
     """A newer same-head run held the gate while this run wrote its comment.
     Mutation: delete the `refuse-newer` line in `Create apply checks` -- the check POST follows."""
-    _write_bodies(tmp_path, '{"name": "apply / stacks/a / dev"}\n')
+    _write_bodies(tmp_path, '{"name": "apply / dev / stacks/a"}\n')
     codes, calls, stderr, _ = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(CREATE,))
     assert (codes, calls, stderr) == ([1], [USER_READ, STATUSES_LIST], REFUSED)
 
@@ -541,7 +541,7 @@ def test_a_failed_read_before_the_final_write_writes_nothing(tmp_path):
 
 NEWER_CHECK = (
     "::error::plan run 50, newer than this run (42), published apply checks on this head "
-    "(apply / stacks/a / dev); this run publishes nothing over them. That run's summary "
+    "(apply / dev / stacks/a); this run publishes nothing over them. That run's summary "
     "writes the gate; if it did not finish, re-plan this pull request (comment shipmate "
     "plan or push).\n"
 )
@@ -861,7 +861,7 @@ _BEHIND_POST = [
     "-",
     json.dumps(
         {
-            "name": "apply / stacks/a / dev",
+            "name": "apply / dev / stacks/a",
             "head_sha": HEAD_SHA,
             "status": "queued",
             "external_id": (

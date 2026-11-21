@@ -7,7 +7,7 @@ and is what that job calls, and it runs this in the `detect` job of the
 `apply-run.yml` it calls in turn.
 
 Both forms source the work set from the head's own apply checks: a stack
-belongs to this run when `apply / <path> / <env>` is among the App-authored
+belongs to this run when `apply / <env> / <path>` is among the App-authored
 checks on the head, and the plan run it applies from is the one that check
 records. Cells whose apply check already completed are dropped (idempotent
 no-op), and the rest wave-ordered. Both write the env-level output contract
@@ -98,15 +98,12 @@ def write_report(report):
 
 
 def paths_with_checks(env, candidate_paths, check_names):
-    """The candidates whose `apply / <path> / <env>` check is on the head.
+    """The candidates whose `apply / <env> / <path>` check is on the head.
 
-    Forward-construct the expected name per candidate path, never reverse-parse
-    it: a stack path contains '/', so `apply / components/app / dev-eu` cannot be
-    split back into its parts without inventing a convention — and a convention
-    is a second reader of the name grammar. `pending-checks` builds these names
-    from the stack PATH, so the exact path is what comes back; nothing here
-    resolves a slug, which is what let two paths slugging alike apply each
-    other's plan."""
+    Forward-construct the expected name per candidate path, never parse it back:
+    `pending-checks` builds these names from the stack PATH, so constructing from the
+    exact path is what binds each cell to its own check. Nothing here resolves a slug,
+    which is what let two paths slugging alike apply each other's plan."""
     return [p for p in candidate_paths if ag.check_name(p, env) in check_names]
 
 
@@ -823,13 +820,12 @@ def bare_main(auto=False):
     """The bare `shipmate apply` work set -> env-levels -> waves.
 
     The pre-merge equivalent of deploy-detect, sourced like the targeted form:
-    cells are the tree's stacks whose `apply / <stack> / <env>` check is on the
+    cells are the tree's stacks whose `apply / <env> / <stack>` check is on the
     head, each applying from the plan run its own check records, and the
     environment entries' `needs` bucket the pending ones into env-levels exactly as
     on the merge-deploy path. Env membership comes from stack tags
     (build-matrix.env_membership) so this form only ever constructs check names
-    forward, never reverse-parses them (deploy-detect's stranded-check refusal is
-    the one site that does); a stack with no `env/*` tag is in no environment and
+    forward, never reverse-parses them; a stack with no `env/*` tag is in no environment and
     adds no cell.
 
     After `settle`, it refuses a run cell that runs after a pending cell `needs` puts on a

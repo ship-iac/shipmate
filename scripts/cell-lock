@@ -75,6 +75,7 @@ import urllib.parse
 from collections.abc import Iterable
 
 from _shipmate import (
+    ENV_NAME_RULE,
     READ_ERRORS,
     REASON_CAP,
     SHIPMATE_WORKFLOW,
@@ -89,6 +90,7 @@ from _shipmate import (
     deploy_mode,
     gh_json,
     holder_dispatch_runs,
+    is_env_name,
     is_head_sha,
     is_run_id,
     listed_jobs,
@@ -104,7 +106,6 @@ from _shipmate import (
 
 ag = _load("apply-gate")
 az = _load("authorize")
-ec = _load("env-config")
 
 LOCKS = "refs/shipmate/locks/"
 ZERO = "0" * 40
@@ -164,8 +165,8 @@ def _record(ref, text):
 
 
 def _env(env):
-    if not ec.is_env_name(env):
-        raise SystemExit(f"::error::{env!r} is not an environment name ({ec.ENV_NAME_RULE})")
+    if not is_env_name(env):
+        raise SystemExit(f"::error::{env!r} is not an environment name ({ENV_NAME_RULE})")
     return env
 
 
@@ -621,8 +622,9 @@ def _warm(name):
 
 
 def evict_stacks(names, env):
-    """The stack of each apply check name in `env`."""
-    return {stack for stack, e in map(ag.parse_check_name, names) if e == env}
+    """The stack of each apply check name in `env`; `names` may hold any name, and one
+    outside the check name grammar is skipped."""
+    return {p[0] for p in map(ag.parse_check_name, names) if p and p[1] == env}
 
 
 def pending_names(lines, app_id):

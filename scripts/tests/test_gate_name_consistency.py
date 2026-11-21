@@ -271,7 +271,7 @@ def test_credentialed_action_steps_thread_app_credentials():
     Never `secrets: inherit`, including on these engine-internal hops. The files sit in one
     organization but the run belongs to the consumer, and inherit is evaluated against the run:
     a cross-organization consumer's applies would execute and then strand their
-    `apply / <stack> / <env>` checks pending forever, because `apply-env-level.yml`'s `complete`
+    `apply / <env> / <stack>` checks pending forever, because `apply-env-level.yml`'s `complete`
     job would hold no key to complete them with.
     """
     offenders = []

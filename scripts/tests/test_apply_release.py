@@ -35,7 +35,7 @@ def patched(monkeypatch):
     return out
 
 
-_SNAP = {"apply / web / dev": [3], "apply / app / dev": [2, 5]}
+_SNAP = {"apply / dev / web": [3], "apply / dev / app": [2, 5]}
 
 
 def test_each_id_gets_exactly_the_status_and_the_run_link(monkeypatch, patched):

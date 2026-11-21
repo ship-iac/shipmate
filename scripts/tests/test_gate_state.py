@@ -621,14 +621,14 @@ def test_open_older_counts_the_newest_app_check_per_name_not_done(tmp_path):
     Mutations: count a completed check as open -- 3, red; drop the `bodies.jsonl` exclusion --
     2, red; drop the App filter -- 2, red."""
     checks = [
-        _check(1, "apply / a / dev"),
-        _check(2, "apply / b / dev", "completed", "neutral"),
-        _check(3, "apply / c / dev"),
-        _check(4, "apply / c / dev", "completed", "success"),
-        _check(5, "apply / d / dev"),
-        _check(6, "apply / e / dev", app=15368),
+        _check(1, "apply / dev / a"),
+        _check(2, "apply / dev / b", "completed", "neutral"),
+        _check(3, "apply / dev / c"),
+        _check(4, "apply / dev / c", "completed", "success"),
+        _check(5, "apply / dev / d"),
+        _check(6, "apply / dev / e", app=15368),
     ]
-    assert _open_older(tmp_path, checks, bodies=["apply / d / dev"]) == 1
+    assert _open_older(tmp_path, checks, bodies=["apply / dev / d"]) == 1
 
 
 def test_an_earlier_attempt_of_this_run_counts_as_open(tmp_path, monkeypatch):
@@ -636,7 +636,15 @@ def test_an_earlier_attempt_of_this_run_counts_as_open(tmp_path, monkeypatch):
     cells leaves attempt 1's queued check, which still blocks the merge. Mutation: leave out
     names whose record names `GITHUB_RUN_ID` -- 0, red."""
     monkeypatch.setenv("GITHUB_RUN_ID", "7")
-    assert _open_older(tmp_path, [_check(1, "apply / a / dev", plan_run="7")]) == 1
+    assert _open_older(tmp_path, [_check(1, "apply / dev / a", plan_run="7")]) == 1
+
+
+def test_open_older_counts_a_stack_first_check_this_run_does_not_republish(tmp_path):
+    """A same-head re-plan publishes `apply / dev / stacks/app` and leaves the older
+    `apply / stacks/app / dev` queued, so the gate holds until a new commit. Mutation: keep only
+    names `apply-gate.parse_check_name` reads -- 0, red."""
+    checks = [_check(1, "apply / stacks/app / dev"), _check(2, "apply / dev / stacks/app")]
+    assert _open_older(tmp_path, checks, bodies=["apply / dev / stacks/app"]) == 1
 
 
 @pytest.mark.parametrize("missing", ["c", "b"])

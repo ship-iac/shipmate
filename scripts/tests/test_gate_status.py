@@ -87,7 +87,7 @@ USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
 GREEN = _status_argv("success", "all applies complete, nothing left to apply")
 
 
-def _check(cid, status, conclusion=None, name="apply / a / dev"):
+def _check(cid, status, conclusion=None, name="apply / dev / a"):
     return json.dumps(
         {"name": name, "status": status, "conclusion": conclusion, "id": cid, "app": {"id": 4242}}
     )
@@ -101,7 +101,7 @@ def _lines(*items):
     return "".join(f"{i}\n" for i in items)
 
 
-DONE = _lines(_check(1, "completed", "success"), _check(2, "completed", "neutral", "apply / b / x"))
+DONE = _lines(_check(1, "completed", "success"), _check(2, "completed", "neutral", "apply / x / b"))
 
 
 def _run(tmp_path, *args, env=ENV, **fakes):
@@ -190,7 +190,7 @@ def test_refresh_refuses_to_green_a_held_gate(tmp_path):
 def test_refresh_leaves_the_gate_while_a_check_is_open(tmp_path):
     """Mutations: ignore the verdict (`if False:`) -> the statuses are read and the gate greened;
     call `app_user()` at `refresh`'s entry -> a lookup precedes the listing."""
-    checks = DONE + _lines(_check(3, "queued", name="apply / c / dev"))
+    checks = DONE + _lines(_check(3, "queued", name="apply / dev / c"))
     proc, calls = _run(tmp_path, "refresh", SHA, checks=checks)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [CHECKS_ARGV]
@@ -416,7 +416,7 @@ def test_checks_writes_the_listing_bytes_as_utf8_with_lf(tmp_path):
     and the code page re-encodes (on Linux the bytes match); append a `print()` -> a trailing
     newline."""
     listing = _lines(
-        json.dumps({"name": "apply / é / dev — x"}, ensure_ascii=False), json.dumps({"name": "b"})
+        json.dumps({"name": "apply / dev / é — x"}, ensure_ascii=False), json.dumps({"name": "b"})
     )
     proc, calls = _run(
         tmp_path,
@@ -1653,7 +1653,7 @@ _SLUG_ERROR = (
     "::error::SHIPMATE_APP_SLUG is empty; gate-status reads only the gate statuses the shipmate "
     "App created and cannot tell which those are\n"
 )
-_OPEN = DONE + _lines(_check(3, "queued", name="apply / c / dev"))
+_OPEN = DONE + _lines(_check(3, "queued", name="apply / dev / c"))
 
 
 @bash_only

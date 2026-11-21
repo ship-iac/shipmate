@@ -692,8 +692,8 @@ def test_evict_cli_writes_both_sets_then_refuses(monkeypatch, tmp_path):
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            _check("apply / stacks/auth / dev", "queued", None),
-            _check("apply / stacks/dns / dev", "queued", None, run_id=2),
+            _check("apply / dev / stacks/auth", "queued", None),
+            _check("apply / dev / stacks/dns", "queued", None, run_id=2),
         ),
     )
     for argv, answers in _two_foreign_locks_first_refused().calls.items():
@@ -709,17 +709,18 @@ def test_evict_cli_writes_both_sets_then_refuses(monkeypatch, tmp_path):
     assert gh.drained()
 
 
-def test_evict_stacks_round_trip_through_check_name():
-    """Mutations: drop the ` / <env>` strip (a stack keeps its env); accept another env's
-    name."""
+def test_evict_stacks_reads_only_its_envs_names_in_the_check_grammar():
+    """A stack-first name, another env's name and a plan check name evict nothing. Mutations:
+    `parse_check_name` reads the stack-first order as a fallback (`stacks/c` appears); drop
+    the env filter (`stacks/b` appears); index a None parse instead of skipping it (raises)."""
     names = {
-        "apply / stacks/a / dev",
-        "apply / stacks/a / dev / x / dev",
-        "apply / stacks/b / dev-eu",
+        "apply / dev / stacks/a",
+        "apply / dev / stacks/a / dev / x",
+        "apply / dev-eu / stacks/b",
+        "apply / stacks/c / dev",
+        "plan / dev / stacks/d",
     }
-    stacks = cl.evict_stacks(names, "dev")
-    assert stacks == {"stacks/a", "stacks/a / dev / x"}
-    assert {ag.check_name(s, "dev") for s in stacks} == names - {"apply / stacks/b / dev-eu"}
+    assert cl.evict_stacks(names, "dev") == {"stacks/a", "stacks/a / dev / x"}
 
 
 def _all_locks(*entries):
@@ -745,7 +746,7 @@ def test_release_merged_keeps_only_our_pending_locks():
     gh.on(REPO_ID_READ, REPO_ID)
     gh.on(update(AUTH_REF, OLD, ZERO, False), "{}")
     gh.on(update(dropped_ref, OTHER, ZERO, False), "{}")
-    gone, refused = cl.release(REPO, PR, pending={"apply / stacks/app / prod"}, run=gh)
+    gone, refused = cl.release(REPO, PR, pending={"apply / prod / stacks/app"}, run=gh)
     assert ([g.ref for g in gone], refused) == ([AUTH_REF, dropped_ref], [])
     assert gh.drained()
 
@@ -803,8 +804,8 @@ def test_release_unmerged_of_a_since_merged_pull_request_keeps_its_pending_locks
     gh.on(
         [a.replace(HEAD, MERGED_HEAD) for a in CHECK_RUNS_READ],
         jsonl(
-            _check("apply / stacks/auth / dev", "queued", None),
-            _check("apply / stacks/dns / dev", "completed", "success", run_id=2),
+            _check("apply / dev / stacks/auth", "queued", None),
+            _check("apply / dev / stacks/dns", "completed", "success", run_id=2),
         ),
     )
     gh.on(update(DNS_REF, NEW, ZERO, False), "{}").on(update(LATER_REF, OTHER, ZERO, False), "{}")
@@ -904,12 +905,12 @@ def test_pending_names_are_app_apply_checks_not_done():
     """Mutations: drop the `from_app` filter (the foreign check counts); count every name as
     pending."""
     lines = jsonl(
-        _check("apply / stacks/a / dev", "completed", "success"),
-        _check("apply / stacks/b / dev", "queued", None),
-        _check("apply / stacks/c / dev", "completed", "failure"),
-        _check("apply / stacks/d / dev", "queued", None, app=15368),
+        _check("apply / dev / stacks/a", "completed", "success"),
+        _check("apply / dev / stacks/b", "queued", None),
+        _check("apply / dev / stacks/c", "completed", "failure"),
+        _check("apply / dev / stacks/d", "queued", None, app=15368),
     ).splitlines()
-    assert cl.pending_names(lines, "99") == {"apply / stacks/b / dev", "apply / stacks/c / dev"}
+    assert cl.pending_names(lines, "99") == {"apply / dev / stacks/b", "apply / dev / stacks/c"}
 
 
 def test_marks_writes_each_foreign_holder_per_cell(monkeypatch, tmp_path):
@@ -1166,7 +1167,7 @@ def test_the_comment_offers_no_eviction_that_evict_refuses(monkeypatch, tmp_path
     blocked = set()
     for env in envs:
         gh = _per_env_double({env}).on(
-            CHECK_RUNS_READ, jsonl(_check(f"apply / stacks/app / {env}", "queued", None))
+            CHECK_RUNS_READ, jsonl(_check(f"apply / {env} / stacks/app", "queued", None))
         )
         try:
             _main(monkeypatch, tmp_path, "evict", gh, {**EVICT_ENV, "SHIPMATE_ENV": env})
@@ -1613,8 +1614,8 @@ def test_release_cli_releases_by_mode(monkeypatch, tmp_path, env, released):
         gh.on(
             CHECK_RUNS_READ,
             jsonl(
-                _check("apply / stacks/auth / dev", "queued", None),
-                _check("apply / stacks/dns / dev", "queued", None, run_id=2, app=15368),
+                _check("apply / dev / stacks/auth", "queued", None),
+                _check("apply / dev / stacks/dns", "queued", None, run_id=2, app=15368),
             ),
         )
     else:
@@ -1725,8 +1726,8 @@ def test_evict_cli_evicts_only_cells_with_an_app_check(monkeypatch, tmp_path):
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            _check("apply / stacks/auth / dev", "queued", None),
-            _check("apply / stacks/dns / dev", "queued", None, run_id=2, app=15368),
+            _check("apply / dev / stacks/auth", "queued", None),
+            _check("apply / dev / stacks/dns", "queued", None, run_id=2, app=15368),
         ),
     )
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (DNS_REF, OTHER)))
@@ -1760,9 +1761,9 @@ def _evict_three(*checks):
 
 
 _THREE_PENDING = (
-    _check("apply / stacks/auth / dev", "queued", None),
-    _check("apply / stacks/dns / dev", "queued", None, run_id=2),
-    _check("apply / stacks/app / dev", "queued", None, run_id=3),
+    _check("apply / dev / stacks/auth", "queued", None),
+    _check("apply / dev / stacks/dns", "queued", None, run_id=2),
+    _check("apply / dev / stacks/app", "queued", None, run_id=3),
 )
 
 
@@ -1898,8 +1899,8 @@ def test_evict_cli_targets_only_pending_cells_failed_included(monkeypatch, tmp_p
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            _check("apply / stacks/auth / dev", "completed", "failure"),
-            _check("apply / stacks/app / dev", "completed", "success", run_id=2),
+            _check("apply / dev / stacks/auth", "completed", "failure"),
+            _check("apply / dev / stacks/app", "completed", "success", run_id=2),
         ),
     )
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, NEW)))
@@ -1927,7 +1928,7 @@ def test_evict_refusal_past_the_cap_keeps_whole_sentences_and_logs_every_holder(
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            *(_check(f"apply / {s} / dev", "queued", None, run_id=i) for i, s in enumerate(stacks))
+            *(_check(f"apply / dev / {s}", "queued", None, run_id=i) for i, s in enumerate(stacks))
         ),
     )
     gh.on(
@@ -1960,7 +1961,7 @@ def test_evict_refusal_cuts_a_lone_sentence_past_the_cap(monkeypatch, tmp_path, 
     drop the cut and return the tail alone when no sentence fits -- the reply names no holder,
     red."""
     cause = "x" * 5000
-    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / stacks/auth / dev", "queued", None)))
+    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / dev / stacks/auth", "queued", None)))
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     gh.on(pull_read(12), SystemExit(f"::error::{cause}"))
@@ -1987,7 +1988,7 @@ def test_evict_on_the_default_branch_reads_no_holder(monkeypatch, tmp_path):
     double queues one read) and the eviction proceeds. Mutation: drop `_read_stacked`'s
     `head_ref == default_branch` return -- #12, based on `main`, reads stacked and the evict
     refuses, red."""
-    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / stacks/auth / dev", "queued", None)))
+    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / dev / stacks/auth", "queued", None)))
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(12, "dev", "stacks/auth")))
     quiet(gh, 12).on(REPO_ID_READ, REPO_ID)
@@ -2032,7 +2033,7 @@ def test_evict_retries_a_transient_holder_read(sleeps):
 
 def _evict_auth(holder=12):
     """A double reading auth's pending check and `holder`'s lock on it, not stacked."""
-    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / stacks/auth / dev", "queued", None)))
+    gh = Gh().on(CHECK_RUNS_READ, jsonl(_check("apply / dev / stacks/auth", "queued", None)))
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD)))
     gh.on(commit_read(OLD), commit(OLD, message(holder, "dev", "stacks/auth")))
     return gh.on(pull_read(holder), pull("main"))
@@ -2384,7 +2385,7 @@ RECORD_READ = [
     "--paginate",
     (
         f"repos/{REPO}/commits/{HEAD}/check-runs?filter=all&per_page=100"
-        "&check_name=apply%20%2F%20stacks%2Fauth%20%2F%20dev"
+        "&check_name=apply%20%2F%20dev%20%2F%20stacks%2Fauth"
     ),
     "--jq",
     ".check_runs[]",
@@ -2431,7 +2432,7 @@ def _record(plan_run, run_id=1, action="synchronize", plan_sha256=DIGEST, behind
     record |= {} if plan_sha256 is None else {"plan_sha256": plan_sha256}
     record |= {"behind": True} if behind else {}
     return {
-        **_check("apply / stacks/auth / dev", "queued", None, run_id=run_id),
+        **_check("apply / dev / stacks/auth", "queued", None, run_id=run_id),
         "external_id": json.dumps(record),
     }
 
@@ -3377,12 +3378,12 @@ def test_evict_cli_releases_no_lock_on_a_behind_cell(monkeypatch, tmp_path):
     gh = Gh().on(
         CHECK_RUNS_READ,
         jsonl(
-            _check("apply / stacks/auth / dev", "queued", None),
+            _check("apply / dev / stacks/auth", "queued", None),
             {
-                **_check("apply / stacks/auth / dev", "queued", None, run_id=4),
+                **_check("apply / dev / stacks/auth", "queued", None, run_id=4),
                 "external_id": json.dumps(behind),
             },
-            _check("apply / stacks/app / dev", "queued", None, run_id=3),
+            _check("apply / dev / stacks/app", "queued", None, run_id=3),
         ),
     )
     gh.on(listing("shipmate/locks/dev/"), refs((AUTH_REF, OLD), (APP_REF, NEW)))

@@ -444,7 +444,7 @@ only in that run's `detect` annotation.
 ### `Saved plan is stale`, or `does not match the reviewed plan's fingerprint`
 
 An apply cell fails at or before `tofu apply` and its
-`apply / <stack> / <env>` check stays pending.
+`apply / <env> / <stack>` check stays pending.
 
 Two fail-safes of the exact-plan model produce this, and both mean the reviewed
 `.otplan` can no longer be trusted. Either the state moved after the plan was
@@ -469,7 +469,7 @@ something nobody reviewed, and the check left pending is exactly what stops the
 gate greening over an unapplied stack.
 
 **A retry is not a re-plan, and the pending check makes the retry look
-available.** A failed apply leaves its `apply / <stack> / <env>` check *pending*
+available.** A failed apply leaves its `apply / <env> / <stack>` check *pending*
 rather than failed, so `snapshot` accepts a fresh `shipmate apply <env>` for that
 cell — the right recovery when nothing moved (a credentials failure, a rate limit,
 a cancelled run). If the apply partially succeeded, the state serial advanced
@@ -492,7 +492,7 @@ actor is not a `[bot]` — a hand-run one fails with `apply refused: the
 dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request
 instead of running a direct workflow_dispatch` — its `review` job refuses a
 `ref` that is not the open pull request's current head, and
-comment-ops reads the plan run each `apply / <stack> / <env>` check on the pull
+comment-ops reads the plan run each `apply / <env> / <stack>` check on the pull
 request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing
 behind it.
@@ -567,7 +567,7 @@ Each check refuses:
 ### `this reviewed plan records no planned commit`, or `the reviewed plan was produced from`
 
 An apply cell fails before the decrypt, the state restore and the apply, and its
-`apply / <stack> / <env>` check stays pending. The cell summary names the
+`apply / <env> / <stack>` check stays pending. The cell summary names the
 blocked reason.
 
 The reviewed `.otplan` carries the commit it was produced from
@@ -636,7 +636,7 @@ Nothing has been applied: the refusal runs before any wave.
 
 An apply is refused over the plan text a reviewer read, at one of three points.
 The first is `detect`, before any cell job starts. The other two are inside an
-apply cell and leave its `apply / <stack> / <env>` check pending: the
+apply cell and leave its `apply / <env> / <stack>` check pending: the
 `digest-input` step refuses a digest that never reached the action, before
 `tofu init`; the `plan-digest` step refuses a render that disagrees with it,
 after `init` and before `tofu apply`. Each names its own blocked reason in the
@@ -673,7 +673,7 @@ an unapplied stack.
 ### `plan files cannot be transferred between different versions`
 
 An apply cell's `plan-digest` step fails rendering the stored plan, nothing
-applied, and its `apply / <stack> / <env>` check stays pending. OpenTofu's
+applied, and its `apply / <env> / <stack>` check stays pending. OpenTofu's
 `plan files cannot be transferred between different versions` text is in the
 step log, and the one error annotation is:
 
@@ -898,7 +898,7 @@ authorizes on the commenter's write or admin permission on the repository and
 the `<env>-apply` environment, not on a review — so a lock
 stranded after the pull request merged is still releasable
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the contract). Every cell
-in that environment with a pending `apply / <stack> / <env>` check is probed;
+in that environment with a pending `apply / <env> / <stack>` check is probed;
 each reports in its own job, and a cell that cannot determine its lock state
 fails red rather than reporting the lock absent.
 
@@ -1207,8 +1207,9 @@ a merged pull request:
   repos/<owner>/<repo>/commits/<sha>/pulls` lists the pull request. If it never
   does, or the commit was a direct push, open a pull request that changes the
   unapplied stacks, comment `shipmate unlock <env> --evict` on it for each
-  environment the refusal names (the `<env>` after the last ` / ` of each
-  `<stack> / <env>` cell or `apply / <stack> / <env>` check). The eviction
+  environment the refusal names (the text after the last ` / ` of each
+  `<stack> / <env>` cell, and the segment after `apply / ` of each
+  `apply / <env> / <stack>` check). The eviction
   releases every pull request's lock on those pending cells, so wait for any
   pull request still open that holds one to merge or close, and for the apply,
   auto and deploy runs of each pull request holding one to end, first, then
@@ -1327,7 +1328,7 @@ split environment alone reaches the wrong cells
 ### `plan artifact ... failed authentication`
 
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
-before openssl or any apply step read it, and its `apply / <stack> / <env>`
+before openssl or any apply step read it, and its `apply / <env> / <stack>`
 check stays pending. The tag the plan cell wrote does not verify under the
 apply side's encryption key. The engine cannot tell the causes apart:
 
@@ -2296,7 +2297,7 @@ The same step refuses, also before any wave:
 ### `apply aborted: the plan recorded for ... was not made on pull request #<n>`
 
 The apply detect refused every cell it would apply whose
-`apply / <stack> / <env>` check records a different pull request, or none, and
+`apply / <env> / <stack>` check records a different pull request, or none, and
 nothing applied. Each cell is named with the plan run and the pull request its
 check records. Each check records the pull request its plan run planned; two
 open pull requests can share one head commit, and only the newest plan on that
@@ -3183,7 +3184,7 @@ label reaches.
 
 ### An apply check is titled `Failed: ...`, `Cancelled`, `Not run` or `Not applied (...)`
 
-The cell did not apply in that run, and its `apply / <stack> / <env>` check went
+The cell did not apply in that run, and its `apply / <env> / <stack>` check went
 back to `queued`, titled with the outcome; the plan summary is unchanged
 (CONTRACT.md §Apply check lifecycle). The gate stays pending.
 
@@ -3209,7 +3210,7 @@ next `shipmate apply` writes it again.
 
 ### An apply check never completes after a successful apply
 
-The apply itself succeeded, but the `apply / <stack> / <env>` check stays
+The apply itself succeeded, but the `apply / <env> / <stack>` check stays
 pending and the trailing completion job failed.
 
 The `shipmate-engine` environment's deployment branch policy names a branch that
@@ -3273,7 +3274,7 @@ pull request's `shipmate unlock <env> --evict` releases them.
 The annotation reads:
 
 ```text
-deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
+deploy aborted: apply / <env> / <stack>: the stack of each lost its env/* tag
 after this pull request was planned, so its reviewed change was not applied. This deploy
 applies nothing, so these other cells of this merge are not applied either:
 <other stack> / <env>. Open a new pull request that retags each stranded stack and

@@ -29,7 +29,7 @@ def _unlock_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
 
 
 _DEV_EU_PENDING_CHECKS = [
-    _check(name=f"apply / {stack} / dev-eu", status="in_progress", conclusion=None)
+    _check(name=f"apply / dev-eu / {stack}", status="in_progress", conclusion=None)
     for stack in ("stacks/app", "stacks/dns", "stacks/db")
 ]
 
@@ -89,10 +89,10 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
         monkeypatch,
         _DEV_EU_CELLS,
         [
-            _check(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None),
-            _check(name="apply / stacks/dns / dev-eu"),
+            _check(name="apply / dev-eu / stacks/app", status="in_progress", conclusion=None),
+            _check(name="apply / dev-eu / stacks/dns"),
             _check(
-                name="apply / stacks/db / dev-eu",
+                name="apply / dev-eu / stacks/db",
                 status="in_progress",
                 conclusion=None,
                 app={"id": 15368},
@@ -124,7 +124,7 @@ def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path,
 
     Mutation: write `cells` only for a non-empty queue -- the output file is empty."""
     out = _unlock_env(monkeypatch, tmp_path)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / stacks/app / dev-eu")])
+    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / dev-eu / stacks/app")])
     ud.main()
     # Whole file: unlock.yml reads `cells` alone, so nothing else is written.
     assert out.read_text(encoding="utf-8") == "cells=[]\n"
@@ -191,7 +191,7 @@ def test_unlock_refuses_a_queue_above_the_matrix_limit(monkeypatch, tmp_path):
         monkeypatch,
         [{"stack": s, "environment": "dev-eu", "workload": "app"} for s in stacks],
         [
-            _check(name=f"apply / {s} / dev-eu", status="in_progress", conclusion=None)
+            _check(name=f"apply / dev-eu / {s}", status="in_progress", conclusion=None)
             for s in stacks
         ],
     )
@@ -270,9 +270,9 @@ def test_unlock_notice_names_the_env_and_counts(monkeypatch, tmp_path, capsys):
         monkeypatch,
         _DEV_EU_CELLS,
         [
-            _check(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None),
-            _check(name="apply / stacks/dns / dev-eu"),
-            _check(name="apply / stacks/db / dev-eu", status="queued", conclusion=None),
+            _check(name="apply / dev-eu / stacks/app", status="in_progress", conclusion=None),
+            _check(name="apply / dev-eu / stacks/dns"),
+            _check(name="apply / dev-eu / stacks/db", status="queued", conclusion=None),
         ],
     )
     ud.main()
@@ -323,7 +323,7 @@ def test_main_validates_its_inputs_before_any_read(monkeypatch, tmp_path, name, 
 
 def _stub_one_pending_check(monkeypatch):
     """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
-    line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
+    line = json.dumps(_check(name="apply / dev-eu / stacks/app", status="queued", conclusion=None))
     monkeypatch.setattr(ud.ad, "_run", lambda args: line)
     forbid_shared_runner(monkeypatch)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)

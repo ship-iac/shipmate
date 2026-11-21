@@ -130,6 +130,17 @@ def _gh(reads, pulls, checks, live, failing):
     return run
 
 
+def test_check_stacks_skip_a_name_outside_the_apply_check_grammar(monkeypatch):
+    """Mutations: `parse_check_name` reads the stack-first order as a fallback (`stacks/b`
+    appears); index a None parse instead of skipping it (raises)."""
+    rows = [
+        check_run(name="apply / dev / stacks/a", id=1),
+        check_run(name="apply / stacks/b / dev", id=2),
+    ]
+    monkeypatch.setattr(_shipmate, "_run", _gh([], [], {1: rows}, (), ()))
+    assert bpp.check_stacks("acme/demo", _sha(1), APP_ID) == {"stacks/a"}
+
+
 @pytest.mark.parametrize(
     "check",
     [

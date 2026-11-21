@@ -16,7 +16,7 @@ PR_OK = {
 #: What the gather step hands over: the plan run each App-authored apply check on
 #: the PR head records. No head SHA anywhere -- a record read from that head's own
 #: check-runs is for that head by construction.
-RUNS_OK = {"apply / stacks/app / dev-eu": "555"}
+RUNS_OK = {"apply / dev-eu / stacks/app": "555"}
 #: The refusal when the head names no plan run at all, hand-written: it is the
 #: sentence a commenter reads on a PR, not an implementation detail.
 NO_PLAN_REASON = (
@@ -265,7 +265,7 @@ def test_a_head_whose_apply_checks_name_a_plan_run_authorizes():
     # The absence branch is the only plan-run condition left, so a mapping that carries no head
     # SHA at all must authorize. Reinstating a comparison against the PR head refuses every
     # apply, because there is nothing to compare.
-    ok, reason = _decide(plan_runs={"apply / stacks/app / dev-eu": "555"})
+    ok, reason = _decide(plan_runs={"apply / dev-eu / stacks/app": "555"})
     assert (ok, reason) == (True, "")
 
 

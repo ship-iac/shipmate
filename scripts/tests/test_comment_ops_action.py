@@ -686,7 +686,7 @@ def test_the_authorize_step_reads_the_files_the_gather_step_writes(tmp_path, mon
                 }
             ),
         ),
-        ("PLAN_RUN_JSON", '{"apply / stacks/app / dev-eu": "555"}'),
+        ("PLAN_RUN_JSON", '{"apply / dev-eu / stacks/app": "555"}'),
     ):
         path = env[key]
         assert f"> {path}\n" in body, f"the gather step writes no {path}"
@@ -766,7 +766,7 @@ fi
 _GATHER_LISTING = (
     json.dumps(
         {
-            "name": "apply / stacks/a / dev",
+            "name": "apply / dev / stacks/a",
             "status": "queued",
             "id": 5,
             "app": {"id": 1},
@@ -865,7 +865,7 @@ def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs(tmp_p
     Mutation: drop `GH_TOKEN="$APP_TOKEN"` -> the listing is read with the workflow token."""
     _run_gather(tmp_path)
     plan_runs = (tmp_path / "plan_run.json").read_text(encoding="utf-8")
-    assert plan_runs == '{"apply / stacks/a / dev": "77"}\n'
+    assert plan_runs == '{"apply / dev / stacks/a": "77"}\n'
     assert (tmp_path / "tokens.txt").read_text(encoding="utf-8").splitlines() == [
         "workflow_token repos/org/repo/pulls/42",
         "workflow_token graphql",
