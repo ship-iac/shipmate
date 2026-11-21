@@ -1,5 +1,4 @@
 import functools
-import itertools
 import json
 import pathlib
 import subprocess
@@ -23,8 +22,6 @@ from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script, workflow_jobs
 
 dd = load_script("deploy-detect")
-ac = load_script("apply-complete")
-pc = load_script("patch-checks")
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=100"
@@ -428,7 +425,6 @@ def _run_main(
     locks=None,
     pull_reads=None,
     runs=None,
-    attempt="1",
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. Without `pull_reads`, `_merged_head` is stubbed rather than fed, so the only `gh api`
@@ -458,9 +454,6 @@ def _run_main(
     `runs`, a `{path: JSON text or exception}` map, answers the holding-run reads by path; an
     exception is raised by every read of its path.
 
-    `attempt` is this run's `GITHUB_RUN_ATTEMPT`, set here because CI runs this suite inside a
-    workflow run whose own attempt is in the environment.
-
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
     for k, v in {
@@ -471,7 +464,6 @@ def _run_main(
         "SHIPMATE_APP_ID": APP_ID,
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_RUN_ID": OWN_RUN,
-        "GITHUB_RUN_ATTEMPT": attempt,
     }.items():
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
@@ -753,16 +745,7 @@ def test_main_queues_an_in_progress_check_as_pending(tmp_path, monkeypatch):
             _apply_check("stacks/app", "dev-eu", plan_run="42", cells=2),
             _in_flight("stacks/app", "dev-us", plan_run="42", cells=2, id=2),
         ],
-        runs=_holder(
-            "completed",
-            [
-                _job(
-                    name="deploy / L0 / dev-us / stacks/app / apply",
-                    steps=[],
-                    conclusion="cancelled",
-                )
-            ],
-        ),
+        runs=_holder("completed", [_job(name="apply / run / detect", steps=[])]),
     )
     assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu", "dev-us"]
 
@@ -1801,48 +1784,20 @@ _LIVE = (
 )
 
 
-#: The cell's job names in a deploy, `<level> / <env> / <stack> / <part>`.
-APP_APPLY = "deploy / L0 / dev-eu / stacks/app / apply"
-APP_SAVE = "deploy / L0 / dev-eu / stacks/app / save"
-WEB_APPLY = "deploy / L0 / dev-eu / stacks/web / apply"
-_STARTS = itertools.count()
-#: `(name, conclusion)` steps of an `apply` job whose apply step ran.
-_RAN = [("Set up job", "success"), ("Apply the cell", "success")]
-
-
-def _job(name=APP_APPLY, steps=None, status="completed", attempt=1, conclusion="", started=None):
-    """One listed job of run attempt `attempt`; `steps`, `(name, conclusion)` pairs, default
-    to a started apply. `conclusion` defaults to `success` once `completed`, else none;
-    `started`, the `started_at` a carried copy shares with its original, defaults to a fresh
-    one."""
+def _job(name="apply / run / L0 / dev-eu / stacks/app", steps=None, status="completed", attempt=1):
+    """One listed job of run attempt `attempt`; `steps`, `(name, conclusion)` pairs, default to a
+    started apply."""
     if steps is None:
-        steps = _RAN
-    if conclusion == "":
-        conclusion = "success" if status == "completed" else None
+        steps = [("Set up job", "success"), ("Apply the cell", "success")]
     return {
         "name": name,
         "status": status,
-        "conclusion": conclusion,
         "run_attempt": attempt,
-        "started_at": started or f"2026-11-20T10:{next(_STARTS):05d}Z",
         "steps": [{"name": n, "status": "completed", "conclusion": c} for n, c in steps],
     }
 
 
-def _save(conclusion="success", attempt=1, **kw):
-    """The cell's listed `save` job."""
-    return _job(APP_SAVE, steps=[], conclusion=conclusion, attempt=attempt, **kw)
-
-
-def _newest(jobs):
-    return max(j["run_attempt"] for j in jobs)
-
-
-#: An `apply` job cancelled while pending: it never applied.
-_CANCELLED = _job(steps=[], conclusion="cancelled")
-
-
-def _two_cells(tmp_path, monkeypatch, runs, check=None, urls=None, attempt="1"):
+def _two_cells(tmp_path, monkeypatch, runs, check=None, urls=None):
     """`stacks/app` in flight (`check`, default held by run `HOLDER`) beside a queued
     `stacks/web`, both pending."""
     return _run_main(
@@ -1855,7 +1810,6 @@ def _two_cells(tmp_path, monkeypatch, runs, check=None, urls=None, attempt="1"):
         ],
         runs=runs,
         urls=urls,
-        attempt=attempt,
     )
 
 
@@ -1895,15 +1849,13 @@ def test_a_newer_replan_check_does_not_hide_an_older_held_one(tmp_path, monkeypa
     assert "wave0" not in github_outputs(tmp_path / "out.txt")
 
 
-@pytest.mark.parametrize("name", [APP_APPLY, APP_SAVE], ids=["apply", "save"])
-def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkeypatch, name):
-    """Run 77 reads `completed` on attempt 1, but its listing shows the cell's attempt-1 `apply`
-    or `save` job not `completed`: the cell is held as live.
+def test_a_completed_run_listing_a_live_job_of_the_cell_is_live(tmp_path, monkeypatch):
+    """Run 77 reads `completed` on attempt 1, but its listing shows the cell's attempt-1 job not
+    `completed`: the cell is held as live.
 
-    Mutation: drop the cell jobs' status check -- the cell reads `ended` (the queued `apply`
-    job is unknown, the queued `save` did not succeed), red."""
-    jobs = [_job(), _save()] if name == APP_SAVE else []
-    jobs = [j for j in jobs if j["name"] != name] + [_job(name, steps=[], status="queued")]
+    Mutation: drop the cell jobs' status check -- the cell's job lists no steps, so it deploys,
+    red."""
+    jobs = [_job(steps=[], status="queued")]
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert str(exc.value) == _LIVE
@@ -1922,7 +1874,7 @@ def test_a_rerun_between_the_reads_holds_the_cell_live(tmp_path, monkeypatch, ag
     Mutation: skip the second read -- deploys, red.
     Mutation: compare the status only -- the advanced attempt deploys, red.
     Mutation: compare the attempt only -- the queued read deploys, red."""
-    runs = _holder("completed", [_CANCELLED], again=again)
+    runs = _holder("completed", [_job(steps=[])], again=again)
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, runs)
     assert str(exc.value) == _LIVE
@@ -1934,7 +1886,7 @@ def test_a_listed_job_of_a_later_attempt_holds_the_cell_live(tmp_path, monkeypat
     applied, but attempt 2 may still apply it, so the cell is held as live.
 
     Mutation: drop the job-attempt check -- deploys, red."""
-    jobs = [_CANCELLED, _job(name="deploy / detect", steps=[], status="queued", attempt=2)]
+    jobs = [_job(steps=[]), _job(name="apply / run / detect", steps=[], status="queued", attempt=2)]
     with pytest.raises(SystemExit) as exc:
         _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert str(exc.value) == _LIVE
@@ -1957,25 +1909,24 @@ def test_a_stuck_job_of_another_cell_does_not_hold_the_cell(tmp_path, monkeypatc
     own job never applied, so the cell deploys with the warning.
 
     Mutation: count every listed job's status -- held as live, red."""
-    jobs = [_job(name=WEB_APPLY, steps=[], status="in_progress"), _CANCELLED]
-    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
+    jobs = [
+        _job(name="apply / run / L0 / dev-eu / stacks/web", steps=[], status="in_progress"),
+        _job(steps=[]),
+    ]
+    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
     assert "run 77 ended before applying this cell" in capsys.readouterr().err
 
 
 _NOT_STARTED = {
     "skipped": [_job(steps=[("Set up job", "success"), ("Apply the cell", "skipped")])],
-    "cancelled while pending": [_CANCELLED, _save("skipped")],
+    "no steps": [_job(steps=[])],
+    "no job": [_job(name="apply / run / L0 / dev-eu / stacks/web")],
     "pre-apply failed, apply failed": [
-        _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "failure")]),
-        _save("failure"),
+        _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "failure")])
     ],
     "pre-apply failed, apply succeeded": [
         _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "success")])
-    ],
-    "never applied, carried": [
-        _job(steps=[], conclusion="cancelled", started="2026-11-20T09:00:00Z"),
-        _job(steps=[], conclusion="cancelled", started="2026-11-20T09:00:00Z", attempt=2),
     ],
 }
 
@@ -1984,16 +1935,15 @@ _NOT_STARTED = {
 def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
     tmp_path, monkeypatch, capsys, jobs
 ):
-    """Run 77 ended and no attempt's `apply` job applied the cell: `Apply the cell` `skipped`,
-    cancelled while pending with no steps (also as attempt 2's carried copy), or a failed
-    `Pre-apply check`, after which `Apply the cell` runs only to refuse.
-    Probe (runs 43968821022 and 43968821153): a leg that started `Apply the cell` never lists it
-    `skipped`, and a pre-apply failure lists it `success`. Nothing writes the check again, so
-    the deploy queues it and warns.
+    """Run 77 ended and its cell job never applied: `Apply the cell` `skipped`, no steps, no job
+    for the cell, or a failed `Pre-apply check`, after which `Apply the cell` runs only to
+    refuse. Probe (runs 43968821022 and 43968821153): a leg that started `Apply the cell` never
+    lists it `skipped`, and a pre-apply failure lists it `success`. Nothing writes the check
+    again, so the deploy queues it and warns.
 
     Mutation: refuse on any ended run -- refuses, red.
     Mutation: drop the `Pre-apply check` clause -- the two pre-apply cases refuse, red."""
-    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
+    parsed = _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
     warnings = [line for line in capsys.readouterr().err.splitlines() if "run 77" in line]
     assert warnings == [
@@ -2005,132 +1955,31 @@ def test_an_ended_run_that_never_applied_the_cell_deploys_it_with_a_warning(
 
 
 _STARTED = {
-    "success, no save": [_job()],
-    "success, save failed": [_job(), _save("failure")],
-    "failure": [_job(steps=[("Apply the cell", "failure")], conclusion="failure")],
-    "cancelled": [_job(steps=[("Apply the cell", "cancelled")], conclusion="cancelled")],
+    "success": [_job()],
+    "failure": [_job(steps=[("Apply the cell", "failure")])],
+    "cancelled": [_job(steps=[("Apply the cell", "cancelled")])],
     "no conclusion": [_job(steps=[("Apply the cell", None)])],
     "unnamed step": [_job(steps=[("Run ship-iac/shipmate/actions/apply-cell@main", "success")])],
-    "one of two jobs": [_CANCELLED, _job(steps=[("Apply the cell", "failure")])],
+    "one of two jobs": [_job(steps=[]), _job(steps=[("Apply the cell", "failure")])],
     "pre-apply passed, apply failed": [
-        _job(steps=[("Pre-apply check", "success"), ("Apply the cell", "failure")]),
-        _save("failure"),
-    ],
-    "no job": [_job(name=WEB_APPLY)],
-    "older job shape": [_job(name=APP_APPLY.removesuffix(" / apply"))],
-    "attempt 1 unsaved, attempt 2 refused": [
-        _job(),
-        _save("failure"),
-        _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "failure")], attempt=2),
-        _save("failure", attempt=2),
+        _job(steps=[("Pre-apply check", "success"), ("Apply the cell", "failure")])
     ],
 }
 
 
 @pytest.mark.parametrize("jobs", _STARTED.values(), ids=_STARTED.keys())
 def test_an_ended_run_whose_apply_may_have_started_refuses(tmp_path, monkeypatch, jobs):
-    """Run 77 ended and an attempt's `apply` job lists `Apply the cell` as started (any
-    conclusion but `skipped`) after a `Pre-apply check` that did not fail, or lists steps
-    without either (an older engine), or one of two jobs did, and no `save` of that attempt or a
-    later one succeeded; or the run lists no job of the cell under the job names this engine
-    reads: the cell may have applied without saving its state, so the deploy refuses and names
-    the procedure.
+    """Run 77 ended and its cell job lists `Apply the cell` as started (any conclusion but
+    `skipped`) after a `Pre-apply check` that did not fail, or lists steps without either (an
+    older engine), or one of two jobs did: the cell may have applied without saving its state,
+    so the deploy refuses and names the procedure.
 
     Mutation: deploy every ended run -- deploys, red.
-    Mutation: drop `not mine or` in `holder_state` -- the no-job cases deploy, red.
     Mutation: treat only `success` as started -- the other started cases deploy, red.
     Mutation: count any `Pre-apply check` conclusion as not started -- the pre-apply-passed case
-    deploys, red.
-    Mutation: classify a `save` `failure` after an applied attempt as saved -- the save-failed
-    cases read `saved`, red."""
+    deploys, red."""
     with pytest.raises(SystemExit) as exc:
-        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
-    assert str(exc.value) == (
-        "::error::deploy refused: stacks/app / dev-eu were left in progress by run 77, which "
-        "ended after their apply may have started, so their state may not be saved. "
-        + _TROUBLESHOOT_LOST
-        + _OTHERS
-    )
-
-
-_SAVED = {
-    "applied, saved": [_job(), _save()],
-    "unknown, saved": [_job(steps=[]), _save()],
-    "saved by a later attempt": [
-        _job(),
-        _save("failure"),
-        _job(steps=[("Pre-apply check", "failure"), ("Apply the cell", "failure")], attempt=2),
-        _save(attempt=2),
-    ],
-    "saved, carried": [
-        _job(started="2026-11-20T09:00:00Z"),
-        _save(started="2026-11-20T09:00:01Z"),
-        _job(started="2026-11-20T09:00:00Z", attempt=2, steps=[]),
-        _save(started="2026-11-20T09:00:01Z", attempt=2),
-    ],
-}
-
-
-@pytest.mark.parametrize("jobs", _SAVED.values(), ids=_SAVED.keys())
-def test_an_ended_run_that_applied_and_saved_the_cell_refuses_naming_the_by_hand_return(
-    tmp_path, monkeypatch, jobs
-):
-    """Run 77 ended after an attempt applied the cell, or may have, and that attempt's `save` or
-    a later one succeeded: the state is saved but the check stays in progress, so the deploy
-    refuses and points at the by-hand return.
-
-    Mutation: read an unknown `apply` verdict as not applied -- the unknown case deploys, red.
-    Mutation: read every ended run that applied as `ended` -- the state-loss text, red."""
-    with pytest.raises(SystemExit) as exc:
-        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
-    assert str(exc.value) == (
-        "::error::deploy refused: stacks/app / dev-eu were left in progress by run 77, which "
-        f"applied them and saved their state. Follow {_BY_HAND}, then re-run this deploy." + _OTHERS
-    )
-
-
-def test_the_held_check_apply_complete_writes_refuses_as_a_state_loss(tmp_path, monkeypatch):
-    """Run 77's `complete` job holds the cell from one jobs listing (apply `success`, save
-    `failure`) and writes the held check; the deploy reads that check and the same listing and
-    refuses with the state-loss text, not as an unknown holder.
-
-    Mutation: `apply-complete` links the `save` job (`<run page>/job/<id>`) -- `unknown`,
-    red."""
-    for k, v in {
-        "GITHUB_SERVER_URL": "https://github.com",
-        "GITHUB_REPOSITORY": "acme/iac",
-        "GITHUB_RUN_ID": HOLDER,
-    }.items():
-        monkeypatch.setenv(k, v)
-    listing = [
-        {**_job("deploy / L0 / complete"), "id": 5},
-        {**_job(), "id": 6},
-        {**_save("failure"), "id": 7},
-    ]
-    rows, unresolved = ac.classify(
-        {"wave0": {"apply / stacks/app / dev-eu": [1]}}, {"wave0": "success"}, listing, "5"
-    )
-    assert (rows, unresolved) == (
-        [
-            {
-                "check": "apply / stacks/app / dev-eu",
-                "ids": [1],
-                "conclusion": None,
-                "job_id": None,
-                "url": None,
-                "held": True,
-            }
-        ],
-        [],
-    )
-    [entry] = ac.writes(rows[0], "acme/iac")
-    base = _apply_check("stacks/app", cells=2, id=entry["id"])
-    check = {**base, **pc.with_output(entry, base)}
-    assert check["status"] == "in_progress"
-    cause = dd.ad.holder_state("acme/iac", _cell("stacks/app"), check, {HOLDER: ("ended", listing)})
-    assert cause == ("ended", HOLDER)
-    with pytest.raises(SystemExit) as exc:
-        _two_cells(tmp_path, monkeypatch, _holder("completed", listing), check=check)
+        _two_cells(tmp_path, monkeypatch, _holder("completed", jobs))
     assert str(exc.value) == (
         "::error::deploy refused: stacks/app / dev-eu were left in progress by run 77, which "
         "ended after their apply may have started, so their state may not be saved. "
@@ -2142,7 +1991,7 @@ def test_the_held_check_apply_complete_writes_refuses_as_a_state_loss(tmp_path, 
 _GH_500 = SystemExit("::error::gh api repos/acme/iac/actions/runs/77 failed\nHTTP 500: boom")
 
 
-_NEVER_APPLIED = [_CANCELLED]
+_NEVER_APPLIED = [_job(steps=[])]
 _BAD_ATTEMPTS = [None, True, "2"]
 
 
@@ -2153,9 +2002,7 @@ _BAD_ATTEMPTS = [None, True, "2"]
         ({**_holder("completed"), JOBS_PATH: _GH_500}, (1, 3)),
         (_holder("completed", []), (1, 1)),
         (
-            _holder(
-                "completed", [_job(name="apply / run / L0 / dev-eu / stacks/web / apply")], total=2
-            ),
+            _holder("completed", [_job(name="apply / run / L0 / dev-eu / stacks/web")], total=2),
             (1, 1),
         ),
         ({RUN_PATH: json.dumps({"id": 77, "run_attempt": 1})}, (1, 0)),
@@ -2213,94 +2060,23 @@ def test_a_holding_run_that_cannot_be_read_completely_refuses(tmp_path, monkeypa
     assert (urls.count(RUN_PATH), urls.count(JOBS_PATH)) == reads
 
 
-OWN_JOBS_PATH = f"repos/acme/iac/actions/runs/{OWN_RUN}/jobs?filter=all&per_page=100&page=1"
-#: Attempt 2's own `detect`, running.
-_OWN_DETECT = _job(name="deploy / detect", steps=[], status="in_progress", attempt=2)
-
-
-def _own(jobs):
-    """`_run_main`'s `runs` answering this run's own jobs listing with `jobs`."""
-    return {OWN_JOBS_PATH: json.dumps({"total_count": len(jobs), "jobs": jobs})}
-
-
 def test_a_deploy_rerun_passes_its_own_in_progress_checks(tmp_path, monkeypatch):
     """Attempt 2 of this deploy meets the checks its attempt 1 flipped, naming this run's page
-    (which carries no attempt), and attempt 1 applied and saved the cell: it deploys, reads no
-    run, and lists its own jobs once.
+    (which carries no attempt): it deploys and reads no run.
 
     Mutation: drop the own-run exclusion -- run 900 is read, red.
     Mutation: compare with a URL carrying the attempt -- run 900 is read, red."""
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     urls = []
     parsed = _two_cells(
         tmp_path,
         monkeypatch,
-        runs=_own([_job(), _save(), _OWN_DETECT]),
+        runs={},
         check=_in_flight("stacks/app", url=RUN_PAGE + OWN_RUN, cells=2, id=1),
         urls=urls,
-        attempt="2",
     )
     assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app", "stacks/web"]
-    assert [u for u in urls if "/actions/runs/" in u] == [OWN_JOBS_PATH]
-
-
-@pytest.mark.parametrize(
-    "check",
-    [
-        _in_flight("stacks/app", url=RUN_PAGE + OWN_RUN, cells=2, id=1),
-        _apply_check("stacks/app", cells=2, id=1),
-    ],
-    ids=["own flip", "queued"],
-)
-def test_a_deploy_rerun_refuses_a_cell_its_earlier_attempt_left_unsaved(
-    tmp_path, monkeypatch, check
-):
-    """Attempt 2 of this deploy lists its own run: attempt 1 applied `stacks/app` and its `save`
-    failed. Whatever the check reads, the deploy refuses naming this run's earlier attempt.
-
-    Mutation: skip the own-run read on attempt 2 -- deploys, red.
-    Mutation: key the cell `ended` in `_own_unsaved` -- the ended-run text, red."""
-    with pytest.raises(SystemExit) as exc:
-        _two_cells(
-            tmp_path,
-            monkeypatch,
-            runs=_own([_job(), _save("failure"), _OWN_DETECT]),
-            check=check,
-            attempt="2",
-        )
-    assert str(exc.value) == (
-        "::error::deploy refused: stacks/app / dev-eu may have been applied by an earlier attempt "
-        "of this deploy, run 900, without saving their state. " + _TROUBLESHOOT_LOST + _OTHERS
-    )
-
-
-@pytest.mark.parametrize(
-    "runs",
-    [
-        {OWN_JOBS_PATH: _GH_500},
-        _own([]),
-        _own([{**_OWN_DETECT, "run_attempt": None}]),
-    ],
-    ids=["failed", "empty", "job attempt null"],
-)
-def test_a_deploy_rerun_that_cannot_list_its_own_jobs_refuses(tmp_path, monkeypatch, runs):
-    """A failed, empty or malformed listing of this run's own jobs on attempt 2 refuses every
-    pending cell as unreadable: this run always lists its own `detect`.
-
-    Mutation: read a listing that is not None as readable (no `newest_attempt` check) -- the
-    empty and null-attempt cases deploy, red."""
-    monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
-    with pytest.raises(SystemExit) as exc:
-        _two_cells(
-            tmp_path,
-            monkeypatch,
-            runs=runs,
-            check=_apply_check("stacks/app", cells=2, id=1),
-            attempt="2",
-        )
-    assert str(exc.value) == (
-        "::error::deploy refused: stacks/app / dev-eu, stacks/web / dev-eu: run 900 could not be "
-        f"read completely; re-run this deploy. If it fails the same way, follow {_BY_HAND}."
-    )
+    assert [u for u in urls if "/actions/runs/" in u] == []
 
 
 @pytest.mark.parametrize(
@@ -2389,16 +2165,22 @@ def test_an_in_flight_check_refuses_before_its_missing_digest(tmp_path, monkeypa
         _two_cells(tmp_path, monkeypatch, _holder("in_progress"), check=check)
 
 
-def test_the_cell_names_the_steps_the_deploy_reads():
+def test_every_wave_names_the_steps_the_deploy_reads():
     """The deploy finds whether a cell applied in a jobs listing by these step names.
 
-    Mutation: rename `cell.yml`'s `Apply the cell` step -- red.
-    Mutation: rename `cell.yml`'s `Pre-apply check` step -- red.
-    Mutation: rename `apply-gate.APPLY_STEP` or `PRE_APPLY_STEP` -- red."""
-    assert (dd.ad.ag.PRE_APPLY_STEP, dd.ad.ag.APPLY_STEP) == ("Pre-apply check", "Apply the cell")
-    names = [
-        (s.get("name"), s["uses"].rsplit("/", 1)[1])
-        for s in workflow_jobs("cell.yml")["apply"]["steps"]
-        if s.get("uses", "").endswith(("/pre-apply", "/apply-cell"))
-    ]
-    assert names == [("Pre-apply check", "pre-apply"), ("Apply the cell", "apply-cell")]
+    Mutation: rename the wave's `Apply the cell` step -- red.
+    Mutation: rename the wave's `Pre-apply check` step -- red.
+    Mutation: rename `APPLY_STEP` -- red.
+    Mutation: rename `PRE_APPLY_STEP` -- red."""
+    jobs = workflow_jobs("apply-env-level.yml")
+    names = {
+        wave: [
+            (s.get("name"), s["uses"].rsplit("/", 1)[1])
+            for s in jobs[wave]["steps"]
+            if s.get("uses", "").endswith(("/pre-apply", "/apply-cell"))
+        ]
+        for wave in (f"wave{n}" for n in range(8))
+    }
+    expected = [("Pre-apply check", "pre-apply"), ("Apply the cell", "apply-cell")]
+    assert names == {f"wave{n}": expected for n in range(8)}
+    assert (dd.PRE_APPLY_STEP, dd.APPLY_STEP) == ("Pre-apply check", "Apply the cell")

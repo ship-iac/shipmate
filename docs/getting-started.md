@@ -598,7 +598,7 @@ jobs:
     with:
       runs_on: *runner
   deploy:
-    # Display only: the job path reads `shipmate / deploy / L<n> / <env> / <stack> / apply`.
+    # Display only: the job path reads `shipmate / deploy / L<n> / <env> / <stack>`.
     name: deploy
     if: github.event_name == 'push'
     concurrency:
@@ -933,7 +933,7 @@ the file whose `secrets:` block names no engine credential.
 The `deploy` job applies, on push to the default branch, every reviewed plan
 whose apply check is still pending — so it no-ops when everything was applied
 pre-merge. Its `name: deploy` is display only: the run's job path reads
-`shipmate / deploy / L<n> / <env> / <stack> / apply`.
+`shipmate / deploy / L<n> / <env> / <stack>`.
 
 ### Why the jobs name their secrets
 
@@ -982,7 +982,7 @@ succeeds, which is why the same fence serves both same-organization and
 cross-organization consumers.
 
 `SHIPMATE_ENCRYPTION_KEY` is the exception, and it is not affected by the
-boundary. The apply cells bind the env's apply environment, not `shipmate-engine`,
+boundary. The wave jobs bind the env's apply environment, not `shipmate-engine`,
 so `shipmate-engine` cannot supply that secret: it travels down the call chain as
 a repository or organization secret you pass by name, or is set as the same
 value on both `<env>-plan` and `<env>-apply`.

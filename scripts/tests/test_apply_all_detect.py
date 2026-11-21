@@ -4,11 +4,9 @@ import pytest
 from _detect_fixtures import (
     APP_ID,
     BASE_TIP,
-    HELD_CASES,
     MINIMAL_TABLE,
     PLAN_SHA,
     PR_NUMBER,
-    RUN_ENV,
     _apply_check,
     _record,
     answering_run_graph,
@@ -19,8 +17,6 @@ from _detect_fixtures import (
     forbid_shared_runner,
     foreign_message,
     held,
-    held_check,
-    holder_answers,
     partial_message,
     routed,
     run_graph_capture,
@@ -274,7 +270,6 @@ def _run_main(
         "SHIPMATE_PR_NUMBER": PR_NUMBER,
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
-        **RUN_ENV,
     }.items():
         monkeypatch.setenv(k, v)
     if decision is None:
@@ -1622,29 +1617,3 @@ def test_a_bare_apply_with_no_cell_to_apply_reads_no_pull_request(tmp_path, monk
     assert urls == [CHECK_RUNS_URL]
     assert base_calls == []
     assert parsed["base_sha"] == ""
-
-
-@pytest.mark.parametrize(
-    ("link", "run", "jobs", "refusal"), HELD_CASES.values(), ids=HELD_CASES.keys()
-)
-def test_a_bare_apply_refuses_a_cell_another_run_holds_unless_it_never_applied(
-    tmp_path, monkeypatch, link, run, jobs, refusal
-):
-    """Run 77 holds `stacks/app / dev-eu`'s apply check `in_progress`: a live run, an ended
-    run that applied it unsaved or saved, an unreadable run and a link naming no run refuse the
-    whole apply; an ended run that never applied it leaves it to apply.
-
-    Mutation: drop the `refuse_held` call in `bare_main` (the held check reads as pending, as
-    before) -- every refusing case applies, red."""
-    kw = {
-        "envs": ["dev-eu"],
-        "decision": "APPROVED",
-        "checks": [held_check("o/r", link, cells=1)],
-        "answers": [*base_answers("o/r"), *holder_answers("o/r", run, jobs)],
-    }
-    if refusal is None:
-        assert _wave_envs(_run_main(tmp_path, monkeypatch, **kw)) == ["dev-eu"]
-        return
-    with pytest.raises(SystemExit) as exc:
-        _run_main(tmp_path, monkeypatch, **kw)
-    assert str(exc.value) == refusal

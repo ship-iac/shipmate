@@ -9,12 +9,12 @@ nothing.
 
 Each step, `uses:` aside, is asserted whole against a hand-written table: `id: setup` and
 `resolve: "true"` at the five detect jobs, whose `tools` output reads that id; `versions` at every
-cell, from its detect job's output (`cell.yml` from its `tools` input, which `apply-run.yml` and
-`deploy.yml` fill through `apply-env-level.yml`) and at `deploy.yml`'s `warm` job, which installs
+cell, from its detect job's output (`apply-env-level.yml` from its `tools` input, which
+`apply-run.yml` and `deploy.yml` fill from theirs) and at `deploy.yml`'s `warm` job, which installs
 OpenTofu to fill the provider cache; `tofu: "false"` at the detect jobs, which never run
-OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml site and at `cell.yml`'s
-`apply`, whose `cache-mode: read` denies the save with a warning; and `if: false` on the
-manifest-load parse probe.
+OpenTofu; `cache-save: "false"` at every plan.yml and unlock.yml site, whose workflow-level
+`cache-mode: read` denies the save with a warning; and `if: false` on the manifest-load parse
+probe.
 """
 
 from _loader import WORKFLOWS, local_action, workflow_yaml
@@ -44,8 +44,8 @@ def _setup_steps():
 _DETECT = {"id": "setup", "with": {"tofu": "false", "resolve": "true"}}
 _FROM_DETECT = "${{ needs.detect.outputs.tools }}"
 EXPECTED_STEPS = {
+    "apply-env-level.yml": [{"with": {"versions": "${{ inputs.tools }}"}}] * 8,
     "apply-run.yml": [_DETECT],
-    "cell.yml": [{"with": {"versions": "${{ inputs.tools }}", "cache-save": "false"}}],
     "deploy.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     "drift.yml": [_DETECT, {"with": {"versions": _FROM_DETECT}}],
     # The remote parse probe never runs a step.
@@ -66,9 +66,8 @@ def test_setup_call_sites_resolve_once_and_pass_only_the_switches():
     cell site; add `tofu-version: x` to apply-run.yml's detect site; delete drift.yml's cell
     site; rename plan.yml's detect site `id: setup` to `id: tools`; drop `cache-save` from
     unlock.yml's cell site; add `cache-save: "false"` to drift.yml's cell site; add
-    `resolve: "true"` to plan.yml's cell site; set `cell.yml`'s `versions` to `""`; drop
-    `cell.yml`'s `cache-save`; drop `resolve` from deploy.yml's detect site; add
-    `tofu: "false"` to deploy.yml's warm site.
+    `resolve: "true"` to plan.yml's cell site; set the wave cells' `versions` to `""`; drop
+    `resolve` from deploy.yml's detect site; add `tofu: "false"` to deploy.yml's warm site.
     """
     got = {
         name: [{k: v for k, v in s.items() if k != "uses"} for s in steps]

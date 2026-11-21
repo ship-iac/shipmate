@@ -5,8 +5,8 @@ failure.
 The step pipes `terramate run ... -- tofu apply ... 2>&1 | tee "$RUNNER_TEMP/apply.txt"` under
 `set -euo pipefail`. With pipefail live across that pipeline -- or plain errexit reacting to the
 pipeline's last-command status -- a `tee` failure alone fails the whole step: a full
-$RUNNER_TEMP, a disk hiccup mid-write, nothing to do with tofu. The handoff has already
-sealed the advanced state for the `save` job by the time the check would complete, so a
+$RUNNER_TEMP, a disk hiccup mid-write, nothing to do with tofu. `Save state` has already
+persisted the advanced state by the time `Complete the apply check` would run, so a
 stranded-pending check here is unrecoverable without a re-plan, the saved plan now being stale
 against the advanced state.
 
@@ -63,13 +63,7 @@ def test_the_apply_half_is_split_across_its_four_attributable_steps():
     # assertion in this file green and this the only test able to catch it. Locating and
     # restoring state run inside `cell-init` after init, and the harness leaves them out: neither
     # touches the stored plan.
-    assert tuple(ids[start : start + 5]) == (
-        "digest-input",
-        "init",
-        "hosted",
-        "plan-digest",
-        "apply",
-    )
+    assert tuple(ids[start : start + 4]) == ("digest-input", "init", "plan-digest", "apply")
 
 
 def test_apply_step_captures_pipestatus_and_exits_on_it():

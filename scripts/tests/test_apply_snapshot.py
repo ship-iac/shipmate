@@ -28,37 +28,6 @@ APP_ID = 111222  # arbitrary: the engine repo is public, no real ids in fixtures
 OTHER_APP_ID = 333444
 
 
-def _job(jid, name, conclusion, steps=()):
-    status = "in_progress" if conclusion is None else "completed"
-    return {
-        "id": jid,
-        "name": name,
-        "status": status,
-        "conclusion": conclusion,
-        "run_attempt": 1,
-        "started_at": f"2026-11-20T10:00:{jid % 60:02d}Z",
-        "steps": list(steps),
-        "html_url": "u" if jid == 9 else f"https://gh/job/{jid}",
-    }
-
-
-#: A wave completion job's listing: itself, `L0 / complete` (id 900), and the `dns` / `dev`
-#: cell's `apply` (id 9, its apply step ran) and `save`, both succeeded.
-JOBS = [
-    _job(900, "L0 / complete", None),
-    _job(
-        9,
-        "L0 / dev / dns / apply",
-        "success",
-        [
-            {"name": "Pre-apply check", "conclusion": "success"},
-            {"name": "Apply the cell", "conclusion": "success"},
-        ],
-    ),
-    _job(10, "L0 / dev / dns / save", "success"),
-]
-
-
 def check(name, cid, app_id=APP_ID, **record):
     """An App check run whose record names `PLAN_RUN` and `DIGEST`, `record` over them."""
     body = {"plan_run": PLAN_RUN, "plan_sha256": DIGEST, **record}
@@ -282,8 +251,9 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
     """wave0's completion runs before wave1 has a job in the listing. Mutation: `classify` walks
     every key of `by_wave` instead of those of its wave results -> wave1's cells read
     unresolved."""
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
     by_wave = apply_snapshot.by_wave(_EIGHT_WAVES, _EIGHT_SNAPSHOT)
-    assert apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, "900") == (
+    assert apply_complete.classify(by_wave, {"wave0": "success"}, jobs) == (
         [
             {
                 "check": "apply / dns / dev",
@@ -381,7 +351,8 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
     )
     runs = [check("apply / dns / dev", 1), check("apply / dns / dev", 2, **extra)]
     by_wave = apply_snapshot.by_wave(waves, apply_snapshot.snapshot(waves, runs, APP_ID))
-    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, JOBS, "900")
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
+    rows, _ = apply_complete.classify(by_wave, {"wave0": "success"}, jobs)
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1]
 
@@ -403,8 +374,9 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     ]
     snap = apply_snapshot.snapshot(waves, runs, APP_ID)
     assert snap == {"apply / dns / dev": [1, 2]}
+    jobs = [{"name": "L0 / dev / dns", "conclusion": "success", "id": 9, "html_url": "u"}]
     rows, _ = apply_complete.classify(
-        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, JOBS, "900"
+        apply_snapshot.by_wave(waves, snap), {"wave0": "success"}, jobs
     )
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1, 2]

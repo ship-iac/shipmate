@@ -59,30 +59,7 @@ def state_path(stack, record, workspace):
         _refuse(stack, "its local state path names the stack directory itself")
     if not _SAFE.fullmatch(rel):
         _refuse(stack, f"its local state path {rel!r} holds a character outside [A-Za-z0-9._/-]")
-    return validate(stack, posixpath.join(stack, rel))
-
-
-def validate(stack, path):
-    """`path` unchanged when it is a state path `state_path` could have built for `stack`;
-    raises SystemExit otherwise.
-
-    The path must sit inside the stack (`./<rel>` for the root stack `.`, `<stack>/<rel>` for
-    any other) with `rel` already normal, relative, below the stack directory and inside
-    `_SAFE`. The path string is returned as given, never normalised: `actions/cache` keys an
-    entry's version on it, so `./terraform.tfstate` and `terraform.tfstate` are two entries.
-    """
-    head = "./" if stack == "." else stack + "/"
-    rel = path[len(head) :] if path.startswith(head) else None
-    if (
-        not rel
-        or rel != posixpath.normpath(rel)
-        or posixpath.isabs(rel)
-        or rel in (".", "..")
-        or rel.startswith("../")
-        or not _SAFE.fullmatch(rel)
-    ):
-        _refuse(stack, f"the state path {path!r} is not a clean relative path inside the stack")
-    return path
+    return posixpath.join(stack, rel)
 
 
 def _read_record(stack, data_dir):

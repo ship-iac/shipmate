@@ -23,12 +23,21 @@ from _loader import (
 )
 
 #: The jobs that run a cell, hand-written. `test_the_registry_names_every_job_that_runs_a_cell`
-#: derives the same set from the files, so a fifth cell job reds rather than going unguarded.
+#: derives the same set from the files, so a twelfth cell job reds rather than going unguarded.
 _CELL_JOBS = {
     "plan.yml": ("plan",),
     "drift.yml": ("drift",),
     "unlock.yml": ("unlock",),
-    "cell.yml": ("apply",),
+    "apply-env-level.yml": (
+        "wave0",
+        "wave1",
+        "wave2",
+        "wave3",
+        "wave4",
+        "wave5",
+        "wave6",
+        "wave7",
+    ),
 }
 
 #: The names `env-inject` writes to `$GITHUB_ENV`. No workflow may bind them on a job: a
@@ -50,8 +59,6 @@ _INJECT_ENV = {
 #: `toJSON` is load-bearing: `tf_vars` is a mapping, and a mapping interpolated into a string
 #: input arrives as GHA's own `Object` rendering, which is not JSON.
 _CELL_STEP_WITH = {"tf-vars": "${{ toJSON(matrix.tf_vars) }}"}
-#: `cell.yml` has no matrix: its row arrives as the `cell` input.
-_CALLED_CELL_STEP_WITH = {"tf-vars": "${{ toJSON(fromJSON(inputs.cell).tf_vars) }}"}
 
 _IDENTITY_INPUTS = ("tf-vars",)
 
@@ -67,7 +74,7 @@ _CHANNEL_STEP_WITH = {
 }
 _CHANNEL_INPUT_SPEC = {"required": False, "default": ""}
 
-_CELL_SITES = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
+_ELEVEN = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
 
 
 def _runs_a_cell(step):
@@ -81,16 +88,16 @@ def _runs_a_cell(step):
 
 def test_the_registry_names_every_job_that_runs_a_cell():
     """Both sides derived: the registry against the workflows themselves. Without this the other
-    guards only check the jobs someone remembered to list.
+    guards only check the eleven jobs someone remembered to list.
 
-    Mutation: drop `unlock.yml` from `_CELL_JOBS`, or add `apply-env-level.yml`'s `wave0`.
+    Mutation: drop `unlock.yml` from `_CELL_JOBS`, or add a ninth wave job to the registry.
     """
     found = set()
     for path in sorted(WORKFLOWS.glob("*.yml")):
         for job_id, job in workflow_jobs(path.name).items():
             if any(_runs_a_cell(s) for s in (job.get("steps") or [])):
                 found.add((path.name, job_id))
-    assert found == set(_CELL_SITES)
+    assert found == set(_ELEVEN)
 
 
 def test_no_workflow_binds_the_old_names():
@@ -118,25 +125,24 @@ def test_no_workflow_binds_the_old_names():
                 scan(f"{path.name}:{job_id}:step{i}", step.get("env"))
 
     assert {p.name for p in files} >= set(_CELL_JOBS)
-    assert visited >= set(_CELL_SITES)
+    assert visited >= set(_ELEVEN)
     assert offenders == []
 
 
-@pytest.mark.parametrize(("workflow", "job_id"), _CELL_SITES, ids=lambda v: v)
+@pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
 def test_every_cell_step_passes_the_identity_input_from_its_matrix_row(workflow, job_id):
     """The last hop: `tf_vars` is stamped on every matrix row, and a cell step that does not
     forward it hands the action an empty input, which `env-inject` refuses. A grep run once at
-    authoring time does not stop a fifth step from omitting it, so the four are checked
+    authoring time does not stop a twelfth step from omitting it, so the eleven are checked
     against the same registry every other property here uses.
 
-    Mutations: drop `cell.yml`'s `tf-vars:` line; drop the `toJSON()` and pass
-    `${{ matrix.tf_vars }}` in `plan.yml`.
+    Mutations: replace one wave job's `steps: *wave-steps` with a copy of wave0's steps minus
+    the `tf-vars:` line; drop the `toJSON()` and pass `${{ matrix.tf_vars }}`.
     """
     steps = [s for s in (workflow_jobs(workflow)[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
     with_ = steps[0]["with"]
-    expected = _CALLED_CELL_STEP_WITH if workflow == "cell.yml" else _CELL_STEP_WITH
-    assert {k: with_.get(k) for k in _IDENTITY_INPUTS} == expected
+    assert {k: with_.get(k) for k in _IDENTITY_INPUTS} == _CELL_STEP_WITH
 
 
 @pytest.mark.parametrize("action", _CELL_ACTIONS)
@@ -191,14 +197,15 @@ def test_each_cell_action_declares_the_identity_input_without_a_default(action):
         assert spec["inputs"][name]["required"] is True, name
 
 
-@pytest.mark.parametrize(("workflow", "job_id"), _CELL_SITES, ids=lambda v: v)
+@pytest.mark.parametrize(("workflow", "job_id"), _ELEVEN, ids=lambda v: v)
 def test_every_cell_step_binds_both_consumer_channels(workflow, job_id):
-    """Both channels, at every one of the four sites, from the same registry the identity
-    input is checked against. One job drifting from the others is the realistic failure: an
+    """Both channels, at every one of the eleven sites, from the same registry the identity
+    input is checked against. One job drifting from the other ten is the realistic failure: an
     unbound channel reaches the action as its empty default, so that cell silently carries none
-    of the consumer's variables or secrets while the others do.
+    of the consumer's variables or secrets while the other ten do.
 
-    Mutation: drop the `consumer-secrets:` line from `cell.yml`'s apply-cell step.
+    Mutation: replace ONE wave job's `steps: *wave-steps` with a copy of wave0's steps minus
+    the `consumer-secrets:` line.
     """
     steps = [s for s in (workflow_jobs(workflow)[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"

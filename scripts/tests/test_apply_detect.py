@@ -10,23 +10,17 @@ from _detect_fixtures import (
     APP_ID,
     BASE_TIP,
     HEAD,
-    HELD_CASES,
-    HOLDER,
     PLAN_SHA,
     PR_NUMBER,
-    RUN_ENV,
     _apply_check,
     _record,
     answering_run_graph,
     base_answers,
     behind_check,
     behind_message,
-    cell_job,
     forbid_shared_runner,
     foreign_message,
     held,
-    held_check,
-    holder_answers,
     partial_message,
     routed,
     run_graph_capture,
@@ -253,7 +247,6 @@ def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_REVIEW_DECISION": "APPROVED",
-        **RUN_ENV,
     }
     env.update(overrides)
     for name, value in env.items():
@@ -1737,87 +1730,3 @@ def test_a_conflict_elsewhere_refuses_a_targeted_apply_of_a_clean_stack(
         f"Version {tip} of stacks/a/main.tf left in tree. Update the branch from the base and "
         "push."
     )
-
-
-@pytest.mark.parametrize(
-    ("link", "run", "jobs", "refusal"), HELD_CASES.values(), ids=HELD_CASES.keys()
-)
-def test_a_targeted_apply_refuses_a_cell_another_run_holds_unless_it_never_applied(
-    monkeypatch, tmp_path, link, run, jobs, refusal
-):
-    """Run 77 holds `stacks/app / dev-eu`'s apply check `in_progress`: a live run, an ended
-    run that applied it unsaved or saved, an unreadable run or jobs listing and a link naming no
-    run refuse the whole apply; an ended run that never applied it leaves it to apply.
-
-    Mutation: drop the `refuse_held` call in `main` (the held check reads as pending, as before)
-    -- every refusing case applies, red. Mutation: `counted=False` in `_holding_run` -- short
-    listing, red. Mutation: `if jobs is None` for `if newest is None` in `_holding_run` --
-    empty listing, red. Mutation: drop `not mine or` in `holder_state` -- a listing with no
-    row of the cell's job grammar (an older engine's `L0 / <env> / <stack>`) applies, red."""
-    out = _apply_env(monkeypatch, tmp_path)
-    answers = [*base_answers("acme/iac"), *holder_answers("acme/iac", run, jobs)]
-    _stub_apply(
-        monkeypatch, {"stacks/app": set()}, [held_check("acme/iac", link, cells=1)], answers=answers
-    )
-    if refusal is None:
-        ad.main()
-        assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == (
-            "stacks/app"
-        )
-        return
-    with pytest.raises(SystemExit) as exc:
-        ad.main()
-    assert str(exc.value) == refusal
-
-
-def test_a_held_cell_refusal_is_a_failure_and_not_a_rule(monkeypatch, tmp_path):
-    """A cell another run may have applied unsaved is no rule the user satisfies: the result
-    comment heads the run `failed`.
-
-    Mutation: raise `Refused` in `refuse_held` -- a `refused_by_rule=true` line, red."""
-    out = _apply_env(monkeypatch, tmp_path)
-    _, run, jobs, _ = HELD_CASES["ended unsaved"]
-    answers = [*base_answers("acme/iac"), *holder_answers("acme/iac", run, jobs)]
-    _stub_apply(
-        monkeypatch, {"stacks/app": set()}, [held_check("acme/iac", cells=1)], answers=answers
-    )
-    with pytest.raises(SystemExit) as exc_info:
-        run_annotated(ad.main, refusal_output=True)
-    assert exc_info.value.code == 1
-    assert out.read_text(encoding="utf-8") == (
-        "refusal=apply refused: stacks/app / dev-eu may have been applied by run 77 without "
-        "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
-        "state was not saved, then re-plan.\n"
-    )
-
-
-def test_the_held_check_apply_complete_writes_refuses_the_next_apply(monkeypatch, tmp_path):
-    """Run 77's `complete` job holds the cell from one jobs listing (apply `success`, save
-    `failure`) and writes the held check whole; a later apply of the head reads that check and
-    the same listing and refuses with the state-loss text.
-
-    Mutation: `apply-complete` links the `save` job (`<run page>/job/<id>`) -- the refusal
-    names apply check 1 and no run, red."""
-    ac, pc = load_script("apply-complete"), load_script("patch-checks")
-    out = _apply_env(monkeypatch, tmp_path, GITHUB_RUN_ID=HOLDER)
-    listing = [
-        {**cell_job("apply", steps=()), "name": "apply / run / L0 / complete", "id": 5},
-        {**cell_job("apply"), "id": 6},
-        {**cell_job("save", steps=(), conclusion="failure"), "id": 7},
-    ]
-    rows, _ = ac.classify(
-        {"wave0": {"apply / stacks/app / dev-eu": [1]}}, {"wave0": "success"}, listing, "5"
-    )
-    [entry] = ac.writes(rows[0], "acme/iac")
-    base = _apply_check("stacks/app", cells=1, id=entry["id"])
-    check = {**base, **pc.with_output(entry, base)}
-    monkeypatch.setenv("GITHUB_RUN_ID", RUN_ENV["GITHUB_RUN_ID"])
-    answers = [
-        *base_answers("acme/iac"),
-        *holder_answers("acme/iac", {"status": "completed", "run_attempt": 1}, listing),
-    ]
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [check], answers=answers)
-    with pytest.raises(SystemExit) as exc:
-        ad.main()
-    assert str(exc.value) == HELD_CASES["ended unsaved"][3]
-    assert not out.exists()
