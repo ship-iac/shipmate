@@ -1528,6 +1528,57 @@ def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, cap
     )
 
 
+def test_replan_retries_a_transient_jobs_read(in_process, monkeypatch, capsys):
+    """Mutation: default `attempt_jobs`' `retry` to False -- the 502 cannot judge the run."""
+    transient = SystemExit("command failed (1): gh api x\nHTTP 502")
+    calls = _live_head(
+        monkeypatch, runs=_row(9, "completed", "success"), jobs={9: [transient, _ZERO_CELL]}
+    )
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls, in_process) == (
+        (
+            "",
+            (
+                "::notice::command failed (1): gh api x%0AHTTP 502\n"
+                f"pull request #7 moved to {_LIVE}, whose autoplan run 9 succeeded; nothing "
+                "dispatched\n"
+            ),
+        ),
+        [_PULL_READ, _RUNS_READ, *_DISPATCH_READS, _jobs_read(9), _jobs_read(9)],
+        [2],
+    )
+
+
+def test_replan_retries_a_transient_live_plan_read(in_process, monkeypatch, capsys):
+    """Mutation: default `other_live_plan_run`'s `retry` to False -- the 502 makes the listing
+    incomplete."""
+    calls = _live_head(monkeypatch, dispatched=[_dispatch(30, _PLAN_7)])
+    listed = gs.run
+    failed = []
+
+    def run(args):
+        if args == _DISPATCH_READS[0] and not failed:
+            failed.append(args)
+            calls.append(args)
+            raise SystemExit("command failed (1): gh api x\nHTTP 502")
+        return listed(args)
+
+    monkeypatch.setattr(gs, "run", run)
+    assert _cli("replan", SHA, "7") == 0
+    assert (capsys.readouterr(), calls, in_process) == (
+        (
+            "",
+            (
+                "::notice::command failed (1): gh api x%0AHTTP 502\n"
+                f"pull request #7 moved to {_LIVE}; its shipmate plan run 30 is queued and plans "
+                "the live head; nothing dispatched\n"
+            ),
+        ),
+        [_PULL_READ, _RUNS_READ, _DISPATCH_READS[0], *_DISPATCH_READS],
+        [2],
+    )
+
+
 def test_replan_spends_three_listing_reads_on_a_persistent_5xx(in_process, monkeypatch, capsys):
     """The listing retries inside `autoplan_runs` only. Mutation: call it through
     `retried(lambda: ag.autoplan_runs(...))` again -- nine listing calls."""
