@@ -1216,7 +1216,8 @@ _PLANS_AFRESH = (
     "(any edit that `terramate list --changed` marks, such as a comment line). It plans the "
     "current default branch for all of them, this merged change included, and its cells are "
     "applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` "
-    "for a `targeted` environment), or by its deploy otherwise. Re-running this deploy checks "
+    "for a `targeted` environment), or by its deploy otherwise. For a named stack that no longer "
+    "exists, return its check by hand instead. Re-running this deploy checks "
     "out the same commit and refuses again. This deploy's apply checks are never read again and "
     "stay open on the merged pull request."
 )

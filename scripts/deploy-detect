@@ -118,11 +118,11 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
     the default branch after its pull request was planned, so no cell carries its reviewed
     change and nothing else would ever complete the check. The gate fails closed.
 
-    A check of a stack absent from the scan is skipped silently, for one of two causes. This
-    merge's diff did not touch the stack, because an identical change landed first: a correct
-    skip. Or the stack is no longer a stack at the merge commit, deleted on the default branch
-    after planning: its check strands with nothing said. The deploy does not refuse that case,
-    because no remedy exists for a deleted stack.
+    A check `parse_check_name` reads, of a stack absent from the scan, is skipped silently,
+    for one of two causes. This merge's diff did not touch the stack, because an identical
+    change landed first: a correct skip. Or the stack is no longer a stack at the merge
+    commit, deleted on the default branch after planning: its check strands with nothing said.
+    The deploy does not refuse that case, because no remedy exists for a deleted stack.
 
     The refusal applies nothing, so the message also names every `pending` cell as
     `<stack> / <env>`, with an apply check or without: those stay unapplied too, and the
@@ -138,8 +138,8 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
             f"::error::deploy aborted: {', '.join(unreadable)}: each is an apply check written "
             "before the upgrade that named apply checks env first, so no cell can be read from it "
             f"and its reviewed change was not applied.{_also(pending)} Open a new pull request "
-            f"that changes each of their stacks and every other listed stack {_PLANS_AFRESH} "
-            f"{_NOT_AGAIN}"
+            f"that changes each of their stacks and every other listed stack {_PLANS_AFRESH} For a "
+            f"named stack that no longer exists, return its check by hand instead. {_NOT_AGAIN}"
         )
     cells = {(c["stack"], c["environment"]) for c in tree}
     scanned = {s for s, _ in cells} | set(unmanaged)

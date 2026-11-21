@@ -18,7 +18,7 @@ section below names the SHA the release tags.
   - Its merge deploy refuses, naming each open apply check that it cannot read as a cell: one whose stack is not an environment name, such as `apply / stacks/app / dev`. The remedy is a new pull request that changes each named stack. Otherwise, with a cell pending, it refuses with `no plan run recorded`, also when every cell was applied before the upgrade.
   - A stack whose name fits the environment-name charset, such as `app`, that lost its `env/*` tag after planning is skipped by the deploy with no refusal, and its reviewed change is not applied.
   - The merge releases every lock the pull request holds, so another pull request can take and apply those cells.
-  - A push to the default branch re-plans no open pull request planned before the upgrade, including for a change outside every stack.
+  - A push to the default branch re-plans no open pull request planned before the upgrade whose stacks are not environment names, including for a change outside every stack.
   - `shipmate unlock <env>` and `shipmate unlock <env> --evict` reach none of its cells.
   - Where a stack is named like an environment and that environment like the stack, the old check of one cell carries the new name of the other and is read as that cell, which can then be skipped as applied.
 
