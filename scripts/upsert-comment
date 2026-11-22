@@ -36,10 +36,10 @@ newest comment is the one to bring up to date either way. Each failed minimize p
 and the run goes on. Every warning goes to stderr on one line; one quoting an unexpected answer
 quotes its first 200 characters.
 
-With `--head`, the pull request's current head is read after the visibility read, before any
-write and before `skipped`, and nothing is written unless it is that SHA, so a run for an older
-head never writes over the newer head's comment, and a run that writes nothing still reports a
-moved head.
+With `--head`, the pull request's current head is read after the listing, before the visibility
+read, any write and `skipped`, and nothing is written unless it is that SHA, so a run for an older
+head never writes over the newer head's comment, a run that writes nothing still reports a moved
+head, and a moved head costs no visibility read.
 
 Prints exactly one word and exits 0:
 
@@ -261,11 +261,11 @@ def main():
         print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    visible, read = _visible(found, pr)
     stop = _head_stop(repo, pr, head)
     if stop:
         print(stop)
         return
+    visible, read = _visible(found, pr)
     if not visible and mode == "--update-only":
         print("skipped")
         return

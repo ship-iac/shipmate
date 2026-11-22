@@ -243,7 +243,9 @@ def test_the_action_declares_the_on_demand_input_it_decides_on():
     assert (declared["required"], declared["default"]) == (False, "")
 
 
-#: Answers each POST `gh` call, recording every body it was handed and refusing the first.
+#: Answers each POST `gh` call, recording every body it was handed and refusing the first, with
+#: a CRLF-ended `HTTP 422` line and a CR-ended `$FAKE_POST_STDERR` on stderr when that is set.
+#: The bare CR is what `$(<file)` leaves of a final CRLF on Linux; Git for Windows' bash drops both.
 #: `python3` stands in for `gate-status checks`: it refuses any argv but the Mirror step's whole
 #: one, else prints `$FAKE_LISTING` and returns `$FAKE_LISTING_RC` without reading stdin. Any
 #: other `python3` call is mirror-checks. Bash resolves a function before searching PATH, so this
@@ -253,7 +255,12 @@ gh() {
   case "$*" in
     *"/check-runs"*) body=$(cat)
       printf '%s\\n' "$body" >> "$POSTED"
-      case "$body" in *"first cell"*) return 1 ;; esac ;;
+      case "$body" in *'first cell'*|*'50%0A cell'*)
+        if [ -n "${FAKE_POST_STDERR:-}" ]; then
+          printf 'HTTP 422: Validation Failed\\r\\n%s\\r' "$FAKE_POST_STDERR" >&2
+        fi
+        return 1 ;;
+      esac ;;
     *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
   esac
 }
@@ -275,8 +282,10 @@ python3() {
 def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     """The listing is unordered, so abandoning the remaining bodies drops an arbitrary suffix of
     them, which can be exactly the failed cell the mirror exists to put on the pull request. The
-    step still exits 0. Mutations: list `$SHIPMATE_HEAD_SHA` instead of `$GITHUB_SHA`, or change
-    the `.check_runs[]` projection -> the stub refuses the listing and nothing is posted."""
+    step still exits 0, and an empty gh stderr adds no cause to the warning. Mutations: append
+    `: $(esc "$err")` unconditionally -> the warning ends with `: `; list `$SHIPMATE_HEAD_SHA`
+    instead of `$GITHUB_SHA`, or change the `.check_runs[]` projection -> the stub refuses the
+    listing and nothing is posted."""
     posted = tmp_path / "posted"
     proc = run_step(
         tmp_path,
@@ -297,8 +306,52 @@ def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     attempted = [json.loads(line)["name"] for line in posted.read_text().splitlines()]
     assert attempted == ["first cell", "second"], f"stdout={proc.stdout!r}"
-    assert '::warning::could not mirror the check "first cell"' in proc.stdout
-    assert "second" not in proc.stdout
+    assert (proc.stdout, proc.stderr) == (
+        (
+            '::warning::could not mirror the check "first cell" onto the pull request head; the '
+            "pull request shows only some of this run's plan checks\n"
+        ),
+        "",
+    )
+
+
+@bash_only
+def test_a_failed_post_names_gh_s_error_in_one_escaped_warning(tmp_path):
+    """gh's stderr is captured, not logged, and joins the check name in one warning, both escaped
+    as `command_data` escapes, so no line of either starts a workflow command and a literal
+    `%0A` is not decoded. Mutations: drop `2>mirror.err` -> reading the missing file ends the
+    step; drop the LF, CR or `%` substitution, or move the `%` one last -> red; skip `esc` on
+    the name -> red; drop the trailing-CR strip -> the warning ends `%0D`; replace `continue`
+    with `exit 0` -> the second body is not attempted."""
+    posted = tmp_path / "posted"
+    proc = run_step(
+        tmp_path,
+        _GH_STUB + step_by("summary", name=_MIRROR)["run"],
+        {
+            **os.environ,
+            "GH_TOKEN": "x",
+            "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_SHA": RUN_COMMIT,
+            "GITHUB_ACTION_PATH": str(tmp_path),
+            "SHIPMATE_HEAD_SHA": HEAD,
+            "FAKE_BODIES": "\n".join(
+                json.dumps({"name": name, "head_sha": HEAD}) for name in ("50%0A cell", "second")
+            ),
+            "FAKE_POST_STDERR": "::warning::injected\nretry 100%0A later",
+            "POSTED": str(posted),
+        },
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    attempted = [json.loads(line)["name"] for line in posted.read_text().splitlines()]
+    assert attempted == ["50%0A cell", "second"], f"stdout={proc.stdout!r}"
+    assert (proc.stdout, proc.stderr) == (
+        (
+            '::warning::could not mirror the check "50%250A cell" onto the pull request head; the '
+            "pull request shows only some of this run's plan checks: HTTP 422: Validation Failed"
+            "%0D%0A::warning::injected%0Aretry 100%250A later\n"
+        ),
+        "",
+    )
 
 
 @bash_only

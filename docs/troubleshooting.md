@@ -3258,14 +3258,27 @@ wait.
 - Each script process waits at most three times across all its writes. The next
   rate-limited write fails like any failed write, and the gate stays pending or
   held. Re-run the job. The exception is the `summary`'s `refresh` after its
-  final `pending` write: a failed `refresh` warns, and the `pending` gate stands
-  until an apply refreshes it.
+  final `pending` write, which warns instead (`could not refresh the gate of
+  <sha>`, below).
 - Before retrying, the plan `summary`'s apply-check creation and final gate
   write read the gate again and stop without writing when a newer plan run
   holds it; a `refresh` stops when any hold stands.
 - `hold` and `deploy` re-post after a wait with no re-check: a hold can
   overwrite a newer run's gate (a re-plan clears it), and a deploy verdict can
   overwrite a hold on the merged head, where the gate no longer gates a merge.
+
+### `could not refresh the gate of <sha>`
+
+A warning from the plan `summary`'s `Create/refresh gate` step, after its final
+`pending` gate write. The step passes either way; the line before it names the
+cause.
+
+- `it stays pending until an apply refreshes it`: the refresh failed, for
+  example on a failed read. The `pending` gate stands until an apply's refresh
+  greens it.
+- `it is held and stays failure until a new plan run rewrites it`: the refresh
+  found a hold, before its write or while it waited to retry. No apply clears
+  it: re-plan (comment `shipmate plan` or push).
 
 ### A deploy refused a cell planned behind the base
 

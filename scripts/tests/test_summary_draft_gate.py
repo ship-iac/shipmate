@@ -103,6 +103,7 @@ def _run_gate(
     bodies=NO_CHANGES_BODY + "\n",
     user_rc=0,
     user_stderr="",
+    run_url=RUN_URL,
 ):
     if bodies is not None:
         (tmp_path / "bodies.jsonl").write_text(bodies, encoding="utf-8")
@@ -130,7 +131,7 @@ def _run_gate(
         sha=HEAD_SHA,
         checks=DONE + "\n",
         checks_rc=checks_rc,
-        page1=gate_line(head_state, RUN_URL) if head_state else "",
+        page1=gate_line(head_state, run_url) if head_state else "",
         statuses_rc=1 if read_fails else 0,
         user_rc=user_rc,
         user_stderr=user_stderr,
@@ -245,8 +246,9 @@ def test_a_post_run_writes_over_this_runs_own_hold(tmp_path):
 @bash_only
 def test_a_pending_post_run_refreshes_the_gate_it_wrote(tmp_path):
     """No queued body was published (a no-changes body is completed), so the refresh runs.
-    Mutations: remove the refresh call -> only the pending POST; match any `"status"` in the skip
-    grep -> no refresh."""
+    A greened gate prints nothing. Mutations: remove the refresh call -> only the pending POST;
+    match any `"status"` in the skip grep -> no refresh; `elif [ "$rc" != 0 ]` -> `else` -> the
+    pending warning."""
     proc, calls = _run_gate(tmp_path, "post", "pending")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [
@@ -258,6 +260,7 @@ def test_a_pending_post_run_refreshes_the_gate_it_wrote(tmp_path):
         READ_ARGV,
         _write_argv("success", "all applies complete, nothing left to apply"),
     ]
+    assert (proc.stdout, proc.stderr) == ("", "")
 
 
 @bash_only
@@ -273,8 +276,8 @@ def test_no_bodies_file_skips_the_refresh(tmp_path):
 @bash_only
 def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
     """The listing's `::error::` reaches the log as a warning: the step passes, so the failure is
-    a warning only. Mutations: drop the `if !` around the refresh -> `set -e` fails the step; drop
-    the `sed` -> an `::error::` line."""
+    a warning only. Mutations: drop `|| rc=$?` -> `set -e` ends the step with exit 1; drop the
+    `sed` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "pending", checks_rc=1)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [
@@ -318,10 +321,14 @@ def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
 
 @bash_only
 def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
-    """`gate-status refresh` over a hold (this run's own, 999) exits 3 with unannotated text.
-    Mutations: treat a refresh failure as fatal (drop the `if !`) -> exit 3; drop the `sed` and
-    prefix the hold text with `::error::` in `gate-status` -> an `::error::` line."""
-    proc, calls = _run_gate(tmp_path, "post", "failure")
+    """`gate-status refresh` over an older run's hold (998, as its `gate-hold` writes outside the
+    gate group, after this run's `pending`) exits 3 with unannotated text, and the step warns
+    that the gate stays held. Mutations: drop `|| rc=$?` -> `set -e` ends the step with exit 3;
+    print the pending text for exit 3 -> red; drop the `sed` and prefix the hold text with
+    `::error::` in `gate-status` -> an `::error::` line."""
+    proc, calls = _run_gate(
+        tmp_path, "post", "failure", run_url="https://example.invalid/acme/demo/actions/runs/998"
+    )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [
         USER_ARGV,
@@ -336,8 +343,8 @@ def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
             f"shipmate / gate is held for {HEAD_SHA}; its status description on the pull request "
             "names the cause. A hold clears only when a new plan run rewrites the gate: comment "
             "shipmate plan, or push.\n"
-            f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
-            "apply refreshes it\n"
+            f"::warning::could not refresh the gate of {HEAD_SHA}; it is held and stays failure "
+            "until a new plan run rewrites it\n"
         ),
         "",
     )
