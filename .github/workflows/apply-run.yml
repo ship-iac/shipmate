@@ -43,13 +43,9 @@ concurrency:
   queue: max
 jobs:
   review:
-    # Deliberately unconditional -- no `if:`. Running always closes the TOCTOU between the
-    # comment that authorized this apply and the dispatch: the decision is re-read here, so an
-    # approval dismissed in between holds.
-    # Re-reads the decision server-side, away from branch-controlled HCL (CONTRACT.md
-    # §Comment-ops). A targeted `apply-detect` refuses on it, a bare or `auto` one holds the
-    # environments it does not admit, and both fail on a missing or unknown decision. A hand-made
-    # dispatch never reaches decide(), so this job also binds `ref` to the open PR's own head.
+    # Deliberately unconditional -- no `if:`: reads the decision server-side for every form; for
+    # the comment forms it closes the comment-to-dispatch TOCTOU (CONTRACT.md §Comment-ops). A
+    # hand-made dispatch never reaches decide(), so this job binds `ref` to the open PR's head.
     runs-on: ubuntu-slim
     # Reaches the App key the same way `summary` does.
     environment: { name: shipmate-engine, deployment: false }

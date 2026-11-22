@@ -197,9 +197,11 @@ and `shipmate-engine`, and §Required — apply → §Environment setup has the
 
 ## Review policy for `shipmate apply`
 
-shipmate delegates review policy to the branch ruleset. `shipmate apply`
-blocks when GitHub's `reviewDecision` is `REVIEW_REQUIRED` or
-`CHANGES_REQUESTED`; it imposes no approval rule of its own. (If the decision
+shipmate delegates review policy to the branch ruleset and imposes no approval
+rule of its own. `shipmate apply` does not apply an environment while GitHub's
+`reviewDecision` is `CHANGES_REQUESTED`, or `REVIEW_REQUIRED` unless the
+environment's entry holds `review: false`; `../CONTRACT.md` §Comment-ops states
+which forms refuse and which hold. (If the decision
 cannot be determined at all — a wiring failure, never a policy state — apply
 fails closed rather than proceeding unreviewed.)
 

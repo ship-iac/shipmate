@@ -1281,9 +1281,10 @@ is:
 - `REVIEW_REQUIRED`, on an environment whose entry holds `review: false`.
 
 `REVIEW_REQUIRED` on any other environment, and `CHANGES_REQUESTED` on every
-environment, refuse a targeted apply and hold the environment from a bare or
-`auto` apply. Any other value, or none, fails every apply form before it reads
-a check. An `apply_mode: auto`
+environment, do not admit it: a targeted apply refuses, a bare or `auto` apply
+holds that environment, and a bare comment refuses outright when the decision
+admits no environment (`CONTRACT.md` §Comment-ops). Any other value, or none,
+fails every apply form before it reads a check. An `apply_mode: auto`
 environment, which must hold `review: false`, applies from the push's autoplan
 with no command (§1). The post-merge deploy reads no review decision: once the
 pull request merges, every cell whose apply check is still pending applies, so

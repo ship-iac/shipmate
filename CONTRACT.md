@@ -1870,10 +1870,14 @@ its own actionable rejection reason:
   ruleset (required approving reviews, CODEOWNERS, last-push approval) is the
   single source of review policy; shipmate imposes none of its own. A ruleset
   requiring zero approvals reports no decision even when an approval exists,
-  but a `CHANGES_REQUESTED` review still blocks. Any other value — including
-  an absent or empty decision — fails closed with a wiring-error reason. An
-  environment whose entry holds `review: false` is exempt from this requirement,
-  and from no other (below);
+  but a `CHANGES_REQUESTED` review still blocks. `REVIEW_REQUIRED` and
+  `CHANGES_REQUESTED` do not satisfy it; a bare comment names no environment and
+  passes `REVIEW_REQUIRED` when any entry holds `review: false`, and the apply
+  run then holds the environments that do not. Any other value — including an
+  absent or empty one in transit (GitHub's null arrives as `NONE`) — is
+  refused when commented and fails an apply run, both with `could not
+  determine the PR's review decision`. An environment whose entry holds `review: false` is exempt from this requirement, and from
+  no other (below);
 - **undiverged**: at least one `apply / <env> / <stack>` check on the pull
   request's current head names the plan run its plan came from (each check
   records that run at plan time). The records are read from that head's own
@@ -1902,8 +1906,8 @@ there is no owners parser here to disagree with it.
 A bare `shipmate apply` is authorized once at comment time, by the same six
 apply requirements. Comment time is never the whole review decision: both comment
 forms re-read `reviewDecision` server-side before anything applies (below), so
-an approval dismissed between the comment and the dispatch holds; the `auto`
-form re-reads it too. Both comment forms
+an approval dismissed between the comment and the dispatch counts as the
+**reviewed** requirement reads it; the `auto` form re-reads it too. Both comment forms
 dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
 `environment` input selects the form `apply.yml` runs (set → targeted, empty → bare). Both
 share the same App-minted `workflow_dispatch` mechanism and the same per-env

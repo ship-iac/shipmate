@@ -1,18 +1,18 @@
 """Guards `apply-run.yml`'s `review` job and its wiring into `detect`.
 
-The job re-reads the pull request's `reviewDecision` server-side, on both apply forms, so the
+The job re-reads the pull request's `reviewDecision` server-side, on every apply form, so the
 apply decision rests on GitHub's answer rather than on a dispatch input, and it refuses unless
 the dispatch's `ref` is the head of an open, non-draft, same-repository pull request: a writer's
 hand-made dispatch pairing an approved number with another head never reaches decide(). The
 step's shell body is executed against a `gh` stub for each refusal. Threat model is
 accidental regression -- a line reverted in a refactor, a flag dropped, an `if:` re-introduced --
-not a hostile edit to a SHA-pinned engine file. Three of the regressions are silently fail-open,
-which is why they are pinned whole:
+not a hostile edit to a SHA-pinned engine file. Two regressions are pinned whole
+here, and a third in `test_apply_dispatch_actor_guard.py`:
 
-- an `if:` re-appearing on the `review` job. A conditional review job can be skipped, a
-  skipped job delivers an empty decision, and that is the state an exempt-list action input
-  wider than the repository variable used to exploit. Absence is the property, so the job
-  mapping is compared whole rather than the absence assumed.
+- an `if:` re-appearing on the `review` job. A conditional review job can be skipped, and a
+  skipped job delivers an empty decision, which every apply form fails on
+  (`refuse_undetermined`). Absence is the property, so the job mapping is compared whole
+  rather than the absence assumed.
 - `detect`'s needs list losing `review`: the decision then never arrives at all.
 - `review` missing from `summary`'s `needs`. That is pinned as one whole-list-per-job map in
   `test_apply_dispatch_actor_guard.py` rather than a second time here, because `results:` is
