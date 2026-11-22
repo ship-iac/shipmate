@@ -139,11 +139,11 @@ gate"):
 
 An apply run writes an `apply / <env> / <stack>` check only while it is not
 `completed`, and only when its record names the wave row's plan, or an older
-plan and no behind record: a check that a newer plan, or a plan that found the
-cell behind the base, published after the run's detect is never written by that
-run, and a completed same-head duplicate is never relinked or retitled. A cell
-with no check recording the wave row's plan refuses the run before any cell
-applies.
+plan of the same pull request and no behind record: a check that a newer plan,
+or a plan that found the cell behind the base, published after the run's detect
+is never written by that run, and a completed same-head duplicate is never
+relinked or retitled. A cell with no check recording the wave row's plan
+refuses the run before any cell applies.
 
 1. Created `queued` by the plan run, titled with the plan's counts, its summary
    the plan. A behind cell (§Plan comment, Behind cells) gets a `queued` check

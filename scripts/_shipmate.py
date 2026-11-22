@@ -357,9 +357,10 @@ def print_annotated(code):
     return errors
 
 
-def run_annotated(main, *args, refusal_output=False):
+def run_annotated(main, *args, refusal_output=False, usage=None):
     """Call `main(*args)`; print an `::error::` exit through `print_annotated`, then exit 1.
 
+    With `usage`, any command-line argument refuses as `::error::usage: <usage>` before `main`.
     The annotation and the `refusal` output split lines with the same `splitlines`, so the two
     surfaces agree on where a line ends. Any other `SystemExit` passes through unchanged.
 
@@ -370,6 +371,8 @@ def run_annotated(main, *args, refusal_output=False):
     so a failing write cannot cost them. This is the one writer of those outputs.
     """
     try:
+        if usage is not None and sys.argv[1:]:
+            raise SystemExit(f"::error::usage: {usage}")
         main(*args)
     except SystemExit as exc:
         code = exc.code

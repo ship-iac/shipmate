@@ -98,6 +98,7 @@ from _shipmate import (
     live_push_runs,
     lock_wait_remedy,
     lock_who,
+    one_line,
     retried,
     run_annotated,
     stacked_through,
@@ -926,7 +927,7 @@ def _why(exc):
         why = exc.code.removeprefix("::error::") if isinstance(exc.code, str) else "read failed"
     else:
         why = repr(exc)
-    return " | ".join(why.splitlines())
+    return one_line(why)
 
 
 _RETRY = "push, or comment `shipmate apply` on the pull request"

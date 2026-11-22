@@ -1,19 +1,15 @@
 import io
 import json
-import os
-import subprocess
-import sys
 from typing import Any
 
 import _shipmate
 import pytest
-from _loader import SCRIPTS, load_script
+from _loader import load_script
 
 pc = load_script("patch-checks")
 
 _REPO = "acme/demo"
 _BAD_GATEWAY = "gh: Bad Gateway (HTTP 502)"
-_USAGE = "::error::usage: patch-checks (write plan on stdin, no arguments)"
 _SUCCESS = {"status": "completed", "conclusion": "success"}
 _PLAN_TITLE = "+1 ~0 -0"
 _SUMMARY = "```diff\n+ a\n```"
@@ -71,10 +67,10 @@ def calls(monkeypatch):
     return recorded, fail, reads
 
 
-def _main(monkeypatch, entries, argv=()):
+def _main(monkeypatch, entries):
     lines = "".join(json.dumps(e) + "\n" if isinstance(e, dict) else f"{e}\n" for e in entries)
     monkeypatch.setattr(pc.sys, "stdin", io.StringIO(lines))
-    pc.main(list(argv))
+    pc.main()
 
 
 def _entry(cid, body=None, **extra):
@@ -299,34 +295,6 @@ def test_a_deploy_never_reads_the_pull_request(monkeypatch, calls):
     _main(monkeypatch, [_entry(1)])
     assert reads["calls"] == []
     assert [a for a, _ in recorded] == [_argv("1")]
-
-
-@pytest.mark.parametrize("argv", [["completed"], ["queued"]])
-def test_any_argument_refuses_before_a_write(monkeypatch, calls, argv):
-    """Mutation: accept `queued` -> no refusal and a PATCH is sent."""
-    recorded, _, _ = calls
-    with pytest.raises(SystemExit) as exc:
-        _main(monkeypatch, [_entry(1)], argv)
-    assert str(exc.value) == _USAGE
-    assert recorded == []
-
-
-def test_the_command_line_reaches_main():
-    """The env carries no `PATH`, `GH_TOKEN` or `GITHUB_REPOSITORY`, so a mutated script can
-    never write to a live repository; a write-first mutation dies on the missing variable with
-    a different stderr. Mutation: `__main__` calls `run_annotated(lambda: main([]))` -> argv
-    never reaches `main`, which reads stdin and fails on the missing `GITHUB_REPOSITORY`."""
-    env = {k: os.environ[k] for k in ("SYSTEMROOT",) if k in os.environ}
-    proc = subprocess.run(
-        [sys.executable, str(SCRIPTS / "patch-checks"), "completed"],
-        input=json.dumps(_entry(1)) + "\n",
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-        timeout=60,
-    )
-    assert (proc.returncode, proc.stdout, proc.stderr) == (1, "", _USAGE + "\n")
 
 
 def test_an_exhausted_write_fails(monkeypatch, capsys, calls):

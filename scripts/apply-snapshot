@@ -7,9 +7,9 @@ being greened. Only checks authored by the shipmate App are eligible — a forge
 check from any other identity is never completed — only those not yet `completed`: a
 completed same-head duplicate is left alone, since a later write would relink or retitle it —
 and only those whose record names the wave row's plan run and plan-text digest, or an older
-plan run: a check a newer plan, or a plan that found the cell behind the base, published after
-detect is not this run's to complete, while an older plan's unfinished duplicate is superseded
-by this apply.
+plan run of the same pull request: a check a newer plan, or a plan that found the cell behind
+the base, published after detect is not this run's to complete, while an older plan's
+unfinished duplicate is superseded by this apply.
 The `snapshot` job holds the App key and checks out no repository content, so no branch content
 runs beside the key. `by_wave` slices the snapshot per wave, so each wave's checks are flipped
 right before that wave and completed right after it.
@@ -19,7 +19,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load, decoded, is_run_id, run_annotated, write_outputs
+from _shipmate import _load, decoded, is_pr_number, run_annotated, write_outputs
 
 ag = _load("apply-gate")
 
@@ -27,8 +27,9 @@ ag = _load("apply-gate")
 def snapshot(waves, check_runs, app_id):
     """{apply check name: [check id, ...]} for every cell in this run's waves, each id a check
     not yet `completed` whose decoded record's `plan_run` and `plan_sha256` equal the wave row's
-    `plan_run_id` and `plan_sha256` (`_records`), or whose record names an older plan run and is
-    no behind record (`_older`). Only a matching check keeps the cell from refusing below.
+    `plan_run_id` and `plan_sha256` (`_records`), or whose record names an older plan run of the
+    same pull request and is no behind record (`_older`). Only a matching check keeps the cell
+    from refusing below.
 
     Every wanted cell must have one. A cell that has none fails the run here,
     before wave0 and so before anything applies. Skipping it would let that
@@ -45,36 +46,41 @@ def snapshot(waves, check_runs, app_id):
     for cell in wanted:
         name = ag.check_name(cell["stack"], cell["environment"])
         plan = (cell.get("plan_run_id"), cell.get("plan_sha256"))
-        unfinished = [c for c in runs if c.get("name") == name and c.get("status") != "completed"]
-        if not any(_records(c, plan) for c in unfinished):
+        unfinished = [
+            (c["id"], decoded(c) or {})
+            for c in runs
+            if c.get("name") == name and c.get("status") != "completed"
+        ]
+        own = next((r for _, r in unfinished if _records(r, plan)), None)
+        if own is None:
             raise SystemExit(
                 f"::error::no App-authored apply check named '{name}' that is not yet "
                 f"completed and records plan run {plan[0]} with its plan-text digest on the head "
                 "SHA before apply; this cell would apply with nothing to complete afterwards, "
                 "stranding its check pending. Re-plan."
             )
-        out[name] = [c["id"] for c in unfinished if _records(c, plan) or _older(c, plan[0])]
+        out[name] = [cid for cid, r in unfinished if _records(r, plan) or _older(r, own)]
     return out
 
 
-def _records(check, plan):
-    """Whether `check`'s decoded record names `plan`, a `(plan run, plan-text digest)` pair of
-    non-empty strings."""
-    record = decoded(check) or {}
+def _records(record, plan):
+    """Whether decoded `record` names `plan`, a `(plan run, plan-text digest)` pair of non-empty
+    strings."""
     return all(plan) and (record.get("plan_run"), record.get("plan_sha256")) == plan
 
 
-def _older(check, plan_run):
-    """Whether `check`'s decoded record names a plan run with a lower id than `plan_run` and is
-    no behind record (`behind` exactly `True`)."""
-    record = decoded(check) or {}
-    recorded = record.get("plan_run")
+def _older(record, own):
+    """Whether decoded `record` names a lower plan run than the matching record `own`, the same
+    pull request as `own`'s `pr` (a number `is_pr_number` accepts), and is no behind record
+    (`behind` exactly `True`)."""
+    recorded, bound, pr = ag._plan_run(record), ag._plan_run(own), own.get("pr")
     return (
-        isinstance(recorded, str)
-        and is_run_id(recorded)
-        and isinstance(plan_run, str)
-        and is_run_id(plan_run)
-        and int(recorded) < int(plan_run)
+        recorded is not None
+        and bound is not None
+        and int(recorded) < int(bound)
+        and isinstance(pr, str)
+        and is_pr_number(pr)
+        and record.get("pr") == pr
         and record.get("behind") is not True
     )
 
@@ -91,11 +97,9 @@ def by_wave(waves, snap):
     }
 
 
-def main(argv=()):
+def main():
     """Write output `by_wave` to `GITHUB_OUTPUT`, from `SHIPMATE_WAVES_JSON`,
     `SHIPMATE_APP_ID` (an empty one refuses first) and the check runs on stdin."""
-    if argv:
-        raise SystemExit("::error::usage: apply-snapshot")
     app_id = os.environ["SHIPMATE_APP_ID"]
     # Refuses an empty id before the waves or the listing are parsed, so a misconfiguration is
     # reported first.
@@ -106,4 +110,4 @@ def main(argv=()):
 
 
 if __name__ == "__main__":
-    run_annotated(main, sys.argv[1:])
+    run_annotated(main, usage="apply-snapshot")

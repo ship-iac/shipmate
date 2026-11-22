@@ -98,13 +98,6 @@ def test_a_merge_deploy_flips_without_reading_its_pull_request(monkeypatch, patc
     assert patched == _FLIPS
 
 
-def test_an_argument_refuses():
-    """Mutation: drop the `if argv:` refusal -> it reads the missing snapshot instead."""
-    with pytest.raises(SystemExit) as exc:
-        ar.main(["x"])
-    assert str(exc.value) == "::error::usage: apply-release"
-
-
 #: The flip step, whole: the App token, the slice, the deploy flag and the pull request, and
 #: nothing else.
 _FLIP_STEP = {

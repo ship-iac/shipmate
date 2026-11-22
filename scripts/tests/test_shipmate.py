@@ -753,6 +753,32 @@ def test_run_annotated_passes_its_arguments_to_main():
     assert calls == [(["refresh", "x"], "y")]
 
 
+@pytest.mark.parametrize(
+    ("argv", "usage", "expected"),
+    [
+        (["x"], "demo", (1, "", "::error::usage: demo\n", [])),
+        ([], "demo", (None, "", "", ["ran"])),
+        (["x"], None, (None, "", "", ["ran"])),
+    ],
+    ids=["argument", "no-argument", "no-usage"],
+)
+def test_run_annotated_refuses_any_argument_when_given_a_usage(
+    monkeypatch, capsys, argv, usage, expected
+):
+    """Mutations: drop the check -- argument red; move it after `main(*args)` -- argument red,
+    `main` ran; drop `usage is not None` -- no-usage red; test `args` instead of
+    `sys.argv[1:]` -- argument red."""
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["demo", *argv])
+    try:
+        run_annotated(lambda: calls.append("ran"), usage=usage)
+        code = None
+    except SystemExit as exc:
+        code = exc.code
+    out, err = capsys.readouterr()
+    assert (code, out, err, calls) == expected
+
+
 def _refusal_output(monkeypatch, tmp_path, main, **switch):
     """(exit code, `GITHUB_OUTPUT` bytes) of `run_annotated(main, **switch)`. Bytes, because a
     text read would turn a CR into a line end and hide one written into the value; only the
