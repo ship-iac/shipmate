@@ -120,9 +120,9 @@ def _failed_cells(jobs, cells):
     failed = {j["name"] for j in jobs if j.get("conclusion") == "failure"}
     if stray := sorted(failed - set(checks) - {SUMMARY_JOB}):
         return f"its failed job {stray[0]} is no plan cell this run planned"
-    if not failed & set(checks):
+    if not (hit := failed & set(checks)):
         return "no plan cell this run planned failed in it"
-    return [checks[name] for name in sorted(failed & set(checks))]
+    return [checks[name] for name in sorted(hit)]
 
 
 def _jobs_reason(repo, newest, what, cells):
@@ -154,17 +154,9 @@ def _uploaded(repo, rid, what, failed):
     return None
 
 
-def _engine_moved(repo, rid, what, engine, ours):
-    """Row 9's reason, or None."""
-    theirs = _engine_sha(repo, rid, engine)
-    if theirs != ours:
-        return f"{what} ran engine plan.yml at {theirs} and this run at {ours}"
-    return None
-
-
 def _reason(repo, head, pr, cells, engine, ours):
-    """`(run id, None)` when every row holds, else `(run id or None, the first failing row's
-    reason)`."""
+    """Rows 1 to 9 in order: `(run id, None)` when every row holds, else `(None, the first
+    failing row's reason)`."""
     newest = ag.newest_autoplan(repo, head, run=run, retry=False)
     if newest is None:
         return None, f"no autoplan run of {head} is listed"
@@ -172,19 +164,29 @@ def _reason(repo, head, pr, cells, engine, ours):
     what = f"autoplan run {rid}"
     status, _ = ag.status_and_conclusion(newest, what)
     if status != "completed":
-        return rid, f"{what} is {status_text(status)}"
+        return None, f"{what} is {status_text(status)}"
     if other := _other_plan(repo, pr):
-        return rid, f"{other}, and a re-run would replace it"
+        return None, f"{other}, and a re-run would replace it"
     failed = _jobs_reason(repo, newest, what, cells)
     if isinstance(failed, str):
-        return rid, failed
-    return rid, _uploaded(repo, rid, what, failed) or _engine_moved(repo, rid, what, engine, ours)
+        return None, failed
+    if reason := _uploaded(repo, rid, what, failed):
+        return None, reason
+    if (theirs := _engine_sha(repo, rid, engine)) != ours:
+        return None, f"{what} ran engine plan.yml at {theirs} and this run at {ours}"
+    return rid, None
 
 
-def decide():
+def _run_env():
+    """`(repo, pr)`; exits 1 on a malformed environment both commands share."""
     repo, pr = _env("GITHUB_REPOSITORY"), ag.env_pr_number()
     if not is_run_id(os.environ.get("GITHUB_RUN_ID", "")):
         raise SystemExit("::error::GITHUB_RUN_ID must be a decimal run id")
+    return repo, pr
+
+
+def decide():
+    repo, pr = _run_env()
     head = os.environ.get("SHIPMATE_HEAD_SHA", "")
     validate_head_sha(head)
     cells = cell_names(os.environ.get("SHIPMATE_PLANNED_CELLS_NAMES", ""))
@@ -207,9 +209,7 @@ def decide():
 
 
 def post(rid):
-    repo, pr = _env("GITHUB_REPOSITORY"), ag.env_pr_number()
-    if not is_run_id(os.environ.get("GITHUB_RUN_ID", "")):
-        raise SystemExit("::error::GITHUB_RUN_ID must be a decimal run id")
+    repo, pr = _run_env()
     if not is_run_id(rid):
         raise SystemExit(f"::error::<id> must be a decimal run id (got: {rid!r})")
     try:

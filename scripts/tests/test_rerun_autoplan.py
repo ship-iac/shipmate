@@ -8,7 +8,7 @@ import json
 
 import _shipmate
 import pytest
-from _detect_fixtures import autoplans_read, listed_autoplan
+from _detect_fixtures import autoplans_read, dispatched_plan, listed_autoplan
 from _loader import load_script
 
 ra = load_script("rerun-autoplan")
@@ -84,16 +84,6 @@ REFS = [
     {"path": "acme/engine/.github/workflows/cell.yml@main", "sha": "d" * 40},
     {"path": PLAN_YML, "sha": ENGINE_SHA},
 ]
-
-
-def dispatch(rid, status="queued"):
-    return {
-        "id": rid,
-        "display_title": "shipmate · plan pr=7 ref= comment=",
-        "event": "workflow_dispatch",
-        "status": status,
-        "actor": {"login": "shipmate-test[bot]"},
-    }
 
 
 def with_job(name, **fields):
@@ -265,7 +255,7 @@ def test_an_unfinished_newest_autoplan_is_not_re_run(slept, monkeypatch, capsys)
 def test_another_live_plan_run_of_the_pull_request_blocks(slept, monkeypatch, capsys):
     """The re-run would replace it while it waits in `plan-<pr>`. Mutation: drop row 3 -- the run
     id prints."""
-    calls = stub(monkeypatch, dispatched=[dispatch(30)])
+    calls = stub(monkeypatch, dispatched=[dispatched_plan(30, "7", "queued")])
     assert (cli("decide"), capsys.readouterr(), calls) == (
         0,
         (
@@ -281,7 +271,7 @@ def test_another_live_plan_run_of_the_pull_request_blocks(slept, monkeypatch, ca
 def test_this_run_listed_alone_blocks_nothing(slept, monkeypatch, capsys):
     """This run is itself a live plan run of the pull request. Mutation: drop the self-exclusion
     -- nothing prints."""
-    calls = stub(monkeypatch, dispatched=[dispatch(999, "in_progress")])
+    calls = stub(monkeypatch, dispatched=[dispatched_plan(999, "7")])
     assert (cli("decide"), capsys.readouterr(), calls) == (0, ("9\n", ""), happy_calls())
 
 
@@ -608,7 +598,7 @@ def test_post_sends_one_post_over_a_clean_listing(slept, monkeypatch, capsys):
 
 def test_post_sends_nothing_when_a_run_appeared_since_decide(slept, monkeypatch, capsys):
     """Mutation: skip the re-read in `post` -- the POST is sent."""
-    calls = stub(monkeypatch, dispatched=[dispatch(30)])
+    calls = stub(monkeypatch, dispatched=[dispatched_plan(30, "7", "queued")])
     assert (cli("post", "9"), capsys.readouterr(), calls) == (
         0,
         (
