@@ -36,6 +36,7 @@ import re
 from _shipmate import (
     _COMMENT_ID,
     _load,
+    cell_names,
     current_run_url,
     gh_json,
     is_pr_number,
@@ -114,7 +115,7 @@ def reply(env, detect_result, raw_cells, root, download_outcome, sentinel_outcom
     env = sc._md_name(env)
     if detect_result != "success":
         return "failed", "the unlock run failed before probing any cell; see the run."
-    cells = _cells(raw_cells)
+    cells = cell_names(raw_cells)
     if cells is None:
         return "failed", "could not read the unlock queue; see the run."
     if not cells:
@@ -169,23 +170,6 @@ def pr_of(repo, comment):
         print(f"::warning::comment {comment} is not on a pull request; no unlock reply posted")
         return None
     return m[1]
-
-
-def _cells(raw):
-    """`detect`'s cells, or None when they are not a JSON list of objects with a string stack and
-    environment."""
-    try:
-        cells = json.loads(raw)
-    except ValueError:
-        return None
-    if isinstance(cells, list) and all(
-        isinstance(c, dict)
-        and isinstance(c.get("stack"), str)
-        and isinstance(c.get("environment"), str)
-        for c in cells
-    ):
-        return cells
-    return None
 
 
 def main():

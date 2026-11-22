@@ -19,10 +19,10 @@ A pre-merge run (`SHIPMATE_DEPLOY` `false`; `deploy_mode` refuses any value but 
 `false`) writes only its `completed`/`success` entries and its held entries (`held` true) on a
 re-run (`GITHUB_RUN_ATTEMPT` above 1): its cells refuse to apply, and a later run may have
 completed the same checks, but a re-run of a completion job can still complete a cell an earlier
-listing missed. With `SHIPMATE_PR_NUMBER` set, a first attempt reads that pull request once
-before any write; when it is merged, only those entries are written, since the merge deploy owns
-the rest. A held entry is written in both cases: it names a state loss the merge deploy must
-refuse over. A failed read writes nothing and fails.
+listing missed. With `SHIPMATE_PR_NUMBER` set, a first attempt refuses a malformed number, then
+reads that pull request once before any write; when it is merged, only those entries are
+written, since the merge deploy owns the rest. A held entry is written in both cases: it names a
+state loss the merge deploy must refuse over. A failed read writes nothing and fails.
 
 Fails closed, because the gate's work queue is the pending checks: the first id that still
 fails (a permanent failure at once, a transient one once its retries are exhausted, a
@@ -39,7 +39,7 @@ import json
 import os
 import sys
 
-from _shipmate import decoded, deploy_mode, is_pr_number, run, run_annotated, write_retried
+from _shipmate import decoded, deploy_mode, env_pr_number, run, run_annotated, write_retried
 
 SUCCESS = {"status": "completed", "conclusion": "success"}
 
@@ -79,10 +79,8 @@ def read(path):
         raise SystemExit(f"::error::{exc.code}") from None
 
 
-def _merged(repo, pr):
-    if not is_pr_number(pr):
-        raise SystemExit(f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {pr!r})")
-    return read(f"repos/{repo}/pulls/{pr}").get("merged") is True
+def _merged(repo):
+    return read(f"repos/{repo}/pulls/{env_pr_number()}").get("merged") is True
 
 
 def write(plan):
@@ -98,7 +96,7 @@ def write(plan):
                 file=sys.stderr,
             )
             plan = [e for e in plan if _kept(e)]
-        elif pr and _merged(repo, pr):
+        elif pr and _merged(repo):
             print(
                 f"::notice::pull request #{pr} is merged; its merge deploy owns every apply check "
                 "this run did not apply",

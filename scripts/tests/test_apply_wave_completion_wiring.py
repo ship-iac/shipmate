@@ -310,10 +310,9 @@ def test_release_jobs_are_written_out(n, expected):
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-release"] == expected
 
 
-def test_snapshot_publishes_both_maps():
-    """Mutation: drop `snapshot`'s `by_wave` output."""
+def test_snapshot_publishes_only_the_per_wave_map():
+    """Mutations: drop `snapshot`'s `by_wave` output; add back a `snapshot` output."""
     assert workflow_jobs("apply-env-level.yml")["snapshot"]["outputs"] == {
-        "snapshot": "${{ steps.snap.outputs.snapshot }}",
         "by_wave": "${{ steps.snap.outputs.by_wave }}",
     }
 

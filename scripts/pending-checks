@@ -55,6 +55,7 @@ from _shipmate import (
     _load,
     cell_summaries,
     current_run_url,
+    env_pr_number,
     event_action,
     is_run_id,
     run_annotated,
@@ -209,7 +210,7 @@ def main():
     plan_run = _plan_run()
     lines = pathlib.Path(os.environ["SHIPMATE_CHECK_RUNS"]).read_text(encoding="utf-8").splitlines()
     done = published(lines, os.environ.get("SHIPMATE_APP_ID", ""), plan_run)
-    pr = ag.env_pr_number()
+    pr = env_pr_number()
     cells = [
         (ag.check_name(cell["stack"], cell["environment"]), cj, cell)
         for cj, cell in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)

@@ -17,7 +17,7 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, bash_only, run_with_gate_gh, step_by
+from _loader import ACTIONS, bash_only, gate_line, run_with_gate_gh, step_by
 
 HEAD_SHA = "a" * 40
 RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
@@ -30,16 +30,6 @@ DONE = json.dumps(
         "app": {"id": 7},
     }
 )
-
-
-def _gate(state):
-    status = {
-        "context": "shipmate / gate",
-        "state": state,
-        "target_url": RUN_URL,
-        "creator": 306306466,
-    }
-    return json.dumps(status) + "\n"
 
 
 def _status_argv(state, description):
@@ -90,7 +80,7 @@ def test_refuses_to_green_a_held_gate(tmp_path):
     """The step turns `gate-status`'s hold exit into one `::error::` line and exit 1.
     Mutations: delete the hold check in `gate-status refresh` -> the hold is greened; drop the
     step's `rc = 3` branch -> exit 3 and no annotation."""
-    proc, posted = _run_step(tmp_path, gate=_gate("failure"))
+    proc, posted = _run_step(tmp_path, gate=gate_line("failure", RUN_URL))
     assert (proc.returncode, proc.stdout, proc.stderr) == (
         1,
         (
@@ -104,7 +94,7 @@ def test_refuses_to_green_a_held_gate(tmp_path):
 
 
 @bash_only
-@pytest.mark.parametrize("gate", [_gate("pending"), ""])
+@pytest.mark.parametrize("gate", [gate_line("pending", RUN_URL), ""])
 def test_a_pending_or_absent_gate_still_greens(tmp_path, gate):
     # The legitimate transition the refusal must not break: gate-state writes `pending` while
     # applies are outstanding, and completing them is what gate-refresh exists to record.

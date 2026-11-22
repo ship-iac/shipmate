@@ -13,7 +13,7 @@ step output `state` = `<value> attempt=<GITHUB_RUN_ATTEMPT>`, which `cell.yml` p
 | the same | a non-empty file | the bundle's sha256 |
 | anything else, empty included | any | no output, an `::error::` |
 
-For a digest it seals a copy of the state with `plan-crypt encrypt-state` under the key
+For a digest it seals a copy of the state with `plan-crypt`'s `encrypt_state` under the key
 `state/<SLUG>/<ENV>/<run>-<attempt>`, writes `$RUNNER_TEMP/state.bundle` = `BUNDLE_MAGIC`, the
 state path and a newline, then the ciphertext, and writes the outputs `bundle=true` and `name`,
 the artifact name. The path travels inside the digested bytes, never in the output. `state` is

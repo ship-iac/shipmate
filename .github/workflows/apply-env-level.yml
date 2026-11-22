@@ -29,7 +29,7 @@ on:
 permissions: {}
 jobs:
   # Pre-flight, before any wave runs: verify that the environments the waves will bind exist and
-  # carry a branch policy, and map the apply-check ids, whole and per wave. It binds
+  # carry a branch policy, and map the apply-check ids per wave. It binds
   # shipmate-engine only to check the App key and mint once, so a bad key fails before any apply.
   snapshot:
     runs-on: ubuntu-slim
@@ -39,7 +39,6 @@ jobs:
     permissions: { checks: read, actions: read }
     environment: { name: shipmate-engine, deployment: false }
     outputs:
-      snapshot: ${{ steps.snap.outputs.snapshot }}
       by_wave: ${{ steps.snap.outputs.by_wave }}
     steps:
       # Before any wave binds the environments it checks: binding one nobody created auto-creates

@@ -400,3 +400,48 @@ def test_a_rate_limited_read_waits_60_s_and_writes(monkeypatch, capsys, calls):
     assert [json.loads(s) for _, s in recorded] == [
         {"status": "queued", "output": {"title": "Not run", "summary": _SUMMARY}}
     ]
+
+
+def test_a_malformed_pr_number_refuses_before_any_read_or_write(monkeypatch, calls):
+    """Mutation: read `pulls/{os.environ['SHIPMATE_PR_NUMBER']}` in `_merged` instead of
+    `env_pr_number()` -- red (the pull request is read)."""
+    recorded, _, reads = calls
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "012")
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, [_entry(1)])
+    assert exc.value.code == (
+        "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '012')"
+    )
+    assert (recorded, reads["calls"]) == ([], [])
+
+
+def test_a_re_run_skips_the_pr_number_check(monkeypatch, calls, capsys):
+    """Mutation: check the number in `write` before the attempt test (`pr = env_pr_number() if
+    os.environ.get("SHIPMATE_PR_NUMBER") else ""`) -- red (the re-run refuses)."""
+    recorded, _, reads = calls
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "012")
+    reads[f"repos/{_REPO}/check-runs/2"] = _check()
+    _main(monkeypatch, [_entry(1), _entry(2, {"status": "queued"}, title="Not run")])
+    assert ([(a, json.loads(s)) for a, s in recorded], reads["calls"]) == (
+        [(_argv("1"), _SUCCESS)],
+        [],
+    )
+    assert capsys.readouterr() == (
+        "1\n",
+        "::notice::run attempt 2 of a pre-merge apply writes only its successes and held checks\n",
+    )
+
+
+def test_a_deploy_skips_the_pr_number_check(monkeypatch, calls, capsys):
+    """Mutation: check the number in `write` before `deploy_mode()` -- red (the deploy
+    refuses)."""
+    recorded, _, reads = calls
+    monkeypatch.setenv("SHIPMATE_DEPLOY", "true")
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "012")
+    _main(monkeypatch, [_entry(1)])
+    assert ([(a, json.loads(s)) for a, s in recorded], reads["calls"]) == (
+        [(_argv("1"), _SUCCESS)],
+        [],
+    )
+    assert capsys.readouterr() == ("1\n", "")

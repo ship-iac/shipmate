@@ -297,8 +297,9 @@ def test_a_wave_slice_reads_no_later_wave_as_unmatched():
     )
 
 
-def test_main_writes_the_snapshot_and_its_slices(monkeypatch, tmp_path, capsys):
-    """Mutation: write the snapshot unsliced as `by_wave` -> its line holds the whole snapshot."""
+def test_main_writes_only_the_per_wave_slices(monkeypatch, tmp_path, capsys):
+    """Mutations: write the snapshot unsliced as `by_wave` -> its line holds the whole snapshot;
+    write a `snapshot` output too -> an extra line."""
     waves = {"wave0": [row("dns", "dev")], "wave1": []}
     out = tmp_path / "out.txt"
     monkeypatch.setenv("SHIPMATE_APP_ID", str(APP_ID))
@@ -308,7 +309,6 @@ def test_main_writes_the_snapshot_and_its_slices(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(apply_snapshot.sys, "stdin", stdin)
     apply_snapshot.main()
     assert out.read_text(encoding="utf-8") == (
-        'snapshot={"apply / dev / dns": [1]}\n'
         'by_wave={"wave0": {"apply / dev / dns": [1]}, "wave1": {}}\n'
     )
     assert capsys.readouterr() == ("", "")

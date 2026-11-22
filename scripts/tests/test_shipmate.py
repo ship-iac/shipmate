@@ -319,13 +319,6 @@ _REFUSED = (
 )
 
 
-@pytest.fixture
-def sleeps(monkeypatch):
-    slept = []
-    monkeypatch.setattr("_shipmate._sleep", slept.append)
-    return slept
-
-
 def _failing(*messages):
     """A call raising each of `messages` in turn, then returning `"x"`; and its call count."""
     calls = []

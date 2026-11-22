@@ -33,7 +33,7 @@ import sys
 from _shipmate import (
     _load,
     current_run_url,
-    is_pr_number,
+    env_pr_number,
     is_run_id,
     one_line,
     run,
@@ -90,10 +90,7 @@ def main():
             "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started "
             f"(got: {outcome})"
         )
-    pr = os.environ.get("PR_NUMBER", "")
-    # Bound into the API path; dispatch hands its input through unvalidated.
-    if not is_pr_number(pr):
-        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr})")
+    pr = env_pr_number("PR_NUMBER")
     verb = os.environ.get("SHIPMATE_REPLY_VERB", "")
     if outcome == "started":
         verdict = started_text(verb, os.environ.get("SHIPMATE_REPLY_RUN_ID", ""))

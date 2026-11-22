@@ -229,14 +229,21 @@ def test_a_state_entry_restored_under_a_newer_key_of_its_prefix_decrypts(tmp_pat
     assert f.read_bytes() == STATE
 
 
-def test_cli_encrypt_state_round_trips_through_decrypt_state(tmp_path, monkeypatch):
-    """Mutation: route main's `encrypt-state` to `encrypt`, and the entry carries the plan
-    label."""
+def test_cli_decrypt_state_opens_an_encrypt_state_entry(tmp_path, monkeypatch):
+    """Mutation: route main's `decrypt-state` to `decrypt`, and the entry fails authentication
+    as a plan."""
     monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     f = _write(tmp_path, STATE)
-    pcx.main(["plan-crypt", "encrypt-state", str(f), KEY])
+    pcx.encrypt_state(str(f), KEY)
     pcx.main(["plan-crypt", "decrypt-state", str(f), KEY])
     assert f.read_bytes() == STATE
+
+
+def test_cli_encrypt_state_refuses_with_usage(tmp_path):
+    """Mutation: restore the `encrypt-state` route in main."""
+    with pytest.raises(SystemExit) as exc:
+        pcx.main(["plan-crypt", "encrypt-state", str(_write(tmp_path)), KEY])
+    assert exc.value.code == pcx.USAGE
 
 
 @pytest.mark.parametrize("kind", KINDS)

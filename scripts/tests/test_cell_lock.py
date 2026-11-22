@@ -431,13 +431,6 @@ OPEN = _pr_state("OPEN")
 BAD_GATEWAY = SystemExit("::error::command failed (1): gh api x\ngh: Bad Gateway (HTTP 502)")
 
 
-@pytest.fixture
-def sleeps(monkeypatch):
-    slept = []
-    monkeypatch.setattr("_shipmate._sleep", slept.append)
-    return slept
-
-
 def test_repo_id_retries_a_transient_failure(sleeps):
     """The double serves both answers from one argv. Mutation: call `run([...])` without
     `retried` -- the 502 raises."""

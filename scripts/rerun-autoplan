@@ -53,6 +53,7 @@ from _shipmate import (
     attempt_jobs,
     cell_names,
     command_data,
+    env_pr_number,
     exit_text,
     gh_json,
     is_head_sha,
@@ -178,7 +179,7 @@ def _reason(repo, head, pr, cells, engine, ours):
 
 def _run_env():
     """`(repo, pr)`; exits 1 on a malformed environment both commands share."""
-    repo, pr = _env("GITHUB_REPOSITORY"), ag.env_pr_number()
+    repo, pr = _env("GITHUB_REPOSITORY"), env_pr_number()
     if not is_run_id(os.environ.get("GITHUB_RUN_ID", "")):
         raise SystemExit("::error::GITHUB_RUN_ID must be a decimal run id")
     return repo, pr

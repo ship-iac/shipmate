@@ -55,6 +55,7 @@ from _shipmate import (
     check_runs,
     command_data,
     current_run_url,
+    env_pr_number,
     exit_text,
     gh_json,
     is_run_id,
@@ -885,7 +886,7 @@ def bare_main(auto=False):
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
     validate_head_sha(head)
-    pr_number = ag.env_pr_number()
+    pr_number = env_pr_number()
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
@@ -1029,7 +1030,7 @@ def main():
 
     validate_head_sha(head)
     validate_env(env)
-    pr_number = ag.env_pr_number()
+    pr_number = env_pr_number()
 
     # Structure-validated before the refusal reads `review`; `validate` re-runs it
     # below, which costs nothing and parses nothing again.

@@ -228,7 +228,7 @@ def test_an_unusable_pull_request_number_refuses_naming_the_variable(tmp_path, m
     """apply-detect refuses a record whose `pr` is not the dispatch's, so a record written with
     a malformed number strands its cell. Mutation: drop the validation (`pr =
     os.environ.get("SHIPMATE_PR_NUMBER", "")`) -- red. Mutation: `re.fullmatch(r"[1-9][0-9]*",
-    value)` for `is_pr_number(value)` in `env_pr_number` -- `"12345678901"` red."""
+    value)` for `is_pr_number(value)` in `_shipmate.env_pr_number` -- `"12345678901"` red."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -642,7 +642,7 @@ def test_a_run_with_an_evidence_gap_still_refuses_a_broken_pull_request_number(
     tmp_path, monkeypatch
 ):
     """A wiring fault surfaces on every run, not only on one that publishes. Mutation: read
-    `ag.env_pr_number()` after the gap check in `main` -> the run returns with a warning."""
+    `env_pr_number()` after the gap check in `main` -> the run returns with a warning."""
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "")
     with pytest.raises(SystemExit) as exc_info:
         _main(tmp_path, monkeypatch, plan_result="failure")

@@ -497,3 +497,23 @@ HELD_CASES = {
         ),
     ),
 }
+
+
+def waiting_cell(stack, env, after_stack, after_env):
+    """A `waiting_cells` entry of apply-detect's report."""
+    return {
+        "stack": stack,
+        "environment": env,
+        "after_stack": after_stack,
+        "after_environment": after_env,
+    }
+
+
+def locked_cell(stack, env, holder):
+    """A `held_cells` entry another pull request's lock holds."""
+    return {"stack": stack, "environment": env, "cause": "locked", "holder": holder}
+
+
+def overlap_cell(stack, env):
+    """A `held_cells` entry whose base changed after the branch left it."""
+    return {"stack": stack, "environment": env, "cause": "overlap"}
