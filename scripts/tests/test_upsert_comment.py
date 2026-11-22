@@ -83,13 +83,6 @@ def _fake_graphql(
 _NOTICE = "::notice::command failed (1): gh api%0AHTTP 502\n"
 
 
-@pytest.fixture
-def sleeps(monkeypatch):
-    slept = []
-    monkeypatch.setattr("_shipmate._sleep", slept.append)
-    return slept
-
-
 def _fake_head(head, fails):
     if fails:
         raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")

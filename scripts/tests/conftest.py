@@ -1,7 +1,7 @@
 """Suite-wide hooks: the `bash_only` marker, whose bash probe runs only when a marked test does,
 a `_shipmate._sleep` that fails any test reaching a retry without patching it, a fresh
-rate-limit wait budget and deferred-run cache per test, and a per-test path for
-`apply-detect`'s report."""
+rate-limit wait budget and deferred-run cache per test, a per-test path for `apply-detect`'s
+report, and a `sleeps` fixture recording the delays of a patched `_shipmate._sleep`."""
 
 import _shipmate
 import pytest
@@ -26,6 +26,13 @@ def _no_unpatched_retry_sleep(monkeypatch):
     # The budget is per process, and every in-process test shares one.
     monkeypatch.setattr(_shipmate, "_rate_limit_waits", 0)
     monkeypatch.setattr(_shipmate, "deferred_runs", {})
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    slept = []
+    monkeypatch.setattr("_shipmate._sleep", slept.append)
+    return slept
 
 
 def pytest_configure(config):

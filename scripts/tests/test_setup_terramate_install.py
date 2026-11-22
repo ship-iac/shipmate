@@ -11,8 +11,10 @@ import os
 import pytest
 from _loader import (
     ENGINE,
+    argv_log,
     bash_only,
     bash_symlink,
+    refusal_output,
     run_step,
     setup_curl_argv,
     step_by,
@@ -121,19 +123,6 @@ def _install(
     return r, runner_temp.as_posix(), logs
 
 
-def _refusal(tmp_path, stdout):
-    """Assert the step wrote one `refusal=` line: its last annotation without the
-    `::error title=...::` prefix. Every caller pins `stdout` whole."""
-    last = stdout.splitlines()[-1]
-    out = (tmp_path / "github_output").read_text(encoding="utf-8")
-    assert out == "refusal=" + last.split("::", 2)[2] + "\n"
-
-
-def _argv(logs, name):
-    path = logs / name
-    return path.read_text(encoding="utf-8").splitlines() if path.exists() else None
-
-
 def test_the_install_step_is_fail_closed():
     """No `continue-on-error`, no `if:`, no third-party `uses:`.
 
@@ -152,12 +141,12 @@ def test_a_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_pat
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     tarball = f"{runner_temp}/terramate-release/{_ASSET}"
     expected = setup_curl_argv(_URL, tarball)
-    assert _argv(logs, "curl") == expected
-    assert _argv(logs, "sha256sum") == [tarball]
-    assert _argv(logs, "order") == ["sha256sum", "tar"]
+    assert argv_log(logs, "curl") == expected
+    assert argv_log(logs, "sha256sum") == [tarball]
+    assert argv_log(logs, "order") == ["sha256sum", "tar"]
     assert r.stdout == _VERIFIED
-    assert _argv(logs, "tar") == ["-xzf", tarball, "-C", f"{runner_temp}/terramate", "terramate"]
-    assert _argv(logs, "terramate") == ["--version"]
+    assert argv_log(logs, "tar") == ["-xzf", tarball, "-C", f"{runner_temp}/terramate", "terramate"]
+    assert argv_log(logs, "terramate") == ["--version"]
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == f"{runner_temp}/terramate\n"
 
 
@@ -177,9 +166,9 @@ def test_a_failed_download_fails_the_step_with_one_annotation(tmp_path, curl_out
     r, _, logs = _install(tmp_path, curl_output, curl_rc)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == _annotation(code, curl_rc) + "\n"
-    assert _argv(logs, "tar") is None
+    assert argv_log(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -194,9 +183,9 @@ def test_a_404_names_the_version_and_platform_as_the_remedy(tmp_path):
         f"{_PREFIX}{_URL} answered HTTP 404 from {_URL} (curl exit 0); "
         "check the signed checksums.txt and the runner's OS and architecture.\n"
     )
-    assert _argv(logs, "tar") is None
+    assert argv_log(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @pytest.mark.parametrize(
@@ -216,7 +205,7 @@ def test_a_failed_extract_or_binary_fails_the_step_with_one_annotation(
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == f"{_VERIFIED}{_PREFIX}{message}\n"
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -229,7 +218,7 @@ def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path
         "check the signed checksums.txt and the release asset.\n"
     )
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -244,9 +233,9 @@ def test_a_digest_mismatch_fails_the_step_before_tar_runs(tmp_path):
         f"{_PREFIX}{_URL} has sha256 {'c' * 64}, not the {_DIGEST} the signed checksums.txt "
         "names; the release asset differs from the signed one.\n"
     )
-    assert _argv(logs, "tar") is None
+    assert argv_log(logs, "tar") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -258,9 +247,9 @@ def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path):
         f"{_PREFIX}the signed checksums.txt yields no sha256 for "
         "terramate_0.17.1_linux_riscv64.tar.gz; shipmate installs on Linux x86_64 and arm64.\n"
     )
-    assert _argv(logs, "curl") is None
+    assert argv_log(logs, "curl") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 _CACHE_KEY = f"shipmate-tools-Linux-X64-terramate-{_VERSION}"
@@ -305,9 +294,9 @@ def test_a_restored_archive_whose_digest_matches_is_not_downloaded(tmp_path):
     r, runner_temp, logs = _install_cached(tmp_path)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"
-    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (None, [archive])
+    assert (argv_log(logs, "curl"), argv_log(logs, "sha256sum")) == (None, [archive])
     assert r.stdout == _VERIFIED
-    assert _argv(logs, "tar") == ["-xzf", archive, "-C", f"{runner_temp}/terramate", "terramate"]
+    assert argv_log(logs, "tar") == ["-xzf", archive, "-C", f"{runner_temp}/terramate", "terramate"]
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == f"{runner_temp}/terramate\n"
 
 
@@ -318,9 +307,12 @@ def test_a_restored_archive_whose_digest_differs_is_downloaded_again_with_one_wa
     r, runner_temp, logs = _install_cached(tmp_path, cached_digest="c" * 64)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"
-    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive, archive])
+    assert (argv_log(logs, "curl"), argv_log(logs, "sha256sum")) == (
+        _curl(archive),
+        [archive, archive],
+    )
     assert r.stdout == _warning(_mismatch("c" * 64)) + _VERIFIED
-    assert _argv(logs, "tar") == ["-xzf", archive, "-C", f"{runner_temp}/terramate", "terramate"]
+    assert argv_log(logs, "tar") == ["-xzf", archive, "-C", f"{runner_temp}/terramate", "terramate"]
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == f"{runner_temp}/terramate\n"
 
 
@@ -330,13 +322,13 @@ def test_a_restored_archive_whose_fresh_copy_differs_too_fails_after_one_downloa
     curl calls, not one)."""
     r, runner_temp, logs = _install_cached(tmp_path, cached_digest="c" * 64, digest="d" * 64)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert _argv(logs, "curl") == _curl(f"{runner_temp}/terramate-release/{_ASSET}")
+    assert argv_log(logs, "curl") == _curl(f"{runner_temp}/terramate-release/{_ASSET}")
     assert r.stdout == _warning(_mismatch("c" * 64)) + _PREFIX + _mismatch("d" * 64) + "\n"
-    assert (_argv(logs, "tar"), (tmp_path / "github_path").read_text(encoding="utf-8")) == (
+    assert (argv_log(logs, "tar"), (tmp_path / "github_path").read_text(encoding="utf-8")) == (
         None,
         "",
     )
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -348,7 +340,7 @@ def test_an_archive_present_without_a_restored_key_is_downloaded_again(tmp_path)
     _cached(tmp_path)
     r, runner_temp, logs = _install(tmp_path, "200", 0, key="")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert _argv(logs, "curl") == _curl(f"{runner_temp}/terramate-release/{_ASSET}")
+    assert argv_log(logs, "curl") == _curl(f"{runner_temp}/terramate-release/{_ASSET}")
 
 
 @bash_only
@@ -363,7 +355,7 @@ def test_a_restored_archive_path_that_is_a_directory_is_downloaded_again(tmp_pat
     r, runner_temp, logs = _install(tmp_path, "200", 0, key=_CACHE_KEY)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"
-    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive])
+    assert (argv_log(logs, "curl"), argv_log(logs, "sha256sum")) == (_curl(archive), [archive])
     assert r.stdout == _warning(f"{archive} is not a regular file.") + _VERIFIED
 
 
@@ -374,11 +366,11 @@ def test_an_empty_sha256sum_output_fails_naming_the_tool_not_the_asset(tmp_path)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"
     assert r.stdout == f"{_PREFIX}sha256sum printed no digest for {archive}.\n"
-    assert (_argv(logs, "tar"), (tmp_path / "github_path").read_text(encoding="utf-8")) == (
+    assert (argv_log(logs, "tar"), (tmp_path / "github_path").read_text(encoding="utf-8")) == (
         None,
         "",
     )
-    _refusal(tmp_path, r.stdout)
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -390,8 +382,8 @@ def test_a_curl_older_than_7_71_is_told_its_floor_by_the_install_step(tmp_path):
         f"{_PREFIX}curl exited 2 on an option it does not know; shipmate needs curl 7.71 or "
         "later (CONTRACT.md §Runner prerequisites).\n"
     )
-    assert _argv(logs, "tar") is None
-    _refusal(tmp_path, r.stdout)
+    assert argv_log(logs, "tar") is None
+    refusal_output(tmp_path, r.stdout)
 
 
 @bash_only
@@ -404,7 +396,10 @@ def test_a_restored_archive_sha256sum_cannot_read_is_downloaded_again(tmp_path):
     r, runner_temp, logs = _install_cached(tmp_path, cached_digest="")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"
-    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive, archive])
+    assert (argv_log(logs, "curl"), argv_log(logs, "sha256sum")) == (
+        _curl(archive),
+        [archive, archive],
+    )
     assert r.stdout == _warning(f"sha256sum printed no digest for {archive}.") + _VERIFIED
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == f"{runner_temp}/terramate\n"
 
@@ -424,6 +419,6 @@ def test_a_restored_archive_that_is_a_symlink_is_downloaded_again(tmp_path):
     r, runner_temp, logs = _install(tmp_path, "200", 0, key=_CACHE_KEY)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/terramate-release/{_ASSET}"
-    assert (_argv(logs, "curl"), _argv(logs, "sha256sum")) == (_curl(archive), [archive])
+    assert (argv_log(logs, "curl"), argv_log(logs, "sha256sum")) == (_curl(archive), [archive])
     assert r.stdout == _warning(f"{archive} is not a regular file.") + _VERIFIED
     assert (target.read_bytes(), (release / _ASSET).is_symlink()) == (b"cached", False)

@@ -531,6 +531,20 @@ def setup_curl_argv(url, out):
     ]
 
 
+def refusal_output(tmp_path, stdout):
+    """Assert the step wrote one `refusal=` line: its last annotation without the
+    `::error title=...::` prefix. Every caller pins `stdout` whole."""
+    last = stdout.splitlines()[-1]
+    out = (tmp_path / "github_output").read_text(encoding="utf-8")
+    assert out == "refusal=" + last.split("::", 2)[2] + "\n"
+
+
+def argv_log(logs, name):
+    """The argv lines stub `name` logged under `logs`, or None when it never ran."""
+    path = logs / name
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else None
+
+
 def bash_symlink(tmp_path, target, link):
     """Make ``link`` a symlink to ``target`` with bash's ``ln -s``, which the steps' ``[ -L ]``
     sees. Python's ``os.symlink`` needs a privilege Windows withholds; MSYS bash makes a native
@@ -603,6 +617,17 @@ GATE_STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
 #: The `_GATE_GH` bot user lookup's default answer for `SHIPMATE_APP_SLUG=shipmate-test`; its id
 #: is unlike any fixture's `SHIPMATE_APP_ID`, so an App-id comparison reddens.
 GATE_USER = '{"id": 306306466, "login": "shipmate-test[bot]"}'
+
+
+def gate_line(state, target_url):
+    """One `shipmate / gate` status as `GATE_STATUSES_JQ` prints it, created by `GATE_USER`."""
+    status = {
+        "context": "shipmate / gate",
+        "state": state,
+        "target_url": target_url,
+        "creator": json.loads(GATE_USER)["id"],
+    }
+    return json.dumps(status) + "\n"
 
 
 def run_with_gate_gh(

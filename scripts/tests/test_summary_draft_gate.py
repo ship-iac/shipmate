@@ -28,6 +28,7 @@ from _loader import (
     ACTIONS,
     bash_only,
     fail_script,
+    gate_line,
     run_step,
     run_with_gate_gh,
     run_with_gh_recorder,
@@ -77,16 +78,6 @@ def _write_argv(state, description):
         "-f",
         f"target_url={RUN_URL}",
     ]
-
-
-def _gate(state):
-    status = {
-        "context": "shipmate / gate",
-        "state": state,
-        "target_url": RUN_URL,
-        "creator": 306306466,
-    }
-    return json.dumps(status) + "\n"
 
 
 _DRAFT_NOT_WRITTEN = (
@@ -139,7 +130,7 @@ def _run_gate(
         sha=HEAD_SHA,
         checks=DONE + "\n",
         checks_rc=checks_rc,
-        page1=_gate(head_state) if head_state else "",
+        page1=gate_line(head_state, RUN_URL) if head_state else "",
         statuses_rc=1 if read_fails else 0,
         user_rc=user_rc,
         user_stderr=user_stderr,

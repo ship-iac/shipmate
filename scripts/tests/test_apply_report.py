@@ -5,6 +5,7 @@ import json
 import pathlib
 
 import pytest
+from _detect_fixtures import locked_cell, overlap_cell, waiting_cell
 from _loader import load_script
 
 ac = load_script("apply-comment")
@@ -12,23 +13,6 @@ ad = load_script("apply-detect")
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "apply-report"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-
-
-def _waits(stack, env, after_stack, after_env):
-    return {
-        "stack": stack,
-        "environment": env,
-        "after_stack": after_stack,
-        "after_environment": after_env,
-    }
-
-
-def _locked(stack, env, holder):
-    return {"stack": stack, "environment": env, "cause": "locked", "holder": holder}
-
-
-def _overlap(stack, env):
-    return {"stack": stack, "environment": env, "cause": "overlap"}
 
 
 #: Each scenario: (render step env beyond the defaults, the cells applied as (stack, env), the
@@ -44,8 +28,8 @@ SCENARIOS = {
             "review_held_envs": ["rev", "both"],
             "applied_exempt_envs": ["qa"],
             "review_not_required_envs": ["lck"],
-            "waiting_cells": [_waits("stacks/w", "wt", "stacks/t", "tgt")],
-            "held_cells": [_locked("stacks/app", "lck", 7), _overlap("stacks/o", "ovl")],
+            "waiting_cells": [waiting_cell("stacks/w", "wt", "stacks/t", "tgt")],
+            "held_cells": [locked_cell("stacks/app", "lck", 7), overlap_cell("stacks/o", "ovl")],
             "env_order": ["qa", "lck", "tgt", "both", "rev", "wt", "ovl", "s1", "s3", "s5"],
         },
     ),
@@ -60,7 +44,7 @@ SCENARIOS = {
             "applied_exempt_envs": [],
             "review_not_required_envs": [],
             "waiting_cells": [],
-            "held_cells": [_overlap("stacks/db", "dev-eu")],
+            "held_cells": [overlap_cell("stacks/db", "dev-eu")],
             "env_order": ["dev-eu", "dev", "prod"],
             "pusher": "k3np",
             "bare_envs": ["dev"],
@@ -71,8 +55,8 @@ SCENARIOS = {
         [("stacks/dns", "dev-eu")],
         {
             "review_not_required_envs": ["dev-eu"],
-            "waiting_cells": [_waits("stacks/app", "dev-eu", "stacks/db", "dev-us")],
-            "held_cells": [_locked("stacks/db2", "dev-eu", 12)],
+            "waiting_cells": [waiting_cell("stacks/app", "dev-eu", "stacks/db", "dev-us")],
+            "held_cells": [locked_cell("stacks/db2", "dev-eu", 12)],
             "env_order": ["dev-eu"],
         },
     ),

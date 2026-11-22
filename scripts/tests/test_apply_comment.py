@@ -4,6 +4,7 @@ import pathlib
 import re
 
 import pytest
+from _detect_fixtures import locked_cell, overlap_cell, waiting_cell
 from _loader import ENGINE as _ENGINE
 from _loader import load_script, workflow_yaml
 
@@ -453,7 +454,7 @@ def test_an_applied_auto_run_counts_an_environment_left_for_a_bare_apply_pending
 
 def test_the_pending_token_follows_the_waiting_and_held_cell_tokens():
     """Mutation: place the pending token before `N waiting` -- red."""
-    held_cells = [_locked("stacks/db", "dev-eu", 12), _overlap("stacks/web", "dev-eu")]
+    held_cells = [locked_cell("stacks/db", "dev-eu", 12), overlap_cell("stacks/web", "dev-eu")]
     assert ac._verdict([_row()], "", ["prod"], SHA, RUN_URL, [_PLATFORM_WAITS], held_cells) == (
         "⚪",
         f"⚪ 1 applied, 1 waiting, 1 locked, 1 held (base changed), 1 environment pending {AT}",
@@ -2154,16 +2155,7 @@ def test_main_prints_the_audit_notices_escaped_and_the_comment_carries_neither(
     )
 
 
-def _waits(stack, env, after_stack, after_env):
-    return {
-        "stack": stack,
-        "environment": env,
-        "after_stack": after_stack,
-        "after_environment": after_env,
-    }
-
-
-_PLATFORM_WAITS = _waits("stacks/platform", "dev-eu", "stacks/dns", "dev-us")
+_PLATFORM_WAITS = waiting_cell("stacks/platform", "dev-eu", "stacks/dns", "dev-us")
 
 
 def test_a_run_where_every_cell_waits_says_nothing_applied():
@@ -2207,10 +2199,10 @@ def test_each_waiting_cell_names_the_remedy_its_blocker_needs():
     Mutation: drop the held-and-targeted test from it -- the `ops` blocker names no command,
     red."""
     waiting = [
-        _waits("stacks/a", "qa", "stacks/dns", "dev"),
-        _waits("stacks/b", "qa", "stacks/net", "stg"),
-        _waits("stacks/c", "qa", "stacks/edge", "prod"),
-        _waits("stacks/d", "qa", "stacks/vault", "ops"),
+        waiting_cell("stacks/a", "qa", "stacks/dns", "dev"),
+        waiting_cell("stacks/b", "qa", "stacks/net", "stg"),
+        waiting_cell("stacks/c", "qa", "stacks/edge", "prod"),
+        waiting_cell("stacks/d", "qa", "stacks/vault", "ops"),
     ]
     body = ac.build_comment(
         [], [], RUN_URL, ["ops", "prod"], ["stg"], "", "success", ["dev", "ops"], SHA, waiting
@@ -2241,7 +2233,7 @@ def test_the_waiting_lines_escape_every_name():
 
     Mutation: build the waiting tuples in `_dispositions` without escaping -- red.
     Mutation: escape the two stacks with `_md_escape` instead of `_md_name` -- red."""
-    waiting = [_waits("s@org/team<1", "e<2", "a@org/ops<3", "b<4")]
+    waiting = [waiting_cell("s@org/team<1", "e<2", "a@org/ops<3", "b<4")]
     assert ac._footer_parts([], [], waiting=waiting) == [
         (
             "⚪ s@<!-- -->org/team&lt;1 / e&lt;2: waits on a@<!-- -->org/ops&lt;3 / b&lt;4, "
@@ -2271,10 +2263,10 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
         for i, e in enumerate(envs)
     ]
     waiting = [
-        _waits("stacks/a", "qa", "stacks/dns", "dev"),
-        _waits("stacks/b", "qa", "stacks/net", "stg"),
-        _waits("stacks/c", "qa", "stacks/dns", "dev"),
-        _waits("stacks/d", "uat", "stacks/edge", targeted[0]),
+        waiting_cell("stacks/a", "qa", "stacks/dns", "dev"),
+        waiting_cell("stacks/b", "qa", "stacks/net", "stg"),
+        waiting_cell("stacks/c", "qa", "stacks/dns", "dev"),
+        waiting_cell("stacks/d", "uat", "stacks/edge", targeted[0]),
     ]
     body = ac.build_comment(
         rows, jobs, RUN_URL, targeted, ["stg"], "", "success", ["dev"], SHA, waiting
@@ -2493,17 +2485,13 @@ def test_main_renders_the_detect_refusal_from_the_render_step_env(monkeypatch, t
     )
 
 
-def _locked(stack, env, holder):
-    return {"stack": stack, "environment": env, "cause": "locked", "holder": holder}
-
-
 _LOCKS = [
-    _locked("stacks/app", "dev", 12),
-    _locked("stacks/db", "dev", 12),
-    _locked("stacks/app", "prod", 12),
-    _locked("stacks/dns", "dev", 7),
-    _locked("stacks/net", "dev", None),
-    _locked("stacks/edge", "dev", "12"),
+    locked_cell("stacks/app", "dev", 12),
+    locked_cell("stacks/db", "dev", 12),
+    locked_cell("stacks/app", "prod", 12),
+    locked_cell("stacks/dns", "dev", 7),
+    locked_cell("stacks/net", "dev", None),
+    locked_cell("stacks/edge", "dev", "12"),
 ]
 #: `_LOCKS`'s lines, hand-written: one per holder and environment, in first-seen order.
 _LOCK_LINES = [
@@ -2547,7 +2535,7 @@ def test_each_lock_holder_and_environment_gets_one_line_in_both_forms(compact):
 def test_the_lock_lines_escape_every_name():
     """Mutation: drop `_md_name` from the locked cell's stack -- the team mention, red.
     Mutation: drop `_md_escape` from the locked cell's environment -- red."""
-    assert ac._footer_parts([], [], held_cells=[_locked("s@org/team<1", "e<2", 3)]) == [
+    assert ac._footer_parts([], [], held_cells=[locked_cell("s@org/team<1", "e<2", 3)]) == [
         (
             "🔒 locked by #3: s@<!-- -->org/team&lt;1 / e&lt;2. Wait for #3 to merge or close, "
             "then re-plan. If #3 has already merged or closed, comment "
@@ -2561,7 +2549,7 @@ def test_a_run_where_every_cell_is_locked_is_never_green():
 
     Mutation: drop the `locked` branch from `_empty_verdict` -- 🟢 no pending applies with no
     hint, red."""
-    assert _comment([], held_cells=[_locked("stacks/app", "dev-eu", 12)]) == (
+    assert _comment([], held_cells=[locked_cell("stacks/app", "dev-eu", 12)]) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {AT}\n\n"
         "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. If "
         "#12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
@@ -2572,7 +2560,7 @@ def test_a_run_where_every_cell_is_locked_is_never_green():
 def test_a_partly_applied_run_counts_its_locked_cells_beside_its_waiting_ones():
     """Mutation: drop the `locked` token from `_white_tokens` -- red.
     Mutation: drop `_verdict`'s `circles.append("⚪")` -- 🟢, red (the run has no waiting cell)."""
-    locked = [_locked("stacks/db", "dev-eu", 12), _locked("stacks/dns", "dev-eu", 12)]
+    locked = [locked_cell("stacks/db", "dev-eu", 12), locked_cell("stacks/dns", "dev-eu", 12)]
     assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), locked) == (
         "⚪",
         f"⚪ 1 applied, 2 locked {AT}",
@@ -2594,11 +2582,11 @@ def test_a_cell_waiting_on_a_locked_cell_names_the_lock_remedy():
     red.
     Mutation: drop the merged-or-closed sentence from `lock_wait_remedy` -- red."""
     waiting = [
-        _waits("stacks/a", "qa", "stacks/dns", "ops"),
-        _waits("stacks/b", "qa", "stacks/net", "ops"),
-        _waits("stacks/c", "qa", "stacks/vault", "ops"),
+        waiting_cell("stacks/a", "qa", "stacks/dns", "ops"),
+        waiting_cell("stacks/b", "qa", "stacks/net", "ops"),
+        waiting_cell("stacks/c", "qa", "stacks/vault", "ops"),
     ]
-    locked = [_locked("stacks/dns", "ops", 12), _locked("stacks/net", "ops", None)]
+    locked = [locked_cell("stacks/dns", "ops", 12), locked_cell("stacks/net", "ops", None)]
     body = ac.build_comment(
         [], [], RUN_URL, ["ops"], [], "", "success", ["ops"], SHA, waiting, held_cells=locked
     )
@@ -2630,7 +2618,7 @@ def test_main_renders_the_locked_cells_from_the_render_step_env(monkeypatch, tmp
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
-    held = [_locked("stacks/app", "dev-eu", 12)]
+    held = [locked_cell("stacks/app", "dev-eu", 12)]
     _set_report(monkeypatch, tmp_path, {"held_cells": held})
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n⚪ nothing applied, pending cells are locked {_MAIN_AT}\n\n"
@@ -2680,10 +2668,6 @@ def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_ap
     )
 
 
-def _overlap(stack, env):
-    return {"stack": stack, "environment": env, "cause": "overlap"}
-
-
 #: The overlap line for `stacks/app` and `stacks/db` in `dev-eu`, hand-written.
 _OVERLAP_LINE = (
     "⚪ held, the base changed these stacks after this branch left it, so their plans would "
@@ -2696,14 +2680,14 @@ _OVERLAP_LINE = (
 def test_the_overlap_cells_get_one_line_naming_them_and_the_remedy_in_both_forms(compact):
     """Mutation: drop `d["overlap"]` from `_per_env_lines` -- the per-environment case, red.
     Mutation: drop `d["overlap"]` from `_grouped_lines` -- the compact case, red."""
-    overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
+    overlap = [overlap_cell("stacks/app", "dev-eu"), overlap_cell("stacks/db", "dev-eu")]
     assert ac._footer_parts([], [], held_cells=overlap, compact=compact) == [_OVERLAP_LINE]
 
 
 def test_the_overlap_line_escapes_every_name():
     """Mutation: drop `_md_name` from the overlap cell's stack -- the team mention, red.
     Mutation: drop `_md_escape` from the overlap cell's environment -- red."""
-    assert ac._footer_parts([], [], held_cells=[_overlap("s@org/team<1", "e<2")]) == [
+    assert ac._footer_parts([], [], held_cells=[overlap_cell("s@org/team<1", "e<2")]) == [
         (
             "⚪ held, the base changed these stacks after this branch left it, so their plans "
             "would revert that change: s@<!-- -->org/team&lt;1 / e&lt;2. Update the branch from "
@@ -2717,7 +2701,7 @@ def test_a_run_whose_every_pending_cell_overlaps_the_base_is_never_green():
 
     Mutation: drop the `overlap` branch from `_empty_verdict` -- 🟢 no pending applies with no
     hint, red."""
-    overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
+    overlap = [overlap_cell("stacks/app", "dev-eu"), overlap_cell("stacks/db", "dev-eu")]
     assert _comment([], env="", held_cells=overlap) == (
         "### shipmate apply\n\n⚪ nothing applied, the base also changed the pending cells' "
         f"stacks {AT}\n\n{_OVERLAP_LINE}\n\n" + HINT
@@ -2727,7 +2711,7 @@ def test_a_run_whose_every_pending_cell_overlaps_the_base_is_never_green():
 def test_a_partly_applied_run_counts_its_overlap_cells():
     """Mutation: drop the overlap token from `_white_tokens` -- red.
     Mutation: drop `_verdict`'s `circles.append("⚪")` -- 🟢, red."""
-    overlap = [_overlap("stacks/db", "dev-eu")]
+    overlap = [overlap_cell("stacks/db", "dev-eu")]
     assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), overlap) == (
         "⚪",
         f"⚪ 1 applied, 1 held (base changed) {AT}",
@@ -2743,11 +2727,11 @@ def test_a_cell_waiting_on_an_overlap_cell_names_the_branch_update():
     Mutation: key the blocker's overlap on its environment alone -- `stacks/b` names the branch
     update, red."""
     waiting = [
-        _waits("stacks/a", "qa", "stacks/dns", "ops"),
-        _waits("stacks/b", "qa", "stacks/vault", "ops"),
+        waiting_cell("stacks/a", "qa", "stacks/dns", "ops"),
+        waiting_cell("stacks/b", "qa", "stacks/vault", "ops"),
     ]
     parts = ac._footer_parts(
-        ["ops"], [], ["ops"], waiting, held_cells=[_overlap("stacks/dns", "ops")]
+        ["ops"], [], ["ops"], waiting, held_cells=[overlap_cell("stacks/dns", "ops")]
     )
     assert parts[-2:] == [
         (
@@ -2767,8 +2751,8 @@ def test_a_cell_waiting_on_a_locked_overlap_cell_names_both_remedies():
 
     Mutation: return the lock remedy alone when the blocker is locked -- red.
     Mutation: join the two remedies with "; " instead of a sentence break -- red."""
-    held_cells = [_locked("stacks/dns", "ops", 7), _overlap("stacks/dns", "ops")]
-    waiting = [_waits("stacks/a", "qa", "stacks/dns", "ops")]
+    held_cells = [locked_cell("stacks/dns", "ops", 7), overlap_cell("stacks/dns", "ops")]
+    waiting = [waiting_cell("stacks/a", "qa", "stacks/dns", "ops")]
     assert ac._footer_parts([], [], [], waiting, held_cells=held_cells)[-1] == (
         "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; it is locked by #7; wait "
         "for #7 to merge or close, then re-plan. If #7 has already merged or closed, comment "
@@ -2787,7 +2771,7 @@ _BOTH_VERDICT = (
 
 def test_a_run_whose_only_cell_is_locked_and_overlaps_the_base_names_both_causes():
     """Mutation: return the locked sentence before checking for an overlap cell -- red."""
-    held_cells = [_locked("stacks/app", "dev-eu", 12), _overlap("stacks/app", "dev-eu")]
+    held_cells = [locked_cell("stacks/app", "dev-eu", 12), overlap_cell("stacks/app", "dev-eu")]
     assert _comment([], env="", held_cells=held_cells) == (
         _BOTH_VERDICT
         + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
@@ -2804,7 +2788,7 @@ def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes()
 
     Mutation: require a cell under both causes for the both-causes sentence -- the locked
     sentence, red."""
-    held_cells = [_locked("stacks/app", "dev-eu", 12), _overlap("stacks/db", "dev-eu")]
+    held_cells = [locked_cell("stacks/app", "dev-eu", 12), overlap_cell("stacks/db", "dev-eu")]
     assert _comment([], env="", held_cells=held_cells) == (
         _BOTH_VERDICT
         + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
@@ -2818,7 +2802,7 @@ def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes()
 
 def test_a_partly_applied_run_counts_a_locked_overlap_cell_once():
     """Mutation: count every overlap cell, locked or not -- `1 held (base changed)`, red."""
-    held_cells = [_locked("stacks/db", "dev-eu", 12), _overlap("stacks/db", "dev-eu")]
+    held_cells = [locked_cell("stacks/db", "dev-eu", 12), overlap_cell("stacks/db", "dev-eu")]
     assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), held_cells) == (
         "⚪",
         f"⚪ 1 applied, 1 locked {AT}",
@@ -2831,7 +2815,7 @@ def test_main_renders_the_overlap_cells_from_the_render_step_env(monkeypatch, tm
     cells = tmp_path / "cells"
     cells.mkdir()
     _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
-    overlap = [_overlap("stacks/app", "dev-eu"), _overlap("stacks/db", "dev-eu")]
+    overlap = [overlap_cell("stacks/app", "dev-eu"), overlap_cell("stacks/db", "dev-eu")]
     _set_report(monkeypatch, tmp_path, {"held_cells": overlap})
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n⚪ nothing applied, the base also changed the pending "
@@ -2846,8 +2830,8 @@ _KINDS = {
     "excluded": ["tgt", "both"],
     "skipped": ["s1", "s2", "s3", "s4", "s5"],
     "held": ["rev", "both"],
-    "waiting": [_waits("stacks/w", "wt", "stacks/t", "tgt")],
-    "held_cells": [_locked("stacks/app", "lck", 7), _overlap("stacks/o", "ovl")],
+    "waiting": [waiting_cell("stacks/w", "wt", "stacks/t", "tgt")],
+    "held_cells": [locked_cell("stacks/app", "lck", 7), overlap_cell("stacks/o", "ovl")],
     "skipped_after": {
         "s1": ["tgt"],
         "s2": ["rev", "both"],
@@ -2944,7 +2928,7 @@ def test_a_cell_blocked_predecessor_gets_the_cell_remedy_even_when_held_and_targ
         ["ops"],
         ["s"],
         ["ops"],
-        held_cells=[_locked("stacks/a", "ops", 7)],
+        held_cells=[locked_cell("stacks/a", "ops", 7)],
         skipped_after={"s": ["ops"]},
     ) == [
         "⚪ s: skipped, waits on ops (a cell of it does not apply this run; see its line below)",
