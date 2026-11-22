@@ -221,14 +221,15 @@ def test_marker_comments_retries_a_transient_listing_failure(monkeypatch):
 
 @pytest.mark.parametrize("flag", ["--new", "--update-only"])
 def test_a_head_match_writes(monkeypatch, tmp_path, capsys, flag):
-    """The head is read after the visibility read and before the write. Mutation: skip the head
-    read before a write -- no pulls call."""
+    """The head is read after the listing and before the visibility read and the write. Mutations:
+    skip the head read before a write -- no pulls call; read visibility before the head -- the
+    `--update-only` row red."""
     listing = [] if flag == "--new" else [_head(5, SUMMARY)]
     code, calls = _upsert(monkeypatch, tmp_path, listing, flag, "--head", _HEAD)
     expected = (
         [LIST_ARGV, PULLS_ARGV, _post(tmp_path)]
         if flag == "--new"
-        else [LIST_ARGV, _read("IC_5"), PULLS_ARGV, _patch(5, tmp_path)]
+        else [LIST_ARGV, PULLS_ARGV, _read("IC_5"), _patch(5, tmp_path)]
     )
     assert (code, calls) == (0, expected)
     assert capsys.readouterr().out == ("created\n" if flag == "--new" else "updated\n")
@@ -597,8 +598,8 @@ def test_new_minimizes_only_this_authors_plan_comments(monkeypatch, tmp_path, ca
 
 def test_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_path, capsys):
     """The newest plan comment minimized by a person, then a quiet run: the unmoved head read,
-    nothing written. Mutation: test the listed comments instead of the visible ones -- a PATCH
-    follows."""
+    nothing written. Mutations: test the listed comments instead of the visible ones -- a PATCH
+    follows; read visibility before the head -- red."""
     code, calls = _upsert(
         monkeypatch,
         tmp_path,
@@ -608,7 +609,7 @@ def test_update_only_with_only_minimized_comments_is_skipped(monkeypatch, tmp_pa
         _HEAD,
         minimized={"IC_5"},
     )
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5"), PULLS_ARGV])
+    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV, _read("IC_5")])
     assert capsys.readouterr() == ("skipped\n", "")
 
 
@@ -688,36 +689,39 @@ def test_new_an_unparseable_post_response_warns_and_minimizes_nothing(
     ],
     ids=["moved", "head-failed", "null-head"],
 )
-def test_new_writes_nothing_when_the_head_check_stops(
-    monkeypatch, tmp_path, capsys, sleeps, head, head_fails, word, err
+@pytest.mark.parametrize("mode", ["--new", "--update-only"])
+def test_a_stopped_head_check_reads_no_visibility_and_writes_nothing(
+    monkeypatch, tmp_path, capsys, sleeps, mode, head, head_fails, word, err
 ):
-    """The head is read after the visibility read and before the POST. Mutations: skip
-    `_head_stop` under `--new` -- a POST and a minimize follow; under `--new`, write on
-    `head-failed` -- the `head-failed` and `null-head` rows post; skip the SHA check in
+    """The head is read after the listing and before the visibility read, so a stopped head
+    costs no GraphQL read. Mutations: read visibility before the head -- every row red; skip
+    `_head_stop` under `--new` -- the `--new` rows post and minimize; under `--new`, write on
+    `head-failed` -- the `--new` `head-failed` and `null-head` rows post; skip the SHA check in
     `_shipmate.pr_head` -- `null-head` prints `moved`."""
     code, calls = _upsert(
         monkeypatch,
         tmp_path,
         [_head(5, SUMMARY)],
-        "--new",
+        mode,
         "--head",
         _HEAD,
         head=head,
         head_fails=head_fails,
     )
     reads = 3 if head_fails else 1
-    assert (code, calls) == (0, [LIST_ARGV, _read("IC_5")] + [PULLS_ARGV] * reads)
+    assert (code, calls) == (0, [LIST_ARGV] + [PULLS_ARGV] * reads)
     assert sleeps == ([2, 5] if head_fails else [])
     assert capsys.readouterr() == (word + "\n", err)
 
 
 def test_new_with_a_matching_head_posts_then_minimizes(monkeypatch, tmp_path, capsys):
-    """The head is read after the visibility read and before the POST, and a match writes.
-    Mutation: skip the write under `--new` when `--head` is given -- no POST or minimize."""
+    """The head is read after the listing and before the visibility read and the POST, and a
+    match writes. Mutations: skip the write under `--new` when `--head` is given -- no POST or
+    minimize; read visibility before the head -- red."""
     code, calls = _upsert(monkeypatch, tmp_path, [_head(5, SUMMARY)], "--new", "--head", _HEAD)
     assert (code, calls) == (
         0,
-        [LIST_ARGV, _read("IC_5"), PULLS_ARGV, _post(tmp_path), _minimize("IC_5")],
+        [LIST_ARGV, PULLS_ARGV, _read("IC_5"), _post(tmp_path), _minimize("IC_5")],
     )
     assert capsys.readouterr() == ("created\n", "")
 
@@ -983,7 +987,7 @@ def test_summary_skipped_head_read_failure_fails_the_step(tmp_path):
     ("listing", "calls"),
     [
         ("", [_LIST, _PULLS, _post_of("held.md")]),
-        (_head(5, SUMMARY), [_LIST, _READ_5, _PULLS, _post_of("held.md"), _MINIMIZE_5]),
+        (_head(5, SUMMARY), [_LIST, _PULLS, _READ_5, _post_of("held.md"), _MINIMIZE_5]),
     ],
     ids=["no-comment", "existing"],
 )
@@ -992,7 +996,8 @@ def test_summary_held_posts_the_held_body(tmp_path, listing, calls):
     word as output `result`.
     Mutations: drop `--new` from the held write -- `existing` PATCHes; pass `--update-only` on
     the held write -- `no-comment` writes nothing; render without `SHIPMATE_COMMENT_MODE=held` --
-    no held body, and no write; drop the held branch's `result=` line -- no output."""
+    no held body, and no write; drop the held branch's `result=` line -- no output; read
+    visibility before the head -- `existing` red."""
     proc, recorded = _run_summary(tmp_path, "held", listing=listing + "\n")
     assert (proc.returncode, proc.stdout, proc.stderr, recorded) == (0, "", "", calls)
     assert (tmp_path / "held.md").read_text(encoding="utf-8") == _HELD_BODY
@@ -1104,7 +1109,7 @@ _POSTS = [_LIST, _PULLS, _post_of("comment.md")]
             "false",
             "false",
             _head(5, SUMMARY),
-            [_LIST, _READ_5, _PULLS, _patch_of(5, "comment.md")],
+            [_LIST, _PULLS, _READ_5, _patch_of(5, "comment.md")],
             "updated",
         ),
         (
@@ -1114,7 +1119,7 @@ _POSTS = [_LIST, _PULLS, _post_of("comment.md")]
             "false",
             "false",
             _head(5, SUMMARY),
-            [_LIST, _READ_5, _PULLS, _post_of("comment.md"), _MINIMIZE_5],
+            [_LIST, _PULLS, _READ_5, _post_of("comment.md"), _MINIMIZE_5],
             "created",
         ),
     ],
@@ -1142,7 +1147,7 @@ def test_summary_posts_unless_quiet_and_rewrites_a_visible_comment_when_quiet(
     `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED` clause (unmanaged red);
     delete the `LOST` clause (lost red); delete the `ON_DEMAND` clause (on-demand red); delete
     the `nothing-changed` clause (ordinary red); drop the posted branch's `result=` line (every
-    case red).
+    case red); read visibility before the head (both `existing` rows red).
     """
     proc, calls = _run_summary(
         tmp_path,

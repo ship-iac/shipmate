@@ -2398,7 +2398,7 @@ check/status/comment/issue that crosses a workflow-run boundary:
   shares its run id, so an earlier attempt's open check counts too. The run's
   own refresh then greens the gate once those checks are done.
 
-  One race stays open. A refresh already past its status read and before its
+  A race stays open. A refresh already past its status read and before its
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
   needs a plan `summary` cancelled while its run was not (for example at a full
   gate-writer queue for the head) while another writer of the head is past its
@@ -4304,8 +4304,9 @@ POST or final write that GitHub's secondary rate limit refuses waits 60 s and is
 the same way, at most three waits per script process (`docs/troubleshooting.md`). A final `pending` gate is followed
 by a refresh, unless this run published a queued apply check, which cannot be
 done yet, or found a behind cell, whose gate only a new plan lifts: when every apply check is already done (an apply's refresh ran before
-this write), the summary greens the gate itself. A failed refresh, or one
-refused by a hold, warns and leaves the `pending` standing.
+this write), the summary greens the gate itself. A failed refresh warns and
+leaves the `pending` standing until an apply refreshes it. A refresh refused by a
+hold warns that the gate is held: it stays `failure` until a new plan run rewrites it.
 
 A run with incomplete evidence publishes no apply check at all, changed or not: a
 plan job whose result is neither `success` nor `skipped`, or `skipped` while cells
