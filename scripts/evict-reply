@@ -23,7 +23,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, lock_who, one_line, run_annotated
+from _shipmate import _load, current_run_url, env_pr_number, lock_who, one_line, run_annotated
 
 sc = _load("summary-comment")
 rc = _load("reply-comment")
@@ -111,9 +111,7 @@ def _cells(name):
 
 
 def main():
-    pr = os.environ.get("PR_NUMBER", "")
-    if not is_pr_number(pr):
-        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr})")
+    pr = env_pr_number("PR_NUMBER")
     if sys.argv[1:] == ["--failed"]:
         env = os.environ["SHIPMATE_ENV"]
         _post(pr, failed(os.environ.get("SHIPMATE_EVICT_REFUSAL", ""), env), "failed")

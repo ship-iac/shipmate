@@ -245,3 +245,14 @@ def test_each_stacked_refusal_gets_its_reply(monkeypatch, posts, refusal, flag, 
     monkeypatch.setenv("SHIPMATE_EVICT_REFUSAL", refusal)
     _main(monkeypatch, [], argv=("evict-reply", flag))
     assert got == [("9", f"### shipmate unlock dev-eu\n\n{reply}\n\n{_HINT_FOOT}")]
+
+
+def test_a_malformed_pr_number_refuses_before_any_post(monkeypatch, posts):
+    """Mutation: read `SHIPMATE_PR_NUMBER` in `_shipmate.env_pr_number` whatever `name` says --
+    red (`got: ''`)."""
+    monkeypatch.setenv("PR_NUMBER", "012")
+    monkeypatch.delenv("SHIPMATE_PR_NUMBER", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, [_A])
+    assert exc.value.code == "::error::PR_NUMBER must be a pull request number (got: '012')"
+    assert posts[0] == []

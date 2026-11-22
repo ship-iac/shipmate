@@ -561,6 +561,16 @@ def is_pr_number(value):
     return _PR_NUMBER.fullmatch(value) is not None
 
 
+def env_pr_number(name="SHIPMATE_PR_NUMBER"):
+    """The environment variable `name`, refused unless `is_pr_number` accepts it: callers bind
+    it into an API path, and the apply record carries it, so the apply refuses a record whose
+    number is not the dispatch's own."""
+    value = os.environ.get(name, "")
+    if not is_pr_number(value):
+        raise SystemExit(f"::error::{name} must be a pull request number (got: {value!r})")
+    return value
+
+
 def is_run_id(value):
     """Whether `value` is a workflow run id: 1 to 20 digits, bounded because it is bound into a
     link."""

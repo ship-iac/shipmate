@@ -98,12 +98,20 @@ def test_an_unknown_outcome_exits_non_zero_and_prints_nothing():
     )
 
 
-def test_a_multi_line_pr_number_refusal_prints_one_escaped_annotation():
-    """`dispatch` hands `PR_NUMBER` through unvalidated, so its refusal goes through
-    `run_annotated`. Mutation: print the refusal to stderr and `sys.exit(1)` -- two raw lines."""
+@pytest.mark.parametrize(
+    ("pr", "got"),
+    [("4\n::warning::x", "'4\\n::warning::x'"), ("4%0A::warning::x", "'4%250A::warning::x'")],
+    ids=["newline", "escape"],
+)
+def test_a_pr_number_refusal_prints_one_escaped_annotation(pr, got):
+    """`dispatch` hands `PR_NUMBER` through unvalidated. Mutations: `{value}` for `{value!r}` in
+    `_shipmate.env_pr_number` -- `newline` red; print the refusal to stderr and `sys.exit(1)`
+    instead of `run_annotated` -- `escape` red."""
+    env = {**os.environ, "SHIPMATE_REPLY_OUTCOME": "refused", "PR_NUMBER": pr}
+    env.pop("SHIPMATE_PR_NUMBER", None)
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "reply-comment")],
-        env={**os.environ, "SHIPMATE_REPLY_OUTCOME": "refused", "PR_NUMBER": "4\n::warning::x"},
+        env=env,
         capture_output=True,
         encoding="utf-8",
         timeout=30,
@@ -111,7 +119,7 @@ def test_a_multi_line_pr_number_refusal_prints_one_escaped_annotation():
     assert (result.returncode, result.stdout, result.stderr) == (
         1,
         "",
-        "::error::PR_NUMBER must be a pull request number (got: 4%0A::warning::x)\n",
+        f"::error::PR_NUMBER must be a pull request number (got: {got})\n",
     )
 
 

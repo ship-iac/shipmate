@@ -39,7 +39,7 @@ import json
 import os
 import sys
 
-from _shipmate import decoded, deploy_mode, is_pr_number, run, run_annotated, write_retried
+from _shipmate import decoded, deploy_mode, env_pr_number, run, run_annotated, write_retried
 
 SUCCESS = {"status": "completed", "conclusion": "success"}
 
@@ -80,8 +80,6 @@ def read(path):
 
 
 def _merged(repo, pr):
-    if not is_pr_number(pr):
-        raise SystemExit(f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {pr!r})")
     return read(f"repos/{repo}/pulls/{pr}").get("merged") is True
 
 
@@ -98,7 +96,7 @@ def write(plan):
                 file=sys.stderr,
             )
             plan = [e for e in plan if _kept(e)]
-        elif pr and _merged(repo, pr):
+        elif pr and _merged(repo, env_pr_number()):
             print(
                 f"::notice::pull request #{pr} is merged; its merge deploy owns every apply check "
                 "this run did not apply",

@@ -59,18 +59,6 @@ APPLY_STEP = "Apply the cell"
 HELD_TITLE = "State not saved"
 
 
-def env_pr_number():
-    """`SHIPMATE_PR_NUMBER`, refused unless it is a decimal pull request number with no
-    leading zero: the apply record carries it, and the apply refuses a record whose number
-    is not the dispatch's own."""
-    value = os.environ.get("SHIPMATE_PR_NUMBER", "")
-    if not is_pr_number(value):
-        raise SystemExit(
-            f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {value!r})"
-        )
-    return value
-
-
 def check_name(stack, env):
     """The apply check's name, `apply / <env> / <stack>`; `parse_check_name` inverts it.
     The format changes only in a breaking release: after a merge, an open check's name is the

@@ -88,6 +88,7 @@ from _shipmate import (
     current_run_url,
     deploy_lock_remedy,
     deploy_mode,
+    env_pr_number,
     gh_json,
     holder_dispatch_runs,
     is_env_name,
@@ -1201,7 +1202,7 @@ def _verify_cmd(repo, _, run):
     where = f"`{env}` / `{stack}`"
     deploy = deploy_mode()
     # A push that merged no pull request deploys with pull request 0, which holds no lock.
-    pr = 0 if deploy and not os.environ.get("SHIPMATE_PR_NUMBER") else int(ag.env_pr_number())
+    pr = 0 if deploy and not os.environ.get("SHIPMATE_PR_NUMBER") else int(env_pr_number())
     if deploy:
         _verify_deploy(repo, pr, env, stack, where, run)
         _verify_earlier_attempts(repo, env, stack, where, run)
@@ -1251,7 +1252,7 @@ COMMANDS = {
 def main():
     if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
         raise SystemExit(f"::error::usage: cell-lock {{{'|'.join(COMMANDS)}}}")
-    pr = None if sys.argv[1] == "verify" else int(ag.env_pr_number())
+    pr = None if sys.argv[1] == "verify" else int(env_pr_number())
     # `_run` is looked up per call, so a test that replaces the module's `_run` reaches it.
     COMMANDS[sys.argv[1]](os.environ["GITHUB_REPOSITORY"], pr, _run)
 

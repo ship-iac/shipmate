@@ -861,3 +861,14 @@ def test_the_comment_link_names_the_repository_main_validated(monkeypatch):
         "[the apply run](<url>) for [this comment](https://github.com/o/r/pull/7#issuecomment-11)"
         " waits for [the apply run](<url>) of this pull request to finish."
     )
+
+
+def test_a_malformed_pr_number_refuses_before_any_read(gh, monkeypatch):
+    """Mutation: read `SHIPMATE_PR_NUMBER` in `_shipmate.env_pr_number` whatever `name` says --
+    red (`got: ''`)."""
+    monkeypatch.setenv("PR_NUMBER", "012")
+    monkeypatch.delenv("SHIPMATE_PR_NUMBER", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        gh.go()
+    assert exc.value.code == "::error::PR_NUMBER must be a pull request number (got: '012')"
+    assert (gh.job_reads, gh.cancels, gh.posts) == ([], [], [])

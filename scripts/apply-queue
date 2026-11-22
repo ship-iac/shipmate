@@ -39,7 +39,7 @@ from _shipmate import (
     _run,
     apply_runs,
     current_run_url,
-    is_pr_number,
+    env_pr_number,
     is_run_id,
     one_line,
     pr_head,
@@ -288,9 +288,7 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     if REPO_RE.fullmatch(repo) is None:
         sys.exit(f"::error::GITHUB_REPOSITORY is not a repository slug: {repo!r}")
-    pr, own = os.environ.get("PR_NUMBER", ""), os.environ["GITHUB_RUN_ID"]
-    if not is_pr_number(pr):
-        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr!r})")
+    pr, own = env_pr_number("PR_NUMBER"), os.environ["GITHUB_RUN_ID"]
     if not is_run_id(own):
         sys.exit(f"::error::GITHUB_RUN_ID must be a run id (got: {own!r})")
     slug = os.environ.get("SHIPMATE_APP_SLUG", "")

@@ -400,3 +400,16 @@ def test_a_rate_limited_read_waits_60_s_and_writes(monkeypatch, capsys, calls):
     assert [json.loads(s) for _, s in recorded] == [
         {"status": "queued", "output": {"title": "Not run", "summary": _SUMMARY}}
     ]
+
+
+def test_a_malformed_pr_number_refuses_before_any_read_or_write(monkeypatch, calls):
+    """Mutation: pass the unread `pr` to `_merged` instead of `env_pr_number()` -- red (the
+    pull request is read)."""
+    recorded, _, reads = calls
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "012")
+    with pytest.raises(SystemExit) as exc:
+        _main(monkeypatch, [_entry(1)])
+    assert exc.value.code == (
+        "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '012')"
+    )
+    assert (recorded, reads["calls"]) == ([], [])

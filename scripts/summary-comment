@@ -80,6 +80,7 @@ from _shipmate import (
     cell_summaries,
     command_data,
     current_run_url,
+    env_pr_number,
     event_action,
     evict_release,
     is_head_sha,
@@ -611,7 +612,7 @@ def render_section(line, plan_text, limit):
     # its check link rather than inline whatever small plan happens to fit.
     if plan_text is None or limit < MIN_PLAN_CHARS:
         return line
-    url = checks_tab_url(ag.env_pr_number())
+    url = checks_tab_url(env_pr_number())
     trailer = f"\n\n_Truncated; see the cell's apply check in [the Checks tab]({url})._\n</details>"
     return fold(line, diff_map(plan_text), limit, trailer, _head_lines)
 
