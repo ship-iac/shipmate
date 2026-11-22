@@ -2424,7 +2424,7 @@ requests this push may put behind` step logs why a pull request got no plan:
 | `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
 | `pull request #<n> was not re-planned: <failure>` | Its head's check runs could not be read. |
 | `the plan dispatch for pull request #<n> failed; comment shipmate plan on it to check it against the base` | The dispatch failed with no run started. |
-| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the dispatch step started (after the token mint), selection included, so no further dispatch began; the named pull requests were not reached. The budget shortens the job's hold on the consumer's deploy concurrency group (`deploy-main` in getting-started). It bounds when a dispatch may begin, not the hold: the job's 15-minute timeout caps its runtime once it starts, and time queued for a runner is not counted. |
+| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the dispatch step started (after the token mint), selection included, so no further dispatch began; the named pull requests were not reached. The budget shortens the run's hold on the consumer's deploy concurrency group (`deploy-main` in getting-started). It bounds when a dispatch may begin, not the hold: the job's 15-minute timeout caps its runtime once it starts, and time queued for a runner is not counted. |
 | `the plan dispatch for pull request #<n> answered with an error, so a plan may have started; check the Actions tab` | The dispatch failed with a server or network error. Look for a run titled `shipmate · plan pr=<n>` before commenting. |
 
 A draft, a pull request with no App apply check, and one whose checks name no
@@ -2440,9 +2440,10 @@ dispatched into it; that apply leaves the new plan's apply checks pending, so
 the gate stays pending until the pull request applies again.
 
 A failed `replan` job stays off the deploy run's conclusion, as a failed `warm`
-job does. Its 15-minute timeout caps the whole job: when it stops the job, the
-pull requests it had not reached get no plan and no warning. Comment `shipmate
-plan` on any open pull request the merge may have put behind.
+job does. Its 15-minute timeout caps its runtime once it starts; queued time is
+not counted. When it stops the job, the pull requests it had not reached get no
+plan and no warning. Comment `shipmate plan` on any open pull request the merge
+may have put behind.
 
 Comment `shipmate plan` on the pull request: its plan marks each cell the base
 changed behind. Until a plan runs, a cell the pull request already applied is
@@ -2625,8 +2626,8 @@ wording, with these remedies:
 ### `⚪ held, the base changed these stacks after this branch left it`
 
 The `auto` apply result comment carries ``⚪ held, the base changed these
-stacks after this branch left it, so their plans would revert that change:
-<cells>. Update the branch from the base and push.`` Its verdict counts them as
+stacks after this branch left it: <cells>. Update the branch from the base and
+push.`` Its verdict counts them as
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
 pending cells' stacks` when the run has no cell result rows at all.
 A cell another pull request also locks counts under `N locked` instead, and a
@@ -2634,18 +2635,17 @@ run with no cell result rows that holds a locked cell reads `⚪ nothing applied
 pending cells are locked or the base also changed their stacks`.
 
 The merge of the base into the branch changes those stacks, directly or
-through a module they source, or removes files in them, or a cell's apply check
+through a module they source, or removes files they own, or a cell's apply check
 records that its plan found the base changed its stack. A stack is not held for
 a base change the branch already holds. When the base edited a file in a stack
 the branch renamed, the stack is held, or refused as a conflict when git does
 not pair the rename; a base delete of that file, or a base rename of it to
-another path, is a merge conflict and refuses. Each
-plan was made on the branch's tree, so applying it would revert the base's
-change. The held cells stay pending, a cell that runs after one waits with the
-remedy `the base also changed it; update the branch from the base and push`
-(after a locked cell's remedy, the sentence `The base also changed it; update the
-branch from the base and push`), and the environments ordered after their environment by `needs` are skipped (next
-entry). The rest applied.
+another path, is a merge conflict and refuses. Each plan was made without the
+base's change. The held cells stay pending, a cell that runs after one waits
+with the remedy `the base also changed it; update the branch from the base and
+push` (after a locked cell's remedy, the sentence `The base also changed it;
+update the branch from the base and push`), and the environments ordered after
+their environment by `needs` are skipped (next entry). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
 its autoplan dispatches again. Commenting `shipmate apply` instead refuses over
@@ -2686,9 +2686,9 @@ refused: <n> cell(s) behind <base> (<stack> / <env>, ...); update the branch fro
 
 A bare or targeted `shipmate apply` checks every cell it would apply: the merge
 of the base into the branch changes its stack, directly or through a module it
-sources, or removes files in it, or its apply check records that its plan found
-the base changed it. Its plan was made on the branch's tree, so applying it
-would revert the base's change, and the whole run refuses. A cell of an
+sources, or removes files it owns, or its apply check records that its plan found
+the base changed it. Its plan was made without the base's change, so the whole
+run refuses. A cell of an
 environment the apply does not select (held for review, or `targeted` on a bare
 apply) is not checked.
 
@@ -2758,10 +2758,11 @@ An `auto` cell also refuses when:
   filter. Comment `shipmate apply`, or push.
 - `shipmate plan run <m> of this pull request is <status> and newer than plan
   run <n>, which this auto apply applies`: a `shipmate plan` of this pull request
-  created after the plan run is running while the wave waits: dispatched since
-  `detect`, missing from `detect`'s listing, or created after the plan run and
-  cancelled before its `detect`, then re-run. Wait for it to
-  finish, review its plan, then comment `shipmate apply`.
+  created at or after the plan run, with a greater id, has not completed while
+  the wave waits: dispatched since `detect`, missing from `detect`'s listing,
+  cancelled before its `detect` and re-run, or re-run after its `plan / detect`
+  failed or was skipped. Wait for it to finish, review its plan, then comment
+  `shipmate apply`.
 - `shipmate plan run <m> of this pull request planned after plan run <n>, which
   this auto apply applies`: such a plan ran and ended, its `plan / detect` job
   succeeded, while the wave waited. Review its plan, then comment `shipmate
@@ -2870,14 +2871,17 @@ observed a run under the block with the policy in place.
 
 The plan comment reads ``⏪ <stack> / <env> is behind <base>: ... changed it
 since this branch left it; a plan of this branch would revert that change.
-Update the branch from <base>.`` (or ``... the branch conflicts with <base>.``),
-the cell's apply check is queued as `Behind <base>: update the branch`, and the
-gate is `pending`, `<n> cell(s) behind <base>; update the branch from <base>`.
-With every changed cell behind, the verdict is `⏪ nothing planned: <n> cell(s)
-behind <base>`. The base changed the stack, or files it depends on such as a
-module it sources, after the branch left it, or the merge of the base into the branch conflicts, so the cell
-was not planned and no apply of the head reaches it. Update the branch from the
-base and push: the push plans the cell on the merged tree. A plan whose behind
+Update the branch from <base>.`` (or ``... merging <base> into this branch marks
+this stack as changed (base commits `<since7>..<tip7>`). Update the branch from
+<base>.``, or ``... the branch conflicts with <base>.``), the cell's apply check
+is queued as `Behind <base>: update the branch`, and the gate is `pending`,
+`<n> cell(s) behind <base>; update the branch from <base>`. With every changed
+cell behind, the verdict is `⏪ nothing planned: <n> cell(s) behind <base>`. The
+base changed the stack, files it depends on such as a module it sources, a
+`watch` file, or removed a whole stack nested in it, after the branch left it, or the merge of
+the base into the branch conflicts, so the cell was not planned and no apply of
+the head reaches it. Update the branch from the base and push: the push plans
+the cell on the merged tree. A plan whose behind
 report could not be read holds the gate with `the behind cells were not
 reported, so this run's evidence is unknown; re-plan before merging`; re-plan.
 

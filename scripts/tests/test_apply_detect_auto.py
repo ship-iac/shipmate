@@ -162,6 +162,7 @@ def _run_auto(
     plans=(),
     jobs=None,
     runs=(),
+    untagged=(),
 ):
     """main() with `SHIPMATE_AUTO` = `flag`, every GitHub and Terramate read stubbed. Defaults
     to one pending check per stack in `stacks` and env in `auto` and `other`, all recording plan run
@@ -170,10 +171,11 @@ def _run_auto(
     the read), `pulls` the successive pull request reads, `base_changed` the stacks the base
     changed (an exception raises from the read), `tip` the base branch ref's commit (an
     exception raises from the read). Each `gh api` path goes to `calls`, its whole argv to
-    `argv`, each sleep to `sleeps`, each `(base tip, sorted candidate stacks)` the overlap
-    detection is asked about to `base_reads`. `plans` is the `shipmate plan` listing's runs (an
-    exception raises from the read), `jobs` maps a run id to its jobs listing's body, and `runs`
-    answers whole paths (`_github`).
+    `argv`, each sleep to `sleeps`, each `(base tip, sorted candidate stacks, sorted stacks)` the
+    overlap detection is asked about to `base_reads`. `plans` is the `shipmate plan` listing's
+    runs (an exception raises from the read), `jobs` maps a run id to its jobs listing's body,
+    and `runs` answers whole paths (`_github`). `untagged` adds stacks to the tag map alone,
+    with no `env/*` tag and no check.
     Returns the parsed GITHUB_OUTPUT."""
     envs = [*auto, *other]
     out = tmp_path / "out"
@@ -220,7 +222,7 @@ def _run_auto(
         "env_membership",
         lambda all_stacks=False, base="", check_names=True: (
             tree,
-            {st: [] for st in stacks},
+            {st: [] for st in (*stacks, *untagged)},
         ),
     )
     stub_read_table(monkeypatch, [aad.bm.ec], base=_table(auto, other), order=order)
@@ -228,8 +230,8 @@ def _run_auto(
     monkeypatch.setattr(aad, "_sleep", (sleeps if sleeps is not None else []).append)
     reads = [] if base_reads is None else base_reads
 
-    def _base_changed(base_ref, candidates):
-        reads.append((base_ref, sorted(candidates)))
+    def _base_changed(base_ref, candidates, stacks):
+        reads.append((base_ref, sorted(candidates), sorted(stacks)))
         if isinstance(base_changed, BaseException):
             raise base_changed
         return set(base_changed)
@@ -296,7 +298,9 @@ def test_an_undetermined_decision_fails_before_any_read(tmp_path, monkeypatch):
 def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     """The action passes `false` for a bare apply, whose actor is no App bot.
 
-    Mutation: route on `os.environ.get("SHIPMATE_AUTO")` being non-empty -- the actor refuses."""
+    Mutation: route on `os.environ.get("SHIPMATE_AUTO")` being non-empty -- the actor refuses.
+    Mutation: pass the candidate stacks as `refuse_behind`'s `stacks` -- `stacks/idle` is
+    missing, red."""
     reads = []
     parsed = _run_auto(
         tmp_path,
@@ -305,12 +309,13 @@ def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
         actor="k3np",
         flag="false",
         base_reads=reads,
+        untagged=("stacks/idle",),
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu"), ("stacks/app", "stage")]
     assert "provenance_run" not in parsed
     assert detect_report()["held_cells"] == []
     assert "bare_envs" not in detect_report()
-    assert reads == [(BASE, ["stacks/app"])]
+    assert reads == [(BASE, ["stacks/app"], ["stacks/app", "stacks/idle"])]
 
 
 @pytest.mark.parametrize("actor", ["github-actions[bot]", "other-app[bot]", "shipmate-iac"])
@@ -583,7 +588,7 @@ def test_the_base_tip_is_the_branch_refs_not_the_pull_requests_base_sha(tmp_path
     the stale tip, red."""
     reads, tip = [], "c" * 40
     parsed = _run_auto(tmp_path, monkeypatch, base_reads=reads, tip=tip)
-    assert (reads, parsed["base_sha"]) == ([(tip, ["stacks/app"])], tip)
+    assert (reads, parsed["base_sha"]) == ([(tip, ["stacks/app"], ["stacks/app"])], tip)
 
 
 @pytest.mark.parametrize(
@@ -770,7 +775,9 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     Mutation: write `held_cells` with no overlap cell -- red.
     Mutation: test `c["environment"] in changed` in `overlap_cells` -- nothing is held, red.
     Mutation: print `len(locked)` for the notice's `overlap=` -- red.
-    Mutation: pass `base_changed_stacks` no candidate stacks (`set()`) -- red."""
+    Mutation: pass `base_changed_stacks` no candidate stacks (`set()`) -- red.
+    Mutation: pass the candidate stacks as `behind_cells`' `stacks` -- `stacks/idle` is missing,
+    red."""
     reads = []
     parsed = _run_auto(
         tmp_path,
@@ -780,6 +787,7 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
         order={"prod": ["dev-eu"]},
         base_changed={"stacks/app", "stacks/other"},
         base_reads=reads,
+        untagged=("stacks/idle",),
     )
     assert _applied(parsed) == [("stacks/dns", "dev-eu")]
     assert detect_report()["held_cells"] == [
@@ -787,7 +795,9 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
         {"stack": "stacks/app", "environment": "prod", "cause": "overlap"},
     ]
     assert detect_report()["skipped_envs"] == ["prod"]
-    assert reads == [(BASE, ["stacks/app", "stacks/dns"])]
+    assert reads == [
+        (BASE, ["stacks/app", "stacks/dns"], ["stacks/app", "stacks/dns", "stacks/idle"])
+    ]
     assert parsed["base_sha"] == BASE
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "

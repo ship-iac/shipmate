@@ -23,8 +23,8 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   every changed stack when the merge of main into the branch conflicts, is not
   planned: it is behind, its apply check reads `Behind <base>: update the
   branch`, the gate stays `pending`, and every pre-merge apply refuses or holds
-  it, since its plan would revert main's change. Update the branch from the base
-  and push to plan it.
+  it, since its plan was made without main's change. Update the branch from the
+  base and push to plan it.
 
 `shipmate / gate` is written on the PR head commit by `scripts/gate-status`,
 through `actions/summary` (the plan run) and `actions/gate-refresh` (the

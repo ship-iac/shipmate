@@ -109,11 +109,12 @@ def routed(answers, default):
 
 def stub_base_changed(monkeypatch, bm, changed=(), calls=None):
     """Stub `build-matrix` module `bm`'s `base_changed_stacks` to answer `changed` (raised when
-    it is an exception), appending each `(base tip, sorted candidate stacks)` to `calls`."""
+    it is an exception), appending each `(base tip, sorted candidate stacks, sorted stacks)` to
+    `calls`."""
 
-    def base_changed(base_ref, candidates):
+    def base_changed(base_ref, candidates, stacks):
         if calls is not None:
-            calls.append((base_ref, sorted(candidates)))
+            calls.append((base_ref, sorted(candidates), sorted(stacks)))
         if isinstance(changed, BaseException):
             raise changed
         return set(changed)

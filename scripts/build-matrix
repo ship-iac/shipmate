@@ -311,11 +311,11 @@ def _merge_env():
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")} | _MERGE_ENV
 
 
-def base_changed_stacks(base_ref, candidates):
+def base_changed_stacks(base_ref, candidates, stacks):
     """The stacks that the merge of `base_ref` into `HEAD` changes, directly or through a module
-    they source, or removes files in, so that a plan of them made on `HEAD` reverts the base's
-    change. Terramate's change detection runs once, on that merge (`git merge-tree`), committed
-    as a child of `HEAD` and checked out in a detached worktree, against `HEAD`. A base change
+    they source, or removes files they own. Terramate's change detection runs once, on that merge
+    (`git merge-tree`), committed as a child of `HEAD` and checked out in a detached worktree,
+    against `HEAD`. A base change
     the branch already holds changes nothing in the merge, so it holds no stack; a merged tree
     equal to `HEAD`'s returns before any commit or checkout. A base edit of a file the branch
     renamed is held at the new path, or refused as a conflict when git does not pair the rename
@@ -324,12 +324,14 @@ def base_changed_stacks(base_ref, candidates):
     file the branch renamed, or a base rename of it to another path. Nothing is merged when the
     base changed no file since the merge base.
 
-    Terramate lists only stacks the merge still has, so each stack path in `candidates` holding
-    a file the merge deletes or renames away from `HEAD`, read from `git diff --name-status`, is
-    added. Refuses as `merge_base` does when the merge base cannot be resolved, and on a failed
-    diff from the merge base to the base tip; a failed merge step, the diff from `HEAD` to the
-    merge included, refuses with its error. A `base_ref` the clone lacks, a tip the
-    base gained after the checkout, is fetched from `origin` first; a failed fetch refuses."""
+    Terramate lists only stacks the merge still has, so each stack of `candidates` that owns a
+    file the merge deletes or renames away from `HEAD`, read from `git diff --name-status`, is
+    added: `_inside`, judged against `stacks`, a collection of every stack path of the head, so a
+    deletion under a nested stack is the nested stack's alone. Refuses as `merge_base` does when
+    the merge base cannot be resolved, and on a failed diff from the merge base to the base tip;
+    a failed merge step, the diff from `HEAD` to the merge included, refuses with its error. A
+    `base_ref` the clone lacks, a tip the base gained after the checkout, is fetched from
+    `origin` first; a failed fetch refuses."""
     # S603/S607: fixed argvs, git from PATH as every other call here.
     present = ["git", "cat-file", "-e", f"{base_ref}^{{commit}}"]  # noqa: S607
     if subprocess.run(present, capture_output=True).returncode:  # noqa: S603
@@ -342,7 +344,7 @@ def base_changed_stacks(base_ref, candidates):
                 f"{_BASE_REMEDY}."
             )
     since = merge_base(base_ref, retry=_BASE_REMEDY)
-    return _merge_stacks(base_ref, candidates) if _diff_records(since, base_ref) else set()
+    return _merge_stacks(base_ref, candidates, stacks) if _diff_records(since, base_ref) else set()
 
 
 class MergeConflict(SystemExit):
@@ -350,7 +352,7 @@ class MergeConflict(SystemExit):
     `SystemExit`, so a caller that does not catch it refuses as on any other failure."""
 
 
-def _merge_stacks(base_ref, candidates):
+def _merge_stacks(base_ref, candidates, stacks):
     """`base_changed_stacks`' listing and its removed-file stacks: the merge of `base_ref` into
     `HEAD`, committed on `HEAD`, checked out in a detached worktree and listed against `HEAD`.
     A merge conflict refuses with git's conflict lines before the worktree is added, as
@@ -380,7 +382,7 @@ def _merge_stacks(base_ref, candidates):
             commit = ["git", *ident, "-c", "commit.gpgsign=false", "commit-tree", merged]
             sha = run([*commit, "-p", head, "-m", "overlay"]).strip()
             moved = _moved_from(_diff_records(head, sha))
-            gone = {s for s in candidates if any(_inside(x, s, candidates) for x in moved)}
+            gone = {s for s in candidates if any(_inside(x, s, stacks) for x in moved)}
             tree = tempfile.mkdtemp(prefix="shipmate-merge-")
             try:
                 add = ["git", "worktree", "add", "--quiet", "--detach", tree, sha]
@@ -412,8 +414,7 @@ def _stack_commits(since, tip, stack, stacks):
     """`(short sha, subject)` per commit of `since..tip` that touches `stack`'s own files, newest
     first: its directory less the directory of every other stack of `stacks` nested in it, so the
     root stack `.` holds the paths no other stack holds, as `_inside` reads them. Path limiting
-    compares trees, so the blobless clone fetches no blob for it. Every pathspec is literal, so a
-    stack path holding `[` or `*` names only itself."""
+    compares trees, so the blobless clone fetches no blob for it."""
     own = "." if stack == "." else f"{stack}/"
     nested = sorted(
         s for s in stacks if s not in (".", stack) and (own == "." or s.startswith(own))
@@ -429,18 +430,18 @@ def behind_report(base_ref, cells, stacks):
     cause `changed`, when `base_changed_stacks` returns its stack; when the merge of the tip into
     the head conflicts (`MergeConflict`), every cell is, cause `conflict`. Any other failure
     refuses. Each behind cell lists `shas`, up to `BEHIND_SHAS` commits of `since..tip` under
-    its stack's directory (`_stack_commits`, over `stacks`, every stack path), newest first, and
-    `more`, the count of the rest; `commits` maps exactly the listed shas to their subjects cut
-    to `SUBJECT_CAP` characters. `shas` is empty for a conflict and for a stack with no base
-    commit under its own files: a module it sources, a `watch` file or a deletion under a nested
-    stack's directory changed it. With no behind
-    cell `tip` and `since` are empty; no `cells` reads no tip."""
+    its stack's own files (not a nested stack's) (`_stack_commits`, over `stacks`, every stack
+    path), newest first, and `more`, the count of the rest; `commits` maps exactly the listed
+    shas to their subjects cut to `SUBJECT_CAP` characters. `shas` is empty for a conflict and
+    when no base commit touched the stack's own files: a module it sources, a `watch` file or
+    the removal of a whole stack nested in it changed it. With no behind cell `tip` and `since`
+    are empty; no `cells` reads no tip."""
     report = {"base": base_ref, "tip": "", "since": "", "commits": {}, "cells": []}
     if not cells:
         return report
     tip = ag.branch_tip(os.environ.get("GITHUB_REPOSITORY", ""), base_ref, run=_run)
     try:
-        changed = base_changed_stacks(tip, {c["stack"] for c in cells})
+        changed = base_changed_stacks(tip, {c["stack"] for c in cells}, stacks)
         held, cause = [c for c in cells if c["stack"] in changed], "changed"
     except MergeConflict:
         held, cause = list(cells), "conflict"
@@ -503,12 +504,14 @@ def _merge_tree_failure(p):
 
 
 def _inside(path, stack, stacks):
-    """Whether the repository-relative `path` lies in `stack`'s directory. git names no `./`
-    prefix, so the root stack `.` holds every path no other stack of `stacks` holds; a path of a
-    stack missing from `stacks` counts as the root's, a hold too many, never too few."""
-    if stack == ".":
-        return not any(path.startswith(f"{s}/") for s in stacks if s != ".")
-    return path.startswith(f"{stack}/")
+    """Whether the repository-relative `path` is `stack`'s own: in its directory and in no other
+    stack of `stacks` nested in it. git names no `./` prefix, so the root stack `.` holds every
+    path no other stack holds; a path of a stack missing from `stacks` counts as its nearest
+    listed parent's, a hold too many, never too few."""
+    own = "" if stack == "." else f"{stack}/"
+    return path.startswith(own) and not any(
+        path.startswith(f"{s}/") for s in stacks if s.startswith(own)
+    )
 
 
 def _diff_records(since, until):

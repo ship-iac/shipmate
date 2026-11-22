@@ -3535,9 +3535,8 @@ _ROW_COMMITS = (
     "branch would revert that change. Update the branch from main."
 )
 _ROW_MODULE = (
-    "⏪ stacks/net / prod is behind main: the base changed files this stack depends on in "
-    "`ddddddd..ccccccc` since this branch left it; a plan of this branch would revert that "
-    "change. Update the branch from main."
+    "⏪ stacks/net / prod is behind main: merging main into this branch marks this stack as "
+    "changed (base commits `ddddddd..ccccccc`). Update the branch from main."
 )
 _ROW_CONFLICT = (
     "⏪ stacks/app / dev-eu is behind main: the branch conflicts with main. Update the branch "
@@ -3553,7 +3552,9 @@ _BEHIND_FOOTER = "⏪ 3 cell(s) are not planned until the branch is updated from
 )
 def test_each_behind_cell_gets_its_row(i, row):
     """Mutations: change one word of each text -- red; render a subject raw -- the mention
-    fires, `commits` red; keep the revert clause on a conflict -- `conflict` red."""
+    fires, `commits` red; keep the revert clause on a conflict -- `conflict` red; keep the
+    revert clause on the row with no commit -- `module` red; drop the revert clause from the
+    row with commits -- `commits` red."""
     assert sc.behind_line(_BEHIND_REPORT["cells"][i], _BEHIND_REPORT) == row
 
 

@@ -221,10 +221,11 @@ def _md_name(s):
 def behind_line(row, report):
     """The `⏪` line of the behind cell `row` of the behind report `report`
     (`gate-state.behind_cells`): what changed its stack since the branch left the base (the
-    commits it lists, `; `-separated, and how many more; or, with none under its own files, the
-    range in which the base changed files it depends on (a module it sources, a `watch` file, a
-    deletion under a nested stack's directory);
-    or a conflict of the branch with the base) and the remedy, updating the branch from the base.
+    commits it lists, `; `-separated, and how many more, and that a plan of the branch would
+    revert them; or, with none under its own files, the `since..tip` range in which merging the
+    base marks the stack as changed (a module it sources, a `watch` file, the removal of a whole
+    stack nested in it), with no revert claim; or a conflict of the branch with the base) and
+    the remedy, updating the branch from the base.
     Author text (names, the base branch, commit subjects) is `_md_name`d."""
     base = _md_name(report["base"])
     where = f"{_md_name(row['stack'])} / {_md_name(row['environment'])}"
@@ -234,11 +235,16 @@ def behind_line(row, report):
         if row["shas"]:
             named = "; ".join(f"`{s}` {_md_name(report['commits'][s])}" for s in row["shas"])
             more = f" and {row['more']} more commit(s)" if row["more"] else ""
-            what = f"{named}{more} changed it"
+            what = (
+                f"{named}{more} changed it since this branch left it; a plan of this branch "
+                "would revert that change."
+            )
         else:
             span = f"{report['since'][:7]}..{report['tip'][:7]}"
-            what = f"the base changed files this stack depends on in `{span}`"
-        what += " since this branch left it; a plan of this branch would revert that change."
+            what = (
+                f"merging {base} into this branch marks this stack as changed "
+                f"(base commits `{span}`)."
+            )
     return f"⏪ {where} is behind {base}: {what} Update the branch from {base}."
 
 

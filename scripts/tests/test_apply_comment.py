@@ -2670,9 +2670,8 @@ def test_main_renders_the_lock_refusal_in_a_fence_over_the_cells_it_kept_from_ap
 
 #: The overlap line for `stacks/app` and `stacks/db` in `dev-eu`, hand-written.
 _OVERLAP_LINE = (
-    "⚪ held, the base changed these stacks after this branch left it, so their plans would "
-    "revert that change: stacks/app / dev-eu, stacks/db / dev-eu. Update the branch from the "
-    "base and push."
+    "⚪ held, the base changed these stacks after this branch left it: stacks/app / dev-eu, "
+    "stacks/db / dev-eu. Update the branch from the base and push."
 )
 
 
@@ -2689,9 +2688,8 @@ def test_the_overlap_line_escapes_every_name():
     Mutation: drop `_md_escape` from the overlap cell's environment -- red."""
     assert ac._footer_parts([], [], held_cells=[overlap_cell("s@org/team<1", "e<2")]) == [
         (
-            "⚪ held, the base changed these stacks after this branch left it, so their plans "
-            "would revert that change: s@<!-- -->org/team&lt;1 / e&lt;2. Update the branch from "
-            "the base and push."
+            "⚪ held, the base changed these stacks after this branch left it: "
+            "s@<!-- -->org/team&lt;1 / e&lt;2. Update the branch from the base and push."
         )
     ]
 
@@ -2777,9 +2775,8 @@ def test_a_run_whose_only_cell_is_locked_and_overlaps_the_base_names_both_causes
         + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
         "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
         "apply, auto and deploy runs have ended.\n"
-        "⚪ held, the base changed these stacks after this branch left it, so their plans would "
-        "revert that change: stacks/app / dev-eu. Update the branch from the base and push.\n\n"
-        + HINT
+        "⚪ held, the base changed these stacks after this branch left it: stacks/app / dev-eu. "
+        "Update the branch from the base and push.\n\n" + HINT
     )
 
 
@@ -2794,9 +2791,8 @@ def test_a_run_with_one_locked_cell_and_another_overlap_cell_names_both_causes()
         + "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then re-plan. "
         "If #12 has already merged or closed, comment `shipmate unlock dev-eu --evict` once #12's "
         "apply, auto and deploy runs have ended.\n"
-        "⚪ held, the base changed these stacks after this branch left it, so their plans would "
-        "revert that change: stacks/db / dev-eu. Update the branch from the base and push.\n\n"
-        + HINT
+        "⚪ held, the base changed these stacks after this branch left it: stacks/db / dev-eu. "
+        "Update the branch from the base and push.\n\n" + HINT
     )
 
 
@@ -2855,8 +2851,8 @@ _S5 = (
     "apply this run; see its line below)"
 )
 _OVL = (
-    "⚪ held, the base changed these stacks after this branch left it, so their plans would "
-    "revert that change: stacks/o / ovl. Update the branch from the base and push."
+    "⚪ held, the base changed these stacks after this branch left it: stacks/o / ovl. Update the "
+    "branch from the base and push."
 )
 _HELD_REMEDY_LINE = (
     "held: get an approving review, or resolve or dismiss a requested-changes review. "

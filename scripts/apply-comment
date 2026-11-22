@@ -713,8 +713,8 @@ def _overlap_lines(overlap):
         f"{sc._md_name(c['stack'])} / {sc._md_escape(c['environment'])}" for c in overlap
     )
     line = (
-        "⚪ held, the base changed these stacks after this branch left it, so their plans would "
-        f"revert that change: {cells}. {_OVERLAP_REMEDY.capitalize()}."
+        "⚪ held, the base changed these stacks after this branch left it: "
+        f"{cells}. {_OVERLAP_REMEDY.capitalize()}."
     )
     return [line]
 

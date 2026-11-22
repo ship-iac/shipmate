@@ -676,7 +676,9 @@ def _stub_overlap(monkeypatch, overlap, tip_reads):
         return "t" * 40
 
     monkeypatch.setattr(bm.ag, "branch_tip", branch_tip)
-    monkeypatch.setattr(bm, "base_changed_stacks", overlap or (lambda base_ref, candidates: set()))
+    monkeypatch.setattr(
+        bm, "base_changed_stacks", overlap or (lambda base_ref, candidates, stacks: set())
+    )
 
 
 def _run_main(
@@ -3432,7 +3434,7 @@ def test_base_changed_stacks_lists_head_stacks_wired_to_a_module_the_base_change
         return "stacks/s\n"
 
     seen = _merge_stub(monkeypatch, listing)
-    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+    assert bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"}) == {"stacks/s"}
     assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", head]]
     assert len(_git("worktree", "list").splitlines()) == 1
     assert _git("rev-parse", "HEAD").strip() == head
@@ -3454,7 +3456,7 @@ def test_base_changed_stacks_fetches_a_base_tip_the_clone_lacks(git_repo, monkey
     monkeypatch.setattr(
         bm, "_run", lambda args: "stacks/app\n" if args[0] == "terramate" else real(args)
     )
-    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+    assert bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"}) == {"stacks/app"}
 
 
 def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
@@ -3466,7 +3468,8 @@ def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
     Mutation: drop `| gone` from the return -- red.
     Mutation: drop `"R"` from the statuses -- `stacks/old` missing, red.
     Mutation: add the new path of a rename (`fields[i + 2]`) -- `stacks/old` missing, red.
-    Mutation: `p.startswith(s)` without the `/` -- `stacks/go` added, red.
+    Mutation: `path.startswith(stack)` for `path.startswith(own)` in `_inside` -- `stacks/go`
+    added, red.
     Mutation: step 2 fields past a rename (`i += 2`) -- `stacks/zed`, deleted after it in path
     order, missing, red."""
     files = {f"stacks/{s}/main.tf": f"{s}\n" for s in ("gone", "old", "kept", "zed")}
@@ -3480,7 +3483,11 @@ def test_base_changed_stacks_adds_candidate_stacks_the_base_deleted_or_renamed(
     real = bm._run
     monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
     candidates = {"stacks/gone", "stacks/old", "stacks/kept", "stacks/go", "stacks/zed"}
-    assert bm.base_changed_stacks(tip, candidates) == {"stacks/gone", "stacks/old", "stacks/zed"}
+    assert bm.base_changed_stacks(tip, candidates, candidates) == {
+        "stacks/gone",
+        "stacks/old",
+        "stacks/zed",
+    }
 
 
 def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_holds(
@@ -3488,7 +3495,8 @@ def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_hold
 ):
     """git reports `main.tf`, never `./main.tf`, so the root stack `.` is matched by exclusion.
 
-    Mutation: drop the `stack == "."` branch of `_inside` (`.` never matches, red). Mutation:
+    Mutation: `own = "./"` for the root in `_inside` (`.` never matches, red). Mutation:
+    `own = ""` for every stack (`stacks/app` excludes its own directory, red). Mutation:
     return True for `.` (a deletion inside `stacks/app` alone holds the root too, red)."""
     _commit({"main.tf": "root\n", "stacks/app/main.tf": "app\n", "stacks/app/x.tf": "x\n"}, "c")
     _git("checkout", "-q", "-b", "pr")
@@ -3499,8 +3507,53 @@ def test_base_changed_stacks_holds_the_root_stack_for_a_path_no_other_stack_hold
     _git("checkout", "-q", "pr")
     real = bm._run
     monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
-    assert bm.base_changed_stacks(only_app, {".", "stacks/app"}) == {"stacks/app"}
-    assert bm.base_changed_stacks(root_too, {".", "stacks/app"}) == {".", "stacks/app"}
+    assert bm.base_changed_stacks(only_app, {".", "stacks/app"}, {".", "stacks/app"}) == {
+        "stacks/app"
+    }
+    assert bm.base_changed_stacks(root_too, {".", "stacks/app"}, {".", "stacks/app"}) == {
+        ".",
+        "stacks/app",
+    }
+
+
+def _nested_base(deleted):
+    """`(merge base, base tip)` of a branch editing `infra` and its nested `infra/db`, and a base
+    deleting `deleted`."""
+    files = ("infra/main.tf", "infra/other.tf", "infra/db/main.tf", "infra/db/old.tf")
+    since = _commit({f: "x\n" for f in files}, "common")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"infra/main.tf": "pr\n", "infra/db/main.tf": "pr\n"}, "pr")
+    _git("checkout", "-q", "main")
+    tip = _commit({deleted: None}, "base")
+    _git("checkout", "-q", "pr")
+    return since, tip
+
+
+@pytest.mark.parametrize(
+    ("deleted", "candidates", "held"),
+    [
+        pytest.param("infra/db/old.tf", {"infra", "infra/db"}, {"infra/db"}, id="nested"),
+        pytest.param("infra/db/old.tf", {"infra"}, set(), id="nested-not-candidate"),
+        pytest.param("infra/other.tf", {"infra", "infra/db"}, {"infra"}, id="parent-own"),
+    ],
+)
+def test_base_changed_stacks_holds_the_nested_stack_for_a_file_deleted_under_it(
+    git_repo, monkeypatch, deleted, candidates, held
+):
+    """A file the base deletes under `infra/db` is that nested stack's, not `infra`'s, judged
+    against every stack of the head whether or not it is a candidate; a file of `infra` outside
+    `infra/db` stays `infra`'s.
+
+    Mutation: `return path.startswith(f"{stack}/")` for a non-root stack in `_inside` --
+    `nested` holds `infra` too, red.
+    Mutation: judge `gone` against `candidates` (`_inside(x, s, candidates)`) --
+    `nested-not-candidate` holds `infra`, red.
+    Mutation: drop the `if s.startswith(own)` filter in `_inside` -- `parent-own` holds nothing,
+    red."""
+    _, tip = _nested_base(deleted)
+    real = bm._run
+    monkeypatch.setattr(bm, "_run", lambda args: "" if args[0] == "terramate" else real(args))
+    assert bm.base_changed_stacks(tip, candidates, {"infra", "infra/db"}) == held
 
 
 @pytest.mark.parametrize(
@@ -3541,10 +3594,10 @@ def test_base_changed_stacks_holds_a_stack_the_branch_renamed(
 
     _merge_stub(monkeypatch, listing)
     if isinstance(held, set):
-        assert bm.base_changed_stacks(tip, {"stacks/b"}) == held
+        assert bm.base_changed_stacks(tip, {"stacks/b"}, {"stacks/a", "stacks/b"}) == held
         return
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/b"})
+        bm.base_changed_stacks(tip, {"stacks/b"}, {"stacks/a", "stacks/b"})
     assert e.value.code == held.format(head=head, tip=tip)
 
 
@@ -3578,7 +3631,7 @@ def test_base_changed_stacks_holds_nothing_when_the_branch_holds_the_base_change
     _commit({"modules/m/main.tf": "a\nB\nc\nd\nE\n", "stacks/s/mod.tf": "wire\n"}, "more")
     listed = _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
     seen = _spy_git(monkeypatch)
-    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+    assert bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"}) == set()
     assert listed == []
     assert ["git", "rev-parse", "HEAD"] in seen  # Not vacuous: the spy records.
     assert [a for a in seen if "commit-tree" in a or "worktree" in a] == []
@@ -3605,7 +3658,7 @@ def test_base_changed_stacks_holds_no_stack_for_a_removal_the_branch_holds(git_r
         return ""
 
     _merge_stub(monkeypatch, listing)
-    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+    assert bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"}) == set()
 
 
 def test_base_changed_stacks_refuses_a_failed_head_read_as_a_merge_step(git_repo, monkeypatch):
@@ -3624,7 +3677,7 @@ def test_base_changed_stacks_refuses_a_failed_head_read_as_a_merge_step(git_repo
     monkeypatch.setattr(bm, "run", run)
     monkeypatch.setattr(bm, "_run", lambda args: bm.run(args) if args[0] == "git" else "")
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/app"})
+        bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: fatal: bad "
         "HEAD. Update the branch from the base and push."
@@ -3660,7 +3713,7 @@ def test_base_changed_stacks_refuses_a_merge_conflict_before_any_worktree(git_re
     _git("checkout", "-q", "pr")
     seen = _spy_git(monkeypatch)
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/b"})
+        bm.base_changed_stacks(tip, {"stacks/b"}, {"stacks/a", "stacks/b"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: "
         f"CONFLICT (modify/delete): stacks/a/main.tf deleted in {head} and modified in {tip}.  "
@@ -3689,7 +3742,7 @@ def test_base_changed_stacks_raises_a_merge_conflict_as_its_own_type(git_repo, m
     Mutation: raise a plain `SystemExit` on a conflict -- the type, red."""
     head, tip = _conflicted(git_repo)
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/b"})
+        bm.base_changed_stacks(tip, {"stacks/b"}, {"stacks/a", "stacks/b"})
     assert type(e.value) is bm.MergeConflict
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: "
@@ -3722,7 +3775,7 @@ def test_base_changed_stacks_raises_any_other_merge_failure_as_a_plain_system_ex
     monkeypatch.setattr(bm, "run", lambda args, **kw: fail(args, real_run, **kw))
     monkeypatch.setattr(bm, "_run", lambda args: fail(args, real_bare))
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/app"})
+        bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
     assert type(e.value) is SystemExit
     cause = "fatal: bad diff" if step == "diff" else "fatal: no add"
     assert e.value.code == (
@@ -3754,7 +3807,7 @@ def test_base_changed_stacks_checks_the_merge_out_without_an_lfs_smudge(
         return "stacks/app\n"
 
     seen = _merge_stub(monkeypatch, listing)
-    assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+    assert bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"}) == {"stacks/app"}
     assert len(seen) == 1  # Not vacuous: the worktree was listed.
 
 
@@ -3787,13 +3840,13 @@ def test_base_changed_stacks_warns_on_a_failed_worktree_removal(
     _merge_stub(monkeypatch, listing)
     if isinstance(listed, BaseException):
         with pytest.raises(SystemExit) as e:
-            bm.base_changed_stacks(tip, {"stacks/app"})
+            bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
         assert e.value.code == (
             "::error::change detection on the merge of the base into the branch failed: Error: "
             "no list. Update the branch from the base and push."
         )
     else:
-        assert bm.base_changed_stacks(tip, {"stacks/app"}) == {"stacks/app"}
+        assert bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"}) == {"stacks/app"}
     assert capsys.readouterr().out == (
         f"::warning::could not remove the merge worktree {trees[0]} (command failed (1): git "
         "worktree remove | fatal: busy)\n"
@@ -3850,7 +3903,7 @@ def test_base_changed_stacks_refuses_a_file_added_under_a_renamed_directory(
     _git("checkout", "-q", "pr")
     _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/s"})
+        bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: "
         "CONFLICT (file location): modules/m/variables.tf added in "
@@ -3961,7 +4014,7 @@ def test_base_changed_stacks_ignores_a_runner_merge_driver(git_repo, monkeypatch
         return "stacks/s\n"
 
     seen = _merge_stub(monkeypatch, listing)
-    assert bm.base_changed_stacks(tip, {"stacks/s"}) == {"stacks/s"}
+    assert bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"}) == {"stacks/s"}
     assert seen == [["terramate", "-C", seen[0][2], "list", "--changed", "-B", head]]
 
 
@@ -3983,7 +4036,7 @@ def test_base_changed_stacks_ignores_an_inherited_attribute_source(git_repo, mon
     monkeypatch.setenv("GIT_ATTR_SOURCE", "attrs")
     _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/s"})
+        bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"})
     assert "CONFLICT (content): Merge conflict in modules/m/main.tf" in str(e.value.code)
 
 
@@ -4012,7 +4065,7 @@ def test_base_changed_stacks_refuses_a_failed_merge_with_its_stderr(git_repo, mo
     _merge_tree_answers(monkeypatch, lambda args: failed)
     _merge_stub(monkeypatch, lambda tree: "stacks/app\n")
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/app"})
+        bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: fatal: bad "
         "object x. Update the branch from the base and push."
@@ -4030,7 +4083,7 @@ def test_base_changed_stacks_runs_merge_tree_in_the_c_locale(git_repo, monkeypat
         monkeypatch, lambda args: subprocess.CompletedProcess(args, 1, "", "fatal: x\n")
     )
     with pytest.raises(SystemExit):
-        bm.base_changed_stacks(tip, {"stacks/app"})
+        bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
     assert len(calls) == 1
     env = calls[0].get("env") or {}
     assert env.get("LC_ALL") == "C"
@@ -4046,7 +4099,7 @@ def test_base_changed_stacks_refuses_a_merge_tree_that_printed_no_tree(git_repo,
     _merge_tree_answers(monkeypatch, lambda args: subprocess.CompletedProcess(args, 0, "", ""))
     seen = _merge_stub(monkeypatch, lambda tree: "stacks/app\n")
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/app"})
+        bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: git "
         "merge-tree printed no tree. Update the branch from the base and push."
@@ -4072,7 +4125,7 @@ def test_base_changed_stacks_refuses_when_the_merge_listing_fails(git_repo, monk
 
     _merge_stub(monkeypatch, listing)
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, {"stacks/app"})
+        bm.base_changed_stacks(tip, {"stacks/app"}, {"stacks/app"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: Error: "
         "duplicated ID found on stacks. Update the branch from the base and push."
@@ -4094,7 +4147,7 @@ def test_base_changed_stacks_lists_nothing_when_the_base_changed_nothing(git_rep
     _git("checkout", "-q", "pr")
     seen = _merge_stub(monkeypatch, lambda tree: "stacks/s\n")
     merges = _merge_tree_answers(monkeypatch, lambda args: pytest.fail("merge-tree ran"))
-    assert bm.base_changed_stacks(tip, {"stacks/s"}) == set()
+    assert bm.base_changed_stacks(tip, {"stacks/s"}, {"stacks/s"}) == set()
     assert seen == []
     assert merges == []
 
@@ -4108,7 +4161,7 @@ def test_base_changed_stacks_refuses_a_base_tip_it_cannot_fetch(git_repo, monkey
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
     missing = "f" * 40
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(missing, set())
+        bm.base_changed_stacks(missing, set(), set())
     assert e.value.code == (
         f"::error::could not fetch the base tip {missing} (fatal: 'origin' does not appear to be "
         "a git repository | fatal: Could not read from remote repository. | Please make sure you "
@@ -4128,7 +4181,7 @@ def test_base_changed_stacks_names_the_update_remedy_when_the_merge_base_fails(m
 
     monkeypatch.setattr(bm.subprocess, "run", run)
     with pytest.raises(SystemExit) as e:
-        bm.base_changed_stacks(tip, set())
+        bm.base_changed_stacks(tip, set(), set())
     assert e.value.code == (
         f"::error::could not resolve the merge base of the pull request's base {tip} and its "
         "head: fatal: bad object. Update the branch from the base and push; if it fails again, "
@@ -4504,6 +4557,38 @@ def test_behind_report_marks_every_changed_cell_on_a_conflict(git_repo, monkeypa
     }
 
 
+@pytest.mark.parametrize(
+    "cell_stacks",
+    [pytest.param(("infra", "infra/db"), id="both"), pytest.param(("infra",), id="parent")],
+)
+def test_behind_report_holds_the_nested_stack_for_a_file_deleted_under_it(
+    git_repo, monkeypatch, cell_stacks
+):
+    """The base deletes `infra/db/old.tf`; `infra/db` is nested in `infra`. Terramate 0.17.1
+    lists `infra/db` alone for that merge, which the listing double answers. Only `infra/db` is
+    behind, naming the deleting commit; with `infra`'s cell alone nothing is behind.
+
+    Mutation: `return path.startswith(f"{stack}/")` for a non-root stack in `_inside` -- an
+    `infra` row with no commit, `both` red.
+    Mutation: `behind_report` passes the cell stacks as `base_changed_stacks`' `stacks` -- an
+    `infra` row with no commit, `parent` red."""
+    since, tip = _nested_base("infra/db/old.tf")
+    _merge_stub(monkeypatch, lambda tree: "infra/db\n")
+    cells = _cells(*((s, "dev") for s in cell_stacks))
+    report = _report_at(monkeypatch, tip, cells, ("infra", "infra/db"))
+    if cell_stacks == ("infra",):
+        assert report == {"base": "main", "tip": "", "since": "", "commits": {}, "cells": []}
+        return
+    row = {"cause": "changed", "shas": [_short(tip)], "more": 0}
+    assert report == {
+        "base": "main",
+        "tip": tip,
+        "since": since,
+        "commits": {_short(tip): "base"},
+        "cells": [{"stack": "infra/db", "environment": "dev", **row}],
+    }
+
+
 def test_behind_report_refuses_a_base_tip_it_cannot_fetch(git_repo, monkeypatch):
     """A failed fetch is not a conflict: it refuses, so the gate holds rather than marking
     every cell behind.
@@ -4522,7 +4607,7 @@ def test_a_plan_with_no_changed_cell_reads_no_tip(monkeypatch, tmp_path):
     Mutation: read the tip before the empty check in `behind_report` -- a read, red."""
     tips, overlaps = [], []
 
-    def overlap(base_ref, candidates):
+    def overlap(base_ref, candidates, stacks):
         overlaps.append(candidates)
         return set()
 
@@ -4551,7 +4636,7 @@ def _behind_main(monkeypatch, tmp_path, cells=_BEHIND_CELLS, tips=None):
         cells=cells,
         head_sha="cafe1234",
         tip_reads=tips,
-        overlap=lambda base_ref, candidates: {"stacks/app"},
+        overlap=lambda base_ref, candidates, stacks: {"stacks/app"},
         merge_base=lambda base, retry=None: "s" * 40,
     )
 
