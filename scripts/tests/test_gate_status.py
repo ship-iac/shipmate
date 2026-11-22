@@ -1529,7 +1529,7 @@ def test_replan_retries_a_transient_listing_failure(in_process, monkeypatch, cap
 
 
 def test_replan_retries_a_transient_jobs_read(in_process, monkeypatch, capsys):
-    """Mutation: default `attempt_jobs`' `retry` to False -- the 502 cannot judge the run."""
+    """Mutation: pass `retry=False` at `_pages`' `gh_json` call -- the 502 cannot judge the run."""
     transient = SystemExit("command failed (1): gh api x\nHTTP 502")
     calls = _live_head(
         monkeypatch, runs=_row(9, "completed", "success"), jobs={9: [transient, _ZERO_CELL]}
@@ -1550,7 +1550,7 @@ def test_replan_retries_a_transient_jobs_read(in_process, monkeypatch, capsys):
 
 
 def test_replan_retries_a_transient_live_plan_read(in_process, monkeypatch, capsys):
-    """Mutation: default `other_live_plan_run`'s `retry` to False -- the 502 makes the listing
+    """Mutation: pass `retry=False` at `_pages`' `gh_json` call -- the 502 makes the listing
     incomplete."""
     calls = _live_head(monkeypatch, dispatched=[_dispatch(30, _PLAN_7)])
     listed = gs.run

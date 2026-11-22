@@ -6,6 +6,7 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build-matrix``.
 """
 
+import contextlib
 import functools
 import glob
 import importlib.util
@@ -241,6 +242,20 @@ def retried(call, before_retry=None):
         if before_retry:
             before_retry()
     return call()
+
+
+@contextlib.contextmanager
+def no_retries():
+    """While the block runs, `retried` calls once process-wide (it rebinds `RETRY_DELAYS`, so it
+    is not thread-safe): a transient failure raises at once, with no sleep or notice. The
+    rate-limit waits of `create_retried` are unchanged. The previous `RETRY_DELAYS` is restored
+    on exit, an exception included."""
+    global RETRY_DELAYS
+    saved, RETRY_DELAYS = RETRY_DELAYS, ()
+    try:
+        yield
+    finally:
+        RETRY_DELAYS = saved
 
 
 #: The wait before a rate-limited retry: gh's stderr carries no `Retry-After` header, and GitHub
@@ -621,17 +636,16 @@ _MAX_PAGES = 10
 JOB_PAGES = 40
 
 
-def _pages(path, field, run, *, counted=False, max_pages=_MAX_PAGES, retry=True):
+def _pages(path, field, run, *, counted=False, max_pages=_MAX_PAGES):
     """Every item of `field` across the pages of listing `path`, or None when a page fails, is
     malformed, or the listing runs past `max_pages` pages; the cause prints as one warning.
     With `counted`, also None unless every page advertises an int `total_count` equal to the
-    items returned: a listing that hides an item it counts is incomplete. `retry` is
-    `gh_json`'s, per page."""
+    items returned: a listing that hides an item it counts is incomplete."""
     items, totals = [], []
     for page in range(1, max_pages + 1):
         sep = "&" if "?" in path else "?"
         try:
-            body = gh_json(f"{path}{sep}per_page={_PAGE}&page={page}", run, retry=retry)
+            body = gh_json(f"{path}{sep}per_page={_PAGE}&page={page}", run)
         except (SystemExit, ValueError) as exc:
             cause = exc.code if isinstance(exc, SystemExit) else repr(exc)
             sys.stderr.write(f"::warning::{command_data(one_line(cause))}\n")
@@ -669,12 +683,12 @@ def _login(user):
     return user.get("login") if isinstance(user, dict) else None
 
 
-def _live_dispatch_runs(repo, workflow_file, run=None, *, counted=False, retry=True):
+def _live_dispatch_runs(repo, workflow_file, run=None, *, counted=False):
     """`(runs, complete)`: every run one `workflow_dispatch` listing of workflow
     `workflow_file` per `LIVE_RUN_STATUSES` value returns, every page, each as listed, once per
     id, ascending. `complete` is false when a page fails or is malformed, a listing is short of
     its `total_count` with `counted`, or a run fails `_listed_run` with `display_title` and
-    `event` (that run is left out). `retry` is `gh_json`'s. A run that changes
+    `event` (that run is left out). A run that changes
     status between listings can be missed, and so can one skipped by a page shift: another run
     leaving the listed status between two page reads moves it to an earlier page."""
     runs, complete = {}, True
@@ -684,7 +698,6 @@ def _live_dispatch_runs(repo, workflow_file, run=None, *, counted=False, retry=T
             "workflow_runs",
             run,
             counted=counted,
-            retry=retry,
         )
         if page is None:
             complete = False
@@ -749,16 +762,14 @@ def titled_runs(listed, verbs, pr_number):
     return matched, unparsed
 
 
-def live_plan_runs(repo, pr_number, run=None, *, counted=False, retry=True):
+def live_plan_runs(repo, pr_number, run=None, *, counted=False):
     """`(runs, complete)`: each live run of `SHIPMATE_WORKFLOW` that plans pull request
     `pr_number`, a str, any actor, as listed, ascending by id: titled `plan pr=<pr_number>`, or
     titled `shipmate · plan pr=<pr_number> ` and more that does not parse (a hand dispatch that
     names a `ref`, say). Any other unparsed title is ignored: with every actor counted, it says
-    nothing about this pull request. A run listed `completed` has ended. `complete`, `counted`
-    and `retry` are `_live_dispatch_runs`'."""
-    listed, complete = _live_dispatch_runs(
-        repo, SHIPMATE_WORKFLOW, run, counted=counted, retry=retry
-    )
+    nothing about this pull request. A run listed `completed` has ended. `complete` and
+    `counted` are `_live_dispatch_runs`'."""
+    listed, complete = _live_dispatch_runs(repo, SHIPMATE_WORKFLOW, run, counted=counted)
     listed = [r for r in listed if r.get("status") != "completed"]
     return _plans_of(listed, pr_number), complete
 
@@ -849,19 +860,17 @@ def live_push_runs(repo, sha, run=None):
     return sorted({(r["id"], r["run_attempt"]) for r in live}), True
 
 
-def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest", retry=True):
+def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest"):
     """Every job of run `run_id`'s latest attempt, or of every attempt with `job_filter="all"`, each
     as the API returns it, possibly none; or None when a page fails or is malformed or a job has
     no string `status` or `name`, so no caller sees a partial listing, or, with `counted`, when
-    `_pages` finds the count short. Each None prints its cause as one warning. `retry` is
-    `gh_json`'s."""
+    `_pages` finds the count short. Each None prints its cause as one warning."""
     jobs = _pages(
         f"repos/{repo}/actions/runs/{run_id}/jobs?filter={job_filter}",
         "jobs",
         run,
         counted=counted,
         max_pages=JOB_PAGES,
-        retry=retry,
     )
     if jobs is None:
         return None
@@ -874,19 +883,19 @@ def listed_jobs(repo, run_id, run=None, *, counted=False, job_filter="latest", r
     return jobs
 
 
-def run_jobs(repo, run_id, run=None, *, retry=True):
+def run_jobs(repo, run_id, run=None):
     """`(jobs, complete)`: `listed_jobs` counted, or `([], False)` when it is None or empty: a
     live run that lists no job is not read as idle, and a listing short of its `total_count` is
     not read as every job."""
-    jobs = listed_jobs(repo, run_id, run, counted=True, retry=retry)
+    jobs = listed_jobs(repo, run_id, run, counted=True)
     return (jobs, True) if jobs else ([], False)
 
 
-def attempt_jobs(repo, run_id, what, run=None, *, retry=True):
+def attempt_jobs(repo, run_id, what, run=None):
     """`(jobs, attempts)`: run `run_id`'s latest attempt's jobs (`run_jobs`) and the sorted run
     attempts they carry, each an int. Raises `ValueError` naming `what` when the listing is
     incomplete or a job's `run_attempt` is not an int."""
-    jobs, complete = run_jobs(repo, run_id, run, retry=retry)
+    jobs, complete = run_jobs(repo, run_id, run)
     if not complete:
         raise ValueError(f"the jobs of {what} could not be listed")
     attempts = sorted(
@@ -897,11 +906,11 @@ def attempt_jobs(repo, run_id, what, run=None, *, retry=True):
     return jobs, attempts
 
 
-def other_live_plan_run(repo, pr_number, own, run=None, *, counted=False, retry=True):
+def other_live_plan_run(repo, pr_number, own, run=None, *, counted=False):
     """The lowest-id live plan run of pull request `pr_number` (`live_plan_runs`) whose id is not
     `own`, a str, or None. Raises `ValueError` when the listing is incomplete: a run it missed
     may be one."""
-    runs, complete = live_plan_runs(repo, pr_number, run, counted=counted, retry=retry)
+    runs, complete = live_plan_runs(repo, pr_number, run, counted=counted)
     if not complete:
         raise ValueError(
             f"the live shipmate plan runs of pull request #{pr_number} could not be listed"
