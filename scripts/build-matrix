@@ -413,8 +413,9 @@ SUBJECT_CAP = 72
 def _stack_commits(since, tip, stack, stacks):
     """`(short sha, subject)` per commit of `since..tip` that touches `stack`'s own files, newest
     first: its directory less the directory of every other stack of `stacks` nested in it, so the
-    root stack `.` holds the paths no other stack holds, as `_inside` reads them. Path limiting
-    compares trees, so the blobless clone fetches no blob for it."""
+    root stack `.` holds the paths no other stack holds, as `_inside` reads them. Pathspecs are
+    `literal`, so git reads each stack path as a path, never as a glob. Path limiting compares
+    trees, so the blobless clone fetches no blob for it."""
     own = "." if stack == "." else f"{stack}/"
     nested = sorted(
         s for s in stacks if s not in (".", stack) and (own == "." or s.startswith(own))
