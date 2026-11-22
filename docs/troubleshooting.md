@@ -2424,7 +2424,7 @@ requests this push may put behind` step logs why a pull request got no plan:
 | `could not select the open pull requests to re-plan, so none was re-planned after this push` | The open pull requests could not be listed; the line above it names the failure. |
 | `pull request #<n> was not re-planned: <failure>` | Its head's check runs could not be read. |
 | `the plan dispatch for pull request #<n> failed; comment shipmate plan on it to check it against the base` | The dispatch failed with no run started. |
-| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the dispatch step started (after the token mint), selection included, so no further dispatch began; the named pull requests were not reached. The budget shortens the job's hold on the consumer's deploy concurrency group (`deploy-main` in getting-started). It bounds when a dispatch may begin, not the hold: the job's 15-minute timeout caps its runtime once it starts, and time queued for a runner is not counted. |
+| `not re-planned: the re-plan budget of 10 minutes is spent; comment shipmate plan on #<n>, ...` | 10 minutes passed since the dispatch step started (after the token mint), selection included, so no further dispatch began; the named pull requests were not reached. The budget shortens the run's hold on the consumer's deploy concurrency group (`deploy-main` in getting-started). It bounds when a dispatch may begin, not the hold: the job's 15-minute timeout caps its runtime once it starts, and time queued for a runner is not counted. |
 | `the plan dispatch for pull request #<n> answered with an error, so a plan may have started; check the Actions tab` | The dispatch failed with a server or network error. Look for a run titled `shipmate · plan pr=<n>` before commenting. |
 
 A draft, a pull request with no App apply check, and one whose checks name no
@@ -2440,9 +2440,10 @@ dispatched into it; that apply leaves the new plan's apply checks pending, so
 the gate stays pending until the pull request applies again.
 
 A failed `replan` job stays off the deploy run's conclusion, as a failed `warm`
-job does. Its 15-minute timeout caps the whole job: when it stops the job, the
-pull requests it had not reached get no plan and no warning. Comment `shipmate
-plan` on any open pull request the merge may have put behind.
+job does. Its 15-minute timeout caps its runtime once it starts; queued time is
+not counted. When it stops the job, the pull requests it had not reached get no
+plan and no warning. Comment `shipmate plan` on any open pull request the merge
+may have put behind.
 
 Comment `shipmate plan` on the pull request: its plan marks each cell the base
 changed behind. Until a plan runs, a cell the pull request already applied is
@@ -2757,10 +2758,11 @@ An `auto` cell also refuses when:
   filter. Comment `shipmate apply`, or push.
 - `shipmate plan run <m> of this pull request is <status> and newer than plan
   run <n>, which this auto apply applies`: a `shipmate plan` of this pull request
-  created after the plan run is running while the wave waits: dispatched since
-  `detect`, missing from `detect`'s listing, or created after the plan run and
-  cancelled before its `detect`, then re-run. Wait for it to
-  finish, review its plan, then comment `shipmate apply`.
+  created at or after the plan run, with a greater id, has not completed while
+  the wave waits: dispatched since `detect`, missing from `detect`'s listing,
+  cancelled before its `detect` and re-run, or re-run after its `plan / detect`
+  failed or was skipped. Wait for it to finish, review its plan, then comment
+  `shipmate apply`.
 - `shipmate plan run <m> of this pull request planned after plan run <n>, which
   this auto apply applies`: such a plan ran and ended, its `plan / detect` job
   succeeded, while the wave waited. Review its plan, then comment `shipmate

@@ -187,11 +187,9 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
-  # Re-plans the open pull requests this push may put behind. Display-only: it runs after a failed
-  # gate write or lock release, and `continue-on-error` keeps its failure off the run's
-  # conclusion. Its work grows with the open pull requests, so it takes the consumer's runner. The
-  # action begins no dispatch once its 10-minute budget is spent; this timeout caps the whole job,
-  # including a selection or a call too slow for the budget to stop.
+  # Re-plans the open pull requests this push may put behind; display-only (`continue-on-error`).
+  # It takes the consumer's runner, as its work grows with the open pull requests. The timeout caps
+  # its runtime from start, not queue (CONTRACT.md §Plan comment, Re-plan after a merge).
   replan:
     needs: [detect, summary]
     if: ${{ !cancelled() }}
