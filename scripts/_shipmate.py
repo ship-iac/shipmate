@@ -246,9 +246,10 @@ def retried(call, before_retry=None):
 
 @contextlib.contextmanager
 def no_retries():
-    """Within the block, `retried` calls once: a transient failure raises at once, with no sleep
-    or notice. The rate-limit waits of `create_retried` are unchanged. The previous
-    `RETRY_DELAYS` is restored on exit, an exception included."""
+    """While the block runs, `retried` calls once process-wide (it rebinds `RETRY_DELAYS`, so it
+    is not thread-safe): a transient failure raises at once, with no sleep or notice. The
+    rate-limit waits of `create_retried` are unchanged. The previous `RETRY_DELAYS` is restored
+    on exit, an exception included."""
     global RETRY_DELAYS
     saved, RETRY_DELAYS = RETRY_DELAYS, ()
     try:

@@ -670,6 +670,7 @@ def test_post_refuses_an_id_that_is_not_a_run_id(slept, monkeypatch, capsys):
 def test_main_restores_the_retry_delays_when_it_raises(slept):
     """Other code in the process retries again. Mutation: restore `RETRY_DELAYS` after the
     `yield` instead of in `finally` -- the usage error leaves it ()."""
+    before = _shipmate.RETRY_DELAYS
     with pytest.raises(SystemExit):
         ra.main(["nope"])
-    assert _shipmate.RETRY_DELAYS == (2, 5)
+    assert _shipmate.RETRY_DELAYS is before
