@@ -266,15 +266,15 @@ def sealed(path):
 
 USAGE = (
     "usage: plan-crypt require | plan-crypt {encrypt|decrypt|sealed} <file> | "
-    "plan-crypt {encrypt-state|decrypt-state} <file> <cache-key>"
+    "plan-crypt decrypt-state <file> <cache-key>"
 )
 
 
 def main(argv):
     if argv[1:] == ["require"]:
         _require_encryption_key()
-    elif len(argv) == 4 and argv[1] in ("encrypt-state", "decrypt-state"):
-        (encrypt_state if argv[1] == "encrypt-state" else decrypt_state)(argv[2], argv[3])
+    elif len(argv) == 4 and argv[1] == "decrypt-state":
+        decrypt_state(argv[2], argv[3])
     elif len(argv) == 3 and argv[1] in ("encrypt", "decrypt", "sealed"):
         {"encrypt": encrypt, "decrypt": decrypt, "sealed": sealed}[argv[1]](argv[2])
     else:

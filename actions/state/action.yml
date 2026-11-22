@@ -11,7 +11,7 @@ inputs:
     description: >-
       `restore` (before plan or apply) decrypts the newest entry under the stack and environment's
       prefix. `save` saves the file at `path` as it is, which must already be sealed with
-      `plan-crypt encrypt-state` under this key's prefix, then looks the entry up. `lookup` only
+      `plan-crypt`'s `encrypt_state` under this key's prefix, then looks the entry up. `lookup` only
       looks up the exact key and never saves.
     required: true
   path:
