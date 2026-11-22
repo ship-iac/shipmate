@@ -625,7 +625,7 @@ def gate_line(state, target_url):
         "context": "shipmate / gate",
         "state": state,
         "target_url": target_url,
-        "creator": json.loads(GATE_USER)["id"],
+        "creator": 306306466,
     }
     return json.dumps(status) + "\n"
 

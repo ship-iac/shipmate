@@ -403,8 +403,8 @@ def test_a_rate_limited_read_waits_60_s_and_writes(monkeypatch, capsys, calls):
 
 
 def test_a_malformed_pr_number_refuses_before_any_read_or_write(monkeypatch, calls):
-    """Mutation: pass the unread `pr` to `_merged` instead of `env_pr_number()` -- red (the
-    pull request is read)."""
+    """Mutation: bind `pr` to the raw `SHIPMATE_PR_NUMBER` instead of `env_pr_number()` in
+    `write` -- red (the pull request is read)."""
     recorded, _, reads = calls
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "012")
     with pytest.raises(SystemExit) as exc:

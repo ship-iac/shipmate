@@ -88,7 +88,7 @@ def write(plan):
     repo = os.environ["GITHUB_REPOSITORY"]
     if not deploy_mode():
         attempt = os.environ["GITHUB_RUN_ATTEMPT"]
-        pr = os.environ.get("SHIPMATE_PR_NUMBER", "")
+        pr = env_pr_number() if os.environ.get("SHIPMATE_PR_NUMBER") else ""
         if attempt != "1":
             print(
                 f"::notice::run attempt {attempt} of a pre-merge apply writes only its successes "
@@ -96,7 +96,7 @@ def write(plan):
                 file=sys.stderr,
             )
             plan = [e for e in plan if _kept(e)]
-        elif pr and _merged(repo, env_pr_number()):
+        elif pr and _merged(repo, pr):
             print(
                 f"::notice::pull request #{pr} is merged; its merge deploy owns every apply check "
                 "this run did not apply",
