@@ -221,8 +221,8 @@ def test_a_deferred_newest_autoplan_yields_to_the_older_run(slept, monkeypatch, 
 
 
 def test_the_deferred_run_read_is_not_retried(slept, monkeypatch, capsys):
-    """Mutation: drop `retry` at `newest_autoplan`'s `_deferred_run` call -- run 12's jobs are
-    read twice after a sleep and run 9 prints."""
+    """Mutation: drop `with no_retries()` from `main` -- run 12's jobs are read twice after a
+    sleep and run 9 prints."""
     calls = stub(
         monkeypatch,
         autoplans=[autoplan(9), autoplan(12, conclusion="success")],
@@ -565,10 +565,8 @@ _TRANSIENT_WARNING = "::warning::command failed (1): gh api x | HTTP 502\n"
 )
 def test_decide_retries_no_read(slept, monkeypatch, capsys, site, stderr, calls):
     """The summary holds the head's gate-writer group, so a read fails once into a notice.
-    Mutations, each reddening its case: pass `retry=True` (or drop the pass-through at
-    `newest_autoplan`'s `autoplan_runs` call) -- autoplans; in `other_live_plan_run` -- live;
-    in `attempt_jobs` -- jobs; in the artifacts `_pages` -- artifacts; in `_engine_sha` --
-    autoplan-run. Each reads the site twice after a sleep and prints the run id."""
+    Mutation: drop `with no_retries()` from `main` -- every case reads its site twice after a
+    sleep and prints the run id."""
     got = stub(monkeypatch, fail=[(site, SystemExit(_TRANSIENT))])
     assert (cli("decide"), capsys.readouterr(), got, slept) == (0, ("", stderr), calls, [])
 
@@ -629,8 +627,8 @@ def test_post_sends_nothing_when_a_run_appeared_since_decide(slept, monkeypatch,
 def test_post_sends_nothing_over_an_incomplete_listing(
     slept, monkeypatch, capsys, dispatched, fail, warning
 ):
-    """Mutations: re-read without `counted` -- short-count sends the POST; with `retry=True` --
-    transient re-reads and sends the POST."""
+    """Mutations: re-read without `counted` -- short-count sends the POST; drop `with no_retries()`
+    from `main` -- transient re-reads and sends the POST."""
     calls = stub(monkeypatch, dispatched=dispatched, fail=fail)
     assert (cli("post", "9"), capsys.readouterr(), calls, slept) == (
         0,
@@ -667,3 +665,11 @@ def test_post_refuses_an_id_that_is_not_a_run_id(slept, monkeypatch, capsys):
         ("", "::error::<id> must be a decimal run id (got: '9/x')\n"),
         [],
     )
+
+
+def test_main_restores_the_retry_delays_when_it_raises(slept):
+    """Other code in the process retries again. Mutation: restore `RETRY_DELAYS` after the
+    `yield` instead of in `finally` -- the usage error leaves it ()."""
+    with pytest.raises(SystemExit):
+        ra.main(["nope"])
+    assert _shipmate.RETRY_DELAYS == (2, 5)

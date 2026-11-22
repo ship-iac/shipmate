@@ -57,6 +57,7 @@ from _shipmate import (
     gh_json,
     is_head_sha,
     is_run_id,
+    no_retries,
     one_line,
     other_live_plan_run,
     run,
@@ -92,7 +93,7 @@ def _cause(exc):
 
 def _other_plan(repo, pr):
     """Row 3's reason, or None."""
-    r = other_live_plan_run(repo, pr, os.environ["GITHUB_RUN_ID"], run, counted=True, retry=False)
+    r = other_live_plan_run(repo, pr, os.environ["GITHUB_RUN_ID"], run, counted=True)
     if r is None:
         return None
     return f"shipmate plan run {r['id']} of pull request #{pr} is {status_text(r.get('status'))}"
@@ -101,7 +102,7 @@ def _other_plan(repo, pr):
 def _engine_sha(repo, run_id, engine):
     """The `sha` of run `run_id`'s one `referenced_workflows` entry for the engine's `plan.yml`,
     or None."""
-    refs = gh_json(f"repos/{repo}/actions/runs/{run_id}", run, retry=False)["referenced_workflows"]
+    refs = gh_json(f"repos/{repo}/actions/runs/{run_id}", run)["referenced_workflows"]
     # GitHub matches `<owner>/<repo>` in any case, and `job.workflow_repository` need not
     # spell it as the caller's `uses:` does.
     want = (engine.lower(), ".github/workflows/plan.yml")
@@ -127,7 +128,7 @@ def _failed_cells(jobs, cells):
 
 def _jobs_reason(repo, newest, what, cells):
     """Rows 4 to 7: the failed planned cells, or the first failing row's reason, a str."""
-    jobs, attempts = attempt_jobs(repo, newest["id"], what, run, retry=False)
+    jobs, attempts = attempt_jobs(repo, newest["id"], what, run)
     if attempts != [newest["run_attempt"]]:
         return f"{what} is listed at attempt {newest['run_attempt']!r} and its jobs at {attempts}"
     if not ag.planned(jobs):
@@ -140,9 +141,7 @@ def _jobs_reason(repo, newest, what, cells):
 
 def _uploaded(repo, rid, what, failed):
     """Row 8's reason, or None."""
-    artifacts = _pages(
-        f"repos/{repo}/actions/runs/{rid}/artifacts", "artifacts", run, counted=True, retry=False
-    )
+    artifacts = _pages(f"repos/{repo}/actions/runs/{rid}/artifacts", "artifacts", run, counted=True)
     if artifacts is None:
         return f"the artifacts of {what} could not be listed"
     names = {a.get("name") for a in artifacts}
@@ -157,7 +156,7 @@ def _uploaded(repo, rid, what, failed):
 def _reason(repo, head, pr, cells, engine, ours):
     """Rows 1 to 9 in order: `(run id, None)` when every row holds, else `(None, the first
     failing row's reason)`."""
-    newest = ag.newest_autoplan(repo, head, run=run, retry=False)
+    newest = ag.newest_autoplan(repo, head, run=run)
     if newest is None:
         return None, f"no autoplan run of {head} is listed"
     rid = newest["id"]
@@ -235,12 +234,13 @@ def post(rid):
 
 
 def main(argv):
-    if argv == ["decide"]:
-        decide()
-    elif len(argv) == 2 and argv[0] == "post":
-        post(argv[1])
-    else:
-        raise SystemExit(f"::error::usage: rerun-autoplan decide | post <id> (got {argv})")
+    with no_retries():
+        if argv == ["decide"]:
+            decide()
+        elif len(argv) == 2 and argv[0] == "post":
+            post(argv[1])
+        else:
+            raise SystemExit(f"::error::usage: rerun-autoplan decide | post <id> (got {argv})")
 
 
 if __name__ == "__main__":
