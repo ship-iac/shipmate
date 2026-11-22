@@ -40,7 +40,7 @@ _DETECT_NEEDS = ["review"]
 
 #: The whole `review` job minus its steps, hand-written. No `if:` is part of the value, and the
 #: App key reaches the job only through `shipmate-engine`, whose branch policy admits the default
-#: branch alone. An unmapped output arrives empty, which detect holds everything on.
+#: branch alone. An unmapped output arrives empty, on which detect fails every apply form.
 _REVIEW_JOB = {
     "runs-on": "ubuntu-slim",
     "environment": ENGINE_ENVIRONMENT,

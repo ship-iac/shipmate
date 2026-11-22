@@ -278,6 +278,21 @@ def test_an_unreviewed_pull_request_applies_the_review_exempt_auto_environment(
     assert detect_report()["applied_exempt_envs"] == ["dev-eu"]
 
 
+def test_an_undetermined_decision_fails_before_any_read(tmp_path, monkeypatch):
+    """Mutation: call `refuse_undetermined` only when `not auto` -- `dev-eu` is held and the
+    run succeeds, red. Mutation: call it after `refuse_actor` -- `calls`, red."""
+    calls = []
+    with pytest.raises(SystemExit) as exc:
+        _run_auto(tmp_path, monkeypatch, decision="", calls=calls)
+    assert exc.value.code == (
+        "::error::not authorized: could not determine the PR's review decision (got ''); the "
+        "apply run's `review` job passed `detect` no decision this engine knows; check the "
+        "pinned engine version, then retry."
+    )
+    assert type(exc.value) is SystemExit
+    assert calls == []
+
+
 def test_the_bare_form_runs_when_the_flag_is_false(tmp_path, monkeypatch):
     """The action passes `false` for a bare apply, whose actor is no App bot.
 

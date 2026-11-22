@@ -881,10 +881,9 @@ def _footer_parts(
     listed once, on its held line, with its `shipmate apply <env>` command: once
     reviewed, a bare `shipmate apply` still leaves it pending. A held env that
     is not targeted names no command. The held lines are also cause-agnostic --
-    three decisions hold (REVIEW_REQUIRED on a `review: true` env, CHANGES_REQUESTED,
-    and an unknown or absent decision) and only the run's own detect notice
-    carries which one, since the decision never reaches this renderer; the
-    `held:` line names every remedy and points there."""
+    two decisions hold (REVIEW_REQUIRED on a `review: true` env, and CHANGES_REQUESTED)
+    and only the run's own detect notice carries which one, since the decision never
+    reaches this renderer; the `held:` line names every remedy and points there."""
     d = _dispositions(excluded, skipped, held, waiting, held_cells, skipped_after, bare)
     return _grouped_lines(d) if compact else _per_env_lines(d)
 

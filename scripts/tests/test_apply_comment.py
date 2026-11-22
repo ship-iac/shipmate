@@ -557,7 +557,7 @@ def test_the_footer_lines_of_the_all_environments_form():
     """One line per environment, in order: targeted, skipped, held, then the `held:` remedy. A
     held targeted env is listed once, on its held line, with the targeted command a bare apply
     never replaces; a held env that is not targeted names none. The held line names no single
-    cause (three decisions hold). No gate line: the `shipmate / gate` status shows that.
+    cause (two decisions hold). No gate line: the `shipmate / gate` status shows that.
 
     Mutation: `needs an approving review` in the held line -- red.
     Mutation: list every `excluded` env on a targeted line -- `sbx` appears twice, red.

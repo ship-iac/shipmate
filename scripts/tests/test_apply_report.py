@@ -265,6 +265,39 @@ def test_an_unread_report_of_a_failed_run_reads_failed(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("auto", "auto_line"),
+    [
+        pytest.param("", "", id="bare"),
+        pytest.param("true", "dispatched as an `apply_mode: auto` apply\n\n", id="auto"),
+    ],
+)
+def test_an_undetermined_review_decision_reads_failed_with_no_review_remedy(
+    monkeypatch, tmp_path, auto, auto_line
+):
+    """A bare or `auto` apply whose review decision never arrived fails in detect with plain
+    `SystemExit`: no `refused_by_rule`, and the report is the empty one its job wrote.
+
+    Mutation: render `refused` for any non-empty refusal in `main` -- `🔴 refused`, red.
+    Mutation: `fence = ""` -- red. Mutation: `auto_line = ""` -- the `auto` row, red."""
+    env = {
+        "SHIPMATE_AUTO": auto,
+        "SHIPMATE_DETECT_REFUSAL": (
+            "not authorized: could not determine the PR's review decision (got ''); the apply "
+            "run's `review` job passed `detect` no decision this engine knows; check the pinned "
+            "engine version, then retry."
+        ),
+    }
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", env, "{}")
+    assert body == (
+        f"### shipmate apply\n\n🔴 failed {_AT}\n\n{auto_line}"
+        "```\nnot authorized: could not determine the PR's review decision (got ''); the apply "
+        "run's `review` job passed `detect` no decision this engine knows; check the pinned "
+        "engine version, then retry.\n"
+        "```\n\nComment `shipmate help` for the available commands."
+    )
+
+
 def test_an_unread_report_over_applied_rows_is_never_green(monkeypatch, tmp_path):
     """Mutation: drop the `result unknown` token from the rows form of `_verdict` -- `🟢 1
     applied`, red."""

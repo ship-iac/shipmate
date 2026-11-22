@@ -61,6 +61,11 @@ def _review_exemption(review_decision, environment, exempt_envs):
     return review_decision == "REVIEW_REQUIRED" and environment.casefold() in exempt_envs
 
 
+#: The decisions `_review_reason` refuses by rule; any other value but NONE and APPROVED is
+#: undetermined.
+RULE_DECISIONS = ("REVIEW_REQUIRED", "CHANGES_REQUESTED")
+
+
 def _review_reason(review_decision, environment="", exempt_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 
@@ -70,6 +75,15 @@ def _review_reason(review_decision, environment="", exempt_envs=frozenset()):
     else fails closed. An environment whose entry holds `review: false` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
     any entry holds `review: false`, and is partitioned per env in apply-detect's bare form."""
+    if review_decision not in ("NONE", "APPROVED", *RULE_DECISIONS):
+        # Fail closed: comment-ops always sends NONE (null decision) or a
+        # decision enum value. Anything else means the review signal never
+        # arrived (wiring drift, unknown future enum) — never authorize on it.
+        return (
+            f"not authorized: could not determine the PR's review decision "
+            f"(got {review_decision!r}); this indicates a comment-ops wiring "
+            f"problem; check the pinned engine version, then retry."
+        )
     if review_decision == "REVIEW_REQUIRED":
         if exempt_envs and (
             not environment or _review_exemption(review_decision, environment, exempt_envs)
@@ -92,15 +106,6 @@ def _review_reason(review_decision, environment="", exempt_envs=frozenset()):
             "not authorized: changes were requested on this PR; resolve them "
             "and get a fresh approval (or dismiss the review), then re-run "
             "`shipmate apply`."
-        )
-    if review_decision not in ("NONE", "APPROVED"):
-        # Fail closed: comment-ops always sends NONE (null decision) or a
-        # decision enum value. Anything else means the review signal never
-        # arrived (wiring drift, unknown future enum) — never authorize on it.
-        return (
-            f"not authorized: could not determine the PR's review decision "
-            f"(got {review_decision!r}); this indicates a comment-ops wiring "
-            f"problem; check the pinned engine version, then retry."
         )
     return None
 

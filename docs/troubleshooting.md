@@ -2038,11 +2038,18 @@ head (§`shipmate / gate` never goes green).
 
 The apply comment carries a line
 `⚪ <env>: held, the review state does not permit applying`, or
-`shipmate apply` was refused with a review reason.
+`shipmate apply` was refused with a review reason or failed with
+`could not determine the PR's review decision`.
 
 Which review decision refuses a targeted apply, and which environments a bare
 apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops (the `review: false` rules).
+
+**The apply failed with `could not determine the PR's review decision`.** The
+decision did not reach `detect`, or is a value the engine does not know. Every
+apply form fails before it reads a check and applies nothing. Check the pinned
+engine version, then comment the same `shipmate apply` command again; for an
+`auto` apply, push again or comment `shipmate apply`.
 
 **The apply is refused although the environment is review-exempt.** Check which
 copy of the file you edited: all three readers resolve `review` from the
