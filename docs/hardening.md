@@ -1268,9 +1268,8 @@ The pull-request condition is the review decision GitHub reports for the pull
 request. `scripts/authorize` reads it when `shipmate apply` is commented and
 refuses there any decision the list below does not admit; `apply-run.yml`'s
 `review` job reads it again in the apply run, and `scripts/apply-detect`
-decides on that value: a targeted apply refuses, and a bare apply holds every
-environment the decision does not admit. The decision admits an apply to an
-environment when it is:
+decides on that value. The decision admits an apply to an environment when it
+is:
 
 - `APPROVED`. The engine checks no freshness of its own: whether a push after
   the approval resets the decision is up to the ruleset's freshness settings
@@ -1281,7 +1280,10 @@ environment when it is:
   or a code-owner rule owning none of the changed files.
 - `REVIEW_REQUIRED`, on an environment whose entry holds `review: false`.
 
-Any other decision refuses, `CHANGES_REQUESTED` included. An `apply_mode: auto`
+`REVIEW_REQUIRED` on any other environment, and `CHANGES_REQUESTED` on every
+environment, refuse a targeted apply and hold the environment from a bare or
+`auto` apply. Any other value, or none, fails every apply form before it reads
+a check. An `apply_mode: auto`
 environment, which must hold `review: false`, applies from the push's autoplan
 with no command (§1). The post-merge deploy reads no review decision: once the
 pull request merges, every cell whose apply check is still pending applies, so

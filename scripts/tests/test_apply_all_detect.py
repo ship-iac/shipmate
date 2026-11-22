@@ -180,15 +180,13 @@ ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
         ("APPROVED", []),
         ("REVIEW_REQUIRED", ["prod-eu"]),
         ("CHANGES_REQUESTED", ALL_PENDING),
-        ("", ALL_PENDING),
-        (None, ALL_PENDING),
-        ("BANANA", ALL_PENDING),
     ],
 )
 def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, expected):
-    """`None` is the unset variable. Mutations: drop `exempt` from the `_review_reason` call
-    -- REVIEW_REQUIRED holds dev-eu and dev-us too; `if not az._review_reason(...)` --
-    every row inverts; `sorted(..., reverse=True)` -- the multi-env rows reorder."""
+    """Mutations: drop `exempt` from the `_review_reason` call -- REVIEW_REQUIRED holds dev-eu
+    and dev-us too; `if not az._review_reason(...)` -- every row inverts;
+    `sorted(..., reverse=True)` -- the multi-env rows reorder; drop `CHANGES_REQUESTED` from
+    `authorize.RULE_DECISIONS` -- that row fails the run."""
     _run_main(
         tmp_path, monkeypatch, envs=ALL_PENDING, cells=3, exempt="dev-eu,dev-us", decision=decision
     )
@@ -205,9 +203,6 @@ def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, exp
         # than the repository variable apply every pending environment unreviewed.
         ("REVIEW_REQUIRED", ALL_PENDING),
         ("CHANGES_REQUESTED", ALL_PENDING),
-        ("", ALL_PENDING),
-        (None, ALL_PENDING),
-        ("BANANA", ALL_PENDING),
     ],
 )
 def test_main_holds_everything_unreviewed_when_no_env_is_exempt(
@@ -790,20 +785,38 @@ def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkey
     assert detect_report()["applied_exempt_envs"] == []
 
 
-def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, monkeypatch):
-    """`decision=None` deletes SHIPMATE_REVIEW_DECISION, so this is the only test that
-    exercises the `os.environ.get(..., "")` default -- the whole fail-closed behaviour when the
-    review job's output never reaches the action. Without it the default could be flipped to
-    "APPROVED" unnoticed."""
-    parsed = _run_main(
-        tmp_path,
-        monkeypatch,
-        envs=["dev-eu", "prod-eu"],
-        cells=2,
-        decision=None,
+@pytest.mark.parametrize(("decision", "got"), [(None, ""), ("", ""), ("BANANA", "BANANA")])
+def test_main_fails_an_undetermined_decision_before_any_read(tmp_path, monkeypatch, decision, got):
+    """`None` is the unset variable, so this also pins the `os.environ.get(..., "")` default.
+    A decision that never arrived or has an unknown value is an engine fault: plain
+    `SystemExit`, before Terramate or `gh api` is called, review-exempt environments included.
+
+    Mutation: delete the `refuse_undetermined` call from `bare_main` -- every row holds and
+    succeeds, red. Mutation: raise `Refused` in `refuse_undetermined` -- the type, red.
+    Mutation: default the decision to `"NONE"` -- the unset row applies, red. Mutation: call
+    `refuse_undetermined` after `_check_run_lines` -- `urls`, red. Mutation: call it after
+    `env_membership` -- `membership`, red. Mutation: raise `authorize._review_reason`'s text,
+    which blames comment-ops -- every row, red."""
+    urls, membership = [], []
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu", "prod-eu"],
+            cells=2,
+            exempt="dev-eu",
+            decision=decision,
+            urls=urls,
+            membership=membership,
+        )
+    assert exc.value.code == (
+        f"::error::not authorized: could not determine the PR's review decision (got '{got}'); "
+        "the apply run's `review` job passed `detect` no decision this engine knows; check the "
+        "pinned engine version, then retry."
     )
-    assert _wave_envs(parsed) == []
-    assert detect_report()["review_held_envs"] == ["dev-eu", "prod-eu"]
+    assert type(exc.value) is SystemExit
+    assert urls == []
+    assert membership == []
 
 
 def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, monkeypatch):

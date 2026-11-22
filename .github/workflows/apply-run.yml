@@ -47,7 +47,8 @@ jobs:
     # comment that authorized this apply and the dispatch: the decision is re-read here, so an
     # approval dismissed in between holds.
     # Re-reads the decision server-side, away from branch-controlled HCL (CONTRACT.md
-    # §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it. A hand-made
+    # §Comment-ops). A targeted `apply-detect` refuses on it, a bare or `auto` one holds the
+    # environments it does not admit, and both fail on a missing or unknown decision. A hand-made
     # dispatch never reaches decide(), so this job also binds `ref` to the open PR's own head.
     runs-on: ubuntu-slim
     # Reaches the App key the same way `summary` does.
@@ -202,7 +203,7 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           # Passed through raw, never defaulted: an empty decision means the review signal never
-          # arrived, which refuses a targeted apply and holds every environment of a bare one.
+          # arrived, which fails every apply form.
           review-decision: ${{ needs.review.outputs.decision }}
           github-vars: ${{ toJSON(vars) }}
           report-path: ${{ steps.report.outputs.path }}

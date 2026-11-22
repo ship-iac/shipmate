@@ -560,6 +560,19 @@ def validate_env(value):
     bm.ec.check_env_name(value, f"SHIPMATE_ENV {value!r}", "the environment")
 
 
+def refuse_undetermined(decision):
+    """Fail on a review decision `authorize._review_reason` neither passes nor refuses by rule
+    (`authorize.RULE_DECISIONS`), as plain `SystemExit`: it never arrived or has an unknown
+    value, an engine fault rather than a rule, so it is no `Refused` (a failed review read fails
+    the `review` job before this runs)."""
+    if decision not in az.RULE_DECISIONS and az._review_reason(decision):
+        raise SystemExit(
+            f"::error::not authorized: could not determine the PR's review decision "
+            f"(got {decision!r}); the apply run's `review` job passed `detect` no decision this "
+            "engine knows; check the pinned engine version, then retry."
+        )
+
+
 def refuse_unreviewed(env, table, decision):
     """Refuse a targeted apply the PR's review decision does not authorize.
 
@@ -567,18 +580,16 @@ def refuse_unreviewed(env, table, decision):
     decision the `review` job read server-side: comment-ops decided on the state
     at comment time, and an approval dismissed since then must not still apply.
     The run dies before any wave, the apply checks stay pending, and the gate stays
-    pending with them. Only REVIEW_REQUIRED and CHANGES_REQUESTED raise `Refused`. Any other
-    decision raises plain `SystemExit`: it never arrived or has an unknown value, an engine
-    fault rather than a rule (a failed review read fails the `review` job before this runs).
+    pending with them. An undetermined decision fails first (`refuse_undetermined`); every
+    refusal this raises itself is `Refused`.
 
     `table` must have been through `validate_structure`: `exempt_envs` reads only a
     boolean `false` as review-exempt, so a `review: no` would otherwise refuse as
     unreviewed rather than as the malformed setting it is."""
-    exempt = bm.ec.exempt_envs(table)
-    reason = az._review_reason(decision, env, exempt)
+    refuse_undetermined(decision)
+    reason = az._review_reason(decision, env, bm.ec.exempt_envs(table))
     if reason:
-        refusal = Refused if decision in ("REVIEW_REQUIRED", "CHANGES_REQUESTED") else SystemExit
-        raise refusal(f"::error::{reason}")
+        raise Refused(f"::error::{reason}")
 
 
 def refuse_actor(lines, app_id, actor, triggering_actor):
@@ -832,6 +843,9 @@ def bare_main(auto=False):
     forward, never reverse-parses them; a stack with no `env/*` tag is in no environment and
     adds no cell.
 
+    First, an undetermined review decision fails the run before any read (`refuse_undetermined`),
+    as on the targeted form.
+
     After `settle`, it refuses a run cell that runs after a pending cell `needs` puts on a
     later env-level (`waves.refuse_inversions`): a cell of an env `settle` skips is no root. A
     waiting run cell stays one, and a held or targeted upstream counts, so the contradiction
@@ -867,10 +881,10 @@ def bare_main(auto=False):
     `auto` is the auto form, over the `apply_mode: auto` environments' pending cells.
     Every other pending environment counts as stopped in `settle`, so its `needs` successors
     skip as a held one's do; review holds, locks, waiting cells and `excluded_envs` are the
-    bare form's. First the run's actor must be the App's bot login (`refuse_actor`). With a
-    pending cell in an environment not stopped, the pull request must be ready and mergeable at
-    this head (`wait_mergeable`), and a cell whose stack the merge of the base into the branch
-    changes, directly or through a module it sources, or removes files in
+    bare form's. After the review decision check, the run's actor must be the App's bot login
+    (`refuse_actor`). With a pending cell in an environment not stopped, the pull request must be
+    ready and mergeable at this head (`wait_mergeable`), and a cell whose stack the merge of the
+    base into the branch changes, directly or through a module it sources, or removes files in
     (`build-matrix.base_changed_stacks`), or whose apply check records that its plan found the
     base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
     it stays pending and stops its environment's `needs` successors, as a locked cell does.
@@ -887,6 +901,8 @@ def bare_main(auto=False):
 
     validate_head_sha(head)
     pr_number = env_pr_number()
+    decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
+    refuse_undetermined(decision)
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
@@ -909,9 +925,6 @@ def bare_main(auto=False):
     levels = wv.cell_levels(order, tags_by_stack)
     pending_envs = {c["environment"] for c in pending}
     exempt = bm.ec.exempt_envs(table)
-    decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
-    # An absent decision reads as '' and holds every env. It is reachable only through
-    # wiring drift: the review job has no `if:`, and a failed one skips this script.
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, exempt))
     targeted = bm.ec.mode_envs(table, "targeted")
     stopped = pending_envs & set(targeted + held)
@@ -988,8 +1001,7 @@ def bare_main(auto=False):
         f"review_held={held} waiting={len(waiting)} locked={len(locked)} overlap={len(overlap)} "
         f"applied_exempt={applied_exempt} "
         # The hold cause: an everything-held run is otherwise indistinguishable
-        # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
-        # review job) renders visibly as ''.
+        # from a CHANGES_REQUESTED one.
         f"review_decision={decision!r}"
     )
     write_report(

@@ -2149,12 +2149,13 @@ engine-owned scripts read it.
   review-exempt, then partitioned per environment by `apply-run.yml`'s `detect`.
   `NONE` / `APPROVED` apply everything; `REVIEW_REQUIRED` applies the
   review-exempt environments and holds the rest — all of them when none is
-  review-exempt; `CHANGES_REQUESTED`, an unknown value, or no decision at all
-  holds everything, review-exempt environments included.
+  review-exempt; `CHANGES_REQUESTED` holds everything, review-exempt
+  environments included. An unknown value or no decision fails the run before
+  any wave, as on a targeted apply.
 - **`auto`** — no comment authorizes it; `apply.yml` partitions the decision as
   for a bare apply. Every `auto` environment holds `review: false`, so
-  `REVIEW_REQUIRED` applies them, and `CHANGES_REQUESTED`, an unknown value or
-  no decision holds every one.
+  `REVIEW_REQUIRED` applies them and `CHANGES_REQUESTED` holds every one; an
+  unknown value or no decision fails the run.
 
 A held environment travels the path `targeted`-environment exclusions already
 travel: dropped before env-levels are built, its `apply / <env> / <stack>`
@@ -4500,9 +4501,9 @@ actionable warning cannot be lost on either path. In the order they render:
   is not `targeted` names no command. When any environment is held, one line
   follows: `held: get an approving review, or resolve or dismiss a
   requested-changes review. The run log's apply-all-detect notice names the
-  decision seen.` The held lines are deliberately cause-agnostic: three
+  decision seen.` The held lines are deliberately cause-agnostic: two
   distinct decisions hold an environment (`REVIEW_REQUIRED` on a `review: true` env,
-  `CHANGES_REQUESTED`, or an unknown or absent decision), and only the run's
+  or `CHANGES_REQUESTED`), and only the run's
   own apply-all-detect notice carries which one, since the decision never
   reaches this renderer.
 - **locked** — ``🔒 locked by #<n>: <cells>. Wait for #<n> to merge or close,

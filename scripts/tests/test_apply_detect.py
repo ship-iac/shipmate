@@ -731,8 +731,8 @@ def test_refuse_unreviewed_refuses_by_rule_only_on_a_known_decision(decision, ki
     """A missing review or requested changes read `refused`; a decision that never arrived or
     has an unknown value is an engine fault and reads `failed`.
 
-    Mutation: raise `Refused` for every reason -- `BANANA` and `""` red. Mutation: drop
-    `CHANGES_REQUESTED` from the refused set -- red."""
+    Mutation: raise `Refused` in `refuse_undetermined` -- `BANANA` and `""` red. Mutation: drop
+    `CHANGES_REQUESTED` from `authorize.RULE_DECISIONS` -- red."""
     with pytest.raises(SystemExit) as exc_info:
         ad.refuse_unreviewed("dev-eu", _gate(""), decision)
     assert type(exc_info.value) is kind
