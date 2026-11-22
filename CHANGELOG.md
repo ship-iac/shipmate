@@ -10,7 +10,7 @@ section below names the SHA the release tags.
 
 ## [0.58.0] — 2026-11-22
 
-Tags (backfilled after the tag).
+Tags `795e7cf`.
 
 Re-pin with `python <engine>/scripts/repin <consumer> v0.58.0 --write-fence` in a pull request that changes no stack: the published `shipmate.yml` fence changes, and the apply check changes its name (### Changed — BREAKING).
 
