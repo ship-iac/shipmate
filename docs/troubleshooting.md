@@ -2625,8 +2625,8 @@ wording, with these remedies:
 ### `⚪ held, the base changed these stacks after this branch left it`
 
 The `auto` apply result comment carries ``⚪ held, the base changed these
-stacks after this branch left it, so their plans would revert that change:
-<cells>. Update the branch from the base and push.`` Its verdict counts them as
+stacks after this branch left it: <cells>. Update the branch from the base and
+push.`` Its verdict counts them as
 `N held (base changed)`, or reads `⚪ nothing applied, the base also changed the
 pending cells' stacks` when the run has no cell result rows at all.
 A cell another pull request also locks counts under `N locked` instead, and a
@@ -2634,18 +2634,17 @@ run with no cell result rows that holds a locked cell reads `⚪ nothing applied
 pending cells are locked or the base also changed their stacks`.
 
 The merge of the base into the branch changes those stacks, directly or
-through a module they source, or removes files in them, or a cell's apply check
+through a module they source, or removes files they own, or a cell's apply check
 records that its plan found the base changed its stack. A stack is not held for
 a base change the branch already holds. When the base edited a file in a stack
 the branch renamed, the stack is held, or refused as a conflict when git does
 not pair the rename; a base delete of that file, or a base rename of it to
-another path, is a merge conflict and refuses. Each
-plan was made on the branch's tree, so applying it would revert the base's
-change. The held cells stay pending, a cell that runs after one waits with the
-remedy `the base also changed it; update the branch from the base and push`
-(after a locked cell's remedy, the sentence `The base also changed it; update the
-branch from the base and push`), and the environments ordered after their environment by `needs` are skipped (next
-entry). The rest applied.
+another path, is a merge conflict and refuses. Each plan was made without the
+base's change. The held cells stay pending, a cell that runs after one waits
+with the remedy `the base also changed it; update the branch from the base and
+push` (after a locked cell's remedy, the sentence `The base also changed it;
+update the branch from the base and push`), and the environments ordered after
+their environment by `needs` are skipped (next entry). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
 its autoplan dispatches again. Commenting `shipmate apply` instead refuses over
@@ -2686,9 +2685,9 @@ refused: <n> cell(s) behind <base> (<stack> / <env>, ...); update the branch fro
 
 A bare or targeted `shipmate apply` checks every cell it would apply: the merge
 of the base into the branch changes its stack, directly or through a module it
-sources, or removes files in it, or its apply check records that its plan found
-the base changed it. Its plan was made on the branch's tree, so applying it
-would revert the base's change, and the whole run refuses. A cell of an
+sources, or removes files it owns, or its apply check records that its plan found
+the base changed it. Its plan was made without the base's change, so the whole
+run refuses. A cell of an
 environment the apply does not select (held for review, or `targeted` on a bare
 apply) is not checked.
 
@@ -2870,14 +2869,17 @@ observed a run under the block with the policy in place.
 
 The plan comment reads ``⏪ <stack> / <env> is behind <base>: ... changed it
 since this branch left it; a plan of this branch would revert that change.
-Update the branch from <base>.`` (or ``... the branch conflicts with <base>.``),
-the cell's apply check is queued as `Behind <base>: update the branch`, and the
-gate is `pending`, `<n> cell(s) behind <base>; update the branch from <base>`.
-With every changed cell behind, the verdict is `⏪ nothing planned: <n> cell(s)
-behind <base>`. The base changed the stack, or files it depends on such as a
-module it sources, after the branch left it, or the merge of the base into the branch conflicts, so the cell
-was not planned and no apply of the head reaches it. Update the branch from the
-base and push: the push plans the cell on the merged tree. A plan whose behind
+Update the branch from <base>.`` (or ``... merging <base> into this branch marks
+this stack as changed (base commits `<since7>..<tip7>`). Update the branch from
+<base>.``, or ``... the branch conflicts with <base>.``), the cell's apply check
+is queued as `Behind <base>: update the branch`, and the gate is `pending`,
+`<n> cell(s) behind <base>; update the branch from <base>`. With every changed
+cell behind, the verdict is `⏪ nothing planned: <n> cell(s) behind <base>`. The
+base changed the stack, files it depends on such as a module it sources, a
+`watch` file, or removed a whole stack nested in it, after the branch left it, or the merge of
+the base into the branch conflicts, so the cell was not planned and no apply of
+the head reaches it. Update the branch from the base and push: the push plans
+the cell on the merged tree. A plan whose behind
 report could not be read holds the gate with `the behind cells were not
 reported, so this run's evidence is unknown; re-plan before merging`; re-plan.
 

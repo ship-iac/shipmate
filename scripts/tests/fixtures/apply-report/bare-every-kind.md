@@ -18,7 +18,7 @@
 ⚪ both: held, the review state does not permit applying; once it clears, comment `shipmate apply both`
 held: get an approving review, or resolve or dismiss a requested-changes review. The run log's apply-all-detect notice names the decision seen.
 🔒 locked by #7: stacks/app / lck. Wait for #7 to merge or close, then re-plan. If #7 has already merged or closed, comment `shipmate unlock lck --evict` once #7's apply, auto and deploy runs have ended.
-⚪ held, the base changed these stacks after this branch left it, so their plans would revert that change: stacks/o / ovl. Update the branch from the base and push.
+⚪ held, the base changed these stacks after this branch left it: stacks/o / ovl. Update the branch from the base and push.
 ⚪ stacks/w / wt: waits on stacks/t / tgt, not applied yet; apply it first with `shipmate apply tgt`
 
 Comment `shipmate help` for the available commands.

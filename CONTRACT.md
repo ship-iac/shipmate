@@ -2926,15 +2926,15 @@ base commit landing between the two reads can conflict. When the merge conflicts
 or the listing fails, `detect` refuses with ``change detection on the merge of
 the base into the branch failed: <cause>. Update the branch from the base and
 push.`` and nothing applies; `<cause>` is git's conflict lines, or the failed
-step's error. Terramate lists only the stacks the merge still has, so a stack in
-which the merge deletes or renames away files the head has (`git diff
---name-status --find-renames` from the head to the merge) is held too. Applying
-a held cell's plan would revert the base's change (§Fan-out). A held cell is not
-applied: its apply check and the gate stay pending, it stops its environment's
-`needs` successors as a locked cell does, a cell that runs after it waits, and
-the result comment names it with ``⚪ held, the base changed these stacks after
-this branch left it, so their plans would revert that change: <cells>. Update
-the branch from the base and push.`` The push re-plans, and its autoplan
+step's error. Terramate lists only the stacks the merge still has, so a stack
+whose own files (not a nested stack's) the merge deletes or renames away from
+the head (`git diff --name-status --find-renames` from the head to the merge)
+is held too. A held cell's plan was made without the base's change. A held cell
+is not applied: its apply check and the gate stay pending, it stops its
+environment's `needs` successors as a locked cell does, a cell that runs after
+it waits, and the result comment names it with ``⚪ held, the base changed these
+stacks after this branch left it: <cells>. Update the branch from the base and
+push.`` The push re-plans, and its autoplan
 dispatches again. A cell whose newest apply check is a behind record (its plan
 found that the base changed its stack after the branch left it) is held the same
 way and named on the same line.
@@ -3593,8 +3593,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   pull request's base and head, so a narrower diff is a smaller matrix. A
   branch behind its base plans only the stacks its own commits change, not
   stacks only the base changed. A stack both changed is not planned: it is
-  behind the base (§Plan comment), since its plan would revert the base's
-  change, until the branch is updated from the base.
+  behind the base (§Plan comment) until the branch is updated from the base.
   Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
@@ -3947,21 +3946,22 @@ and `lost` outputs, which the same rule reads.
   platform behaviour no `if:` or `name:` change removes.
 - **Behind cells.** `detect` merges the base branch's tip into the head
   (`git merge-tree`) and lists the stacks the merge changes, directly or through
-  a module they source. A changed cell whose stack is listed is behind: a plan
-  of it made on the branch would revert the base's change. When the merge
-  conflicts, every changed cell is behind. A behind cell is not planned: it
-  leaves the matrix, `count`, `cells` and `env_order`, and `detect`'s `behind`
-  output names it, its cause and up to three base commits under its stack's
-  directory. Under the stacked holder lines, one line per behind cell reads
+  a module they source, or removes files they own. A changed cell whose stack is
+  listed is behind. When the merge conflicts, every changed cell is behind. A
+  behind cell is not planned: it leaves the matrix, `count`, `cells` and
+  `env_order`, and `detect`'s `behind` output names it, its cause and up to
+  three base commits under its stack's own files (not a nested stack's). Under
+  the stacked holder lines, one line per behind cell reads
   ``⏪ <stack> / <env> is behind <base>: `<sha>` <subject>; ... and <n> more
   commit(s) changed it since this branch left it; a plan of this branch would
-  revert that change. Update the branch from <base>.``, with ``the base changed
-  files this stack depends on in `<since7>..<tip7>` `` for a stack with no base
-  commit under its own files (a module it sources, a `watch` file, a deletion under
-  a nested stack's directory), and
-  ``the branch conflicts with <base>.`` in place of the commits and the revert
-  clause on a conflict; then ``⏪ <n> cell(s) are not planned until the branch is
-  updated from <base>.``. Subjects are cut to 72 characters. Each line yields to
+  revert that change. Update the branch from <base>.``, with ``merging <base>
+  into this branch marks this stack as changed (base commits
+  `<since7>..<tip7>`).`` in place of the commits and the revert clause for a
+  stack with no base commit under its own files (a module it sources, a `watch`
+  file, removal of a whole stack nested in it), and ``the branch conflicts with
+  <base>.`` in place of the commits and the revert clause on a conflict; then
+  ``⏪ <n> cell(s) are not planned until the branch is updated from <base>.``.
+  Subjects are cut to 72 characters. Each line yields to
   the cell lines under the comment cap, with a warning. Each behind cell gets a
   queued apply check (§Apply check lifecycle), and the gate stays `pending`, ``<n>
   cell(s) behind <base>; update the branch from <base>``. An apply of the head
@@ -4514,11 +4514,10 @@ actionable warning cannot be lost on either path. In the order they render:
   unknown renders ``🔒 locked by an unknown holder: <cells>. Comment
   `shipmate unlock <env> --evict`.`` Every form renders these lines.
 - **overlap** — ``⚪ held, the base changed these stacks after this branch left
-  it, so their plans would revert that change: <cells>. Update the branch from
-  the base and push.``, one line naming each of an `auto` apply's overlap cells
-  (the report's `held_cells` with `cause` `overlap`, §`apply_mode: auto`: a
-  stack the base changed, or a behind record) as
-  `<stack> / <env>` comma-separated. Only the `auto` form renders it.
+  it: <cells>. Update the branch from the base and push.``, one line naming each
+  of an `auto` apply's overlap cells (the report's `held_cells` with `cause`
+  `overlap`, §`apply_mode: auto`: a stack the base changed, or a behind record)
+  as `<stack> / <env>` comma-separated. Only the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
   (§Fan-out) is pending and not applying this run; the second pair is that

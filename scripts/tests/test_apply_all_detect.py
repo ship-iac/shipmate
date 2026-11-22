@@ -1605,7 +1605,9 @@ def test_a_bare_apply_checks_only_the_cells_it_would_apply(
     Mutation: answer the overlap as empty (`changed = set()` in `behind_cells`) -- the first
     case applies, red.
     Mutation: check every pending cell (`pending` for `candidates`) -- the other two refuse,
-    red."""
+    red.
+    Mutation: pass the candidate stacks as `refuse_behind`'s `stacks` -- `stacks/db` is
+    missing, red."""
     base_calls = []
     kw = {
         "envs": ["dev-eu", "prod"],
@@ -1624,7 +1626,7 @@ def test_a_bare_apply_checks_only_the_cells_it_would_apply(
         parsed = _run_main(tmp_path, monkeypatch, **kw)
         assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
         assert parsed["base_sha"] == BASE_TIP
-    assert base_calls == [(BASE_TIP, ["stacks/app"])]
+    assert base_calls == [(BASE_TIP, ["stacks/app"], ["stacks/app", "stacks/db"])]
 
 
 def test_a_bare_apply_with_no_cell_to_apply_reads_no_pull_request(tmp_path, monkeypatch):

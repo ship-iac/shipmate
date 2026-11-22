@@ -765,9 +765,9 @@ def wait_mergeable(repo, pr_number, head):
 def overlap_cells(candidates, changed, behind=frozenset()):
     """`{stack, environment}` of each cell in `candidates` whose stack is in `changed`, the
     stacks the merge of the base into the branch changes, directly or through a module they
-    source, or removes files in, or whose apply check name is in `behind`
-    (`apply-gate.behind_names`), its plan having found the base changed it: applying its plan
-    would revert that change. A cell under both causes is listed once."""
+    source, or removes files they own, or whose apply check name is in `behind`
+    (`apply-gate.behind_names`), its plan having found the base changed it: its plan was made
+    without the base's change. A cell under both causes is listed once."""
     return [
         {"stack": c["stack"], "environment": c["environment"]}
         for c in candidates
@@ -775,11 +775,12 @@ def overlap_cells(candidates, changed, behind=frozenset()):
     ]
 
 
-def behind_cells(tip, cells, lines, app_id):
-    """`overlap_cells` of `cells` against base tip `tip` (`build-matrix.base_changed_stacks`)
-    and the head's behind records in check-run `lines`. A merge conflict refuses with
-    `MergeConflict`'s text, any other failed step with its own."""
-    changed = bm.base_changed_stacks(tip, {c["stack"] for c in cells})
+def behind_cells(tip, cells, lines, app_id, stacks):
+    """`overlap_cells` of `cells` against base tip `tip` (`build-matrix.base_changed_stacks`,
+    passed `stacks`, a collection of every stack path of the head) and the head's behind records
+    in check-run `lines`. A merge conflict refuses with `MergeConflict`'s text, any other failed
+    step with its own."""
+    changed = bm.base_changed_stacks(tip, {c["stack"] for c in cells}, stacks)
     return overlap_cells(cells, changed, ag.behind_names(lines, app_id))
 
 
@@ -807,16 +808,17 @@ def _read_base(repo, pr_number):
     return _base_tip(repo, pr_number, "apply refused", "; comment `shipmate apply` again.")
 
 
-def refuse_behind(repo, pr_number, selected, lines, app_id):
+def refuse_behind(repo, pr_number, selected, lines, app_id, stacks):
     """The base tip of pull request `pr_number`, refusing the whole run when a cell of
-    `selected`, the cells a bare or targeted apply would apply, is behind it (`behind_cells`).
+    `selected`, the cells a bare or targeted apply would apply, is behind it (`behind_cells`,
+    passed `stacks`, a collection of every stack path of the head).
     Before refusing it writes the report `{"behind": [{stack, environment}, ...], "base":
     <base branch>}`, which the apply result comment renders. With no selected cell it reads
     nothing and returns ""."""
     if not selected:
         return ""
     base, tip = _read_base(repo, pr_number)
-    behind = behind_cells(tip, selected, lines, app_id)
+    behind = behind_cells(tip, selected, lines, app_id, stacks)
     if behind:
         write_report({"behind": behind, "base": base})
         cells = named([f"{c['stack']} / {c['environment']}" for c in behind], _NAMED)
@@ -839,8 +841,8 @@ def bare_main(auto=False):
     forward, never reverse-parses them; a stack with no `env/*` tag is in no environment and
     adds no cell.
 
-    First, an undetermined review decision fails the run before any read (`refuse_undetermined`),
-    as on the targeted form.
+    First, an undetermined review decision fails the run before any GitHub or tree read
+    (`refuse_undetermined`).
 
     After `settle`, it refuses a run cell that runs after a pending cell `needs` puts on a
     later env-level (`waves.refuse_inversions`): a cell of an env `settle` skips is no root. A
@@ -880,7 +882,7 @@ def bare_main(auto=False):
     bare form's. After the review decision check, the run's actor must be the App's bot login
     (`refuse_actor`). With a pending cell in an environment not stopped, the pull request must be
     ready and mergeable at this head (`wait_mergeable`), and a cell whose stack the merge of the
-    base into the branch changes, directly or through a module it sources, or removes files in
+    base into the branch changes, directly or through a module it sources, or removes files it owns
     (`build-matrix.base_changed_stacks`), or whose apply check records that its plan found the
     base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
     it stays pending and stops its environment's `needs` successors, as a locked cell does.
@@ -934,9 +936,9 @@ def bare_main(auto=False):
     # One read: the wave re-check compares the base tip with the one this run checked.
     if auto and candidates:
         base_sha = wait_mergeable(repo, pr_number, head)
-        overlap = behind_cells(base_sha, candidates, lines, app_id)
+        overlap = behind_cells(base_sha, candidates, lines, app_id, tags_by_stack)
     elif not auto:
-        base_sha = refuse_behind(repo, pr_number, candidates, lines, app_id)
+        base_sha = refuse_behind(repo, pr_number, candidates, lines, app_id, tags_by_stack)
     locked = locked_cells(repo, candidates, pr_number)
     holds = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)
@@ -1068,7 +1070,7 @@ def main():
 
     all_pending = pending_tuples(names, completed, wv.env_stacks(tag_map))
     pending = filter_pending(cells, completed)
-    base_sha = refuse_behind(repo, pr_number, pending, lines, app_id)
+    base_sha = refuse_behind(repo, pr_number, pending, lines, app_id, tag_map)
     locked = locked_cells(repo, pending, pr_number)
     run = drop_waiting(pending, locked)
     levels = wv.cell_levels(bm.ec.env_order(table), tag_map)

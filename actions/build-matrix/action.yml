@@ -105,12 +105,14 @@ outputs:
       [{"stack", "environment", "cause", "shas", "more"}]}: each changed cell whose stack the merge
       of the base tip into the head changes, directly or through a module it sources (cause
       `changed`), or every changed cell when that merge conflicts (cause `conflict`). These cells
-      are left out of `matrix`, `count`, `cells` and `env_order`; a plan of them would revert the
-      base's change. `shas` lists up to three base commits under the stack's directory, newest
-      first, `more` counts the rest, and `commits` holds exactly the listed ones; `shas` is empty
-      for a conflict and for a stack with no base commit under its own files (a module it sources, a `watch` file, a deletion under a nested stack's directory). With no behind cell, `tip` and
-      `since` are empty and `commits` and `cells` are too; a plan with no changed cell reads no
-      tip. A value over 100 KiB refuses. Empty on a sweep.
+      are left out of `matrix`, `count`, `cells` and `env_order`. These cells are not planned
+      until the branch is updated from the base. `shas` lists up to three base commits under the
+      stack's own files (not a nested stack's), newest first, `more` counts the rest, and
+      `commits` holds exactly the listed ones; `shas` is empty for a conflict and for a stack
+      with no base commit under its own files (a module it sources, a `watch` file, removal of a
+      whole stack nested in it). With no behind cell, `tip` and `since` are empty and `commits`
+      and `cells` are too; a plan with no changed cell reads no tip. A value over 100 KiB
+      refuses. Empty on a sweep.
     value: ${{ steps.build.outputs.behind }}
 runs:
   using: composite

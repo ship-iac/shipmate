@@ -10,6 +10,6 @@ dispatched as an `apply_mode: auto` apply, after an autoplan triggered by @<!-- 
 
 🟡 dev: left pending (not `apply_mode: auto`), comment `shipmate apply`
 ⚪ prod: skipped, waits on dev (comment `shipmate apply`, which applies them in order); dev-eu (a cell of it does not apply this run; see its line below)
-⚪ held, the base changed these stacks after this branch left it, so their plans would revert that change: stacks/db / dev-eu. Update the branch from the base and push.
+⚪ held, the base changed these stacks after this branch left it: stacks/db / dev-eu. Update the branch from the base and push.
 
 Comment `shipmate help` for the available commands.

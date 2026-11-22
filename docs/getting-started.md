@@ -1151,7 +1151,7 @@ Properties that fall out of the existing gate semantics:
   Strict gates the merge and nothing else, so it does not protect the apply. A
   stack that both the branch and main changed is not planned on a stale branch:
   it is behind, and every `shipmate apply` refuses or holds it, since its plan
-  would revert main's change in real infrastructure
+  was made without main's change
   ([`branch-protection.md`](branch-protection.md)). Update the branch from the
   base and push before commenting `shipmate apply`.
 - **The post-merge deploy still runs.** GitHub performs the auto-merge as the
@@ -1222,10 +1222,11 @@ dispatches the fence's `auto` job, which applies that environment's pending
 cells when the pusher has write access; it runs as the shipmate App. The table refuses
 `apply_mode: auto` without `review: false`. A draft or unmergeable pull
 request, one whose newest plan came from a `shipmate plan` comment, or one just
-marked ready for review or reopened, does not apply this way; comment `shipmate apply` instead. A cell whose stack the merge
-of the base into the branch changes, or removes files in, stays pending until the
-branch is updated from the base; a merge conflict, or a failure to read the base
-or run that detection, refuses the run ([`troubleshooting.md`](troubleshooting.md)).
+marked ready for review or reopened, does not apply this way; comment
+`shipmate apply` instead. A cell whose stack the merge of the base into the
+branch changes, or removes files it owns, stays pending until the branch is
+updated from the base; a merge conflict, or a failure to read the base or run
+that detection, refuses the run ([`troubleshooting.md`](troubleshooting.md)).
 [`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto` has every condition, and
 [`troubleshooting.md`](troubleshooting.md) has each refusal.
 

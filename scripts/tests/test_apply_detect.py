@@ -1547,11 +1547,13 @@ def test_a_targeted_apply_refuses_a_behind_cell_of_its_environment(
     a behind record of another environment's cell does not.
 
     Mutation: check every environment's pending cells -- the third case refuses, red.
-    Mutation: answer the overlap as empty -- the first case applies, red."""
+    Mutation: answer the overlap as empty -- the first case applies, red.
+    Mutation: pass the pending cells' stacks as `refuse_behind`'s `stacks` -- `stacks/idle` is
+    missing, red."""
     out = _apply_env(monkeypatch, tmp_path)
     base_calls = []
     _stub_apply(monkeypatch, {"stacks/app": set()}, checks, changed=changed, base_calls=base_calls)
-    tags = {"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"]}
+    tags = {"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"], "stacks/idle": []}
     monkeypatch.setattr(ad.bm, "all_tags", lambda: tags)
     if refused:
         with pytest.raises(SystemExit) as e:
@@ -1562,7 +1564,7 @@ def test_a_targeted_apply_refuses_a_behind_cell_of_its_environment(
         parsed = github_outputs(out)
         assert len(json.loads(parsed["envlevel0_waves"])["wave0"]) == 1
         assert parsed["base_sha"] == BASE_TIP
-    assert base_calls == [(BASE_TIP, ["stacks/app"])]
+    assert base_calls == [(BASE_TIP, ["stacks/app"], ["stacks/app", "stacks/idle"])]
 
 
 def test_a_behind_refusal_writes_the_refusal_output_whole(monkeypatch, tmp_path):
@@ -1706,7 +1708,7 @@ def test_a_stack_the_base_did_not_change_stays_applyable_from_a_blobless_clone(
     assert f"?{blob}" in missing  # Not vacuous: the merge needs a blob the clone lacks.
     _list_merge(monkeypatch)
     cells = [{"stack": s, "environment": "dev-eu"} for s in ("stacks/a", "stacks/b")]
-    assert ad.behind_cells(tip, cells, [], APP_ID) == [cells[1]]
+    assert ad.behind_cells(tip, cells, [], APP_ID, {"stacks/a", "stacks/b"}) == [cells[1]]
 
 
 def test_a_conflict_elsewhere_refuses_a_targeted_apply_of_a_clean_stack(
@@ -1729,7 +1731,7 @@ def test_a_conflict_elsewhere_refuses_a_targeted_apply_of_a_clean_stack(
     monkeypatch.setattr(ad, "_read_base", lambda repo, pr: ("main", tip))
     cell = {"stack": "stacks/b", "environment": "dev-eu"}
     with pytest.raises(SystemExit) as e:
-        ad.refuse_behind("acme/iac", PR_NUMBER, [cell], [], APP_ID)
+        ad.refuse_behind("acme/iac", PR_NUMBER, [cell], [], APP_ID, {"stacks/a", "stacks/b"})
     assert e.value.code == (
         "::error::change detection on the merge of the base into the branch failed: "
         f"CONFLICT (modify/delete): stacks/a/main.tf deleted in {head} and modified in {tip}.  "
