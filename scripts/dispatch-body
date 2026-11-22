@@ -4,7 +4,7 @@ it and print the API's answer.
 
 Env: `VERB`, `REF`, `PR_NUMBER`, `ENVIRONMENT`, `COMMENT_ID`, `DISPATCH_REF`,
 `GITHUB_REPOSITORY`, `GH_TOKEN`, and `SHIPMATE_APP_SLUG`, the shipmate App's slug, which every
-dispatch but `auto` reads.
+dispatch but `auto` reads. It takes no arguments.
 
 `COMMENT_ID` is the command comment's id, sent as `comment_id`. A commented `apply` or
 `unlock` must carry one, and `plan` may; an empty one on a `plan` is a comment-less plan (the
@@ -34,11 +34,12 @@ started a run: GitHub can start it and still answer 502. Before each retry it li
 Exit codes:
 
     0                   dispatched; stdout is the API's answer, unchanged
-    1                   a dispatch other than `auto` without `SHIPMATE_APP_SLUG`, refused
-                        before any request; or failed on the first attempt with a failure that
-                        is not transient, so no run started. When the answer shows a `shipmate.yml`
-                        older than this dispatch (`skew_hint`), stdout is the remedy sentence
-                        and stderr ends with it as an `::error::` line
+    1                   an argument, or a dispatch other than `auto` without
+                        `SHIPMATE_APP_SLUG`, refused before any request; or failed on the first
+                        attempt with a failure that is not transient, so no run started. When
+                        the answer shows a `shipmate.yml` older than this dispatch
+                        (`skew_hint`), stdout is the remedy sentence and stderr ends with it as
+                        an `::error::` line
     3 MAY_HAVE_STARTED  a listed run is this dispatch's by its title, or was created since `t0`
                         (`auto`); not retried
     4 UNDETERMINED      the attempts ended on transient failures, a later attempt failed after a
@@ -47,8 +48,8 @@ Exit codes:
 When the attempts fail (1 or 4), the final failure's message goes to stderr as one escaped
 `::warning::` line. When 4 follows a failed or malformed listing, that message is the listing's
 error; the dispatch's own failure is in the retry notices printed above it. A refusal before any
-request (an empty `SHIPMATE_APP_SLUG`, a missing or unexpected `COMMENT_ID`) exits 1 with an
-`::error::`.
+request (an argument, an empty `SHIPMATE_APP_SLUG`, a missing or unexpected `COMMENT_ID`) exits
+1 with an `::error::`.
 
 Known ceilings: a run not listed yet when the listing is last read is not seen, so that attempt
 can be retried and start twice; a second commented `plan` or `apply` run loses its comment's
@@ -282,9 +283,7 @@ def _exit_failed(e, failed):
     raise SystemExit(1) from None
 
 
-def main(argv=()):
-    if argv:
-        raise SystemExit("::error::usage: dispatch-body")
+def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     data = json.dumps(body())
     if os.environ["VERB"] != "auto" and not os.environ.get("SHIPMATE_APP_SLUG"):
@@ -319,4 +318,4 @@ def main(argv=()):
 
 
 if __name__ == "__main__":
-    run_annotated(main, sys.argv[1:])
+    run_annotated(main, usage="dispatch-body")

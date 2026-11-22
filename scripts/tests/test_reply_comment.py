@@ -123,11 +123,10 @@ def test_a_pr_number_refusal_prints_one_escaped_annotation(pr, got):
     )
 
 
-def _post(monkeypatch, *argv, pr="42", outcome="refused"):
-    """Run `main` in-process with `argv`; return (exit code, captured `(argv, stdin)` calls)."""
+def _post(monkeypatch, pr="42", outcome="refused"):
+    """Run `main` in-process; return (exit code, captured `(argv, stdin)` calls)."""
     calls = []
     monkeypatch.setattr(rc, "run", lambda args, stdin=None: calls.append((args, stdin)) or "{}")
-    monkeypatch.setattr(sys, "argv", ["reply-comment", *argv])
     for key, value in {
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "org/repo",
@@ -191,14 +190,6 @@ def test_a_value_that_is_not_a_pull_request_number_posts_nothing(monkeypatch, pr
     code, calls = _post(monkeypatch, pr=pr)
     assert code not in (0, None)
     assert calls == []
-
-
-@pytest.mark.parametrize("argv", [["--post"], ["--psot"], ["--post", "x"], ["x"]])
-def test_any_argument_is_refused_before_any_work(monkeypatch, capsys, argv):
-    """Mutations: accept `--post` as a no-op (`["--post"]` red); delete the argv check (every
-    case then posts, exit 0)."""
-    assert _post(monkeypatch, *argv) == ("::error::usage: reply-comment", [])
-    assert capsys.readouterr().out == ""
 
 
 _STARTED_RUN = "https://github.com/org/repo/actions/runs/38481239914"
@@ -274,7 +265,6 @@ def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, caps
     calls = []
     failed = subprocess.CompletedProcess([], 1, b"", b"HTTP 403: forbidden\nsecond line")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(k.get("input")) or failed)
-    monkeypatch.setattr(sys, "argv", ["reply-comment"])
     for key, value in {
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "org/repo",

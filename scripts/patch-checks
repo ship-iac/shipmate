@@ -124,11 +124,9 @@ def write(plan):
         print(cid, flush=True)
 
 
-def main(argv=()):
-    if argv:
-        raise SystemExit("::error::usage: patch-checks (write plan on stdin, no arguments)")
+def main():
     write([json.loads(line) for line in sys.stdin if line.strip()])
 
 
 if __name__ == "__main__":
-    run_annotated(main, sys.argv[1:])
+    run_annotated(main, usage="patch-checks (write plan on stdin, no arguments)")

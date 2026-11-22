@@ -317,15 +317,6 @@ def test_main_writes_only_the_per_wave_slices(monkeypatch, tmp_path, capsys):
     assert capsys.readouterr() == ("", "")
 
 
-@pytest.mark.parametrize("argv", [["ids"], ["by-wave"], ["foo"]])
-def test_an_unknown_argument_list_refuses(argv):
-    """Mutation: keep a `by-wave` mode -> `by-wave` runs instead of refusing; drop the `if argv:`
-    refusal -> `foo` runs the snapshot and fails on its environment."""
-    with pytest.raises(SystemExit) as exc:
-        apply_snapshot.main(argv)
-    assert str(exc.value) == "::error::usage: apply-snapshot"
-
-
 def test_only_a_check_recording_the_rows_plan_is_collected():
     """An older unfinished check records the row's plan; a newer unfinished behind check of the
     same name, published after detect, records another run and no digest: only the older id is
