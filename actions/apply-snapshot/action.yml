@@ -14,11 +14,8 @@ inputs:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
 outputs:
-  snapshot:
-    description: JSON object mapping each cell's apply check name to its list of pre-existing App-authored apply-check ids.
-    value: ${{ steps.snap.outputs.snapshot }}
   by_wave:
-    description: JSON object mapping each wave key of `waves-json` to the `snapshot` entries of that wave's cells; `{}` for an empty wave.
+    description: JSON object mapping each wave key of `waves-json` to the pre-existing apply-check ids of that wave's cells; `{}` for an empty wave.
     value: ${{ steps.snap.outputs.by_wave }}
 runs:
   using: composite

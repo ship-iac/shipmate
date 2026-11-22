@@ -195,12 +195,11 @@ def test_snapshot_action_steps_are_the_key_check_the_snapshot_then_the_mint():
     changed. The mint's token is used by no step; minting is the authenticated preflight.
 
     Mutations: delete the verify step; drop the mint step; restore the flip step; wire
-    `by_wave` to `steps.snap.outputs.snapshot`.
+    `by_wave` to `steps.snap.outputs.snapshot`; add back a `snapshot` output.
     """
     doc = action_yaml(ACTIONS / "apply-snapshot" / "action.yml")
     assert doc["runs"]["steps"] == [_call(_ACTION_WITH), _SNAPSHOT_SNAP, _SNAPSHOT_MINT]
     assert {k: v["value"] for k, v in doc["outputs"].items()} == {
-        "snapshot": "${{ steps.snap.outputs.snapshot }}",
         "by_wave": "${{ steps.snap.outputs.by_wave }}",
     }
 

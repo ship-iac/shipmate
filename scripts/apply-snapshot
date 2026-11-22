@@ -92,7 +92,7 @@ def by_wave(waves, snap):
 
 
 def main(argv=()):
-    """Write outputs `snapshot` and `by_wave` to `GITHUB_OUTPUT`, from `SHIPMATE_WAVES_JSON`,
+    """Write output `by_wave` to `GITHUB_OUTPUT`, from `SHIPMATE_WAVES_JSON`,
     `SHIPMATE_APP_ID` (an empty one refuses first) and the check runs on stdin."""
     if argv:
         raise SystemExit("::error::usage: apply-snapshot")
@@ -102,7 +102,7 @@ def main(argv=()):
     ag.from_app([], app_id)
     waves = json.loads(os.environ["SHIPMATE_WAVES_JSON"])
     snap = snapshot(waves, ag.parse_jsonl(sys.stdin), app_id)
-    write_outputs(snapshot=json.dumps(snap), by_wave=json.dumps(by_wave(waves, snap)))
+    write_outputs(by_wave=json.dumps(by_wave(waves, snap)))
 
 
 if __name__ == "__main__":
