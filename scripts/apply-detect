@@ -758,7 +758,7 @@ def wait_mergeable(repo, pr_number, head):
     reason = az._head_repo_reason(pr) or az._ready_reason(pr, retry=_AUTO_RETRY)
     if reason:
         raise SystemExit(f"::error::{reason}")
-    tip = _base_tip(repo, pr_number, lambda: pr, "auto apply refused", f". {_AUTO_REMEDY}")
+    tip = _base_tip(repo, pr_number, "auto apply refused", f". {_AUTO_REMEDY}", pull=pr)
     return tip[1]
 
 
@@ -783,12 +783,14 @@ def behind_cells(tip, cells, lines, app_id):
     return overlap_cells(cells, changed, ag.behind_names(lines, app_id))
 
 
-def _base_tip(repo, pr_number, read, lead, remedy):
-    """`(base branch, base tip)` of pull request `pr_number`, whose REST object `read()`
-    returns, the tip from the branch ref (`apply-gate.base_tip`). A failed or malformed read
-    refuses as `<lead>: could not read the base tip of pull request #<n> (<why>)<remedy>`."""
+def _base_tip(repo, pr_number, lead, remedy, pull=None):
+    """`(base branch, base tip)` of pull request `pr_number`, the tip from the branch ref
+    (`apply-gate.base_tip`). `pull` is the pull request's REST object, read here when None. A
+    failed or malformed read refuses as
+    `<lead>: could not read the base tip of pull request #<n> (<why>)<remedy>`."""
     try:
-        pull = read()
+        if pull is None:
+            pull = gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run)
         return pull["base"]["ref"], ag.base_tip(repo, pull, run=_run)
     except SystemExit as e:
         why = one_line(exit_text(e))
@@ -802,13 +804,7 @@ def _base_tip(repo, pr_number, read, lead, remedy):
 def _read_base(repo, pr_number):
     """`_base_tip` of pull request `pr_number` from one pull request read, refused with the
     commanded forms' remedy."""
-    return _base_tip(
-        repo,
-        pr_number,
-        lambda: gh_json(f"repos/{repo}/pulls/{pr_number}", run=_run),
-        "apply refused",
-        "; comment `shipmate apply` again.",
-    )
+    return _base_tip(repo, pr_number, "apply refused", "; comment `shipmate apply` again.")
 
 
 def refuse_behind(repo, pr_number, selected, lines, app_id):
