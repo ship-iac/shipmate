@@ -3202,10 +3202,11 @@ def test_verify_deploy_refuses_a_lock_it_cannot_read(monkeypatch, tmp_path):
 
 
 def test_verify_deploy_names_a_failed_read_on_one_line(monkeypatch, tmp_path, sleeps):
-    """A gh failure whose stderr runs to a second line stays one line in the refusal, which a
-    502 reaches after its retries unchanged. Mutation: return `why` unjoined from `_why` -- the
-    refusal splits, red."""
-    failure = SystemExit("::error::command failed (1): gh api\nHTTP 502")
+    """A gh failure whose stderr runs to more lines stays one line in the refusal, a blank line
+    dropped, which a 502 reaches after its retries unchanged. Mutations: return `why` unjoined
+    from `_why` -- the refusal splits, red; join with `" | ".join(why.splitlines())` -- the blank
+    line renders `gh api |  | HTTP 502`, red."""
+    failure = SystemExit("::error::command failed (1): gh api\n\nHTTP 502")
     gh = Gh().on(ref_read(AUTH_REF), failure, failure, failure)
     assert _verify_refusal(monkeypatch, tmp_path, gh, DEPLOY) == (
         "::error::apply aborted for `dev` / `stacks/auth`: could not confirm which pull request "
