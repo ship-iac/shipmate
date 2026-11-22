@@ -105,8 +105,8 @@ def test_an_unknown_outcome_exits_non_zero_and_prints_nothing():
 )
 def test_a_pr_number_refusal_prints_one_escaped_annotation(pr, got):
     """`dispatch` hands `PR_NUMBER` through unvalidated. Mutations: `{value}` for `{value!r}` in
-    `_shipmate.env_pr_number` -- `newline` red; print the refusal to stderr and `sys.exit(1)`
-    instead of `run_annotated` -- `escape` red."""
+    `_shipmate.env_pr_number` -- `newline` and `escape` red; print the refusal to stderr and
+    `sys.exit(1)` instead of `run_annotated` -- `escape` red."""
     env = {**os.environ, "SHIPMATE_REPLY_OUTCOME": "refused", "PR_NUMBER": pr}
     env.pop("SHIPMATE_PR_NUMBER", None)
     result = subprocess.run(

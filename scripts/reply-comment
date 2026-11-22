@@ -90,7 +90,6 @@ def main():
             "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started "
             f"(got: {outcome})"
         )
-    # Dispatch hands its input through unvalidated.
     pr = env_pr_number("PR_NUMBER")
     verb = os.environ.get("SHIPMATE_REPLY_VERB", "")
     if outcome == "started":

@@ -563,8 +563,8 @@ def is_pr_number(value):
 
 def env_pr_number(name="SHIPMATE_PR_NUMBER"):
     """The environment variable `name`, refused unless `is_pr_number` accepts it: callers bind
-    it into an API path, and the apply record carries it, so the apply refuses a record whose
-    number is not the dispatch's own."""
+    it into an API path. The default `SHIPMATE_PR_NUMBER` is also carried by the apply record,
+    and the apply refuses a record whose number is not the dispatch's own."""
     value = os.environ.get(name, "")
     if not is_pr_number(value):
         raise SystemExit(f"::error::{name} must be a pull request number (got: {value!r})")
