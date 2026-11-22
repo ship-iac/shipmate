@@ -155,8 +155,8 @@ def _uploaded(repo, rid, what, failed):
 
 
 def _reason(repo, head, pr, cells, engine, ours):
-    """Rows 1, 2 and 9, then the others in order: `(run id, None)` when every row holds, else
-    `(None, the first failing row's reason)`."""
+    """Rows 1 to 9 in order: `(run id, None)` when every row holds, else `(None, the first
+    failing row's reason)`."""
     newest = ag.newest_autoplan(repo, head, run=run, retry=False)
     if newest is None:
         return None, f"no autoplan run of {head} is listed"
