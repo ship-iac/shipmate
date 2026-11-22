@@ -10,6 +10,8 @@ apply_complete = load_script("apply-complete")
 
 PLAN_RUN = "7"
 DIGEST = "e" * 64
+PR = "12"
+OTHER_PR = "13"
 
 
 def row(stack, env):
@@ -60,8 +62,9 @@ JOBS = [
 
 
 def check(name, cid, app_id=APP_ID, **record):
-    """An App check run whose record names `PLAN_RUN` and `DIGEST`, `record` over them."""
-    body = {"plan_run": PLAN_RUN, "plan_sha256": DIGEST, **record}
+    """An App check run whose record names `PLAN_RUN`, `DIGEST` and pull request `PR`, `record`
+    over them."""
+    body = {"plan_run": PLAN_RUN, "plan_sha256": DIGEST, "pr": PR, **record}
     return {"name": name, "id": cid, "app": {"id": app_id}, "external_id": json.dumps(body)}
 
 
@@ -388,11 +391,12 @@ def test_a_check_published_after_detect_is_never_completed_by_the_older_apply(ne
 
 def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     """Run 6's unfinished check of the cell is superseded by this apply of run 7, so it is
-    collected beside run 7's and completed with it; run 8's check, and run 6's behind check, are
-    not collected.
+    collected beside run 7's and completed with it; run 8's check, run 6's behind check and run
+    6's check of another pull request are not collected.
 
     Mutation: collect none of the older checks (`_older` answers False) -- id 1 is left, red.
-    Mutation: collect a newer run's check too (`!=` for `<`) -- id 3 is collected, red."""
+    Mutation: collect a newer run's check too (`!=` for `<`) -- id 3 is collected, red.
+    Mutation: drop the `pr` equality -- id 5 is collected, red."""
     waves = {"wave0": [row("dns", "dev")]}
     behind = {"plan_run": "6", "plan_sha256": None, "behind": True}
     runs = [
@@ -400,6 +404,7 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
         check("apply / dev / dns", 2),
         check("apply / dev / dns", 3, plan_run="8"),
         check("apply / dev / dns", 4, **behind),
+        check("apply / dev / dns", 5, plan_run="6", plan_sha256="f" * 64, pr=OTHER_PR),
     ]
     snap = apply_snapshot.snapshot(waves, runs, APP_ID)
     assert snap == {"apply / dev / dns": [1, 2]}
@@ -408,3 +413,62 @@ def test_an_older_plans_unfinished_duplicate_is_collected_and_completed():
     )
     writes = [w for r in rows for w in apply_complete.writes(r, "acme/demo")]
     assert [w["id"] for w in writes] == [1, 2]
+
+
+@pytest.mark.parametrize(
+    ("own_pr", "older_pr"),
+    [(None, None), ("", ""), (PR, None)],
+    ids=["null", "empty", "older-null"],
+)
+def test_an_older_check_without_the_same_valid_pr_is_not_collected(own_pr, older_pr):
+    """The matching check's `pr` must be a pull-request number and the older check's equal to
+    it.
+
+    Mutation: test `is not None` instead of `isinstance` and `is_pr_number` -- empty, red.
+    Mutation: drop that validation -- null, red.
+    Mutation: drop the `pr` equality -- older-null, red."""
+    waves = {"wave0": [row("dns", "dev")]}
+    runs = [
+        check("apply / dev / dns", 1, plan_run="6", pr=older_pr),
+        check("apply / dev / dns", 2, pr=own_pr),
+    ]
+    assert apply_snapshot.snapshot(waves, runs, APP_ID) == {"apply / dev / dns": [2]}
+
+
+def test_each_unfinished_check_is_decoded_once(monkeypatch):
+    """Mutation: decode again when collecting (`_records(decoded(c) or {}, plan)` over the
+    unfinished checks) -- ids 2 and 4 are decoded twice and id 1 three times, red."""
+    seen = []
+    real = apply_snapshot.decoded
+
+    def counting(run):
+        seen.append(run["id"])
+        return real(run)
+
+    monkeypatch.setattr(apply_snapshot, "decoded", counting)
+    runs = [
+        check("apply / dev-eu / stacks/dns", 1, plan_run="6"),
+        check("apply / dev-eu / stacks/dns", 2),
+        {**check("apply / dev-eu / stacks/dns", 3), "status": "completed"},
+        check("apply / dev-eu / stacks/app", 4),
+    ]
+    assert apply_snapshot.snapshot(WAVES, runs, APP_ID) == {
+        "apply / dev-eu / stacks/dns": [1, 2],
+        "apply / dev-eu / stacks/app": [4],
+    }
+    assert seen == [1, 2, 4]
+
+
+@pytest.mark.parametrize(
+    ("plan_run", "other_run", "expected"),
+    [("10", "9", [1, 2]), ("9", "10", [1])],
+    ids=["run-10", "run-9"],
+)
+def test_plan_runs_compare_as_numbers(plan_run, other_run, expected):
+    """Mutation: compare the `_plan_run` strings without `int` -- both cases red."""
+    waves = {"wave0": [{**row("dns", "dev"), "plan_run_id": plan_run}]}
+    runs = [
+        check("apply / dev / dns", 1, plan_run=plan_run),
+        check("apply / dev / dns", 2, plan_run=other_run),
+    ]
+    assert apply_snapshot.snapshot(waves, runs, APP_ID) == {"apply / dev / dns": expected}
