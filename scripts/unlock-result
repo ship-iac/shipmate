@@ -12,9 +12,9 @@ Each unlock leg uploads one record, artifact `shipmate-unlock-<strategy.job-inde
 `shipmate-unlock-<strategy.job-index>.json`: `{"index", "stack", "environment", "outcome",
 "lock_id"}`, `outcome` being `released`, `none` or `failed`. `download-artifact` writes each of
 several artifacts into a directory of its name, but a lone one straight into the download path,
-so cell `i`'s record is read from `shipmate-unlock-<i>/shipmate-unlock-<i>.json` when that
-exists, else from `shipmate-unlock-<i>.json` at the download root; one download never holds
-both. A cell with no record is unread when the download failed; a failed download that left
+so records are read from `shipmate-unlock-<i>/shipmate-unlock-<i>.json` when any record
+directory exists, and from `shipmate-unlock-<i>.json` at the download root only when none does
+(`records`). A cell with no record is unread when the download failed; a failed download that left
 every cell its record reads as a successful one. A leg
 runs pull-request HCL, so a record can be forged, and the reply is display only: the cell is
 `cells[index]`, and a record counts only when its file name and `index` agree, its

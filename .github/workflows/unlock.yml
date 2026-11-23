@@ -150,7 +150,7 @@ jobs:
     permissions: { pull-requests: write }
     steps:
       # A lone matching artifact downloads without a directory of its name; `unlock-result` reads
-      # a record in either place.
+      # the root only when no record directory exists.
       - name: Download the cells' records
         id: download
         if: ${{ needs.detect.result == 'success' && needs.detect.outputs.cells != '[]' }}
