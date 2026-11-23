@@ -2559,6 +2559,19 @@ def test_verify_refuses_a_pull_request_it_cannot_read(monkeypatch, tmp_path, ans
     )
 
 
+@pytest.mark.parametrize("action", ["opened", "ready_for_review"])
+def test_verify_auto_passes_a_plan_the_ready_click_or_opening_started(
+    monkeypatch, tmp_path, action
+):
+    """Mutation: drop `ready_for_review` from `AUTO_ACTIONS` (the ready row refuses). Mutation:
+    drop `opened` (the opened row refuses)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, _records(RUN, action=action)).on(PLANS_READ, _plans())
+    gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
+    assert gh.drained()
+
+
 def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch, tmp_path):
     """The record check reads the newest record per name: an older check run recording another
     plan run is outvoted. Mutation: route `SHIPMATE_AUTO` `true` like `false` (the listing and
@@ -2571,12 +2584,13 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     assert gh.drained()
 
 
-@pytest.mark.parametrize("action", ["ready_for_review", "", None])
+@pytest.mark.parametrize("action", ["reopened", "", None])
 def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, action):
-    """A ready-for-review autoplan of the head can become the newest autoplan after detect.
+    """A reopen autoplan of the head can become the newest autoplan after detect.
 
     Mutation: drop the action check from `provenance_reason` (the permission read runs,
-    unexpected)."""
+    unexpected). Mutation: add `reopened` to `AUTO_ACTIONS` (the reopened row reads the
+    permission, unexpected)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (

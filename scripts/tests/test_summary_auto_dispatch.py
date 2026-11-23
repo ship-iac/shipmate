@@ -50,43 +50,46 @@ def _gate(**overrides):
     return state or "", mode
 
 
-_AUTOPLAN = ("pull_request_target", "synchronize", "1", "")
+_AUTOPLAN = ("pull_request_target", "synchronize", "1", "", False)
 
-#: name -> (event, action, attempt, is_draft, decide overrides, whole reason); each row breaks
-#: one condition.
+#: name -> ((event, action, attempt, is_draft, payload draft), decide overrides, whole reason);
+#: each row breaks one condition.
 SKIPS = {
     "on-demand plan": (
-        ("workflow_dispatch", "", "1", ""),
+        ("workflow_dispatch", "", "1", "", False),
         {},
         "a workflow_dispatch run is not an autoplan",
     ),
-    "ready for review": (
-        ("pull_request_target", "ready_for_review", "1", ""),
-        {},
-        "this plan was started by marking the pull request ready, not by a push",
-    ),
     "reopened": (
-        ("pull_request_target", "reopened", "1", ""),
+        ("pull_request_target", "reopened", "1", "", False),
         {},
         "this plan was started by reopening the pull request, not by a push",
     ),
     "unreadable action": (
-        ("pull_request_target", "", "1", ""),
+        ("pull_request_target", "", "1", "", False),
         {},
         "this plan's event could not be read",
     ),
     "other action": (
-        ("pull_request_target", "edited", "1", ""),
+        ("pull_request_target", "edited", "1", "", False),
         {},
         "this plan was started by the `edited` event, not by a push",
     ),
+    "push onto a draft": (
+        ("pull_request_target", "synchronize", "1", "false", True),
+        {},
+        (
+            "this plan's push landed on a draft; the run that marking it ready started decides "
+            "the auto apply"
+        ),
+    ),
     "re-run": (
-        ("pull_request_target", "synchronize", "2", ""),
+        ("pull_request_target", "synchronize", "2", "", False),
         {},
         "run attempt 2 is a re-run",
     ),
     "draft": (
-        ("pull_request_target", "synchronize", "1", "true"),
+        ("pull_request_target", "synchronize", "1", "true", False),
         {},
         "the pull request is a draft",
     ),
@@ -129,26 +132,34 @@ def test_each_failed_condition_dispatches_nothing(name):
 
     Mutations: delete any one `if` of `action_reason` or `skip_reason` (its row reddens); compare
     only `state` with `pending` (the draft-gate row reddens: a draft autoplan's gate is pending
-    too); admit `reopened` (its row reddens); swap the `ready_for_review` and `reopened` reasons
-    (both rows redden)."""
-    (event, action, attempt, is_draft), overrides, reason = SKIPS[name]
+    too); admit `reopened` (its row reddens); swap the `reopened` and `""` reasons (both rows
+    redden)."""
+    (event, action, attempt, is_draft, payload_draft), overrides, reason = SKIPS[name]
     state, mode = _gate(**overrides)
     got = ad.skip_reason(
-        event=event, action=action, attempt=attempt, is_draft=is_draft, state=state, mode=mode
+        event=event,
+        action=action,
+        attempt=attempt,
+        payload_draft=payload_draft,
+        is_draft=is_draft,
+        state=state,
+        mode=mode,
     )
     assert got == reason
 
 
-@pytest.mark.parametrize("action", ["opened", "synchronize"])
+@pytest.mark.parametrize("action", ["opened", "synchronize", "ready_for_review"])
 def test_every_condition_holding_dispatches(action):
     """Mutation: compare `mode` with `nothing-changed` in place of `post`. Mutation: drop
-    `opened` from the admitted actions."""
+    `opened` from the admitted actions. Mutation: drop `ready_for_review` from `AUTO_ACTIONS`
+    (the ready row reddens)."""
     state, mode = _gate()
     assert (state, mode) == ("pending", "post")
     got = ad.skip_reason(
         event="pull_request_target",
         action=action,
         attempt="1",
+        payload_draft=False,
         is_draft="false",
         state=state,
         mode=mode,
@@ -367,8 +378,8 @@ def test_a_changed_auto_cell_decides_to_dispatch(tmp_path):
 
 @bash_only
 def test_a_newer_autoplan_of_the_head_decides_nothing(tmp_path):
-    """A ready-for-review run of the same head is never an auto source, yet it becomes the
-    head's newest autoplan, and the `auto` run would refuse this run's plan as older.
+    """A ready-for-review run of the same head is its newest autoplan unless it completed after
+    deferring, and the `auto` run would refuse this run's plan as older.
     Mutations: drop the newest check; compare with `!=`."""
     runs = jsonl(_autoplan(999), _autoplan(1000))
     proc, calls, outputs = _run(tmp_path, DECIDE, cells=[("dev", True)], runs=runs)
@@ -484,9 +495,9 @@ def test_no_changed_auto_cell_decides_nothing(tmp_path):
     ("event", "reason"),
     [
         pytest.param(
-            json.dumps({"action": "ready_for_review"}),
-            "this plan was started by marking the pull request ready, not by a push",
-            id="ready",
+            json.dumps({"action": "reopened"}),
+            "this plan was started by reopening the pull request, not by a push",
+            id="reopened",
         ),
         pytest.param("not json", "this plan's event could not be read", id="unparseable"),
         pytest.param(
@@ -505,6 +516,38 @@ def test_an_autoplan_not_started_by_a_push_decides_nothing(tmp_path, event, reas
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (calls, outputs) == ([], {"envs": ""})
     assert proc.stderr.splitlines() == [f"no auto apply dispatched: {reason}"]
+
+
+def _push_by_k3np(draft):
+    """A human push by `k3np`, payload `draft` as given, run 999 the only listed autoplan."""
+    run = _autoplan(999) | {"actor": {"login": "k3np"}, "triggering_actor": {"login": "k3np"}}
+    event = json.dumps({"action": "synchronize", "pull_request": {"draft": draft}})
+    return {"cells": [("sbx", True)], "auto": '["sbx"]', "runs": jsonl(run), "event": event}
+
+
+@bash_only
+def test_a_push_onto_a_draft_decides_nothing(tmp_path):
+    """`SHIPMATE_IS_DRAFT` is `false`: the pull request was marked ready while the run planned.
+    Mutation: drop the `payload_draft` check from `skip_reason` -- `sbx` is printed, red."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, **_push_by_k3np(True))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (calls, outputs) == ([], {"envs": ""})
+    assert proc.stderr.splitlines() == [
+        (
+            "no auto apply dispatched: this plan's push landed on a draft; the run that marking "
+            "it ready started decides the auto apply"
+        )
+    ]
+
+
+@bash_only
+def test_a_push_onto_a_ready_pull_request_decides_to_dispatch(tmp_path):
+    """Mutation: refuse whenever the payload holds `pull_request.draft` (`"draft" in pull`) --
+    nothing is printed, red."""
+    proc, calls, outputs = _run(tmp_path, DECIDE, **_push_by_k3np(False))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (_paths(calls), outputs) == ([_LISTING], {"envs": "sbx"})
+    assert proc.stderr == ""
 
 
 @bash_only

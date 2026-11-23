@@ -50,9 +50,9 @@ unless one of that environment's holders is in `SHIPMATE_BLOCKING`, where evict 
 `targeted-envs` names no targeted environment, so the section degrades to the bare
 `shipmate apply` even when every changed environment is targeted; the unreadable one warns.
 
-An autoplan of a pull request that is not a draft, not started by a push, that changed a cell of
-an `apply_mode: auto` environment no other pull request locks says so in a line under the verdict
-(`auto_line`), whatever `command_hints` is:
+An autoplan of a pull request that is not a draft, started by neither a push nor the
+ready-for-review click, that changed a cell of an `apply_mode: auto` environment no other pull
+request locks says so in a line under the verdict (`auto_line`), whatever `command_hints` is:
 auto-dispatch's `action_reason` and its remedy.
 
 Only a commanded plan (`SHIPMATE_ON_DEMAND` is `true`) names, directly under the verdict, the
@@ -526,8 +526,8 @@ AUTO_REMEDY = "push a commit, or comment `shipmate apply`."
 
 def auto_line(cells, auto, locks, *, event, action, is_draft):
     """`⚪ auto apply not started: <reason>; ` and `AUTO_REMEDY` when this run is an autoplan of a
-    pull request that is not a draft, its event action is not a push (`action_reason` names
-    why, the same on every attempt), and a changed cell of `cells` in `auto` is not locked by
+    pull request that is not a draft, its event action is not in `AUTO_ACTIONS` (`action_reason`
+    names why, the same on every attempt), and a changed cell of `cells` in `auto` is not locked by
     another pull request (`locks`); else empty. A locked cell applies on no trigger, and an
     on-demand plan cannot tell whether an auto apply of the head is running."""
     if event != "pull_request_target" or is_draft == "true":

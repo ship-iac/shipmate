@@ -530,6 +530,13 @@ def event_action():
     return action if isinstance(action, str) else ""
 
 
+def event_draft():
+    """Whether the event payload at `GITHUB_EVENT_PATH` holds `pull_request.draft` exactly
+    `True`; an unreadable payload or any other value is not a draft."""
+    pull = event_payload(os.environ.get("GITHUB_EVENT_PATH", "")).get("pull_request")
+    return isinstance(pull, dict) and pull.get("draft") is True
+
+
 def utf8_output():
     """Write stdout and stderr as UTF-8: a cp1252 Windows console prints `—` and `§` as `?`.
 

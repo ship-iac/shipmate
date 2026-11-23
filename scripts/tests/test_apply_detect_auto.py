@@ -340,19 +340,18 @@ def test_a_rerun_by_anyone_but_the_apps_bot_refuses(tmp_path, monkeypatch, trigg
 @pytest.mark.parametrize(
     "action",
     [
-        pytest.param("ready_for_review", id="ready"),
         pytest.param("reopened", id="reopened"),
         pytest.param("", id="dispatch"),
         pytest.param(None, id="older-engine"),
     ],
 )
 def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
-    """A ready-for-review or reopen autoplan of the head dispatches no auto apply but becomes
-    the newest autoplan; its clicker is no pusher. The listing is read, the permission is not;
-    `_github` fails a single-run read.
+    """A reopen autoplan of the head dispatches no auto apply but becomes the newest autoplan;
+    its clicker authorizes nothing. The listing is read, the permission is not; `_github` fails a
+    single-run read.
 
     Mutation: drop the action check from `provenance_reason` (every row applies). Mutation:
-    admit a missing action (`act not in (*PUSH_ACTIONS, None)`; older-engine applies).
+    admit a missing action (`act not in (*AUTO_ACTIONS, None)`; older-engine applies).
     Mutation: answer `newest` with the bound run instead of reading the listing (no listing
     call, red)."""
     calls = []
@@ -366,9 +365,10 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     assert not [c for c in calls if "/collaborators/" in c]
 
 
-@pytest.mark.parametrize("action", ["opened", "synchronize"])
+@pytest.mark.parametrize("action", ["opened", "synchronize", "ready_for_review"])
 def test_a_plan_a_push_started_applies(tmp_path, monkeypatch, action):
-    """Mutation: drop `opened` from `PUSH_ACTIONS` (the opened row refuses)."""
+    """Mutation: drop `opened` from `AUTO_ACTIONS` (the opened row refuses). Mutation: drop
+    `ready_for_review` (the ready row refuses)."""
     checks = [_check("stacks/app", "dev-eu", action=action)]
     assert _applied(_run_auto(tmp_path, monkeypatch, checks=checks)) == [("stacks/app", "dev-eu")]
 

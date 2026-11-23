@@ -330,7 +330,7 @@ def is_plan_digest(value):
 
 def plan_actions(check_run_lines, app_id):
     """Map each App-authored apply check name to the `action` its newest record holds, None
-    when it holds none, as an older engine's does; callers compare it with `PUSH_ACTIONS`. A
+    when it holds none, as an older engine's does; callers compare it with `AUTO_ACTIONS`. A
     name whose newest check carries no decodable record is absent. Read beside
     `plan_records`, whose tuple every reader unpacks."""
     return {name: record.get("action") for name, record in _newest_records(check_run_lines, app_id)}
@@ -355,8 +355,20 @@ def behind_names(check_run_lines, app_id):
     }
 
 
-#: The event actions of an autoplan a push started: only its plan applies automatically.
-PUSH_ACTIONS = ("opened", "synchronize")
+def draft_names(check_run_lines, app_id):
+    """The App-authored apply check names whose newest run's record holds `draft` exactly
+    `True`: the plan run's event payload said the pull request was a draft, so its push alone
+    authorizes no auto apply. An absent key or any other value is not draft."""
+    return {
+        name
+        for name, record in _newest_records(check_run_lines, app_id)
+        if record.get("draft") is True
+    }
+
+
+#: The event actions of an autoplan whose plan applies automatically: a push, or the
+#: ready-for-review click, each by a writer that `authorize.pusher_reason` admits.
+AUTO_ACTIONS = ("opened", "synchronize", "ready_for_review")
 
 
 def incomplete_runs(check_run_lines, app_id):
@@ -543,7 +555,7 @@ def provenance_reason(newest, plan_run, head, cells):
       `event=` filter should already exclude one.
     - `("head", newest["head_sha"])`: it planned another commit than `head`.
     - `("record", [(name, recorded), ...])`: cells recording another plan run.
-    - `("action", [(name, action), ...])`: cells whose action is not in `PUSH_ACTIONS`."""
+    - `("action", [(name, action), ...])`: cells whose action is not in `AUTO_ACTIONS`."""
     if newest is None:
         return "unlisted", None
     if str(newest["id"]) != plan_run:
@@ -555,7 +567,7 @@ def provenance_reason(newest, plan_run, head, cells):
     records = [(name, run) for name, (run, _) in cells.items() if run != plan_run]
     if records:
         return "record", records
-    actions = [(name, act) for name, (_, act) in cells.items() if act not in PUSH_ACTIONS]
+    actions = [(name, act) for name, (_, act) in cells.items() if act not in AUTO_ACTIONS]
     return ("action", actions) if actions else None
 
 

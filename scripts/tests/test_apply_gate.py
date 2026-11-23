@@ -644,6 +644,30 @@ def test_behind_names_reads_only_a_newest_app_record_whose_behind_is_true():
     assert ag.behind_names(lines, "999") == {"apply / dev-eu / a"}
 
 
+def test_draft_names_reads_only_a_newest_app_record_whose_draft_is_true():
+    """`a` is draft on its newest run; `b`'s draft record sits under a newer plain one; `c` and
+    `d` hold `"true"` and `1`; `e` holds no `draft` key, as an older engine's record does;
+    `f`'s newest draft record is another App's, over ours.
+
+    Mutation: test `record.get("draft")` for truth -- `c` and `d` are listed, red.
+    Mutation: read an absent key as draft (`record.get("draft", True) is True`) -- `b`, `e` and
+    `f` are listed, red.
+    Mutation: read every App run, not the newest per name -- `b` is listed, red.
+    Mutation: parse the lines without `from_app` -- `f` is listed, red."""
+    draft = _record(action="synchronize", draft=True)
+    lines = [
+        _ext("apply / sbx / a", 1, draft),
+        _ext("apply / sbx / b", 2, draft),
+        _ext("apply / sbx / b", 3, _record(action="synchronize")),
+        _ext("apply / sbx / c", 4, _record(draft="true")),
+        _ext("apply / sbx / d", 5, _record(draft=1)),
+        _ext("apply / sbx / e", 6, _record(action="synchronize")),
+        _ext("apply / sbx / f", 7, _record(action="synchronize")),
+        _ext("apply / sbx / f", 8, draft, app_id=15368),
+    ]
+    assert ag.draft_names(lines, "999") == {"apply / sbx / a"}
+
+
 def test_plan_records_ignores_foreign_app_even_when_newest():
     """Mutation: iterate `parse_jsonl(check_run_lines)` instead of `app_runs(...)`."""
     ours = _ext("apply / dev-eu / stacks/app", 1, _record(plan_run="111", plan_sha256="a" * 64))
@@ -1038,14 +1062,14 @@ _PUSHED = {"x": ("7", "synchronize"), "y": ("7", "opened")}
         ),
         pytest.param(
             listed_autoplan(7, _HEAD),
-            {"x": ("7", "ready_for_review"), "y": ("8", "synchronize")},
+            {"x": ("7", "reopened"), "y": ("8", "synchronize")},
             ("record", [("y", "8")]),
             id="record-first",
         ),
         pytest.param(
             listed_autoplan(7, _HEAD),
-            {"x": ("7", "ready_for_review"), "y": ("7", "synchronize"), "z": ("7", None)},
-            ("action", [("x", "ready_for_review"), ("z", None)]),
+            {"x": ("7", "reopened"), "y": ("7", "ready_for_review"), "z": ("7", None)},
+            ("action", [("x", "reopened"), ("z", None)]),
             id="action",
         ),
     ],
@@ -1056,7 +1080,8 @@ def test_provenance_reason_names_the_first_failing_check(newest, cells, expected
     otherwise). Mutation: drop the event check (event passes). Mutation: drop the head check
     (head passes). Mutation: drop the record check (record passes). Mutation: drop the action
     check, or `==` for `!=` in the record check (action passes, or pass refuses). Mutation:
-    test the event before the id (newer-first reads `event`)."""
+    test the event before the id (newer-first reads `event`). Mutation: drop `ready_for_review`
+    from `AUTO_ACTIONS` (action lists `y`)."""
     assert ag.provenance_reason(newest, "7", _HEAD, cells) == expected
 
 

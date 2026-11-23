@@ -1017,9 +1017,7 @@ def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     `shipmate unlock` -- red."""
     cp = load_script("comment-parse")
     cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b"), None)]
-    auto = sc.auto_line(
-        [c for c, _ in cells], ["dev-eu"], {}, **_AUTOPLAN | {"action": "ready_for_review"}
-    )
+    auto = sc.auto_line([c for c, _ in cells], ["dev-eu"], {}, **_AUTOPLAN | {"action": "reopened"})
     body = sc.build_comment(
         cells, {}, RUN_URL, SHA, hints=True, locks={"stacks/app / dev-eu": 1}, auto=auto
     )[0]
@@ -3002,31 +3000,34 @@ _AUTO_CELLS = [(_cell(environment="dev"), "  + one"), (_cell(changed=False, stac
 @pytest.mark.parametrize(
     ("action", "line"),
     [
-        (
-            "ready_for_review",
-            _auto("this plan was started by marking the pull request ready, not by a push"),
-        ),
         ("reopened", _auto("this plan was started by reopening the pull request, not by a push")),
         ("", _auto("this plan's event could not be read")),
         ("edited", _auto("this plan was started by the `edited` event, not by a push")),
     ],
-    ids=["ready", "reopened", "unreadable", "other"],
+    ids=["reopened", "unreadable", "other"],
 )
 def test_an_autoplan_not_started_by_a_push_says_why_no_auto_apply_follows(action, line):
-    """Mutation: swap the `ready_for_review` and `reopened` reasons in auto-dispatch -- red."""
+    """Mutation: swap the `reopened` and `""` reasons in auto-dispatch -- red."""
     cells = [c for c, _ in _AUTO_CELLS]
     assert sc.auto_line(cells, ["dev"], {}, **_AUTOPLAN | {"action": action}) == line
+
+
+def test_an_autoplan_started_by_the_ready_click_says_nothing_about_an_auto_apply():
+    """It dispatches. Mutation: restore the `ready_for_review` entry of `_ACTION_REASONS` and
+    drop the action from `AUTO_ACTIONS` -- the reason renders, red."""
+    cells = [c for c, _ in _AUTO_CELLS]
+    assert sc.auto_line(cells, ["dev"], {}, **_AUTOPLAN | {"action": "ready_for_review"}) == ""
 
 
 def test_the_auto_line_sits_under_the_verdict():
     """Mutation: `action_reason` returns None for every action -- no line, red."""
     auto = sc.auto_line(
-        [c for c, _ in _AUTO_CELLS], ["dev"], {}, **_AUTOPLAN | {"action": "ready_for_review"}
+        [c for c, _ in _AUTO_CELLS], ["dev"], {}, **_AUTOPLAN | {"action": "reopened"}
     )
     assert sc.build_comment(_AUTO_CELLS, CHECKS, RUN_URL, SHA, auto=auto)[0] == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
-        "⚪ auto apply not started: this plan was started by marking the pull request ready, not "
-        f"by a push; {_REMEDY}\n\n"
+        "⚪ auto apply not started: this plan was started by reopening the pull request, not by "
+        f"a push; {_REMEDY}\n\n"
         "#### dev: 1 cell, 1 changed\n\n"
         f"<details><summary>{_bare_app(RUN_URL)}</summary>\n\n```diff\n+   one\n```\n"
         "</details>\n\n"
@@ -3039,7 +3040,7 @@ def test_the_auto_line_sits_under_the_verdict():
     "facts",
     [
         pytest.param({"event": "workflow_dispatch", "action": ""}, id="on-demand"),
-        pytest.param({"event": "pull_request", "action": "ready_for_review"}, id="pull-request"),
+        pytest.param({"event": "pull_request", "action": "reopened"}, id="pull-request"),
         pytest.param(
             {"event": "workflow_dispatch", "action": "", "is_draft": "true"}, id="on-demand-draft"
         ),
@@ -3057,7 +3058,7 @@ def test_an_autoplan_of_a_draft_says_nothing_about_an_auto_apply():
     """An autoplan of a draft writes no comment, and marking it ready replans. Mutation: drop the
     draft condition from `auto_line` -- the ready reason renders, red."""
     cells = [c for c, _ in _AUTO_CELLS]
-    facts = _AUTOPLAN | {"action": "ready_for_review", "is_draft": "true"}
+    facts = _AUTOPLAN | {"action": "reopened", "is_draft": "true"}
     assert sc.auto_line(cells, ["dev"], {}, **facts) == ""
 
 
@@ -3079,7 +3080,7 @@ def test_a_push_started_autoplan_says_nothing_about_an_auto_apply():
 def test_no_changed_cell_of_an_auto_environment_says_nothing(cells):
     """Mutations: render for any changed cell (`any(c["changed"] for c in cells)`) -- the first
     row renders; drop `if c["changed"]` from `changed_auto_envs` -- the second row renders."""
-    facts = _AUTOPLAN | {"action": "ready_for_review"}
+    facts = _AUTOPLAN | {"action": "reopened"}
     assert sc.auto_line(cells, ["dev"], {}, **facts) == ""
 
 
@@ -3091,15 +3092,15 @@ def test_an_auto_cell_another_pull_request_locks_says_nothing():
     """A locked cell applies on no trigger. Mutation: keep every cell in `free` (drop the
     `_lock_key` filter) -- red."""
     locks = {"stacks/app / dev": 3, "stacks/db / dev": None}
-    facts = _AUTOPLAN | {"action": "ready_for_review"}
+    facts = _AUTOPLAN | {"action": "reopened"}
     assert sc.auto_line(_TWO_DEV, ["dev"], locks, **facts) == ""
 
 
 def test_one_unlocked_auto_cell_keeps_the_line():
     """Mutation: drop every cell from `free` when any is locked -- red."""
-    facts = _AUTOPLAN | {"action": "ready_for_review"}
+    facts = _AUTOPLAN | {"action": "reopened"}
     assert sc.auto_line(_TWO_DEV, ["dev"], {"stacks/app / dev": 3}, **facts) == _auto(
-        "this plan was started by marking the pull request ready, not by a push"
+        "this plan was started by reopening the pull request, not by a push"
     )
 
 
@@ -3109,9 +3110,7 @@ def test_the_auto_line_stays_in_a_body_over_the_size_budget():
     SIZE_BUDGET, as the command section is -- red."""
     cells = [(_cell(environment="dev"), None)]
     cells += [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(135)]
-    auto = sc.auto_line(
-        [c for c, _ in cells], ["dev"], {}, **_AUTOPLAN | {"action": "ready_for_review"}
-    )
+    auto = sc.auto_line([c for c, _ in cells], ["dev"], {}, **_AUTOPLAN | {"action": "reopened"})
     body = sc.build_comment(cells, {}, RUN_URL, SHA, auto=auto)[0]
     assert len(body) > sc.SIZE_BUDGET
     assert body.split("\n\n")[2] == auto
@@ -3124,7 +3123,7 @@ def test_main_says_why_no_auto_apply_follows(tmp_path, monkeypatch, attempt):
     as the action -- no line, red. Mutation: restore the attempt guard (render only when
     `GITHUB_RUN_ATTEMPT` is `1`) -- the attempt-2 row, red."""
     payload = tmp_path / "event.json"
-    payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
+    payload.write_text(json.dumps({"action": "reopened"}), encoding="utf-8")
     (tmp_path / "run").mkdir()
     for name, value in {
         "GITHUB_EVENT_NAME": "pull_request_target",
@@ -3138,8 +3137,8 @@ def test_main_says_why_no_auto_apply_follows(tmp_path, monkeypatch, attempt):
     assert (tmp_path / "run" / "comment.md").read_text(encoding="utf-8") == (
         _UNMARKED_LOCK_BODY.replace(
             f"{MAIN_AT}\n\n",
-            f"{MAIN_AT}\n\n⚪ auto apply not started: this plan was started by marking the pull "
-            f"request ready, not by a push; {_REMEDY}\n\n",
+            f"{MAIN_AT}\n\n⚪ auto apply not started: this plan was started by reopening the pull "
+            f"request, not by a push; {_REMEDY}\n\n",
         )
     )
 
@@ -3151,7 +3150,7 @@ def test_main_warns_once_and_says_nothing_for_a_malformed_auto_set(
     """Mutation: drop the warning -- red; accept any JSON list (`["dev-eu", 1]` renders the
     line) -- red."""
     payload = tmp_path / "event.json"
-    payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
+    payload.write_text(json.dumps({"action": "reopened"}), encoding="utf-8")
     (tmp_path / "run").mkdir()
     for name, value in {
         "GITHUB_EVENT_NAME": "pull_request_target",
@@ -3173,7 +3172,7 @@ def test_main_gives_no_auto_line_for_a_cell_another_pull_request_locks(tmp_path,
     """`main` passes the `SHIPMATE_LOCKS` marks to `auto_line`. Mutation: call `auto_line` with
     `{}` for the locks in `main` -- the locked cell renders the line, red."""
     payload = tmp_path / "event.json"
-    payload.write_text(json.dumps({"action": "ready_for_review"}), encoding="utf-8")
+    payload.write_text(json.dumps({"action": "reopened"}), encoding="utf-8")
     (tmp_path / "run").mkdir()
     for name, value in {
         "GITHUB_EVENT_NAME": "pull_request_target",

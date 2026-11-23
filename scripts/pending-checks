@@ -12,7 +12,9 @@ the sha256 of the plan text that run published, on either branch, and
 `cells`, the number of cells that run planned plus its behind cells, against which apply judges
 whether the run published every check, and `action`, the plan run's event action (`""` when its
 payload names none, as a `shipmate plan` dispatch's does), which the auto apply requires
-to be a push's, and `title`, the check's own output title, which a successful apply restores
+to be one of `apply-gate.AUTO_ACTIONS`, then `draft: true` only when that payload said the pull
+request was a draft, whose plan applies automatically only under a ready-for-review run that
+deferred to it, and `title`, the check's own output title, which a successful apply restores
 after a failed one retitled the check. GitHub caps `external_id` at `EXTERNAL_ID_CAP`
 characters and truncates a longer one, which no reader can decode, so a record over the cap
 refuses. That digest is computed here, over the whole plan.txt this job downloaded, never
@@ -22,7 +24,8 @@ least what a reviewer saw and often more.
 Each behind cell (`SHIPMATE_BEHIND`, build-matrix's `behind` output read by
 `gate-state.behind_cells`) gets a queued check titled `Behind <base>: update the branch` whose
 summary names the base commits that changed its stack, and whose record is `{plan_run, pr, cells,
-action, behind: true}`: no digest, since no plan exists, and no title, which no apply restores.
+action, [draft: true,] behind: true}`: no digest, since no plan exists, and no title, which no
+apply restores.
 The base branch stays out of the record, whose size it would make unbounded.
 The check name uses the stack PATH so deploy-detect (which only has the path)
 reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
@@ -57,6 +60,7 @@ from _shipmate import (
     current_run_url,
     env_pr_number,
     event_action,
+    event_draft,
     is_run_id,
     run_annotated,
 )
@@ -109,10 +113,11 @@ def check_output(cell, raw, url):
     return {"title": title, "summary": sc.fence(kept, f) + sc.check_trailer(url)}
 
 
-def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
+def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url, draft=False):
     """The POST body for the cell summary `cell` at `cell_json`, whose apply check is `name`,
     hashing the plan.txt beside it, which it reads once. `cells` is the number of cells the run
-    planned, `action` its event action, `url` the run page a cut plan links."""
+    planned, `action` its event action, `url` the run page a cut plan links, `draft` whether
+    its event payload said draft."""
     txt = pathlib.Path(cell_json).with_name("plan.txt")
     if not txt.is_file():
         raise SystemExit(
@@ -142,6 +147,7 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
                 "pr": pr,
                 "cells": cells,
                 "action": action,
+                **_draft(draft),
                 "title": output["title"],
             }
         ),
@@ -149,17 +155,24 @@ def body(name, cell_json, cell, head_sha, plan_run, pr, cells, action, url):
     }
 
 
-def behind_body(row, report, head_sha, plan_run, pr, cells, action):
+def behind_body(row, report, head_sha, plan_run, pr, cells, action, draft=False):
     """The POST body for the behind cell `row` of the behind report `report`: queued, titled
     with the base branch, its summary `summary-comment.behind_line` and that the cell is not
-    planned until the branch is updated. `cells` and `action` are as `body`'s."""
+    planned until the branch is updated. `cells`, `action` and `draft` are as `body`'s."""
     base = report["base"]
     return {
         "name": ag.check_name(row["stack"], row["environment"]),
         "head_sha": head_sha,
         "status": "queued",
         "external_id": external_id(
-            {"plan_run": plan_run, "pr": pr, "cells": cells, "action": action, "behind": True}
+            {
+                "plan_run": plan_run,
+                "pr": pr,
+                "cells": cells,
+                "action": action,
+                **_draft(draft),
+                "behind": True,
+            }
         ),
         "output": {
             "title": f"Behind {base}: update the branch",
@@ -167,6 +180,11 @@ def behind_body(row, report, head_sha, plan_run, pr, cells, action):
             f"branch is updated from {sc._md_name(base)}.",
         },
     }
+
+
+def _draft(draft):
+    """The record's `draft` key: present, and `True`, only for a draft payload."""
+    return {"draft": True} if draft else {}
 
 
 def external_id(record):
@@ -230,16 +248,16 @@ def main():
         if todo or rows:
             print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
         return
-    action = event_action()
+    action, draft = event_action(), event_draft()
     url = current_run_url()
     total = len(cells) + len(rows)
     for name, cj, cell in todo:
-        print(json.dumps(body(name, cj, cell, head, plan_run, pr, total, action, url)))
+        print(json.dumps(body(name, cj, cell, head, plan_run, pr, total, action, url, draft)))
     # This run's earlier attempt may have published a plan check under the name; only a behind
     # record of this run stands for this behind cell.
     for row in rows:
         if ag.check_name(row["stack"], row["environment"]) not in done & behind:
-            print(json.dumps(behind_body(row, report, head, plan_run, pr, total, action)))
+            print(json.dumps(behind_body(row, report, head, plan_run, pr, total, action, draft)))
 
 
 if __name__ == "__main__":

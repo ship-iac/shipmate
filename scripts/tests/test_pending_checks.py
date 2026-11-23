@@ -206,6 +206,21 @@ def test_the_record_names_the_plan_runs_event_action(tmp_path, _push_event, payl
     assert json.loads(body["external_id"])["action"] == action
 
 
+def test_a_draft_payload_records_draft_after_the_action(tmp_path, _push_event):
+    """The record is compared as the exact string GitHub stores. Mutation: drop the `draft`
+    conditional (`_draft` returns `{}`) -- red. Mutation: write `"draft": True` in `body` in
+    place of `_draft(draft)` -- the non-draft whole-body tests redden."""
+    _push_event.write_text(
+        json.dumps({"action": "synchronize", "pull_request": {"draft": True}}), encoding="utf-8"
+    )
+    _write_cell(tmp_path, "sbx", "stacks-app", stack="stacks/app", environment="sbx", changed=True)
+    (body,) = _emit(tmp_path)
+    assert body["external_id"] == (
+        f'{{"plan_run":"{RUN_ID}","plan_sha256":"{SHA_A}","pr":"{PR}","cells":1,'
+        '"action":"synchronize","draft":true,"title":"+? ~? -?"}'
+    )
+
+
 def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
     _write_cell(
         tmp_path,
@@ -848,14 +863,15 @@ def test_a_plan_text_with_cr_line_ends_publishes_the_same_body_as_before(tmp_pat
 
 
 #: A wide record: a 20-digit run id, a 6-digit pull request, 9999 cells, the longest event
-#: action an autoplan runs on, and all five counts at 4 digits. It is 225 characters, 30 under
-#: the cap.
+#: action an autoplan runs on, a draft payload, and all five counts at 4 digits. It is 238
+#: characters, 17 under the cap.
 _WIDEST = {
     "plan_run": "9" * 20,
     "plan_sha256": "a" * 64,
     "pr": "999999",
     "cells": 9999,
     "action": "ready_for_review",
+    "draft": True,
     "title": "+9999 ~9999 -9999, 9999 import, 9999 forget",
 }
 
@@ -867,7 +883,7 @@ def test_the_widest_record_fits_under_githubs_cap_whole():
     text = pc.external_id(_WIDEST)
     assert text == (
         '{"plan_run":"99999999999999999999","plan_sha256":"' + "a" * 64 + '","pr":"999999",'
-        '"cells":9999,"action":"ready_for_review",'
+        '"cells":9999,"action":"ready_for_review","draft":true,'
         '"title":"+9999 ~9999 -9999, 9999 import, 9999 forget"}'
     )
     assert pc.EXTERNAL_ID_CAP == 255
@@ -878,7 +894,7 @@ def test_a_record_over_the_cap_refuses():
     with pytest.raises(SystemExit) as exc:
         pc.external_id({**_WIDEST, "action": "x" * 200})
     assert str(exc.value.code) == (
-        "::error::the apply check record is 409 characters, over GitHub's 255-character "
+        "::error::the apply check record is 422 characters, over GitHub's 255-character "
         "external_id cap"
     )
 
@@ -955,6 +971,20 @@ def test_a_behind_cell_gets_a_queued_check_with_a_record_and_no_digest(tmp_path,
         "output": {"title": "Behind main: update the branch", "summary": _WORKERS_SUMMARY},
     }
     assert bodies[2]["name"] == "apply / prod / modules/net"
+
+
+def test_a_draft_payload_records_draft_on_a_behind_cell(tmp_path, monkeypatch, _push_event):
+    """Mutation: drop the `draft` conditional (`_draft` returns `{}`) -- red. Mutation: write
+    `"draft": True` in `behind_body` in place of `_draft(draft)` -- the non-draft behind test
+    reddens."""
+    _push_event.write_text(
+        json.dumps({"action": "synchronize", "pull_request": {"draft": True}}), encoding="utf-8"
+    )
+    workers = _emit_behind(tmp_path, monkeypatch)[1]
+    assert workers["external_id"] == (
+        f'{{"plan_run":"{RUN_ID}","pr":"{PR}","cells":3,"action":"synchronize","draft":true,'
+        '"behind":true}'
+    )
 
 
 def _as_check_runs(bodies):
