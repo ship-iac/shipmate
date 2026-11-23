@@ -233,7 +233,7 @@ jobs:
         # A failed or timed-out download must reach gate-state as a cell-summary shortfall that
         # holds the gate, not end the job before `Create/refresh gate` writes any gate.
         continue-on-error: true
-        # 256 cell-summary artifacts downloaded in 5-6 s (measured 2026-11-23).
+        # 256 cell-summary artifacts of about 200 KB each downloaded in 5-6 s (measured 2026-11-23).
         timeout-minutes: 1
         with:
           pattern: cell-summary.*
