@@ -20,6 +20,7 @@ pc = _load("patch-checks")
 
 
 def _now():
+    """The release time; tests replace it."""
     return datetime.now(UTC)
 
 
