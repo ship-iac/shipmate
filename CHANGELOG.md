@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- **An `auto` wave cell's provenance refusal reads the same as `detect`'s.** The wave pre-apply check words each cause with `detect`'s text after `apply aborted for <where>:`, and every one ends ``push, or comment `shipmate apply` on the pull request``. `detect`'s refusal of a listed run that is not a `pull_request_target` run drops its `: an auto apply applies only an autoplan's plan` tail (`docs/troubleshooting.md`).
+
 ### Fixed
 
 - **An apply check's duration counts from its wave's release, not from the plan that created it.** The release flip to `in_progress` sets the check's start time to the release (`CONTRACT.md` §Apply check lifecycle).

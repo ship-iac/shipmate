@@ -38,6 +38,7 @@ from _shipmate import (
     is_pr_number,
     is_run_id,
     listed_jobs,
+    named,
     plan_runs_since,
     retried,
     run_annotated,
@@ -49,6 +50,8 @@ APPLY_PREFIX = "apply / "
 #: check runs `<caller job> / <callee job>`. `shipmate doctor` reports a job carrying another
 #: name, and `CONTRACT.md` §Check names states it.
 CALLER_PREFIX = "plan / "
+#: The most cell names a refusal lists before eliding the rest.
+NAMED = 10
 DONE_CONCLUSIONS = {"success", "neutral"}
 #: The `apply` job's steps the attempt verdict reads, as `cell.yml` names them: the pre-apply
 #: check, whose failure makes `apply-cell` refuse before it applies, and the step running it.
@@ -579,8 +582,8 @@ def status_and_conclusion(listed, what):
 
 def provenance_reason(newest, plan_run, head, cells, authorizer):
     """The first provenance check the auto apply of `plan_run`, a decimal run id, on `head`
-    fails, as `(cause, detail)`, or None when every check passes. Pure: each caller words the
-    cause itself from `detail`.
+    fails, as `(cause, detail)`, or None when every check passes. Pure: `provenance_text`
+    words it.
 
     `newest` and `authorizer` are `auto_source`'s plan and authorizer, each None when nothing
     is listed. `cells` maps each check name to the `(recorded plan run or None, event action or
@@ -617,6 +620,34 @@ def provenance_reason(newest, plan_run, head, cells, authorizer):
         return None
     drafts = [name for name, (_, _, draft) in cells.items() if draft]
     return ("draft", drafts) if drafts else None
+
+
+def provenance_text(cause, detail, plan_run, head):
+    """`provenance_reason`'s `(cause, detail)` for plan run `plan_run` on `head`, as one clause
+    with no prefix, remedy or final period."""
+    if cause == "unlisted":
+        return f"plan run {plan_run} is not listed, and no autoplan run of the head is listed"
+    if cause == "newer":
+        return f"plan run {plan_run} is not the newest autoplan of the head (run {detail} is)"
+    shown = "missing" if detail is None else detail
+    if cause == "event":
+        return f"plan run {plan_run} is a `{shown}` run, not an autoplan"
+    if cause == "head":
+        return f"plan run {plan_run} planned {shown}, not the head {head}"
+    if cause == "record":
+        cells = named([n for n, _ in detail], NAMED)
+        return f"the plan records of {cells} name other plan runs than {plan_run}"
+    if cause == "draft":
+        return (
+            f"the plan records of {named(detail, NAMED)} say their plan's push landed on a "
+            f"draft, and no ready-for-review run of the head that deferred to plan run {plan_run} "
+            "is listed, so nothing authorizes it"
+        )
+    bad = named([f"{n} ({a!r})" for n, a in detail], NAMED)
+    return (
+        f"the plan records of {bad} name no event action that starts an auto apply (opened, "
+        "synchronize or ready_for_review)"
+    )
 
 
 def newer_plans(repo, pr_number, newest, *, since, run):

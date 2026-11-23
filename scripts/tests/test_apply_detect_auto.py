@@ -424,8 +424,7 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
     [
         pytest.param(
             {"event": "workflow_dispatch"},
-            f"plan run {RUN} is a `workflow_dispatch` run, not an autoplan: an auto apply "
-            "applies only an autoplan's plan.",
+            f"plan run {RUN} is a `workflow_dispatch` run, not an autoplan.",
             id="event",
         ),
         pytest.param(
@@ -433,8 +432,7 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
         ),
         pytest.param(
             {"event": None},
-            f"plan run {RUN} is a `missing` run, not an autoplan: an auto apply applies only "
-            "an autoplan's plan.",
+            f"plan run {RUN} is a `missing` run, not an autoplan.",
             id="null-event",
         ),
     ],
@@ -442,8 +440,8 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
 def test_a_listed_run_the_listing_filter_should_drop_refuses(tmp_path, monkeypatch, entry, refusal):
     """The listing's `event=` and `head_sha=` filters are GitHub's, so the listed object is
     checked again. Mutation: drop the event check from `provenance_reason` (event applies).
-    Mutation: drop the head check (head applies). Mutation: `_or_missing` returns its value
-    (null-event reads `None`)."""
+    Mutation: drop the head check (head applies). Mutation: `provenance_text`'s event branch
+    renders `detail` raw (null-event reads `None`)."""
     code = _refusal(tmp_path, monkeypatch, listing=(entry,))
     assert code == f"::error::auto apply refused: {refusal} {REMEDY}"
 

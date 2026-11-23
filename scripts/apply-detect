@@ -74,7 +74,6 @@ ag = _load("apply-gate")
 az = _load("authorize")
 cl = _load("cell-lock")
 
-_NAMED = 10
 #: The auto form's mergeability wait: reads, and seconds between them. Unprobed: GitHub
 #: documents no bound on computing `mergeable` after a push.
 _MERGEABLE_READS = 12
@@ -251,7 +250,7 @@ def refuse_incomplete(rows, records, incomplete, *, merged):
     for run in named_runs:
         held = [name for _, name, r, _, _ in rows if r == run] or [name for _, name, *_ in rows]
         found.append(
-            f"plan run {run} {_fact(*incomplete[run])}, holding back {named(held, _NAMED)}"
+            f"plan run {run} {_fact(*incomplete[run])}, holding back {named(held, ag.NAMED)}"
         )
     it, runs = ("it", "run") if len(found) == 1 else ("they", "runs")
     if merged:
@@ -645,7 +644,7 @@ def refuse_provenance(repo, head, runnable, actions, drafts, pr_number):
                     for c in runnable
                     if c["plan_run_id"] == r
                 ],
-                _NAMED,
+                ag.NAMED,
             )
             for r in runs
         )
@@ -665,7 +664,7 @@ def refuse_provenance(repo, head, runnable, actions, drafts, pr_number):
     reason = ag.provenance_reason(newest, runs[0], head, cells, authorizer)
     if reason:
         raise SystemExit(
-            f"::error::auto apply refused: {_provenance_text(runs[0], head, *reason)} "
+            f"::error::auto apply refused: {ag.provenance_text(*reason, runs[0], head)}. "
             + _AUTO_REMEDY
         )
     since = newest.get("created_at")
@@ -692,43 +691,6 @@ def _newer_plan_text(run_id, cause, newer):
         f"shipmate plan run {newer['id']} of this pull request is {status} and newer than plan "
         f"run {run_id}. Wait for it to finish, review its plan, then comment `shipmate apply`."
     )
-
-
-def _provenance_text(run_id, head, cause, detail):
-    """`apply-gate.provenance_reason`'s `(cause, detail)` for plan run `run_id`, as one
-    sentence."""
-    if cause == "unlisted":
-        return f"plan run {run_id} is not listed, and no autoplan run of the head is listed."
-    if cause == "newer":
-        return f"plan run {run_id} is not the newest autoplan of the head (run {detail} is)."
-    if cause == "event":
-        return (
-            f"plan run {run_id} is a `{_or_missing(detail)}` run, not an autoplan: an auto "
-            "apply applies only an autoplan's plan."
-        )
-    if cause == "head":
-        return f"plan run {run_id} planned {_or_missing(detail)}, not the head {head}."
-    if cause == "record":
-        return (
-            f"the plan records of {named([n for n, _ in detail], _NAMED)} name other plan runs "
-            f"than {run_id}."
-        )
-    if cause == "draft":
-        return (
-            f"the plan records of {named(detail, _NAMED)} say their plan's push landed on a "
-            f"draft, and no ready-for-review run of the head that deferred to plan run {run_id} "
-            "is listed, so nothing authorizes it."
-        )
-    bad = [f"{n} ({a!r})" for n, a in detail]
-    return (
-        f"the plan records of {named(bad, _NAMED)} name no event action that starts an auto "
-        "apply (opened, synchronize or ready_for_review)."
-    )
-
-
-def _or_missing(value):
-    """`value`, or `missing` when the listed run gave it null."""
-    return "missing" if value is None else value
 
 
 def _malformed(what, e):
@@ -831,7 +793,7 @@ def refuse_behind(repo, pr_number, selected, lines, app_id, stacks):
     behind = behind_cells(tip, selected, lines, app_id, stacks)
     if behind:
         write_report({"behind": behind, "base": base})
-        cells = named([f"{c['stack']} / {c['environment']}" for c in behind], _NAMED)
+        cells = named([f"{c['stack']} / {c['environment']}" for c in behind], ag.NAMED)
         raise Refused(
             f"::error::apply refused: {len(behind)} cell(s) behind {base} ({cells}); update the "
             f"branch from {base} and push."

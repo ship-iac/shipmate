@@ -2597,8 +2597,9 @@ def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, actio
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the cell's plan record names event action {action!r}, not one that "
-        "starts an auto apply (opened, synchronize or ready_for_review); comment `shipmate apply`"
+        f"::error::{WHERE} the plan records of apply / dev / stacks/auth ({action!r}) name no "
+        "event action that starts an auto apply (opened, synchronize or ready_for_review); "
+        f"{RETRY}"
     )
 
 
@@ -2719,27 +2720,34 @@ def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     ("autoplans", "newest"),
     [
-        pytest.param(_autoplans(RUN, "4243"), "run 4243", id="newer"),
+        pytest.param(
+            _autoplans(RUN, "4243"),
+            f"plan run {RUN} is not the newest autoplan of the head (run 4243 is)",
+            id="newer",
+        ),
         pytest.param(
             _autoplans(RUN, "4243", status="completed", conclusion="success", run_attempt=1),
-            "run 4243",
+            f"plan run {RUN} is not the newest autoplan of the head (run 4243 is)",
             id="newer-ended",
         ),
-        pytest.param(_autoplans(), "not listed", id="none"),
+        pytest.param(
+            _autoplans(),
+            f"plan run {RUN} is not listed, and no autoplan run of the head is listed",
+            id="none",
+        ),
     ],
 )
 def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
     """Mutation: sort `auto_source`'s listing ascending (newer and newer-ended pass the provenance
     check, and the record read runs, unexpected). Mutation: skip the comparison when nothing is
     listed (`newest is not None and ...`: none passes). Mutation: `deferred` returns True
-    (newer-ended's planned jobs read run 4243 past, and the record read runs, unexpected)."""
+    (newer-ended's planned jobs read run 4243 past, and the record read runs, unexpected).
+    Mutation: swap `plan_run` and `head` in `_refuse`'s `provenance_text` call (newer red)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
     if '"completed"' in autoplans:
         gh.on(jobs_listing(4243), plan_jobs(4243))
-    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the newest autoplan of {HEAD} is {newest}, not plan run {RUN}, which "
-        f"this auto apply applies; {RETRY}"
-    )
+    code = _verify_refusal(monkeypatch, tmp_path, gh, AUTO)
+    assert code == f"::error::{WHERE} {newest}; {RETRY}"
 
 
 #: Ready-for-review run 4243 by its clicker octocat, ended `success`.
@@ -2792,9 +2800,9 @@ def test_verify_auto_refuses_a_draft_origin_plan_no_listed_ready_run_authorizes(
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, draft=True))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the cell's plan record says its push landed on a draft, and the "
-        f"newest autoplan of {HEAD} is no ready-for-review run that deferred to plan run {RUN}; "
-        "comment `shipmate apply`"
+        f"::error::{WHERE} the plan records of apply / dev / stacks/auth say their plan's push "
+        "landed on a draft, and no ready-for-review run of the head that deferred to plan run "
+        f"{RUN} is listed, so nothing authorizes it; {RETRY}"
     )
 
 
@@ -2803,18 +2811,17 @@ def test_verify_auto_refuses_a_draft_origin_plan_no_listed_ready_run_authorizes(
     [
         pytest.param(
             {"event": "workflow_dispatch"},
-            f"the newest autoplan of {HEAD} is a `workflow_dispatch` run, not a "
-            "pull_request_target run",
+            f"plan run {RUN} is a `workflow_dispatch` run, not an autoplan",
             id="event",
         ),
         pytest.param(
             {"head_sha": OTHER},
-            f"the newest autoplan of {HEAD} is a run of {OTHER}, not of {HEAD}",
+            f"plan run {RUN} planned {OTHER}, not the head {HEAD}",
             id="head",
         ),
         pytest.param(
             {"head_sha": None},
-            f"the newest autoplan of {HEAD} is a run of missing, not of {HEAD}",
+            f"plan run {RUN} planned missing, not the head {HEAD}",
             id="null-head",
         ),
     ],
@@ -2826,7 +2833,8 @@ def test_verify_auto_refuses_a_listed_run_the_listing_filter_should_drop(
     checked again, before the record read. Mutation: drop the event check from
     `provenance_reason` (event reads the record, unexpected). Mutation: drop the head check
     (head reads the record, unexpected). Mutation: word `head` as `event` (head red).
-    Mutation: render the head sha as given (null-head reads `None`)."""
+    Mutation: render the head sha as given (null-head reads `None`). Mutation: pass another
+    sha as `head` to `_verify_auto`'s `_refuse` call (head and null-head red)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip())
     gh.on(AUTOPLANS_READ, _autoplans(RUN, **keys))
     code = _verify_refusal(monkeypatch, tmp_path, gh, AUTO)
@@ -2834,19 +2842,17 @@ def test_verify_auto_refuses_a_listed_run_the_listing_filter_should_drop(
 
 
 @pytest.mark.parametrize(
-    ("records", "named"),
-    [
-        pytest.param((RUN, "4243"), "plan run 4243", id="newer-record"),
-        pytest.param((), "no plan run", id="no-record"),
-    ],
+    "records",
+    [pytest.param((RUN, "4243"), id="newer-record"), pytest.param((), id="no-record")],
 )
-def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path, records, named):
-    """Mutation: drop the record comparison (both pass)."""
+def test_verify_auto_refuses_a_cell_planned_by_another_run(monkeypatch, tmp_path, records):
+    """Mutation: drop the record comparison (both pass). Mutation: swap `plan_run` and `head`
+    in `_refuse`'s `provenance_text` call (both red)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(*records))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the cell's newest plan record names {named}, not plan run {RUN}, "
-        f"which this auto apply applies; {RETRY}"
+        f"::error::{WHERE} the plan records of apply / dev / stacks/auth name other plan runs "
+        f"than {RUN}; {RETRY}"
     )
 
 
