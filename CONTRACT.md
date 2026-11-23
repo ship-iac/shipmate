@@ -2248,12 +2248,8 @@ failed cell reds the run.
 **The unlock result reply.** Each `unlock` leg uploads a record, even when it
 failed: artifact `shipmate-unlock-<strategy.job-index>` holding
 `shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
-and environment, its outcome and the probed lock id. `download-artifact` writes
-each of several records into a directory of its artifact's name, and a lone one
-straight into the download path, so `result` reads cell `<n>`'s record from
-`shipmate-unlock-<n>/shipmate-unlock-<n>.json` when that exists, else from
-`shipmate-unlock-<n>.json` at the download root. The download and the record
-reading run only when `detect` succeeded. The outcome is `released`
+and environment, its outcome and the probed lock id. The download and the
+record reading run only when `detect` succeeded. The outcome is `released`
 only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
 `failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
 before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
@@ -2294,8 +2290,8 @@ a record counts only when it is read as `shipmate-unlock-<n>.json`, its `index`
 is `<n>`, its outcome is one of the three, and at most 4,096 bytes of it are
 read and decoded. Its `stack` and `environment` must also equal that queue
 entry's: this catches a record that reached the wrong cell, not a forged one,
-which can copy them. Any other entry is ignored. A lock id outside the charset `scripts/lock-info` accepts is dropped, and stack names are
-escaped.
+which can copy them. Any other entry is ignored. A lock id outside the charset
+`scripts/lock-info` accepts is dropped, and stack names are escaped.
 A comment not on a pull request, an unreadable comment or a failed post posts
 nothing and warns. None of these, nor a failed download, fails `result`: the
 `unlock` legs' results stay the run's.

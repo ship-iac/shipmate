@@ -286,6 +286,30 @@ def test_a_root_record_under_another_cells_name_is_ignored(gh, tmp_path):
     assert posts == _post("failed", "stacks/app, stacks/db, stacks/dns did not run.")
 
 
+def test_a_lone_root_record_among_several_cells_is_read(gh, tmp_path):
+    """Three cells, and only cell 1's record arrived, at the root. Mutation: fall back to the root
+    only when `len(cells) == 1` (cell 1 reads `did not run`)."""
+    posts, _ = gh
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released")), flat=True)
+    ur.main()
+    assert posts == _post(
+        "failed",
+        "stacks/app, stacks/dns did not run; "
+        f"released 1 state lock(s) in dev-eu: stacks/db ({_ID}).",
+    )
+
+
+def test_a_root_record_beside_record_directories_is_ignored(gh, tmp_path):
+    """Cells 0 and 2 arrived as directories, and a stray root file holds cell 1's record.
+    Mutation: read the root whenever a cell's directory lacks its file (cell 1 reads as
+    released)."""
+    posts, _ = gh
+    _records(tmp_path, "none", None, "none")
+    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released")), flat=True)
+    ur.main()
+    assert posts == _post("failed", "stacks/db did not run.")
+
+
 def test_an_artifact_holding_only_subdirectories_claims_nothing(gh, tmp_path):
     """Artifact `shipmate-unlock-1` whose `shipmate-unlock-1.json` is a directory holding a valid
     record. Mutation: walk the artifact directory for the first `.json` file in it."""

@@ -84,13 +84,19 @@ def _record(path, index, cell):
 
 
 def records(root, cells):
-    """{index: (outcome, lock_id)} of the valid records under `root`, cell `i`'s read from its
-    artifact directory when that file exists, else from the root; anything else is ignored."""
+    """{index: (outcome, lock_id)} of the valid records under `root`; anything else is ignored.
+
+    `download-artifact` writes each of several artifacts into a directory of its name, and a lone
+    one straight into the download path. So cell `i`'s record is read from
+    `shipmate-unlock-<i>/shipmate-unlock-<i>.json` when `root` holds any cell's
+    `shipmate-unlock-<n>` directory, and from `shipmate-unlock-<i>.json` at `root` only when it
+    holds none."""
+    nested = any((root / f"shipmate-unlock-{i}").is_dir() for i in range(len(cells)))
     out = {}
     for index, cell in enumerate(cells):
         name = f"shipmate-unlock-{index}.json"
-        artifact = root / f"shipmate-unlock-{index}" / name
-        rec = _record(artifact if artifact.exists() else root / name, index, cell)
+        path = root / f"shipmate-unlock-{index}" / name if nested else root / name
+        rec = _record(path, index, cell)
         if rec is not None:
             out[index] = rec
     return out
