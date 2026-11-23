@@ -198,9 +198,8 @@ jobs:
           encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
 
   # Holds the App key, as `claim`, `defer`, `defer-auto`, `gate-hold` and `outcome` do. None
-  # checks anything out, so none runs consumer repository content: that makes
-  # `pull_request_target` safe here. Its own `if:` decides trust, reading only `facts`, the one
-  # producer of pull-request facts.
+  # checks anything out, so `pull_request_target` runs no consumer content here. Its own `if:`
+  # decides trust, reading only `facts`, the one producer of pull-request facts.
   summary:
     needs: [facts, defer, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
@@ -234,6 +233,7 @@ jobs:
         # A failed or timed-out download must reach gate-state as a cell-summary shortfall that
         # holds the gate, not end the job before `Create/refresh gate` writes any gate.
         continue-on-error: true
+        # 256 cell-summary artifacts downloaded in 5-6 s (measured 2026-11-23).
         timeout-minutes: 1
         with:
           pattern: cell-summary.*

@@ -653,7 +653,7 @@ def provenance_text(cause, detail, plan_run, head):
 def newer_plans(repo, pr_number, newest, *, since, run):
     """`(counted, complete)`: the first `shipmate plan` run of pull request `pr_number`, a str,
     any actor, created at or after `since` (`plan_runs_since`) with a greater id than autoplan
-    `newest` (`newest_autoplan`'s object, the plan run an auto apply applies), that counts against
+    `newest` (`auto_source`'s plan, the plan run an auto apply applies), that counts against
     that apply, as a one-item list, or an empty one. Runs are judged ascending by id and the
     read stops at the first counted one. Ids decide: a run created in the same second can be
     newer. A run whose status is not `completed` counts. A completed run counts when its jobs

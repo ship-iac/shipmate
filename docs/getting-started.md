@@ -915,8 +915,9 @@ omitted key read as the empty string.
 
 No comment lands on the `auto` job. A plan run's `summary` dispatches
 `verb: auto` after an autoplan that changes a cell of an `apply_mode: auto`
-environment, and the job calls `apply.yml` with `auto: true`
-(§Applying an environment after every push).
+environment, or its `defer-auto` job after a ready-for-review run that deferred
+to such a plan, and the job calls `apply.yml` with `auto: true`
+(§Applying an environment after a push or ready click).
 
 The apply runs of one pull request run one at a time: a later `shipmate apply`
 or `auto` run waits until the earlier one ends
@@ -1200,7 +1201,7 @@ on an unreviewed pull request, is in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops; how it compares with an environment's `required_reviewers` is in
 [`hardening.md`](hardening.md) §3–5.
 
-### Applying an environment after every push
+### Applying an environment after a push or ready click
 
 To apply a low-tier environment with no comment at all, set `apply_mode: auto`
 beside `review: false` on its entry:
