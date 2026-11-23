@@ -2347,14 +2347,15 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    started: the autoplans of <head> resolve to plan run <id> authorized by run
    <id>, not plan run <id> authorized by this run <id>; comment `shipmate apply` ``,
    unless a newer run that took over the decision authorizes, which decides
-   itself; an empty listing replies ``auto apply not started: no autoplan run of
+   itself unless its `defer` job later skips, is cancelled or fails (no reply then,
+   `CONTRACT.md` §`apply_mode: auto`); an empty listing replies ``auto apply not started: no autoplan run of
    <head> is listed yet; comment `shipmate apply` ``. A failed `defer-auto`
    leaves that run green. A listing that lags this run replies with the
    mismatch in `defer-auto`; only the push run's `summary` path dispatches on
    a lagging listing, warning `autoplan run <id> of <head> is not listed yet;
    ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
-   head's autoplan runs could not be read or malformed) it warns `could not decide
+   head's autoplan runs could not be read (a failed or malformed listing)) it warns `could not decide
    whether to dispatch an auto apply; no auto apply started`. It posts a reply
    only when the autoplan runs could not be read (below). Separately, when an autoplan of a
    pull request that is not a draft was started by neither a push nor the ready
