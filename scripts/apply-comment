@@ -440,12 +440,12 @@ def _resources(text):
 
 def _state(row):
     """A row's state text: applied counts (or `applied`), the same plus `, not recorded`,
-    `failed`, `blocked: <reason>` (escaped: cell.json is untrusted), `not attempted`; a held
-    row's text ends `, state not saved`."""
+    `failed`, `blocked: <reason>` (`_md_name`: cell.json is untrusted, and a pre-apply refusal
+    can name a login), `not attempted`; a held row's text ends `, state not saved`."""
     status = row["status"]
     word = _STATUS[status][1]
     if status == "blocked":
-        text = f"{word}: {sc._md_escape(row['reason'])}"
+        text = f"{word}: {sc._md_name(row['reason'])}"
     elif status in ("applied", "unrecorded"):
         counts = _resources(row["apply_text"]) or "applied"
         text = counts if status == "applied" else f"{counts}, {word}"
