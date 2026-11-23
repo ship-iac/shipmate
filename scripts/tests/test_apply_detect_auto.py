@@ -12,6 +12,7 @@ from _detect_fixtures import (
     _apply_check,
     autoplans_read,
     behind_check,
+    deferred_in_progress_jobs,
     deferred_jobs,
     dispatched_plan,
     forbid_shared_runner,
@@ -450,7 +451,7 @@ def test_a_listed_run_the_listing_filter_should_drop_refuses(tmp_path, monkeypat
 def test_a_record_older_than_the_heads_newest_autoplan_refuses(tmp_path, monkeypatch):
     """Run 123999 is a newer autoplan of the head that recorded no cell.
 
-    Mutation: `min` for `max` over the listing -- the run applies."""
+    Mutation: sort `auto_source`'s listing ascending -- the run applies."""
     code = _refusal(tmp_path, monkeypatch, listing=(123999, int(RUN)))
     assert code == (
         f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
@@ -678,8 +679,7 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
 def test_a_malformed_plan_run_read_refuses_without_a_traceback(
     tmp_path, monkeypatch, kw, what, error
 ):
-    """Mutation: drop the `except` around `newest_autoplan` (listing escapes as a
-    `ValueError`)."""
+    """Mutation: drop the `except` around `auto_source` (listing escapes as a `ValueError`)."""
     assert _refusal(tmp_path, monkeypatch, **kw) == (
         f"::error::auto apply refused: the {what} read returned a malformed answer ({error}). "
         f"{REMEDY}"
@@ -922,7 +922,7 @@ def test_the_shipmate_plan_listing_is_one_read_from_the_plan_runs_creation(tmp_p
     [
         pytest.param(
             (
-                int(RUN),
+                {"status": "completed", "conclusion": "success", "run_attempt": 1},
                 {"id": 123999, "status": "completed", "conclusion": "success", "run_attempt": 1},
             ),
             id="zero-cell",
@@ -953,13 +953,14 @@ _CLICKED = {"login": "octocat"}
 _READY = {"id": 123999, **_PUSHED, "actor": _CLICKED, "triggering_actor": _CLICKED}
 
 
-def test_a_ready_run_that_deferred_leaves_the_push_run_applying_as_its_pusher(
+def test_a_ready_run_that_deferred_leaves_the_push_runs_plan_applying_as_its_clicker(
     tmp_path, monkeypatch
 ):
-    """R's jobs show it deferred to E, so `refuse_provenance` returns E's whole listed object,
-    `authorize.pusher_reason` reads E's pusher's permission (k3np), and the cell applies.
-    Mutation: revert `newest_autoplan`'s skip (R is newest and refuses `newer`). Mutation: pass
-    `refuse_pusher` the listing's greatest-id run (octocat's permission is read)."""
+    """R's jobs show it deferred to E, so `refuse_provenance` returns E's whole listed object as
+    the plan and R's as the authorizer, `authorize.pusher_reason` reads R's clicker's
+    permission (octocat), and the cell applies with `pusher` octocat. Mutation: return
+    `(top, top)` from `auto_source` (R is newest and refuses `newer`). Mutation: pass
+    `refuse_pusher` the plan (k3np's permission is read)."""
     returned, calls = [], []
     real = aad.refuse_provenance
     monkeypatch.setattr(
@@ -974,21 +975,141 @@ def test_a_ready_run_that_deferred_leaves_the_push_run_applying_as_its_pusher(
     )
     assert _applied(parsed) == [("stacks/app", "dev-eu")]
     assert returned == [
-        {
-            "id": int(RUN),
-            "event": "pull_request_target",
-            "head_sha": HEAD,
-            "created_at": "2026-11-15T22:47:48Z",
-            "actor": {"login": "k3np"},
-            "triggering_actor": {"login": "k3np"},
-            "status": "completed",
-            "conclusion": "success",
-            "run_attempt": 1,
-        }
+        (
+            {
+                "id": int(RUN),
+                "event": "pull_request_target",
+                "head_sha": HEAD,
+                "created_at": "2026-11-15T22:47:48Z",
+                "actor": {"login": "k3np"},
+                "triggering_actor": {"login": "k3np"},
+                "status": "completed",
+                "conclusion": "success",
+                "run_attempt": 1,
+            },
+            {
+                "id": 123999,
+                "event": "pull_request_target",
+                "head_sha": HEAD,
+                "created_at": "2026-11-15T22:47:48Z",
+                "actor": {"login": "octocat"},
+                "triggering_actor": {"login": "octocat"},
+                "status": "completed",
+                "conclusion": "success",
+                "run_attempt": 1,
+            },
+        )
     ]
     assert [c for c in calls if "/collaborators/" in c] == [
-        "repos/o/r/collaborators/k3np/permission"
+        "repos/o/r/collaborators/octocat/permission"
     ]
+    assert detect_report()["pusher"] == "octocat"
+
+
+def test_a_ready_run_still_dispatching_authorizes_the_push_runs_plan(tmp_path, monkeypatch):
+    """R is `in_progress` in its `defer-auto` job while the auto run it dispatched detects.
+    Mutation: read a run's jobs only once it ended `completed` (R refuses `newer`)."""
+    live = {**_READY, "status": "in_progress", "conclusion": None}
+    calls = []
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        listing=(_PUSHED, live),
+        jobs={123999: deferred_in_progress_jobs()},
+        calls=calls,
+    )
+    assert _applied(parsed) == [("stacks/app", "dev-eu")]
+    assert [c for c in calls if "/collaborators/" in c] == [
+        "repos/o/r/collaborators/octocat/permission"
+    ]
+
+
+def test_a_running_ready_run_whose_defer_has_not_ended_refuses_as_newer(tmp_path, monkeypatch):
+    """Mutation: treat any in-progress run as deferred (E applies)."""
+    live = {**_READY, "status": "in_progress", "conclusion": None}
+    body = json.loads(deferred_in_progress_jobs())
+    for job in body["jobs"]:
+        if job["name"] == "plan / defer":
+            job |= {"status": "in_progress", "conclusion": None}
+    jobs = {123999: json.dumps(body)}
+    assert _refusal(tmp_path, monkeypatch, listing=(_PUSHED, live), jobs=jobs) == (
+        f"::error::auto apply refused: plan run {RUN} is not the newest autoplan of the head "
+        f"(run 123999 is). {REMEDY}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("clicker", "permission", "refusal"),
+    [
+        pytest.param(
+            "renovate[bot]",
+            "write",
+            "::error::not authorized: the head was pushed by @renovate[bot], a bot account, "
+            "which auto never authorizes; a writer comments `shipmate apply`.",
+            id="bot",
+        ),
+        pytest.param(
+            "octocat",
+            "read",
+            "::error::not authorized: `shipmate apply` needs write access to this repository, "
+            "and the pusher @octocat's permission is `read`.",
+            id="reader",
+        ),
+    ],
+)
+def test_a_bot_or_reader_clicker_refuses_the_deferred_plan(
+    tmp_path, monkeypatch, clicker, permission, refusal
+):
+    """The pusher k3np has `write`; the clicker decides. Mutation: pass `refuse_pusher` the plan
+    (k3np applies)."""
+    login = {"login": clicker}
+    ready = {**_READY, "actor": login, "triggering_actor": login}
+    kw = {"listing": (_PUSHED, ready), "jobs": {123999: deferred_jobs()}}
+    assert _refusal(tmp_path, monkeypatch, permission=permission, **kw) == refusal
+
+
+#: The refusal of a draft-origin plan no deferred ready run authorizes, hand-written.
+DRAFT_REFUSAL = (
+    "::error::auto apply refused: the plan records of apply / dev-eu / stacks/app say their "
+    "plan's push landed on a draft, and no ready-for-review run of the head that deferred to "
+    f"plan run {RUN} is listed, so nothing authorizes it. {REMEDY}"
+)
+
+
+def test_a_draft_origin_plan_with_no_deferred_ready_run_listed_refuses(tmp_path, monkeypatch):
+    """Only the push run is listed and its record holds `"draft": true`: its pusher authorizes
+    nothing, and no permission is read. Mutation: drop the `draft` cause from
+    `provenance_reason` (k3np applies). Mutation: pass a draft record whenever `authorizer` is
+    not None (`(plan, plan)` passes, k3np applies)."""
+    calls = []
+    checks = [_check("stacks/app", "dev-eu", draft=True)]
+    assert _refusal(tmp_path, monkeypatch, checks=checks, calls=calls) == DRAFT_REFUSAL
+    assert not [c for c in calls if "/collaborators/" in c]
+
+
+def test_a_draft_origin_plan_under_a_deferred_ready_run_applies_as_its_clicker(
+    tmp_path, monkeypatch
+):
+    """Mutation: refuse every draft record (the draft refusal fires)."""
+    calls = []
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        checks=[_check("stacks/app", "dev-eu", draft=True)],
+        listing=(_PUSHED, _READY),
+        jobs={123999: deferred_jobs()},
+        calls=calls,
+    )
+    assert _applied(parsed) == [("stacks/app", "dev-eu")]
+    assert detect_report()["pusher"] == "octocat"
+
+
+def test_a_plan_whose_record_holds_no_draft_key_applies_as_its_pusher(tmp_path, monkeypatch):
+    """An older engine's record has no `draft` key. Mutation: read an absent key as draft
+    (`record.get("draft", True) is True` in `draft_names`; the draft refusal fires)."""
+    parsed = _run_auto(tmp_path, monkeypatch)
+    assert _applied(parsed) == [("stacks/app", "dev-eu")]
+    assert detect_report()["pusher"] == "k3np"
 
 
 def test_a_cancelled_ready_run_is_the_newest_autoplan_and_refuses(tmp_path, monkeypatch):
