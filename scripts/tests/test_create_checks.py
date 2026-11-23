@@ -21,7 +21,7 @@ _READ = [
     "--paginate",
     f"repos/acme/demo/commits/{SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url, creator: .creator.id}",
+    ".[] | {context, state, target_url, id, creator: .creator.id}",
 ]
 #: Not captured: gh's `gh: <message> (HTTP <code>)` form around the probed API message.
 _SECONDARY = "gh: You have exceeded a secondary rate limit. (HTTP 403)"
@@ -30,6 +30,7 @@ _NEWER_HOLD = json.dumps(
         "context": "shipmate / gate",
         "state": "failure",
         "target_url": "https://example.invalid/acme/demo/actions/runs/50",
+        "id": 1,
         "creator": 306306466,
     }
 )

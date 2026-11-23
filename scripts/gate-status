@@ -108,7 +108,7 @@ ag = _load("apply-gate")
 _RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
 #: The fields `apply-gate` judges.
 _CHECK_RUNS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
-_STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
+_STATUSES_JQ = ".[] | {context, state, target_url, id, creator: .creator.id}"
 _GOOD_RESULTS = {"success", "skipped"}
 HELD = 3
 NEWER = 4
@@ -178,14 +178,16 @@ def app_user():
 
 
 def _gates(sha):
-    """`(state, run id)` of every gate status on `sha` the shipmate App created, newest first.
+    """`(state, run id, status id)` of every gate status on `sha` the shipmate App created,
+    newest first.
 
     A status's creator must be the App's bot user (`app_user`), read before the listing: any
     token with `statuses: write` can post this context, so a status from another identity would
     otherwise add or hide a hold. That identity is never defaulted: without it no status counts.
     The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none. The
-    statuses listing is paginated: a head with many other contexts can push its gate past the
-    first page."""
+    status id is the one GitHub assigns each write, increasing: it orders two writes of one run,
+    as a re-run attempt's, where the run id cannot. The statuses listing is paginated: a head
+    with many other contexts can push its gate past the first page."""
     app = app_user()
     args = [
         "gh",
@@ -200,13 +202,13 @@ def _gates(sha):
     for status in ag.parse_jsonl(out.splitlines()):
         if status.get("context") == GATE_CONTEXT and status["creator"] == app:
             m = _RUN_ID.search(status.get("target_url") or "")
-            gates.append((status["state"], m.group(1) if m else "-"))
+            gates.append((status["state"], m.group(1) if m else "-", status["id"]))
     return gates
 
 
 def newest_gate(sha):
-    """(state, run id) of the newest gate status the shipmate App created on `sha`, or None when
-    it carries none. Statuses from other identities are not counted."""
+    """(state, run id, status id) of the newest gate status the shipmate App created on `sha`,
+    or None when it carries none. Statuses from other identities are not counted."""
     gates = _gates(sha)
     return gates[0] if gates else None
 
@@ -221,7 +223,7 @@ def newer_hold(sha):
     this_run = _this_run()
     runs = [
         int(run)
-        for state, run in _gates(sha)
+        for state, run, _ in _gates(sha)
         if state == "failure" and run != "-" and int(run) > this_run
     ]
     return max(runs) if runs else None
@@ -246,21 +248,23 @@ def _refuse_held(sha):
     """Exit `HELD` when the newest gate on `sha` is `failure`, reading again up to
     `HOLD_REREADS` times while that hold may lag this run's own write (`_may_lag`).
 
-    The first hold read stands until a re-read shows a non-`failure` gate from a run at least as
-    new as the hold's: an older run's status under it is a stale read, not a clear. A re-read
+    A re-read showing a non-`failure` gate clears the hold only when its status id is higher than
+    that of every `failure` gate read so far: any other is a stale read under a hold. A re-read
     showing a hold that cannot lag refuses at once. Accepted cost: a hold an apply or deploy run
     refreshes over waits `HOLD_REREADS * HOLD_REREAD_WAIT` seconds before it refuses."""
     newest = newest_gate(sha)
     hold = newest if newest and newest[0] == "failure" else None
+    highest = hold[2] if hold else 0
     for _ in range(HOLD_REREADS):
         if hold is None or not _may_lag(hold):
             break
         sleep(HOLD_REREAD_WAIT)
         newest = newest_gate(sha)
         if newest and newest[0] == "failure":
+            highest = max(highest, newest[2])
             if not _may_lag(newest):
                 hold = newest
-        elif newest and is_run_id(newest[1]) and int(newest[1]) >= int(hold[1]):
+        elif newest and newest[2] > highest:
             hold = None
     if hold:
         print(
@@ -332,7 +336,7 @@ def refresh(sha):
 def _newest(sha):
     newest = newest_gate(sha)
     if newest:
-        print(*newest)
+        print(*newest[:2])
 
 
 def _refuse_newer(sha):

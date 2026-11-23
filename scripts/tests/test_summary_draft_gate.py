@@ -43,7 +43,7 @@ READ_ARGV = [
     "--paginate",
     f"repos/acme/demo/commits/{HEAD_SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url, creator: .creator.id}",
+    ".[] | {context, state, target_url, id, creator: .creator.id}",
 ]
 #: `gate-status`'s App bot user lookup, once per process before its first statuses read.
 USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]

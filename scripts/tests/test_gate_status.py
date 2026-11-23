@@ -82,7 +82,7 @@ STATUSES_ARGV = [
     "--paginate",
     f"repos/acme/demo/commits/{SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url, creator: .creator.id}",
+    ".[] | {context, state, target_url, id, creator: .creator.id}",
 ]
 #: The App bot user lookup, hand-written: `[` and `]` percent-encoded in the path.
 USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
@@ -95,8 +95,10 @@ def _check(cid, status, conclusion=None, name="apply / dev / a"):
     )
 
 
-def _status(context, state, url=RUN_URL, creator=BOT_ID):
-    return json.dumps({"context": context, "state": state, "target_url": url, "creator": creator})
+def _status(context, state, url=RUN_URL, creator=BOT_ID, status_id=1):
+    return json.dumps(
+        {"context": context, "state": state, "target_url": url, "id": status_id, "creator": creator}
+    )
 
 
 def _lines(*items):
@@ -560,7 +562,7 @@ def test_gates_retries_a_transient_failure(in_process, monkeypatch):
     """Mutation: `_run(args)` without `retried` in `_gates` -> the 502 raises."""
     calls = _flaky_run(monkeypatch, [("failure", "42")])
     assert (gs.newest_gate(SHA), calls, in_process) == (
-        ("failure", "42"),
+        ("failure", "42", 1),
         [_USER, _READ, _READ],
         [2],
     )
@@ -598,7 +600,8 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
 
 def _gate_reads(monkeypatch, gates):
     """`gs._run` answering the bot user lookup and each statuses read with the next of `gates`,
-    each `(state, run id)`; run id `-` gives a `target_url` naming no run. Returns the calls."""
+    each `(state, run id, status id)`; run id `-` gives a `target_url` naming no run. Returns the
+    calls."""
     calls = []
 
     def run(args):
@@ -606,9 +609,9 @@ def _gate_reads(monkeypatch, gates):
         if args == _USER:
             return GATE_USER
         assert args == _READ
-        state, run_id = gates.pop(0)
+        state, run_id, status_id = gates.pop(0)
         url = "https://example.invalid/acme/demo" if run_id == "-" else _run_url(run_id)
-        return _lines(_status("shipmate / gate", state, url))
+        return _lines(_status("shipmate / gate", state, url, status_id=status_id))
 
     monkeypatch.setattr(gs, "_run", run)
     return calls
@@ -628,7 +631,7 @@ def test_a_hold_a_lagging_read_returned_is_read_again(in_process, monkeypatch, c
     """A statuses read right after this run's `pending` write can return this run's publish hold,
     or an older run's hold under it. Mutations: no re-read (`HOLD_REREADS = 0`) -> `HELD`; re-read
     only for this run's id (`==` for `<=` in `_may_lag`) -> the older case is `HELD`."""
-    calls = _gate_reads(monkeypatch, [("failure", run_id), ("pending", "999")])
+    calls = _gate_reads(monkeypatch, [("failure", run_id, 5), ("pending", "999", 6)])
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         None,
         [_USER, _READ, _READ],
@@ -640,7 +643,7 @@ def test_a_hold_a_lagging_read_returned_is_read_again(in_process, monkeypatch, c
 @pytest.mark.parametrize("run_id", ["999", "42"], ids=["own", "older"])
 def test_a_hold_on_every_read_refuses_after_three_rereads(in_process, monkeypatch, capsys, run_id):
     """Mutation: return after the re-reads without refusing (`return` after the loop) -> None."""
-    calls = _gate_reads(monkeypatch, [("failure", run_id)] * 4)
+    calls = _gate_reads(monkeypatch, [("failure", run_id, 5)] * 4)
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         gs.HELD,
         [_USER, *[_READ] * 4],
@@ -653,7 +656,7 @@ def test_a_hold_on_every_read_refuses_after_three_rereads(in_process, monkeypatc
 def test_a_newer_or_runless_hold_refuses_with_no_reread(in_process, monkeypatch, capsys, run_id):
     """Mutations: re-read for any run (`_may_lag` returns True for every `failure`) -> four
     reads; `int(gate[1])` on `-` (drop the `-` clause) -> ValueError."""
-    calls = _gate_reads(monkeypatch, [("failure", run_id)])
+    calls = _gate_reads(monkeypatch, [("failure", run_id, 5)])
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         gs.HELD,
         [_USER, _READ],
@@ -662,11 +665,11 @@ def test_a_newer_or_runless_hold_refuses_with_no_reread(in_process, monkeypatch,
     )
 
 
-def test_an_older_runs_status_under_a_hold_does_not_clear_it(in_process, monkeypatch, capsys):
-    """A hold from run 900, then a stale `pending` from run 899, refuses after every re-read.
-    Mutation: clear on any non-`failure` re-read (drop the run id comparison) -> None."""
+def test_an_older_status_under_a_hold_does_not_clear_it(in_process, monkeypatch, capsys):
+    """A hold with status id 5, then a stale `pending` with id 4, refuses after every re-read.
+    Mutation: clear on any non-`failure` re-read (drop `newest[2] > highest`) -> None."""
     monkeypatch.setenv("GITHUB_RUN_ID", "1000")
-    calls = _gate_reads(monkeypatch, [("failure", "900"), *[("pending", "899")] * 3])
+    calls = _gate_reads(monkeypatch, [("failure", "900", 5), *[("pending", "899", 4)] * 3])
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         gs.HELD,
         [_USER, *[_READ] * 4],
@@ -675,10 +678,10 @@ def test_an_older_runs_status_under_a_hold_does_not_clear_it(in_process, monkeyp
     )
 
 
-def test_this_runs_pending_clears_an_older_runs_hold(in_process, monkeypatch, capsys):
-    """Mutation: clear only on a status from the hold's own run (`==` for `>=`) -> `HELD`."""
+def test_a_newer_status_write_clears_the_hold(in_process, monkeypatch, capsys):
+    """Mutation: never clear on a re-read (delete the `hold = None` branch) -> `HELD`."""
     monkeypatch.setenv("GITHUB_RUN_ID", "1000")
-    calls = _gate_reads(monkeypatch, [("failure", "899"), ("pending", "1000")])
+    calls = _gate_reads(monkeypatch, [("failure", "899", 5), ("pending", "1000", 8)])
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         None,
         [_USER, _READ, _READ],
@@ -690,7 +693,7 @@ def test_this_runs_pending_clears_an_older_runs_hold(in_process, monkeypatch, ca
 def test_each_reread_is_judged_anew(in_process, monkeypatch, capsys):
     """Own `failure`, then a newer run's on the re-read, refuses at once. Mutation: judge only the
     first read (compute `_may_lag` once, before the loop) -> four reads."""
-    calls = _gate_reads(monkeypatch, [("failure", "999"), ("failure", "1000")])
+    calls = _gate_reads(monkeypatch, [("failure", "999", 5), ("failure", "1000", 6)])
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         gs.HELD,
         [_USER, _READ, _READ],
@@ -699,10 +702,24 @@ def test_each_reread_is_judged_anew(in_process, monkeypatch, capsys):
     )
 
 
+def test_a_status_older_than_a_reread_hold_does_not_clear_it(in_process, monkeypatch, capsys):
+    """A re-run attempt writes under its run's id, so only the status id orders its writes: a
+    `pending` (id 6) older than the re-read hold (id 7) is stale. Mutation: compare against the
+    first hold's id only (drop the `highest = max(...)` update) -> None."""
+    gates = [("failure", "999", 5), ("failure", "999", 7), *[("pending", "999", 6)] * 2]
+    calls = _gate_reads(monkeypatch, gates)
+    assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
+        gs.HELD,
+        [_USER, *[_READ] * 4],
+        [2, 2, 2],
+        HELD,
+    )
+
+
 def test_an_unset_run_id_reads_a_pending_gate(in_process, monkeypatch):
     """Mutation: validate `GITHUB_RUN_ID` before the first read -> the error."""
     monkeypatch.delenv("GITHUB_RUN_ID")
-    calls = _gate_reads(monkeypatch, [("pending", "42")])
+    calls = _gate_reads(monkeypatch, [("pending", "42", 1)])
     assert (_refuse_held(), calls) == (None, [_USER, _READ])
 
 
@@ -714,7 +731,7 @@ def test_a_missing_run_id_over_a_hold_is_a_configuration_error(in_process, monke
         monkeypatch.delenv("GITHUB_RUN_ID")
     else:
         monkeypatch.setenv("GITHUB_RUN_ID", value)
-    _gate_reads(monkeypatch, [("failure", "42")])
+    _gate_reads(monkeypatch, [("failure", "42", 1)])
     with pytest.raises(SystemExit) as exc:
         gs._refuse_held(SHA)
     assert exc.value.code == (
