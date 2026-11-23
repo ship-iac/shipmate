@@ -1,0 +1,167 @@
+name: shipmate auto-dispatch
+description: >-
+  Dispatch the auto verb to shipmate.yml for a pull request head, replying on the pull request
+  when that dispatch fails or may have started a run. With `envs`, the caller already decided
+  which apply_mode auto environments call for it. With `deferred-to`, a ready-for-review run
+  that deferred to that earlier plan run decides here through scripts/auto-dispatch deferred,
+  authorized as this run's actor; a failed decision warns, replies only when a change already
+  called for an auto apply, and dispatches nothing.
+inputs:
+  envs:
+    description: >-
+      The space-separated apply_mode auto environments the caller decided on; empty decides here when `deferred-to` is set.
+    required: false
+    default: ""
+  deferred-to:
+    description: >-
+      The earlier plan run this ready-for-review run deferred to (plan-defer's `run`); empty when `envs` decides.
+    required: false
+    default: ""
+  head-sha:
+    description: PR head commit SHA.
+    required: true
+  pr-number:
+    description: Pull request number.
+    required: true
+  app-id:
+    description: shipmate App id (a repo/org variable, not a secret).
+    required: true
+  private-key:
+    description: shipmate App private key (from the shipmate-engine environment secret).
+    required: true
+  reply-token:
+    description: >-
+      A token holding `pull-requests: write` for the replies; empty uses this action's own main token.
+    required: false
+    default: ""
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON, for the environment
+      table's variable references. Read only with `deferred-to`.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Verify the App key arrived
+      if: ${{ inputs.deferred-to != '' }}
+      uses: $/actions/verify-app-key
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+
+    - uses: $/actions/python-yaml
+      if: ${{ inputs.deferred-to != '' }}
+
+    - name: Mint App installation token
+      if: ${{ inputs.deferred-to != '' }}
+      id: maintoken
+      # Reviewer-facing degrade: an empty token fails the decision's first read, which warns and
+      # dispatches nothing. No `actions: write`: only the dispatch mint holds it.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: read
+        permission-checks: read
+        permission-contents: read
+        permission-statuses: read
+        permission-pull-requests: write
+
+    - name: Decide whether to dispatch an auto apply
+      if: ${{ inputs.deferred-to != '' }}
+      id: decide
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.maintoken.outputs.token }}
+        SHIPMATE_APP_SLUG: ${{ steps.maintoken.outputs.app-slug }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        DEFERRED_TO: ${{ inputs.deferred-to }}
+      run: |
+        set -euo pipefail
+        # Reviewer-facing degrade only: the plan run this one deferred to wrote the gate.
+        rc=0
+        envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" deferred "$DEFERRED_TO" 2>decide.err) || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          sed 's/^::error::/::warning::/' decide.err >&2
+          echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+          # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
+          # pull request gets the same reply as a failed dispatch.
+          if [ "$rc" -eq 3 ]; then
+            SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME=failed \
+              SHIPMATE_REPLY_TEXT="auto apply not started: what decides it for this ready-for-review run could not be read; comment \`shipmate apply\`" \
+              python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+          fi
+          exit 0
+        fi
+        cat decide.err >&2
+        echo "envs=$envs" >> "$GITHUB_OUTPUT"
+
+    - name: Mint the auto apply dispatch token
+      if: ${{ inputs.envs != '' || steps.decide.outputs.envs != '' }}
+      id: autotoken
+      # Reviewer-facing degrade: a failed mint leaves the token empty, which the dispatch step
+      # reports. Its own token, so no main token holds `actions: write`.
+      continue-on-error: true
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      with:
+        client-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ github.repository_owner }}
+        repositories: ${{ github.event.repository.name }}
+        permission-actions: write
+
+    - name: Dispatch an auto apply
+      if: ${{ inputs.envs != '' || steps.decide.outputs.envs != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.autotoken.outputs.token }}
+        # The main mint's token: it holds `pull-requests: write` and exists when `autotoken` failed.
+        REPLY_TOKEN: ${{ inputs.reply-token || steps.maintoken.outputs.token }}
+        SHIPMATE_AUTO_ENVS: ${{ inputs.envs || steps.decide.outputs.envs }}
+        # dispatch-body's inputs; no ENVIRONMENT, so the body carries no environment key.
+        VERB: auto
+        REF: ${{ inputs.head-sha }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        DISPATCH_REF: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        scripts="$GITHUB_ACTION_PATH/../../scripts"
+        # Reviewer-facing degrade only: a failed mint or dispatch, or one that may have started a
+        # run, warns, replies with the remedy and exits 0.
+        reply() {
+          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" \
+            SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
+            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+        }
+        # not_started <what> [remedy]: a skew remedy replaces the advice to comment, which would
+        # meet the same skew.
+        not_started() {
+          echo "::warning::$1 for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
+          if [ -n "${2:-}" ]; then
+            reply failed "auto apply not started: the dispatch failed. $2"
+          else
+            reply failed "auto apply not started: the dispatch failed; comment \`shipmate apply\`"
+          fi
+          exit 0
+        }
+        [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
+        rc=0
+        # Exit codes are documented in scripts/dispatch-body; on exit 1 stdout is the skew remedy
+        # or empty.
+        out=$(python3 "$scripts/dispatch-body") || rc=$?
+        if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
+          echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS answered with an error, and an auto run may have started; check the Actions tab before commenting shipmate apply"
+          # Exit 3 saw a run start, so it is a notice, as in comment-ops; exit 4 cannot tell.
+          if [ "$rc" -eq 3 ]; then outcome=notice; else outcome=failed; fi
+          reply "$outcome" "auto apply may have started: the dispatch answered with an error; check the Actions tab before commenting \`shipmate apply\`"
+          exit 0
+        fi
+        [ "$rc" -eq 0 ] || not_started "the auto apply dispatch" "$out"
+        echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"

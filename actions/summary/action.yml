@@ -748,65 +748,14 @@ runs:
         cat decide.err >&2
         echo "envs=$envs" >> "$GITHUB_OUTPUT"
 
-    - name: Mint the auto apply dispatch token
-      if: ${{ steps.autodecide.outputs.envs != '' }}
-      id: autotoken
-      # Reviewer-facing degrade: a failed mint leaves the token empty, which the dispatch step
-      # reports. Its own token, so the summary's main token stays `actions: read`.
-      continue-on-error: true
-      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-      with:
-        client-id: ${{ inputs.app-id }}
-        private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
-        permission-actions: write
-
     - name: Dispatch an auto apply
       if: ${{ steps.autodecide.outputs.envs != '' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.autotoken.outputs.token }}
-        # The main mint's token: it holds `pull-requests: write` and exists when `autotoken` failed.
-        REPLY_TOKEN: ${{ steps.token.outputs.token }}
-        SHIPMATE_AUTO_ENVS: ${{ steps.autodecide.outputs.envs }}
-        # dispatch-body's inputs; no ENVIRONMENT, so the body carries no environment key.
-        VERB: auto
-        REF: ${{ inputs.head-sha }}
-        PR_NUMBER: ${{ inputs.pr-number }}
-        DISPATCH_REF: ${{ github.event.repository.default_branch }}
-      run: |
-        set -euo pipefail
-        scripts="$GITHUB_ACTION_PATH/../../scripts"
-        # Reviewer-facing degrade only: a failed mint or dispatch, or one that may have started a
-        # run, warns, replies with the remedy and exits 0.
-        reply() {
-          GH_TOKEN="$REPLY_TOKEN" SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" \
-            SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
-            python3 "$scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
-        }
-        # not_started <what> [remedy]: a skew remedy replaces the advice to comment, which would
-        # meet the same skew.
-        not_started() {
-          echo "::warning::$1 for $SHIPMATE_AUTO_ENVS failed; comment shipmate apply to apply"
-          if [ -n "${2:-}" ]; then
-            reply failed "auto apply not started: the dispatch failed. $2"
-          else
-            reply failed "auto apply not started: the dispatch failed; comment \`shipmate apply\`"
-          fi
-          exit 0
-        }
-        [ -n "${GH_TOKEN:-}" ] || not_started "the auto apply dispatch token mint"
-        rc=0
-        # Exit codes are documented in scripts/dispatch-body; on exit 1 stdout is the skew remedy
-        # or empty.
-        out=$(python3 "$scripts/dispatch-body") || rc=$?
-        if [ "$rc" -eq 3 ] || [ "$rc" -eq 4 ]; then
-          echo "::warning::the auto apply dispatch for $SHIPMATE_AUTO_ENVS answered with an error, and an auto run may have started; check the Actions tab before commenting shipmate apply"
-          # Exit 3 saw a run start, so it is a notice, as in comment-ops; exit 4 cannot tell.
-          if [ "$rc" -eq 3 ]; then outcome=notice; else outcome=failed; fi
-          reply "$outcome" "auto apply may have started: the dispatch answered with an error; check the Actions tab before commenting \`shipmate apply\`"
-          exit 0
-        fi
-        [ "$rc" -eq 0 ] || not_started "the auto apply dispatch" "$out"
-        echo "::notice title=dispatch::dispatched an auto apply of $SHIPMATE_AUTO_ENVS for PR #$PR_NUMBER (ref $REF)"
+      uses: $/actions/auto-dispatch
+      with:
+        envs: ${{ steps.autodecide.outputs.envs }}
+        head-sha: ${{ inputs.head-sha }}
+        pr-number: ${{ inputs.pr-number }}
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        # Holds `pull-requests: write` for the replies and exists when the dispatch mint failed.
+        reply-token: ${{ steps.token.outputs.token }}

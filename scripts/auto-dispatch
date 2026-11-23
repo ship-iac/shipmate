@@ -30,6 +30,23 @@ from the environment:
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
+
+`auto-dispatch deferred <P>` decides for a ready-for-review run that deferred to the earlier plan
+run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in order:
+
+1. the newest `shipmate / gate` of `SHIPMATE_HEAD_SHA` (`gate-status.newest_gate`,
+   `SHIPMATE_APP_SLUG`) is `pending` and names `P`;
+2. `skip_reason` over this run's event, action and attempt, with the draft, gate and comment
+   conditions that check 1 and `P`'s publish already proved;
+3. the changed cells: the App's (`SHIPMATE_APP_ID`) apply checks on the head whose newest run
+   is `queued`, records `P`, names an action in `AUTO_ACTIONS` and is not behind;
+4. their environments that hold `apply_mode: auto` in the default branch's table
+   (`env-config.read_table`, `SHIPMATE_GITHUB_VARS`);
+5. `apply-gate.auto_source` gives `P` as the plan and this run as its authorizer;
+6. `authorize.pusher_reason` admits this run's actor, the clicker.
+
+A failed read in checks 1, 3 or 4 exits 1: no change is yet known to call for an auto apply. A
+failed or malformed listing in check 5 exits `UNREAD` with one `::error::` line.
 """
 
 import os
@@ -39,6 +56,7 @@ from _shipmate import (
     _load,
     _run,
     cell_summaries,
+    check_runs,
     event_action,
     event_draft,
     exit_text,
@@ -51,6 +69,9 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
+au = _load("authorize")
+ec = _load("env-config")
+gs = _load("gate-status")
 
 #: The exit code of a failed or malformed autoplan listing, read once a change calls for an auto
 #: apply: the summary step replies on it, and on no other failure.
@@ -113,21 +134,31 @@ def auto_set(raw):
     return None
 
 
-def newer_autoplan(repo, head, run_id):
-    """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
-    none is listed newer. A listing that holds no run as new as this one lags it: it warns and
-    returns None. A failed or malformed listing prints one `::error::` line and exits
-    `UNREAD`."""
+def _require_run_id(run_id):
     if not is_run_id(run_id):
         raise SystemExit(f"::error::GITHUB_RUN_ID must be a run id (got: {run_id!r})")
+
+
+def _listed(head, read):
+    """`read()`, the autoplan listing of `head`; a failed or malformed one prints one
+    `::error::` line and exits `UNREAD`."""
     try:
-        newest = ag.newest_autoplan(repo, head, run=_run)
+        return read()
     except (SystemExit, ValueError) as exc:
         cause = exit_text(exc) if isinstance(exc, SystemExit) else exc
         print_annotated(
             f"::error::the autoplan runs of {head} could not be read ({one_line(cause)})"
         )
         raise SystemExit(UNREAD) from None
+
+
+def newer_autoplan(repo, head, run_id):
+    """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
+    none is listed newer. A listing that holds no run as new as this one lags it: it warns and
+    returns None. A failed or malformed listing prints one `::error::` line and exits
+    `UNREAD`."""
+    _require_run_id(run_id)
+    newest = _listed(head, lambda: ag.newest_autoplan(repo, head, run=_run))
     if newest is None or newest["id"] < int(run_id):
         print(
             f"::warning::autoplan run {run_id} of {head} is not listed yet; dispatching the auto "
@@ -138,7 +169,90 @@ def newer_autoplan(repo, head, run_id):
     return newest["id"] if newest["id"] > int(run_id) else None
 
 
+def queued_envs(check_run_lines, app_id, plan_run):
+    """The environments of the App-authored apply checks in JSONL `check_run_lines` whose newest
+    run is `queued` and whose record names plan run `plan_run` (a str), an action in
+    `AUTO_ACTIONS` and no `behind`. A name outside the check grammar is dropped."""
+    records = ag.plan_records(check_run_lines, app_id)
+    actions = ag.plan_actions(check_run_lines, app_id)
+    behind = ag.behind_names(check_run_lines, app_id)
+    envs = set()
+    for name, check in ag.latest_by_name(ag.app_runs(check_run_lines, app_id)).items():
+        parsed = ag.parse_check_name(name)
+        if (
+            parsed
+            and check.get("status") == "queued"
+            and records.get(name, (None,))[0] == plan_run
+            and actions.get(name) in ag.AUTO_ACTIONS
+            and name not in behind
+        ):
+            envs.add(parsed[1])
+    return envs
+
+
+def _skip(reason):
+    print(f"no auto apply dispatched: {reason}", file=sys.stderr)
+
+
+def _gate_reason(head, plan_run):
+    gate = gs.newest_gate(head)
+    if gate != ("pending", plan_run):
+        state, run_id = gate or ("absent", "-")
+        return (
+            f"the newest gate of {head} is {state} from run {run_id}, not pending from plan run "
+            f"{plan_run}"
+        )
+    return skip_reason(
+        event=os.environ.get("GITHUB_EVENT_NAME", ""),
+        action=event_action(),
+        attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+        payload_draft=False,
+        is_draft="false",
+        state="pending",
+        mode="post",
+    )
+
+
+def _source_reason(repo, head, plan_run, run_id):
+    plan, authorizer = _listed(head, lambda: ag.auto_source(repo, head, run=_run))
+    got = (None, None) if plan is None else (plan["id"], authorizer["id"])
+    if got != (int(plan_run), int(run_id)):
+        return (
+            f"the autoplans of {head} resolve to plan run {got[0]} authorized by run {got[1]}, "
+            f"not plan run {plan_run} authorized by this run {run_id}"
+        )
+    return au.pusher_reason(repo, authorizer, run=_run)
+
+
+def deferred(plan_run):
+    """Print the changed `auto` environments this ready-for-review run dispatches for plan run
+    `plan_run`, or nothing with the reason on stderr; the module docstring lists the checks."""
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    _require_run_id(run_id)
+    head = os.environ.get("SHIPMATE_HEAD_SHA", "")
+    validate_head_sha(head)
+    if reason := _gate_reason(head, plan_run):
+        _skip(reason)
+        return
+    lines = check_runs(repo, head, run=_run).splitlines()
+    changed = queued_envs(lines, os.environ.get("SHIPMATE_APP_ID", ""), plan_run)
+    envs = sorted(changed & set(ec.mode_envs(ec.read_table(), "auto")))
+    if not envs:
+        _skip("no changed cell is in an apply_mode auto environment")
+        return
+    if reason := _source_reason(repo, head, plan_run, run_id):
+        _skip(reason)
+        return
+    print(" ".join(envs))
+
+
 def main():
+    if args := sys.argv[1:]:
+        if len(args) != 2 or args[0] != "deferred" or not is_run_id(args[1]):
+            raise SystemExit("::error::usage: auto-dispatch [deferred <plan run id>]")
+        deferred(args[1])
+        return
     reason = skip_reason(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
         action=event_action(),

@@ -6,19 +6,28 @@ The gate conditions are fed from `gate-state.decide`'s real outputs, so a change
 `decide` returns for a held, cancelled, draft or nothing-changed run reaches these rows.
 """
 
+import base64
 import json
 import os
 import re
 
 import pytest
-from _detect_fixtures import deferred_jobs
+from _detect_fixtures import (
+    APP_ID,
+    _apply_check,
+    deferred_in_progress_jobs,
+    deferred_jobs,
+    listed_autoplan,
+)
 from _loader import (
     ACTIONS,
+    action_yaml,
     bash_only,
     fail_script,
     github_outputs,
     jsonl,
     load_script,
+    local_action,
     read_calls,
     run_step,
     step_by,
@@ -28,6 +37,7 @@ from _loader import (
 ad = load_script("auto-dispatch")
 gs = load_script("gate-state")
 
+AD = "auto-dispatch"
 DECIDE = "Decide whether to dispatch an auto apply"
 MINT = "Mint the auto apply dispatch token"
 DISPATCH = "Dispatch an auto apply"
@@ -177,16 +187,13 @@ def test_only_changed_cells_of_auto_environments_count():
     assert ad.changed_auto_envs(cells, ["dev", "stage"]) == ["dev"]
 
 
-def test_the_dispatch_steps_are_wired_exactly():
+def test_the_summary_decides_and_calls_the_dispatch_composite_exactly():
     """Only a run whose upsert did not report a newer head decides, and only a decision naming
-    environments mints the `actions: write` token and dispatches. No `ENVIRONMENT`:
-    dispatch-body adds that key when it is set, and `auto` takes none.
+    environments calls `actions/auto-dispatch`, which replies with the summary's main token.
 
-    Mutations: drop `&& steps.upsert.outputs.result != 'moved'`; add `ENVIRONMENT: x` to the
-    dispatch step; drop `SHIPMATE_AUTO_ENVS_TABLE` from the decision; drop the decision's
-    `GH_TOKEN`; drop the mint's `if:`; add
-    `permission-pull-requests: write` to the mint; dispatch with `steps.token.outputs.token`;
-    reply with `steps.autotoken.outputs.token`."""
+    Mutations: drop `&& steps.upsert.outputs.result != 'moved'`; drop `SHIPMATE_AUTO_ENVS_TABLE`
+    from the decision; drop the decision's `GH_TOKEN`; drop the call's `if:`; pass
+    `deferred-to` to the call; reply with another token."""
     decide = step_by("summary", name=DECIDE)
     assert decide["id"] == "autodecide"
     assert decide["if"] == (
@@ -201,24 +208,93 @@ def test_the_dispatch_steps_are_wired_exactly():
         "SHIPMATE_COMMENT_MODE": "${{ steps.gate.outputs.comment_mode }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
-    mint = step_by("summary", name=MINT)
-    assert mint["id"] == "autotoken"
-    assert mint["if"] == "${{ steps.autodecide.outputs.envs != '' }}"
-    assert mint["continue-on-error"] is True
-    assert mint["uses"].startswith("actions/create-github-app-token@")
-    assert mint["with"] == {
-        "client-id": "${{ inputs.app-id }}",
-        "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
-        "permission-actions": "write",
+    assert step_by("summary", name=DISPATCH) == {
+        "name": DISPATCH,
+        "if": "${{ steps.autodecide.outputs.envs != '' }}",
+        "uses": local_action(AD),
+        "with": {
+            "envs": "${{ steps.autodecide.outputs.envs }}",
+            "head-sha": "${{ inputs.head-sha }}",
+            "pr-number": "${{ inputs.pr-number }}",
+            "app-id": "${{ inputs.app-id }}",
+            "private-key": "${{ inputs.private-key }}",
+            "reply-token": "${{ steps.token.outputs.token }}",
+        },
     }
-    dispatch = step_by("summary", name=DISPATCH)
-    assert dispatch["if"] == "${{ steps.autodecide.outputs.envs != '' }}"
+
+
+_DEFERRED = "${{ inputs.deferred-to != '' }}"
+_EITHER = "${{ inputs.envs != '' || steps.decide.outputs.envs != '' }}"
+_MINT = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510"
+_APP = {
+    "client-id": "${{ inputs.app-id }}",
+    "private-key": "${{ inputs.private-key }}",
+    "owner": "${{ github.repository_owner }}",
+    "repositories": "${{ github.event.repository.name }}",
+}
+
+
+def test_the_composite_runs_its_steps_in_order_each_under_its_mode():
+    """The deferred decision verifies the key, installs PyYAML for the table and mints its own
+    token before deciding; the dispatch mint and dispatch run for either mode's environments.
+
+    Mutations: delete the `python-yaml` step; swap the two mints; drop the deferred `if:` of
+    the main mint; dispatch on `steps.decide.outputs.envs != ''` alone (a summary call, which
+    passes `envs`, dispatches nothing)."""
+    steps = [
+        (s.get("name") or s.get("uses"), s.get("id"), s.get("if"))
+        for s in action_yaml(AD)["runs"]["steps"]
+    ]
+    assert steps == [
+        ("Verify the App key arrived", None, _DEFERRED),
+        (local_action("python-yaml"), None, _DEFERRED),
+        ("Mint App installation token", "maintoken", _DEFERRED),
+        (DECIDE, "decide", _DEFERRED),
+        (MINT, "autotoken", _EITHER),
+        (DISPATCH, None, _EITHER),
+    ]
+    assert step_by(AD, name="Verify the App key arrived")["uses"] == local_action("verify-app-key")
+
+
+def test_the_main_mint_reads_and_replies_but_never_dispatches():
+    """The decision reads runs, checks, the table and the gate, and replies; only the dispatch
+    mint holds `actions: write`. A failed main mint degrades: the decision's first read then
+    fails, warns and dispatches nothing.
+
+    Mutations: add `permission-actions: write`; drop `permission-pull-requests: write`; drop
+    the main mint's `continue-on-error`."""
+    mint = step_by(AD, id="maintoken")
+    assert mint["uses"].split(" ")[0] == _MINT
+    assert mint["continue-on-error"] is True
+    assert mint["with"] == _APP | {
+        "permission-actions": "read",
+        "permission-checks": "read",
+        "permission-contents": "read",
+        "permission-statuses": "read",
+        "permission-pull-requests": "write",
+    }
+
+
+def test_the_dispatch_steps_are_wired_exactly():
+    """Only a decision naming environments, the caller's or the deferred one's, mints the
+    `actions: write` token and dispatches. A failed dispatch mint still runs the dispatch step,
+    whose empty-token branch replies. No `ENVIRONMENT`: dispatch-body adds that key when it is
+    set, and `auto` takes none.
+
+    Mutations: add `&& steps.autotoken.outputs.token != ''` to the dispatch `if:`; add
+    `ENVIRONMENT: x` to the dispatch step; add `permission-pull-requests: write` to the mint;
+    dispatch with `steps.maintoken.outputs.token`; reply with `steps.autotoken.outputs.token`;
+    drop `inputs.envs ||` from `SHIPMATE_AUTO_ENVS`."""
+    mint = step_by(AD, name=MINT)
+    assert mint["continue-on-error"] is True
+    assert mint["uses"].split(" ")[0] == _MINT
+    assert mint["with"] == _APP | {"permission-actions": "write"}
+    dispatch = step_by(AD, name=DISPATCH)
+    assert dispatch["if"] == _EITHER
     assert dispatch["env"] == {
         "GH_TOKEN": "${{ steps.autotoken.outputs.token }}",
-        "REPLY_TOKEN": "${{ steps.token.outputs.token }}",
-        "SHIPMATE_AUTO_ENVS": "${{ steps.autodecide.outputs.envs }}",
+        "REPLY_TOKEN": "${{ inputs.reply-token || steps.maintoken.outputs.token }}",
+        "SHIPMATE_AUTO_ENVS": "${{ inputs.envs || steps.decide.outputs.envs }}",
         "VERB": "auto",
         "REF": "${{ inputs.head-sha }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
@@ -226,10 +302,53 @@ def test_the_dispatch_steps_are_wired_exactly():
     }
 
 
-def test_the_decision_replies_on_auto_dispatchs_unread_exit_code():
+_DECIDE_RUN = """\
+set -euo pipefail
+# Reviewer-facing degrade only: the plan run this one deferred to wrote the gate.
+rc=0
+envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" deferred "$DEFERRED_TO" 2>decide.err) || rc=$?
+if [ "$rc" -ne 0 ]; then
+  sed 's/^::error::/::warning::/' decide.err >&2
+  echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+  # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
+  # pull request gets the same reply as a failed dispatch.
+  if [ "$rc" -eq 3 ]; then
+    SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME=failed \\
+      SHIPMATE_REPLY_TEXT="auto apply not started: what decides it for this ready-for-review run could not be read; comment \\`shipmate apply\\`" \\
+      python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+  fi
+  exit 0
+fi
+cat decide.err >&2
+echo "envs=$envs" >> "$GITHUB_OUTPUT"
+"""  # noqa: E501 - the step's lines, compared whole
+
+
+def test_the_deferred_decision_is_wired_exactly():
+    """The decision reads with the main token, finds the App's gate through its slug, and
+    resolves the table's variable references.
+
+    Mutations: drop `SHIPMATE_APP_SLUG`; drop `DEFERRED_TO`; drop `SHIPMATE_GITHUB_VARS`; call
+    `scripts/auto-dispatch` by a relative path; drop the failure branch's `exit 0`; drop the
+    `rc -eq 3` reply; drop `cat decide.err >&2`."""
+    decide = step_by(AD, name=DECIDE)
+    assert decide["env"] == {
+        "GH_TOKEN": "${{ steps.maintoken.outputs.token }}",
+        "SHIPMATE_APP_SLUG": "${{ steps.maintoken.outputs.app-slug }}",
+        "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+        "PR_NUMBER": "${{ inputs.pr-number }}",
+        "DEFERRED_TO": "${{ inputs.deferred-to }}",
+    }
+    assert decide["run"] == _DECIDE_RUN
+
+
+@pytest.mark.parametrize("action", ["summary", AD])
+def test_the_decision_replies_on_auto_dispatchs_unread_exit_code(action):
     """The step keys its reply on a bare exit-code literal, which must be `UNREAD`; every
     `-eq` comparison of `$rc` in the step is that one. Mutation: renumber `UNREAD` to 4 -- red."""
-    run = step_by("summary", name=DECIDE)["run"]
+    run = step_by(action, name=DECIDE)["run"]
     assert re.findall(r'"\$rc" -eq ([0-9]+)', run) == [str(ad.UNREAD)]
 
 
@@ -266,6 +385,7 @@ def _run(
     runs=None,
     runs_rc=0,
     runs_err="",
+    action="summary",
 ):
     """Run `step`'s `run:` with the gh stub; return (process, gh calls, step outputs). `event`
     is the payload text at `GITHUB_EVENT_PATH`, a `synchronize` one by default; `auto` is
@@ -273,7 +393,7 @@ def _run(
     dispatch; `post_rc` makes `python3` exit with it for
     `dispatch-body` in place of running it. `runs` is the head's autoplan listing as `gh --jq`
     prints it, this run (999) alone by default; `runs_rc` is that listing's exit code and
-    `runs_err` its stderr."""
+    `runs_err` its stderr. `action` names the composite holding `step`."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -303,7 +423,7 @@ def _run(
         "FAKE_RUNS": jsonl(_autoplan(999)) if runs is None else runs,
         "FAKE_RUNS_RC": str(runs_rc),
         "FAKE_RUNS_ERR": runs_err,
-        "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
+        "GITHUB_ACTION_PATH": str(ACTIONS / action),
         "GITHUB_OUTPUT": str(out),
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://example.invalid",
@@ -325,7 +445,7 @@ def _run(
         "DISPATCH_REF": "main",
     }
     env.pop("ENVIRONMENT", None)
-    proc = run_step(tmp_path, step_by("summary", name=step)["run"], env)
+    proc = run_step(tmp_path, step_by(action, name=step)["run"], env)
     return proc, read_calls(tmp_path / "calls"), github_outputs(out)
 
 
@@ -554,7 +674,7 @@ def test_a_push_onto_a_ready_pull_request_decides_to_dispatch(tmp_path):
 def test_a_dispatch_sends_the_exact_body(tmp_path):
     """Mutations: send `ENVIRONMENT` into dispatch-body; dispatch to another file than
     `shipmate.yml`."""
-    proc, calls, _ = _run(tmp_path, DISPATCH)
+    proc, calls, _ = _run(tmp_path, DISPATCH, action=AD)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == ["repos/acme/demo/actions/workflows/shipmate.yml/dispatches"]
     assert json.loads((tmp_path / "dispatch.json").read_text(encoding="utf-8")) == {
@@ -577,7 +697,7 @@ def test_a_failed_mint_replies_with_the_main_token_and_dispatches_nothing(tmp_pa
     empty-token check (the dispatch is attempted); reply with `GH_TOKEN`, the empty dispatch
     token, in place of `REPLY_TOKEN`; drop `SHIPMATE_REPLY_LABEL` from `reply` (the footer reads
     `comment run`)."""
-    proc, calls, _ = _run(tmp_path, DISPATCH, token="")
+    proc, calls, _ = _run(tmp_path, DISPATCH, action=AD, token="")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == ["repos/acme/demo/issues/42/comments"]
     assert (
@@ -601,7 +721,7 @@ def test_a_failed_dispatch_replies_and_warns_and_leaves_the_gate(tmp_path):
     the reply text; reply with `GH_TOKEN`, the dispatch token; treat every nonzero exit of
     `dispatch-body` as a run that may have started -- the reply differs; send dispatch-body's
     stderr to /dev/null, and gh's answer leaves the log."""
-    proc, calls, _ = _run(tmp_path, DISPATCH, dispatch_rc=1)
+    proc, calls, _ = _run(tmp_path, DISPATCH, action=AD, dispatch_rc=1)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == [
         "repos/acme/demo/actions/workflows/shipmate.yml/dispatches",
@@ -631,6 +751,7 @@ def test_a_dispatch_to_a_fence_without_its_inputs_logs_and_replies_the_repin_rem
     proc, _, _ = _run(
         tmp_path,
         DISPATCH,
+        action=AD,
         dispatch_rc=1,
         dispatch_err='gh: Unexpected inputs provided: ["comment_id"] (HTTP 422)',
     )
@@ -657,7 +778,7 @@ def test_a_dispatch_that_may_have_started_a_run_replies_to_check_the_actions_tab
     in comment-ops, and 4 when it cannot tell, a failure: either way "not started" would be false.
     Mutations: reply the `auto apply not started` text on exit 3 and 4 -- both rows redden;
     reply `failed` on exit 3 -- its row reddens."""
-    proc, calls, _ = _run(tmp_path, DISPATCH, post_rc=post_rc)
+    proc, calls, _ = _run(tmp_path, DISPATCH, action=AD, post_rc=post_rc)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert _paths(calls) == ["repos/acme/demo/issues/42/comments"]
     assert proc.stdout.splitlines() == [
@@ -719,3 +840,314 @@ def test_a_listing_exit_without_text_names_a_fixed_cause(monkeypatch, capsys, co
     assert capsys.readouterr().err == (
         f"::error::the autoplan runs of {HEAD_SHA} could not be read (gh failed)\n"
     )
+
+
+# A stub for the deferred decision: each read answers the file `$FAKE/<key>`, or fails with a 404
+# when it is absent; a reply is saved to `$FAKE/reply.md`.
+_DEFERRED_GH = """\
+#!/bin/bash
+printf '%s\\n' "$@" -- >> "$CALLS"
+case "$*" in
+  *users/*) key=user ;;
+  *statuses*) key=statuses ;;
+  *check-runs*) key=checks ;;
+  *contents/*) key=table ;;
+  *workflows/shipmate.yml/runs*) key=runs ;;
+  */jobs[?]*) key=jobs ;;
+  *collaborators/*) key=permission ;;
+  *issues/*/comments*) cat > "$FAKE/reply.md"; exit 0 ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+[ -e "$FAKE/$key" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+cat "$FAKE/$key"
+"""
+
+P, R = 1000, 1001
+_TABLE = """\
+layout: folder
+environments:
+  sbx:
+    apply_mode: auto
+    region: {vars: SBX_REGION}
+  dev-eu:
+    apply_mode: targeted
+"""
+
+
+def _table(text):
+    """The contents-API body of the environment table `text`."""
+    return json.dumps({"content": base64.b64encode(text.encode()).decode(), "encoding": "base64"})
+
+
+_NO_AUTO_TABLE = "layout: folder\nenvironments:\n  sbx:\n    apply_mode: targeted\n"
+
+
+def _sbx(env="sbx", *, check=None, **kw):
+    """A queued apply check of `env` for plan run P, a push onto a draft: `kw` overrides the
+    record's arguments and `check` the check-run's keys."""
+    record = {"plan_run": str(P), "cells": 2, "draft": True} | kw
+    return _apply_check("stacks/app", env, **record) | (check or {})
+
+
+def _gate_status(state="pending", run_id=P):
+    return {
+        "context": "shipmate / gate",
+        "state": state,
+        "target_url": f"https://example.invalid/acme/demo/actions/runs/{run_id}",
+        "creator": 7,
+    }
+
+
+def _ready(run_id=R, login="octocat"):
+    """The ready-for-review run, still dispatching, clicked by `login`."""
+    actor = {"login": login}
+    return listed_autoplan(
+        run_id, HEAD_SHA, status="in_progress", conclusion=None, run_attempt=1
+    ) | {"actor": actor, "triggering_actor": actor}
+
+
+def _push(run_id=P):
+    return listed_autoplan(
+        run_id, HEAD_SHA, status="completed", conclusion="success", run_attempt=1
+    )
+
+
+def _deferred_answers(**overrides):
+    """What each read answers for a deferred run R of plan run P: a pending gate of P, a queued
+    `sbx` check and a queued `dev-eu` one of P, a table where only `sbx` is `auto`, R
+    deferred above P, and `write` for R's clicker `octocat`. An override of None makes that read
+    fail."""
+    answers = {
+        "user": json.dumps({"id": 7}),
+        "statuses": jsonl(_gate_status()),
+        "checks": jsonl(_sbx(), _sbx("dev-eu", check={"id": 2})),
+        "table": _table(_TABLE),
+        "runs": jsonl(_ready(), _push()),
+        "jobs": deferred_in_progress_jobs(),
+        "permission": json.dumps({"permission": "write"}),
+    }
+    return answers | overrides
+
+
+def _decide_deferred(tmp_path, *, action="ready_for_review", attempt="1", token="x", **answers):  # noqa: S107 - a stub token
+    """Run the composite's decision for run R deferring to P; return (process, outputs, reply
+    or None). Each keyword in `answers` replaces one read's answer (`_deferred_answers`)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_python3_shim(bin_dir)
+    (bin_dir / "gh").write_text(_DEFERRED_GH, encoding="utf-8", newline="\n")
+    (bin_dir / "gh").chmod(0o755)
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    for key, body in _deferred_answers(**answers).items():
+        if body is not None:
+            (fake / key).write_text(body, encoding="utf-8")
+    out = tmp_path / "out"
+    out.write_text("", encoding="utf-8")
+    payload = tmp_path / "event.json"
+    payload.write_text(
+        json.dumps({"action": action, "pull_request": {"draft": False}}), encoding="utf-8"
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "PYTHON3_SHIM_NO_SLEEP": "1",
+        "CALLS": str(tmp_path / "calls"),
+        "FAKE": str(fake),
+        "GITHUB_ACTION_PATH": str(ACTIONS / AD),
+        "GITHUB_OUTPUT": str(out),
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_SERVER_URL": "https://example.invalid",
+        "GITHUB_RUN_ID": str(R),
+        "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(payload),
+        "GITHUB_RUN_ATTEMPT": attempt,
+        "GH_TOKEN": token,
+        "SHIPMATE_APP_SLUG": "shipmate-test" if token else "",
+        "SHIPMATE_APP_ID": APP_ID,
+        "SHIPMATE_HEAD_SHA": HEAD_SHA,
+        "SHIPMATE_GITHUB_VARS": json.dumps({"SBX_REGION": "eu-west-1"}),
+        "PR_NUMBER": "42",
+        "DEFERRED_TO": str(P),
+    }
+    env.pop("SHIPMATE_GATE_STATE", None)
+    proc = run_step(tmp_path, step_by(AD, name=DECIDE)["run"], env)
+    reply = fake / "reply.md"
+    return (
+        proc,
+        github_outputs(out),
+        (reply.read_text(encoding="utf-8") if reply.exists() else None),
+    )
+
+
+@bash_only
+def test_a_deferred_ready_run_dispatches_the_changed_auto_environments(tmp_path):
+    """The queued `dev-eu` check of P is `targeted` in the table, so only `sbx` is printed; the
+    table resolves a variable reference; P's records say draft, which the clicker authorizes.
+
+    Mutation: skip the table filter (use every queued environment) -- `dev-eu sbx` is printed."""
+    proc, outputs, reply = _decide_deferred(tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, reply, proc.stderr) == ({"envs": "sbx"}, None, "")
+
+
+_NOT_PENDING_P = (
+    f"the newest gate of {HEAD_SHA} is {{}} from run {{}}, not pending from plan run {P}"
+)
+_SOURCE = (
+    f"the autoplans of {HEAD_SHA} resolve to plan run {{}} authorized by run {{}}, not plan run "
+    f"{P} authorized by this run {R}"
+)
+_NO_AUTO = "no changed cell is in an apply_mode auto environment"
+
+#: name -> (decision overrides, whole logged reason); each row breaks one check.
+DEFERRED_SKIPS = {
+    # Mutation: drop the gate-owner check (compare only the state).
+    "gate of another run": (
+        {"statuses": jsonl(_gate_status(run_id=999))},
+        _NOT_PENDING_P.format("pending", 999),
+    ),
+    # Mutation: accept a `success` gate.
+    "gate success": (
+        {"statuses": jsonl(_gate_status("success"))},
+        _NOT_PENDING_P.format("success", P),
+    ),
+    # Mutation: count a check of any status.
+    "only completed checks": (
+        {"checks": jsonl(_sbx(check={"status": "completed", "conclusion": "success"}))},
+        _NO_AUTO,
+    ),
+    # Mutation: drop the `behind_names` filter.
+    "behind check": (
+        {
+            "checks": jsonl(
+                _sbx(
+                    check={
+                        "external_id": json.dumps(
+                            {"plan_run": str(P), "action": "synchronize", "behind": True}
+                        )
+                    }
+                )
+            )
+        },
+        _NO_AUTO,
+    ),
+    # Mutation: drop the record-run filter.
+    "record of another run": ({"checks": jsonl(_sbx(plan_run="999"))}, _NO_AUTO),
+    # Mutation: drop the `AUTO_ACTIONS` filter.
+    "record action reopened": ({"checks": jsonl(_sbx(action="reopened"))}, _NO_AUTO),
+    # Mutation: split the name by hand (`name.split(" / ")[1]`) in place of `parse_check_name`.
+    "name outside the grammar": ({"checks": jsonl(_sbx(check={"name": "apply / sbx"}))}, _NO_AUTO),
+    # Mutation: drop the plan-id check.
+    "plan of another run": (
+        {"runs": jsonl(_ready(), _push(999))},
+        _SOURCE.format(999, R),
+    ),
+    # Mutation: drop the authorizer check.
+    "authorizer of another run": (
+        {"runs": jsonl(_ready(2002), _push())},
+        _SOURCE.format(P, 2002),
+    ),
+    # Mutation: drop the `pusher_reason` call.
+    "bot clicker": (
+        {"runs": jsonl(_ready(login="renovate[bot]"), _push())},
+        (
+            "not authorized: the head was pushed by @renovate[bot], a bot account, which auto "
+            "never authorizes; a writer comments `shipmate apply`."
+        ),
+    ),
+    # Mutation: drop the `pusher_reason` call.
+    "read clicker": (
+        {"permission": json.dumps({"permission": "read"})},
+        (
+            "not authorized: `shipmate apply` needs write access to this repository, and the "
+            "pusher @octocat's permission is `read`."
+        ),
+    ),
+}
+
+
+@bash_only
+@pytest.mark.parametrize("name", list(DEFERRED_SKIPS))
+def test_a_deferred_ready_run_failing_one_check_dispatches_nothing(tmp_path, name):
+    """Each row's mutation, in its comment above the row, prints `sbx` for that row."""
+    answers, reason = DEFERRED_SKIPS[name]
+    proc, outputs, reply = _decide_deferred(tmp_path, **answers)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, reply) == ({"envs": ""}, None)
+    assert proc.stderr.splitlines() == [f"no auto apply dispatched: {reason}"]
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("event", "reason"),
+    [
+        pytest.param({"attempt": "2"}, "run attempt 2 is a re-run", id="attempt-2"),
+        pytest.param(
+            {"action": "reopened"},
+            "this plan was started by reopening the pull request, not by a push",
+            id="reopened",
+        ),
+    ],
+)
+def test_a_deferred_re_run_or_reopen_dispatches_nothing(tmp_path, event, reason):
+    """Mutation: pass `attempt="1"` to `skip_reason` in place of `GITHUB_RUN_ATTEMPT` (the
+    attempt-2 row prints `sbx`)."""
+    proc, outputs, reply = _decide_deferred(tmp_path, **event)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, reply) == ({"envs": ""}, None)
+    assert proc.stderr.splitlines() == [f"no auto apply dispatched: {reason}"]
+
+
+_DECIDE_FAILED = (
+    "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
+)
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "answers",
+    [
+        pytest.param({"statuses": None, "table": _table(_NO_AUTO_TABLE)}, id="gate"),
+        pytest.param({"checks": None}, id="check-runs"),
+        pytest.param({"table": None}, id="table"),
+    ],
+)
+def test_a_failed_read_before_a_change_is_known_warns_and_posts_nothing(tmp_path, answers):
+    """Checks 1, 3 and 4 exit 1: nothing yet says an auto apply was called for, so no reply.
+    The gate row's table holds no `auto` environment either.
+
+    Mutation, per row: exit `UNREAD` when that read fails (wrap it in `_listed`) -- a reply is
+    posted, red."""
+    proc, outputs, reply = _decide_deferred(tmp_path, **answers)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, reply) == ({}, None)
+    assert proc.stdout.splitlines() == [_DECIDE_FAILED]
+
+
+@bash_only
+def test_an_empty_main_token_warns_and_posts_nothing(tmp_path):
+    """A failed main mint leaves the token and the slug empty: the gate read refuses, and the
+    step degrades. Mutation: `exit 1` in place of the failure branch's `exit 0`."""
+    proc, outputs, reply = _decide_deferred(tmp_path, token="")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, reply) == ({}, None)
+    assert proc.stdout.splitlines() == [_DECIDE_FAILED]
+    assert proc.stderr.splitlines()[0].startswith("::warning::SHIPMATE_APP_SLUG is empty")
+
+
+@bash_only
+def test_a_failed_autoplan_listing_after_a_change_is_known_replies(tmp_path):
+    """Mutation: exit 1 in place of `UNREAD` when `auto_source` fails -- no reply, red."""
+    proc, outputs, reply = _decide_deferred(tmp_path, runs=None)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert outputs == {}
+    assert proc.stdout.splitlines() == [_DECIDE_FAILED]
+    assert reply.splitlines()[:3] == [
+        "### shipmate apply",
+        "",
+        (
+            "🔴 failed: auto apply not started: what decides it for this ready-for-review run "
+            "could not be read; comment `shipmate apply`"
+        ),
+    ]

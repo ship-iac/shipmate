@@ -193,6 +193,7 @@ def test_exactly_the_actions_that_parse_yaml_install_it():
         "deploy-detect",
         "unlock-detect",
         "summary",
+        "auto-dispatch",
         "comment-ops",
         "setup",
     }

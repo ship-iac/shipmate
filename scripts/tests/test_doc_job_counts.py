@@ -54,7 +54,7 @@ ENGINE_BOUND = _jobs(_binds_engine)
 def test_the_derived_counts_are_the_documented_ones():
     """The counts the prose states, hand-written. Mutation: count every workflow with
     `ci.yml`'s job on `ubuntu-slim` -- 33, red."""
-    assert (len(SLIM), len(ENGINE_BOUND)) == (32, 34)
+    assert (len(SLIM), len(ENGINE_BOUND)) == (33, 35)
 
 
 def _doc(name):

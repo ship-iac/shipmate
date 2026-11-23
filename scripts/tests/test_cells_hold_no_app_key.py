@@ -46,7 +46,7 @@ PLAN_WF = WORKFLOWS / "plan.yml"
 #: the key, and none checks anything out.
 UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 #: Every job in plan.yml that references the App key, hand-written.
-PLAN_KEY_HOLDERS = ("claim", "defer", "summary", "gate-hold", "outcome")
+PLAN_KEY_HOLDERS = ("claim", "defer", "defer-auto", "summary", "gate-hold", "outcome")
 
 
 @pytest.mark.parametrize("action", CELLS)
@@ -173,6 +173,7 @@ ENGINE_BOUND_JOBS = {
     ("drift.yml", "issues"),
     ("plan.yml", "claim"),
     ("plan.yml", "defer"),
+    ("plan.yml", "defer-auto"),
     ("plan.yml", "summary"),
     ("plan.yml", "gate-hold"),
     ("plan.yml", "outcome"),

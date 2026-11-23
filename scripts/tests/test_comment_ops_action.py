@@ -538,7 +538,7 @@ def test_both_doctor_token_mints_request_actions_read():
     Both sites, because they are separate mints: `actions/summary`'s token drives `annotate` mode on
     every plan run, `comment-ops`' `doctortoken` drives `report` mode on demand, and a fix applied
     to only one leaves half the environment probes degraded. The `auto` dispatch mints its own
-    `actions: write` token (`autotoken`), so this one stays `read`.
+    `actions: write` token (`actions/auto-dispatch`'s `autotoken`), so this one stays `read`.
 
     Mutation: `permission-actions: write` on the summary mint."""
     assert _mint_with("comment-ops", "doctortoken").get("permission-actions") == "read"

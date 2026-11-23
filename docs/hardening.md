@@ -1157,10 +1157,11 @@ rather than conventions. The trusted `summary` job declines unless the head
 repository `facts` reported equals `github.repository`, and an absent or empty
 value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
 deployment is created and the environment is never entered. And that job has no
-checkout, so even admitted it would run nothing the fork wrote. The other four
+checkout, so even admitted it would run nothing the fork wrote. The other five
 jobs holding the key check nothing out either. `claim` runs only on a
 `workflow_dispatch` carrying a comment id, which a fork's pull request event never
-is. `defer` carries the same head-repository clause in its own `if:`. `gate-hold` runs only when
+is. `defer` carries the same head-repository clause in its own `if:`. `defer-auto` carries it too, and
+runs only on the first attempt of a ready-for-review run that deferred. `gate-hold` runs only when
 `summary` was cancelled and the run was not; a refused `summary` is skipped, not cancelled.
 `outcome` carries `summary`'s head-repository clause in its own `if:`, except
 after a failed `facts` on a commented plan, when no head is known.

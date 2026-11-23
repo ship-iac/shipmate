@@ -50,6 +50,7 @@ def test_every_job_declares_its_own_permissions():
         "claim": {},
         "facts": {"pull-requests": "read"},
         "defer": {},
+        "defer-auto": {},
         "detect": {"contents": "read"},
         "plan": {"contents": "read", "id-token": "write"},
         "summary": {"contents": "read"},
@@ -189,14 +190,15 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     Both fail toward a green gate over a pull request nobody planned.
 
     The shim owns the one read that has to exist -- the concurrency group, where `needs` is not
-    in scope -- so this file's count is zero outside `claim`, `defer` and `outcome`, compared whole
+    in scope -- so this file's count is zero outside `claim`, `defer`, `defer-auto` and `outcome`,
+    compared whole
     rather than per expression. `claim` runs before `facts` exists and reads the dispatch's own
     `comment_id`, which no pull request holds, and its `pr_number` only to address the
     not-started reply; under `pull_request_target` both read empty and the job skips. `outcome`
     reads `pr_number` only to address its reply when `facts` failed, and only for a run whose
     `claim` validated that number. `facts` and `outcome` read `comment_id` for the claim gate's
-    bypass, which admits a run that carries none. `defer` reads `action`, the trigger's activity
-    type, which no pull request fact carries.
+    bypass, which admits a run that carries none. `defer` and `defer-auto` read `action`, the
+    trigger's activity type, which no pull request fact carries.
 
     Mutations: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job;
     `github.event.inputs.ref` added to `claim`'s `with:` or to `outcome`'s.
@@ -209,6 +211,7 @@ def test_the_workflow_reads_the_event_payload_nowhere():
         "claim": ["github.event.inputs.comment_id", "github.event.inputs.pr_number"],
         "facts": ["github.event.inputs.comment_id"],
         "defer": ["github.event.action"],
+        "defer-auto": ["github.event.action"],
         "detect": [],
         "plan": [],
         "summary": [],
@@ -293,3 +296,50 @@ def test_the_defer_job_is_wired_exactly():
             }
         ],
     }
+
+
+#: The comment above `defer-auto`'s `continue-on-error`, which the parsed file drops.
+_DEFER_AUTO_WHY = """\
+    # A failed dispatch must not fail the run: `_deferred_run` reads an ended deferred ready run
+    # past only when it concluded `success`. A job-level `continue-on-error` keeps the run
+    # `success` while this job ends `failure`, and `deferred` reads only `defer` and `detect`.
+    continue-on-error: true
+"""
+
+
+def test_the_defer_auto_job_is_wired_exactly():
+    """It holds the App key only on the first attempt of a same-repository ready-for-review
+    autoplan whose `defer` named an earlier plan run, and it never fails the run.
+
+    Mutations: drop `github.run_attempt == '1'` (a re-run dispatches again); drop the
+    `github.event_name` clause; drop the head-repo clause (the key reaches a fork's ready run);
+    change `needs.defer.outputs.run != ''` to `==`; drop `continue-on-error` (a failed dispatch
+    fails the run, and `_deferred_run` stops reading it past); drop its comment."""
+    assert workflow_jobs(WF)["defer-auto"] == {
+        "needs": ["facts", "defer"],
+        "if": (
+            "${{ !cancelled() && github.event_name == 'pull_request_target' && "
+            "github.event.action == 'ready_for_review' && github.run_attempt == '1' && "
+            "needs.facts.result == 'success' && needs.facts.outputs.is-draft == 'false' && "
+            "needs.facts.outputs.head-repo == github.repository && "
+            "needs.defer.result == 'success' && needs.defer.outputs.run != '' }}"
+        ),
+        "runs-on": "ubuntu-slim",
+        "environment": ENGINE_ENVIRONMENT,
+        "permissions": {},
+        "continue-on-error": True,
+        "steps": [
+            {
+                "uses": local_action("auto-dispatch"),
+                "with": {
+                    "deferred-to": "${{ needs.defer.outputs.run }}",
+                    "head-sha": "${{ needs.facts.outputs.head-sha }}",
+                    "pr-number": "${{ needs.facts.outputs.pr-number }}",
+                    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+                    "github-vars": "${{ toJSON(vars) }}",
+                },
+            }
+        ],
+    }
+    assert WF.read_text(encoding="utf-8").count(_DEFER_AUTO_WHY) == 1

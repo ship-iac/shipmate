@@ -466,7 +466,7 @@ off the pull request's checks list.
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
-  `claim`, `defer`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
+  `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
   `claim`, `queue` and `outcome`, `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
   `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete`,
@@ -3078,10 +3078,10 @@ The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
-Engine `plan.yml` is eight jobs: `claim`, `facts`, `defer`, `detect`, `plan`,
+Engine `plan.yml` is nine jobs: `claim`, `facts`, `defer`, `defer-auto`, `detect`, `plan`,
 `summary`, `gate-hold`, `outcome`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
-check out the pull request's own head and hold no App credential. `claim`, `defer`,
+check out the pull request's own head and hold no App credential. `claim`, `defer`, `defer-auto`,
 `summary`, `gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
 `deployment: false`, like every engine job binding it, and none
 checks anything out. Every App-authored
@@ -3149,19 +3149,19 @@ attaches to the dispatch ref rather than to the pull request — which is why th
 `summary` job mirrors this run's completed `plan / ` checks onto the head
 commit on an `on-demand` run.
 
-**Requirement: no job in engine `plan.yml` other than `claim`, `defer`, `summary`, `gate-hold` and
+**Requirement: no job in engine `plan.yml` other than `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and
 `outcome` may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
 a ref the environment's policy admits — the base ref, or the ref the plan was
 dispatched on — and the `plan` job's `environment:` is chosen by
 branch-authored `env/*` tags, so the file naming no such secret outside
-`claim`, `defer`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
+`claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
 `plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
 that copy of the file is the base branch's or the default branch's — never the
 pull request's own.
 
-The eight jobs:
+The nine jobs:
 
 - **`claim`** (engine, a `workflow_dispatch` carrying a `comment_id` only,
   bound to `shipmate-engine`, `permissions: {}`) — claims the command comment
@@ -3176,8 +3176,8 @@ The eight jobs:
   was dispatched with is the only thing it can look one up by; and a
   pull-request event whose payload says draft reads the pull request's draft
   flag once more (the draft clause below). Besides `claim`; `outcome`, which
-  falls back to the dispatch's `pr_number` when `facts` failed; and `defer`,
-  whose `if:` reads the event action, nothing else in the file reads the event
+  falls back to the dispatch's `pr_number` when `facts` failed; and `defer` and
+  `defer-auto`, whose `if:`s read the event action, nothing else in the file reads the event
   payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
   about its own head repository. Its outputs are `head-sha`, `head-repo`,
@@ -3199,6 +3199,13 @@ The eight jobs:
   tell, a missing App key or a failed read included, it warns and the run
   plans. It checks nothing out and runs on `ubuntu-slim` whatever `runs_on` the
   caller passes.
+- **`defer-auto`** (engine, the first attempt of a `ready_for_review` run whose
+  `defer` named an earlier plan run, bound to `shipmate-engine`,
+  `permissions: {}`, `continue-on-error: true`) — decides through
+  `actions/auto-dispatch` whether that plan's `apply_mode: auto` environments get
+  an `auto` apply, and dispatches it. A failure ends this job `failure` and
+  leaves the run `success`. It checks nothing out and runs on `ubuntu-slim`
+  whatever `runs_on` the caller passes.
 - **`detect` and `plan`** (engine, either trigger) — they upload plan artifacts
   and cell summaries; they author nothing and mint no App token. `detect` binds
   no environment; `plan` binds only the plan environment for the cell it is
@@ -3480,14 +3487,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-two, which run on
+  every engine job but thirty-three, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
-  `gate-hold` and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
+  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-two
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-three
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
