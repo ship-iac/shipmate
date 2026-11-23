@@ -42,6 +42,21 @@ def test_load_cells_reads_every_downloaded_cell_sorted(tmp_path):
     assert [c["stack"] for c in cells] == ["stacks/a", "stacks/b"]
 
 
+@pytest.mark.parametrize("key", ["plan_ok", "drifted"])
+def test_load_cells_refuses_a_string_flag(tmp_path, key):
+    """A truthy `"false"` `plan_ok` would close a drift issue for a failed plan. Mutation: map
+    `plan_ok` to `str` in `CELL_KEYS` (plan_ok passes; drifted refuses on plan_ok). Mutation:
+    map `drifted` to `str` (drifted passes)."""
+    _write_cell(tmp_path, "app", _cell(**{key: "false"}))
+    with pytest.raises(SystemExit) as exc:
+        di.load_cells(str(tmp_path))
+    path = os.path.join(str(tmp_path), "drift-summary.dev-eu.app", "cell.json")
+    assert str(exc.value) == (
+        f"::error::cell summary {path} key '{key}' must be bool, got str -- drift-cell and this "
+        "script must be pinned at the same engine SHA"
+    )
+
+
 def test_load_cells_missing_key_fails_loud(tmp_path):
     """The whole refusal, so the pin-skew sentence the caller passes to `cell_summaries` is
     checked too. Mutations: drop `{skew}` from `cell_summaries`' message; drop `"stack"` from

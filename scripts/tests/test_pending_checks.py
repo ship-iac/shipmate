@@ -900,7 +900,8 @@ def test_a_record_over_the_cap_refuses():
 
 
 def test_a_cell_missing_a_key_fails_loud(tmp_path):
-    """Mutation: drop `"changed"` from `_KEYS` -- a `KeyError` instead of the `SystemExit`."""
+    """Mutation: drop `"changed"` from `PLAN_CELL_KEYS` -- a `KeyError` instead of the
+    `SystemExit`."""
     d = tmp_path / "cell-summary.dev-eu.stacks-app"
     d.mkdir()
     (d / "cell.json").write_text(

@@ -51,12 +51,11 @@ ag = _load("apply-gate")
 li = _load("lock-info")
 wv = _load("waves")
 
-_STR_KEYS = ("stack", "environment", "result", "reason")
-CELL_KEYS = _STR_KEYS
+CELL_KEYS = {"stack": str, "environment": str, "result": str, "reason": str}
 _RESULTS = frozenset({"applied", "failed", "blocked"})
 # (circle, verdict word) per display status, in verdict token order. A SUPERSET of cell.json's
 # `result` enum: `unrecorded` is derived at render time (apply_check_state), never written,
-# so _validate_cell still rejects an out-of-enum artifact value as pin skew.
+# so _validate_result still rejects an out-of-enum artifact value as pin skew.
 _STATUS = {
     "failed": ("🔴", "failed"),
     "unrecorded": ("🟠", "not recorded"),
@@ -235,14 +234,9 @@ _RESOURCES_RE = re.compile(
 )
 
 
-def _validate_cell(cell, path):
-    """Type/enum-check cell.json values past the missing-keys check, mirroring
-    summary-comment's `_validate_cell`. A pin-skewed or crafted cell.json with
-    the right keys but wrong types would otherwise land unescaped in the
-    comment, and an out-of-enum result would fall through the status dispatch."""
-    for k in _STR_KEYS:
-        if type(cell[k]) is not str:
-            raise SystemExit(f"::error::cell summary {path} key {k!r} must be a string")
+def _validate_result(cell, path):
+    """Refuse a cell.json whose `result` is out of enum: it would fall through the status
+    dispatch."""
     if cell["result"] not in _RESULTS:
         raise SystemExit(
             f"::error::cell summary {path} key 'result' must be one of "
@@ -305,7 +299,7 @@ def load_cells(cells_dir):
     out = []
     skew = "(apply-cell and this script must be pinned at the same engine SHA)"
     for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
-        _validate_cell(cell, p)
+        _validate_result(cell, p)
         txt = pathlib.Path(p).with_name("apply.txt")
         text = None
         if txt.exists():

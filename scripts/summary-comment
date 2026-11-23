@@ -73,6 +73,8 @@ import types
 
 from _shipmate import (
     CHECK_OUTPUT_CAP,
+    PLAN_CELL_KEYS,
+    PLAN_CELL_SKEW,
     REASON_CAP,
     _load,
     _run,
@@ -116,7 +118,6 @@ UNMANAGED_LINE_CAP = 1000
 #: build-matrix's own `UNMANAGED_NAMES`: the `unmanaged` and `lost` outputs carry at most this
 #: many names. Kept equal by `test_the_two_unmanaged_name_caps_are_equal`.
 UNMANAGED_NAMES = 10
-CELL_KEYS = ("stack", "environment", "changed")
 
 # A plan line's change sign, possibly indented: `+`, `-`, `~`, or the
 # replace forms `-/+` / `+/-`. The sign moves to column 0 (GitHub's diff
@@ -891,7 +892,6 @@ def build_comment(
     return body, named["unmanaged stacks"], named["lost stack / environment pairs"]
 
 
-_STR_KEYS = ("stack", "environment")
 _TALLY = re.compile(
     r"Plan: (?:(?P<import>\d+) to import, )?(?P<add>\d+) to add, (?P<change>\d+) to change, "
     r"(?P<destroy>\d+) to destroy(?:, (?P<forget>\d+) to forget)?\."
@@ -1005,18 +1005,6 @@ def fold_drift(text, kept_bytes):
     return text
 
 
-def _validate_cell(cell, path):
-    """Type-check cell.json values past the missing-keys check. A
-    pin-skewed/crafted cell.json can carry the right keys with the wrong
-    types (e.g. `changed = "false"`, a truthy string that would mark a
-    no-change cell pending)."""
-    for k in _STR_KEYS:
-        if type(cell[k]) is not str:
-            raise SystemExit(f"::error::cell summary {path} key {k!r} must be a string")
-    if type(cell["changed"]) is not bool:
-        raise SystemExit(f"::error::cell summary {path} key 'changed' must be a bool")
-
-
 def load_cells(cells_dir, url):
     """(cell, plan_text) per downloaded cell-summary artifact, sorted by
     (environment, stack). A cell.json missing schema keys, or carrying the
@@ -1029,9 +1017,7 @@ def load_cells(cells_dir, url):
     with the plan run `url` when the note opens the plan, then cut or topped up from the file to
     SIZE_BUDGET characters."""
     out = []
-    skew = "(plan-cell and summary must be pinned at the same engine SHA)"
-    for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
-        _validate_cell(cell, p)
+    for p, cell in cell_summaries(cells_dir, PLAN_CELL_KEYS, PLAN_CELL_SKEW):
         txt = pathlib.Path(p).with_name("plan.txt")
         tally = counts(txt)
         if tally is None:

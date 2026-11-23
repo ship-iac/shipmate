@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Changed
 
 - **An `auto` wave cell's provenance refusal reads the same as `detect`'s.** The wave pre-apply check words each cause with `detect`'s text after `apply aborted for <where>:`, and every one ends ``push, or comment `shipmate apply` on the pull request``. `detect`'s refusal of a listed run that is not a `pull_request_target` run drops its `: an auto apply applies only an autoplan's plan` tail (`docs/troubleshooting.md`).
+- **The plan-cell pin-skew refusal reads the same in the summary, `pending-checks` and `auto-dispatch` steps, and a cell summary of the wrong type is refused in every reader.** A missing key or a value of another type ends `-- plan-cell and the summary job must run the same engine revision; re-pin every engine reference to one commit, then re-plan (comment shipmate plan or push)`. `pending-checks`, `auto-dispatch` and `drift-issues` now refuse a cell summary value of the wrong type as the summary step does; the type refusal reads `key '<key>' must be <type>, got <type>`, followed by the reader's pin-skew sentence.
 
 ### Fixed
 

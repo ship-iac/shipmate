@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import sys
 
 import pytest
 from _detect_fixtures import (
@@ -497,6 +498,36 @@ def _autoplan(run_id):
 
 
 @bash_only
+def test_a_cell_summary_missing_a_key_refuses_as_plan_cell_skew(tmp_path, monkeypatch):
+    """Mutation: pass `{}` for `PLAN_CELL_KEYS` (the run refuses later, on
+    `SHIPMATE_AUTO_ENVS_TABLE`). Mutation: pass another skew
+    (red)."""
+    d = tmp_path / "cells" / "0"
+    d.mkdir(parents=True)
+    (d / "cell.json").write_text(json.dumps({"stack": "s0", "environment": "dev"}), "utf-8")
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps({"action": "synchronize"}), encoding="utf-8")
+    for k, v in {
+        "GITHUB_EVENT_NAME": "pull_request_target",
+        "GITHUB_EVENT_PATH": str(payload),
+        "GITHUB_RUN_ATTEMPT": "1",
+        "SHIPMATE_IS_DRAFT": "false",
+        "SHIPMATE_GATE_STATE": "pending",
+        "SHIPMATE_COMMENT_MODE": "post",
+        "SHIPMATE_CELLS_DIR": str(tmp_path / "cells"),
+    }.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(sys, "argv", ["auto-dispatch"])
+    with pytest.raises(SystemExit) as exc:
+        ad.main()
+    path = os.path.join(str(tmp_path / "cells"), "0", "cell.json")
+    assert str(exc.value) == (
+        f"::error::cell summary {path} missing keys ['changed'] -- plan-cell and the summary job "
+        "must run the same engine revision; re-pin every engine reference to one commit, then "
+        "re-plan (comment shipmate plan or push)"
+    )
+
+
 def test_a_changed_auto_cell_decides_to_dispatch(tmp_path):
     """The auto set comes from `SHIPMATE_AUTO_ENVS_TABLE`; the decision's one API call is the
     head's autoplan listing, where this run (998 listed before it) is the newest.

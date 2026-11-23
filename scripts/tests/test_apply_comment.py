@@ -1196,6 +1196,7 @@ def test_load_cells_fails_loud_on_wrong_type(tmp_path):
 
 
 def test_load_cells_fails_loud_on_out_of_enum_result(tmp_path):
+    """Mutation: drop the enum check from `_validate_result` (passes)."""
     bad = _cell(result="cancelled")
     _write_cell(tmp_path, "dev-eu", "stacks-app", bad)
     with pytest.raises(SystemExit, match="result"):

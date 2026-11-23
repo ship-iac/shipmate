@@ -547,12 +547,23 @@ def utf8_output():
             stream.reconfigure(encoding="utf-8")
 
 
+#: A plan cell summary's keys and types, which plan-cell writes and the summary job reads.
+PLAN_CELL_KEYS = {"stack": str, "environment": str, "changed": bool}
+#: Only a fresh plan rewrites a skewed plan cell summary, so the remedy ends in a re-plan.
+PLAN_CELL_SKEW = (
+    "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
+    "reference to one commit, then re-plan (comment shipmate plan or push)"
+)
+
+
 def cell_summaries(cells_dir, keys, skew):
     """Yield ``(path, cell)`` for every ``cell.json`` under ``cells_dir``, sorted by path.
 
-    A cell missing any of ``keys`` raises ``SystemExit`` naming it; ``skew`` ends that message
-    with the producer and reader that must share one engine SHA. Recursive because
-    ``actions/download-artifact`` drops the per-artifact subdirectory when one artifact matches.
+    ``keys`` maps each required key to its exact type (``type(v) is t``, so ``True`` is no
+    ``int``). A cell missing a key, or holding one of another type, raises ``SystemExit`` naming
+    it; ``skew`` ends that message with the producer and reader that must share one engine SHA.
+    Recursive because ``actions/download-artifact`` drops the per-artifact subdirectory when one
+    artifact matches.
     """
     for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
         with open(p, encoding="utf-8") as fh:
@@ -560,6 +571,12 @@ def cell_summaries(cells_dir, keys, skew):
         missing = [k for k in keys if k not in cell]
         if missing:
             raise SystemExit(f"::error::cell summary {p} missing keys {missing} {skew}")
+        for k, t in keys.items():
+            if type(cell[k]) is not t:
+                got = type(cell[k]).__name__
+                raise SystemExit(
+                    f"::error::cell summary {p} key {k!r} must be {t.__name__}, got {got} {skew}"
+                )
         yield p, cell
 
 

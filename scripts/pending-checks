@@ -55,6 +55,8 @@ import sys
 
 from _shipmate import (
     CHECK_OUTPUT_CAP,
+    PLAN_CELL_KEYS,
+    PLAN_CELL_SKEW,
     _load,
     cell_summaries,
     current_run_url,
@@ -70,13 +72,6 @@ gs = _load("gate-state")
 sc = _load("summary-comment")
 NEWER_RUN = 3
 EXTERNAL_ID_CAP = 255
-
-
-_KEYS = ("stack", "environment", "changed")
-_SKEW = (
-    "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
-    "reference to one commit, then re-plan (comment shipmate plan or push)"
-)
 
 
 def _plan_run():
@@ -231,7 +226,9 @@ def main():
     pr = env_pr_number()
     cells = [
         (ag.check_name(cell["stack"], cell["environment"]), cj, cell)
-        for cj, cell in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
+        for cj, cell in cell_summaries(
+            os.environ.get("SHIPMATE_CELLS_DIR", "cells"), PLAN_CELL_KEYS, PLAN_CELL_SKEW
+        )
     ]
     # A behind record of this run's earlier attempt does not stand for a cell this attempt plans.
     behind = ag.behind_names(lines, os.environ.get("SHIPMATE_APP_ID", ""))
