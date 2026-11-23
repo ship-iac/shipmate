@@ -1,5 +1,5 @@
 name: shipmate apply-release
-description: Flip one wave's apply checks to in_progress, linked to this run, before the wave runs. A pre-merge re-run writes nothing, and neither does a pre-merge run whose pull request has merged. A failed write or pull request read fails the job, which skips the wave.
+description: Flip one wave's apply checks to in_progress, linked to this run and started at this release, before the wave runs. A pre-merge re-run writes nothing, and neither does a pre-merge run whose pull request has merged. A failed write or pull request read fails the job, which skips the wave.
 inputs:
   snapshot:
     description: JSON object, the wave's slice of apply-snapshot's by_wave, mapping each cell to its apply-check ids.

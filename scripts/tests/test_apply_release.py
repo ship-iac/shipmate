@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import _shipmate
 import pytest
@@ -7,6 +8,7 @@ from _loader import action_steps, load_script
 ar = load_script("apply-release")
 
 _URL = "https://github.com/acme/demo/actions/runs/77"
+_STARTED = "2026-11-23T17:07:47Z"
 
 
 @pytest.fixture
@@ -21,6 +23,9 @@ def patched(monkeypatch):
     monkeypatch.delenv("SHIPMATE_DEPLOY", raising=False)
     monkeypatch.delenv("SHIPMATE_PR_NUMBER", raising=False)
     monkeypatch.setattr(_shipmate, "_sleep", lambda _s: None)
+    ticks = iter(range(100))
+    t0 = datetime(2026, 11, 23, 17, 7, 47, 250000, tzinfo=UTC)
+    monkeypatch.setattr(ar, "_now", lambda: t0 + timedelta(seconds=next(ticks)))
     out = []
 
     def run(args, secrets=(), stdin=None):
@@ -38,12 +43,13 @@ def patched(monkeypatch):
 _SNAP = {"apply / dev / web": [3], "apply / dev / app": [2, 5]}
 
 
-def test_each_id_gets_exactly_the_status_and_the_run_link(monkeypatch, patched):
-    """Never `output`: that would replace the plan text. Mutations: add `output` to the body;
-    drop `details_url`; write `queued`."""
+def test_each_id_gets_exactly_the_status_the_run_link_and_one_start_time(monkeypatch, patched):
+    """Never `output`: that would replace the plan text. The clock advances a second per read, so
+    every id carries the first read. Mutations: add `output` to the body; drop `details_url`;
+    write `queued`; drop `started_at`; call `_now()` per id; format with `isoformat()`."""
     monkeypatch.setenv("SHIPMATE_SNAPSHOT_JSON", json.dumps(_SNAP))
     ar.main()
-    flip = {"status": "in_progress", "details_url": _URL}
+    flip = {"status": "in_progress", "details_url": _URL, "started_at": _STARTED}
     assert patched == [
         ("repos/acme/demo/check-runs/2", flip),
         ("repos/acme/demo/check-runs/5", flip),
@@ -60,10 +66,11 @@ def test_a_pre_merge_re_run_flips_nothing(monkeypatch, patched):
     assert patched == []
 
 
+_FLIP = {"status": "in_progress", "details_url": _URL, "started_at": _STARTED}
 _FLIPS = [
-    ("repos/acme/demo/check-runs/2", {"status": "in_progress", "details_url": _URL}),
-    ("repos/acme/demo/check-runs/5", {"status": "in_progress", "details_url": _URL}),
-    ("repos/acme/demo/check-runs/3", {"status": "in_progress", "details_url": _URL}),
+    ("repos/acme/demo/check-runs/2", _FLIP),
+    ("repos/acme/demo/check-runs/5", _FLIP),
+    ("repos/acme/demo/check-runs/3", _FLIP),
 ]
 
 
@@ -96,6 +103,12 @@ def test_a_merge_deploy_flips_without_reading_its_pull_request(monkeypatch, patc
     monkeypatch.setenv("SHIPMATE_DEPLOY", "true")
     ar.main()
     assert patched == _FLIPS
+
+
+def test_the_clock_reads_utc():
+    """GitHub reads `started_at` as UTC (`Z`). Mutation: `datetime.now()` without `UTC` -> a
+    naive datetime."""
+    assert ar._now().tzinfo is UTC
 
 
 #: The flip step, whole: the App token, the slice, the deploy flag and the pull request, and

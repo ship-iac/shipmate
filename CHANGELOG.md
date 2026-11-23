@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **An apply check's duration counts from its wave's release, not from the plan that created it.** The release flip to `in_progress` sets the check's start time to the release (`CONTRACT.md` §Apply check lifecycle).
+
 ## [0.58.0] — 2026-11-22
 
 Tags `795e7cf`.

@@ -151,9 +151,12 @@ refuses the run before any cell applies.
    commits that changed the stack. Each check's `external_id` holds the plan's
    record; GitHub keeps 255 characters of an `external_id`, so a record over
    that refuses the plan summary.
-2. Flipped to `in_progress` when its wave is released, linked to the apply run.
+2. Flipped to `in_progress` when its wave is released, linked to the apply run,
+   its start time set to the release, so GitHub's duration counts from the
+   release.
 3. Written once the cell's outcome is read. The summary is never rewritten; the
-   error goes in the title.
+   error goes in the title. A check returned to `queued` keeps its last start
+   time.
 
 | Cell outcome | Write |
 | --- | --- |
