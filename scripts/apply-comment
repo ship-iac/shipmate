@@ -438,26 +438,14 @@ def _resources(text):
     return sc.tally(*(int(m[k] or 0) for k in ("add", "change", "destroy", "import", "forget")))
 
 
-def _reason_text(reason):
-    """`reason`, from untrusted cell.json, `_md_escape`d, with each `@` outside a code span broken
-    as `_md_name` does, since a pre-apply refusal can name a login; inside a span it would show
-    as written. A segment after an unpaired backtick is outside any span."""
-    parts = reason.split("`")
-    last = len(parts) - 1
-    return "`".join(
-        sc._md_name(p) if i % 2 == 0 or (i == last and last % 2) else sc._md_escape(p)
-        for i, p in enumerate(parts)
-    )
-
-
 def _state(row):
     """A row's state text: applied counts (or `applied`), the same plus `, not recorded`,
-    `failed`, `blocked: <reason>` (`_reason_text`), `not attempted`; a held row's text ends
-    `, state not saved`."""
+    `failed`, `blocked: <reason>` (`_md_name`: cell.json is untrusted, and a pre-apply refusal
+    can name a login), `not attempted`; a held row's text ends `, state not saved`."""
     status = row["status"]
     word = _STATUS[status][1]
     if status == "blocked":
-        text = f"{word}: {_reason_text(row['reason'])}"
+        text = f"{word}: {sc._md_name(row['reason'])}"
     elif status in ("applied", "unrecorded"):
         counts = _resources(row["apply_text"]) or "applied"
         text = counts if status == "applied" else f"{counts}, {word}"

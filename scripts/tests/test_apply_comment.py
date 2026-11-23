@@ -201,33 +201,20 @@ def test_a_blocked_reason_renders_escaped_on_its_bare_line():
     )
 
 
-@pytest.mark.parametrize(
-    ("reason", "shown"),
-    [
-        pytest.param(
-            "not authorized: `shipmate apply` needs write access to this repository, and the "
-            "autoplan's actor @octocat's permission is `read`.",
-            "not authorized: `shipmate apply` needs write access to this repository, and the "
-            "autoplan's actor @<!-- -->octocat's permission is `read`.",
-            id="login",
-        ),
-        pytest.param(
-            "the plan records of `dev-eu` / `stacks/a@b` name no event action",
-            "the plan records of `dev-eu` / `stacks/a@b` name no event action",
-            id="code-span",
-        ),
-        pytest.param("unpaired ` @octocat", "unpaired ` @<!-- -->octocat", id="unpaired"),
-    ],
-)
-def test_a_blocked_reason_mentions_nobody(reason, shown):
-    """A pre-apply refusal, as apply-cell-summary records it, can name the authorizer's login
-    and backticked cell names. Mutation: `_md_name` over the whole reason -- the code-span row
-    shows `@<!-- -->b`, red. Mutation: `_md_escape` over the whole reason -- the login and
-    unpaired rows ping, red. Mutation: drop the unpaired clause -- the unpaired row pings, red."""
-    row = _row(status="blocked", reason=reason, apply_text=None)
+def test_a_blocked_reason_mentions_nobody():
+    """A pre-apply refusal can name the authorizer's login. Mutation: `_md_escape` for
+    `_md_name` on the reason in `_state` -- the line pings `@octocat`, red."""
+    row = _row(
+        status="blocked",
+        reason="apply aborted for dev-eu / stacks/app: not authorized: the autoplan's actor "
+        "@octocat's permission is `read`.",
+        apply_text=None,
+    )
     assert _comment([row]) == (
         f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cell, 1 blocked\n\n"
-        f'⚪ stacks/app: blocked: {shown} <a href="https://gh/run/1">logs</a>\n\n' + HINT
+        "⚪ stacks/app: blocked: apply aborted for dev-eu / stacks/app: not authorized: the "
+        "autoplan's actor @<!-- -->octocat's permission is `read`. "
+        '<a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
 
 
