@@ -662,6 +662,31 @@ def test_a_newer_or_runless_hold_refuses_with_no_reread(in_process, monkeypatch,
     )
 
 
+def test_an_older_runs_status_under_a_hold_does_not_clear_it(in_process, monkeypatch, capsys):
+    """A hold from run 900, then a stale `pending` from run 899, refuses after every re-read.
+    Mutation: clear on any non-`failure` re-read (drop the run id comparison) -> None."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "1000")
+    calls = _gate_reads(monkeypatch, [("failure", "900"), *[("pending", "899")] * 3])
+    assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
+        gs.HELD,
+        [_USER, *[_READ] * 4],
+        [2, 2, 2],
+        HELD,
+    )
+
+
+def test_this_runs_pending_clears_an_older_runs_hold(in_process, monkeypatch, capsys):
+    """Mutation: clear only on a status from the hold's own run (`==` for `>=`) -> `HELD`."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "1000")
+    calls = _gate_reads(monkeypatch, [("failure", "899"), ("pending", "1000")])
+    assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
+        None,
+        [_USER, _READ, _READ],
+        [2],
+        "",
+    )
+
+
 def test_each_reread_is_judged_anew(in_process, monkeypatch, capsys):
     """Own `failure`, then a newer run's on the re-read, refuses at once. Mutation: judge only the
     first read (compute `_may_lag` once, before the loop) -> four reads."""

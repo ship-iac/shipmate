@@ -243,16 +243,25 @@ def _may_lag(gate):
 
 def _refuse_held(sha):
     """Exit `HELD` when the newest gate on `sha` is `failure`, reading again up to
-    `HOLD_REREADS` times while that read may lag this run's own write (`_may_lag`). Each
-    read is judged anew. Accepted cost: a hold an apply or deploy run refreshes over waits
-    `HOLD_REREADS * HOLD_REREAD_WAIT` seconds before it refuses."""
+    `HOLD_REREADS` times while that hold may lag this run's own write (`_may_lag`).
+
+    The first hold read stands until a re-read shows a non-`failure` gate from a run at least as
+    new as the hold's: an older run's status under it is a stale read, not a clear. A re-read
+    showing a hold that cannot lag refuses at once. Accepted cost: a hold an apply or deploy run
+    refreshes over waits `HOLD_REREADS * HOLD_REREAD_WAIT` seconds before it refuses."""
     newest = newest_gate(sha)
+    hold = newest if newest and newest[0] == "failure" else None
     for _ in range(HOLD_REREADS):
-        if not _may_lag(newest):
+        if hold is None or not _may_lag(hold):
             break
         sleep(HOLD_REREAD_WAIT)
         newest = newest_gate(sha)
-    if newest and newest[0] == "failure":
+        if newest and newest[0] == "failure":
+            if not _may_lag(newest):
+                hold = newest
+        elif newest and is_run_id(newest[1]) and int(newest[1]) >= int(hold[1]):
+            hold = None
+    if hold:
         print(
             f"{GATE_CONTEXT} is held for {sha}; its status description on the pull request names "
             "the cause. A hold clears only when a new plan run rewrites the gate: comment "
