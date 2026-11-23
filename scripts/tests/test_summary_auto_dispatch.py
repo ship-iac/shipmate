@@ -1017,6 +1017,19 @@ _SOURCE = (
 )
 _NO_AUTO = "no changed cell is in an apply_mode auto environment"
 
+
+def _defer_jobs(run_id, status, conclusion=None):
+    """The jobs listing of autoplan run `run_id` with a `plan / defer` job `status`
+    `conclusion` added."""
+    listing = json.loads(plan_jobs(run_id))
+    listing["jobs"].append(
+        listing["jobs"][0]
+        | {"id": 1, "name": "plan / defer", "status": status, "conclusion": conclusion}
+    )
+    listing["total_count"] += 1
+    return json.dumps(listing)
+
+
 #: name -> (decision overrides, whole logged reason); each row breaks one check.
 DEFERRED_SKIPS = {
     # Mutation: drop the gate-owner check (compare only the state).
@@ -1061,18 +1074,18 @@ DEFERRED_SKIPS = {
         {"runs": jsonl(_ready(2002), _push())},
         _SOURCE.format(P, 2002),
     ),
+    # A newer run whose `defer` job is live took over. Mutation: drop the live-status clause of
+    # `_ready_run`.
+    "newer run defer in_progress": (
+        {"runs": jsonl(_ready(2002), _ready(), _push()), "jobs": _defer_jobs(2002, "in_progress")},
+        _SOURCE.format(2002, 2002),
+    ),
+    # Mutation: drop the live-status clause of `_ready_run`.
+    "newer run defer queued": (
+        {"runs": jsonl(_ready(2002), _ready(), _push()), "jobs": _defer_jobs(2002, "queued")},
+        _SOURCE.format(2002, 2002),
+    ),
 }
-
-
-def _reopened_jobs(run_id):
-    """The jobs listing of a completed autoplan run `run_id` whose `defer` job was skipped."""
-    listing = json.loads(plan_jobs(run_id))
-    listing["jobs"].append(
-        listing["jobs"][0]
-        | {"id": 1, "name": "plan / defer", "status": "completed", "conclusion": "skipped"}
-    )
-    listing["total_count"] += 1
-    return json.dumps(listing)
 
 
 #: name -> (decision overrides, whole reason); each row breaks check 5 or 6, past a changed
@@ -1082,13 +1095,32 @@ DEFERRED_REFUSALS = {
     "plan of another run": ({"runs": jsonl(_ready(), _push(999))}, _SOURCE.format(999, R)),
     # The listing lags this run. Mutation: stay silent on every mismatch.
     "listing lags": ({"runs": jsonl(_push())}, _SOURCE.format(P, P)),
-    # Mutation: stay silent whenever the authorizer is newer (drop `_ready_run`).
-    "reopened run on top": (
+    # A reopened run on top skips `defer`. Mutation: stay silent whenever the authorizer is
+    # newer (drop `_ready_run`).
+    "newer run defer skipped": (
         {
             "runs": jsonl(_push(2002), _ready(), _push()),
-            "jobs": _reopened_jobs(2002),
+            "jobs": _defer_jobs(2002, "completed", "skipped"),
         },
         _SOURCE.format(2002, 2002),
+    ),
+    # Mutation: count `cancelled` as taken over.
+    "newer run defer cancelled": (
+        {
+            "runs": jsonl(_push(2002), _ready(), _push()),
+            "jobs": _defer_jobs(2002, "completed", "cancelled"),
+        },
+        _SOURCE.format(2002, 2002),
+    ),
+    # Mutation: stay silent whenever the authorizer is newer (drop `_ready_run`).
+    "newer run lists no defer": (
+        {"runs": jsonl(_push(2002), _ready(), _push()), "jobs": plan_jobs(2002)},
+        _SOURCE.format(2002, 2002),
+    ),
+    # Mutation: word it as a mismatch of `None` runs.
+    "empty listing": (
+        {"runs": ""},
+        f"no autoplan run of {HEAD_SHA} is listed yet; comment `shipmate apply`",
     ),
     # Mutation: drop the `pusher_reason` call.
     "bot clicker": (

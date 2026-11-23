@@ -2346,9 +2346,13 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    provenance mismatch past a changed `auto` environment replies ``auto apply not
    started: the autoplans of <head> resolve to plan run <id> authorized by run
    <id>, not plan run <id> authorized by this run <id>; comment `shipmate apply` ``,
-   unless a newer ready-for-review run authorizes, which decides itself. A failed `defer-auto` leaves that run green. A
-   listing that does not show this run yet dispatches, warning `autoplan run
-   <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
+   unless a newer run that took over the decision authorizes, which decides
+   itself; an empty listing replies ``auto apply not started: no autoplan run of
+   <head> is listed yet; comment `shipmate apply` ``. A failed `defer-auto`
+   leaves that run green. A listing that lags this run replies with the
+   mismatch in `defer-auto`; only the push run's `summary` path dispatches on
+   a lagging listing, warning `autoplan run <id> of <head> is not listed yet;
+   ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
    head's autoplan runs not listed or malformed) it warns `could not decide
    whether to dispatch an auto apply; no auto apply started`. It posts a reply

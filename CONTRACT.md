@@ -2774,11 +2774,19 @@ hold:
 
 A failed condition logs `no auto apply dispatched: <reason>` and dispatches
 nothing. Past that change, a provenance mismatch posts no reply only when the
-head's autoplans resolve to a newer ready-for-review run as the authorizer,
-which decides itself. Any other mismatch, such as a listing that does not show
-this run yet or a reopened run on top, posts one reply, ``🔴 refused: auto apply
-not started: the autoplans of <head> resolve to plan run <id> authorized by run
-<id>, not plan run <id> authorized by this run <id>; comment `shipmate apply` ``.
+head's autoplans resolve, as the authorizer, to a newer run that took over the
+decision: its `plan / defer` job is listed `queued`, `waiting`, `pending`,
+`requested` or `in_progress`, or `completed` `success`. A newer run whose
+`plan / defer` job is `completed` `skipped`, `cancelled` or `failure`, or not
+listed, has not taken over: a reopened or other non-ready run skips `defer` and
+states its own auto line in its plan comment. A newer ready-for-review run
+cancelled after its `defer` job succeeded leaves no reply; this limit is
+accepted. Any other mismatch, such as a listing that does not show this run yet
+or a reopened run on top, posts one reply, ``🔴 refused: auto apply not started:
+the autoplans of <head> resolve to plan run <id> authorized by run <id>, not plan
+run <id> authorized by this run <id>; comment `shipmate apply` ``, and a listing
+that holds no autoplan run of the head replies ``🔴 refused: auto apply not
+started: no autoplan run of <head> is listed yet; comment `shipmate apply` ``.
 When the clicker's check refuses on a permission it read, a change already called
 for an auto apply, so it also posts one reply, ``🔴 refused: auto apply not
 started: <reason>``, the autoplan actor check's reason as worded below. The `auto` run applies the push run's plan, authorized as the clicker.

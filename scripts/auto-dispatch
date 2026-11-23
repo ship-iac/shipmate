@@ -47,9 +47,9 @@ run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in
 
 A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 4 prints nothing: no change
 is yet known to call for an auto apply. A check 5 mismatch prints nothing when the authorizer is a
-run newer than this one whose `defer` job started, which only a ready-for-review run's does: that
-run decides itself. Any other mismatch prints the mismatch, ending in its remedy, and exits
-`REFUSED`. A failed or malformed listing in check 5, or of that newer run's jobs,, exits
+run newer than this one that took over the decision (`_ready_run`). Any other mismatch, and an
+empty listing, prints the mismatch, ending in its remedy, and exits `REFUSED`. A failed or
+malformed listing in check 5, or of that newer run's jobs, exits
 `UNREAD` with one `::error::` line, and so does a clicker's permission check 6 could not read
 (`authorize.UnreadablePermission`); any other refusal in check 6 prints its reason, which carries
 its own remedy, and exits `REFUSED`.
@@ -230,15 +230,20 @@ def _gate_reason(head, plan_run):
 
 
 def _ready_run(repo, listed):
-    """Whether listed run `listed` is a ready-for-review run: its `defer` job, which runs only
-    for that action, started. Raises `ValueError` when its jobs cannot be listed."""
+    """Whether listed run `listed` took over the decision: its `defer` job is listed `queued`,
+    `waiting`, `pending`, `requested` or `in_progress`, or `completed` `success`. A reopened
+    or other non-ready run skips `defer` and states its own auto line in its plan comment, so a
+    `defer` job `completed` `skipped`, `cancelled` or `failure`, or none listed, leaves this
+    run to reply. Raises `ValueError` when its jobs cannot be listed."""
     jobs = listed_jobs(repo, listed["id"], _run, counted=True)
     if jobs is None:
         raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
     return any(
         j["name"] == ag.CALLER_PREFIX + "defer"
-        and j["status"] in ("in_progress", "completed")
-        and j.get("conclusion") != "skipped"
+        and (
+            j["status"] in ("queued", "waiting", "pending", "requested", "in_progress")
+            or (j["status"], j.get("conclusion")) == ("completed", "success")
+        )
         for j in jobs
     )
 
@@ -246,7 +251,7 @@ def _ready_run(repo, listed):
 def _authorizer(repo, head, plan_run, run_id):
     """This run's listed run object when the autoplans of `head` resolve to plan run `plan_run`
     authorized by this run `run_id`. Otherwise None with the mismatch logged when a newer
-    ready-for-review run authorizes, since it decides itself; else the mismatch is printed and
+    run that took over the decision (`_ready_run`) authorizes; else the mismatch is printed and
     exits `REFUSED`."""
 
     def read():
@@ -255,13 +260,16 @@ def _authorizer(repo, head, plan_run, run_id):
         return plan, authorizer, newer and _ready_run(repo, authorizer)
 
     plan, authorizer, taken_over = _listed(head, read)
-    got = (None, None) if plan is None else (plan["id"], authorizer["id"])
-    if got == (int(plan_run), int(run_id)):
+    if plan is None:
+        reason = f"no autoplan run of {head} is listed yet; comment `shipmate apply`"
+    elif (plan["id"], authorizer["id"]) == (int(plan_run), int(run_id)):
         return authorizer
-    reason = (
-        f"the autoplans of {head} resolve to plan run {got[0]} authorized by run {got[1]}, "
-        f"not plan run {plan_run} authorized by this run {run_id}; comment `shipmate apply`"
-    )
+    else:
+        reason = (
+            f"the autoplans of {head} resolve to plan run {plan['id']} authorized by run "
+            f"{authorizer['id']}, not plan run {plan_run} authorized by this run {run_id}; "
+            "comment `shipmate apply`"
+        )
     _skip(reason)
     if taken_over:
         return None
