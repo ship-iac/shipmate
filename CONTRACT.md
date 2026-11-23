@@ -2248,13 +2248,12 @@ failed cell reds the run.
 **The unlock result reply.** Each `unlock` leg uploads a record, even when it
 failed: artifact `shipmate-unlock-<strategy.job-index>` holding
 `shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
-and environment, its outcome and the probed lock id. Before downloading the
-records, `result` uploads a `shipmate-unlock-sentinel` artifact of its own (a
-file it writes, kept one day): `download-artifact` writes a lone matching
-artifact without a directory of its name, so whenever the sentinel uploaded,
-every record downloads into its artifact's directory. A file at the download
-root is never read. The sentinel, the download and the record reading all run
-only when `detect` succeeded. The outcome is `released`
+and environment, its outcome and the probed lock id. `download-artifact` writes
+each of several records into a directory of its artifact's name, and a lone one
+straight into the download path, so `result` reads cell `<n>`'s record from
+`shipmate-unlock-<n>/shipmate-unlock-<n>.json` when that exists, else from
+`shipmate-unlock-<n>.json` at the download root. The download and the record
+reading run only when `detect` succeeded. The outcome is `released`
 only when `force-unlock` succeeded, `none` when a clean probe found no lock, and
 `failed` otherwise (a failed init, probe or `force-unlock`, or a leg that failed
 before `unlock-cell`). The `result` job (`needs: [guard, detect, unlock]`,
@@ -2277,9 +2276,8 @@ verdict line is one of:
 - ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
   each clause present when it names a cell: `failed` cells, then cells with no
   valid record, then the released ones.
-- When the results may not all have arrived (the download failed or timed out,
-  or the sentinel failed and no `shipmate-unlock-<n>/` directory arrived), the
-  records in their own directories are still read, and a cell without one reads
+- When the results may not all have arrived (the download failed or timed out),
+  the records that arrived are still read, and a cell without one reads
   ``result unknown for <stack>, ...`` in place of `did not run`. When at least
   one cell has a record, the reply ends ``; some cells' results could not be
   read; see the run.`` When every cell has its record, the reply is the one
@@ -2292,13 +2290,11 @@ verdict line is one of:
 The reply is display only and gates nothing. A record is written by a job that
 runs the pull request's HCL, so it can be forged. The reply names a cell only as
 `detect`'s queue entry at the record's index, never by a name in the record, and
-a record counts only when it sits in an artifact directory
-`shipmate-unlock-<n>` as `shipmate-unlock-<n>.json`, its `index` is `<n>`, its
-outcome is one of the three, and at most 4,096 bytes of it are read and decoded.
-Its `stack` and `environment` must also equal that queue entry's: this catches a
-record that reached the wrong cell, not a forged one, which can copy them. A file
-at the download root, the sentinel and any other entry are ignored. A lock id
-outside the charset `scripts/lock-info` accepts is dropped, and stack names are
+a record counts only when it is read as `shipmate-unlock-<n>.json`, its `index`
+is `<n>`, its outcome is one of the three, and at most 4,096 bytes of it are
+read and decoded. Its `stack` and `environment` must also equal that queue
+entry's: this catches a record that reached the wrong cell, not a forged one,
+which can copy them. Any other entry is ignored. A lock id outside the charset `scripts/lock-info` accepts is dropped, and stack names are
 escaped.
 A comment not on a pull request, an unreadable comment or a failed post posts
 nothing and warns. None of these, nor a failed download, fails `result`: the

@@ -38,7 +38,6 @@ def gh(monkeypatch, tmp_path):
     monkeypatch.setenv("SHIPMATE_ENV", "dev-eu")
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "success")
     monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "success")
-    monkeypatch.setenv("SHIPMATE_SENTINEL_OUTCOME", "success")
     monkeypatch.setenv("SHIPMATE_CELLS", json.dumps(_CELLS))
     monkeypatch.setenv("SHIPMATE_RECORDS", str(tmp_path / "records"))
     posts = []
@@ -211,15 +210,15 @@ def test_a_failed_download_that_left_every_record_replies_as_a_successful_one(tm
     cells = _CELLS[:2]
     _records(tmp_path, "released", "failed", cells=cells)
     raw, root = json.dumps(cells), str(tmp_path / "records")
-    assert ur.reply("dev-eu", "success", raw, root, "failure", "success") == (
+    assert ur.reply("dev-eu", "success", raw, root, "failure") == (
         "failed",
         (
             "could not determine the lock of stacks/db; released 1 state lock(s) in dev-eu: "
             f"stacks/app ({_ID})."
         ),
     )
-    assert ur.reply("dev-eu", "success", raw, root, "success", "success") == ur.reply(
-        "dev-eu", "success", raw, root, "failure", "success"
+    assert ur.reply("dev-eu", "success", raw, root, "success") == ur.reply(
+        "dev-eu", "success", raw, root, "failure"
     )
 
 
@@ -237,13 +236,12 @@ _BAD = [
 
 @pytest.mark.parametrize("name, rec", _BAD)
 def test_a_record_that_fails_a_check_reads_as_did_not_run(gh, tmp_path, name, rec):
-    """A record's cell is its artifact name's index, which its file name and `index` must match,
-    and its `stack` and `environment` must be that cell's. Mutations, one per case: drop
-    `rec["index"] != index`; drop the `len(cells)` bound (IndexError); `type(...) is not int` to
+    """A record is looked up by its cell's index, and its `index`, `stack` and `environment`
+    must be that cell's. Mutations: drop `rec["index"] != index`; `type(...) is not int` to
     `not isinstance(..., int)` (`true` reads as 1); drop the outcome check (`cleared` reads as no
-    lock held); drop the `stack` check; drop the `environment` check; a name pattern of
-    `([0-9]+)` (`shipmate-unlock-01` reads as 1); `fullmatch` to `match` (`shipmate-unlock-1-x`
-    reads as 1)."""
+    lock held); drop the `stack` check; drop the `environment` check; find records by listing
+    the directories and parsing `int(d.name.rsplit("-", 1)[1])` (`shipmate-unlock-3` raises
+    IndexError, `shipmate-unlock-01` reads as 1, `shipmate-unlock-1-x` raises ValueError)."""
     posts, _ = gh
     _records(tmp_path, "none", None, "none")
     _write(tmp_path, name, json.dumps(rec))
@@ -261,14 +259,29 @@ def test_an_artifact_holding_a_siblings_file_name_is_ignored(gh, tmp_path):
     assert posts == _post("failed", "stacks/db did not run.")
 
 
-@pytest.mark.parametrize("flat", [1, 2])
-def test_a_record_file_outside_an_artifact_directory_is_ignored(gh, tmp_path, flat):
-    """The sentinel artifact makes every download two or more artifacts, so each gets its own
-    directory; a file at the download root is never a record. Mutation: read a root
-    `shipmate-unlock-<n>.json` as the record of `<n>` (match on its stem, read the file itself)."""
+def test_a_lone_record_at_the_download_root_is_read(tmp_path):
+    """`download-artifact` writes a lone artifact straight into the download path, so a one-cell
+    unlock's record sits at the root. Mutation: read only artifact directories (the cell reads
+    `did not run`)."""
+    cells = _CELLS[:1]
+    _write(tmp_path, "shipmate-unlock-0", json.dumps(_rec(0, "released")), flat=True)
+    raw, root = json.dumps(cells), str(tmp_path / "records")
+    assert ur.reply("dev-eu", "success", raw, root, "success") == (
+        "notice",
+        f"released 1 state lock(s) in dev-eu: stacks/app ({_ID}).",
+    )
+
+
+def test_a_root_record_under_another_cells_name_is_ignored(gh, tmp_path):
+    """Root file `shipmate-unlock-0.json` holding a record with `index` 1 and cell 0's stack.
+    Mutation: drop `rec["index"] != index` (cell 0 reads as released)."""
     posts, _ = gh
-    for i in range(flat):
-        _write(tmp_path, f"shipmate-unlock-{i}", json.dumps(_rec(i, "none")), flat=True)
+    _write(
+        tmp_path,
+        "shipmate-unlock-0",
+        json.dumps(_rec(1, "released", stack="stacks/app")),
+        flat=True,
+    )
     ur.main()
     assert posts == _post("failed", "stacks/app, stacks/db, stacks/dns did not run.")
 
@@ -315,33 +328,6 @@ def test_the_reader_never_reads_past_the_bound():
 def test_a_record_that_cannot_be_read_is_invalid():
     """Mutation: drop `OSError` from the `except`."""
     assert ur._record(_Spy(b"", OSError("I/O error")), 1, _CELLS[1]) is None
-
-
-def test_a_failed_sentinel_with_no_record_directory_reads_every_result_as_unknown(
-    gh, monkeypatch, tmp_path
-):
-    """Without the sentinel a lone record downloads with no directory, so a download holding no
-    record directory proves nothing. Every cell reads `result unknown`, and the reply adds no
-    "could not be read" clause, which would repeat it. Mutations: ignore the sentinel outcome
-    (every cell `did not run`); keep the clause when every cell reads unknown."""
-    posts, _ = gh
-    monkeypatch.setenv("SHIPMATE_SENTINEL_OUTCOME", "failure")
-    _write(tmp_path, "shipmate-unlock-1", json.dumps(_rec(1, "released")), flat=True)
-    ur.main()
-    assert posts == _post("failed", "result unknown for stacks/app, stacks/db, stacks/dns.")
-
-
-def test_a_failed_sentinel_still_reads_records_in_their_own_directories(gh, monkeypatch, tmp_path):
-    """Two or more artifacts download into directories with or without the sentinel. Mutation:
-    read every failed sentinel as unreadable results (the reply fails over three `none`
-    records)."""
-    posts, _ = gh
-    monkeypatch.setenv("SHIPMATE_SENTINEL_OUTCOME", "failure")
-    _records(tmp_path, "none", "none", "none")
-    ur.main()
-    assert posts == _post(
-        "notice", "released no state lock in dev-eu: no probed cell held a state lock."
-    )
 
 
 def test_three_records_all_count(gh, tmp_path):
