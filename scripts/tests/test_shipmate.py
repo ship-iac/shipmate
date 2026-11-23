@@ -8,10 +8,13 @@ import types
 import pytest
 from _loader import ENGINE
 from _shipmate import (
+    PLAN_CELL_KEYS,
+    PLAN_CELL_SKEW,
     Refused,
     _run,
     approval_rules,
     cell_names,
+    cell_summaries,
     check_runs,
     command_data,
     command_property,
@@ -187,6 +190,40 @@ def test_run_hands_env_to_the_child(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
     assert run(["gh", "api", "x"], env={"GH_TOKEN": "t"}) == "out"
     assert seen == [{"GH_TOKEN": "t"}]
+
+
+def _cell_refusal(tmp_path, cell, keys, skew):
+    (tmp_path / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        list(cell_summaries(str(tmp_path), keys, skew))
+    return str(exc.value), os.path.join(str(tmp_path), "cell.json")
+
+
+@pytest.mark.parametrize(
+    ("keys", "cell", "refusal"),
+    [
+        pytest.param({"s": str}, {"s": 1}, "key 's' must be str, got int", id="str"),
+        pytest.param({"b": bool}, {"b": "false"}, "key 'b' must be bool, got str", id="bool"),
+        pytest.param({"n": int}, {"n": True}, "key 'n' must be int, got bool", id="bool-as-int"),
+    ],
+)
+def test_cell_summaries_refuses_a_key_of_another_type(tmp_path, keys, cell, refusal):
+    """Mutation: `isinstance` for `type(...) is` (bool-as-int passes). Mutation: drop the type
+    loop (every row passes)."""
+    code, path = _cell_refusal(tmp_path, cell, keys, "-- skew")
+    assert code == f"::error::cell summary {path} {refusal} -- skew"
+
+
+def test_cell_summaries_refuses_a_string_changed_in_a_plan_cell(tmp_path):
+    """A truthy `"false"` would mark a no-change cell pending. Mutation: drop the type loop
+    (passes)."""
+    cell = {"stack": "stacks/app", "environment": "dev", "changed": "false"}
+    code, path = _cell_refusal(tmp_path, cell, PLAN_CELL_KEYS, PLAN_CELL_SKEW)
+    assert code == (
+        f"::error::cell summary {path} key 'changed' must be bool, got str -- plan-cell and the "
+        "summary job must run the same engine revision; re-pin every engine reference to one "
+        "commit, then re-plan (comment shipmate plan or push)"
+    )
 
 
 def test_named_lists_cap_items_whole_and_counts_the_rest():

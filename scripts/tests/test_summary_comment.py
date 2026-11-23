@@ -1269,8 +1269,9 @@ def test_load_cells_fails_loud_on_missing_schema_keys(tmp_path):
         sc.load_cells(str(tmp_path), RUN_URL)
     path = os.path.join(str(tmp_path), "cell-summary.x.y", "cell.json")
     assert str(exc.value) == (
-        f"::error::cell summary {path} missing keys ['stack'] "
-        "(plan-cell and summary must be pinned at the same engine SHA)"
+        f"::error::cell summary {path} missing keys ['stack'] -- plan-cell and the summary job "
+        "must run the same engine revision; re-pin every engine reference to one commit, then "
+        "re-plan (comment shipmate plan or push)"
     )
 
 
@@ -1467,7 +1468,7 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
         "environment": "dev",
         "changed": True,
     }
-    assert set(sc.CELL_KEYS) <= set(written)
+    assert set(_shipmate.PLAN_CELL_KEYS) <= set(written)
     # And the step still runs that writer: a guard over a script nothing invokes pins nothing.
     # Matched as a whole run line, so neither prose elsewhere in the file nor a commented-out
     # invocation satisfies it.

@@ -53,15 +53,15 @@ from _shipmate import (
     run_annotated,
 )
 
-CELL_KEYS = (
-    "stack",
-    "environment",
-    "plan_ok",
-    "drifted",
-    "add",
-    "change",
-    "destroy",
-)
+CELL_KEYS = {
+    "stack": str,
+    "environment": str,
+    "plan_ok": bool,
+    "drifted": bool,
+    "add": int,
+    "change": int,
+    "destroy": int,
+}
 
 LABEL = "drift"
 PREFIX = "drift: "
@@ -69,9 +69,9 @@ PREFIX = "drift: "
 
 def load_cells(cells_dir):
     """[cell, ...] from every downloaded `drift-summary.*/cell.json`, sorted
-    for a deterministic run order. A cell.json missing a schema key is
-    drift-cell/this-script pin skew -- fail loud rather than silently drop a
-    stack x env's drift state."""
+    for a deterministic run order. A cell.json missing a schema key, or holding
+    one of another type, is drift-cell/this-script pin skew -- fail loud rather
+    than silently drop a stack x env's drift state."""
     skew = "-- drift-cell and this script must be pinned at the same engine SHA"
     return [cell for _, cell in cell_summaries(cells_dir, CELL_KEYS, skew)]
 

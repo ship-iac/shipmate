@@ -1145,6 +1145,68 @@ def test_provenance_reason_refuses_a_draft_origin_record_no_distinct_run_authori
     assert ag.provenance_reason(plan, "7", _HEAD, cells, authorizer) == expected
 
 
+_SHA = "b" * 40
+
+
+@pytest.mark.parametrize(
+    ("cause", "detail", "text"),
+    [
+        pytest.param(
+            "unlisted",
+            None,
+            "plan run 7 is not listed, and no autoplan run of the head is listed",
+            id="unlisted",
+        ),
+        pytest.param(
+            "newer", 9, "plan run 7 is not the newest autoplan of the head (run 9 is)", id="newer"
+        ),
+        pytest.param("event", "push", "plan run 7 is a `push` run, not an autoplan", id="event"),
+        pytest.param(
+            "event", None, "plan run 7 is a `missing` run, not an autoplan", id="null-event"
+        ),
+        pytest.param("head", _SHA, f"plan run 7 planned {_SHA}, not the head {_HEAD}", id="head"),
+        pytest.param(
+            "head", None, f"plan run 7 planned missing, not the head {_HEAD}", id="null-head"
+        ),
+        pytest.param(
+            "record",
+            [("x", "8"), ("y", None)],
+            "the plan records of x, y name other plan runs than 7",
+            id="record",
+        ),
+        pytest.param(
+            "action",
+            [("x", "reopened"), ("y", None)],
+            "the plan records of x ('reopened'), y (None) name no event action that starts an "
+            "auto apply (opened, synchronize or ready_for_review)",
+            id="action",
+        ),
+        pytest.param(
+            "draft",
+            ["x", "y"],
+            "the plan records of x, y say their plan's push landed on a draft, and no "
+            "ready-for-review run of the head that deferred to plan run 7 is listed, so nothing "
+            "authorizes it",
+            id="draft",
+        ),
+    ],
+)
+def test_provenance_text_words_each_cause(cause, detail, text):
+    """Mutation: drop the `draft` branch (draft falls through to the action wording and raises).
+    Mutation: the event/head branch renders `detail` raw (null-event and null-head read
+    `None`). Mutation: render `newer` without `detail` (newer red)."""
+    assert ag.provenance_text(cause, detail, "7", _HEAD) == text
+
+
+def test_provenance_text_words_a_draft_origin_record():
+    """Literal beside the parametrization. Mutation: drop the `draft` branch (raises)."""
+    assert ag.provenance_text("draft", ["apply / dev / app"], "7", _HEAD) == (
+        "the plan records of apply / dev / app say their plan's push landed on a draft, and no "
+        "ready-for-review run of the head that deferred to plan run 7 is listed, so nothing "
+        "authorizes it"
+    )
+
+
 def test_newest_autoplan_selects_by_id_not_by_creation():
     """The greatest id is created first here. Mutation: select by `created_at` (run 5)."""
     newest, _ = _newest(

@@ -931,7 +931,8 @@ def _why(exc):
     return one_line(why)
 
 
-_RETRY = "push, or comment `shipmate apply` on the pull request"
+_COMMENT = "comment `shipmate apply` on the pull request"
+_RETRY = f"push, or {_COMMENT}"
 _DEPLOY_RETRY = "re-run the failed deploy jobs"
 
 
@@ -1063,7 +1064,7 @@ def _verify_plan_record(
     if newest is not None:
         cells = {name: (recorded, action, draft)}
         reason = ag.provenance_reason(newest, plan_run, head, cells, authorizer)
-        _refuse_provenance(where, head, plan_run, reason)
+        _refuse(where, plan_run, head, reason)
     if recorded == plan_run and recorded_digest == digest:
         return
     if recorded is None:
@@ -1090,7 +1091,7 @@ def _verify_auto(repo, head, provenance, digest, env, stack, where, run, pr):
         lambda: ag.auto_source(repo, head, run=run),
     )
     reason = ag.provenance_reason(newest, provenance, head, {}, authorizer)
-    _refuse_provenance(where, head, provenance, reason)
+    _refuse(where, provenance, head, reason)
     name = ag.check_name(stack, env)
     _verify_plan_record(repo, head, name, provenance, digest, where, run, newest, authorizer)
     what = f"no newer shipmate plan run of pull request #{pr}"
@@ -1123,39 +1124,12 @@ def _verify_auto(repo, head, provenance, digest, env, stack, where, run, pr):
         raise SystemExit(f"::error::apply aborted for {where}: {reason}")
 
 
-def _refuse_provenance(where, head, provenance, reason):
-    """Refuse the cell at `where` with `apply-gate.provenance_reason`'s `reason` for plan run
-    `provenance`; return when it is None."""
-    if reason is None:
-        return
-    cause, detail = reason
-    applies = f"not plan run {provenance}, which this auto apply applies; {_RETRY}"
-    if cause in ("unlisted", "newer"):
-        why = f"the newest autoplan of {head} is "
-        why += f"{'not listed' if detail is None else f'run {detail}'}, {applies}"
-    elif cause == "event":
-        event = "missing" if detail is None else detail
-        why = f"the newest autoplan of {head} is a `{event}` run, not a pull_request_target "
-        why += f"run; {_RETRY}"
-    elif cause == "head":
-        sha = "missing" if detail is None else detail
-        why = f"the newest autoplan of {head} is a run of {sha}, not of {head}; {_RETRY}"
-    elif cause == "record":
-        recorded = detail[0][1]
-        why = "the cell's newest plan record names "
-        why += f"{'no plan run' if recorded is None else f'plan run {recorded}'}, {applies}"
-    elif cause == "draft":
-        why = (
-            "the cell's plan record says its push landed on a draft, and the newest autoplan of "
-            f"{head} is no ready-for-review run that deferred to plan run {provenance}; comment "
-            "`shipmate apply`"
-        )
-    else:
-        why = (
-            f"the cell's plan record names event action {detail[0][1]!r}, not one that starts "
-            "an auto apply (opened, synchronize or ready_for_review); comment `shipmate apply`"
-        )
-    raise SystemExit(f"::error::apply aborted for {where}: {why}")
+def _refuse(where, plan_run, head, reason):
+    """Returns when `reason` is None, else raises `SystemExit` with the wave refusal."""
+    if reason:
+        text = ag.provenance_text(*reason, plan_run, head)
+        retry = _COMMENT if reason[0] in ("draft", "action") else _RETRY
+        raise SystemExit(f"::error::apply aborted for {where}: {text}; {retry}")
 
 
 def _draft(pull):

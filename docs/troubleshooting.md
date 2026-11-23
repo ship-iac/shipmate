@@ -2537,6 +2537,9 @@ request to apply it.``:
   `shipmate apply`.
 - `the cells to apply record different plan runs (...)`: no one autoplan
   planned every cell this run would apply.
+- `the plan records of <cells> name other plan runs than <n>`: a cell's newest
+  plan record names another plan run, so a newer plan of that cell exists, or
+  names no plan run, so that cell's record was not written or holds no readable plan run.
 - ``plan run <n> is a `<event>` run, not an autoplan`` or `plan run <n> planned
   <sha>, not the head <sha>`: the listing returned a run outside its own
   `event=` or `head_sha=` filter. Comment `shipmate apply`.
@@ -2613,18 +2616,17 @@ A collaborator with write access comments `shipmate apply`.
 
 The newest plan of the head was started by neither a push nor the ready click:
 the pull request was reopened after the push, or the record names no event
-action. Nothing applied. Comment `shipmate apply`. A wave cell refuses the same
-way with `the cell's plan record names event action <action>, not one that
-starts an auto apply (opened, synchronize or ready_for_review)`, where
-`<action>` is quoted (`'reopened'`), or `None` for a record without one.
+action. Nothing applied. Comment `shipmate apply`. Each cell is named with its
+action quoted (`'reopened'`), or `None` for a record without one. A wave cell
+refuses with the same text after `apply aborted for <where>:`.
 
 ### `auto apply refused: the plan records of <cells> say their plan's push landed on a draft`
 
 The plan's push landed on a draft, so only the ready-for-review run that
 deferred to that plan authorizes its `auto` apply. That run is not listed (yet),
 or the newest autoplan of the head is another run. Nothing applied. Comment
-`shipmate apply`. A wave cell refuses the same way with `the cell's plan record
-says its push landed on a draft`.
+`shipmate apply`. A wave cell refuses with the same text after `apply aborted
+for <where>:`.
 
 ### `auto apply refused: the <read> read returned a malformed answer (<error>)`
 
@@ -2777,15 +2779,13 @@ reason. On every form it refuses when:
   `detect` (`a re-run of an auto apply never applies`).
 
 An `auto` cell also refuses when:
-- `the newest autoplan of <head> is run <n>, not plan run <p>, which this auto
-  apply applies` (or `is not listed`), or `the cell's newest plan record names
-  plan run <r>, not plan run <p>` (or `names no plan run`): a newer autoplan, or
-  a newer plan of this cell, exists. Comment
-  `shipmate apply`, or push.
-- ``the newest autoplan of <head> is a `<event>` run, not a pull_request_target
-  run`` or `the newest autoplan of <head> is a run of <sha>, not of <head>`: the
-  Actions runs listing returned a run outside its own `event=` or `head_sha=`
-  filter. Comment `shipmate apply`, or push.
+- `plan run <p> is not the newest autoplan of the head (run <n> is)` (or `plan
+  run <p> is not listed, and no autoplan run of the head is listed`), or `the
+  plan records of <cells> name other plan runs than <p>`: a newer autoplan, or a
+  newer plan of this cell, exists. Comment `shipmate apply`, or push.
+- ``plan run <p> is a `<event>` run, not an autoplan`` or `plan run <p> planned
+  <sha>, not the head <head>`: the Actions runs listing returned a run outside
+  its own `event=` or `head_sha=` filter. Comment `shipmate apply`, or push.
 - `shipmate plan run <m> of this pull request is <status> and newer than plan
   run <n>, which this auto apply applies`: a `shipmate plan` of this pull request
   created at or after the plan run, with a greater id, has not completed while

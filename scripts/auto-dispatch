@@ -59,6 +59,8 @@ import os
 import sys
 
 from _shipmate import (
+    PLAN_CELL_KEYS,
+    PLAN_CELL_SKEW,
     _load,
     _run,
     cell_summaries,
@@ -87,12 +89,6 @@ UNREAD = 3
 #: The exit code of check 5 or 6 refusing once a change calls for an auto apply: stdout is the
 #: reply's sentence, its remedy included.
 REFUSED = 5
-
-_KEYS = ("stack", "environment", "changed")
-_SKEW = (
-    "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
-    "reference to one commit"
-)
 
 
 _ACTION_REASONS = {
@@ -326,7 +322,10 @@ def main():
         print(f"no auto apply dispatched: {reason}", file=sys.stderr)
         return
     cells = [
-        c for _, c in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
+        c
+        for _, c in cell_summaries(
+            os.environ.get("SHIPMATE_CELLS_DIR", "cells"), PLAN_CELL_KEYS, PLAN_CELL_SKEW
+        )
     ]
     auto = auto_set(os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", ""))
     if auto is None:
