@@ -196,8 +196,8 @@ def _skip(reason):
 
 def _gate_reason(head, plan_run):
     gate = gs.newest_gate(head)
-    if gate != ("pending", plan_run):
-        state, run_id = gate or ("absent", "-")
+    state, run_id, _ = gate or ("absent", "-", None)
+    if (state, run_id) != ("pending", plan_run):
         return (
             f"the newest gate of {head} is {state} from run {run_id}, not pending from plan run "
             f"{plan_run}"

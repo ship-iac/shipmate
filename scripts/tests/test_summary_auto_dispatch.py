@@ -894,6 +894,7 @@ def _gate_status(state="pending", run_id=P):
         "context": "shipmate / gate",
         "state": state,
         "target_url": f"https://example.invalid/acme/demo/actions/runs/{run_id}",
+        "id": 1,
         "creator": 7,
     }
 
