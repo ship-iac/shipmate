@@ -2784,6 +2784,9 @@ started: no autoplan run of <head> is listed yet; comment `shipmate apply` ``.
 When the clicker's check refuses on a permission it read, a change already called
 for an auto apply, so it also posts one reply, ``🔴 refused: auto apply not
 started: <reason>``, the autoplan actor check's reason as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
+Accepted: a ready click on a pull request that was not a draft, landing while
+the push run publishes, can make both runs dispatch; the second `auto` run waits
+in the pull request's apply queue and finds nothing pending.
 A read that fails before a change of an `auto` environment is known warns and
 posts no reply; a failed autoplan listing, or a clicker's permission that could
 not be read, after it warns and posts one reply,
