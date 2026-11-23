@@ -347,6 +347,26 @@ def deferred_jobs():
     )
 
 
+def deferred_in_progress_jobs():
+    """`fixtures/jobs-deferred-in-progress.json`: constructed, not captured. It is
+    `jobs-deferred.json` with one `plan / defer-auto` job added after `plan / defer`,
+    `in_progress` with no conclusion, at the same run attempt: the listing of a deferred
+    ready-for-review run still dispatching. Build its run object with `status: in_progress`."""
+    return (
+        pathlib.Path(__file__).parent / "fixtures" / "jobs-deferred-in-progress.json"
+    ).read_text(encoding="utf-8")
+
+
+def deferred_auto_failed_jobs():
+    """`fixtures/jobs-deferred-auto-failed.json`: constructed, not captured. It is
+    `jobs-deferred.json` with one `plan / defer-auto` job added after `plan / defer`,
+    `completed`/`failure`, at the same run attempt. Its job-level `continue-on-error` leaves
+    the run `completed`/`success`, so build the run object that way."""
+    return (
+        pathlib.Path(__file__).parent / "fixtures" / "jobs-deferred-auto-failed.json"
+    ).read_text(encoding="utf-8")
+
+
 def plan_jobs(run_id, detect="success", attempt=1, names=None, total=None):
     """The jobs listing body of dispatched plan run `run_id`, shaped like `gh api
     'repos/ship-iac/repo-example-stacks/actions/runs/43638853580/jobs?filter=latest&per_page=100'`
