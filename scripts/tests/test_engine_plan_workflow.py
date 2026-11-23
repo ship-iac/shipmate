@@ -300,9 +300,9 @@ def test_the_defer_job_is_wired_exactly():
 
 #: The comment above `defer-auto`'s `continue-on-error`, which the parsed file drops.
 _DEFER_AUTO_WHY = """\
-    # A failed dispatch must not fail the run: `_deferred_run` reads an ended deferred ready run
-    # past only when it concluded `success`. A job-level `continue-on-error` keeps the run
-    # `success` while this job ends `failure`, and `deferred` reads only `defer` and `detect`.
+    # Only a failed `verify-app-key` or `python-yaml` step fails this job; a failed decision or
+    # dispatch warns or replies and ends it `success`. `continue-on-error` keeps the run
+    # `success` even then, which `_deferred_run` needs to read a deferred ready run past.
     continue-on-error: true
 """
 
@@ -314,9 +314,11 @@ def test_the_defer_auto_job_is_wired_exactly():
     Mutations: drop `github.run_attempt == '1'` (a re-run dispatches again); drop the
     `github.event_name` clause; drop the head-repo clause (the key reaches a fork's ready run);
     change `needs.defer.outputs.run != ''` to `==`; drop `continue-on-error` (a failed dispatch
-    fails the run, and `_deferred_run` stops reading it past); drop its comment."""
+    fails the run, and `_deferred_run` stops reading it past); drop its comment; drop `detect`
+    from `needs` (the auto run can read `detect` pending and the run as not deferred). The
+    `!cancelled()` lead lets it run past the `detect` that a deferring run skips."""
     assert workflow_jobs(WF)["defer-auto"] == {
-        "needs": ["facts", "defer"],
+        "needs": ["facts", "defer", "detect"],
         "if": (
             "${{ !cancelled() && github.event_name == 'pull_request_target' && "
             "github.event.action == 'ready_for_review' && github.run_attempt == '1' && "

@@ -45,8 +45,9 @@ run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in
 5. `apply-gate.auto_source` gives `P` as the plan and this run as its authorizer;
 6. `authorize.pusher_reason` admits this run's actor, the clicker.
 
-A failed read in checks 1, 3 or 4 exits 1: no change is yet known to call for an auto apply. A
-failed or malformed listing in check 5 exits `UNREAD` with one `::error::` line.
+A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 4 prints nothing: no change
+is yet known to call for an auto apply. A failed or malformed listing in check 5 exits `UNREAD`
+with one `::error::` line; a refusal in check 5 or 6 prints its reason and exits `REFUSED`.
 """
 
 import os
@@ -77,6 +78,10 @@ gs = _load("gate-status")
 #: apply: the summary step replies on it, and on no other failure.
 UNREAD = 3
 
+#: The exit code of check 5 or 6 refusing once a change calls for an auto apply: stdout is the
+#: reason, which `actions/auto-dispatch` replies with.
+REFUSED = 5
+
 _KEYS = ("stack", "environment", "changed")
 _SKEW = (
     "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
@@ -85,7 +90,10 @@ _SKEW = (
 
 
 _ACTION_REASONS = {
-    "reopened": "this plan was started by reopening the pull request, not by a push",
+    "reopened": (
+        "this plan was started by reopening the pull request, not by a push or the "
+        "ready-for-review click"
+    ),
     "": "this plan's event could not be read",
 }
 
@@ -96,7 +104,9 @@ def action_reason(action):
     if action in ag.AUTO_ACTIONS:
         return None
     return _ACTION_REASONS.get(
-        action, f"this plan was started by the `{action}` event, not by a push"
+        action,
+        f"this plan was started by the `{action}` event, not by a push or the ready-for-review "
+        "click",
     )
 
 
@@ -243,7 +253,8 @@ def deferred(plan_run):
         return
     if reason := _source_reason(repo, head, plan_run, run_id):
         _skip(reason)
-        return
+        print(reason)
+        raise SystemExit(REFUSED)
     print(" ".join(envs))
 
 

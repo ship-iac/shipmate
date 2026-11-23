@@ -2939,9 +2939,9 @@ def test_the_defaults_name_each_auto_environment_after_the_apply_mode_line():
                 "bare `shipmate apply`, production included."
             ),
             (
-                "`apply_mode: auto` on a&lt;b, zeta: a push applies their changed cells after a "
-                "complete autoplan of a ready pull request, with no approving review and no "
-                "comment."
+                "`apply_mode: auto` on a&lt;b, zeta: a push or the ready-for-review click applies "
+                "their changed cells after a complete autoplan of a ready pull request, with no "
+                "approving review and no comment."
             ),
             _MAX_PARALLEL_UNSET[1],
         )
@@ -2963,8 +2963,9 @@ def test_a_long_auto_list_is_cut_between_env_names():
             "environment-with-a-long-name-06, environment-with-a-long-name-07, "
             "environment-with-a-long-name-08, environment-with-a-long-name-09, "
             "environment-with-a-long-name-10"
-            " … and 9 more: a push applies their changed cells after a complete autoplan of a "
-            "ready pull request, with no approving review and no comment."
+            " … and 9 more: a push or the ready-for-review click applies their changed cells "
+            "after a complete autoplan of a ready pull request, with no approving review and no "
+            "comment."
         ),
     )
 

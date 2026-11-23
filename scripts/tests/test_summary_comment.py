@@ -3000,9 +3000,21 @@ _AUTO_CELLS = [(_cell(environment="dev"), "  + one"), (_cell(changed=False, stac
 @pytest.mark.parametrize(
     ("action", "line"),
     [
-        ("reopened", _auto("this plan was started by reopening the pull request, not by a push")),
+        (
+            "reopened",
+            _auto(
+                "this plan was started by reopening the pull request, not by a push or the "
+                "ready-for-review click"
+            ),
+        ),
         ("", _auto("this plan's event could not be read")),
-        ("edited", _auto("this plan was started by the `edited` event, not by a push")),
+        (
+            "edited",
+            _auto(
+                "this plan was started by the `edited` event, not by a push or the "
+                "ready-for-review click"
+            ),
+        ),
     ],
     ids=["reopened", "unreadable", "other"],
 )
@@ -3027,7 +3039,7 @@ def test_the_auto_line_sits_under_the_verdict():
     assert sc.build_comment(_AUTO_CELLS, CHECKS, RUN_URL, SHA, auto=auto)[0] == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
         "⚪ auto apply not started: this plan was started by reopening the pull request, not by "
-        f"a push; {_REMEDY}\n\n"
+        f"a push or the ready-for-review click; {_REMEDY}\n\n"
         "#### dev: 1 cell, 1 changed\n\n"
         f"<details><summary>{_bare_app(RUN_URL)}</summary>\n\n```diff\n+   one\n```\n"
         "</details>\n\n"
@@ -3100,7 +3112,8 @@ def test_one_unlocked_auto_cell_keeps_the_line():
     """Mutation: drop every cell from `free` when any is locked -- red."""
     facts = _AUTOPLAN | {"action": "reopened"}
     assert sc.auto_line(_TWO_DEV, ["dev"], {"stacks/app / dev": 3}, **facts) == _auto(
-        "this plan was started by reopening the pull request, not by a push"
+        "this plan was started by reopening the pull request, not by a push or the "
+        "ready-for-review click"
     )
 
 
@@ -3138,7 +3151,7 @@ def test_main_says_why_no_auto_apply_follows(tmp_path, monkeypatch, attempt):
         _UNMARKED_LOCK_BODY.replace(
             f"{MAIN_AT}\n\n",
             f"{MAIN_AT}\n\n⚪ auto apply not started: this plan was started by reopening the pull "
-            f"request, not by a push; {_REMEDY}\n\n",
+            f"request, not by a push or the ready-for-review click; {_REMEDY}\n\n",
         )
     )
 

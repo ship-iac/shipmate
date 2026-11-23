@@ -4,8 +4,8 @@ description: >-
   when that dispatch fails or may have started a run. With `envs`, the caller already decided
   which apply_mode auto environments call for it. With `deferred-to`, a ready-for-review run
   that deferred to that earlier plan run decides here through scripts/auto-dispatch deferred,
-  authorized as this run's actor; a failed decision warns, replies only when a change already
-  called for an auto apply, and dispatches nothing.
+  authorized as this run's actor; a failed or refused decision dispatches nothing, and replies
+  only when a change already called for an auto apply.
 inputs:
   envs:
     description: >-
@@ -87,21 +87,30 @@ runs:
         set -euo pipefail
         # Reviewer-facing degrade only: the plan run this one deferred to wrote the gate.
         rc=0
-        envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" deferred "$DEFERRED_TO" 2>decide.err) || rc=$?
+        out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" deferred "$DEFERRED_TO" 2>decide.err) || rc=$?
+        reply() {
+          SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \
+            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+        }
+        # Exit 5 (REFUSED in scripts/auto-dispatch): a change called for an auto apply and a later
+        # check refused it; stdout is the reason.
+        if [ "$rc" -eq 5 ]; then
+          cat decide.err >&2
+          reply refused "auto apply not started: $out; comment \`shipmate apply\`"
+          exit 0
+        fi
         if [ "$rc" -ne 0 ]; then
           sed 's/^::error::/::warning::/' decide.err >&2
           echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
           # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
           # pull request gets the same reply as a failed dispatch.
           if [ "$rc" -eq 3 ]; then
-            SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME=failed \
-              SHIPMATE_REPLY_TEXT="auto apply not started: what decides it for this ready-for-review run could not be read; comment \`shipmate apply\`" \
-              python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+            reply failed "auto apply not started: what decides it for this ready-for-review run could not be read; comment \`shipmate apply\`"
           fi
           exit 0
         fi
         cat decide.err >&2
-        echo "envs=$envs" >> "$GITHUB_OUTPUT"
+        echo "envs=$out" >> "$GITHUB_OUTPUT"
 
     - name: Mint the auto apply dispatch token
       if: ${{ inputs.envs != '' || steps.decide.outputs.envs != '' }}

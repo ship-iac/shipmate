@@ -2773,12 +2773,16 @@ hold:
   or a clicker without write access dispatches nothing.
 
 A failed condition logs `no auto apply dispatched: <reason>` and dispatches
-nothing. The `auto` run applies the push run's plan, authorized as the clicker.
+nothing. When either of the last two fails, a change already called for an
+auto apply, so it also posts one reply, ``🔴 refused: auto apply not started:
+<reason>; comment `shipmate apply` ``. The `auto` run applies the push run's plan, authorized as the clicker.
 A read that fails before a change of an `auto` environment is known warns and
 posts no reply; a failed autoplan listing after it warns and posts one reply,
 ``🔴 failed: auto apply not started: what decides it for this ready-for-review
 run could not be read; comment `shipmate apply` ``. A failed dispatch replies as
-below. Any failure ends `defer-auto` `failure` and leaves the run `success`.
+below. Only a failed `verify-app-key` or `python-yaml` step ends `defer-auto`
+`failure`, and the run still ends `success`; a failed decision or dispatch warns
+or replies and ends `defer-auto` `success`.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
 The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
@@ -3249,8 +3253,9 @@ The nine jobs:
   `permissions: {}`, `continue-on-error: true`) — decides through
   `actions/auto-dispatch` whether that plan's `apply_mode: auto` environments get
   an `auto` apply, and dispatches it (§`apply_mode: auto`, "Deferred
-  dispatch"). A failure ends this job `failure` and
-  leaves the run `success`. It checks nothing out and runs on `ubuntu-slim`
+  dispatch"). Only a failed `verify-app-key` or `python-yaml` step ends this
+  job `failure`, and the run still ends `success`; a failed decision or dispatch
+  warns or replies and ends it `success`. It checks nothing out and runs on `ubuntu-slim`
   whatever `runs_on` the caller passes.
 - **`detect` and `plan`** (engine, either trigger) — they upload plan artifacts
   and cell summaries; they author nothing and mint no App token. `detect` binds

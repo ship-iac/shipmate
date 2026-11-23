@@ -73,7 +73,10 @@ SKIPS = {
     "reopened": (
         ("pull_request_target", "reopened", "1", "", False),
         {},
-        "this plan was started by reopening the pull request, not by a push",
+        (
+            "this plan was started by reopening the pull request, not by a push or the "
+            "ready-for-review click"
+        ),
     ),
     "unreadable action": (
         ("pull_request_target", "", "1", "", False),
@@ -83,7 +86,7 @@ SKIPS = {
     "other action": (
         ("pull_request_target", "edited", "1", "", False),
         {},
-        "this plan was started by the `edited` event, not by a push",
+        "this plan was started by the `edited` event, not by a push or the ready-for-review click",
     ),
     "push onto a draft": (
         ("pull_request_target", "synchronize", "1", "false", True),
@@ -306,21 +309,30 @@ _DECIDE_RUN = """\
 set -euo pipefail
 # Reviewer-facing degrade only: the plan run this one deferred to wrote the gate.
 rc=0
-envs=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" deferred "$DEFERRED_TO" 2>decide.err) || rc=$?
+out=$(python3 "$GITHUB_ACTION_PATH/../../scripts/auto-dispatch" deferred "$DEFERRED_TO" 2>decide.err) || rc=$?
+reply() {
+  SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME="$1" SHIPMATE_REPLY_TEXT="$2" \\
+    python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+}
+# Exit 5 (REFUSED in scripts/auto-dispatch): a change called for an auto apply and a later
+# check refused it; stdout is the reason.
+if [ "$rc" -eq 5 ]; then
+  cat decide.err >&2
+  reply refused "auto apply not started: $out; comment \\`shipmate apply\\`"
+  exit 0
+fi
 if [ "$rc" -ne 0 ]; then
   sed 's/^::error::/::warning::/' decide.err >&2
   echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
   # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
   # pull request gets the same reply as a failed dispatch.
   if [ "$rc" -eq 3 ]; then
-    SHIPMATE_REPLY_VERB=apply SHIPMATE_REPLY_LABEL="plan run" SHIPMATE_REPLY_OUTCOME=failed \\
-      SHIPMATE_REPLY_TEXT="auto apply not started: what decides it for this ready-for-review run could not be read; comment \\`shipmate apply\\`" \\
-      python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
+    reply failed "auto apply not started: what decides it for this ready-for-review run could not be read; comment \\`shipmate apply\\`"
   fi
   exit 0
 fi
 cat decide.err >&2
-echo "envs=$envs" >> "$GITHUB_OUTPUT"
+echo "envs=$out" >> "$GITHUB_OUTPUT"
 """  # noqa: E501 - the step's lines, compared whole
 
 
@@ -330,7 +342,7 @@ def test_the_deferred_decision_is_wired_exactly():
 
     Mutations: drop `SHIPMATE_APP_SLUG`; drop `DEFERRED_TO`; drop `SHIPMATE_GITHUB_VARS`; call
     `scripts/auto-dispatch` by a relative path; drop the failure branch's `exit 0`; drop the
-    `rc -eq 3` reply; drop `cat decide.err >&2`."""
+    `rc -eq 3` reply; drop the `rc -eq 5` reply; drop `cat decide.err >&2`."""
     decide = step_by(AD, name=DECIDE)
     assert decide["env"] == {
         "GH_TOKEN": "${{ steps.maintoken.outputs.token }}",
@@ -344,12 +356,14 @@ def test_the_deferred_decision_is_wired_exactly():
     assert decide["run"] == _DECIDE_RUN
 
 
-@pytest.mark.parametrize("action", ["summary", AD])
-def test_the_decision_replies_on_auto_dispatchs_unread_exit_code(action):
-    """The step keys its reply on a bare exit-code literal, which must be `UNREAD`; every
-    `-eq` comparison of `$rc` in the step is that one. Mutation: renumber `UNREAD` to 4 -- red."""
+@pytest.mark.parametrize(
+    ("action", "codes"), [("summary", [ad.UNREAD]), (AD, [ad.REFUSED, ad.UNREAD])]
+)
+def test_the_decision_replies_on_auto_dispatchs_exit_codes(action, codes):
+    """The step keys its replies on bare exit-code literals, which must be `auto-dispatch`'s
+    constants, in this order. Mutations: renumber `UNREAD` to 4; renumber `REFUSED` to 6."""
     run = step_by(action, name=DECIDE)["run"]
-    assert re.findall(r'"\$rc" -eq ([0-9]+)', run) == [str(ad.UNREAD)]
+    assert re.findall(r'"\$rc" -eq ([0-9]+)', run) == [str(c) for c in codes]
 
 
 # A stub, not `_GH_RECORDER`: that one discards stdin.
@@ -616,7 +630,8 @@ def test_no_changed_auto_cell_decides_nothing(tmp_path):
     [
         pytest.param(
             json.dumps({"action": "reopened"}),
-            "this plan was started by reopening the pull request, not by a push",
+            "this plan was started by reopening the pull request, not by a push or the "
+            "ready-for-review click",
             id="reopened",
         ),
         pytest.param("not json", "this plan's event could not be read", id="unparseable"),
@@ -1039,6 +1054,10 @@ DEFERRED_SKIPS = {
     "record action reopened": ({"checks": jsonl(_sbx(action="reopened"))}, _NO_AUTO),
     # Mutation: split the name by hand (`name.split(" / ")[1]`) in place of `parse_check_name`.
     "name outside the grammar": ({"checks": jsonl(_sbx(check={"name": "apply / sbx"}))}, _NO_AUTO),
+}
+
+#: name -> (decision overrides, whole reason); each row breaks check 5 or 6, past a changed `sbx`.
+DEFERRED_REFUSALS = {
     # Mutation: drop the plan-id check.
     "plan of another run": (
         {"runs": jsonl(_ready(), _push(999))},
@@ -1080,13 +1099,32 @@ def test_a_deferred_ready_run_failing_one_check_dispatches_nothing(tmp_path, nam
 
 
 @bash_only
+@pytest.mark.parametrize("name", list(DEFERRED_REFUSALS))
+def test_a_deferred_ready_run_refused_past_a_change_replies_with_the_reason(tmp_path, name):
+    """A changed `sbx` called for an auto apply, so the refusal replies. Each row's mutation,
+    in its comment above the row, prints `sbx` for that row. Mutation: log the reason and
+    print nothing (`_skip(reason); return`) -- no reply, red."""
+    answers, reason = DEFERRED_REFUSALS[name]
+    proc, outputs, reply = _decide_deferred(tmp_path, **answers)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, proc.stdout) == ({}, "")
+    assert proc.stderr.splitlines() == [f"no auto apply dispatched: {reason}"]
+    assert reply.splitlines()[:3] == [
+        "### shipmate apply",
+        "",
+        f"🔴 refused: auto apply not started: {reason}; comment `shipmate apply`",
+    ]
+
+
+@bash_only
 @pytest.mark.parametrize(
     ("event", "reason"),
     [
         pytest.param({"attempt": "2"}, "run attempt 2 is a re-run", id="attempt-2"),
         pytest.param(
             {"action": "reopened"},
-            "this plan was started by reopening the pull request, not by a push",
+            "this plan was started by reopening the pull request, not by a push or the "
+            "ready-for-review click",
             id="reopened",
         ),
     ],

@@ -635,10 +635,10 @@ def command_hints(table):
 def mode_envs(table, mode):
     """Environments whose entry holds `apply_mode: <mode>`, sorted.
 
-    `auto` environments are the ones a push applies. `targeted` environments are the ones a
-    bare `shipmate apply` skips: each needs its own `shipmate apply <env>`; a bare apply
-    reaches an `auto` environment like a `bare` one. `validate_structure` refuses any value
-    but `targeted`, `bare` and `auto`.
+    `auto` environments are the ones a push or the ready-for-review click applies. `targeted`
+    environments are the ones a bare `shipmate apply` skips: each needs its own
+    `shipmate apply <env>`; a bare apply reaches an `auto` environment like a `bare` one.
+    `validate_structure` refuses any value but `targeted`, `bare` and `auto`.
     """
     return sorted(
         e for e, entry in table.get("environments", {}).items() if entry.get("apply_mode") == mode

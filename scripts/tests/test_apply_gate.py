@@ -1332,6 +1332,13 @@ def _source(rows, jobs):
     return (plan and plan["id"], authorizer and authorizer["id"]), argv
 
 
+def _short():
+    """`deferred_in_progress_jobs` counting one job more than it lists."""
+    body = json.loads(deferred_in_progress_jobs())
+    body["total_count"] += 1
+    return json.dumps(body)
+
+
 def _defer_running():
     """`deferred_in_progress_jobs` with `plan / defer` itself still `in_progress`."""
     body = json.loads(deferred_in_progress_jobs())
@@ -1350,6 +1357,13 @@ def _defer_running():
             [_PUSH, _CLICK], deferred_auto_failed_jobs(), (1000, 1001), id="dispatch-failed"
         ),
         pytest.param([_PUSH, _LIVE], _defer_running(), (1001, 1001), id="defer-running"),
+        pytest.param(
+            [_PUSH, {**_LIVE, "status": "queued"}],
+            json.dumps({"total_count": 0, "jobs": []}),
+            (1001, 1001),
+            id="queued-no-jobs",
+        ),
+        pytest.param([_PUSH, _LIVE], _short(), (1001, 1001), id="dispatching-short"),
         pytest.param([_PUSH, _CLICK], _jobs_body("zero-cell"), (1001, 1001), id="planned"),
         pytest.param(
             [{**_PUSH, "conclusion": "failure"}, _CLICK],
@@ -1372,7 +1386,9 @@ def test_auto_source_names_the_plan_and_the_run_that_authorizes_it(rows, jobs, e
     (dispatch-failed names 1001 twice). Mutation: treat any in-progress run as deferred
     (defer-running names 1000). Mutation: skip the jobs read and treat the run as deferred
     (planned names 1000). Mutation: drop the plan-status check (plan-failed names 1000).
-    Mutation: drop the head check (plan-of-another-head names 1000). Mutation: call
+    Mutation: drop the head check (plan-of-another-head names 1000). Mutation: raise on a live
+    run's empty or incomplete jobs listing as on an ended one (queued-no-jobs and
+    dispatching-short raise `ValueError`). Mutation: call
     `autoplan_runs` twice (the argv lists it twice)."""
     assert _source(rows, {1001: jobs}) == (
         expected,

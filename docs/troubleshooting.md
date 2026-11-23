@@ -2338,8 +2338,9 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    that ready-for-review run deferred to this run's plan, look at its
    `defer-auto` job, step `Decide whether to dispatch an auto apply`: it
    dispatches, or logs `no auto apply dispatched: <reason>`, the clicker's
-   access refusal included (`not authorized: ...`, entries below); a failed
-   `defer-auto` leaves that run green. A
+   access refusal included (`not authorized: ...`, entries below); a refusal
+   past a changed `auto` environment also replies ``auto apply not started:
+   <reason>; comment `shipmate apply` ``. A failed `defer-auto` leaves that run green. A
    listing that does not show this run yet dispatches, warning `autoplan run
    <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the

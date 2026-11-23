@@ -87,14 +87,16 @@ jobs:
   # Dispatches the auto apply of the plan `defer` named, authorized as this run's actor, the
   # ready-for-review clicker. Holds the App key but checks nothing out.
   defer-auto:
-    needs: [facts, defer]
+    # `detect` resolves before this job starts, so the jobs listing that the auto run's
+    # `deferred` reads shows it `skipped`, not pending.
+    needs: [facts, defer, detect]
     if: ${{ !cancelled() && github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review' && github.run_attempt == '1' && needs.facts.result == 'success' && needs.facts.outputs.is-draft == 'false' && needs.facts.outputs.head-repo == github.repository && needs.defer.result == 'success' && needs.defer.outputs.run != '' }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
-    # A failed dispatch must not fail the run: `_deferred_run` reads an ended deferred ready run
-    # past only when it concluded `success`. A job-level `continue-on-error` keeps the run
-    # `success` while this job ends `failure`, and `deferred` reads only `defer` and `detect`.
+    # Only a failed `verify-app-key` or `python-yaml` step fails this job; a failed decision or
+    # dispatch warns or replies and ends it `success`. `continue-on-error` keeps the run
+    # `success` even then, which `_deferred_run` needs to read a deferred ready run past.
     continue-on-error: true
     steps:
       - uses: $/actions/auto-dispatch
