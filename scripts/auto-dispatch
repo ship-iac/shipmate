@@ -10,24 +10,49 @@ as a sentence to the pull request's reader; the other reasons are log-only. Cond
 from the environment:
 
 - `GITHUB_EVENT_NAME` is `pull_request_target`: only an autoplan dispatches.
-- the `action` of the event payload at `GITHUB_EVENT_PATH` is `opened` or `synchronize`: only
-  a push authorizes its pusher, never a ready-for-review or reopen click; an unreadable
-  payload dispatches nothing.
+- the `action` of the event payload at `GITHUB_EVENT_PATH` is in `apply-gate.AUTO_ACTIONS`
+  (`opened`, `synchronize` or `ready_for_review`): a push or the ready-for-review click
+  authorizes whoever made it, never a reopen; an unreadable payload dispatches nothing.
+- that payload's `pull_request.draft` is not `true`: a push onto a draft dispatches nothing,
+  since the run that marking it ready started decides the auto apply.
 - `GITHUB_RUN_ATTEMPT` is `1`: a re-run never starts a second `auto` run for the same head.
 - `SHIPMATE_IS_DRAFT` is not `true`.
 - gate-state's `SHIPMATE_GATE_STATE` and `SHIPMATE_COMMENT_MODE` are `pending` and `post`: the
   plan published completely and nothing holds the gate, and an apply check is pending.
 - this run (`GITHUB_RUN_ID`) is the newest autoplan run of `SHIPMATE_HEAD_SHA` that
   `apply-gate.newest_autoplan` lists in `GITHUB_REPOSITORY`, the check the `auto` run's own
-  provenance check repeats: a ready-for-review run of the same head is never an `auto` source,
-  yet it is the newest unless it completed after deferring (`apply-gate.deferred`), so a push
-  run whose ready click came while it ran dispatches nothing. Read only once every other
-  condition holds and an `auto` environment holds a change. A listing with no run as new as this
-  one (the listing lagging this run) dispatches with a warning; a failed or malformed listing
-  exits `UNREAD` with one `::error::` line, and the summary replies that no auto apply started.
+  provenance check repeats: a ready-for-review run of the same head is the newest unless it
+  completed after deferring (`apply-gate.deferred`), so a push run whose ready click came while
+  it ran dispatches nothing. Read only once every other condition holds and an `auto`
+  environment holds a change. A listing with no run as new as this one (the listing lagging this
+  run) dispatches with a warning; a failed or malformed listing exits `UNREAD` with one
+  `::error::` line, and the summary replies that no auto apply started.
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
+
+`auto-dispatch deferred <P>` decides for a ready-for-review run that deferred to the earlier plan
+run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in order:
+
+1. the newest `shipmate / gate` of `SHIPMATE_HEAD_SHA` (`gate-status.newest_gate`,
+   `SHIPMATE_APP_SLUG`) is `pending` and names `P`;
+2. `skip_reason` over this run's event, action and attempt, with the draft, gate and comment
+   conditions that check 1 and `P`'s publish already proved;
+3. the changed cells: the App's (`SHIPMATE_APP_ID`) apply checks on the head whose newest run
+   is `queued`, records `P`, names an action in `AUTO_ACTIONS` and is not behind;
+4. their environments that hold `apply_mode: auto` in the default branch's table
+   (`env-config.read_table`, `SHIPMATE_GITHUB_VARS`);
+5. `apply-gate.auto_source` gives `P` as the plan and this run as its authorizer;
+6. `authorize.pusher_reason` admits this run's actor, the clicker.
+
+A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 4 prints nothing: no change
+is yet known to call for an auto apply. A check 5 mismatch prints nothing when the authorizer is a
+run newer than this one that took over the decision (`_ready_run`). Any other mismatch, and an
+empty listing, prints the mismatch, ending in its remedy, and exits `REFUSED`. A failed or
+malformed listing in check 5, or of that newer run's jobs, exits
+`UNREAD` with one `::error::` line, and so does a clicker's permission check 6 could not read
+(`authorize.UnreadablePermission`); any other refusal in check 6 prints its reason, which carries
+its own remedy, and exits `REFUSED`.
 """
 
 import os
@@ -37,10 +62,13 @@ from _shipmate import (
     _load,
     _run,
     cell_summaries,
+    check_runs,
     event_action,
+    event_draft,
     exit_text,
     is_run_id,
     json_or_none,
+    listed_jobs,
     one_line,
     print_annotated,
     run_annotated,
@@ -48,10 +76,17 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
+au = _load("authorize")
+ec = _load("env-config")
+gs = _load("gate-status")
 
-#: The exit code of a failed or malformed autoplan listing, read once a change calls for an auto
-#: apply: the summary step replies on it, and on no other failure.
+#: The exit code of a failed or malformed autoplan listing, or of an unreadable clicker
+#: permission, read once a change calls for an auto apply: the decision steps reply on it.
 UNREAD = 3
+
+#: The exit code of check 5 or 6 refusing once a change calls for an auto apply: stdout is the
+#: reply's sentence, its remedy included.
+REFUSED = 5
 
 _KEYS = ("stack", "environment", "changed")
 _SKEW = (
@@ -61,28 +96,37 @@ _SKEW = (
 
 
 _ACTION_REASONS = {
-    "ready_for_review": "this plan was started by marking the pull request ready, not by a push",
-    "reopened": "this plan was started by reopening the pull request, not by a push",
+    "reopened": (
+        "this plan was started by reopening the pull request, not by a push or the "
+        "ready-for-review click"
+    ),
     "": "this plan's event could not be read",
 }
 
 
 def action_reason(action):
     """Why an autoplan started by the event action `action` dispatches no `auto` apply on any
-    attempt, or None for a push."""
-    if action in ag.PUSH_ACTIONS:
+    attempt, or None for an action in `AUTO_ACTIONS`."""
+    if action in ag.AUTO_ACTIONS:
         return None
     return _ACTION_REASONS.get(
-        action, f"this plan was started by the `{action}` event, not by a push"
+        action,
+        f"this plan was started by the `{action}` event, not by a push or the ready-for-review "
+        "click",
     )
 
 
-def skip_reason(*, event, action, attempt, is_draft, state, mode):
+def skip_reason(*, event, action, attempt, payload_draft, is_draft, state, mode):
     """Why this run dispatches no `auto` apply, or None when every condition holds."""
     if event != "pull_request_target":
         return f"a {event or '(unset event)'} run is not an autoplan"
     if reason := action_reason(action):
         return reason
+    if payload_draft:
+        return (
+            "this plan's push landed on a draft; the run that marking it ready started decides "
+            "the auto apply"
+        )
     if attempt != "1":
         return f"run attempt {attempt} is a re-run"
     if is_draft == "true":
@@ -106,21 +150,31 @@ def auto_set(raw):
     return None
 
 
-def newer_autoplan(repo, head, run_id):
-    """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
-    none is listed newer. A listing that holds no run as new as this one lags it: it warns and
-    returns None. A failed or malformed listing prints one `::error::` line and exits
-    `UNREAD`."""
+def _require_run_id(run_id):
     if not is_run_id(run_id):
         raise SystemExit(f"::error::GITHUB_RUN_ID must be a run id (got: {run_id!r})")
+
+
+def _listed(head, read):
+    """`read()`, the autoplan listing of `head`; a failed or malformed one prints one
+    `::error::` line and exits `UNREAD`."""
     try:
-        newest = ag.newest_autoplan(repo, head, run=_run)
+        return read()
     except (SystemExit, ValueError) as exc:
         cause = exit_text(exc) if isinstance(exc, SystemExit) else exc
         print_annotated(
             f"::error::the autoplan runs of {head} could not be read ({one_line(cause)})"
         )
         raise SystemExit(UNREAD) from None
+
+
+def newer_autoplan(repo, head, run_id):
+    """The id of an autoplan run of `head` newer than this run `run_id` (a str), or None when
+    none is listed newer. A listing that holds no run as new as this one lags it: it warns and
+    returns None. A failed or malformed listing prints one `::error::` line and exits
+    `UNREAD`."""
+    _require_run_id(run_id)
+    newest = _listed(head, lambda: ag.newest_autoplan(repo, head, run=_run))
     if newest is None or newest["id"] < int(run_id):
         print(
             f"::warning::autoplan run {run_id} of {head} is not listed yet; dispatching the auto "
@@ -131,10 +185,138 @@ def newer_autoplan(repo, head, run_id):
     return newest["id"] if newest["id"] > int(run_id) else None
 
 
+def queued_envs(check_run_lines, app_id, plan_run):
+    """The environments of the App-authored apply checks in JSONL `check_run_lines` whose newest
+    run is `queued` and whose record names plan run `plan_run` (a str), an action in
+    `AUTO_ACTIONS` and no `behind`. A name outside the check grammar is dropped."""
+    records = ag.plan_records(check_run_lines, app_id)
+    actions = ag.plan_actions(check_run_lines, app_id)
+    behind = ag.behind_names(check_run_lines, app_id)
+    envs = set()
+    for name, check in ag.latest_by_name(ag.app_runs(check_run_lines, app_id)).items():
+        parsed = ag.parse_check_name(name)
+        if (
+            parsed
+            and check.get("status") == "queued"
+            and records.get(name, (None,))[0] == plan_run
+            and actions.get(name) in ag.AUTO_ACTIONS
+            and name not in behind
+        ):
+            envs.add(parsed[1])
+    return envs
+
+
+def _skip(reason):
+    print(f"no auto apply dispatched: {reason}", file=sys.stderr)
+
+
+def _gate_reason(head, plan_run):
+    gate = gs.newest_gate(head)
+    state, run_id, _ = gate or ("absent", "-", None)
+    if (state, run_id) != ("pending", plan_run):
+        return (
+            f"the newest gate of {head} is {state} from run {run_id}, not pending from plan run "
+            f"{plan_run}"
+        )
+    return skip_reason(
+        event=os.environ.get("GITHUB_EVENT_NAME", ""),
+        action=event_action(),
+        attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+        payload_draft=False,
+        is_draft="false",
+        state="pending",
+        mode="post",
+    )
+
+
+def _ready_run(repo, listed):
+    """Whether listed run `listed` took over the decision: its `defer` job is listed `queued`,
+    `waiting`, `pending`, `requested` or `in_progress`, or `completed` `success`. A reopened
+    or other non-ready run skips `defer` and states its own auto line in its plan comment, so a
+    `defer` job `completed` `skipped`, `cancelled` or `failure`, or none listed, leaves this
+    run to reply. Raises `ValueError` when its jobs cannot be listed."""
+    jobs = listed_jobs(repo, listed["id"], _run, counted=True)
+    if jobs is None:
+        raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
+    return any(
+        j["name"] == ag.CALLER_PREFIX + "defer"
+        and (
+            j["status"] in ("queued", "waiting", "pending", "requested", "in_progress")
+            or (j["status"], j.get("conclusion")) == ("completed", "success")
+        )
+        for j in jobs
+    )
+
+
+def _authorizer(repo, head, plan_run, run_id):
+    """This run's listed run object when the autoplans of `head` resolve to plan run `plan_run`
+    authorized by this run `run_id`. Otherwise None with the mismatch logged when a newer
+    run that took over the decision (`_ready_run`) authorizes; else the mismatch is printed and
+    exits `REFUSED`."""
+
+    def read():
+        plan, authorizer = ag.auto_source(repo, head, run=_run)
+        newer = authorizer is not None and authorizer["id"] > int(run_id)
+        return plan, authorizer, newer and _ready_run(repo, authorizer)
+
+    plan, authorizer, taken_over = _listed(head, read)
+    if plan is None:
+        reason = f"no autoplan run of {head} is listed yet; comment `shipmate apply`"
+    elif (plan["id"], authorizer["id"]) == (int(plan_run), int(run_id)):
+        return authorizer
+    else:
+        reason = (
+            f"the autoplans of {head} resolve to plan run {plan['id']} authorized by run "
+            f"{authorizer['id']}, not plan run {plan_run} authorized by this run {run_id}; "
+            "comment `shipmate apply`"
+        )
+    _skip(reason)
+    if taken_over:
+        return None
+    print(reason)
+    raise SystemExit(REFUSED)
+
+
+def deferred(plan_run):
+    """Print the changed `auto` environments this ready-for-review run dispatches for plan run
+    `plan_run`, or nothing with the reason on stderr; the module docstring lists the checks."""
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    _require_run_id(run_id)
+    head = os.environ.get("SHIPMATE_HEAD_SHA", "")
+    validate_head_sha(head)
+    if reason := _gate_reason(head, plan_run):
+        _skip(reason)
+        return
+    lines = check_runs(repo, head, run=_run).splitlines()
+    changed = queued_envs(lines, os.environ.get("SHIPMATE_APP_ID", ""), plan_run)
+    envs = sorted(changed & set(ec.mode_envs(ec.read_table(), "auto")))
+    if not envs:
+        _skip("no changed cell is in an apply_mode auto environment")
+        return
+    authorizer = _authorizer(repo, head, plan_run, run_id)
+    if authorizer is None:
+        return
+    if reason := au.pusher_reason(repo, authorizer, run=_run):
+        _skip(reason)
+        if isinstance(reason, au.UnreadablePermission):
+            print_annotated("::error::the permission of this run's clicker could not be read")
+            raise SystemExit(UNREAD)
+        print(reason)
+        raise SystemExit(REFUSED)
+    print(" ".join(envs))
+
+
 def main():
+    if args := sys.argv[1:]:
+        if len(args) != 2 or args[0] != "deferred" or not is_run_id(args[1]):
+            raise SystemExit("::error::usage: auto-dispatch [deferred <plan run id>]")
+        deferred(args[1])
+        return
     reason = skip_reason(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
         action=event_action(),
+        payload_draft=event_draft(),
         attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
         state=os.environ.get("SHIPMATE_GATE_STATE", ""),

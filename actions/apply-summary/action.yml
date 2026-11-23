@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Reads the per-cell apply-summary.* artifacts the calling job downloads into cells/ and apply-detect's report it downloads into apply-report/ (none when detect never ran), the comment's dispositions, waiting and held cells, environment order and pusher (a missing or unreadable one renders a red line and never a green verdict), mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the jobs listing.
+description: Render the apply result comment and post it to the pull request. Reads the per-cell apply-summary.* artifacts the calling job downloads into cells/ and apply-detect's report it downloads into apply-report/ (none when detect never ran), the comment's dispositions, waiting and held cells, environment order and autoplan actor (a missing or unreadable one renders a red line and never a green verdict), mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.

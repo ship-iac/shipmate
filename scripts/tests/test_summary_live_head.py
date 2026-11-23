@@ -100,7 +100,7 @@ def test_the_live_head_steps_are_wired_exactly():
     }
     mint = step_by("summary", name=MINT)
     assert (mint["id"], mint["if"], mint["continue-on-error"]) == ("plantoken", HAS_LIVE, True)
-    assert mint["uses"] == step_by("summary", id="autotoken")["uses"]
+    assert mint["uses"] == step_by("auto-dispatch", id="autotoken")["uses"]
     assert mint["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",

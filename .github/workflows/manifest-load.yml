@@ -43,6 +43,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/apply-waiters@main
       - if: false
+        uses: ship-iac/shipmate/actions/auto-dispatch@main
+      - if: false
         uses: ship-iac/shipmate/actions/base-push-plan@main
       - if: false
         uses: ship-iac/shipmate/actions/build-matrix@main

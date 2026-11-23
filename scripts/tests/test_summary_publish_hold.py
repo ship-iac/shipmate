@@ -629,7 +629,6 @@ LATER_STEP_IFS = {
     "Mint the plan dispatch token": "${{ steps.livehead.outputs.live != '' }}",
     "Dispatch a plan of the live head": "${{ steps.livehead.outputs.live != '' }}",
     "Decide whether to dispatch an auto apply": NOT_MOVED,
-    "Mint the auto apply dispatch token": "${{ steps.autodecide.outputs.envs != '' }}",
     "Dispatch an auto apply": "${{ steps.autodecide.outputs.envs != '' }}",
 }
 

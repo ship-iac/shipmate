@@ -88,7 +88,17 @@ EXPECTED_DETECT_OUTPUTS = {
     "behind": "${{ steps.matrix.outputs.behind }}",
     "tools": "${{ steps.setup.outputs.tools }}",
 }
-EXPECTED_JOB_IDS = ["claim", "facts", "defer", "detect", "plan", "summary", "gate-hold", "outcome"]
+EXPECTED_JOB_IDS = [
+    "claim",
+    "facts",
+    "defer",
+    "defer-auto",
+    "detect",
+    "plan",
+    "summary",
+    "gate-hold",
+    "outcome",
+]
 
 
 def _summary_job():

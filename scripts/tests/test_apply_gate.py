@@ -3,7 +3,13 @@ import json
 import pathlib
 
 import pytest
-from _detect_fixtures import AUTOPLAN_CREATED, autoplans_read, listed_autoplan
+from _detect_fixtures import (
+    AUTOPLAN_CREATED,
+    autoplans_read,
+    deferred_auto_failed_jobs,
+    deferred_in_progress_jobs,
+    listed_autoplan,
+)
 from _loader import load_script
 
 ag = load_script("apply-gate")
@@ -644,6 +650,30 @@ def test_behind_names_reads_only_a_newest_app_record_whose_behind_is_true():
     assert ag.behind_names(lines, "999") == {"apply / dev-eu / a"}
 
 
+def test_draft_names_reads_only_a_newest_app_record_whose_draft_is_true():
+    """`a` is draft on its newest run; `b`'s draft record sits under a newer plain one; `c` and
+    `d` hold `"true"` and `1`; `e` holds no `draft` key, as an older engine's record does;
+    `f`'s newest draft record is another App's, over ours.
+
+    Mutation: test `record.get("draft")` for truth -- `c` and `d` are listed, red.
+    Mutation: read an absent key as draft (`record.get("draft", True) is True`) -- `b`, `e` and
+    `f` are listed, red.
+    Mutation: read every App run, not the newest per name -- `b` is listed, red.
+    Mutation: parse the lines without `from_app` -- `f` is listed, red."""
+    draft = _record(action="synchronize", draft=True)
+    lines = [
+        _ext("apply / sbx / a", 1, draft),
+        _ext("apply / sbx / b", 2, draft),
+        _ext("apply / sbx / b", 3, _record(action="synchronize")),
+        _ext("apply / sbx / c", 4, _record(draft="true")),
+        _ext("apply / sbx / d", 5, _record(draft=1)),
+        _ext("apply / sbx / e", 6, _record(action="synchronize")),
+        _ext("apply / sbx / f", 7, _record(action="synchronize")),
+        _ext("apply / sbx / f", 8, draft, app_id=15368),
+    ]
+    assert ag.draft_names(lines, "999") == {"apply / sbx / a"}
+
+
 def test_plan_records_ignores_foreign_app_even_when_newest():
     """Mutation: iterate `parse_jsonl(check_run_lines)` instead of `app_runs(...)`."""
     ours = _ext("apply / dev-eu / stacks/app", 1, _record(plan_run="111", plan_sha256="a" * 64))
@@ -899,7 +929,8 @@ def _newest(*lines):
 
 def test_newest_autoplan_returns_the_whole_listed_run_of_the_greatest_id():
     """Lines from two pages, the greatest id neither first nor last. Mutation: `min` for `max`
-    (run 5). Mutation: return the id instead of the object."""
+    (run 5). Mutation: return the id instead of the object. Mutation: list again in
+    `newest_autoplan` (the argv lists it twice). Mutation: drop `_walk`'s sort (run 5)."""
     newest, argv = _newest(
         json.dumps(listed_autoplan(5, _HEAD)),
         json.dumps(listed_autoplan(12, _HEAD, event="x")),
@@ -995,7 +1026,7 @@ def test_newest_autoplan_raises_value_error_on_a_malformed_line(line):
 
 
 _OTHER = "b" * 40
-_PUSHED = {"x": ("7", "synchronize"), "y": ("7", "opened")}
+_PUSHED = {"x": ("7", "synchronize", False), "y": ("7", "opened", False)}
 
 
 @pytest.mark.parametrize(
@@ -1026,26 +1057,34 @@ _PUSHED = {"x": ("7", "synchronize"), "y": ("7", "opened")}
         ),
         pytest.param(
             listed_autoplan(7, _HEAD, head_sha=_OTHER),
-            {"x": ("8", None)},
+            {"x": ("8", None, False)},
             ("head", _OTHER),
             id="head-first",
         ),
         pytest.param(
             listed_autoplan(7, _HEAD),
-            {"x": ("7", "synchronize"), "y": ("8", "synchronize"), "z": (None, "opened")},
+            {
+                "x": ("7", "synchronize", False),
+                "y": ("8", "synchronize", False),
+                "z": (None, "opened", False),
+            },
             ("record", [("y", "8"), ("z", None)]),
             id="record",
         ),
         pytest.param(
             listed_autoplan(7, _HEAD),
-            {"x": ("7", "ready_for_review"), "y": ("8", "synchronize")},
+            {"x": ("7", "reopened", False), "y": ("8", "synchronize", False)},
             ("record", [("y", "8")]),
             id="record-first",
         ),
         pytest.param(
             listed_autoplan(7, _HEAD),
-            {"x": ("7", "ready_for_review"), "y": ("7", "synchronize"), "z": ("7", None)},
-            ("action", [("x", "ready_for_review"), ("z", None)]),
+            {
+                "x": ("7", "reopened", False),
+                "y": ("7", "ready_for_review", False),
+                "z": ("7", None, False),
+            },
+            ("action", [("x", "reopened"), ("z", None)]),
             id="action",
         ),
     ],
@@ -1056,13 +1095,54 @@ def test_provenance_reason_names_the_first_failing_check(newest, cells, expected
     otherwise). Mutation: drop the event check (event passes). Mutation: drop the head check
     (head passes). Mutation: drop the record check (record passes). Mutation: drop the action
     check, or `==` for `!=` in the record check (action passes, or pass refuses). Mutation:
-    test the event before the id (newer-first reads `event`)."""
-    assert ag.provenance_reason(newest, "7", _HEAD, cells) == expected
+    test the event before the id (newer-first reads `event`). Mutation: drop `ready_for_review`
+    from `AUTO_ACTIONS` (action lists `y`)."""
+    assert ag.provenance_reason(newest, "7", _HEAD, cells, newest) == expected
 
 
 def test_provenance_reason_compares_run_ids_as_strings():
     """A record `"07"` names no run 7. Mutation: `newest["id"] != int(plan_run)` (passes)."""
-    assert ag.provenance_reason(listed_autoplan(7, _HEAD), "07", _HEAD, {}) == ("newer", 7)
+    plan = listed_autoplan(7, _HEAD)
+    assert ag.provenance_reason(plan, "07", _HEAD, {}, plan) == ("newer", 7)
+
+
+@pytest.mark.parametrize(
+    ("authorizer", "cells", "expected"),
+    [
+        pytest.param(
+            listed_autoplan(7, _HEAD),
+            {"x": ("7", "synchronize", True), "y": ("7", "opened", False)},
+            ("draft", ["x"]),
+            id="the-plan-authorizes",
+        ),
+        pytest.param(None, {"x": ("7", "synchronize", True)}, ("draft", ["x"]), id="no-authorizer"),
+        pytest.param(
+            listed_autoplan(8, _HEAD, actor={"login": "octocat"}),
+            {"x": ("7", "synchronize", True)},
+            None,
+            id="a-deferred-ready-run-authorizes",
+        ),
+        pytest.param(
+            listed_autoplan(7, _HEAD),
+            {"x": ("7", "reopened", True), "y": ("7", "synchronize", True)},
+            ("action", [("x", "reopened")]),
+            id="action-first",
+        ),
+        pytest.param(
+            listed_autoplan(7, _HEAD), {"x": ("7", "synchronize", False)}, None, id="not-draft"
+        ),
+    ],
+)
+def test_provenance_reason_refuses_a_draft_origin_record_no_distinct_run_authorizes(
+    authorizer, cells, expected
+):
+    """Plan run "7" of `_HEAD`, listed. Mutation: drop the `draft` check (the-plan-authorizes and
+    no-authorizer pass). Mutation: pass a draft record whenever `authorizer` is not None
+    (the-plan-authorizes passes). Mutation: refuse every draft record (a-deferred-ready-run-
+    authorizes refuses). Mutation: test `draft` before the action (action-first reads
+    `draft`)."""
+    plan = listed_autoplan(7, _HEAD)
+    assert ag.provenance_reason(plan, "7", _HEAD, cells, authorizer) == expected
 
 
 def test_newest_autoplan_selects_by_id_not_by_creation():
@@ -1112,7 +1192,8 @@ _EARLIER, _READY = _ended(5), _ended(9)
 
 
 def test_newest_autoplan_reads_past_a_deferred_ready_run():
-    """Mutation: drop the skip (return the newest run, R)."""
+    """The listing is in ascending id order. Mutation: drop the skip (return the newest run, R).
+    Mutation: drop `_walk`'s sort (run 5's jobs are read, unexpected)."""
     newest, argv = _walk([_EARLIER, _READY], {9: _jobs_body("deferred")})
     assert newest == {
         "id": 5,
@@ -1219,6 +1300,133 @@ def test_newest_autoplan_returns_a_lone_completed_run_without_reading_its_jobs()
     deferred jobs skip the only run and None returns)."""
     newest, argv = _walk([_READY], {9: _jobs_body("deferred")})
     assert (newest, argv) == (_READY, [autoplans_read("o/r", _HEAD)])
+
+
+#: Push run 1000 by `k3np` and the ready-for-review run 1001 its clicker `octocat` started.
+_CLICKER = {"login": "octocat"}
+_PUSH = listed_autoplan(1000, _HEAD, status="completed", conclusion="success", run_attempt=1)
+_CLICK = listed_autoplan(
+    1001,
+    _HEAD,
+    status="completed",
+    conclusion="success",
+    run_attempt=1,
+    actor=_CLICKER,
+    triggering_actor=_CLICKER,
+)
+_LIVE = {**_CLICK, "status": "in_progress", "conclusion": None}
+
+
+def _source(rows, jobs):
+    """`auto_source`'s `(plan id, authorizer id)` over listing `rows`, each jobs read of run
+    id `k` answered by `jobs[k]`, and every argv it ran."""
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in rows)
+        return jobs[int(args[2].split("/")[5])]
+
+    plan, authorizer = ag.auto_source("o/r", _HEAD, run=run)
+    return (plan and plan["id"], authorizer and authorizer["id"]), argv
+
+
+def _short():
+    """`deferred_in_progress_jobs` counting one job more than it lists."""
+    body = json.loads(deferred_in_progress_jobs())
+    body["total_count"] += 1
+    return json.dumps(body)
+
+
+def _defer_running():
+    """`deferred_in_progress_jobs` with `plan / defer` itself still `in_progress`."""
+    body = json.loads(deferred_in_progress_jobs())
+    for job in body["jobs"]:
+        if job["name"] == "plan / defer":
+            job |= {"status": "in_progress", "conclusion": None}
+    return json.dumps(body)
+
+
+@pytest.mark.parametrize(
+    ("rows", "jobs", "expected"),
+    [
+        pytest.param([_CLICK, _PUSH], _jobs_body("deferred"), (1000, 1001), id="ended-deferred"),
+        pytest.param([_PUSH, _LIVE], deferred_in_progress_jobs(), (1000, 1001), id="dispatching"),
+        pytest.param(
+            [_PUSH, _CLICK], deferred_auto_failed_jobs(), (1000, 1001), id="dispatch-failed"
+        ),
+        pytest.param([_PUSH, _LIVE], _defer_running(), (1001, 1001), id="defer-running"),
+        pytest.param(
+            [_PUSH, {**_LIVE, "status": "queued"}],
+            json.dumps({"total_count": 0, "jobs": []}),
+            (1001, 1001),
+            id="queued-no-jobs",
+        ),
+        pytest.param([_PUSH, _CLICK], _jobs_body("zero-cell"), (1001, 1001), id="planned"),
+        pytest.param(
+            [{**_PUSH, "conclusion": "failure"}, _CLICK],
+            _jobs_body("deferred"),
+            (1001, 1001),
+            id="plan-failed",
+        ),
+        pytest.param(
+            [{**_PUSH, "head_sha": "b" * 40}, _CLICK],
+            _jobs_body("deferred"),
+            (1001, 1001),
+            id="plan-of-another-head",
+        ),
+    ],
+)
+def test_auto_source_names_the_plan_and_the_run_that_authorizes_it(rows, jobs, expected):
+    """One listing, then run 1001's jobs once. Mutation: return `(plan, plan)` (every deferred row
+    names 1000 twice). Mutation: require `completed` before reading a run's jobs (dispatching
+    names 1001 twice). Mutation: make `deferred` require every other job `skipped` or `success`
+    (dispatch-failed names 1001 twice). Mutation: treat any in-progress run as deferred
+    (defer-running names 1000). Mutation: skip the jobs read and treat the run as deferred
+    (planned names 1000). Mutation: drop the plan-status check (plan-failed names 1000).
+    Mutation: drop the head check (plan-of-another-head names 1000). Mutation: raise on a live
+    run's empty jobs listing as on an ended one (queued-no-jobs raises `ValueError`). Mutation: call
+    `autoplan_runs` twice (the argv lists it twice)."""
+    assert _source(rows, {1001: jobs}) == (
+        expected,
+        [autoplans_read("o/r", _HEAD), _jobs_argv(1001)],
+    )
+
+
+def test_auto_source_raises_on_a_live_runs_short_jobs_listing():
+    """A short listing may hide `defer`. Mutation: treat a live run's short listing as not
+    deferred (1001 names itself twice)."""
+    with pytest.raises(ValueError, match="the jobs of autoplan run 1001 could not be listed"):
+        _source([_PUSH, _LIVE], {1001: _short()})
+
+
+def test_auto_source_of_an_empty_listing_is_none_twice():
+    """Mutation: return `None` (unpacking it raises)."""
+    assert _source([], {}) == ((None, None), [autoplans_read("o/r", _HEAD)])
+
+
+def test_a_failed_dispatch_leaves_the_ready_run_read_past_by_newest_autoplan():
+    """Its job-level `continue-on-error` leaves the run `success`. Mutation: make `deferred`
+    require every other job `skipped` or `success` (run 1001 returns)."""
+    newest, argv = _walk([_PUSH, _CLICK], {1001: deferred_auto_failed_jobs()})
+    assert (newest, argv) == (_PUSH, [autoplans_read("o/r", _HEAD), _jobs_argv(1001)])
+
+
+def test_auto_source_does_not_cache_a_running_runs_jobs():
+    """Two reads while run 1001 dispatches read its jobs twice: it may yet be re-run. Mutation:
+    cache the verdict of a run still running (the second read skips the jobs)."""
+    argv = []
+
+    def run(args):
+        argv.append(args)
+        if args == autoplans_read("o/r", _HEAD):
+            return "".join(json.dumps(row) + "\n" for row in [_PUSH, _LIVE])
+        return deferred_in_progress_jobs()
+
+    sources = [ag.auto_source("o/r", _HEAD, run=run) for _ in range(2)]
+    assert sources == [(_PUSH, _LIVE)] * 2
+    assert argv == [autoplans_read("o/r", _HEAD), _jobs_argv(1001)] * 2
 
 
 @pytest.mark.parametrize("name", ["plan / defer", "plan / detect"])

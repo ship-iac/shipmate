@@ -445,7 +445,7 @@ def _check_apply_mode(entry, env, errors):
     """`apply_mode` is exactly the string `targeted`, `bare` or `auto`. Anything else reads as
     set to a person and resolves as `bare`, which puts the environment on a bare
     `shipmate apply`. `auto` also requires `review: false` on the entry: an `auto` apply
-    starts on a push, so it has no approving review to wait for.
+    starts after an autoplan, so it has no approving review to wait for.
 
     `load_config` refused any value holding a reference, so the value here is written in the
     file.
@@ -458,8 +458,8 @@ def _check_apply_mode(entry, env, errors):
     elif entry.get("apply_mode") == "auto" and entry.get("review") is not False:
         errors.append(
             f"::error::environments.{env}.apply_mode is auto, which requires review: false on "
-            "the same entry. An auto apply starts on a push and does not wait for an approving "
-            "review."
+            "the same entry. An auto apply starts after an autoplan and does not wait for an "
+            "approving review."
         )
 
 
@@ -635,10 +635,10 @@ def command_hints(table):
 def mode_envs(table, mode):
     """Environments whose entry holds `apply_mode: <mode>`, sorted.
 
-    `auto` environments are the ones a push applies. `targeted` environments are the ones a
-    bare `shipmate apply` skips: each needs its own `shipmate apply <env>`; a bare apply
-    reaches an `auto` environment like a `bare` one. `validate_structure` refuses any value
-    but `targeted`, `bare` and `auto`.
+    `auto` environments are the ones a push or the ready-for-review click applies. `targeted`
+    environments are the ones a bare `shipmate apply` skips: each needs its own
+    `shipmate apply <env>`; a bare apply reaches an `auto` environment like a `bare` one.
+    `validate_structure` refuses any value but `targeted`, `bare` and `auto`.
     """
     return sorted(
         e for e, entry in table.get("environments", {}).items() if entry.get("apply_mode") == mode

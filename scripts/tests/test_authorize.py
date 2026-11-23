@@ -744,23 +744,23 @@ def test_permission_reason_names_the_given_subject_and_retry():
     Mutations: write `the commenter` back into the `read` refusal; into the unreadable one; into
     the unadmitted one; write `comment again` back for `retry`."""
     kw = {
-        "subject": "the pusher @k3np",
+        "subject": "the autoplan's actor @k3np",
         "retry": "push again, or a writer comments `shipmate apply`",
     }
     assert [az._permission_reason(p, "apply", **kw) for p in ("read", "", "maintain", "write")] == [
         (
             "not authorized: `shipmate apply` needs write access to this repository, and the "
-            "pusher @k3np's permission is `read`."
+            "autoplan's actor @k3np's permission is `read`."
         ),
         (
-            "not authorized: could not read the pusher @k3np's permission on this repository, so "
-            "`shipmate apply` was not run. This run's log has the API response; push again, or a "
-            "writer comments `shipmate apply`."
+            "not authorized: could not read the autoplan's actor @k3np's permission on this "
+            "repository, so `shipmate apply` was not run. This run's log has the API response; "
+            "push again, or a writer comments `shipmate apply`."
         ),
         (
             "not authorized: `shipmate apply` needs write access to this repository, and GitHub "
-            "reported the pusher @k3np's permission as `maintain`, which this engine does not "
-            "admit."
+            "reported the autoplan's actor @k3np's permission as `maintain`, which this engine "
+            "does not admit."
         ),
         None,
     ]

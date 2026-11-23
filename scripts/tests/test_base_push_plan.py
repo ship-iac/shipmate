@@ -508,7 +508,7 @@ def test_the_mint_is_display_only_with_its_permissions_whole():
     `permission-checks`."""
     mint = step_by("base-push-plan", name=MINT)
     assert (mint["id"], mint["continue-on-error"]) == ("token", True)
-    assert mint["uses"] == step_by("summary", id="autotoken")["uses"]
+    assert mint["uses"] == step_by("auto-dispatch", id="autotoken")["uses"]
     assert mint["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",

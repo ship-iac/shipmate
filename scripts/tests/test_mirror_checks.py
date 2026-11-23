@@ -211,7 +211,6 @@ EXPECTED_STEP_NAMES = [
     "Mint the plan dispatch token",
     "Dispatch a plan of the live head",
     "Decide whether to dispatch an auto apply",
-    "Mint the auto apply dispatch token",
     "Dispatch an auto apply",
 ]
 

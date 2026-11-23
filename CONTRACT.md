@@ -466,7 +466,7 @@ off the pull request's checks list.
   itself, that exists purely to scope the App private key to the
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
-  `claim`, `defer`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
+  `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
   `claim`, `queue` and `outcome`, `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
   `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete`,
@@ -889,7 +889,7 @@ variable rows depend on the run as well as the file, so they are not structural.
 | For one workload, a role name and no account | a name becomes `arn:aws:iam::<account>:role/<name>` and has no account to go in it |
 | For one workload, a full ARN and an account | an ARN carries its own account, so the file would hold two for one role |
 | `split` or `review` that is not `true` or `false`, or `apply_mode` that is not `targeted`, `bare` or `auto` | any other value would otherwise resolve to the default: `split: no` binds the split pair the repository believes it gave up, `apply_mode: Targeted` puts the environment on a bare `shipmate apply`, and `review: no` leaves it under review. A variable reference refuses before it resolves, even one that would resolve to a valid value, so the refusal never quotes its value |
-| `apply_mode: auto` on an entry that does not hold `review: false` | an `auto` apply starts on a push and does not wait for an approving review, so an entry under review cannot take it. One refusal names both keys |
+| `apply_mode: auto` on an entry that does not hold `review: false` | an `auto` apply starts after an autoplan and does not wait for an approving review, so an entry under review cannot take it. One refusal names both keys |
 | A `split: false` environment naming an identity that sets `aws.plan` | a shared environment is one GitHub Environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
 | `vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape | a string where a mapping is required, and the reverse |
@@ -1551,8 +1551,9 @@ re-run that run, not both. A re-run of an apply run applies no cell either way
 Every dispatching verb dispatches the same file,
 `.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
 selects the job: `plan` → the `plan` job, `apply` → the `apply` job, `unlock` → the `unlock`
-job. A fourth verb, `auto` → the `auto` job, is sent only by a plan run's `summary`
-job after an autoplan (§`apply_mode: auto`); no comment sends it, and
+job. A fourth verb, `auto` → the `auto` job, is sent only by a plan run (its `summary`
+or `defer-auto` job) through `actions/auto-dispatch` after an autoplan
+(§`apply_mode: auto`); no comment sends it, and
 `actions/dispatch` refuses it. That file carries four triggers; `workflow_dispatch` is the one a
 commented verb reaches, and the other three (`pull_request_target`,
 `issue_comment`, `push`) fire from their own events. `doctor`, `help` and
@@ -2585,10 +2586,12 @@ cell's newest apply check still records the wave row's plan run and plan-text di
 and is no behind record (§`apply_mode: auto`, Wave re-check, for the texts). Under
 `apply_mode: auto` it also refuses unless the wave row's plan run is the plan run detect bound, the pull request is not a draft, the plan run detect bound is
 still the head's newest autoplan, a `pull_request_target` run of the head, and the run the
-cell's newest plan record names, that record names a push event action (`opened` or
-`synchronize`), no newer `shipmate plan` run of the pull request created since the plan run
-is live or planned, and the plan run's pusher
-still passes detect's pusher check (§`apply_mode: auto`, same function and
+cell's newest plan record names, that record names an event action that starts an auto
+apply (`opened`, `synchronize` or `ready_for_review`), a record saying its push landed on a
+draft is still authorized by a ready-for-review run that deferred to its plan, no newer
+`shipmate plan` run of the pull request created since the plan run
+is live or planned, and the autoplan actor
+still passes detect's autoplan actor check (§`apply_mode: auto`, same function and
 wording). Mergeability is not re-read: a base move refuses already. A read that fails refuses with
 `` apply aborted for `<env>` / `<stack>`: could not confirm <what> (<why>); push,
 or comment `shipmate apply` on the pull request ``, and every other `auto`
@@ -2710,7 +2713,7 @@ mints, so every `shipmate apply` refuses at `lock` (`docs/github-app.md`
 
 An environment whose entry holds `apply_mode: auto` applies after its autoplan,
 with no comment. The entry must also hold `review: false` (§Refusals): an
-`auto` apply starts on a push, so there is no approving review to wait for. A
+`auto` apply starts after an autoplan, so there is no approving review to wait for. A
 bare and a targeted `shipmate apply` reach an `auto` environment as they reach a
 `bare` one.
 
@@ -2724,22 +2727,25 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   (§Plan comment);
 - the run is a `pull_request_target` run, an autoplan, on its first attempt: a
   `shipmate plan` run and a re-run dispatch nothing;
-- the event payload's `action` is `opened` or `synchronize`, a push: an autoplan
-  started by marking the pull request ready for review or reopening it, or with
-  an unreadable payload, dispatches nothing, and `shipmate apply` applies it;
+- the event payload's `action` is `opened`, `synchronize` or `ready_for_review`:
+  a push, or the click that marks the pull request ready for review. An autoplan
+  started by reopening the pull request, or with an unreadable payload,
+  dispatches nothing, and `shipmate apply` applies it;
+- the event payload's `pull_request.draft` is not `true`: a push onto a draft
+  dispatches nothing and logs "this plan's push landed on a draft; the run that
+  marking it ready started decides the auto apply";
 - the pull request is not a draft;
 - the gate is `pending` over a completely published plan with an apply check
   pending;
 - a changed cell of this run is in an `apply_mode: auto` environment of the
   default branch's table;
 - this run is the head's newest autoplan run, as `apply-gate.newest_autoplan`
-  lists them, the check the `auto` run's provenance check repeats: a
-  ready-for-review run of the same head is never an `auto` source, yet it is
-  the newest unless it completed after deferring to an earlier plan
-  (§Post-plan topology, `defer`), and an `auto` run from the older push's plan would refuse it as
-  `newer`. So a push run of a head marked ready for review while it ran starts
-  no `auto` run: the ready-for-review run is still waiting behind it, and
-  `shipmate apply` applies that plan. A newer run logs "autoplan run <id> of <head> is newer than this run;
+  lists them, the check the `auto` run's provenance check repeats. A
+  ready-for-review run of the same head is the newest unless it completed after
+  deferring to an earlier plan (§Post-plan topology, `defer`). So a push run of
+  a head marked ready for review while it ran starts no `auto` run: the
+  ready-for-review run is still waiting behind it, and decides the `auto` apply
+  of this run's plan when it defers to it (Deferred dispatch, below). A newer run logs "autoplan run <id> of <head> is newer than this run;
   no auto apply started; comment shipmate apply to apply". A listing that holds
   no run as new as this one lags it and dispatches with the warning "autoplan
   run <id> of <head> is not listed yet; dispatching the auto apply, whose own
@@ -2748,6 +2754,52 @@ pr_number: <n>}` when all of these hold (`scripts/auto-dispatch`):
   auto apply not started: the autoplan runs of this head could not be read;
   comment `shipmate apply` ``. An autoplan created
   after this read still makes the `auto` run refuse.
+
+**Deferred dispatch.** When a ready-for-review run defers to the push run's
+published plan (§Post-plan topology, `defer`), its `defer-auto` job sends the
+same body for that plan (`scripts/auto-dispatch deferred`) when all of these
+hold:
+
+- the run is the first attempt of a `pull_request_target` `ready_for_review`
+  run of a pull request that is not a draft and not from a fork, and its `defer`
+  named the earlier plan run;
+- the head's newest `shipmate / gate` is `pending` and names that plan run;
+- a queued apply check of that plan run that is no behind record and names the
+  event action `opened`, `synchronize` or `ready_for_review` is in an
+  `apply_mode: auto` environment of the default branch's table;
+- the head's autoplans resolve to that plan run as the plan and this run as its
+  authorizer (Provenance, below);
+- this run's actor, the clicker, passes the autoplan actor check (below): a bot
+  or a clicker without write access dispatches nothing.
+
+A failed condition logs `no auto apply dispatched: <reason>` and dispatches
+nothing. Past that change, a provenance mismatch posts no reply only when the
+head's autoplans resolve, as the authorizer, to a newer run that took over the
+decision: its `plan / defer` job is listed `queued`, `waiting`, `pending`,
+`requested` or `in_progress`, or `completed` `success`. A newer run whose
+`plan / defer` job is `completed` `skipped`, `cancelled` or `failure`, or not
+listed, has not taken over: a reopened or other non-ready run skips `defer` and
+states its own auto line in its plan comment. Accepted limits, both without a
+reply: a newer ready-for-review run cancelled after its `defer` job succeeded,
+and a newer run whose `defer` job is listed but not yet `completed` and that
+later does not succeed (skipped, cancelled or failed; a reopened run states its
+own auto line). Any other mismatch, such as a
+listing that does not show this run yet, posts one reply, ``🔴 refused: auto apply not started:
+the autoplans of <head> resolve to plan run <id> authorized by run <id>, not plan
+run <id> authorized by this run <id>; comment `shipmate apply` ``, and a listing
+that holds no autoplan run of the head replies ``🔴 refused: auto apply not
+started: no autoplan run of <head> is listed yet; comment `shipmate apply` ``.
+When the clicker's check refuses on a permission it read, a change already called
+for an auto apply, so it also posts one reply, ``🔴 refused: auto apply not
+started: <reason>``, the autoplan actor check's reason as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
+A read that fails before a change of an `auto` environment is known warns and
+posts no reply; a failed autoplan listing, or a clicker's permission that could
+not be read, after it warns and posts one reply,
+``🔴 failed: auto apply not started: what decides it for this ready-for-review
+run could not be read; comment `shipmate apply` ``. A failed dispatch replies as
+below. Only a failed `verify-app-key` or `python-yaml` step ends `defer-auto`
+`failure`, and the run still ends `success`; a failed decision or dispatch warns
+or replies and ends `defer-auto` `success`.
 
 The dispatch token is an App token minted for it alone, with `actions: write`.
 The consumer's `auto` job, selected by `verb: auto`, calls `apply.yml` with
@@ -2771,15 +2823,16 @@ decide (`detect`'s `auto_envs` output missing or malformed, a cell summary
 unparseable) warns and posts no reply. Neither changes the gate.
 
 When an autoplan of a pull request that is not a draft changes a cell of an
-`auto` environment that no other pull request locks, but a push did not start
-it, its plan comment says why no `auto` apply follows, under the verdict:
+`auto` environment that no other pull request locks, but neither a push nor the
+ready-for-review click started it (a reopen or an unreadable event did), its plan
+comment says why no `auto` apply follows, under the verdict:
 ``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.``,
 whatever `command_hints` is. A re-run of such an autoplan keeps the
 line: no attempt of it dispatches. A `shipmate plan` run carries no such line: it
 cannot tell whether an `auto` apply of the head is running. Known limit: an
-autoplan started by converting the pull request to a draft and back, or by
-closing and reopening it, on the same head while an earlier `auto` apply of it
-runs shows the line although that apply is running.
+autoplan started by closing and reopening the pull request on the same head
+while an earlier `auto` apply of it runs shows the line although that apply is
+running.
 
 **What an `auto` run applies.** It passes `apply.yml`'s `guard`, waits in its
 pull request's apply queue and passes `apply-run.yml`'s `review` as any apply
@@ -2821,7 +2874,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
 - **Provenance.** Every cell to apply must record one plan run, and it must
   be the newest run listed by
   `actions/workflows/shipmate.yml/runs?event=pull_request_target&head_sha=<head>`,
-  every page read; that listed run's `event` must also be `pull_request_target`
+  every page read, or, when that run is a ready-for-review run whose jobs show it
+  deferred, the newest earlier run it deferred to; that run's `event` must also be `pull_request_target`
   and its `head_sha` the head. A `shipmate plan` run is a `workflow_dispatch`,
   never in this listing, so a cell whose newest plan record names one refuses the run as
   ``plan run <n> is not the newest autoplan of the head (run <m> is)`` or, with
@@ -2831,13 +2885,21 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   the head that published no apply check refuses it too, which the record-based
   binding of the bare and targeted forms cannot see (§Apply-match
   fingerprint). Every cell's record must also name the
-  event action `opened` or `synchronize`: a ready-for-review or reopen autoplan
-  of the head dispatches nothing yet becomes its newest autoplan, unless it is a
-  ready-for-review run that completed after deferring to an earlier plan, and
-  whoever clicked is no pusher. A record with no action refuses too:
-  ``auto apply refused: the plan records of <cells> name no push event action
-  (opened or synchronize), so no push started that plan.`` The wave pre-apply
-  check repeats this on the cell's newest record.
+  event action `opened`, `synchronize` or `ready_for_review`: a reopen autoplan
+  of the head dispatches nothing yet becomes its newest autoplan. A record with
+  no action refuses too: ``auto apply refused: the plan records of <cells> name
+  no event action that starts an auto apply (opened, synchronize or
+  ready_for_review).`` A plan run whose event payload said draft, a push onto a
+  draft, writes `"draft":true` into each of its apply checks' `external_id`
+  records; the key is written only when true. Such a plan applies only when its
+  authorizer is a distinct ready-for-review run of the head, newer than the plan
+  run, whose jobs show it deferred; otherwise: ``auto apply refused: the plan
+  records of <cells> say their plan's push landed on a draft, and no
+  ready-for-review run of the head that deferred to plan run <n> is listed, so
+  nothing authorizes it.`` The wave pre-apply check repeats both on the cell's
+  newest record, the draft one as ``apply aborted for <where>: the cell's plan
+  record says its push landed on a draft, and the newest autoplan of <head> is no
+  ready-for-review run that deferred to plan run <n>; comment `shipmate apply` ``.
 - **Newer plan.** Once provenance passes, `detect` lists
   `actions/workflows/shipmate.yml/runs?event=workflow_dispatch&created=>=<created_at>`,
   `>=` URL-encoded, from the plan run's `created_at`, every page and status, and
@@ -2881,27 +2943,28 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   before it can be missing from the listing, and a re-run of a plan run created
   before the plan run is outside the window. Each wave cell repeats the check
   over the same window (§Wave re-check).
-- **Pusher.** The listed run's `actor`, the pusher, must equal its
-  `triggering_actor` and must have write access. A re-run of the autoplan keeps
-  `actor` and names the re-runner as `triggering_actor`, so it refuses:
+- **Autoplan actor.** The authorizing run's `actor` must equal its
+  `triggering_actor` and must have write access. That actor is the pusher of a
+  push onto a ready pull request, the clicker of a ready-for-review run that
+  planned, or the clicker of a ready-for-review run that deferred to the plan
+  (Provenance, above). A re-run of the autoplan keeps `actor` and names the
+  re-runner as `triggering_actor`, so it refuses:
   ``not authorized: the autoplan ran as @<actor> but was triggered by
-  @<triggering actor>, so it was re-run, and auto authorizes only the push
-  itself; a writer comments `shipmate apply`.`` The listed run carries no event
-  action, so a ready-for-review or reopen autoplan is kept out by the dispatch
-  condition above, not here; a ready-for-review run that completed after
-  deferring is never the listed run. The permission is read with the `detect` job's `GITHUB_TOKEN` from
+  @<triggering actor>, so it was re-run, and auto authorizes only the push or
+  ready click itself; a writer comments `shipmate apply`.`` A re-run by the same
+  login passes, but only a first attempt dispatches. The permission is read with the `detect` job's `GITHUB_TOKEN` from
   `collaborators/<login>/permission` and decided by
   `authorize._permission_reason`, the function that decides a commenter:
   ``not authorized: `shipmate apply` needs write access to this repository, and
-  the pusher @<login>'s permission is `<permission>`.`` for `read` and `none`,
-  and ``... and GitHub reported the pusher @<login>'s permission as `<permission>`,
+  the autoplan's actor @<login>'s permission is `<permission>`.`` for `read` and `none`,
+  and ``... and GitHub reported the autoplan's actor @<login>'s permission as `<permission>`,
   which this engine does not admit.`` for any other value. An unreadable
   permission ends ``push again, or a writer comments `shipmate apply`.`` A
-  pusher whose login ends `[bot]` refuses without a read: ``not authorized: the
-  head was pushed by @<login>, a bot account, which auto never authorizes; a
+  actor whose login ends `[bot]` refuses without a read: ``not authorized: the
+  autoplan was started by @<login>, a bot account, which auto never authorizes; a
   writer comments `shipmate apply`.``
 
-With no cell to apply, neither the autoplan listing nor the pusher is read.
+With no cell to apply, neither the autoplan listing nor the autoplan actor is read.
 
 **Overlap.** A cell `detect` would apply is held when merging the base tip into
 the head changes its stack, directly or through a module it sources on the
@@ -2985,10 +3048,12 @@ the wave row's plan run and plan-text digest and is no behind record. Each
 `auto` wave cell also refuses unless the wave row's plan run is the plan run
 `detect` bound, which apply-cell downloads, the plan run `detect` bound is still the
 head's newest autoplan, a `pull_request_target` run of the head, and the run the
-cell's newest plan record names, that record names a push event action
-(`opened` or `synchronize`), the pull request is still not a draft, no newer
+cell's newest plan record names, that record names an event action that starts an
+auto apply (`opened`, `synchronize` or `ready_for_review`), a record saying its
+push landed on a draft is still authorized by a ready-for-review run that deferred
+to its plan, the pull request is still not a draft, no newer
 `shipmate plan` run of the pull request counts (the Newer plan check above), and
-the pusher still passes the pusher check above. The cell lists the plan runs created
+the autoplan actor still passes the autoplan actor check above. The cell lists the plan runs created
 since the plan run's `created_at`, the window `detect` read, not since the apply
 run's: a plan run `detect` listed as ended can be re-run while the wave waits,
 keeping its `created_at`, and one missing from `detect`'s lagging listing shows
@@ -3030,12 +3095,12 @@ for a bare apply, a `targeted` one or a skipped one is never `🟢` (§Apply res
 comment). A
 `detect` refusal shows in the comment's error fence. Under the verdict line, the
 comment says ``dispatched as an `apply_mode: auto` apply``. When `detect` wrote
-the login that triggered the listed autoplan (the opener for `opened`, the
-pusher for `synchronize`), the line goes on
+the authorizing autoplan's actor (the opener for `opened`, the
+pusher for `synchronize`, the clicker for `ready_for_review`), the line goes on
 `` , after an autoplan triggered by @<!-- -->`<login>` ``: the login sits in a
 code span after `@<!-- -->`, so it mentions nobody. `detect` writes the login
 only when it ends with a cell to apply, so a refusal anywhere in `detect`, the
-pusher check included, leaves it out.
+autoplan actor check included, leaves it out.
 
 **Permissions.** The consumer's `auto` and `apply` jobs grant
 `pull-requests: read`: `detect` and the wave pre-apply check read the pull
@@ -3078,10 +3143,10 @@ The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
-Engine `plan.yml` is eight jobs: `claim`, `facts`, `defer`, `detect`, `plan`,
+Engine `plan.yml` is nine jobs: `claim`, `facts`, `defer`, `defer-auto`, `detect`, `plan`,
 `summary`, `gate-hold`, `outcome`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
-check out the pull request's own head and hold no App credential. `claim`, `defer`,
+check out the pull request's own head and hold no App credential. `claim`, `defer`, `defer-auto`,
 `summary`, `gate-hold` and `outcome` are the trusted jobs — bound to `shipmate-engine` with
 `deployment: false`, like every engine job binding it, and none
 checks anything out. Every App-authored
@@ -3149,19 +3214,19 @@ attaches to the dispatch ref rather than to the pull request — which is why th
 `summary` job mirrors this run's completed `plan / ` checks onto the head
 commit on an `on-demand` run.
 
-**Requirement: no job in engine `plan.yml` other than `claim`, `defer`, `summary`, `gate-hold` and
+**Requirement: no job in engine `plan.yml` other than `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and
 `outcome` may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
 a ref the environment's policy admits — the base ref, or the ref the plan was
 dispatched on — and the `plan` job's `environment:` is chosen by
 branch-authored `env/*` tags, so the file naming no such secret outside
-`claim`, `defer`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
+`claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
 `plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
 that copy of the file is the base branch's or the default branch's — never the
 pull request's own.
 
-The eight jobs:
+The nine jobs:
 
 - **`claim`** (engine, a `workflow_dispatch` carrying a `comment_id` only,
   bound to `shipmate-engine`, `permissions: {}`) — claims the command comment
@@ -3176,8 +3241,8 @@ The eight jobs:
   was dispatched with is the only thing it can look one up by; and a
   pull-request event whose payload says draft reads the pull request's draft
   flag once more (the draft clause below). Besides `claim`; `outcome`, which
-  falls back to the dispatch's `pr_number` when `facts` failed; and `defer`,
-  whose `if:` reads the event action, nothing else in the file reads the event
+  falls back to the dispatch's `pr_number` when `facts` failed; and `defer` and
+  `defer-auto`, whose `if:`s read the event action, nothing else in the file reads the event
   payload, and nothing anywhere reads a head SHA or a head repository from a
   dispatch input: the number is all a dispatcher states, and a number cannot lie
   about its own head repository. Its outputs are `head-sha`, `head-repo`,
@@ -3191,14 +3256,24 @@ The eight jobs:
   pull request that is not a draft and not from a fork, bound to
   `shipmate-engine`, `permissions: {}`) — when the pull request's push run
   planned and published this head while the ready click waited, this run plans
-  nothing and posts nothing: `plan / defer` succeeds with the notice "plan run
+  nothing and posts no plan comment: `plan / defer` succeeds with the notice "plan run
   <id> planned and published <sha>; this ready-for-review run plans nothing",
   and `detect`, `plan`, `summary`, `gate-hold` and `outcome` are skipped. That
-  run's plan comment, apply checks and gate stand. A re-run of this run defers
+  run's plan comment, apply checks and gate stand, and `defer-auto` decides its
+  `auto` apply. A re-run of this run defers
   again, so the earlier plan stays; a push plans the new head. When it cannot
   tell, a missing App key or a failed read included, it warns and the run
   plans. It checks nothing out and runs on `ubuntu-slim` whatever `runs_on` the
   caller passes.
+- **`defer-auto`** (engine, the first attempt of a `ready_for_review` run whose
+  `defer` named an earlier plan run, bound to `shipmate-engine`,
+  `permissions: {}`, `continue-on-error: true`) — decides through
+  `actions/auto-dispatch` whether that plan's `apply_mode: auto` environments get
+  an `auto` apply, and dispatches it (§`apply_mode: auto`, "Deferred
+  dispatch"). Only a failed `verify-app-key` or `python-yaml` step ends this
+  job `failure`, and the run still ends `success`; a failed decision or dispatch
+  warns or replies and ends it `success`. It checks nothing out and runs on `ubuntu-slim`
+  whatever `runs_on` the caller passes.
 - **`detect` and `plan`** (engine, either trigger) — they upload plan artifacts
   and cell summaries; they author nothing and mint no App token. `detect` binds
   no environment; `plan` binds only the plan environment for the cell it is
@@ -3480,14 +3555,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-two, which run on
+  every engine job but thirty-three, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
-  `gate-hold` and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
+  `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `claim`, `queue` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-two
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-three
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -3844,7 +3919,7 @@ Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the superseded autoplan lines and a blank
 line on a `shipmate plan` run whose head carries red checks of an earlier
 autoplan run (below), the auto apply line and a blank line when
-an autoplan not started by a push changed a cell of an `auto` environment
+an autoplan started by reopening the pull request or by an unreadable event changed a cell of an `auto` environment
 (§`apply_mode: auto`), the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack that is not local, the lost pairs
@@ -4410,7 +4485,7 @@ names an error. A job that failed without an `::error::` renders no fence.
   head, as the plan comment's does.
 - **Unread report.** `🔴 could not read the detect report; see the run`, under the verdict
   (and under the auto line when there is one). The comment's fields (the dispositions, waiting
-  and held cells, environment order and pusher) reach it as a file, with no size cap. The
+  and held cells, environment order and autoplan actor) reach it as a file, with no size cap. The
   `detect` job writes an empty report before checkout, `apply-detect` overwrites it with the
   complete one, marked `"complete": true`, and the job uploads whichever is there, after a
   failed step too, as the artifact `apply-report-<run attempt>-<random token>`, kept 7 days.

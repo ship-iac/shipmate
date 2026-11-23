@@ -2426,18 +2426,21 @@ def _tip(sha=BASE):
     return json.dumps({"ref": "refs/heads/main", "object": {"sha": sha, "type": "commit"}})
 
 
-def _record(plan_run, run_id=1, action="synchronize", plan_sha256=DIGEST, behind=False):
+def _record(
+    plan_run, run_id=1, action="synchronize", plan_sha256=DIGEST, behind=False, draft=False
+):
     record = {"plan_run": plan_run} | ({} if action is None else {"action": action})
     record |= {} if plan_sha256 is None else {"plan_sha256": plan_sha256}
     record |= {"behind": True} if behind else {}
+    record |= {"draft": True} if draft else {}
     return {
         **_check("apply / dev / stacks/auth", "queued", None, run_id=run_id),
         "external_id": json.dumps(record),
     }
 
 
-def _records(*plan_runs, action="synchronize"):
-    return jsonl(*(_record(r, i, action) for i, r in enumerate(plan_runs, 1)))
+def _records(*plan_runs, action="synchronize", draft=False):
+    return jsonl(*(_record(r, i, action, draft=draft) for i, r in enumerate(plan_runs, 1)))
 
 
 def _held():
@@ -2559,6 +2562,19 @@ def test_verify_refuses_a_pull_request_it_cannot_read(monkeypatch, tmp_path, ans
     )
 
 
+@pytest.mark.parametrize("action", ["opened", "ready_for_review"])
+def test_verify_auto_passes_a_plan_the_ready_click_or_opening_started(
+    monkeypatch, tmp_path, action
+):
+    """Mutation: drop `ready_for_review` from `AUTO_ACTIONS` (the ready row refuses). Mutation:
+    drop `opened` (the opened row refuses)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, _records(RUN, action=action)).on(PLANS_READ, _plans())
+    gh.on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
+    assert gh.drained()
+
+
 def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch, tmp_path):
     """The record check reads the newest record per name: an older check run recording another
     plan run is outvoted. Mutation: route `SHIPMATE_AUTO` `true` like `false` (the listing and
@@ -2571,17 +2587,18 @@ def test_verify_auto_passes_the_newest_autoplan_at_the_detected_base(monkeypatch
     assert gh.drained()
 
 
-@pytest.mark.parametrize("action", ["ready_for_review", "", None])
+@pytest.mark.parametrize("action", ["reopened", "", None])
 def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, action):
-    """A ready-for-review autoplan of the head can become the newest autoplan after detect.
+    """A reopen autoplan of the head can become the newest autoplan after detect.
 
     Mutation: drop the action check from `provenance_reason` (the permission read runs,
-    unexpected)."""
+    unexpected). Mutation: add `reopened` to `AUTO_ACTIONS` (the reopened row reads the
+    permission, unexpected)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the cell's plan record names event action {action!r}, not a push "
-        "(opened or synchronize); comment `shipmate apply`"
+        f"::error::{WHERE} the cell's plan record names event action {action!r}, not one that "
+        "starts an auto apply (opened, synchronize or ready_for_review); comment `shipmate apply`"
     )
 
 
@@ -2651,23 +2668,23 @@ def _pusher_gh(autoplans, permission=None):
             _autoplans(RUN),
             json.dumps({"permission": "read"}),
             "not authorized: `shipmate apply` needs write access to this repository, and the "
-            "pusher @k3np's permission is `read`.",
+            "autoplan's actor @k3np's permission is `read`.",
             id="read",
         ),
         pytest.param(
             _autoplans(RUN),
             FAIL,
-            "not authorized: could not read the pusher @k3np's permission on this repository, "
-            "so `shipmate apply` was not run. This run's log has the API response; push again, "
-            "or a writer comments `shipmate apply`.",
+            "not authorized: could not read the autoplan's actor @k3np's permission on this "
+            "repository, so `shipmate apply` was not run. This run's log has the API response; "
+            "push again, or a writer comments `shipmate apply`.",
             id="unreadable",
         ),
         pytest.param(
             _autoplans(RUN, triggering_actor={"login": "octocat"}),
             None,
             "not authorized: the autoplan ran as @k3np but was triggered by @octocat, so it was "
-            "re-run, and auto authorizes only the push itself; a writer comments `shipmate "
-            "apply`.",
+            "re-run, and auto authorizes only the push or ready click itself; a writer comments "
+            "`shipmate apply`.",
             id="re-run",
         ),
     ],
@@ -2712,10 +2729,10 @@ def test_verify_auto_refuses_a_moved_base(monkeypatch, tmp_path):
     ],
 )
 def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, newest):
-    """Mutation: `min` for `max` in `newest_autoplan` (newer passes). Mutation: skip the
-    comparison when nothing is listed (`newest is not None and ...`: none passes). Mutation:
-    `deferred` returns True (newer-ended's planned jobs read run 4243 past, and run `RUN`
-    passes)."""
+    """Mutation: sort `auto_source`'s listing ascending (newer and newer-ended pass the provenance
+    check, and the record read runs, unexpected). Mutation: skip the comparison when nothing is
+    listed (`newest is not None and ...`: none passes). Mutation: `deferred` returns True
+    (newer-ended's planned jobs read run 4243 past, and the record read runs, unexpected)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
     if '"completed"' in autoplans:
         gh.on(jobs_listing(4243), plan_jobs(4243))
@@ -2725,26 +2742,60 @@ def test_verify_auto_refuses_a_newer_autoplan(monkeypatch, tmp_path, autoplans, 
     )
 
 
-def test_verify_auto_passes_the_push_run_under_a_ready_run_that_deferred(monkeypatch, tmp_path):
-    """Ready run 4243 ended `success` and its jobs show it deferred, so push run `RUN` stays the
-    newest autoplan and its pusher's permission is read. Mutation: revert `newest_autoplan`'s
-    skip (run 4243 refuses as newer)."""
-    clicked = {"login": "octocat"}
-    ready = listed_autoplan(
-        4243,
-        HEAD,
-        status="completed",
-        conclusion="success",
-        run_attempt=1,
-        actor=clicked,
-        triggering_actor=clicked,
-    )
-    autoplans = _autoplans(RUN) + "\n" + json.dumps(ready)
+#: Ready-for-review run 4243 by its clicker octocat, ended `success`.
+_CLICKED = {"login": "octocat"}
+_READY = listed_autoplan(
+    4243,
+    HEAD,
+    status="completed",
+    conclusion="success",
+    run_attempt=1,
+    actor=_CLICKED,
+    triggering_actor=_CLICKED,
+)
+CLICKER_READ = ["gh", "api", f"repos/{REPO}/collaborators/octocat/permission"]
+
+
+def _deferred_gh(records):
+    """The reads of a wave whose listing holds push run `RUN`, ended `success`, under ready run
+    4243, whose jobs show it deferred, with the cell's check runs `records`."""
+    ended = {"status": "completed", "conclusion": "success", "run_attempt": 1}
+    autoplans = _autoplans(RUN, **ended) + "\n" + json.dumps(_READY)
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, autoplans)
-    gh.on(jobs_listing(4243), deferred_jobs()).on(RECORD_READ, _records(RUN))
-    gh.on(PLANS_READ, _plans()).on(PERMISSION_READ, json.dumps({"permission": "write"}))
+    return gh.on(jobs_listing(4243), deferred_jobs()).on(RECORD_READ, records)
+
+
+@pytest.mark.parametrize("draft", [False, True], ids=["pushed-ready", "pushed-draft"])
+def test_verify_auto_passes_the_push_runs_plan_under_a_ready_run_that_deferred_as_its_clicker(
+    monkeypatch, tmp_path, draft
+):
+    """Ready run 4243 ended `success` and its jobs show it deferred, so push run `RUN`'s plan
+    applies, authorized as 4243's clicker: octocat's permission is read, also when the plan's
+    record says its push landed on a draft. Mutation: return `(top, top)` from `auto_source`
+    (run 4243 refuses as newer). Mutation: keep `newest` in `_verify_auto`'s `pusher_reason`
+    call (k3np's permission is read, unexpected). Mutation: pass `newest` as the authorizer to
+    `_verify_plan_record` (pushed-draft refuses as draft)."""
+    gh = _deferred_gh(_records(RUN, draft=draft)).on(PLANS_READ, _plans())
+    gh.on(CLICKER_READ, json.dumps({"permission": "write"}))
     assert _verify(monkeypatch, tmp_path, gh, AUTO) == {}
     assert gh.drained()
+
+
+def test_verify_auto_refuses_a_draft_origin_plan_no_listed_ready_run_authorizes(
+    monkeypatch, tmp_path
+):
+    """Detect saw the deferring ready run, but the wave's listing holds only push run `RUN`,
+    whose record says its push landed on a draft: `auto_source` answers `(RUN, RUN)`, and
+    the refusal comes before any newer-plan or permission read (the strict double holds
+    neither). Mutation: skip `draft` in `_plan_record` (always `False`; the plans read runs,
+    unexpected). Mutation: drop the `draft` cause from `provenance_reason` (the same)."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, _records(RUN, draft=True))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the cell's plan record says its push landed on a draft, and the "
+        f"newest autoplan of {HEAD} is no ready-for-review run that deferred to plan run {RUN}; "
+        "comment `shipmate apply`"
+    )
 
 
 @pytest.mark.parametrize(

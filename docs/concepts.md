@@ -101,7 +101,8 @@ reply when a `shipmate plan` run ends without writing its plan comment, and a
 fourth, `claim`, holds it to add the App's 🚀 to a `shipmate plan` comment, so
 that one run of that comment does the work. A fifth, `defer`, holds it to read
 whether a ready-for-review run's head was already planned and published, so
-that run plans nothing. Fork pull requests are refused before any plan cell starts
+that run plans nothing. A sixth, `defer-auto`, holds it when that run deferred,
+to dispatch the `auto` apply of the plan it deferred to. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check, and

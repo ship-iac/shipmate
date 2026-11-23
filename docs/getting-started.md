@@ -394,7 +394,7 @@ writing `false` gives something up. `apply_mode` is the one enum.
 | --- | --- | --- | --- | --- | --- | --- |
 | `review: false` (`true`) | — | On `REVIEW_REQUIRED`, applies it and holds the environments under review | Authorized on `REVIEW_REQUIRED` | — | Approving review not required; `CHANGES_REQUESTED` still holds or refuses; an unknown or absent decision fails the run. Environment reviewers untouched. At 0 required approving reviews it changes nothing: an environment under review is then held only where a code-owner review is required | The approving review before a pre-merge apply |
 | `apply_mode: targeted` (`bare`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
-| `apply_mode: auto` (`bare`) | — | Applies it | — | — | Requires `review: false` on the entry. The autoplan applies it with no comment, authorized by the pusher's write access. Environment reviewers untouched | The comment before a pre-merge apply |
+| `apply_mode: auto` (`bare`) | — | Applies it | — | — | Requires `review: false` on the entry. The autoplan applies it with no comment, authorized by the write access of the pusher or of whoever marked the pull request ready. Environment reviewers untouched | The comment before a pre-merge apply |
 | `split: false` (`true`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
 | `needs: [<env>]` (none) | Its applies, until the earlier env-levels complete (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
 | `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment, or after a cell another pull request locks, waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
@@ -488,7 +488,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except thirty-two that run neither `terramate` nor `tofu` and stay on
+engine job except thirty-three that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross
@@ -1216,13 +1216,15 @@ environments:
     apply_mode: auto
 ```
 
-Each autoplan a push starts on a ready pull request (event action `opened` or
-`synchronize`) whose plan changes a cell in `dev-eu` then
-dispatches the fence's `auto` job, which applies that environment's pending
-cells when the pusher has write access; it runs as the shipmate App. The table refuses
-`apply_mode: auto` without `review: false`. A draft or unmergeable pull
-request, one whose newest plan came from a `shipmate plan` comment, or one just
-marked ready for review or reopened, does not apply this way; comment
+Each autoplan that a push onto a ready pull request or the ready-for-review
+click starts (event action `opened`, `synchronize` or `ready_for_review`), and
+whose plan changes a cell in `dev-eu`, then dispatches the fence's `auto` job.
+That job applies the environment's pending cells when the pusher or the clicker
+has write access; it runs as the shipmate App. A ready-for-review run that defers
+to the push run's plan dispatches it the same way, authorized as the clicker.
+The table refuses `apply_mode: auto` without `review: false`. A draft or
+unmergeable pull request, one whose newest plan came from a `shipmate plan`
+comment, or one just reopened, does not apply this way; comment
 `shipmate apply` instead. A cell whose stack the merge of the base into the
 branch changes, or removes files it owns, stays pending until the branch is
 updated from the base; a merge conflict, or a failure to read the base or run

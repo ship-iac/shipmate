@@ -2123,9 +2123,9 @@ def _config_defaults(table):
     ]
     if autos:
         auto_line = _Rendered(
-            f"`apply_mode: auto` on {_md_escape(_fit_items(autos, ', ', 400))}: a push applies "
-            "their changed cells after a complete autoplan of a ready pull request, with no "
-            "approving review and no comment."
+            f"`apply_mode: auto` on {_md_escape(_fit_items(autos, ', ', 400))}: a push or the "
+            "ready-for-review click applies their changed cells after a complete autoplan of a "
+            "ready pull request, with no approving review and no comment."
         )
         notices.insert(2, (NOTICE, auto_line))
     return notices

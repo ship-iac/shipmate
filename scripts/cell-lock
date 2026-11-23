@@ -50,9 +50,10 @@ Subcommands, each reading the environment, printing `::notice::` lines and refus
   `SHIPMATE_PLAN_RUN_ID` and digest `SHIPMATE_PLAN_SHA256` and is no behind record
   (`_verify_plan_record`); an empty one of the three refuses before any read. With
   `SHIPMATE_AUTO` `true` it also refuses unless the pull request is not a draft,
-  `SHIPMATE_PROVENANCE_RUN` is the head's newest autoplan and the run the cell's newest plan
-  record names, no newer `shipmate plan` run of the pull request created since that autoplan
-  is live or planned, and its pusher still passes `authorize.pusher_reason`. A "Re-run failed
+  `SHIPMATE_PROVENANCE_RUN` is `apply-gate.auto_source`'s plan and the run the cell's newest plan
+  record names, a draft-origin record has a distinct authorizer, no newer `shipmate plan` run of
+  the pull request created since that autoplan is live or planned, and the authorizer's actor
+  still passes `authorize.pusher_reason`. A "Re-run failed
   jobs" of an apply re-runs its waves without `detect` or `acquire`, and a wave can wait hours
   on an environment approval, so each apply cell checks here before its credentials. The base
   tip comparison is whole-branch: any base merge refuses every cell still to apply in this run.
@@ -1029,22 +1030,26 @@ def _verify_pull(repo, pr, head, where, run):
 
 
 def _plan_record(repo, head, name, run):
-    """(plan run, plan-text digest, event action, behind) the newest App-authored check named
-    `name` on `head` records, from one listing: each of the first three None when absent, and
-    whether it is a behind record (`apply-gate.behind_names`)."""
+    """(plan run, plan-text digest, event action, behind, draft) the newest App-authored check
+    named `name` on `head` records, from one listing: each of the first three None when absent,
+    whether it is a behind record (`apply-gate.behind_names`), and whether its plan's push landed
+    on a draft (`apply-gate.draft_names`)."""
     lines = check_runs(repo, head, run=run, name=name).splitlines()
     app_id = os.environ.get("SHIPMATE_APP_ID", "")
     plan_run, digest, _ = ag.plan_records(lines, app_id).get(name, (None, None, None))
     action = ag.plan_actions(lines, app_id).get(name)
-    return plan_run, digest, action, name in ag.behind_names(lines, app_id)
+    behind = name in ag.behind_names(lines, app_id)
+    return plan_run, digest, action, behind, name in ag.draft_names(lines, app_id)
 
 
-def _verify_plan_record(repo, head, name, plan_run, digest, where, run, newest=None):
+def _verify_plan_record(
+    repo, head, name, plan_run, digest, where, run, newest=None, authorizer=None
+):
     """Refuse unless the newest App-authored check `name` on `head` records plan run `plan_run`
-    with digest `digest`, the wave row's, and is no behind record. `newest`, the auto form's
-    newest autoplan, also runs `apply-gate.provenance_reason` over the record, with its own
-    refusals, before the run and digest comparison."""
-    recorded, recorded_digest, action, behind = _confirm(
+    with digest `digest`, the wave row's, and is no behind record. `newest` and `authorizer`,
+    the auto form's `apply-gate.auto_source` answer, also run `apply-gate.provenance_reason`
+    over the record, with its own refusals, before the run and digest comparison."""
+    recorded, recorded_digest, action, behind, draft = _confirm(
         where,
         f"the cell's newest plan record names plan run {plan_run}",
         lambda: _plan_record(repo, head, name, run),
@@ -1056,7 +1061,8 @@ def _verify_plan_record(repo, head, name, plan_run, digest, where, run, newest=N
             "the base and push"
         )
     if newest is not None:
-        reason = ag.provenance_reason(newest, plan_run, head, {name: (recorded, action)})
+        cells = {name: (recorded, action, draft)}
+        reason = ag.provenance_reason(newest, plan_run, head, cells, authorizer)
         _refuse_provenance(where, head, plan_run, reason)
     if recorded == plan_run and recorded_digest == digest:
         return
@@ -1074,18 +1080,19 @@ def _verify_plan_record(repo, head, name, plan_run, digest, where, run, newest=N
 
 def _verify_auto(repo, head, provenance, digest, env, stack, where, run, pr):
     """The auto form's provenance checks of plan run `provenance`, with plan-text digest
-    `digest`, on `head` for pull request `pr`, a str, then the newer-plan check over the plan
-    runs created since that autoplan: a run `detect` listed can be re-run while the wave
-    waits, keeping its `created_at`."""
-    newest = _confirm(
+    `digest`, on `head` for pull request `pr`, a str, against `apply-gate.auto_source`'s plan
+    and authorizer, then the newer-plan check over the plan runs created since that autoplan: a
+    run `detect` listed can be re-run while the wave waits, keeping its `created_at`. Last, the
+    authorizer's actor must still pass `authorize.pusher_reason`."""
+    newest, authorizer = _confirm(
         where,
         f"plan run {provenance} is the newest autoplan of {head}",
-        lambda: ag.newest_autoplan(repo, head, run=run),
+        lambda: ag.auto_source(repo, head, run=run),
     )
-    reason = ag.provenance_reason(newest, provenance, head, {})
+    reason = ag.provenance_reason(newest, provenance, head, {}, authorizer)
     _refuse_provenance(where, head, provenance, reason)
     name = ag.check_name(stack, env)
-    _verify_plan_record(repo, head, name, provenance, digest, where, run, newest)
+    _verify_plan_record(repo, head, name, provenance, digest, where, run, newest, authorizer)
     what = f"no newer shipmate plan run of pull request #{pr}"
     counted, complete = _confirm(
         where,
@@ -1110,8 +1117,8 @@ def _verify_auto(repo, head, provenance, digest, env, stack, where, run, pr):
             "applies; wait for it to finish, review its plan, then comment `shipmate apply`"
         )
         raise SystemExit(f"::error::apply aborted for {where}: {why}")
-    # The pusher's write access can be revoked while a wave waits on an approval.
-    reason = az.pusher_reason(repo, newest, run=run)
+    # The authorizer's write access can be revoked while a wave waits on an approval.
+    reason = az.pusher_reason(repo, authorizer, run=run)
     if reason:
         raise SystemExit(f"::error::apply aborted for {where}: {reason}")
 
@@ -1137,10 +1144,16 @@ def _refuse_provenance(where, head, provenance, reason):
         recorded = detail[0][1]
         why = "the cell's newest plan record names "
         why += f"{'no plan run' if recorded is None else f'plan run {recorded}'}, {applies}"
+    elif cause == "draft":
+        why = (
+            "the cell's plan record says its push landed on a draft, and the newest autoplan of "
+            f"{head} is no ready-for-review run that deferred to plan run {provenance}; comment "
+            "`shipmate apply`"
+        )
     else:
         why = (
-            f"the cell's plan record names event action {detail[0][1]!r}, not a push (opened "
-            "or synchronize); comment `shipmate apply`"
+            f"the cell's plan record names event action {detail[0][1]!r}, not one that starts "
+            "an auto apply (opened, synchronize or ready_for_review); comment `shipmate apply`"
         )
     raise SystemExit(f"::error::apply aborted for {where}: {why}")
 

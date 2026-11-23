@@ -41,7 +41,6 @@ from _shipmate import (
     plan_runs_since,
     retried,
     run_annotated,
-    run_jobs,
 )
 
 #: The prefix keeps the gate's pending-apply queue off the plan checks on the same head.
@@ -330,7 +329,7 @@ def is_plan_digest(value):
 
 def plan_actions(check_run_lines, app_id):
     """Map each App-authored apply check name to the `action` its newest record holds, None
-    when it holds none, as an older engine's does; callers compare it with `PUSH_ACTIONS`. A
+    when it holds none, as an older engine's does; callers compare it with `AUTO_ACTIONS`. A
     name whose newest check carries no decodable record is absent. Read beside
     `plan_records`, whose tuple every reader unpacks."""
     return {name: record.get("action") for name, record in _newest_records(check_run_lines, app_id)}
@@ -355,8 +354,20 @@ def behind_names(check_run_lines, app_id):
     }
 
 
-#: The event actions of an autoplan a push started: only its plan applies automatically.
-PUSH_ACTIONS = ("opened", "synchronize")
+def draft_names(check_run_lines, app_id):
+    """The App-authored apply check names whose newest run's record holds `draft` exactly
+    `True`: the plan run's event payload said the pull request was a draft, so its push alone
+    authorizes no auto apply. An absent key or any other value is not draft."""
+    return {
+        name
+        for name, record in _newest_records(check_run_lines, app_id)
+        if record.get("draft") is True
+    }
+
+
+#: The event actions of an autoplan whose plan applies automatically: a push, or the
+#: ready-for-review click, each by a writer that `authorize.pusher_reason` admits.
+AUTO_ACTIONS = ("opened", "synchronize", "ready_for_review")
 
 
 def incomplete_runs(check_run_lines, app_id):
@@ -454,30 +465,70 @@ def autoplan_runs(repo, head, *, run):
 def newest_autoplan(repo, head, *, run):
     """The `autoplan_runs` entry with the greatest `id` that did not defer, or None when none
     is listed. Walking down by id, a run is read past only when it is listed `completed` with
-    conclusion `success`, an older run is listed, and its jobs (`run_jobs`, through `run`), every
-    one at the listed `run_attempt`, are `deferred`: it planned nothing and left the head the
-    older run's plan. Jobs at another attempt are not deferred, as a re-run turned the run live.
-    Retries and raises as `autoplan_runs` does, and raises `ValueError` on an incomplete jobs
-    listing or one `deferred` cannot read."""
-    runs = sorted(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], reverse=True)
+    conclusion `success`, an older run is listed, and its jobs (`listed_jobs` counted, through
+    `run`), every one at the listed `run_attempt`, are `deferred`: it planned nothing and left
+    the head the older run's plan. Jobs at another attempt are not deferred, as a re-run turned
+    the run live. Retries and raises as `autoplan_runs` does, and raises `ValueError` on an
+    incomplete jobs listing or one `deferred` cannot read."""
+    return _walk(repo, autoplan_runs(repo, head, run=run), run)
+
+
+def _walk(repo, runs, run):
+    runs = sorted(runs, key=lambda listed: listed["id"], reverse=True)
     for listed in runs[:-1]:
         if not _deferred_run(repo, listed, run):
             return listed
     return runs[-1] if runs else None
 
 
-def _deferred_run(repo, listed, run):
-    if (listed.get("status"), listed.get("conclusion")) != ("completed", "success"):
+def auto_source(repo, head, *, run):
+    """`(plan, authorizer)` of an auto apply of `head` from one `autoplan_runs` listing, each a
+    listed run object, or `(None, None)` when none is listed. With `T` the greatest id, the
+    authorizer is `T` and the plan is `newest_autoplan`'s walk over the older runs when `T` is a
+    ready-for-review run that deferred to that plan: an older run is listed, `T`'s `status` is a
+    str, `T` is `completed` `success` or not yet `completed`, its jobs at its listed
+    `run_attempt` are `deferred`, and the plan is a `completed` `success` run of `T`'s
+    `head_sha` with a lower id. Otherwise both are `T`. A run still running when read is the
+    deferring run still dispatching when its own auto apply reads it, and its jobs are not
+    cached; one that lists no job yet is not deferred, and one whose jobs listing is incomplete
+    raises.
+    Retries and raises as `newest_autoplan` does."""
+    runs = sorted(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], reverse=True)
+    if not runs:
+        return None, None
+    top, rest = runs[0], runs[1:]
+    status = top.get("status")
+    live = isinstance(status, str) and status != "completed"
+    if not rest or not _deferred_run(repo, top, run, live=live):
+        return top, top
+    plan = _walk(repo, rest, run)
+    if (
+        plan["head_sha"] != top["head_sha"]
+        or plan["id"] >= top["id"]
+        or (plan.get("status"), plan.get("conclusion")) != ("completed", "success")
+    ):
+        return top, top
+    return plan, top
+
+
+def _deferred_run(repo, listed, run, *, live=False):
+    ended = (listed.get("status"), listed.get("conclusion")) == ("completed", "success")
+    if not ended and not live:
         return False
     # An ended attempt's jobs do not change, so one read per attempt serves the process.
     key = (repo, listed["id"], listed.get("run_attempt"))
     if key not in _shipmate.deferred_runs:
-        jobs, complete = run_jobs(repo, listed["id"], run)
-        if not complete:
+        jobs = listed_jobs(repo, listed["id"], run, counted=True)
+        # A live run that lists no job yet has not deferred; a short listing may hide `defer`.
+        if jobs == [] and not ended:
+            return False
+        if not jobs:
             raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
         # Jobs at another attempt are a lagging read or a re-run: not deferred, and read again.
         if not all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs):
             return False
+        if not ended:
+            return deferred(jobs)
         _shipmate.deferred_runs[key] = deferred(jobs)
     return _shipmate.deferred_runs[key]
 
@@ -526,14 +577,15 @@ def status_and_conclusion(listed, what):
     return status, conclusion
 
 
-def provenance_reason(newest, plan_run, head, cells):
+def provenance_reason(newest, plan_run, head, cells, authorizer):
     """The first provenance check the auto apply of `plan_run`, a decimal run id, on `head`
     fails, as `(cause, detail)`, or None when every check passes. Pure: each caller words the
     cause itself from `detail`.
 
-    `newest` is `newest_autoplan`'s object or None. `cells` maps each check name to the
-    `(recorded plan run or None, event action or None)` its record holds, possibly empty;
-    failing names are reported in its order. Checks, in this order:
+    `newest` and `authorizer` are `auto_source`'s plan and authorizer, each None when nothing
+    is listed. `cells` maps each check name to the `(recorded plan run or None, event action or
+    None, draft)` its record holds, possibly empty; failing names are reported in its order.
+    Checks, in this order:
 
     - `("unlisted", None)`: `newest` is None.
     - `("newer", newest["id"])`: the newest autoplan is another run, older or newer. Ids
@@ -543,7 +595,10 @@ def provenance_reason(newest, plan_run, head, cells):
       `event=` filter should already exclude one.
     - `("head", newest["head_sha"])`: it planned another commit than `head`.
     - `("record", [(name, recorded), ...])`: cells recording another plan run.
-    - `("action", [(name, action), ...])`: cells whose action is not in `PUSH_ACTIONS`."""
+    - `("action", [(name, action), ...])`: cells whose action is not in `AUTO_ACTIONS`.
+    - `("draft", [name, ...])`: cells whose record says the plan's push landed on a draft, when
+      no distinct authorizer is given: only the ready-for-review run that deferred to the plan
+      authorizes it."""
     if newest is None:
         return "unlisted", None
     if str(newest["id"]) != plan_run:
@@ -552,11 +607,16 @@ def provenance_reason(newest, plan_run, head, cells):
         return "event", newest["event"]
     if newest["head_sha"] != head:
         return "head", newest["head_sha"]
-    records = [(name, run) for name, (run, _) in cells.items() if run != plan_run]
+    records = [(name, run) for name, (run, _, _) in cells.items() if run != plan_run]
     if records:
         return "record", records
-    actions = [(name, act) for name, (_, act) in cells.items() if act not in PUSH_ACTIONS]
-    return ("action", actions) if actions else None
+    actions = [(name, act) for name, (_, act, _) in cells.items() if act not in AUTO_ACTIONS]
+    if actions:
+        return "action", actions
+    if authorizer is not None and authorizer["id"] != newest["id"]:
+        return None
+    drafts = [name for name, (_, _, draft) in cells.items() if draft]
+    return ("draft", drafts) if drafts else None
 
 
 def newer_plans(repo, pr_number, newest, *, since, run):

@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ''
   auto:
-    description: "'true' runs the auto form, the bare form over the `apply_mode: auto` environments, dispatched by the App after an autoplan: it refuses unless the actor is the App's bot, the plan is the head's newest autoplan, no newer shipmate plan run of the pull request is live or planned, its pusher has write access and the pull request is mergeable at this head, and holds a cell whose stack the merge of the base into the branch changes, directly or through a module it sources, or removes files it owns, or whose apply check records that its plan found the base changed it."
+    description: "'true' runs the auto form, the bare form over the `apply_mode: auto` environments, dispatched by the App after an autoplan: it refuses unless the actor is the App's bot, the plan is the head's newest autoplan, no newer shipmate plan run of the pull request is live or planned, the autoplan's actor has write access and the pull request is mergeable at this head, and holds a cell whose stack the merge of the base into the branch changes, directly or through a module it sources, or removes files it owns, or whose apply check records that its plan found the base changed it."
     required: false
     default: "false"
   report-path:

@@ -218,13 +218,18 @@ closes the branch-authored-workflow path outright; everything else narrows it.
 Write access is also the grant that runs every comment verb but `help`: apply,
 unlock, plan and doctor. So review the list as you would the apply role.
 
-On an `apply_mode: auto` environment a push is enough. The plan run's `summary`
-job dispatches the `auto` apply with an App token, so it runs as the shipmate
-App, and `detect` refuses any other actor or triggering actor, so a human's
-re-run of it refuses. It is authorized as the pusher of the
-autoplan it applies, started by a push (`opened` or `synchronize`): that run's
-`actor`, which must also be its `triggering_actor`, and whose permission must be
-`write` or `admin`, decided by the same function that decides a commenter. It
+On an `apply_mode: auto` environment a push or a ready click is enough. The plan
+run's `summary` or `defer-auto` job dispatches the `auto` apply with an App
+token, so it runs as the shipmate App, and `detect` refuses any other actor or
+triggering actor, so a human's re-run of it refuses. It is authorized as the
+actor of the autoplan that started it (`opened`, `synchronize` or
+`ready_for_review`): the pusher, or whoever marked the pull request ready for
+review, also when that ready-for-review run deferred to the push run's plan. That
+run's `actor` must also be its `triggering_actor`, and its permission must be
+`write` or `admin`, decided by the same function that decides a commenter. A
+plan of a push onto a draft applies automatically only under that ready click:
+its apply checks record `"draft":true`, and `detect` and each wave cell refuse it
+unless a ready-for-review run that deferred to it authorizes it. It
 waits for no approving review, because the entry must hold `review: false`; the
 `<env>-apply` environment's required reviewers (§6) still gate each cell
 (`CONTRACT.md` §`apply_mode: auto`).
@@ -1157,10 +1162,11 @@ rather than conventions. The trusted `summary` job declines unless the head
 repository `facts` reported equals `github.repository`, and an absent or empty
 value is a refusal, not a pass: a job-level `if:`, so the job never starts, no
 deployment is created and the environment is never entered. And that job has no
-checkout, so even admitted it would run nothing the fork wrote. The other four
+checkout, so even admitted it would run nothing the fork wrote. The other five
 jobs holding the key check nothing out either. `claim` runs only on a
 `workflow_dispatch` carrying a comment id, which a fork's pull request event never
-is. `defer` carries the same head-repository clause in its own `if:`. `gate-hold` runs only when
+is. `defer` carries the same head-repository clause in its own `if:`. `defer-auto` carries it too, and
+runs only on the first attempt of a ready-for-review run that deferred. `gate-hold` runs only when
 `summary` was cancelled and the run was not; a refused `summary` is skipped, not cancelled.
 `outcome` carries `summary`'s head-repository clause in its own `if:`, except
 after a failed `facts` on a commented plan, when no head is known.

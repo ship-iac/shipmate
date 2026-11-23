@@ -35,7 +35,7 @@ the run refuses.
 
 `SHIPMATE_AUTO=true` selects the auto form, `bare_main(auto=True)`: the bare form over the
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
-refuses unless the actor, the plan's provenance, the pusher's permission and the pull
+refuses unless the actor, the plan's provenance, the autoplan actor's permission and the pull
 request's mergeability hold, and holds a cell whose stack the merge of the base into the
 branch changes or whose apply check records that its plan found the base changed it.
 """
@@ -620,20 +620,21 @@ def refuse_actor(lines, app_id, actor, triggering_actor):
         )
 
 
-def refuse_provenance(repo, head, runnable, actions, pr_number):
-    """The newest autoplan of `head`, refused unless every cell in `runnable` records one plan
-    run and `apply-gate.provenance_reason` admits it, with each cell's event action from
-    `actions` (`apply-gate.plan_actions`), and no `shipmate plan` run of pull request
+def refuse_provenance(repo, head, runnable, actions, drafts, pr_number):
+    """`apply-gate.auto_source`'s `(plan, authorizer)` of `head`, refused unless every cell in
+    `runnable` records one plan run and `apply-gate.provenance_reason` admits it, with each
+    cell's event action from `actions` (`apply-gate.plan_actions`) and its draft origin from
+    `drafts` (`apply-gate.draft_names`), and no `shipmate plan` run of pull request
     `pr_number`, a str, created since the plan run counts as newer (`apply-gate.newer_plans`).
 
     A `shipmate plan` run is a `workflow_dispatch`, so its commenter is lost and nothing
-    authorizes it as the pusher; it is never the autoplan listed. Any actor's newer plan run
-    refuses while live, or once it planned: it rewrites the head's records, so applying the
-    older plan under it would apply what the reviewer no longer sees. A newer autoplan of the
-    head that recorded no cell must not leave an older one applying. A ready-for-review or
-    reopen autoplan dispatches no auto apply yet becomes the newest autoplan, unless a
-    ready-for-review run deferred to an earlier plan, and its clicker is no pusher; a record
-    with no action is an older engine's."""
+    authorizes it as the autoplan's actor; it is never the autoplan listed. Any actor's newer
+    plan run refuses while live, or once it planned: it rewrites the head's records, so applying
+    the older plan under it would apply what the reviewer no longer sees. A newer autoplan of the
+    head that recorded no cell must not leave an older one applying. A reopen autoplan
+    dispatches no auto apply yet becomes the newest autoplan; a ready-for-review run that
+    deferred to an earlier plan leaves that plan applying, authorized as the run's clicker; a
+    record with no action is an older engine's."""
     runs = sorted({c["plan_run_id"] for c in runnable}, key=int)
     if len(runs) > 1:
         listed = "; ".join(
@@ -653,12 +654,15 @@ def refuse_provenance(repo, head, runnable, actions, pr_number):
             f"({listed}), so no one autoplan planned them all. " + _AUTO_REMEDY
         )
     try:
-        newest = ag.newest_autoplan(repo, head, run=_run)
+        newest, authorizer = ag.auto_source(repo, head, run=_run)
     except ValueError as e:
         raise _malformed("autoplan listing", e) from None
     names = [ag.check_name(c["stack"], c["environment"]) for c in runnable]
-    cells = {n: (c["plan_run_id"], actions.get(n)) for n, c in zip(names, runnable, strict=True)}
-    reason = ag.provenance_reason(newest, runs[0], head, cells)
+    cells = {
+        n: (c["plan_run_id"], actions.get(n), n in drafts)
+        for n, c in zip(names, runnable, strict=True)
+    }
+    reason = ag.provenance_reason(newest, runs[0], head, cells, authorizer)
     if reason:
         raise SystemExit(
             f"::error::auto apply refused: {_provenance_text(runs[0], head, *reason)} "
@@ -668,7 +672,7 @@ def refuse_provenance(repo, head, runnable, actions, pr_number):
     reason = ag.newer_plan(*ag.newer_plans(repo, pr_number, newest, since=since, run=_run))
     if reason:
         raise SystemExit(f"::error::auto apply refused: {_newer_plan_text(runs[0], *reason)}")
-    return newest
+    return newest, authorizer
 
 
 def _newer_plan_text(run_id, cause, newer):
@@ -700,7 +704,7 @@ def _provenance_text(run_id, head, cause, detail):
     if cause == "event":
         return (
             f"plan run {run_id} is a `{_or_missing(detail)}` run, not an autoplan: an auto "
-            "apply applies only the plan a push started."
+            "apply applies only an autoplan's plan."
         )
     if cause == "head":
         return f"plan run {run_id} planned {_or_missing(detail)}, not the head {head}."
@@ -709,10 +713,16 @@ def _provenance_text(run_id, head, cause, detail):
             f"the plan records of {named([n for n, _ in detail], _NAMED)} name other plan runs "
             f"than {run_id}."
         )
+    if cause == "draft":
+        return (
+            f"the plan records of {named(detail, _NAMED)} say their plan's push landed on a "
+            f"draft, and no ready-for-review run of the head that deferred to plan run {run_id} "
+            "is listed, so nothing authorizes it."
+        )
     bad = [f"{n} ({a!r})" for n, a in detail]
     return (
-        f"the plan records of {named(bad, _NAMED)} name no push event action (opened or "
-        "synchronize), so no push started that plan."
+        f"the plan records of {named(bad, _NAMED)} name no event action that starts an auto "
+        "apply (opened, synchronize or ready_for_review)."
     )
 
 
@@ -728,13 +738,13 @@ def _malformed(what, e):
     )
 
 
-def refuse_pusher(repo, newest):
-    """The login `authorize.pusher_reason` admits as the pusher of `newest`, the listed
-    autoplan; refuses unless it admits one."""
-    reason = az.pusher_reason(repo, newest, run=_run)
+def refuse_pusher(repo, authorizer):
+    """The login `authorize.pusher_reason` admits as the actor of `authorizer`,
+    `apply-gate.auto_source`'s authorizing autoplan; refuses unless it admits one."""
+    reason = az.pusher_reason(repo, authorizer, run=_run)
     if reason:
         raise SystemExit(f"::error::{reason}")
-    return az._login(newest.get("actor"))
+    return az._login(authorizer.get("actor"))
 
 
 def wait_mergeable(repo, pr_number, head):
@@ -887,12 +897,13 @@ def bare_main(auto=False):
     base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
     it stays pending and stops its environment's `needs` successors, as a locked cell does.
     With a cell to apply, its records must name one plan run that
-    `apply-gate.provenance_reason` admits against the head's newest autoplan listed, no newer
-    `shipmate plan` run of the pull request may be live or have planned (`refuse_provenance`),
-    and that listed run's pusher must have write access (`refuse_pusher`). Writes the bare
-    outputs plus `provenance_run`, empty when no cell applies; its report also holds `pusher`,
-    that run's `actor` login, empty when no cell applies, and `bare_envs`, the pending
-    environments neither `auto`, `targeted` nor held, left for a bare apply.
+    `apply-gate.provenance_reason` admits against `apply-gate.auto_source`'s plan and
+    authorizer, no newer `shipmate plan` run of the pull request may be live or have planned
+    (`refuse_provenance`), and the authorizer's actor must have write access (`refuse_pusher`).
+    Writes the bare outputs plus `provenance_run`, empty when no cell applies; its report also
+    holds `pusher`, the authorizer's `actor` login, empty when no cell applies, and
+    `bare_envs`, the pending environments neither `auto`, `targeted` nor held, left for a bare
+    apply.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -962,9 +973,9 @@ def bare_main(auto=False):
     if auto:
         provenance_run = pusher = ""
         if runnable:
-            actions = ag.plan_actions(lines, app_id)
-            newest = refuse_provenance(repo, head, runnable, actions, pr_number)
-            pusher = refuse_pusher(repo, newest)
+            actions, drafts = ag.plan_actions(lines, app_id), ag.draft_names(lines, app_id)
+            _, authorizer = refuse_provenance(repo, head, runnable, actions, drafts, pr_number)
+            pusher = refuse_pusher(repo, authorizer)
             provenance_run = runnable[0]["plan_run_id"]
         auto_outputs["provenance_run"] = provenance_run
         auto_report = {"pusher": pusher, "bare_envs": sorted(unselected)}
