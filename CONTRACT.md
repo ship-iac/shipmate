@@ -155,8 +155,8 @@ refuses the run before any cell applies.
    its start time set to the release, so GitHub's duration counts from the
    release.
 3. Written once the cell's outcome is read. The summary is never rewritten; the
-   error goes in the title. A check returned to `queued` keeps the start time
-   of its last release.
+   error goes in the title. A check returned to `queued` keeps its last start
+   time.
 
 | Cell outcome | Write |
 | --- | --- |
