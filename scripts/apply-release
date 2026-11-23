@@ -3,7 +3,8 @@
 
 `SHIPMATE_SNAPSHOT_JSON` is the wave's `apply-snapshot` slice, `{check name: [check id, ...]}`.
 Each id gets one PATCH, one at a time, of exactly `{"status": "in_progress", "details_url": <this
-run's page>}` through `patch-checks`, which also writes nothing on a pre-merge re-run, nor on a
+run's page>, "started_at": <the release, UTC, to the second>}` through `patch-checks`, which also
+writes nothing on a pre-merge re-run, nor on a
 pre-merge run whose pull request, `SHIPMATE_PR_NUMBER`, reads merged (one read, one notice; a
 merge deploy reads none). Never `output`: that would replace the check's plan text. A failed
 write or read fails the job, which skips the wave, and the level's `complete` returns every check
@@ -12,23 +13,30 @@ of it to `queued`, titled `Not run`.
 
 import json
 import os
+from datetime import UTC, datetime
 
 from _shipmate import _load, current_run_url, run_annotated
 
 pc = _load("patch-checks")
 
 
-def flips(snapshot, url):
-    """The `patch-checks` write plan flipping every id of `snapshot`, linking `url`."""
+def _now():
+    return datetime.now(UTC)
+
+
+def flips(snapshot, url, started):
+    """The `patch-checks` write plan flipping every id of `snapshot`, linking `url`, started at
+    `started`."""
     return [
-        {"id": cid, "body": {"status": "in_progress", "details_url": url}}
+        {"id": cid, "body": {"status": "in_progress", "details_url": url, "started_at": started}}
         for name in sorted(snapshot)
         for cid in snapshot[name]
     ]
 
 
 def main():
-    pc.write(flips(json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"]), current_run_url()))
+    started = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    pc.write(flips(json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"]), current_run_url(), started))
 
 
 if __name__ == "__main__":
