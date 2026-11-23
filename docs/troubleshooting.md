@@ -2354,7 +2354,7 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    a lagging listing, warning `autoplan run <id> of <head> is not listed yet;
    ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
-   head's autoplan runs not listed or malformed) it warns `could not decide
+   head's autoplan runs could not be read or malformed) it warns `could not decide
    whether to dispatch an auto apply; no auto apply started`. It posts a reply
    only when the autoplan runs could not be read (below). Separately, when an autoplan of a
    pull request that is not a draft was started by neither a push nor the ready

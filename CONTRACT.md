@@ -2779,10 +2779,11 @@ decision: its `plan / defer` job is listed `queued`, `waiting`, `pending`,
 `requested` or `in_progress`, or `completed` `success`. A newer run whose
 `plan / defer` job is `completed` `skipped`, `cancelled` or `failure`, or not
 listed, has not taken over: a reopened or other non-ready run skips `defer` and
-states its own auto line in its plan comment. A newer ready-for-review run
-cancelled after its `defer` job succeeded leaves no reply; this limit is
-accepted. Any other mismatch, such as a listing that does not show this run yet
-or a reopened run on top, posts one reply, ``🔴 refused: auto apply not started:
+states its own auto line in its plan comment. Accepted limits, both without a
+reply: a newer ready-for-review run cancelled after its `defer` job succeeded,
+and a newer run whose `defer` job is still listed waiting on `needs` and later
+skips (a reopened run states its own auto line). Any other mismatch, such as a
+listing that does not show this run yet, posts one reply, ``🔴 refused: auto apply not started:
 the autoplans of <head> resolve to plan run <id> authorized by run <id>, not plan
 run <id> authorized by this run <id>; comment `shipmate apply` ``, and a listing
 that holds no autoplan run of the head replies ``🔴 refused: auto apply not
