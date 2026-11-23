@@ -931,7 +931,8 @@ def _why(exc):
     return one_line(why)
 
 
-_RETRY = "push, or comment `shipmate apply` on the pull request"
+_COMMENT = "comment `shipmate apply` on the pull request"
+_RETRY = f"push, or {_COMMENT}"
 _DEPLOY_RETRY = "re-run the failed deploy jobs"
 
 
@@ -1124,9 +1125,11 @@ def _verify_auto(repo, head, provenance, digest, env, stack, where, run, pr):
 
 
 def _refuse(where, plan_run, head, reason):
+    """Returns when `reason` is None, else raises `SystemExit` with the wave refusal."""
     if reason:
         text = ag.provenance_text(*reason, plan_run, head)
-        raise SystemExit(f"::error::apply aborted for {where}: {text}; {_RETRY}")
+        retry = _COMMENT if reason[0] in ("draft", "action") else _RETRY
+        raise SystemExit(f"::error::apply aborted for {where}: {text}; {retry}")
 
 
 def _draft(pull):

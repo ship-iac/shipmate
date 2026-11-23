@@ -2899,8 +2899,8 @@ holds, cell locks, waiting cells and `targeted` exclusions are the bare form's.
   nothing authorizes it.`` The wave pre-apply check repeats both on the cell's
   newest record, the draft one as ``apply aborted for <where>: the plan records of
   <cells> say their plan's push landed on a draft, and no ready-for-review run of
-  the head that deferred to plan run <n> is listed, so nothing authorizes it; push,
-  or comment `shipmate apply` on the pull request``.
+  the head that deferred to plan run <n> is listed, so nothing authorizes it;
+  comment `shipmate apply` on the pull request``.
 - **Newer plan.** Once provenance passes, `detect` lists
   `actions/workflows/shipmate.yml/runs?event=workflow_dispatch&created=>=<created_at>`,
   `>=` URL-encoded, from the plan run's `created_at`, every page and status, and

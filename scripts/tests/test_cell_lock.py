@@ -2373,7 +2373,8 @@ DIGEST = "e" * 64
 #: The wave row's plan run and digest, and the base tip detect read: a commanded wave's inputs.
 COMMANDED = {"SHIPMATE_BASE_SHA": BASE, "SHIPMATE_PLAN_RUN_ID": RUN, "SHIPMATE_PLAN_SHA256": DIGEST}
 AUTO = {**COMMANDED, "SHIPMATE_AUTO": "true", "SHIPMATE_PROVENANCE_RUN": RUN}
-RETRY = "push, or comment `shipmate apply` on the pull request"
+COMMENT = "comment `shipmate apply` on the pull request"
+RETRY = f"push, or {COMMENT}"
 WHERE = "apply aborted for `dev` / `stacks/auth`:"
 
 
@@ -2593,13 +2594,13 @@ def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, actio
 
     Mutation: drop the action check from `provenance_reason` (the permission read runs,
     unexpected). Mutation: add `reopened` to `AUTO_ACTIONS` (the reopened row reads the
-    permission, unexpected)."""
+    permission, unexpected). Mutation: end `_refuse`'s action refusal with `_RETRY` (red)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the plan records of apply / dev / stacks/auth ({action!r}) name no "
         "event action that starts an auto apply (opened, synchronize or ready_for_review); "
-        f"{RETRY}"
+        f"{COMMENT}"
     )
 
 
@@ -2796,13 +2797,14 @@ def test_verify_auto_refuses_a_draft_origin_plan_no_listed_ready_run_authorizes(
     whose record says its push landed on a draft: `auto_source` answers `(RUN, RUN)`, and
     the refusal comes before any newer-plan or permission read (the strict double holds
     neither). Mutation: skip `draft` in `_plan_record` (always `False`; the plans read runs,
-    unexpected). Mutation: drop the `draft` cause from `provenance_reason` (the same)."""
+    unexpected). Mutation: drop the `draft` cause from `provenance_reason` (the same).
+    Mutation: end `_refuse`'s draft refusal with `_RETRY` (red)."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, draft=True))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
         f"::error::{WHERE} the plan records of apply / dev / stacks/auth say their plan's push "
         "landed on a draft, and no ready-for-review run of the head that deferred to plan run "
-        f"{RUN} is listed, so nothing authorizes it; {RETRY}"
+        f"{RUN} is listed, so nothing authorizes it; {COMMENT}"
     )
 
 

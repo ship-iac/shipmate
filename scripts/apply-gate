@@ -159,8 +159,8 @@ def _applied(row):
         return None
 
     def conclusion(name):
-        named = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
-        return named[0].get("conclusion") if len(named) == 1 else None
+        matches = [s for s in steps if isinstance(s, dict) and s.get("name") == name]
+        return matches[0].get("conclusion") if len(matches) == 1 else None
 
     return not (conclusion(APPLY_STEP) == "skipped" or conclusion(PRE_APPLY_STEP) == "failure")
 
@@ -406,12 +406,12 @@ def incomplete_runs(check_run_lines, app_id):
         counts.setdefault(plan_run, set()).add(cells if valid else None)
     return {
         run: (
-            len(named),
+            len(listed),
             tuple(sorted(c for c in counts[run] if c is not None)),
             None in counts[run],
         )
-        for run, named in names.items()
-        if counts[run] != {len(named)}
+        for run, listed in names.items()
+        if counts[run] != {len(listed)}
     }
 
 
@@ -563,10 +563,10 @@ def deferred(jobs):
     skipped. Raises `ValueError` on two jobs of either name."""
     found = {}
     for name in ("defer", "detect"):
-        named = [j for j in jobs if j.get("name") == CALLER_PREFIX + name]
-        if len(named) > 1:
-            raise ValueError(f"{len(named)} jobs are named {CALLER_PREFIX}{name}")
-        found[name] = [(j.get("status"), j.get("conclusion")) for j in named]
+        matches = [j for j in jobs if j.get("name") == CALLER_PREFIX + name]
+        if len(matches) > 1:
+            raise ValueError(f"{len(matches)} jobs are named {CALLER_PREFIX}{name}")
+        found[name] = [(j.get("status"), j.get("conclusion")) for j in matches]
     return found == {"defer": [("completed", "success")], "detect": [("completed", "skipped")]}
 
 
