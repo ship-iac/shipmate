@@ -1198,8 +1198,21 @@ def test_a_deferred_ready_run_refused_past_a_change_replies_with_the_reason(tmp_
     assert reply.splitlines()[:3] == [
         "### shipmate apply",
         "",
-        f"🔴 refused: auto apply not started: {reason}",
+        f"🔴 refused: auto apply not started: {reason.replace('@', '@<!-- -->')}",
     ]
+
+
+@bash_only
+def test_a_deferred_refusal_reply_mentions_nobody(tmp_path):
+    """Mutation: print the reason raw in `deferred` -- the bare login is posted, red."""
+    proc, _, reply = _decide_deferred(tmp_path, **DEFERRED_REFUSALS["bot clicker"][0])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert reply.splitlines()[2] == (
+        "🔴 refused: auto apply not started: not authorized: the autoplan was started by "
+        "@<!-- -->renovate[bot], a bot account, which auto never authorizes; a writer comments "
+        "`shipmate apply`."
+    )
+    assert "@renovate[bot]" not in reply
 
 
 @bash_only

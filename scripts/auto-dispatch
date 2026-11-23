@@ -20,13 +20,15 @@ from the environment:
 - gate-state's `SHIPMATE_GATE_STATE` and `SHIPMATE_COMMENT_MODE` are `pending` and `post`: the
   plan published completely and nothing holds the gate, and an apply check is pending.
 - this run (`GITHUB_RUN_ID`) is the newest autoplan run of `SHIPMATE_HEAD_SHA` that
-  `apply-gate.newest_autoplan` lists in `GITHUB_REPOSITORY`, the check the `auto` run's own
-  provenance check repeats: a ready-for-review run of the same head is the newest unless it
-  completed after deferring (`apply-gate.deferred`), so a push run whose ready click came while
-  it ran dispatches nothing. Read only once every other condition holds and an `auto`
-  environment holds a change. A listing with no run as new as this one (the listing lagging this
-  run) dispatches with a warning; a failed or malformed listing exits `UNREAD` with one
-  `::error::` line, and the summary replies that no auto apply started.
+  `apply-gate.newest_autoplan` lists in `GITHUB_REPOSITORY`: a ready-for-review run of the same
+  head is the newest unless it completed after deferring (`apply-gate.deferred`), so a push run
+  whose ready click came while it ran dispatches nothing. Read only once every other condition
+  holds and an `auto` environment holds a change. A listing with no run as new as this one (the
+  listing lagging this run) dispatches with a warning; a failed or malformed listing exits
+  `UNREAD` with one `::error::` line, and the summary replies that no auto apply started. The
+  `auto` run's own provenance check reads `apply-gate.auto_source` instead, whose plan is the
+  run a ready-for-review run deferred to, where `newest_autoplan` names that ready-for-review
+  run while it waits or runs.
 
 The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto_envs` output
 (a JSON list of names); a missing or malformed value exits 1 with `::error::`.
@@ -52,7 +54,8 @@ empty listing, prints the mismatch, ending in its remedy, and exits `REFUSED`. A
 malformed listing in check 5, or of that newer run's jobs, exits
 `UNREAD` with one `::error::` line, and so does a clicker's permission check 6 could not read
 (`authorize.UnreadablePermission`); any other refusal in check 6 prints its reason, which carries
-its own remedy, and exits `REFUSED`.
+its own remedy, with an empty HTML comment after each `@` so a login mentions nobody, and exits
+`REFUSED`.
 """
 
 import os
@@ -298,7 +301,9 @@ def deferred(plan_run):
         if isinstance(reason, au.UnreadablePermission):
             print_annotated("::error::the permission of this run's clicker could not be read")
             raise SystemExit(UNREAD)
-        print(reason)
+        # The reply posts this unfenced; an empty HTML comment after `@` keeps a login from
+        # mentioning its user.
+        print(reason.replace("@", "@<!-- -->"))
         raise SystemExit(REFUSED)
     print(" ".join(envs))
 

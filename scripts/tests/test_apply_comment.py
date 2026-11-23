@@ -192,11 +192,28 @@ def test_an_import_only_or_forget_only_capture_renders_its_counts(tmp_path, name
 def test_a_blocked_reason_renders_escaped_on_its_bare_line():
     """cell.json is untrusted, so the reason is `_md_escape`d before it reaches the line.
 
-    Mutation: drop `_md_escape` on the reason in `_state` -- the raw `<a href>` renders, red."""
+    Mutation: drop `_md_name` on the reason in `_state` -- the raw `<a href>` renders, red."""
     row = _row(status="blocked", reason='<a href="https://evil">x</a>', apply_text=None)
     assert _comment([row]) == (
         f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cell, 1 blocked\n\n"
         '⚪ stacks/app: blocked: &lt;a href="https://evil"&gt;x&lt;/a&gt; '
+        '<a href="https://gh/run/1">logs</a>\n\n' + HINT
+    )
+
+
+def test_a_blocked_reason_mentions_nobody():
+    """A pre-apply refusal can name the authorizer's login. Mutation: `_md_escape` for
+    `_md_name` on the reason in `_state` -- the line pings `@octocat`, red."""
+    row = _row(
+        status="blocked",
+        reason="apply aborted for dev-eu / stacks/app: not authorized: the autoplan's actor "
+        "@octocat's permission is `read`.",
+        apply_text=None,
+    )
+    assert _comment([row]) == (
+        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cell, 1 blocked\n\n"
+        "⚪ stacks/app: blocked: apply aborted for dev-eu / stacks/app: not authorized: the "
+        "autoplan's actor @<!-- -->octocat's permission is `read`. "
         '<a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
 

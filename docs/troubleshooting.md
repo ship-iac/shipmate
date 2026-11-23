@@ -2399,9 +2399,10 @@ unchanged and nothing applied. Comment `shipmate apply`.
 ### `auto apply not started: the dispatch failed`, or `auto apply may have started: the dispatch answered with an error`
 
 The pull request carries ``🔴 failed: auto apply not started: the dispatch
-failed; comment `shipmate apply` ``. The plan run's `summary` job could not mint
-its dispatch token or the dispatch call failed; a `::warning::` on that run names
-which. The gate is unchanged and nothing applied. Comment `shipmate apply`.
+failed; comment `shipmate apply` ``. The plan run's `summary` or `defer-auto`
+job could not mint its dispatch token or the dispatch call failed; a
+`::warning::` on that run names which. The gate is unchanged and nothing
+applied. Comment `shipmate apply`.
 
 When gh's answer shows a `shipmate.yml` older than the engine, the reply reads
 ``🔴 failed: auto apply not started: the dispatch failed. <remedy>`` instead, and
@@ -2503,12 +2504,12 @@ comment `shipmate apply`.
 The `auto` run's `detect` refused before any wave, and nothing applied. An
 `auto` run must run as the shipmate App's bot login, `<slug>[bot]` compared
 whole, where `<slug>` comes from the App-authored check runs on the head other
-than `shipmate / apply run`. Only a
-plan run's `summary` job dispatches `verb: auto`, with an App token; a run whose
-actor is anything else, a workflow's `GITHUB_TOKEN` (`github-actions[bot]`)
-included, was dispatched by something else. A "Re-run all jobs" of an `auto` run
-runs with the re-runner as its triggering actor and refuses; do not re-run an
-`auto` run. "Re-run failed jobs" keeps the passed `detect`, so each wave cell
+than `shipmate / apply run`. Only a plan run's `summary` or `defer-auto` job
+dispatches `verb: auto`, with an App token; a run whose actor is anything else,
+a workflow's `GITHUB_TOKEN` (`github-actions[bot]`) included, was dispatched by
+something else. A "Re-run all jobs" of an `auto` run runs with the re-runner as
+its triggering actor and refuses; do not re-run an `auto` run. "Re-run failed
+jobs" keeps the passed `detect`, so each wave cell
 refuses instead with `an apply is never re-run (run attempt '<n>')`. With no such check on the head there is no slug to compare.
 Comment `shipmate apply` on the pull request, or push when the head carries no
 apply checks yet.
