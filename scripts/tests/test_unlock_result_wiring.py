@@ -18,27 +18,6 @@ RESULT_JOB = {
     "permissions": {"pull-requests": "write"},
     "steps": [
         {
-            "name": "Write the download sentinel",
-            "if": _QUEUED,
-            "continue-on-error": True,
-            "shell": "bash",
-            "run": 'echo sentinel > "$RUNNER_TEMP/shipmate-unlock-sentinel.txt"',
-        },
-        {
-            "name": "Upload the download sentinel",
-            "id": "sentinel",
-            "if": _QUEUED,
-            "continue-on-error": True,
-            "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
-            "with": {
-                "name": "shipmate-unlock-sentinel",
-                "path": "${{ runner.temp }}/shipmate-unlock-sentinel.txt",
-                "if-no-files-found": "error",
-                "retention-days": 1,
-                "overwrite": True,
-            },
-        },
-        {
             "name": "Download the cells' records",
             "id": "download",
             "if": _QUEUED,
@@ -59,7 +38,6 @@ RESULT_JOB = {
                 "cells": "${{ needs.detect.outputs.cells }}",
                 "detect-result": "${{ needs.detect.result }}",
                 "download-outcome": "${{ steps.download.outcome }}",
-                "sentinel-outcome": "${{ steps.sentinel.outcome }}",
             },
         },
     ],
@@ -109,16 +87,12 @@ def test_the_result_job_is_this_whole_job():
     legs); add `actions: read` to `permissions`; add an `actions/checkout` step; pass
     `inputs.ref` as `comment-id`.
 
-    The sentinel and the download: drop `continue-on-error` from either (a failed download reds
-    `result`), or from the sentinel write (a failed write skips the reply); `merge-multiple:
-    true` (records lose the artifact directory whose name gives their index); add `github-token`
+    The download: drop `continue-on-error` (a failed download reds `result`); `merge-multiple:
+    true`; add `github-token`
     (the API path needs `actions: read`, which `result` lacks); drop the `[]` condition; read
     `inputs.cells` or `inputs.detect-result` in an `if:` (empty in a job); drop
-    `timeout-minutes` (actions/toolkit#2575 holds the job 180 s); upload
-    `${{ github.action_path }}/action.yml` (empty in a job); drop `if-no-files-found` (a
-    missing sentinel reads `success`); rename the sentinel `shipmate-unlock-0` (it would read
-    as cell 0's record); pass `steps.download.conclusion` (always `success` under
-    `continue-on-error`); pass `steps.sentinel.outcome` as `download-outcome`."""
+    `timeout-minutes` (actions/toolkit#2575 holds the job 180 s); pass
+    `steps.download.conclusion` (always `success` under `continue-on-error`)."""
     assert workflow_jobs("unlock.yml")["result"] == RESULT_JOB
 
 
@@ -145,8 +119,8 @@ def test_unlock_cell_reads_released_only_when_the_force_unlock_succeeded():
 
 
 def test_the_unlock_result_action_reads_the_calling_jobs_outcomes():
-    """Mutations: read `steps.download.outcome` (empty inside the action); swap the two
-    outcomes."""
+    """Mutations: read `steps.download.outcome` (empty inside the action); pass
+    `inputs.detect-result` as `SHIPMATE_DOWNLOAD_OUTCOME`."""
     assert action_yaml("unlock-result")["runs"]["steps"] == [
         {
             "name": "Reply with the unlock result",
@@ -158,7 +132,6 @@ def test_the_unlock_result_action_reads_the_calling_jobs_outcomes():
                 "SHIPMATE_CELLS": "${{ inputs.cells }}",
                 "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
                 "SHIPMATE_DOWNLOAD_OUTCOME": "${{ inputs.download-outcome }}",
-                "SHIPMATE_SENTINEL_OUTCOME": "${{ inputs.sentinel-outcome }}",
                 "SHIPMATE_RECORDS": "${{ runner.temp }}/unlock-records",
             },
             "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-result"',

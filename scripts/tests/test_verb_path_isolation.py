@@ -110,7 +110,6 @@ UNLOCK_STEP_ACTIONS = {
         "actions/upload-artifact",
     ],
     "result": [
-        "actions/upload-artifact",
         "actions/download-artifact",
         local_action("unlock-result"),
     ],
@@ -121,9 +120,8 @@ UNLOCK_STEP_ACTIONS = {
 #: id-token: write and an already-assumed apply role. The apply side takes no mirror of this,
 #: because `apply.yml` legitimately runs shell, so a `tofu force-unlock` pasted there stays a
 #: blind spot rather than a second selector here. The `unlock` job's one is its outcome record,
-#: and the `result` job's its download sentinel, both pinned whole by
-#: `test_unlock_result_wiring.py`.
-UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 1, "result": 1}
+#: pinned whole by `test_unlock_result_wiring.py`.
+UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 1, "result": 0}
 
 UNLOCK_PERMISSIONS = {
     "detect": {"contents": "read", "checks": "read", "actions": "read"},

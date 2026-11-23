@@ -16,9 +16,6 @@ inputs:
   download-outcome:
     description: The outcome of the calling job's record download into `$RUNNER_TEMP/unlock-records`; `failure` reads the cells with no record as unknown.
     required: true
-  sentinel-outcome:
-    description: The outcome of the calling job's sentinel upload; anything but `success`, with no record directory downloaded, reads every cell as unknown.
-    required: true
 runs:
   using: composite
   steps:
@@ -31,6 +28,5 @@ runs:
         SHIPMATE_CELLS: ${{ inputs.cells }}
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
         SHIPMATE_DOWNLOAD_OUTCOME: ${{ inputs.download-outcome }}
-        SHIPMATE_SENTINEL_OUTCOME: ${{ inputs.sentinel-outcome }}
         SHIPMATE_RECORDS: ${{ runner.temp }}/unlock-records
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-result"
