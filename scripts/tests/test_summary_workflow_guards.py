@@ -18,7 +18,16 @@ A draft is not refused here: it reaches the job, and gate-state writes its gate 
 reason.
 """
 
-from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, action_yaml, local_action, step_by, workflow_yaml
+from _loader import (
+    ACTIONS,
+    ENGINE_ENVIRONMENT,
+    WORKFLOWS,
+    action_steps,
+    action_yaml,
+    local_action,
+    step_by,
+    workflow_yaml,
+)
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -31,7 +40,11 @@ EXPECTED_IF = (
 #: The whole job, as an ordered list of what each step runs. A checkout step, a `run:`
 #: step, or any extra step at all changes this list, where a substring scan would miss every one
 #: of those.
-EXPECTED_STEP_USES = [local_action("summary")]
+EXPECTED_STEP_USES = [
+    "actions/download-artifact",
+    "actions/download-artifact",
+    local_action("summary"),
+]
 EXPECTED_SUMMARY_WITH = {
     "pr-number": "${{ needs.facts.outputs.pr-number }}",
     "head-sha": "${{ needs.facts.outputs.head-sha }}",
@@ -115,8 +128,8 @@ def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
     """It runs at the base ref holding the App key. A checkout of the pull request head here
     would make it the canonical pull_request_target vulnerability, and so would any step that
     executes repository content by another route, which is why the step list is compared whole:
-    any checkout step at all reddens it. Mutation: re-add the cell-summary download step ahead of
-    the action."""
+    any checkout step at all reddens it. Mutation: add an `actions/checkout` step ahead of the
+    action."""
     job, _ = _summary_job()
     assert [str(s["uses"]).split("@")[0] for s in job["steps"]] == EXPECTED_STEP_USES
 
@@ -152,47 +165,68 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     assert workflow_yaml(WF)["jobs"]["detect"]["outputs"] == EXPECTED_DETECT_OUTPUTS
 
 
+def _job_step(name):
+    job, _ = _summary_job()
+    matches = [s for s in job["steps"] if s.get("name") == name]
+    assert len(matches) == 1, f"summary job: {len(matches)} steps named {name!r}"
+    return matches[0]
+
+
 #: The whole download step, as parsed. Any extra key reddens the comparison:
 #: an `if:` or a `github-token`, which the job's `contents: read` grant would not cover.
 EXPECTED_DOWNLOAD_STEP = {
     "name": "Download plan cell summaries",
     "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "continue-on-error": True,
+    "timeout-minutes": 1,
     "with": {"pattern": "cell-summary.*", "path": "cells"},
 }
 
 
-def test_the_summary_action_always_downloads_and_tolerates_a_failed_download():
+def test_the_summary_job_always_downloads_and_tolerates_a_failed_or_hung_download():
     """Unconditional, because skipping the download when zero cells were planned makes
     gate-state's "more cells than planned" branch unreachable. `continue-on-error`, because a
-    failed download must reach gate-state as a shortfall that holds the gate, not end the job
-    before any gate is written. `path` is the readers' default directory.
+    failed or timed-out download must reach gate-state as a shortfall that holds the gate, not end
+    the job before any gate is written. `timeout-minutes` ends the 180 s a retried download holds
+    the job. `path` is the readers' default directory.
 
-    Mutations: drop `continue-on-error`; change `path`; add `github-token`; add
-    `if: ${{ inputs.planned-cells != '0' }}`.
+    Mutations: drop `continue-on-error`; drop `timeout-minutes`; change `path`; add
+    `github-token`; add `if: ${{ needs.detect.outputs.count != '0' }}`.
     """
-    assert step_by("summary", name="Download plan cell summaries") == EXPECTED_DOWNLOAD_STEP
+    assert _job_step("Download plan cell summaries") == EXPECTED_DOWNLOAD_STEP
 
 
 #: The whole cell-error download step, as parsed.
 EXPECTED_CELL_ERROR_DOWNLOAD_STEP = {
     "name": "Download cell errors",
-    "if": (
-        "${{ steps.hold.outputs.superseded != 'true'"
-        " && steps.gate.outputs.comment_mode == 'held' }}"
-    ),
+    "if": "${{ needs.plan.result == 'failure' }}",
     "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "continue-on-error": True,
+    "timeout-minutes": 1,
     "with": {"pattern": "cell-error.*", "path": "cell-errors"},
 }
 
 
-def test_the_summary_action_downloads_cell_errors_where_the_held_render_reads_them():
+def test_the_summary_job_downloads_cell_errors_where_the_held_render_reads_them():
     """Reviewer-facing only, so a failed download continues: the gate reads none of it. `path` is
-    `cell_errors`' default directory. Only the held render reads them. Mutations: drop
-    `continue-on-error`; change `path`; change `pattern` to `cell-summary.*`; drop the
-    `comment_mode` clause."""
-    assert step_by("summary", name="Download cell errors") == EXPECTED_CELL_ERROR_DOWNLOAD_STEP
+    `cell_errors`' default directory. `plan-cell` uploads a cell error only under `failure()`,
+    which fails the plan job. Mutations: drop `continue-on-error`; change `path`; change
+    `pattern` to `cell-summary.*`; `if:` to `needs.plan.result != 'success'`."""
+    assert _job_step("Download cell errors") == EXPECTED_CELL_ERROR_DOWNLOAD_STEP
+
+
+def test_no_engine_action_downloads_an_artifact():
+    """A composite action's step takes no `timeout-minutes`, so a download there cannot be
+    bounded against the 180 s a retried download holds the job (actions/toolkit#2575); every
+    download is a workflow job step. Mutation: put `Download plan cell summaries` back inside
+    `actions/summary`."""
+    downloads = [
+        path.parent.name
+        for path in sorted(ACTIONS.glob("*/action.yml"))
+        for step in action_steps(path)
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    ]
+    assert downloads == []
 
 
 #: Hand-written: a superseded run or a moved upsert writes no apply check and no gate.
@@ -242,4 +276,4 @@ def test_the_summary_job_passes_the_action_outputs_on():
         "upsert": "${{ steps.summary.outputs.upsert }}",
         "superseded": "${{ steps.summary.outputs.superseded }}",
     }
-    assert job["steps"][0]["id"] == "summary"
+    assert job["steps"][-1]["id"] == "summary"

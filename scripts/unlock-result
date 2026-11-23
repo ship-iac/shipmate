@@ -12,10 +12,11 @@ into) and `GH_TOKEN` (`pull-requests: write`).
 Each unlock leg uploads one record, artifact `shipmate-unlock-<strategy.job-index>` holding
 `shipmate-unlock-<strategy.job-index>.json`: `{"index", "stack", "environment", "outcome",
 "lock_id"}`, `outcome` being `released`, `none` or `failed`. `download-artifact` writes a lone
-matching artifact without a directory of its name, so the action first uploads a sentinel
+matching artifact without a directory of its name, so the `result` job first uploads a sentinel
 artifact; whenever that upload succeeded, every record downloads into its artifact's directory.
-Only those directories are read, never a file at the download root. The results are unreadable
-when the download failed, or when the sentinel failed and no record directory arrived. A leg
+Only those directories are read, never a file at the download root. A cell with no record is
+unread when the download failed, or when the sentinel failed and no record directory arrived; a
+failed download that left every cell its record reads as a successful one. A leg
 runs pull-request HCL, so a record can be forged, and the reply is display only: the cell is
 `cells[index]`, and a record counts only when its directory, file name and `index` agree, its
 `stack` and `environment` equal that cell's (a check against a mismatched record, not a forged
@@ -123,14 +124,15 @@ def reply(env, detect_result, raw_cells, root, download_outcome, sentinel_outcom
     path = pathlib.Path(root) if root else None
     recs = records(path, cells) if path else {}
     lone = sentinel_outcome != "success" and not (path and any(_record_dirs(path)))
-    return _per_cell(env, cells, recs, download_outcome == "failure" or lone)
+    unread = (download_outcome == "failure" or lone) and len(recs) < len(cells)
+    return _per_cell(env, cells, recs, unread)
 
 
 def _per_cell(env, cells, recs, unread):
     """(outcome, text) naming each cell by its record: released, failed, or with no record
-    `did not run`. `unread`: the results are unreadable, so some records may not have arrived; a
-    cell with no record then reads `result unknown`, and the reply says some results could not be
-    read unless every cell already reads so."""
+    `did not run`. `unread`: some cell has no record and records may not have arrived; a cell with
+    no record then reads `result unknown`, and the reply says some results could not be read
+    unless every cell already reads so."""
     named = {"released": [], "failed": [], None: []}
     for i, c in enumerate(cells):
         name = sc._md_name(c["stack"])
@@ -139,7 +141,7 @@ def _per_cell(env, cells, recs, unread):
             name = f"{name} ({lock_id})"
         named.get(outcome, []).append(name)
     released, failed, missing = named["released"], named["failed"], named[None]
-    if not failed and not missing and not unread:
+    if not failed and not missing:
         if released:
             return "notice", _released(env, released) + "."
         return "notice", f"released no state lock in {env}: no probed cell held a state lock."

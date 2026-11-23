@@ -205,13 +205,22 @@ def test_a_failed_download_still_reads_the_records_that_arrived(gh, monkeypatch,
     )
 
 
-def test_a_failed_download_fails_the_reply_even_with_every_record(gh, monkeypatch, tmp_path):
-    """Mutation: drop `and not unread` (a notice says no lock was held)."""
-    posts, _ = gh
-    monkeypatch.setenv("SHIPMATE_DOWNLOAD_OUTCOME", "failure")
-    _records(tmp_path, "none", "none", "none")
-    ur.main()
-    assert posts == _post("failed", "some cells' results could not be read; see the run.")
+def test_a_failed_download_that_left_every_record_replies_as_a_successful_one(tmp_path):
+    """A download that timed out after every record landed is actions/toolkit#2575's case.
+    Mutation: keep the clause whenever the download outcome is `failure`."""
+    cells = _CELLS[:2]
+    _records(tmp_path, "released", "failed", cells=cells)
+    raw, root = json.dumps(cells), str(tmp_path / "records")
+    assert ur.reply("dev-eu", "success", raw, root, "failure", "success") == (
+        "failed",
+        (
+            "could not determine the lock of stacks/db; released 1 state lock(s) in dev-eu: "
+            f"stacks/app ({_ID})."
+        ),
+    )
+    assert ur.reply("dev-eu", "success", raw, root, "success", "success") == ur.reply(
+        "dev-eu", "success", raw, root, "failure", "success"
+    )
 
 
 _BAD = [

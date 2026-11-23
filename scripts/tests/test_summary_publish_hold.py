@@ -65,7 +65,7 @@ PUBLISH_HOLD = (
     "Plan run 42 holds this while it publishes; "
     "if that run has ended, re-plan (comment shipmate plan or push)"
 )
-STATUSES_JQ = ".[] | {context, state, target_url, creator: .creator.id}"
+STATUSES_JQ = ".[] | {context, state, target_url, id, creator: .creator.id}"
 APPLY_CHECKS_JQ = (
     ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}"
 )
@@ -163,6 +163,7 @@ def _gate(state, run):
             "context": "shipmate / gate",
             "state": state,
             "target_url": f"https://github.com/acme/demo/actions/runs/{run}",
+            "id": 1,
             "creator": 306306466,
         }
     )
@@ -613,10 +614,6 @@ LATER_STEP_IFS = {
     ),
     "Build comment + gate state": NOT_SUPERSEDED,
     "Decide gate state and comment mode": NOT_SUPERSEDED,
-    "Download cell errors": (
-        "${{ steps.hold.outputs.superseded != 'true'"
-        " && steps.gate.outputs.comment_mode == 'held' }}"
-    ),
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_MOVED,
     GATE: NOT_MOVED,
@@ -640,7 +637,7 @@ LATER_STEP_IFS = {
 def test_a_superseded_run_skips_every_later_step():
     """The hold step's `exit 0` does not end the composite, so each later step reads `superseded`
     itself and a superseded run writes nothing.
-    Mutations: drop the guard from Mirror, `Download cell errors`, Upsert, `Create apply checks` or
+    Mutations: drop the guard from Mirror, Upsert, `Create apply checks` or
     `Create/refresh gate` -> red each."""
     steps = action_steps("summary")
     later = steps[steps.index(step_by("summary", id="hold")) + 1 :]

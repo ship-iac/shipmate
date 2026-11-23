@@ -1,5 +1,5 @@
 name: shipmate apply-summary
-description: Render the apply result comment and post it to the pull request. Downloads the per-cell apply-summary.* artifacts and apply-detect's report artifact, the comment's dispositions, waiting and held cells, environment order and pusher (a missing or unreadable one renders a red line and never a green verdict), mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the artifact download and the jobs listing.
+description: Render the apply result comment and post it to the pull request. Reads the per-cell apply-summary.* artifacts the calling job downloads into cells/ and apply-detect's report it downloads into apply-report/ (none when detect never ran), the comment's dispositions, waiting and held cells, environment order and pusher (a missing or unreadable one renders a red line and never a green verdict), mints a shipmate App installation token, scans the head SHA's apply checks, and lists the run's jobs for per-cell log links. Reads the job's GITHUB_TOKEN, which needs actions:read for the jobs listing.
 inputs:
   pr-number:
     description: Pull request number to comment on.
@@ -22,10 +22,6 @@ inputs:
     default: ""
   envlevel3-waves:
     description: Env-level 3 waves JSON; a padded empty map when level 3 has no cell, as in every targeted apply. Empty when detect did not succeed.
-    required: false
-    default: ""
-  report-artifact:
-    description: "detect's `report_artifact` output: the name of the artifact holding apply-detect's report. Empty (detect never ran) reads the report as unread."
     required: false
     default: ""
   detect-result:
@@ -72,36 +68,6 @@ runs:
       with:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-    - name: Download apply cell summaries
-      id: download
-      # Reviewer-facing only (continue-on-error): for comment-ops the comment IS the feedback
-      # channel, so an artifact-API error must not skip the token and the post. The renderer
-      # handles an empty or partial cells directory.
-      continue-on-error: true
-      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-      with:
-        pattern: apply-summary.*
-        path: cells
-        github-token: ${{ github.token }}
-        merge-multiple: false
-
-    - name: Download the apply report
-      # Reviewer-facing only (continue-on-error): the render reads a missing report as unread,
-      # renders a red line and never a green verdict. An empty name would download every
-      # artifact of the run.
-      if: ${{ inputs.report-artifact != '' }}
-      continue-on-error: true
-      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-      with:
-        name: ${{ inputs.report-artifact }}
-        path: apply-report
-
-    - name: Warn on apply cell summaries download failure
-      if: ${{ steps.download.outcome == 'failure' }}
-      shell: bash
-      run: |
-        echo "::warning::apply cell summaries download failed; the comment renders without per-cell detail"
-
     - name: Mint App installation token
       # Minted before `Render apply result comment`, not only before `Post apply result
       # comment`: `Scan apply checks (degrade to no data on failure)` needs it too, and one token
