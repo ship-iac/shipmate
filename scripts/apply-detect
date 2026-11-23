@@ -35,7 +35,7 @@ the run refuses.
 
 `SHIPMATE_AUTO=true` selects the auto form, `bare_main(auto=True)`: the bare form over the
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
-refuses unless the actor, the plan's provenance, the pusher's permission and the pull
+refuses unless the actor, the plan's provenance, the autoplan actor's permission and the pull
 request's mergeability hold, and holds a cell whose stack the merge of the base into the
 branch changes or whose apply check records that its plan found the base changed it.
 """
@@ -704,7 +704,7 @@ def _provenance_text(run_id, head, cause, detail):
     if cause == "event":
         return (
             f"plan run {run_id} is a `{_or_missing(detail)}` run, not an autoplan: an auto "
-            "apply applies only the plan a push started."
+            "apply applies only an autoplan's plan."
         )
     if cause == "head":
         return f"plan run {run_id} planned {_or_missing(detail)}, not the head {head}."
@@ -721,8 +721,8 @@ def _provenance_text(run_id, head, cause, detail):
         )
     bad = [f"{n} ({a!r})" for n, a in detail]
     return (
-        f"the plan records of {named(bad, _NAMED)} name no push event action (opened or "
-        "synchronize), so no push started that plan."
+        f"the plan records of {named(bad, _NAMED)} name no event action that starts an auto "
+        "apply (opened, synchronize or ready_for_review)."
     )
 
 

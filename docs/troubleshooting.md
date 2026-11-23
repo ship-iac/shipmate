@@ -790,7 +790,7 @@ merge it through a bypass actor.
 | `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `split` and `review` are written into the file, so which environments are shared and which are review-exempt stays a merged commit. Write `true` or `false` |
 | `environments.<env>.apply_mode must be targeted, bare or auto, got …` | `apply_mode` holds `targeted`, `bare` or `auto`. Any other value, `true` and `Targeted` included, would otherwise resolve as `bare` and put the environment on a bare `shipmate apply` |
 | `environments.<env>.apply_mode holds a variable reference, and it accepts none` | `apply_mode` is written into the file, so which environments a bare `shipmate apply` skips stays a merged commit. Write `targeted`, `bare` or `auto` |
-| `environments.<env>.apply_mode is auto, which requires review: false on the same entry` | an `auto` apply starts on a push, so it has no approving review to wait for. Add `review: false` to the entry, or choose `targeted` or `bare` |
+| `environments.<env>.apply_mode is auto, which requires review: false on the same entry` | an `auto` apply starts after an autoplan, so it has no approving review to wait for. Add `review: false` to the entry, or choose `targeted` or `bare` |
 | `environment <env>: region is empty` | `region:` with nothing after it, or `region: #eu-west-1`, which YAML reads as a comment. Write the region, or remove the key |
 | `layout references GitHub variable <NAME>, whose value is not one of …` | the variable holds something other than `tf_vars`, `workspace` or `folder`. Fix the variable; the refusal names it rather than quoting its value |
 | `environment <env>: identity names no entry under identities` | the entry names an identity the file does not declare; the message lists the ones it does. A misspelled name lands here |
@@ -831,8 +831,8 @@ exclusions, and at most 10 cell jobs at once per plan and drift sweep, and 10
 that sets `apply_mode: targeted` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
 warns. `shipmate doctor` echoes all three on every report for exactly this reason,
-and names each `apply_mode: auto` environment, which a push to a ready pull request
-applies after a complete autoplan, with no approving review and no comment; read them
+and names each `apply_mode: auto` environment, which a ready pull request's autoplan
+applies once it completes, with no approving review and no comment; read them
 before merging.
 
 **Editing them on a branch does not change what that branch applies.**
@@ -2317,7 +2317,7 @@ comment `shipmate plan`), then comment the apply again. A cell whose check
 already completed is not compared. The post-merge deploy does not read the
 record's pull request.
 
-### An `apply_mode: auto` environment did not apply after a push
+### An `apply_mode: auto` environment did not apply after its autoplan
 
 An `auto` environment applies without a comment only through the autoplan of a
 ready pull request ([`../CONTRACT.md`](../CONTRACT.md) §`apply_mode: auto`); a
@@ -2325,23 +2325,30 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
 
 1. The plan run's `summary` job, step `Decide whether to dispatch an auto
    apply`. When it dispatches nothing it logs `no auto apply dispatched:
-   <reason>`: the run is not an autoplan (a `shipmate plan` run), a push did not
-   start it (its event action is not `opened` or `synchronize`: the pull request
-   was marked ready for review or reopened), it is a
+   <reason>`: the run is not an autoplan (a `shipmate plan` run), neither a push
+   nor the ready-for-review click started it (its event action is not `opened`,
+   `synchronize` or `ready_for_review`: the pull request was reopened), its push
+   landed on a draft (`this plan's push landed on a draft; the run that marking it
+   ready started decides the auto apply`), it is a
    re-run, the pull request is a draft, the gate is not pending over a complete
    plan, or no changed cell is in an `auto` environment. When another autoplan
    run of the head is newer, typically the run that marking the pull request
    ready started on the same head, it logs `autoplan run <id> of <head> is newer
-   than this run; no auto apply started; comment shipmate apply to apply`; a
+   than this run; no auto apply started; comment shipmate apply to apply`. When
+   that ready-for-review run deferred to this run's plan, look at its
+   `defer-auto` job, step `Decide whether to dispatch an auto apply`: it
+   dispatches, or logs `no auto apply dispatched: <reason>`, the clicker's
+   access refusal included (`not authorized: ...`, entries below); a failed
+   `defer-auto` leaves that run green. A
    listing that does not show this run yet dispatches, warning `autoplan run
    <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the
    head's autoplan runs not listed or malformed) it warns `could not decide
    whether to dispatch an auto apply; no auto apply started`. It posts a reply
    only when the autoplan runs could not be read (below). Separately, when an autoplan of a
-   pull request that is not a draft was not started by a push (marking it
-   ready, reopening it or another non-push event started it, or its event could
-   not be read) and a changed cell of an `auto` environment is not locked by
+   pull request that is not a draft was started by neither a push nor the ready
+   click (reopening it or another event started it, or its event could not be
+   read) and a changed cell of an `auto` environment is not locked by
    another pull request, the plan comment says so under its verdict, on every
    attempt of that run:
    ``⚪ auto apply not started: <reason>; push a commit, or comment `shipmate apply`.``
@@ -2501,14 +2508,14 @@ apply checks yet.
 must be the plan run every cell records. Usually plan run `<n>` is a `shipmate
 plan` run (`workflow_dispatch`), which is never in this listing: anyone with
 write access can dispatch it, the App on a comment included, and it does not
-carry the commenter, so there is no pusher to authorize. Comment
+carry the commenter, so there is no autoplan actor to authorize. Comment
 `shipmate apply`, which applies that plan under the comment-time requirements.
-Otherwise a newer autoplan of the same head exists. One started by a push
-dispatches its own `auto` apply once it completes with apply checks; one started
-by marking the pull request ready or reopening it never dispatches one, so
-comment `shipmate apply`. When it published no apply check, push. A
-ready-for-review run that completed after deferring to an earlier plan ("A
-ready-for-review run planned nothing") is never the newest.
+Otherwise a newer autoplan of the same head exists. One started by a push or a
+ready click dispatches its own `auto` apply once it completes with apply checks;
+one started by reopening it never dispatches one, so comment `shipmate apply`.
+When it published no apply check, push. A ready-for-review run that deferred to
+an earlier plan ("A ready-for-review run planned nothing") is never the newest:
+the plan it deferred to is.
 
 The same check refuses, each ending ``Comment `shipmate apply` on the pull
 request to apply it.``:
@@ -2556,45 +2563,56 @@ comment `shipmate apply`.
 A failed or malformed page and a count mismatch log a warning naming the
 listing. Comment `shipmate apply`.
 
-### ``not authorized: `shipmate apply` needs write access to this repository, and the pusher @<login>'s permission is ...``
+### ``not authorized: `shipmate apply` needs write access to this repository, and the autoplan's actor @<login>'s permission is ...``
 
-The `auto` run applies as the pusher of the autoplan, that run's `actor`, and
-the pusher lacks `write` or `admin`. Nothing applied. A
+The `auto` run applies as the actor of the autoplan that authorizes it: the
+pusher, or whoever marked the pull request ready for review, also when that
+ready-for-review run deferred to the push run's plan. That actor lacks `write`
+or `admin`. Nothing applied. A
 collaborator with write access comments `shipmate apply`, or pushes. The
 permission is read with the `detect` job's `GITHUB_TOKEN`; when it cannot be
-read the refusal reads `could not read the pusher @<login>'s permission on this
+read the refusal reads `could not read the autoplan's actor @<login>'s permission on this
 repository` and ends ``push again, or a writer comments `shipmate apply` ``. A
 permission other than `read`, `none`, `write` or `admin` reads ``GitHub reported
-the pusher @<login>'s permission as `<permission>`, which this engine does not
+the autoplan's actor @<login>'s permission as `<permission>`, which this engine does not
 admit``.
 
-### `not authorized: the head was pushed by @<login>, a bot account`
+### `not authorized: the autoplan was started by @<login>, a bot account`
 
-The autoplan's pusher is a bot, such as `renovate[bot]`. `auto` never
-authorizes a bot's push: a bot has no repository permission to read. Nothing
+The autoplan's actor, the pusher or the ready-for-review clicker, is a bot, such
+as `renovate[bot]`. `auto` never authorizes a bot: a bot has no repository
+permission to read. Nothing
 applied. A collaborator with write access comments `shipmate apply`.
 
 ### `not authorized: the autoplan run names no actor or no triggering actor login`
 
 In the autoplan's run object from the Actions runs listing, its `actor` or
-`triggering_actor` login is missing or empty, so there is no pusher to
-authorize. Nothing applied. A collaborator with write access comments
+`triggering_actor` login is missing or empty, so who started it is unknown. Nothing applied. A collaborator with write access comments
 `shipmate apply`.
 
 ### `not authorized: the autoplan ran as @<login> but was triggered by @<login>`
 
 The autoplan was re-run, so its `triggering_actor` is whoever re-ran it, not the
-pusher in its `actor`. `auto` authorizes only the push itself. Nothing applied.
+pusher or clicker in its `actor`. `auto` authorizes only the push or ready click
+itself. Nothing applied.
 A collaborator with write access comments `shipmate apply`.
 
-### `auto apply refused: the plan records of <cells> name no push event action`
+### `auto apply refused: the plan records of <cells> name no event action that starts an auto apply`
 
-The newest plan of the head was not started by a push: the pull request was
-marked ready for review or reopened after the push, or the cell's plan record
-names no event action. Nothing applied. Comment `shipmate apply`. A wave cell
-refuses the same way with `the cell's plan record names event action <action>,
-not a push (opened or synchronize)`, where `<action>` is quoted
-(`'ready_for_review'`), or `None` for a record without one.
+The newest plan of the head was started by neither a push nor the ready click:
+the pull request was reopened after the push, or the record names no event
+action. Nothing applied. Comment `shipmate apply`. A wave cell refuses the same
+way with `the cell's plan record names event action <action>, not one that
+starts an auto apply (opened, synchronize or ready_for_review)`, where
+`<action>` is quoted (`'reopened'`), or `None` for a record without one.
+
+### `auto apply refused: the plan records of <cells> say their plan's push landed on a draft`
+
+The plan's push landed on a draft, so only the ready-for-review run that
+deferred to that plan authorizes its `auto` apply. That run is not listed (yet),
+or the newest autoplan of the head is another run. Nothing applied. Comment
+`shipmate apply`. A wave cell refuses the same way with `the cell's plan record
+says its push landed on a draft`.
 
 ### `auto apply refused: the <read> read returned a malformed answer (<error>)`
 
@@ -2780,8 +2798,8 @@ An `auto` cell also refuses when:
   apply`.
 - `pull request #<pr> is a draft`: it was converted to draft since `detect`.
   Mark it ready for review, then comment `shipmate apply`.
-- a pusher refusal in `detect`'s wording (`not authorized: ...`, entries above),
-  read again before each cell: the pusher's access changed since `detect`, or
+- an autoplan actor refusal in `detect`'s wording (`not authorized: ...`, entries
+  above), read again before each cell: that actor's access changed since `detect`, or
   the autoplan was re-run after `detect` (its triggering actor changed). Comment
   `shipmate apply`.
 

@@ -2597,8 +2597,8 @@ def test_verify_auto_refuses_a_plan_no_push_started(monkeypatch, tmp_path, actio
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, _records(RUN, action=action))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
-        f"::error::{WHERE} the cell's plan record names event action {action!r}, not a push "
-        "(opened or synchronize); comment `shipmate apply`"
+        f"::error::{WHERE} the cell's plan record names event action {action!r}, not one that "
+        "starts an auto apply (opened, synchronize or ready_for_review); comment `shipmate apply`"
     )
 
 
@@ -2668,23 +2668,23 @@ def _pusher_gh(autoplans, permission=None):
             _autoplans(RUN),
             json.dumps({"permission": "read"}),
             "not authorized: `shipmate apply` needs write access to this repository, and the "
-            "pusher @k3np's permission is `read`.",
+            "autoplan's actor @k3np's permission is `read`.",
             id="read",
         ),
         pytest.param(
             _autoplans(RUN),
             FAIL,
-            "not authorized: could not read the pusher @k3np's permission on this repository, "
-            "so `shipmate apply` was not run. This run's log has the API response; push again, "
-            "or a writer comments `shipmate apply`.",
+            "not authorized: could not read the autoplan's actor @k3np's permission on this "
+            "repository, so `shipmate apply` was not run. This run's log has the API response; "
+            "push again, or a writer comments `shipmate apply`.",
             id="unreadable",
         ),
         pytest.param(
             _autoplans(RUN, triggering_actor={"login": "octocat"}),
             None,
             "not authorized: the autoplan ran as @k3np but was triggered by @octocat, so it was "
-            "re-run, and auto authorizes only the push itself; a writer comments `shipmate "
-            "apply`.",
+            "re-run, and auto authorizes only the push or ready click itself; a writer comments "
+            "`shipmate apply`.",
             id="re-run",
         ),
     ],

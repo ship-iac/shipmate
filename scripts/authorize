@@ -150,14 +150,15 @@ def _login(user):
 
 
 def pusher_reason(repo, plan_run, *, run):
-    """Reject reason for the pusher of `plan_run`, an autoplan's run object as
-    `apply-gate.newest_autoplan` lists it, or None.
+    """Reject reason for the actor of `plan_run`, the authorizing autoplan run object
+    `apply-gate.auto_source` returns, or None.
 
-    The pusher is the run's `actor`, and `triggering_actor` must be the same login: a re-run
-    keeps `actor` and names whoever re-ran it, and a ready-for-review or reopen click is no
-    push either, though the listed run does not say which event action started it (the
-    dispatching summary admits only `opened` and `synchronize`); a ready-for-review run that
-    completed after deferring to an earlier plan is never the listed run. A bot login has no
+    That run is one of: the push run of a push onto a ready pull request, whose actor is the
+    pusher; a ready-for-review run that planned, whose actor is the clicker; or a
+    ready-for-review run that deferred to the published plan, whose actor is also the clicker.
+    The actor is the run's `actor`, and `triggering_actor` must be the same login: a re-run
+    keeps `actor` and names whoever re-ran it, so a re-run by the same login passes here, and
+    only attempt 1 ever dispatches an `auto` apply. A bot login has no
     collaborator permission to read and refuses. Otherwise `collaborators/<login>/permission`,
     read through `run`, is decided by `_permission_reason`; a failed or malformed read is an
     unreadable permission. A missing or empty login refuses first. `plan_run` must be a
@@ -166,18 +167,18 @@ def pusher_reason(repo, plan_run, *, run):
     if not (actor and trigger):
         return (
             "not authorized: the autoplan run names no actor or no triggering actor login, so "
-            "its pusher is unknown; a writer comments `shipmate apply`."
+            "who started it is unknown; a writer comments `shipmate apply`."
         )
     if actor != trigger:
         return (
             f"not authorized: the autoplan ran as @{actor} but was triggered by @{trigger}, so "
-            "it was re-run, and auto authorizes only the push itself; a writer comments "
-            "`shipmate apply`."
+            "it was re-run, and auto authorizes only the push or ready click itself; a writer "
+            "comments `shipmate apply`."
         )
     if actor.endswith("[bot]"):
         return (
-            f"not authorized: the head was pushed by @{actor}, a bot account, which auto never "
-            "authorizes; a writer comments `shipmate apply`."
+            f"not authorized: the autoplan was started by @{actor}, a bot account, which auto "
+            "never authorizes; a writer comments `shipmate apply`."
         )
     readable = _LOGIN.fullmatch(actor) is not None
     permission = ""
@@ -192,7 +193,7 @@ def pusher_reason(repo, plan_run, *, run):
     return _permission_reason(
         permission if isinstance(permission, str) else "",
         "apply",
-        subject=f"the pusher @{actor}" if readable else "the pusher",
+        subject=f"the autoplan's actor @{actor}" if readable else "the autoplan's actor",
         retry=_PUSHER_RETRY,
     )
 

@@ -283,7 +283,7 @@ def test_an_auto_apply_mode_validates_with_review_false():
 
 @pytest.mark.parametrize("review", ["", "    review: true\n"], ids=["absent", "true"])
 def test_an_auto_apply_mode_without_review_false_refuses(review):
-    """An `auto` apply starts on a push, so it has no approving review to wait for.
+    """An `auto` apply starts after an autoplan, so it has no approving review to wait for.
 
     Mutation: drop the `review` check from `_check_apply_mode` -- both rows validate.
     """
@@ -292,7 +292,8 @@ def test_an_auto_apply_mode_without_review_false_refuses(review):
         env_config.validate_structure(env_config.load_config(text))
     assert str(excinfo.value) == (
         "::error::environments.dev-eu.apply_mode is auto, which requires review: false on the "
-        "same entry. An auto apply starts on a push and does not wait for an approving review."
+        "same entry. An auto apply starts after an autoplan and does not wait for an approving "
+        "review."
     )
 
 

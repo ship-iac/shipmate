@@ -359,8 +359,8 @@ def test_a_plan_no_push_started_refuses(tmp_path, monkeypatch, action):
     checks = [_check("stacks/app", "dev-eu", action=action)]
     assert _refusal(tmp_path, monkeypatch, checks=checks, calls=calls) == (
         f"::error::auto apply refused: the plan records of apply / dev-eu / stacks/app "
-        f"({action!r}) name no push event action (opened or synchronize), so no push started "
-        f"that plan. {REMEDY}"
+        f"({action!r}) name no event action that starts an auto apply (opened, synchronize or "
+        f"ready_for_review). {REMEDY}"
     )
     assert LISTING[3] in calls
     assert not [c for c in calls if "/collaborators/" in c]
@@ -425,7 +425,7 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
         pytest.param(
             {"event": "workflow_dispatch"},
             f"plan run {RUN} is a `workflow_dispatch` run, not an autoplan: an auto apply "
-            "applies only the plan a push started.",
+            "applies only an autoplan's plan.",
             id="event",
         ),
         pytest.param(
@@ -434,7 +434,7 @@ def test_a_shipmate_plan_record_refuses_naming_shipmate_apply(tmp_path, monkeypa
         pytest.param(
             {"event": None},
             f"plan run {RUN} is a `missing` run, not an autoplan: an auto apply applies only "
-            "the plan a push started.",
+            "an autoplan's plan.",
             id="null-event",
         ),
     ],
@@ -504,7 +504,7 @@ def test_a_pusher_with_read_permission_refuses(tmp_path, monkeypatch):
     """Mutation: drop `subject=` from the `_permission_reason` call -- it names the commenter."""
     assert _refusal(tmp_path, monkeypatch, permission="read") == (
         "::error::not authorized: `shipmate apply` needs write access to this repository, and "
-        "the pusher @k3np's permission is `read`."
+        "the autoplan's actor @k3np's permission is `read`."
     )
 
 
@@ -514,7 +514,7 @@ def test_an_unreadable_pusher_permission_refuses_with_the_auto_retry(tmp_path, m
     Mutation: drop `retry=` from the `_permission_reason` call -- it says "comment again"."""
     code = _refusal(tmp_path, monkeypatch, permission=SystemExit("::error::gh: Not Found"))
     assert code == (
-        "::error::not authorized: could not read the pusher @k3np's permission on this "
+        "::error::not authorized: could not read the autoplan's actor @k3np's permission on this "
         "repository, so `shipmate apply` was not run. This run's log has the API response; "
         "push again, or a writer comments `shipmate apply`."
     )
@@ -624,9 +624,9 @@ def test_a_pusher_login_that_cannot_be_read_refuses_as_unreadable(tmp_path, monk
     Mutation: `readable = True` -- reads `write` and applies."""
     entry = {"actor": {"login": "a b"}, "triggering_actor": {"login": "a b"}}
     assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (
-        "::error::not authorized: could not read the pusher's permission on this repository, "
-        "so `shipmate apply` was not run. This run's log has the API response; push again, or "
-        "a writer comments `shipmate apply`."
+        "::error::not authorized: could not read the autoplan's actor's permission on this "
+        "repository, so `shipmate apply` was not run. This run's log has the API response; push "
+        "again, or a writer comments `shipmate apply`."
     )
 
 
@@ -637,8 +637,8 @@ def test_a_bot_pusher_refuses_naming_the_bot(tmp_path, monkeypatch):
     Mutation: drop the `[bot]` branch from `pusher_reason` -- the unreadable wording, red."""
     entry = {"actor": {"login": "renovate[bot]"}, "triggering_actor": {"login": "renovate[bot]"}}
     assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (
-        "::error::not authorized: the head was pushed by @renovate[bot], a bot account, which "
-        "auto never authorizes; a writer comments `shipmate apply`."
+        "::error::not authorized: the autoplan was started by @renovate[bot], a bot account, "
+        "which auto never authorizes; a writer comments `shipmate apply`."
     )
 
 
@@ -659,8 +659,8 @@ def test_an_autoplan_triggered_by_anyone_but_its_actor_refuses(
     calls = []
     assert _refusal(tmp_path, monkeypatch, listing=(entry,), calls=calls) == (
         f"::error::not authorized: the autoplan ran as @{actor} but was triggered by "
-        f"@{trigger}, so it was re-run, and auto authorizes only the push itself; a writer "
-        "comments `shipmate apply`."
+        f"@{trigger}, so it was re-run, and auto authorizes only the push or ready click "
+        "itself; a writer comments `shipmate apply`."
     )
     assert not [c for c in calls if "/collaborators/" in c]
 
@@ -707,7 +707,7 @@ def test_a_missing_actor_login_refuses_naming_the_unknown_pusher(
     entry = {"actor": actor, "triggering_actor": trigger}
     assert _refusal(tmp_path, monkeypatch, listing=(entry,)) == (
         "::error::not authorized: the autoplan run names no actor or no triggering actor login, "
-        "so its pusher is unknown; a writer comments `shipmate apply`."
+        "so who started it is unknown; a writer comments `shipmate apply`."
     )
 
 
@@ -716,7 +716,7 @@ def test_a_malformed_permission_body_refuses_as_unreadable(tmp_path, monkeypatch
     """Mutation: drop `(LookupError, TypeError, ValueError)` from `pusher_reason`'s permission
     read -- each row escapes as a malformed answer, red."""
     assert _refusal(tmp_path, monkeypatch, permission=_Raw(body)) == (
-        "::error::not authorized: could not read the pusher @k3np's permission on this "
+        "::error::not authorized: could not read the autoplan's actor @k3np's permission on this "
         "repository, so `shipmate apply` was not run. This run's log has the API response; "
         "push again, or a writer comments `shipmate apply`."
     )
@@ -1044,15 +1044,15 @@ def test_a_running_ready_run_whose_defer_has_not_ended_refuses_as_newer(tmp_path
         pytest.param(
             "renovate[bot]",
             "write",
-            "::error::not authorized: the head was pushed by @renovate[bot], a bot account, "
-            "which auto never authorizes; a writer comments `shipmate apply`.",
+            "::error::not authorized: the autoplan was started by @renovate[bot], a bot "
+            "account, which auto never authorizes; a writer comments `shipmate apply`.",
             id="bot",
         ),
         pytest.param(
             "octocat",
             "read",
             "::error::not authorized: `shipmate apply` needs write access to this repository, "
-            "and the pusher @octocat's permission is `read`.",
+            "and the autoplan's actor @octocat's permission is `read`.",
             id="reader",
         ),
     ],

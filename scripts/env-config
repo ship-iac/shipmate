@@ -445,7 +445,7 @@ def _check_apply_mode(entry, env, errors):
     """`apply_mode` is exactly the string `targeted`, `bare` or `auto`. Anything else reads as
     set to a person and resolves as `bare`, which puts the environment on a bare
     `shipmate apply`. `auto` also requires `review: false` on the entry: an `auto` apply
-    starts on a push, so it has no approving review to wait for.
+    starts after an autoplan, so it has no approving review to wait for.
 
     `load_config` refused any value holding a reference, so the value here is written in the
     file.
@@ -458,8 +458,8 @@ def _check_apply_mode(entry, env, errors):
     elif entry.get("apply_mode") == "auto" and entry.get("review") is not False:
         errors.append(
             f"::error::environments.{env}.apply_mode is auto, which requires review: false on "
-            "the same entry. An auto apply starts on a push and does not wait for an approving "
-            "review."
+            "the same entry. An auto apply starts after an autoplan and does not wait for an "
+            "approving review."
         )
 
 

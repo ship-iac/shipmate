@@ -1052,8 +1052,8 @@ DEFERRED_SKIPS = {
     "bot clicker": (
         {"runs": jsonl(_ready(login="renovate[bot]"), _push())},
         (
-            "not authorized: the head was pushed by @renovate[bot], a bot account, which auto "
-            "never authorizes; a writer comments `shipmate apply`."
+            "not authorized: the autoplan was started by @renovate[bot], a bot account, which "
+            "auto never authorizes; a writer comments `shipmate apply`."
         ),
     ),
     # Mutation: drop the `pusher_reason` call.
@@ -1061,7 +1061,7 @@ DEFERRED_SKIPS = {
         {"permission": json.dumps({"permission": "read"})},
         (
             "not authorized: `shipmate apply` needs write access to this repository, and the "
-            "pusher @octocat's permission is `read`."
+            "autoplan's actor @octocat's permission is `read`."
         ),
     ),
 }

@@ -5,9 +5,9 @@ description: >-
   still the one detect read, and the cell's newest apply check records the wave row's plan run
   and plan-text digest and is no behind record; with auto true, also unless the pull request is
   not a draft, the provenance run is still the head's newest autoplan and the run the cell's
-  newest plan record names, that record names a push event action (opened or synchronize), no
+  newest plan record names, that record names an event action that starts an auto apply (opened, synchronize or ready_for_review) and, when it says its push landed on a draft, the newest autoplan is a ready-for-review run that deferred to it, no
   newer shipmate plan run of the pull request, by any actor, created since the provenance run is
-  live or planned (its plan / detect job succeeded), and its pusher still has write access. With
+  live or planned (its plan / detect job succeeded), and the autoplan's actor still has write access. With
   deploy true (a merge deploy's wave) it runs none of those and refuses only when a pull request
   other than pr-number, the merged one (empty on a push), holds the cell's lock, or, on a run
   attempt above 1, when an earlier attempt of this run may have applied the cell without saving
