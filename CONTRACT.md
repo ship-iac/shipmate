@@ -2775,7 +2775,8 @@ hold:
 A failed condition logs `no auto apply dispatched: <reason>` and dispatches
 nothing. When either of the last two fails, a change already called for an
 auto apply, so it also posts one reply, ``🔴 refused: auto apply not started:
-<reason>; comment `shipmate apply` ``. The `auto` run applies the push run's plan, authorized as the clicker.
+<reason>``: a provenance mismatch ends ``; comment `shipmate apply` ``, and the
+clicker's refusal is the autoplan actor check's reason, as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
 A read that fails before a change of an `auto` environment is known warns and
 posts no reply; a failed autoplan listing after it warns and posts one reply,
 ``🔴 failed: auto apply not started: what decides it for this ready-for-review

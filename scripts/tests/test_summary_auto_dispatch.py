@@ -315,10 +315,10 @@ reply() {
     python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
 }
 # Exit 5 (REFUSED in scripts/auto-dispatch): a change called for an auto apply and a later
-# check refused it; stdout is the reason.
+# check refused it; stdout is the reply's sentence, its remedy included.
 if [ "$rc" -eq 5 ]; then
   cat decide.err >&2
-  reply refused "auto apply not started: $out; comment \\`shipmate apply\\`"
+  reply refused "auto apply not started: $out"
   exit 0
 fi
 if [ "$rc" -ne 0 ]; then
@@ -1012,7 +1012,7 @@ _NOT_PENDING_P = (
 )
 _SOURCE = (
     f"the autoplans of {HEAD_SHA} resolve to plan run {{}} authorized by run {{}}, not plan run "
-    f"{P} authorized by this run {R}"
+    f"{P} authorized by this run {R}; comment `shipmate apply`"
 )
 _NO_AUTO = "no changed cell is in an apply_mode auto environment"
 
@@ -1103,7 +1103,8 @@ def test_a_deferred_ready_run_failing_one_check_dispatches_nothing(tmp_path, nam
 def test_a_deferred_ready_run_refused_past_a_change_replies_with_the_reason(tmp_path, name):
     """A changed `sbx` called for an auto apply, so the refusal replies. Each row's mutation,
     in its comment above the row, prints `sbx` for that row. Mutation: log the reason and
-    print nothing (`_skip(reason); return`) -- no reply, red."""
+    print nothing (`_skip(reason); return`) -- no reply, red. Mutation: append
+    the remedy (`; comment ...`) after `$out` in the composite's reply -- every row reddens."""
     answers, reason = DEFERRED_REFUSALS[name]
     proc, outputs, reply = _decide_deferred(tmp_path, **answers)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -1112,7 +1113,7 @@ def test_a_deferred_ready_run_refused_past_a_change_replies_with_the_reason(tmp_
     assert reply.splitlines()[:3] == [
         "### shipmate apply",
         "",
-        f"🔴 refused: auto apply not started: {reason}; comment `shipmate apply`",
+        f"🔴 refused: auto apply not started: {reason}",
     ]
 
 

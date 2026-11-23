@@ -93,10 +93,10 @@ runs:
             python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
         }
         # Exit 5 (REFUSED in scripts/auto-dispatch): a change called for an auto apply and a later
-        # check refused it; stdout is the reason.
+        # check refused it; stdout is the reply's sentence, its remedy included.
         if [ "$rc" -eq 5 ]; then
           cat decide.err >&2
-          reply refused "auto apply not started: $out; comment \`shipmate apply\`"
+          reply refused "auto apply not started: $out"
           exit 0
         fi
         if [ "$rc" -ne 0 ]; then

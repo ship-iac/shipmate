@@ -47,7 +47,9 @@ run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in
 
 A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 4 prints nothing: no change
 is yet known to call for an auto apply. A failed or malformed listing in check 5 exits `UNREAD`
-with one `::error::` line; a refusal in check 5 or 6 prints its reason and exits `REFUSED`.
+with one `::error::` line; a refusal in check 5 or 6 prints the reply's sentence and exits
+`REFUSED`: check 5's reason followed by "; comment `shipmate apply`", or check 6's reason,
+which carries its own remedy.
 """
 
 import os
@@ -229,7 +231,7 @@ def _source_reason(repo, head, plan_run, run_id):
     if got != (int(plan_run), int(run_id)):
         return (
             f"the autoplans of {head} resolve to plan run {got[0]} authorized by run {got[1]}, "
-            f"not plan run {plan_run} authorized by this run {run_id}"
+            f"not plan run {plan_run} authorized by this run {run_id}; comment `shipmate apply`"
         )
     return au.pusher_reason(repo, authorizer, run=_run)
 
