@@ -110,11 +110,16 @@ def _review_reason(review_decision, environment="", exempt_envs=frozenset()):
     return None
 
 
+class UnreadablePermission(str):
+    """The `_permission_reason` refusal of a permission that could not be read."""
+
+
 def _permission_reason(permission, verb, *, subject="the commenter", retry="comment again"):
     """Reject reason for `subject`'s repository permission, or None to pass.
 
     `write` and `admin` pass. Anything else refuses, and an unreadable value (empty, or
-    outside `[a-z]+`) is never quoted back; that refusal ends with `retry`. `fullmatch`, not
+    outside `[a-z]+`) is never quoted back; that refusal is an `UnreadablePermission` and
+    ends with `retry`. `fullmatch`, not
     `match` with `^...$`: `$` matches before a trailing newline, so `"write\\n"` would pass
     the charset check. Route `evict` is named by its command, `unlock --evict`."""
     verb = "unlock --evict" if verb == "evict" else verb
@@ -126,7 +131,7 @@ def _permission_reason(permission, verb, *, subject="the commenter", retry="comm
             f"and {subject}'s permission is `{permission}`."
         )
     if not re.fullmatch(r"[a-z]+", permission):
-        return (
+        return UnreadablePermission(
             f"not authorized: could not read {subject}'s permission on this repository, "
             f"so `shipmate {verb}` was not run. This run's log has the API response; "
             f"{retry}."
@@ -161,8 +166,8 @@ def pusher_reason(repo, plan_run, *, run):
     only attempt 1 ever dispatches an `auto` apply. A bot login has no
     collaborator permission to read and refuses. Otherwise `collaborators/<login>/permission`,
     read through `run`, is decided by `_permission_reason`; a failed or malformed read is an
-    unreadable permission. A missing or empty login refuses first. `plan_run` must be a
-    mapping."""
+    unreadable permission, refused with an `UnreadablePermission`. A missing or empty login
+    refuses first. `plan_run` must be a mapping."""
     actor, trigger = (_login(plan_run.get(k)) for k in ("actor", "triggering_actor"))
     if not (actor and trigger):
         return (

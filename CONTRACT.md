@@ -2773,12 +2773,13 @@ hold:
   or a clicker without write access dispatches nothing.
 
 A failed condition logs `no auto apply dispatched: <reason>` and dispatches
-nothing. When either of the last two fails, a change already called for an
-auto apply, so it also posts one reply, ``🔴 refused: auto apply not started:
-<reason>``: a provenance mismatch ends ``; comment `shipmate apply` ``, and the
-clicker's refusal is the autoplan actor check's reason, as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
+nothing. A provenance mismatch posts no reply: a newer ready-for-review run of
+the head may take over. When the clicker's check refuses, a change already called
+for an auto apply, so it also posts one reply, ``🔴 refused: auto apply not
+started: <reason>``, the autoplan actor check's reason as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
 A read that fails before a change of an `auto` environment is known warns and
-posts no reply; a failed autoplan listing after it warns and posts one reply,
+posts no reply; a failed autoplan listing, or a clicker's permission that could
+not be read, after it warns and posts one reply,
 ``🔴 failed: auto apply not started: what decides it for this ready-for-review
 run could not be read; comment `shipmate apply` ``. A failed dispatch replies as
 below. Only a failed `verify-app-key` or `python-yaml` step ends `defer-auto`

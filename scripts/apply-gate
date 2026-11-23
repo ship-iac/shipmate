@@ -41,7 +41,6 @@ from _shipmate import (
     plan_runs_since,
     retried,
     run_annotated,
-    run_jobs,
 )
 
 #: The prefix keeps the gate's pending-apply queue off the plan checks on the same head.
@@ -466,11 +465,11 @@ def autoplan_runs(repo, head, *, run):
 def newest_autoplan(repo, head, *, run):
     """The `autoplan_runs` entry with the greatest `id` that did not defer, or None when none
     is listed. Walking down by id, a run is read past only when it is listed `completed` with
-    conclusion `success`, an older run is listed, and its jobs (`run_jobs`, through `run`), every
-    one at the listed `run_attempt`, are `deferred`: it planned nothing and left the head the
-    older run's plan. Jobs at another attempt are not deferred, as a re-run turned the run live.
-    Retries and raises as `autoplan_runs` does, and raises `ValueError` on an incomplete jobs
-    listing or one `deferred` cannot read."""
+    conclusion `success`, an older run is listed, and its jobs (`listed_jobs` counted, through
+    `run`), every one at the listed `run_attempt`, are `deferred`: it planned nothing and left
+    the head the older run's plan. Jobs at another attempt are not deferred, as a re-run turned
+    the run live. Retries and raises as `autoplan_runs` does, and raises `ValueError` on an
+    incomplete jobs listing or one `deferred` cannot read."""
     return _walk(repo, autoplan_runs(repo, head, run=run), run)
 
 
@@ -491,7 +490,8 @@ def auto_source(repo, head, *, run):
     `run_attempt` are `deferred`, and the plan is a `completed` `success` run of `T`'s
     `head_sha` with a lower id. Otherwise both are `T`. A run still running when read is the
     deferring run still dispatching when its own auto apply reads it, and its jobs are not
-    cached; one whose jobs listing is empty or incomplete is not deferred.
+    cached; one that lists no job yet is not deferred, and one whose jobs listing is incomplete
+    raises.
     Retries and raises as `newest_autoplan` does."""
     runs = sorted(autoplan_runs(repo, head, run=run), key=lambda listed: listed["id"], reverse=True)
     if not runs:
@@ -518,11 +518,11 @@ def _deferred_run(repo, listed, run, *, live=False):
     # An ended attempt's jobs do not change, so one read per attempt serves the process.
     key = (repo, listed["id"], listed.get("run_attempt"))
     if key not in _shipmate.deferred_runs:
-        jobs, complete = run_jobs(repo, listed["id"], run)
-        if not complete:
-            # A live run lists its jobs as it creates them: a short listing is not deferred yet.
-            if not ended:
-                return False
+        jobs = listed_jobs(repo, listed["id"], run, counted=True)
+        # A live run that lists no job yet has not deferred; a short listing may hide `defer`.
+        if jobs == [] and not ended:
+            return False
+        if not jobs:
             raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
         # Jobs at another attempt are a lagging read or a re-run: not deferred, and read again.
         if not all(j.get("run_attempt") == listed.get("run_attempt") for j in jobs):

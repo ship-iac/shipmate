@@ -1363,7 +1363,6 @@ def _defer_running():
             (1001, 1001),
             id="queued-no-jobs",
         ),
-        pytest.param([_PUSH, _LIVE], _short(), (1001, 1001), id="dispatching-short"),
         pytest.param([_PUSH, _CLICK], _jobs_body("zero-cell"), (1001, 1001), id="planned"),
         pytest.param(
             [{**_PUSH, "conclusion": "failure"}, _CLICK],
@@ -1387,13 +1386,19 @@ def test_auto_source_names_the_plan_and_the_run_that_authorizes_it(rows, jobs, e
     (defer-running names 1000). Mutation: skip the jobs read and treat the run as deferred
     (planned names 1000). Mutation: drop the plan-status check (plan-failed names 1000).
     Mutation: drop the head check (plan-of-another-head names 1000). Mutation: raise on a live
-    run's empty or incomplete jobs listing as on an ended one (queued-no-jobs and
-    dispatching-short raise `ValueError`). Mutation: call
+    run's empty jobs listing as on an ended one (queued-no-jobs raises `ValueError`). Mutation: call
     `autoplan_runs` twice (the argv lists it twice)."""
     assert _source(rows, {1001: jobs}) == (
         expected,
         [autoplans_read("o/r", _HEAD), _jobs_argv(1001)],
     )
+
+
+def test_auto_source_raises_on_a_live_runs_short_jobs_listing():
+    """A short listing may hide `defer`. Mutation: treat a live run's short listing as not
+    deferred (1001 names itself twice)."""
+    with pytest.raises(ValueError, match="the jobs of autoplan run 1001 could not be listed"):
+        _source([_PUSH, _LIVE], {1001: _short()})
 
 
 def test_auto_source_of_an_empty_listing_is_none_twice():

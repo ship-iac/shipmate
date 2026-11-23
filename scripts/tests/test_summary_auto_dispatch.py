@@ -1054,11 +1054,7 @@ DEFERRED_SKIPS = {
     "record action reopened": ({"checks": jsonl(_sbx(action="reopened"))}, _NO_AUTO),
     # Mutation: split the name by hand (`name.split(" / ")[1]`) in place of `parse_check_name`.
     "name outside the grammar": ({"checks": jsonl(_sbx(check={"name": "apply / sbx"}))}, _NO_AUTO),
-}
-
-#: name -> (decision overrides, whole reason); each row breaks check 5 or 6, past a changed `sbx`.
-DEFERRED_REFUSALS = {
-    # Mutation: drop the plan-id check.
+    # Mutation: drop the plan-id check. A newer ready-for-review run may take over, so no reply.
     "plan of another run": (
         {"runs": jsonl(_ready(), _push(999))},
         _SOURCE.format(999, R),
@@ -1068,6 +1064,10 @@ DEFERRED_REFUSALS = {
         {"runs": jsonl(_ready(2002), _push())},
         _SOURCE.format(P, 2002),
     ),
+}
+
+#: name -> (decision overrides, whole reason); each row breaks check 6, past a changed `sbx`.
+DEFERRED_REFUSALS = {
     # Mutation: drop the `pusher_reason` call.
     "bot clicker": (
         {"runs": jsonl(_ready(login="renovate[bot]"), _push())},
@@ -1174,6 +1174,28 @@ def test_an_empty_main_token_warns_and_posts_nothing(tmp_path):
     assert (outputs, reply) == ({}, None)
     assert proc.stdout.splitlines() == [_DECIDE_FAILED]
     assert proc.stderr.splitlines()[0].startswith("::warning::SHIPMATE_APP_SLUG is empty")
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "permission",
+    [pytest.param(None, id="read-failed"), pytest.param("{}", id="malformed")],
+)
+def test_an_unreadable_clicker_permission_replies_as_failed(tmp_path, permission):
+    """Mutation: exit `REFUSED` for an `UnreadablePermission` -- the reply reads `refused` and
+    quotes the reason, red."""
+    proc, outputs, reply = _decide_deferred(tmp_path, permission=permission)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert outputs == {}
+    assert proc.stdout.splitlines() == [_DECIDE_FAILED]
+    assert reply.splitlines()[:3] == [
+        "### shipmate apply",
+        "",
+        (
+            "🔴 failed: auto apply not started: what decides it for this ready-for-review run "
+            "could not be read; comment `shipmate apply`"
+        ),
+    ]
 
 
 @bash_only

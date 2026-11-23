@@ -45,11 +45,12 @@ run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in
 5. `apply-gate.auto_source` gives `P` as the plan and this run as its authorizer;
 6. `authorize.pusher_reason` admits this run's actor, the clicker.
 
-A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 4 prints nothing: no change
-is yet known to call for an auto apply. A failed or malformed listing in check 5 exits `UNREAD`
-with one `::error::` line; a refusal in check 5 or 6 prints the reply's sentence and exits
-`REFUSED`: check 5's reason followed by "; comment `shipmate apply`", or check 6's reason,
-which carries its own remedy.
+A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 5 prints nothing: until
+check 5 no change is yet known to call for an auto apply, and past a check 5 mismatch a newer
+ready-for-review run may take over. A failed or malformed listing in check 5 exits `UNREAD` with
+one `::error::` line, and so does a clicker's permission check 6 could not read
+(`authorize.UnreadablePermission`); any other refusal in check 6 prints its reason, which carries
+its own remedy, and exits `REFUSED`.
 """
 
 import os
@@ -76,12 +77,12 @@ au = _load("authorize")
 ec = _load("env-config")
 gs = _load("gate-status")
 
-#: The exit code of a failed or malformed autoplan listing, read once a change calls for an auto
-#: apply: the summary step replies on it, and on no other failure.
+#: The exit code of a failed or malformed autoplan listing, or of an unreadable clicker
+#: permission, read once a change calls for an auto apply: the decision steps reply on it.
 UNREAD = 3
 
-#: The exit code of check 5 or 6 refusing once a change calls for an auto apply: stdout is the
-#: reason, which `actions/auto-dispatch` replies with.
+#: The exit code of check 6 refusing once a change calls for an auto apply: stdout is the
+#: reply's sentence, its remedy included.
 REFUSED = 5
 
 _KEYS = ("stack", "environment", "changed")
@@ -225,15 +226,18 @@ def _gate_reason(head, plan_run):
     )
 
 
-def _source_reason(repo, head, plan_run, run_id):
+def _authorizer(repo, head, plan_run, run_id):
+    """This run's listed run object when the autoplans of `head` resolve to plan run `plan_run`
+    authorized by this run `run_id`, else None with the mismatch logged."""
     plan, authorizer = _listed(head, lambda: ag.auto_source(repo, head, run=_run))
     got = (None, None) if plan is None else (plan["id"], authorizer["id"])
     if got != (int(plan_run), int(run_id)):
-        return (
+        _skip(
             f"the autoplans of {head} resolve to plan run {got[0]} authorized by run {got[1]}, "
             f"not plan run {plan_run} authorized by this run {run_id}; comment `shipmate apply`"
         )
-    return au.pusher_reason(repo, authorizer, run=_run)
+        return None
+    return authorizer
 
 
 def deferred(plan_run):
@@ -253,8 +257,14 @@ def deferred(plan_run):
     if not envs:
         _skip("no changed cell is in an apply_mode auto environment")
         return
-    if reason := _source_reason(repo, head, plan_run, run_id):
+    authorizer = _authorizer(repo, head, plan_run, run_id)
+    if authorizer is None:
+        return
+    if reason := au.pusher_reason(repo, authorizer, run=_run):
         _skip(reason)
+        if isinstance(reason, au.UnreadablePermission):
+            print_annotated("::error::the permission of this run's clicker could not be read")
+            raise SystemExit(UNREAD)
         print(reason)
         raise SystemExit(REFUSED)
     print(" ".join(envs))
