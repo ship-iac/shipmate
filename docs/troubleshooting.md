@@ -2343,7 +2343,10 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    <reason>``, the reason carrying its own remedy, or, when the clicker's
    permission could not be read, ``auto apply not started: what decides it for
    this ready-for-review run could not be read; comment `shipmate apply` ``. A
-   provenance mismatch replies nothing: a newer ready-for-review run may take over. A failed `defer-auto` leaves that run green. A
+   provenance mismatch past a changed `auto` environment replies ``auto apply not
+   started: the autoplans of <head> resolve to plan run <id> authorized by run
+   <id>, not plan run <id> authorized by this run <id>; comment `shipmate apply` ``,
+   unless a newer ready-for-review run authorizes, which decides itself. A failed `defer-auto` leaves that run green. A
    listing that does not show this run yet dispatches, warning `autoplan run
    <id> of <head> is not listed yet; ...`. When it cannot decide (`detect`'s
    `auto_envs` output missing or malformed, a cell summary unparseable, the

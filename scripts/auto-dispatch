@@ -45,10 +45,12 @@ run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in
 5. `apply-gate.auto_source` gives `P` as the plan and this run as its authorizer;
 6. `authorize.pusher_reason` admits this run's actor, the clicker.
 
-A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 5 prints nothing: until
-check 5 no change is yet known to call for an auto apply, and past a check 5 mismatch a newer
-ready-for-review run may take over. A failed or malformed listing in check 5 exits `UNREAD` with
-one `::error::` line, and so does a clicker's permission check 6 could not read
+A failed read in checks 1, 3 or 4 exits 1, and a skip in checks 1 to 4 prints nothing: no change
+is yet known to call for an auto apply. A check 5 mismatch prints nothing when the authorizer is a
+run newer than this one whose `defer` job started, which only a ready-for-review run's does: that
+run decides itself. Any other mismatch prints the mismatch, ending in its remedy, and exits
+`REFUSED`. A failed or malformed listing in check 5, or of that newer run's jobs,, exits
+`UNREAD` with one `::error::` line, and so does a clicker's permission check 6 could not read
 (`authorize.UnreadablePermission`); any other refusal in check 6 prints its reason, which carries
 its own remedy, and exits `REFUSED`.
 """
@@ -66,6 +68,7 @@ from _shipmate import (
     exit_text,
     is_run_id,
     json_or_none,
+    listed_jobs,
     one_line,
     print_annotated,
     run_annotated,
@@ -81,7 +84,7 @@ gs = _load("gate-status")
 #: permission, read once a change calls for an auto apply: the decision steps reply on it.
 UNREAD = 3
 
-#: The exit code of check 6 refusing once a change calls for an auto apply: stdout is the
+#: The exit code of check 5 or 6 refusing once a change calls for an auto apply: stdout is the
 #: reply's sentence, its remedy included.
 REFUSED = 5
 
@@ -226,18 +229,44 @@ def _gate_reason(head, plan_run):
     )
 
 
+def _ready_run(repo, listed):
+    """Whether listed run `listed` is a ready-for-review run: its `defer` job, which runs only
+    for that action, started. Raises `ValueError` when its jobs cannot be listed."""
+    jobs = listed_jobs(repo, listed["id"], _run, counted=True)
+    if jobs is None:
+        raise ValueError(f"the jobs of autoplan run {listed['id']} could not be listed")
+    return any(
+        j["name"] == ag.CALLER_PREFIX + "defer"
+        and j["status"] in ("in_progress", "completed")
+        and j.get("conclusion") != "skipped"
+        for j in jobs
+    )
+
+
 def _authorizer(repo, head, plan_run, run_id):
     """This run's listed run object when the autoplans of `head` resolve to plan run `plan_run`
-    authorized by this run `run_id`, else None with the mismatch logged."""
-    plan, authorizer = _listed(head, lambda: ag.auto_source(repo, head, run=_run))
+    authorized by this run `run_id`. Otherwise None with the mismatch logged when a newer
+    ready-for-review run authorizes, since it decides itself; else the mismatch is printed and
+    exits `REFUSED`."""
+
+    def read():
+        plan, authorizer = ag.auto_source(repo, head, run=_run)
+        newer = authorizer is not None and authorizer["id"] > int(run_id)
+        return plan, authorizer, newer and _ready_run(repo, authorizer)
+
+    plan, authorizer, taken_over = _listed(head, read)
     got = (None, None) if plan is None else (plan["id"], authorizer["id"])
-    if got != (int(plan_run), int(run_id)):
-        _skip(
-            f"the autoplans of {head} resolve to plan run {got[0]} authorized by run {got[1]}, "
-            f"not plan run {plan_run} authorized by this run {run_id}; comment `shipmate apply`"
-        )
+    if got == (int(plan_run), int(run_id)):
+        return authorizer
+    reason = (
+        f"the autoplans of {head} resolve to plan run {got[0]} authorized by run {got[1]}, "
+        f"not plan run {plan_run} authorized by this run {run_id}; comment `shipmate apply`"
+    )
+    _skip(reason)
+    if taken_over:
         return None
-    return authorizer
+    print(reason)
+    raise SystemExit(REFUSED)
 
 
 def deferred(plan_run):

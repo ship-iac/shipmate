@@ -18,6 +18,7 @@ from _detect_fixtures import (
     deferred_in_progress_jobs,
     deferred_jobs,
     listed_autoplan,
+    plan_jobs,
 )
 from _loader import (
     ACTIONS,
@@ -1054,20 +1055,41 @@ DEFERRED_SKIPS = {
     "record action reopened": ({"checks": jsonl(_sbx(action="reopened"))}, _NO_AUTO),
     # Mutation: split the name by hand (`name.split(" / ")[1]`) in place of `parse_check_name`.
     "name outside the grammar": ({"checks": jsonl(_sbx(check={"name": "apply / sbx"}))}, _NO_AUTO),
-    # Mutation: drop the plan-id check. A newer ready-for-review run may take over, so no reply.
-    "plan of another run": (
-        {"runs": jsonl(_ready(), _push(999))},
-        _SOURCE.format(999, R),
-    ),
-    # Mutation: drop the authorizer check.
-    "authorizer of another run": (
+    # A newer ready-for-review run decides itself, so no reply. Mutation: drop the authorizer
+    # check. Mutation: reply on every mismatch (drop the `taken_over` return).
+    "authorizer of a newer ready run": (
         {"runs": jsonl(_ready(2002), _push())},
         _SOURCE.format(P, 2002),
     ),
 }
 
-#: name -> (decision overrides, whole reason); each row breaks check 6, past a changed `sbx`.
+
+def _reopened_jobs(run_id):
+    """The jobs listing of a completed autoplan run `run_id` whose `defer` job was skipped."""
+    listing = json.loads(plan_jobs(run_id))
+    listing["jobs"].append(
+        listing["jobs"][0]
+        | {"id": 1, "name": "plan / defer", "status": "completed", "conclusion": "skipped"}
+    )
+    listing["total_count"] += 1
+    return json.dumps(listing)
+
+
+#: name -> (decision overrides, whole reason); each row breaks check 5 or 6, past a changed
+#: `sbx`.
 DEFERRED_REFUSALS = {
+    # Mutation: drop the plan-id check.
+    "plan of another run": ({"runs": jsonl(_ready(), _push(999))}, _SOURCE.format(999, R)),
+    # The listing lags this run. Mutation: stay silent on every mismatch.
+    "listing lags": ({"runs": jsonl(_push())}, _SOURCE.format(P, P)),
+    # Mutation: stay silent whenever the authorizer is newer (drop `_ready_run`).
+    "reopened run on top": (
+        {
+            "runs": jsonl(_push(2002), _ready(), _push()),
+            "jobs": _reopened_jobs(2002),
+        },
+        _SOURCE.format(2002, 2002),
+    ),
     # Mutation: drop the `pusher_reason` call.
     "bot clicker": (
         {"runs": jsonl(_ready(login="renovate[bot]"), _push())},
@@ -1090,7 +1112,7 @@ DEFERRED_REFUSALS = {
 @bash_only
 @pytest.mark.parametrize("name", list(DEFERRED_SKIPS))
 def test_a_deferred_ready_run_failing_one_check_dispatches_nothing(tmp_path, name):
-    """Each row's mutation, in its comment above the row, prints `sbx` for that row."""
+    """Each row's mutation, in its comment above the row, reddens that row."""
     answers, reason = DEFERRED_SKIPS[name]
     proc, outputs, reply = _decide_deferred(tmp_path, **answers)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -1102,7 +1124,7 @@ def test_a_deferred_ready_run_failing_one_check_dispatches_nothing(tmp_path, nam
 @pytest.mark.parametrize("name", list(DEFERRED_REFUSALS))
 def test_a_deferred_ready_run_refused_past_a_change_replies_with_the_reason(tmp_path, name):
     """A changed `sbx` called for an auto apply, so the refusal replies. Each row's mutation,
-    in its comment above the row, prints `sbx` for that row. Mutation: log the reason and
+    in its comment above the row, reddens that row. Mutation: log the reason and
     print nothing (`_skip(reason); return`) -- no reply, red. Mutation: append
     the remedy (`; comment ...`) after `$out` in the composite's reply -- every row reddens."""
     answers, reason = DEFERRED_REFUSALS[name]

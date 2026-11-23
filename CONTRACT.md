@@ -2773,8 +2773,13 @@ hold:
   or a clicker without write access dispatches nothing.
 
 A failed condition logs `no auto apply dispatched: <reason>` and dispatches
-nothing. A provenance mismatch posts no reply: a newer ready-for-review run of
-the head may take over. When the clicker's check refuses, a change already called
+nothing. Past that change, a provenance mismatch posts no reply only when the
+head's autoplans resolve to a newer ready-for-review run as the authorizer,
+which decides itself. Any other mismatch, such as a listing that does not show
+this run yet or a reopened run on top, posts one reply, ``🔴 refused: auto apply
+not started: the autoplans of <head> resolve to plan run <id> authorized by run
+<id>, not plan run <id> authorized by this run <id>; comment `shipmate apply` ``.
+When the clicker's check refuses on a permission it read, a change already called
 for an auto apply, so it also posts one reply, ``🔴 refused: auto apply not
 started: <reason>``, the autoplan actor check's reason as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
 A read that fails before a change of an `auto` environment is known warns and
