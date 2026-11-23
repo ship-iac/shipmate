@@ -63,12 +63,15 @@ def test_the_workflow_call_secrets_are_exactly_these():
 
 
 def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
-    """The download lives in the action. Mutations: re-add the drift-summary download step ahead
-    of the action; re-add `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
+    """The download step ahead of the action is pinned whole in `test_drift_issues.py`; nothing
+    else runs. Mutations: add an `actions/checkout` step; re-add
+    `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
     `private-key` at `vars.`, which every plan cell exports and the run log prints; drop
     `cells`, which `actions/drift-issues` then refuses as unset; drop `default-branch`, and no
     Issue of a removed cell is ever closed."""
-    assert workflow_jobs(WF)["issues"]["steps"] == [
+    steps = workflow_jobs(WF)["issues"]["steps"]
+    assert steps[0]["name"] == "Download drift cell summaries"
+    assert steps[1:] == [
         {
             "uses": local_action("drift-issues"),
             "with": {

@@ -175,67 +175,92 @@ def test_render_step_never_interpolates_expr_directly():
     assert "${{" not in (render_step.get("run") or "")
 
 
-def test_download_pattern_matches_apply_cell_upload_prefix():
-    upload_step = _find_step(
-        action_yaml("apply-summary")["runs"]["steps"], uses_contains="download-artifact"
-    )
-    assert upload_step is not None, "no download-artifact step found"
-    pattern = (upload_step.get("with") or {}).get("pattern")
+def _summary_job_step(name):
+    """The one step of `apply-run.yml`'s `summary` job named `name`."""
+    matches = [
+        s for s in workflow_jobs("apply-run.yml")["summary"]["steps"] if s.get("name") == name
+    ]
+    assert len(matches) == 1, f"apply-run.yml summary: {len(matches)} steps named {name!r}"
+    return matches[0]
 
+
+#: The `summary` job's step names, in order, hand-written.
+_SUMMARY_JOB_STEPS = [
+    "Complete gate if every apply check is done",
+    "Download apply cell summaries",
+    "Download the apply report",
+    "Warn on apply cell summaries download failure",
+    "Post apply result comment",
+    "End the running apply check",
+    "Tell the apply runs waiting behind this one",
+]
+
+
+def test_the_downloads_precede_the_comment_that_reads_them():
+    """Mutation: move `Download apply cell summaries` after `Post apply result comment`."""
+    steps = workflow_jobs("apply-run.yml")["summary"]["steps"]
+    assert [s.get("name") for s in steps] == _SUMMARY_JOB_STEPS
+
+
+#: The cell summaries download step, hand-written.
+_CELL_DOWNLOAD = {
+    "name": "Download apply cell summaries",
+    "id": "download",
+    "if": "${{ !cancelled() }}",
+    "continue-on-error": True,
+    "timeout-minutes": 1,
+    "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "with": {
+        "pattern": "apply-summary.*",
+        "path": "cells",
+        "github-token": "${{ github.token }}",
+        "merge-multiple": False,
+    },
+}
+
+
+def test_the_cell_summaries_download_is_bounded_and_never_blocks_the_comment():
+    """`!cancelled()`: the comment posts after a failed gate refresh, and an implicit `success()`
+    would skip the download it reads. `continue-on-error`: for comment-ops the comment is the
+    feedback channel, so an artifact-API error must not skip it. `timeout-minutes` ends the 180 s
+    a retried download holds the job. `pattern:` mode succeeds on zero matches, where `name:`
+    throws.
+
+    Mutations: drop `!cancelled()`; drop `continue-on-error`; drop `timeout-minutes`; download
+    by `name:`."""
+    assert _summary_job_step(_CELL_DOWNLOAD["name"]) == _CELL_DOWNLOAD
+
+
+def test_download_pattern_matches_apply_cell_upload_prefix():
+    pattern = _summary_job_step("Download apply cell summaries")["with"]["pattern"]
     upload_apply_cell_step = step_by("apply-cell", name="Upload apply summary")
-    assert upload_apply_cell_step is not None, "apply-cell has no upload-artifact step"
     name = (upload_apply_cell_step.get("with") or {}).get("name", "")
     # From `apply-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}`, take the literal
     # prefix before the first templated segment.
     prefix = name.split("${{", 1)[0]
     assert prefix, "could not extract a literal prefix from apply-cell's artifact name"
     assert pattern == f"{prefix}*", (
-        f"apply-summary's download pattern {pattern!r} does not match "
+        f"the cell summaries download pattern {pattern!r} does not match "
         f"apply-cell's upload name prefix {prefix!r}"
     )
 
 
-def test_download_step_tolerates_failure():
-    # For comment-ops the comment is the feedback channel: a transient artifact-API 5xx or 403
-    # must not skip the token mint and the POST, leaving a developer whose apply fully succeeded
-    # with no pull-request comment.
-    download_step = _find_step(
-        action_yaml("apply-summary")["runs"]["steps"], uses_contains="download-artifact"
-    )
-    assert download_step.get("continue-on-error") is True
+#: The warning on a cell summaries download that did not complete, hand-written.
+_DOWNLOAD_WARNING = {
+    "name": "Warn on apply cell summaries download failure",
+    "if": "${{ !cancelled() && steps.download.outcome == 'failure' }}",
+    "run": (
+        'echo "::warning::apply cell summaries download did not complete; the comment may '
+        'render without per-cell detail"'
+    ),
+}
 
 
-def test_download_step_failure_is_warned_not_silently_swallowed():
-    steps = action_yaml("apply-summary")["runs"]["steps"]
-    download_step = _find_step(steps, uses_contains="download-artifact")
-    step_id = download_step.get("id")
-    assert step_id, "download step needs an id so a later step can check its outcome"
-    warn_step = next(
-        (
-            s
-            for s in steps
-            if f"steps.{step_id}.outcome" in str(s.get("if", ""))
-            and "failure" in str(s.get("if", ""))
-        ),
-        None,
-    )
-    assert warn_step is not None, (
-        "expected a step gated on the download step's failure outcome to warn about it"
-    )
-
-
-def test_download_step_does_not_fail_on_zero_matches():
-    """`pattern:`-mode download-artifact does not fail when zero artifacts match, verified
-    against v7.0.0 source: the pattern branch never throws on an empty result, unlike the
-    `name:` and `artifact-ids:` single-artifact modes, so no extra 'ignore missing' option is
-    needed. This guards against silently switching to `name:`, the single-artifact mode, which
-    does throw on a miss."""
-    download_step = _find_step(
-        action_yaml("apply-summary")["runs"]["steps"], uses_contains="download-artifact"
-    )
-    with_ = download_step.get("with") or {}
-    assert "pattern" in with_
-    assert "name" not in with_
+def test_a_download_that_did_not_complete_is_warned():
+    """A timeout and a failed download both read `failure`, so the text names neither.
+    Mutations: drop `!cancelled()`; read `steps.download.conclusion` (always `success` under
+    `continue-on-error`)."""
+    assert _summary_job_step(_DOWNLOAD_WARNING["name"]) == _DOWNLOAD_WARNING
 
 
 def _steps():
@@ -267,7 +292,6 @@ def test_declared_inputs_are_exactly_these():
         "envlevel1-waves",
         "envlevel2-waves",
         "envlevel3-waves",
-        "report-artifact",
         "detect-result",
         "detect-refusal",
         "lock-refusal",
@@ -402,7 +426,6 @@ _APPLY_SUMMARY_WITH = {
     "envlevel1-waves": "${{ needs.detect.outputs.envlevel1_waves }}",
     "envlevel2-waves": "${{ needs.detect.outputs.envlevel2_waves }}",
     "envlevel3-waves": "${{ needs.detect.outputs.envlevel3_waves }}",
-    "report-artifact": "${{ needs.detect.outputs.report_artifact }}",
     "detect-result": "${{ needs.detect.result }}",
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "lock-refusal": "${{ needs.lock.outputs.refusal }}",
@@ -423,7 +446,6 @@ def test_apply_passes_apply_summary_exactly_this_with():
 
     Mutation: drop `environment:` from the step's `with:` -- red.
     Mutation: restore `held-cells: ${{ needs.detect.outputs.held_cells }}` -- red.
-    Mutation: drop `report-artifact:` from the step's `with:` -- red.
     Mutation: drop `detect-result:` from the step's `with:` -- red.
     Mutation: drop `detect-refusal:` from the step's `with:` -- red.
     Mutation: wire `needs.detect.outputs.refusal` into `lock-refusal` -- red.
@@ -434,26 +456,28 @@ def test_apply_passes_apply_summary_exactly_this_with():
     assert step["with"] == _APPLY_SUMMARY_WITH
 
 
-#: apply-summary's report download step, hand-written.
+#: The report download step, hand-written.
 _REPORT_DOWNLOAD = {
     "name": "Download the apply report",
-    "if": "${{ inputs.report-artifact != '' }}",
+    "if": "${{ !cancelled() && needs.detect.outputs.report_artifact != '' }}",
     "continue-on-error": True,
+    "timeout-minutes": 1,
     "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
-    "with": {"name": "${{ inputs.report-artifact }}", "path": "apply-report"},
+    "with": {"name": "${{ needs.detect.outputs.report_artifact }}", "path": "apply-report"},
 }
 
 
 def test_the_report_is_downloaded_by_exact_name_where_the_render_reads_it():
     """By the exact name detect output, not a `pattern`, to the directory the render step's
     `SHIPMATE_REPORT_PATH` names (pinned in `_RENDER_ENV`), and never with an empty name, which
-    downloads every artifact of the run. A failed download degrades: the render reads the report
-    as unread, renders the red line and never a green verdict.
+    downloads every artifact of the run. A failed or timed-out download degrades: the render reads
+    the report as unread, renders the red line and never a green verdict. `!cancelled()` runs it
+    after a failed gate refresh, as the comment does.
 
-    Mutations: drop the `if:`; name a fixed artifact; download to another path; drop
-    `continue-on-error`, so a missing report skips the comment; download by `pattern`."""
-    steps = action_yaml("apply-summary")["runs"]["steps"]
-    assert next(s for s in steps if s.get("name") == _REPORT_DOWNLOAD["name"]) == _REPORT_DOWNLOAD
+    Mutations: name `${{ inputs.report-artifact }}`; drop the name clause from the `if:`; drop
+    `!cancelled()`; download to another path; drop `continue-on-error`; drop
+    `timeout-minutes`; download by `pattern`."""
+    assert _summary_job_step(_REPORT_DOWNLOAD["name"]) == _REPORT_DOWNLOAD
 
 
 def test_the_detect_refusal_input_is_optional_and_empty_by_default():

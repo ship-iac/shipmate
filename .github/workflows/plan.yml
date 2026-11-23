@@ -200,6 +200,29 @@ jobs:
       upsert: ${{ steps.summary.outputs.upsert }}
       superseded: ${{ steps.summary.outputs.superseded }}
     steps:
+      # A job step, not a composite one, so `timeout-minutes` can end the run that
+      # actions/toolkit#2575 holds open for 180 s after a retried blob download.
+      - name: Download plan cell summaries
+        # No `if:`: skipping it when zero cells were planned would make gate-state's "more cells
+        # than planned" branch unreachable. A `pattern:` matching nothing succeeds.
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        # A failed or timed-out download must reach gate-state as a cell-summary shortfall that
+        # holds the gate, not end the job before `Create/refresh gate` writes any gate.
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          pattern: cell-summary.*
+          path: cells
+      - name: Download cell errors
+        # `plan-cell` uploads a cell error only from a failed cell. Reviewer-facing only: a failed
+        # download renders the held comment's rows with no error under them.
+        if: ${{ needs.plan.result == 'failure' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        timeout-minutes: 1
+        with:
+          pattern: cell-error.*
+          path: cell-errors
       - uses: $/actions/summary
         id: summary
         # `scripts/doctor`'s probes need the engine slug, and `scripts/rerun-autoplan` the slug and

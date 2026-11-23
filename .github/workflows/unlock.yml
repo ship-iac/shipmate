@@ -149,9 +149,42 @@ jobs:
     runs-on: ubuntu-slim
     permissions: { pull-requests: write }
     steps:
+      # `download-artifact` writes a lone match without a directory of its name; with this
+      # sentinel uploaded, every record downloads into its artifact's directory.
+      - name: Write the download sentinel
+        if: ${{ needs.detect.result == 'success' && needs.detect.outputs.cells != '[]' }}
+        # A failed write fails the upload below (`if-no-files-found: error`), which the reply reads.
+        continue-on-error: true
+        shell: bash
+        run: echo sentinel > "$RUNNER_TEMP/shipmate-unlock-sentinel.txt"
+      - name: Upload the download sentinel
+        id: sentinel
+        if: ${{ needs.detect.result == 'success' && needs.detect.outputs.cells != '[]' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shipmate-unlock-sentinel
+          path: ${{ runner.temp }}/shipmate-unlock-sentinel.txt
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+      - name: Download the cells' records
+        id: download
+        if: ${{ needs.detect.result == 'success' && needs.detect.outputs.cells != '[]' }}
+        # Display only: the reply names a failed download, so it must not stop the reply. A job
+        # step so `timeout-minutes` can end the 180 s actions/toolkit#2575 adds after a retry.
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: shipmate-unlock-*
+          path: ${{ runner.temp }}/unlock-records
+          merge-multiple: false
       - uses: $/actions/unlock-result
         with:
           comment-id: ${{ github.event.inputs.comment_id }}
           environment: ${{ inputs.environment }}
           cells: ${{ needs.detect.outputs.cells }}
           detect-result: ${{ needs.detect.result }}
+          download-outcome: ${{ steps.download.outcome }}
+          sentinel-outcome: ${{ steps.sentinel.outcome }}

@@ -4,7 +4,7 @@ import json
 import os
 
 import pytest
-from _loader import action_steps, action_yaml, load_script, step_by
+from _loader import action_steps, action_yaml, load_script, workflow_jobs
 
 di = load_script("drift-issues")
 
@@ -584,12 +584,14 @@ def test_the_script_step_hands_the_script_exactly_these_names():
 def test_the_download_fails_the_job_on_an_artifact_api_error():
     """The whole step: no `continue-on-error`, no `github-token`, and `path` is the script's
     default directory. The gate for the empty case is the calling job's `if:`; degrading the
-    download too makes an artifact-API error read as no drift.
+    download too makes an artifact-API error read as no drift. Five minutes outlasts the 180 s a
+    retried download holds the job, so only a longer hang fails the sweep.
 
-    Mutations: add `continue-on-error: true`; change `path`.
+    Mutations: add `continue-on-error: true`; change `path`; drop `timeout-minutes`.
     """
-    assert step_by("drift-issues", name="Download drift cell summaries") == {
+    assert workflow_jobs("drift.yml")["issues"]["steps"][0] == {
         "name": "Download drift cell summaries",
         "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+        "timeout-minutes": 5,
         "with": {"pattern": "drift-summary.*", "path": "drift"},
     }

@@ -2248,8 +2248,8 @@ failed cell reds the run.
 failed: artifact `shipmate-unlock-<strategy.job-index>` holding
 `shipmate-unlock-<strategy.job-index>.json`, which names the leg's index, stack
 and environment, its outcome and the probed lock id. Before downloading the
-records, `result` uploads a `shipmate-unlock-sentinel` artifact of its own (the
-action's manifest, kept one day): `download-artifact` writes a lone matching
+records, `result` uploads a `shipmate-unlock-sentinel` artifact of its own (a
+file it writes, kept one day): `download-artifact` writes a lone matching
 artifact without a directory of its name, so whenever the sentinel uploaded,
 every record downloads into its artifact's directory. A file at the download
 root is never read. The sentinel, the download and the record reading all run
@@ -2276,12 +2276,13 @@ verdict line is one of:
 - ``🔴 failed: could not determine the lock of <stack>, ...; <stack>, ... did not run; released <n> state lock(s) in <env>: ...``,
   each clause present when it names a cell: `failed` cells, then cells with no
   valid record, then the released ones.
-- When the results are unreadable (the download failed, or the sentinel failed
-  and no `shipmate-unlock-<n>/` directory arrived), the records in their own
-  directories are still read, a cell without one reads
-  ``result unknown for <stack>, ...`` in place of `did not run`, and, when at
-  least one cell has a record, the reply ends ``; some cells' results could not
-  be read; see the run.``
+- When the results may not all have arrived (the download failed or timed out,
+  or the sentinel failed and no `shipmate-unlock-<n>/` directory arrived), the
+  records in their own directories are still read, and a cell without one reads
+  ``result unknown for <stack>, ...`` in place of `did not run`. When at least
+  one cell has a record, the reply ends ``; some cells' results could not be
+  read; see the run.`` When every cell has its record, the reply is the one
+  a successful download gives.
 - ``🔴 failed: could not read the unlock queue; see the run.`` when `detect`
   succeeded and its `cells` output is not a list of cells.
 - ``🔴 failed: the unlock run failed before probing any cell; see the run.``
@@ -2449,9 +2450,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
   edits or minimizes it (§Comment-ops, "One apply run per pull request").
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
-  artifact. A separate `issues` job, bound to `shipmate-engine`, calls
-  `actions/drift-issues`, which downloads those artifacts and, under an App
-  token, opens/updates/closes the drift Issues.
+  artifact. A separate `issues` job, bound to `shipmate-engine`, downloads
+  those artifacts and calls `actions/drift-issues`, which, under an App token,
+  opens/updates/closes the drift Issues.
 
 The plan matrix job's own `plan / <env> / <stack>` auto check-run is the one
 exception: it's the job's own check-run (GitHub creates it for the job
@@ -3223,9 +3224,9 @@ The eight jobs:
   drift path is unaffected because engine `drift.yml` states that it is a sweep
   with no pull request (`sweep: "true"`), which is the only opt-out
   and appears in no other engine workflow.
-- **`summary`** (engine, bound to `shipmate-engine`) — it calls
-  `actions/summary`, which downloads this same run's cell summaries and, under
-  an App token minted inside that environment, publishes the results. This is
+- **`summary`** (engine, bound to `shipmate-engine`) — it downloads this same
+  run's cell summaries and calls `actions/summary`, which, under an App token
+  minted inside that environment, publishes the results. This is
   what creates the pending `apply / <env> / <stack>` checks, the plan
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
   mirror of this run's completed `plan / ` checks onto the pull request's
@@ -3690,7 +3691,7 @@ verbatim as:
 using the same dot-delimited, env-first grammar as `plan.<env>.<slug>` above
 (the `.` delimiter is unambiguous for the same reason: the engine refuses an
 env name containing `.`). `apply-cell` uploads it (`if: always()`, so a blocked cell
-still reports); `actions/apply-summary` downloads every `apply-summary.*`
+still reports); `apply-run.yml`'s `summary` job downloads every `apply-summary.*`
 artifact for the run with the glob pattern `apply-summary.*`. It contains
 verbatim:
 

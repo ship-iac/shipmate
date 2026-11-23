@@ -189,13 +189,10 @@ def test_main_emits_one_json_body_per_mirrored_check(monkeypatch, capsys):
 #: The summary action's whole step-name list, hand-written and in order. The mirror must run
 #: before `Build comment + gate state`, which resolves each cell's comment link against the
 #: checks on the head; after it, every link on a dispatched plan's comment degrades to the
-#: workflow-run URL. The download sits where `apply-summary`'s does, between the key check and
-#: the mint. `Create apply checks` follows the comment, so a failed comment write publishes no apply
-#: check. Mutations: move the download after the mint; move `Create apply checks` back above the
-#: mirror.
+#: workflow-run URL. `Create apply checks` follows the comment, so a failed comment write
+#: publishes no apply check. Mutation: move `Create apply checks` back above the mirror.
 EXPECTED_STEP_NAMES = [
     "Verify the App key arrived",
-    "Download plan cell summaries",
     "Mint App installation token",
     "Hold the gate while apply checks publish",
     "Mirror this run's per-cell plan checks onto the head",
@@ -204,7 +201,6 @@ EXPECTED_STEP_NAMES = [
     "Mark cells another pull request holds",
     "Build comment + gate state",
     "Decide gate state and comment mode",
-    "Download cell errors",
     "Write the plan comment",
     "Create apply checks (pending / no-changes)",
     "Create/refresh gate",

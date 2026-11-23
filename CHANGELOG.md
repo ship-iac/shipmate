@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **An apply check's duration counts from its wave's release, not from the plan that created it.** The release flip to `in_progress` sets the check's start time to the release (`CONTRACT.md` §Apply check lifecycle).
+- **An artifact download no longer holds its job for three minutes after a retry.** `actions/download-artifact` keeps a job alive 180 s after a retried blob download (actions/toolkit#2575). Each engine download is now a step of its calling job with `timeout-minutes: 1` (`5` on the drift sweep, which fails on a longer hang): the plan summary's cell summaries and cell errors, the apply result's cell summaries and report, and the unlock reply's records. A cell-summary download that times out before its files land holds the gate as a shortfall, as a failed one does. An unlock reply whose download failed or timed out after every cell's record arrived now reads as a successful one; only a cell with no record reads `result unknown` (`CONTRACT.md` §Comment-ops, `docs/troubleshooting.md`).
 
 ## [0.58.0] — 2026-11-22
 

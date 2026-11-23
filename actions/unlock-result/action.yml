@@ -1,5 +1,5 @@
 name: shipmate unlock-result
-description: Reply once on the pull request with the state locks an unlock run released per cell, or why it released nothing (scripts/unlock-result). Display only, written with the job token, which needs pull-requests write; a reply that cannot be posted, or records that cannot be downloaded, never fail the step.
+description: Reply once on the pull request with the state locks an unlock run released per cell, or why it released nothing (scripts/unlock-result). Display only, written with the job token, which needs pull-requests write; a reply that cannot be posted never fails the step, and a cell whose record did not arrive reads as unknown.
 inputs:
   comment-id:
     description: The command comment's id, the dispatch's `comment_id`. The pull request is read from it.
@@ -13,32 +13,15 @@ inputs:
   detect-result:
     description: The `detect` job's result; anything but `success` replies that no cell was probed.
     required: true
+  download-outcome:
+    description: The outcome of the calling job's record download into `$RUNNER_TEMP/unlock-records`; `failure` reads the cells with no record as unknown.
+    required: true
+  sentinel-outcome:
+    description: The outcome of the calling job's sentinel upload; anything but `success`, with no record directory downloaded, reads every cell as unknown.
+    required: true
 runs:
   using: composite
   steps:
-    # `download-artifact` writes a lone match without a directory of its name; with this
-    # sentinel uploaded, every record downloads into its artifact's directory.
-    - name: Upload the download sentinel
-      id: sentinel
-      if: ${{ inputs.detect-result == 'success' && inputs.cells != '[]' }}
-      continue-on-error: true
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-      with:
-        name: shipmate-unlock-sentinel
-        path: ${{ github.action_path }}/action.yml
-        retention-days: 1
-        overwrite: true
-    - name: Download the cells' records
-      id: download
-      if: ${{ inputs.detect-result == 'success' && inputs.cells != '[]' }}
-      # Display only: the reply names a failed download, so it must not stop the reply. No
-      # `github-token`: this run's own artifacts download with no token permission.
-      continue-on-error: true
-      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-      with:
-        pattern: shipmate-unlock-*
-        path: ${{ runner.temp }}/unlock-records
-        merge-multiple: false
     - name: Reply with the unlock result
       shell: bash
       env:
@@ -47,7 +30,7 @@ runs:
         SHIPMATE_ENV: ${{ inputs.environment }}
         SHIPMATE_CELLS: ${{ inputs.cells }}
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
-        SHIPMATE_DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
-        SHIPMATE_SENTINEL_OUTCOME: ${{ steps.sentinel.outcome }}
+        SHIPMATE_DOWNLOAD_OUTCOME: ${{ inputs.download-outcome }}
+        SHIPMATE_SENTINEL_OUTCOME: ${{ inputs.sentinel-outcome }}
         SHIPMATE_RECORDS: ${{ runner.temp }}/unlock-records
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-result"

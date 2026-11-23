@@ -613,10 +613,6 @@ LATER_STEP_IFS = {
     ),
     "Build comment + gate state": NOT_SUPERSEDED,
     "Decide gate state and comment mode": NOT_SUPERSEDED,
-    "Download cell errors": (
-        "${{ steps.hold.outputs.superseded != 'true'"
-        " && steps.gate.outputs.comment_mode == 'held' }}"
-    ),
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_MOVED,
     GATE: NOT_MOVED,
@@ -640,7 +636,7 @@ LATER_STEP_IFS = {
 def test_a_superseded_run_skips_every_later_step():
     """The hold step's `exit 0` does not end the composite, so each later step reads `superseded`
     itself and a superseded run writes nothing.
-    Mutations: drop the guard from Mirror, `Download cell errors`, Upsert, `Create apply checks` or
+    Mutations: drop the guard from Mirror, Upsert, `Create apply checks` or
     `Create/refresh gate` -> red each."""
     steps = action_steps("summary")
     later = steps[steps.index(step_by("summary", id="hold")) + 1 :]

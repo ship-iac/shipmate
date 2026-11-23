@@ -109,7 +109,11 @@ UNLOCK_STEP_ACTIONS = {
         local_action("unlock-cell"),
         "actions/upload-artifact",
     ],
-    "result": [local_action("unlock-result")],
+    "result": [
+        "actions/upload-artifact",
+        "actions/download-artifact",
+        local_action("unlock-result"),
+    ],
 }
 
 #: `run:` steps per unlock job, hand-written. The `uses:` list above cannot see a shell step,
@@ -117,8 +121,9 @@ UNLOCK_STEP_ACTIONS = {
 #: id-token: write and an already-assumed apply role. The apply side takes no mirror of this,
 #: because `apply.yml` legitimately runs shell, so a `tofu force-unlock` pasted there stays a
 #: blind spot rather than a second selector here. The `unlock` job's one is its outcome record,
-#: pinned whole by `test_unlock_result_wiring.py`.
-UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 1, "result": 0}
+#: and the `result` job's its download sentinel, both pinned whole by
+#: `test_unlock_result_wiring.py`.
+UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 1, "result": 1}
 
 UNLOCK_PERMISSIONS = {
     "detect": {"contents": "read", "checks": "read", "actions": "read"},
@@ -267,14 +272,18 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
 def test_every_summary_step_runs_on_every_apply_dispatch():
     """A gate refresh that finds a hold once every check is done, or hits an API error, fails
     its step; the result comment, the run check's finish and the reply to waiting runs still
-    run. Mutations: delete the comment step's `if:` (the default `success()` skips it) -- red;
-    delete the run check's finish step's `if:` -- red; delete the waiting-runs step's `if:` --
-    red."""
+    run, and so do the downloads and the warning the comment reads. Mutations: delete the comment
+    step's `if:` (the default `success()` skips it) -- red; delete the run check's finish step's
+    `if:` -- red; delete the waiting-runs step's `if:` -- red; drop `!cancelled()` from a
+    download or the warning -- red."""
     steps = _job(APPLY_RUN, "summary")["steps"]
-    assert len(steps) == 4, f"summary no longer has exactly four steps: {len(steps)}"
+    assert len(steps) == 7, f"summary no longer has exactly seven steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
     assert conditions == [
         None,
+        "${{ !cancelled() }}",
+        "${{ !cancelled() && needs.detect.outputs.report_artifact != '' }}",
+        "${{ !cancelled() && steps.download.outcome == 'failure' }}",
         "${{ !cancelled() }}",
         "${{ always() && steps.result.outputs.posted == 'true' }}",
         "${{ !cancelled() }}",
