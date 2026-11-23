@@ -2539,7 +2539,7 @@ request to apply it.``:
   planned every cell this run would apply.
 - `the plan records of <cells> name other plan runs than <n>`: a cell's newest
   plan record names another plan run, so a newer plan of that cell exists, or
-  names no plan run, so that cell's record was not written.
+  names no plan run, so that cell's record was not written or holds no readable plan run.
 - ``plan run <n> is a `<event>` run, not an autoplan`` or `plan run <n> planned
   <sha>, not the head <sha>`: the listing returned a run outside its own
   `event=` or `head_sha=` filter. Comment `shipmate apply`.
