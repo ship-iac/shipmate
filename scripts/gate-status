@@ -26,7 +26,9 @@ transiently retries twice, each retry noted on stderr. A gate write (`post`, `ho
 `deploy`) that GitHub's secondary rate limit refuses also waits 60 s and retries, noted on
 stderr, up to three waits per invocation.
 `refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
-its write retries: each caller decides whether a hold fails its step. `refuse-newer` prints its
+its write retries. A `failure` gate from this run or an older one is read again first, up to three
+times two seconds apart, since a statuses read right after this run's own write can return the
+write before it: each caller decides whether a hold fails its step. `refuse-newer` prints its
 refusal as an `::error::` line and exits `NEWER`, so a caller tells a newer run from a failed
 read (exit 1); `post` re-runs it before each retry, so it can exit `NEWER` too. `checks`
 serves `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends
@@ -114,6 +116,11 @@ NEWER = 4
 #: five trials each on a sample repository in November 2026.
 REPLAN_WAIT = 15
 REPLAN_POLL = 5
+#: How often, and how many seconds apart, `refresh` reads again a `failure` gate this run or an
+#: older one wrote: a statuses read right after a write returned the write before it in 8 of 40
+#: probes, and in 5 of 30 in a second run, where each lag was one read and converged within 0.97 s.
+HOLD_REREADS = 3
+HOLD_REREAD_WAIT = 2
 _COMMENTS_JQ = '.[] | {login: .user.login, lines: ((.body // "") | split("\\n")[0:4])}'
 
 
@@ -210,19 +217,41 @@ def newer_hold(sha):
     Every App-created status in the history counts, not only the newest: this run's own hold,
     written after a failed read, must not hide a newer run's earlier one. Only plan runs write a
     `failure` gate before a merge, so a newer one is a newer plan of the same head."""
-    this_run = os.environ.get("GITHUB_RUN_ID", "")
-    if not is_run_id(this_run):
-        raise SystemExit(f"::error::GITHUB_RUN_ID must be a decimal run id (got: {this_run!r})")
+    this_run = _this_run()
     runs = [
         int(run)
         for state, run in _gates(sha)
-        if state == "failure" and run != "-" and int(run) > int(this_run)
+        if state == "failure" and run != "-" and int(run) > this_run
     ]
     return max(runs) if runs else None
 
 
+def _this_run():
+    this_run = os.environ.get("GITHUB_RUN_ID", "")
+    if not is_run_id(this_run):
+        raise SystemExit(f"::error::GITHUB_RUN_ID must be a decimal run id (got: {this_run!r})")
+    return int(this_run)
+
+
+def _may_lag(gate):
+    """Whether `gate` is a `failure` from this run or an older one: a statuses read that lags
+    this run's own write returns one. A newer run's hold, or one with run id `-`, is final."""
+    if gate is None or gate[0] != "failure" or gate[1] == "-":
+        return False
+    return int(gate[1]) <= _this_run()
+
+
 def _refuse_held(sha):
+    """Exit `HELD` when the newest gate on `sha` is `failure`, reading again up to
+    `HOLD_REREADS` times while that read may lag this run's own write (`_may_lag`). Each
+    read is judged anew. Accepted cost: a hold an apply or deploy run refreshes over waits
+    `HOLD_REREADS * HOLD_REREAD_WAIT` seconds before it refuses."""
     newest = newest_gate(sha)
+    for _ in range(HOLD_REREADS):
+        if not _may_lag(newest):
+            break
+        sleep(HOLD_REREAD_WAIT)
+        newest = newest_gate(sha)
     if newest and newest[0] == "failure":
         print(
             f"{GATE_CONTEXT} is held for {sha}; its status description on the pull request names "

@@ -336,7 +336,7 @@ def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
         _write_argv("pending", "the reason"),
         CHECKS_ARGV,
         USER_ARGV,
-        READ_ARGV,
+        *[READ_ARGV] * 4,
     ]
     assert (proc.stdout, proc.stderr) == (
         (
