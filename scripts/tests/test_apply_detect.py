@@ -1845,7 +1845,8 @@ _LIVE_9 = dispatched_plan(9, PR_NUMBER)
 _LIVE_10 = dispatched_plan(10, PR_NUMBER, status="queued")
 _TIMEOUT_9 = (
     "apply aborted: shipmate plan run 9 of this pull request is still in progress after 8 "
-    "minutes; wait for it to finish, review its plan, then comment `shipmate apply`"
+    "minutes; wait for it to finish, review its plan, then comment the same `shipmate apply` "
+    "command"
 )
 _UNLISTED = (
     "apply aborted: the live shipmate plan runs of pull request #8 could not all be listed for 8 "
@@ -1861,7 +1862,8 @@ _UNREAD_9 = (
 def _replanned(run_id):
     return (
         f"apply aborted: shipmate plan run {run_id} of this pull request planned stacks/app / "
-        "dev-eu while this apply waited for it; review its plan, then comment `shipmate apply`"
+        "dev-eu while this apply waited for it; review its plan, then comment the same "
+        "`shipmate apply` command"
     )
 
 

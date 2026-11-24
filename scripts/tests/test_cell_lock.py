@@ -2973,13 +2973,13 @@ REPLAN = "comment `shipmate plan`, review, then apply"
         pytest.param(
             _record("4243"),
             "plan run 4243",
-            "review the plan of run 4243, then comment `shipmate apply`",
+            "review the plan of run 4243, then comment the same `shipmate apply` command",
             id="other-run",
         ),
         pytest.param(
             _record(RUN, plan_sha256="f" * 64),
             f"plan run {RUN} with another plan-text digest",
-            "review its plan, then comment `shipmate apply`",
+            "review its plan, then comment the same `shipmate apply` command",
             id="other-digest",
         ),
         pytest.param(
@@ -3018,7 +3018,8 @@ def test_verify_refuses_a_commanded_cell_whose_record_changed(
 def test_verify_auto_refuses_a_cell_whose_digest_changed(monkeypatch, tmp_path):
     """The auto form reaches only the digest row: same run, another digest.
 
-    Mutation: keep the `shipmate plan` remedy when `newest` is set -- red."""
+    Mutations: keep the `shipmate plan` remedy when `newest` is set -- red; name "the same
+    `shipmate apply` command" when `newest` is set (an auto run had no command) -- red."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
     gh.on(RECORD_READ, jsonl(_record(RUN, plan_sha256="f" * 64)))
     assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (

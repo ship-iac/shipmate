@@ -599,7 +599,7 @@ def _wait_refusal(pr_number, complete, live, unread):
         return Refused(
             f"::error::apply aborted: shipmate plan run {run_id} of this pull request is still "
             f"{live[run_id]} after {minutes} minutes; wait for it to finish, review its plan, "
-            "then comment `shipmate apply`"
+            "then comment the same `shipmate apply` command"
         )
     return SystemExit(
         f"::error::apply aborted: shipmate plan run {unread[0]} of this pull request could not be "
@@ -622,7 +622,7 @@ def refuse_replanned(runnable, waited):
         raise Refused(
             f"::error::apply aborted: shipmate plan run {hits[0]} of this pull request planned "
             f"{named(cells, ag.NAMED)} while this apply waited for it; review its plan, then "
-            "comment `shipmate apply`"
+            "comment the same `shipmate apply` command"
         )
 
 

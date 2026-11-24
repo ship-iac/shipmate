@@ -2315,7 +2315,7 @@ The same step refuses, also before any wave:
 
 A bare or targeted apply's `detect` waited 8 minutes for a `shipmate plan` run of
 this pull request, and run `<m>` had still not finished. Nothing applied. Wait
-for it to finish, review its plan, then comment `shipmate apply`
+for it to finish, review its plan, then comment the same `shipmate apply` command
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops, "One apply run per pull
 request").
 
@@ -2325,7 +2325,7 @@ A `shipmate plan` run of this pull request was live during the apply's `detect`
 wait, and it republished the apply checks of `<cells>` before it ended. Their
 plan is no longer the one reviewed, so nothing applied. This includes an apply
 commented while the plan run it was meant to apply was still finishing. Review
-the plan of run `<m>`, then comment `shipmate apply`.
+the plan of run `<m>`, then comment the same `shipmate apply` command.
 
 ### `apply aborted: the live shipmate plan runs of pull request #<n> could not all be listed for 8 minutes`
 
@@ -2803,9 +2803,9 @@ reason. On every form it refuses when:
   <what>)`: a newer plan republished the cell's check while the wave waited.
   The text ends with the remedy for what the record names:
   - `plan run <m>`, with a plan-text digest: review the plan of run `<m>`, then
-    comment `shipmate apply`.
+    comment the same `shipmate apply` command.
   - `plan run <n> with another plan-text digest`: review its plan, then comment
-    `shipmate apply`.
+    the same `shipmate apply` command (`shipmate apply` for an `auto` cell).
   - `no plan run`, or a plan run with no digest: comment `shipmate plan`,
     review, then apply.
   - `a behind check`: that plan found the base changed the stack. Update the

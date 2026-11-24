@@ -1075,12 +1075,14 @@ def _verify_plan_record(
         records = f"plan run {recorded}"
     # A record without a digest makes the next apply's detect refuse, so only a run and a
     # digest together earn the review remedy; the next apply binds the cell to that record.
+    # An auto run had no command to repeat; a commanded one names its environment or none.
+    command = "`shipmate apply`" if newest is not None else "the same `shipmate apply` command"
     if recorded is None or recorded_digest is None:
         remedy = "comment `shipmate plan`, review, then apply"
     elif recorded == plan_run:
-        remedy = "review its plan, then comment `shipmate apply`"
+        remedy = f"review its plan, then comment {command}"
     else:
-        remedy = f"review the plan of run {recorded}, then comment `shipmate apply`"
+        remedy = f"review the plan of run {recorded}, then comment {command}"
     raise SystemExit(f"::error::{lead} {plan_run} (it records {records}); {remedy}")
 
 

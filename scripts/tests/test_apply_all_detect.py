@@ -1781,5 +1781,6 @@ def test_a_bare_cell_a_waited_run_replanned_refuses(tmp_path, monkeypatch):
         )
     assert str(exc_info.value) == (
         "::error::apply aborted: shipmate plan run 9 of this pull request planned stacks/app / "
-        "dev-eu while this apply waited for it; review its plan, then comment `shipmate apply`"
+        "dev-eu while this apply waited for it; review its plan, then comment the same "
+        "`shipmate apply` command"
     )

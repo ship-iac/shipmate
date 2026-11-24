@@ -1974,21 +1974,21 @@ and the check after it can refuse four ways, `<status>` the run's last read stat
 and `<cells>` the cells that record the run, `<stack> / <env>`, the first 10
 then `, and <k> more`:
 
-- a run still live at the deadline, the lowest such id: ``apply aborted:
-  shipmate plan run <m> of this pull request is still <status> after 8
-  minutes; wait for it to finish, review its plan, then comment `shipmate
-  apply```;
+- the last listing before the deadline was complete and a run is still live,
+  listed or read by id, the lowest such id: ``apply aborted: shipmate plan run
+  <m> of this pull request is still <status> after 8 minutes; wait for it to
+  finish, review its plan, then comment the same `shipmate apply` command``;
 - a run the apply waited for rewrote a cell's record, the lowest such id:
   ``apply aborted: shipmate plan run <m> of this pull request planned <cells>
-  while this apply waited for it; review its plan, then comment `shipmate
-  apply```;
+  while this apply waited for it; review its plan, then comment the same
+  `shipmate apply` command``;
 - the last listing before the deadline was incomplete (a page failed or was
   malformed, the listing disagreed with its `total_count`, or it ran past 10
-  pages): ``apply aborted: the live shipmate plan runs of pull request #<n>
-  could not all be listed for 8 minutes, so a plan in flight may change what
-  this apply applies; comment `shipmate apply` again``;
-- otherwise, a run the apply waited for could not be read by id at the deadline,
-  the lowest such id: ``apply aborted: shipmate plan run <m> of this pull request
+  pages), whatever runs are known live: ``apply aborted: the live shipmate plan
+  runs of pull request #<n> could not all be listed for 8 minutes, so a plan in
+  flight may change what this apply applies; comment `shipmate apply` again``;
+- the last listing was complete and no run is known live, but a run the apply
+  waited for could not be read by id at the deadline, the lowest such id: ``apply aborted: shipmate plan run <m> of this pull request
   could not be read for 8 minutes, so it may still change what this apply
   applies; comment `shipmate apply` again``.
 
@@ -3146,9 +3146,10 @@ records plan run <n> (it records <plan run m, no plan run, or plan run n with
 another plan-text digest>); <remedy>``, and a
 behind record with ``... (it records a behind check); update the branch from the
 base and push``. `<remedy>` is ``review the plan of run <m>, then comment
-`shipmate apply` `` when the record names another plan run and a plan-text
-digest, ``review its plan, then comment `shipmate apply` `` when it names plan
-run <n> with another digest, and ``comment `shipmate plan`, review, then
+the same `shipmate apply` command`` when the record names another plan run and a
+plan-text digest, ``review its plan, then comment the same `shipmate apply`
+command`` when it names plan run <n> with another digest (an `auto` cell, which
+reaches only this case, reads ``comment `shipmate apply` ``), and ``comment `shipmate plan`, review, then
 apply`` when it names no plan run or no digest. An empty base tip, plan run or
 digest refuses the cell before any read.
 
