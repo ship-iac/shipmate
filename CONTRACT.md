@@ -1470,8 +1470,8 @@ commit and the jobs of each live run it lists. A listed run whose status is not 
 
 The check is a point in time, not a hold. A run dispatched in the last few
 seconds may not be listed yet, a run that changes status between the
-per-status listings can be missed (one moving back, from `in_progress` to
-`waiting` or by a re-run to `queued`), a run can be
+per-status listings other than forward from `requested` towards `in_progress`
+can be missed (one entering or leaving `waiting` at an environment rule), a run can be
 skipped when another run leaves the listed status between two page reads of
 one listing (the rest shift to an earlier page), a holder
 that merges after its read starts its deploy after the check, and a holder can

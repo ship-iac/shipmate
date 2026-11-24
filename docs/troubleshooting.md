@@ -2808,12 +2808,12 @@ reason. On every form it refuses when:
     the same `shipmate apply` command.
   - `no plan run`, or a plan run with no digest: comment `shipmate plan`,
     review, then apply.
-
-  An `auto` cell reaches only the cases of its own plan run, another digest or
-  no digest; its review remedy reads `review its plan, then comment `shipmate
-  apply``.
   - `a behind check`: that plan found the base changed the stack. Update the
     branch from the base and push.
+
+  Of the record cases, an `auto` cell reaches only those of its own plan run
+  (another digest, or no digest); its review remedy reads
+  ``review its plan, then comment `shipmate apply` ``.
 - `the apply reached the wave without its base tip, plan run and plan-text
   digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
