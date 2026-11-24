@@ -543,19 +543,17 @@ runs:
         MODE: ${{ steps.gate.outputs.comment_mode }}
         BEHIND: ${{ steps.gate.outputs.behind }}
         PLAN_RESULT: ${{ inputs.plan-result }}
-        HELD: ${{ steps.hold.outputs.held }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
         # An empty state from gate-state means a cancelled plan job, so no final gate is written.
-        # A failed `end` fails the step, and the publish hold stands.
+        # `end` runs whatever this attempt wrote: an earlier attempt's publish hold is this run's
+        # too. A failed `end` fails the step, and the publish hold stands.
         if [ -z "${STATE}" ]; then
           echo "plan job was ${PLAN_RESULT}; no final gate written"
-          if [ "$HELD" = "true" ]; then
-            python3 "$gate_status" end "$HEAD_SHA" "re-plan this pull request (comment shipmate plan or push): its plan job was cancelled before it published"
-          fi
+          python3 "$gate_status" end "$HEAD_SHA" "re-plan this pull request (comment shipmate plan or push): its plan job was cancelled before it published"
           exit 0
         fi
         # A draft status never replaces an existing gate: gate-refresh greens an absent gate or a
