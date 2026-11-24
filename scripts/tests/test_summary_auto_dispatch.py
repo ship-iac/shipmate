@@ -936,10 +936,11 @@ def _sbx(env="sbx", *, check=None, **kw):
     return _apply_check("stacks/app", env, **record) | (check or {})
 
 
-def _gate_status(state="pending", run_id=P):
+def _gate_status(state="pending", run_id=P, description=""):
     return {
         "context": "shipmate / gate",
         "state": state,
+        "description": description,
         "target_url": f"https://example.invalid/acme/demo/actions/runs/{run_id}",
         "id": 1,
         "creator": 7,
@@ -1067,6 +1068,18 @@ DEFERRED_SKIPS = {
     "gate of another run": (
         {"statuses": jsonl(_gate_status(run_id=999))},
         _NOT_PENDING_P.format("pending", 999),
+    ),
+    # Mutation: drop the `is_hold` check in `_gate_reason`.
+    "gate publish hold": (
+        {
+            "statuses": jsonl(
+                _gate_status(
+                    description=f"Plan run {P} holds this while it publishes; if that run has "
+                    "ended, re-plan (comment shipmate plan or push)"
+                )
+            )
+        },
+        f"the newest gate of {HEAD_SHA} is plan run {P}'s publish hold, not its final pending gate",
     ),
     # Mutation: accept a `success` gate.
     "gate success": (

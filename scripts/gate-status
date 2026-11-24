@@ -6,6 +6,8 @@
     gate-status refuse-newer <sha>               exit `NEWER` when a newer run holds the gate
     gate-status post <sha> <state> <description> write the gate
     gate-status hold <sha> <description>         write a `failure` gate
+    gate-status publishing <sha>                 write this run's `pending` publish hold
+    gate-status end <sha> <description>          turn this run's publish hold `failure`
     gate-status refresh <sha>                    green the gate once every apply check is done
     gate-status deploy <sha> <detect> <results>  write the post-merge verdict over job results
     gate-status checks <sha> <jq>                print one `jq` projection per line of check runs
@@ -17,16 +19,20 @@ The gate is a commit status, not a check-run: a check-run binds to a check-suite
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
 `target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
 `GITHUB_RUN_ID`, `SHIPMATE_APP_ID` for `refresh`, and `SHIPMATE_APP_SLUG`, the shipmate App's
-slug, for `newest`, `refuse-newer`, `refresh`, `post` and `published`: each refuses an empty one
-before any API call, and looks up the id of the App's bot user `<slug>[bot]` once, before its
-first statuses listing; an invocation that lists no statuses makes no lookup. A `<sha>` that is
-not 40 lowercase hex characters is refused before any API call. A failed API call exits 1 with
-an `::error::` line, except in `checks`, `moved`, `replan` and `published`. A call that fails
-transiently retries twice, each retry noted on stderr. A gate write (`post`, `hold`, `refresh`,
-`deploy`) that GitHub's secondary rate limit refuses also waits 60 s and retries, noted on
-stderr, up to three waits per invocation.
+slug, for `newest`, `refuse-newer`, `refresh`, `post`, `end` and `published`: each refuses an
+empty one before any API call, and looks up the id of the App's bot user `<slug>[bot]` once,
+before its first statuses listing; an invocation that lists no statuses makes no lookup. A
+`<sha>` that is not 40 lowercase hex characters is refused before any API call. A failed API
+call exits 1 with an `::error::` line, except in `checks`, `moved`, `replan` and `published`. A
+call that fails transiently retries twice, each retry noted on stderr. A gate write (`post`, `hold`,
+`publishing`, `end`, `refresh`, `deploy`) that GitHub's secondary rate limit refuses also waits
+60 s and retries, noted on stderr, up to three waits per invocation.
+A hold (`is_hold`) is a `failure` gate or a publish hold: a `pending` gate whose description is
+`PUBLISH_HOLD` naming the run of its `target_url`, which a plan run writes while it publishes.
+`end` turns this run's publish hold `failure` with its description; when the newest gate is
+anything else it prints why, writes nothing and exits 0.
 `refresh` over a hold prints why, unannotated, and exits `HELD`, also when the hold appears while
-its write retries: each caller decides whether a hold fails its step. A `failure` gate from this
+its write retries: each caller decides whether a hold fails its step. A hold from this
 run or an older one is read again first, up to three times two seconds apart, since a statuses
 read right after this run's own write can return the write before it; only a status write
 newer than the hold, by status id, clears it. `refuse-newer` prints its
@@ -108,7 +114,13 @@ ag = _load("apply-gate")
 _RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
 #: The fields `apply-gate` judges.
 _CHECK_RUNS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
-_STATUSES_JQ = ".[] | {context, state, target_url, id, creator: .creator.id}"
+_STATUSES_JQ = ".[] | {context, state, description, target_url, id, creator: .creator.id}"
+#: The publish hold's description: `publishing` writes it and `is_hold` reads it, so the two
+#: cannot drift.
+PUBLISH_HOLD = (
+    "Plan run {run} holds this while it publishes; if that run has ended, re-plan (comment "
+    "shipmate plan or push)"
+)
 _GOOD_RESULTS = {"success", "skipped"}
 HELD = 3
 NEWER = 4
@@ -117,8 +129,8 @@ NEWER = 4
 #: five trials each on a sample repository in November 2026.
 REPLAN_WAIT = 15
 REPLAN_POLL = 5
-#: How often, and how many seconds apart, `refresh` reads again a `failure` gate this run or an
-#: older one wrote: a statuses read right after a write returned the write before it in 8 of 40
+#: How often, and how many seconds apart, `refresh` reads again a hold this run or an older
+#: one wrote: a statuses read right after a write returned the write before it in 8 of 40
 #: probes, and in 5 of 30 in a second run, where each lag was one read and converged within 0.97 s.
 HOLD_REREADS = 3
 HOLD_REREAD_WAIT = 2
@@ -178,13 +190,14 @@ def app_user():
 
 
 def _gates(sha):
-    """`(state, run id, status id)` of every gate status on `sha` the shipmate App created,
-    newest first.
+    """`(state, run id, status id, description)` of every gate status on `sha` the shipmate App
+    created, newest first.
 
     A status's creator must be the App's bot user (`app_user`), read before the listing: any
     token with `statuses: write` can post this context, so a status from another identity would
     otherwise add or hide a hold. That identity is never defaulted: without it no status counts.
-    The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none. The
+    The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none; a missing
+    or null description is `""`, which is never a publish hold. The
     status id is the one GitHub assigns each write, increasing: it orders two writes of one run,
     as a re-run attempt's, where the run id cannot. The statuses listing is paginated: a head
     with many other contexts can push its gate past the first page."""
@@ -202,29 +215,44 @@ def _gates(sha):
     for status in ag.parse_jsonl(out.splitlines()):
         if status.get("context") == GATE_CONTEXT and status["creator"] == app:
             m = _RUN_ID.search(status.get("target_url") or "")
-            gates.append((status["state"], m.group(1) if m else "-", status["id"]))
+            run_id = m.group(1) if m else "-"
+            gates.append((status["state"], run_id, status["id"], status.get("description") or ""))
     return gates
 
 
 def newest_gate(sha):
-    """(state, run id, status id) of the newest gate status the shipmate App created on `sha`,
-    or None when it carries none. Statuses from other identities are not counted."""
+    """(state, run id, status id, description) of the newest gate status the shipmate App created
+    on `sha`, or None when it carries none. Statuses from other identities are not counted."""
     gates = _gates(sha)
     return gates[0] if gates else None
 
 
+def _publish_hold(gate):
+    """Whether `gate`, a `_gates` tuple, is the publish hold of the run its `target_url` names:
+    state and whole description, since that run's final gate can be `pending` too."""
+    state, run_id, _, description = gate
+    return state == "pending" and description == PUBLISH_HOLD.format(run=run_id)
+
+
+def is_hold(gate):
+    """Whether `gate`, a `_gates` tuple, holds the gate: a `failure` or a publish hold. Only a
+    new plan run's write replaces either."""
+    return gate[0] == "failure" or _publish_hold(gate)
+
+
 def newer_hold(sha):
-    """The highest run id among the `failure` gates on `sha` written by a run newer than this one,
-    or None.
+    """The highest run id among the holds (`is_hold`) on `sha` written by a run newer than this
+    one, or None.
 
     Every App-created status in the history counts, not only the newest: this run's own hold,
-    written after a failed read, must not hide a newer run's earlier one. Only plan runs write a
-    `failure` gate before a merge, so a newer one is a newer plan of the same head."""
+    written after a failed read, must not hide a newer run's earlier one, nor that run's final
+    gate its own publish hold. Only plan runs write a hold before a merge, so a newer one is a
+    newer plan of the same head."""
     this_run = _this_run()
     runs = [
-        int(run)
-        for state, run, _ in _gates(sha)
-        if state == "failure" and run != "-" and int(run) > this_run
+        int(gate[1])
+        for gate in _gates(sha)
+        if is_hold(gate) and gate[1] != "-" and int(gate[1]) > this_run
     ]
     return max(runs) if runs else None
 
@@ -237,30 +265,30 @@ def _this_run():
 
 
 def _may_lag(gate):
-    """Whether `gate` is a `failure` from this run or an older one: a statuses read that lags
-    this run's own write returns one. A newer run's hold, or one with run id `-`, is final."""
-    if gate is None or gate[0] != "failure" or gate[1] == "-":
+    """Whether `gate` is a hold (`is_hold`) from this run or an older one: a statuses read that
+    lags this run's own write returns one. A newer run's hold, or one with run id `-`, is final."""
+    if gate is None or not is_hold(gate) or gate[1] == "-":
         return False
     return int(gate[1]) <= _this_run()
 
 
 def _refuse_held(sha):
-    """Exit `HELD` when the newest gate on `sha` is `failure`, reading again up to
+    """Exit `HELD` when the newest gate on `sha` is a hold (`is_hold`), reading again up to
     `HOLD_REREADS` times while that hold may lag this run's own write (`_may_lag`).
 
-    A re-read showing a non-`failure` gate clears the hold only when its status id is higher than
-    that of every `failure` gate read so far: any other is a stale read under a hold. A re-read
+    A re-read showing a gate that is no hold clears the hold only when its status id is higher
+    than that of every hold read so far: any other is a stale read under a hold. A re-read
     showing a hold that cannot lag refuses at once. Accepted cost: a hold an apply or deploy run
     refreshes over waits `HOLD_REREADS * HOLD_REREAD_WAIT` seconds before it refuses."""
     newest = newest_gate(sha)
-    hold = newest if newest and newest[0] == "failure" else None
+    hold = newest if newest and is_hold(newest) else None
     highest = hold[2] if hold else 0
     for _ in range(HOLD_REREADS):
         if hold is None or not _may_lag(hold):
             break
         sleep(HOLD_REREAD_WAIT)
         newest = newest_gate(sha)
-        if newest and newest[0] == "failure":
+        if newest and is_hold(newest):
             highest = max(highest, newest[2])
             if not _may_lag(newest):
                 hold = newest
@@ -282,7 +310,8 @@ def post(sha, state, description, before_retry=None):
     Known ceilings: a retry re-posts over a hold its `before_retry` does not see, as a first POST
     already can over one written just before it (`gate-hold` writes outside the gate group). The
     `post` command re-runs `refuse-newer` and `refresh` its own hold check; `hold` and `deploy`
-    re-check nothing. `hold` writes `failure`, so its re-post greens nothing. A `deploy` write,
+    re-check nothing, nor do `publishing` and `end`. `hold`, `publishing` and `end` write a
+    hold, so their re-posts green nothing. A `deploy` write,
     first POST or retry, covers any hold written on the merged head before it, whether a plan run
     wrote it in the gate group (a run admitted before the merge can write one after it) or
     `gate-hold` wrote it outside the group. The merged head's gate then gates no merge unless
@@ -307,7 +336,8 @@ def post(sha, state, description, before_retry=None):
 
 
 def refresh(sha):
-    """Green the gate when every App-authored apply check on `sha` is done and no hold stands.
+    """Green the gate when every App-authored apply check on `sha` is done and no hold
+    (`is_hold`) stands: an absent gate or a final `pending` one greens.
 
     A hold must not be cleared by the applies it exists to prevent: `shipmate apply` never
     consults the gate, so the parsed cells can all complete while stacks whose summaries were
@@ -350,6 +380,20 @@ def _refuse_newer(sha):
             file=sys.stderr,
         )
         raise SystemExit(NEWER)
+
+
+def _end(sha, description):
+    """Write `failure` with `description` over this run's own publish hold. Any other newest gate
+    stays: a newer run's gate, this run's final gate, or a gate this run did not write."""
+    newest, own = newest_gate(sha), str(_this_run())
+    if newest is None or newest[1] != own or not _publish_hold(newest):
+        shown = f"{newest[0]} from run {newest[1]}" if newest else "none"
+        print(
+            f"the newest gate of {sha} is not plan run {own}'s publish hold (newest: {shown}); "
+            "the gate is left as it is"
+        )
+        return
+    post(sha, "failure", description)
 
 
 def _post(sha, state, description):
@@ -568,7 +612,8 @@ def _published(sha, pr):
     """Print run `G` when every rule holds, else nothing:
 
     1. The newest App gate on `sha` (`newest_gate`) is `pending` or `success` and names
-       run `G`. A `failure` gate is a hold or a publish in progress, and only a plan clears it.
+       run `G`, and is no hold (`is_hold`). A hold is a publish in progress or a plan that ended
+       before its final gate, and only a plan clears it.
     2. `G` is not this run (`GITHUB_RUN_ID`): a re-run of a run that planned plans again.
     3. `G` is one of `sha`'s autoplan runs, listed `completed` with conclusion `success`.
     4. `G`'s jobs, every one at the listed run attempt, are `planned` (`apply-gate.planned`)
@@ -582,13 +627,13 @@ def _published(sha, pr):
        created while `G` had not published, the ready click racing the push run. Timestamps
        have whole seconds, so an equal pair cannot prove that order.
 
-    `summary` writes `G`'s non-failure gate last, after the comment and the apply checks, so
-    rules 1-4 hold for a zero-cell plan and fail for a superseded summary, which writes no final
-    gate. It reads in rule order and stops at the first rule that fails. Any other `plan /
+    `summary` writes `G`'s final gate, never a hold, last, after the comment and the apply
+    checks, so rules 1-4 hold for a zero-cell plan and fail for a superseded summary, which writes
+    no final gate. It reads in rule order and stops at the first rule that fails. Any other `plan /
     summary` shape under a planned, successful run, a summary without a `completed_at`, and
     every failed or malformed read exit 1 with one unannotated stderr line, as `replan` does."""
     gate = _published_gate(sha)
-    if gate is None or gate[0] not in ("pending", "success"):
+    if gate is None or gate[0] not in ("pending", "success") or is_hold(gate):
         return
     own, g = os.environ.get("GITHUB_RUN_ID", ""), gate[1]
     if not is_run_id(own):
@@ -619,6 +664,8 @@ _COMMANDS = {
     "published": (1, _published),
     "post": (2, _post),
     "hold": (1, lambda sha, description: post(sha, "failure", description)),
+    "publishing": (0, lambda sha: post(sha, "pending", PUBLISH_HOLD.format(run=_this_run()))),
+    "end": (1, _end),
     "refresh": (0, refresh),
     "deploy": (2, lambda sha, detect, results: post(sha, *deploy_verdict(detect, results))),
 }

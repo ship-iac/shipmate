@@ -37,7 +37,8 @@ The auto environments come from `SHIPMATE_AUTO_ENVS_TABLE`, build-matrix's `auto
 run `P` (`actions/auto-dispatch`), printing the same line or nothing. Checks, in order:
 
 1. the newest `shipmate / gate` of `SHIPMATE_HEAD_SHA` (`gate-status.newest_gate`,
-   `SHIPMATE_APP_SLUG`) is `pending` and names `P`;
+   `SHIPMATE_APP_SLUG`) is `pending`, names `P` and is not that run's publish hold
+   (`gate-status.is_hold`);
 2. `skip_reason` over this run's event, action and attempt, with the draft, gate and comment
    conditions that check 1 and `P`'s publish already proved;
 3. the changed cells: the App's (`SHIPMATE_APP_ID`) apply checks on the head whose newest run
@@ -211,11 +212,16 @@ def _skip(reason):
 
 def _gate_reason(head, plan_run):
     gate = gs.newest_gate(head)
-    state, run_id, _ = gate or ("absent", "-", None)
+    state, run_id, _, _ = gate or ("absent", "-", None, "")
     if (state, run_id) != ("pending", plan_run):
         return (
             f"the newest gate of {head} is {state} from run {run_id}, not pending from plan run "
             f"{plan_run}"
+        )
+    if gs.is_hold(gate):
+        return (
+            f"the newest gate of {head} is plan run {plan_run}'s publish hold, not its final "
+            "pending gate"
         )
     return skip_reason(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),

@@ -65,7 +65,7 @@ PUBLISH_HOLD = (
     "Plan run 42 holds this while it publishes; "
     "if that run has ended, re-plan (comment shipmate plan or push)"
 )
-STATUSES_JQ = ".[] | {context, state, target_url, id, creator: .creator.id}"
+STATUSES_JQ = ".[] | {context, state, description, target_url, id, creator: .creator.id}"
 APPLY_CHECKS_JQ = (
     ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}"
 )
