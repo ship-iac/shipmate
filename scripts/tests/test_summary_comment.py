@@ -1713,7 +1713,7 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     one path, the count of 3 over none and the count of -1."""
     monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
     assert _run_main(tmp_path, monkeypatch, []) == (
-        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\nmissing=[]\nstacked_hold=\n"
+        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\nmissing=[]\nstacked_hold=\nauto_change=\n"
     )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
@@ -1747,7 +1747,7 @@ def test_main_names_the_lost_pairs_without_touching_the_gate_outputs(
     Mutation: read the lost value under `paths` -- the first bad case renders a line."""
     monkeypatch.setenv("SHIPMATE_LOST_ENV_TAGS", raw)
     assert _run_main(tmp_path, monkeypatch, []) == (
-        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\nmissing=[]\nstacked_hold=\n"
+        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\nmissing=[]\nstacked_hold=\nauto_change=\n"
     )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LOST_LEAD.format(1) + ": stacks/x / dev" if flag == "true" else ""
@@ -1770,7 +1770,7 @@ def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monke
     (tmp_path / "out.txt").unlink()
     capsys.readouterr()
     assert _run_main(tmp_path, monkeypatch, []) == (
-        "pending=true\ncount=130\nunmanaged=false\nlost=false\nmissing=[]\nstacked_hold=\n"
+        "pending=true\ncount=130\nunmanaged=false\nlost=false\nmissing=[]\nstacked_hold=\nauto_change=\n"
     )
     assert capsys.readouterr().out == _NO_ROOM
     assert len((tmp_path / "comment.md").read_text(encoding="utf-8")) == sc.HARD_CAP - 10
@@ -1828,7 +1828,7 @@ def test_main_names_the_planned_cells_with_no_cell_summary(
     monkeypatch.setenv("SHIPMATE_PLANNED_CELLS_NAMES", raw)
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", detect)
     text = _run_main(tmp_path, monkeypatch, [_cell()])
-    assert text.splitlines()[-2:] == [f"missing={missing}", "stacked_hold="]
+    assert text.splitlines()[-3:-1] == [f"missing={missing}", "stacked_hold="]
     assert capsys.readouterr().out == out
 
 
@@ -3215,6 +3215,46 @@ def test_main_gives_no_auto_line_for_a_cell_another_pull_request_locks(tmp_path,
     body = (tmp_path / "run" / "comment.md").read_text(encoding="utf-8")
     assert "🔒 locked by #12" in body
     assert "auto apply not started" not in body
+
+
+@pytest.mark.parametrize(
+    ("table", "locks", "line"),
+    [
+        pytest.param('["dev-eu"]', "", "auto_change=yes", id="yes"),
+        pytest.param('["prod"]', "", "auto_change=no", id="no"),
+        pytest.param("[]", "", "auto_change=no", id="no-auto-environment"),
+        pytest.param("", "", "auto_change=", id="empty"),
+        pytest.param('["dev-eu", 1]', "", "auto_change=", id="malformed"),
+        pytest.param('["dev-eu"]', '{"stacks/app / dev-eu": 12}', "auto_change=yes", id="locked"),
+    ],
+)
+def test_main_writes_whether_an_auto_apply_follows(tmp_path, monkeypatch, table, locks, line):
+    """A ready-for-review run that defers to this plan skips its auto apply decision on `no`
+    alone, so `no` needs a readable `auto-envs`, and a cell another pull request locks still
+    counts: `deferred` filters no locks. Mutations: emit `no` when a changed cell is in an
+    `auto` environment -- (yes) red; emit empty instead of `no` -- (no) red; emit `no` on a
+    malformed value -- (malformed) red; pass the lock-filtered cells -- (locked) red."""
+    monkeypatch.setenv("SHIPMATE_AUTO_ENVS_TABLE", table)
+    monkeypatch.setenv("SHIPMATE_LOCKS", locks)
+    assert _run_main(tmp_path, monkeypatch, [_cell()]).splitlines()[-1] == line
+
+
+@pytest.mark.parametrize("table", ['["dev-eu"]', '["prod"]', ""], ids=["yes", "no", "empty"])
+def test_the_comment_head_is_the_same_whether_an_auto_apply_follows(tmp_path, monkeypatch, table):
+    """`gate-status published` reads the head's fourth line, and a writer can edit a comment, so
+    nothing about an auto apply rides on it. Mutation: add `auto` text to the head when
+    `auto_change` is `yes` -- (yes) red."""
+    monkeypatch.setenv("SHIPMATE_AUTO_ENVS_TABLE", table)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    monkeypatch.setenv("SHIPMATE_IS_DRAFT", "false")
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert body.splitlines()[:4] == [
+        "<!-- shipmate:summary -->",
+        "### shipmate plan",
+        "",
+        f"🟡 1 of 1 cells change {MAIN_AT}",
+    ]
 
 
 def _job(run, name, conclusion, check_id):

@@ -2503,12 +2503,98 @@ def test_published_prints_the_earlier_run_that_planned_and_published(
     in_process, monkeypatch, capsys, state
 ):
     """(a) a `pending` gate by E, (b) a `success` one, each over a zero-cell plan (raw capture):
-    every rule holds, E prints. Mutations: return before printing -- both red; require
-    `pending` -- (b) red."""
+    every rule holds, E prints, `unread` since the capture's engine had no auto apply steps.
+    Mutations: return before printing -- both red; require `pending` -- (b) red."""
     calls = _publish_gh(monkeypatch, gate=(state, _E))
     assert (_cli("published", SHA, "7"), capsys.readouterr(), calls) == (
         0,
-        ("41\n", ""),
+        ("41 unread\n", ""),
+        _ALL_READS,
+    )
+
+
+def _step(name, conclusion):
+    return {"name": name, "status": "completed", "conclusion": conclusion}
+
+
+_SUMMARY_STEP = _step("Run ship-iac/shipmate/actions/summary@abc", "success")
+
+
+@pytest.mark.parametrize(
+    ("steps", "state"),
+    [
+        pytest.param(
+            [_step("Auto apply follows", "success"), _step("No auto apply follows", "skipped")],
+            "yes",
+            id="yes",
+        ),
+        pytest.param(
+            [_step("Auto apply follows", "skipped"), _step("No auto apply follows", "success")],
+            "no",
+            id="no",
+        ),
+        pytest.param([], "unread", id="neither"),
+        pytest.param(
+            [_step("Auto apply follows", "success"), _step("No auto apply follows", "success")],
+            "unread",
+            id="both-success",
+        ),
+        pytest.param(
+            [_step("Auto apply follows", "skipped"), _step("No auto apply follows", "skipped")],
+            "unread",
+            id="both-skipped",
+        ),
+        pytest.param([_step("Auto apply follows", "skipped")], "unread", id="yes-skipped-alone"),
+        pytest.param(
+            [_step("Auto apply follows", "failure"), _step("No auto apply follows", "skipped")],
+            "unread",
+            id="yes-failed",
+        ),
+        pytest.param(
+            [_step("Auto apply follows", "success"), _step("Auto apply follows", "success")],
+            "unread",
+            id="yes-listed-twice",
+        ),
+        pytest.param(
+            [
+                _step("Auto apply follows", "skipped"),
+                _step("No auto apply follows", "success"),
+                _step("No auto apply follows", "success"),
+            ],
+            "unread",
+            id="no-listed-twice",
+        ),
+        pytest.param(
+            [
+                _step("Auto apply follows (old)", "success"),
+                _step("No auto apply follows", "skipped"),
+            ],
+            "unread",
+            id="old-step",
+        ),
+        pytest.param(None, "unread", id="steps-missing"),
+        pytest.param("steps", "unread", id="steps-not-a-list"),
+    ],
+)
+def test_published_prints_whether_an_auto_apply_follows(
+    in_process, monkeypatch, capsys, steps, state
+):
+    """The second word is read from the conclusions of the `plan / summary` job's two steps,
+    and anything but one `success` among them reads `unread`, which starts `defer-auto`.
+    Mutations: read the yes step's `skipped` as `no` -- (yes-skipped-alone) and
+    (both-skipped) red; accept any conclusion for the yes step -- (yes-failed) red; match the
+    name with `startswith` -- (old-step) red; take the first of two same-named steps --
+    (yes-listed-twice), (no-listed-twice) red; print `no` for every state but `yes` --
+    (neither) red."""
+    if steps is None:
+        jobs = _with_summary(drop=("steps",))
+    else:
+        listed = [_SUMMARY_STEP, *steps] if isinstance(steps, list) else steps
+        jobs = _with_summary(steps=listed)
+    calls = _publish_gh(monkeypatch, jobs=jobs)
+    assert (_cli("published", SHA, "7"), capsys.readouterr(), calls) == (
+        0,
+        (f"41 {state}\n", ""),
         _ALL_READS,
     )
 

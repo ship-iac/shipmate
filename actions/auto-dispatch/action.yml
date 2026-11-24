@@ -17,6 +17,12 @@ inputs:
       The earlier plan run this ready-for-review run deferred to (plan-defer's `run`); empty when `envs` decides.
     required: false
     default: ""
+  auto-change:
+    description: >-
+      Whether an auto apply follows the `deferred-to` run's plan (plan-defer's `auto`: `yes`,
+      `no` or `unread`); empty when `envs` decides.
+    required: false
+    default: ""
   head-sha:
     description: PR head commit SHA.
     required: true

@@ -151,6 +151,13 @@ outputs:
       plan run holding its gate, and this run wrote nothing on the head. Empty otherwise. A head
       that moves after that read reports through `upsert` as `moved`.
     value: ${{ steps.hold.outputs.superseded }}
+  auto-change:
+    description: >-
+      `yes` when a changed cell sits in an environment `auto-envs` names, `no` when
+      `auto-envs` is a list of names and none does, empty when it is empty or not such a list,
+      or when the run was superseded before it built the comment. The `plan.yml` steps `Auto
+      apply follows` and `No auto apply follows` publish it as their conclusions.
+    value: ${{ steps.build.outputs.auto_change }}
 runs:
   using: composite
   steps:

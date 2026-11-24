@@ -270,7 +270,8 @@ def test_the_defer_job_is_wired_exactly():
     """It holds the App key only for a head `summary` would admit, and only on a ready-for-review
     autoplan. Mutations: drop the fork clause (the key reaches a fork's ready run); drop the
     `ready_for_review` clause (every autoplan reads); drop the `is-draft` clause; pass
-    `head-sha: ${{ github.sha }}`."""
+    `head-sha: ${{ github.sha }}`; drop the `auto` output (`defer-auto` reads it empty and starts
+    on a published `no`)."""
     assert workflow_jobs(WF)["defer"] == {
         "needs": "facts",
         "if": (
@@ -282,7 +283,10 @@ def test_the_defer_job_is_wired_exactly():
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
         "permissions": {},
-        "outputs": {"run": "${{ steps.defer.outputs.run }}"},
+        "outputs": {
+            "run": "${{ steps.defer.outputs.run }}",
+            "auto": "${{ steps.defer.outputs.auto }}",
+        },
         "steps": [
             {
                 "id": "defer",
@@ -315,7 +319,9 @@ def test_the_defer_auto_job_is_wired_exactly():
     `github.event_name` clause; drop the head-repo clause (the key reaches a fork's ready run);
     change `needs.defer.outputs.run != ''` to `==`; drop `continue-on-error` (a failed dispatch
     fails the run, and `_deferred_run` stops reading it past); drop its comment; drop `detect`
-    from `needs` (the auto run can read `detect` pending and the run as not deferred). The
+    from `needs` (the auto run can read `detect` pending and the run as not deferred); compare
+    `needs.defer.outputs.auto == 'yes'` (an empty or `unread` answer skips the decision); drop
+    the `auto` clause (a published `no` still starts it); drop the `auto-change` input. The
     `!cancelled()` lead lets it run past the `detect` that a deferring run skips."""
     assert workflow_jobs(WF)["defer-auto"] == {
         "needs": ["facts", "defer", "detect"],
@@ -324,7 +330,8 @@ def test_the_defer_auto_job_is_wired_exactly():
             "github.event.action == 'ready_for_review' && github.run_attempt == '1' && "
             "needs.facts.result == 'success' && needs.facts.outputs.is-draft == 'false' && "
             "needs.facts.outputs.head-repo == github.repository && "
-            "needs.defer.result == 'success' && needs.defer.outputs.run != '' }}"
+            "needs.defer.result == 'success' && needs.defer.outputs.run != '' && "
+            "needs.defer.outputs.auto != 'no' }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -340,6 +347,7 @@ def test_the_defer_auto_job_is_wired_exactly():
                     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
                     "github-vars": "${{ toJSON(vars) }}",
+                    "auto-change": "${{ needs.defer.outputs.auto }}",
                 },
             }
         ],

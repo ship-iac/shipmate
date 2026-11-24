@@ -4,9 +4,10 @@
 Reads the plan matrix jobs' auto check-runs (named `plan / <env> / <stack>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
 cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
-artifacts). Writes comment.md, plus pending, count, unmanaged, lost, missing and stacked_hold
-to GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned cells with no
-cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
+artifacts). Writes comment.md, plus pending, count, unmanaged, lost, missing, stacked_hold and
+auto_change (`auto_change`) to GITHUB_OUTPUT; `missing` is a JSON list of the
+`{stack, environment}` planned cells with no cell summary, empty unless detect succeeded and
+`planned-cell-names` is a valid list.
 `stacked_hold` is the pending gate text (`stacked_hold`) for a holder `SHIPMATE_STACKED` names
 and `SHIPMATE_DEFAULT_BRANCH` to retarget it to; gate-state writes it, and empty keeps the
 generic text. A holder `SHIPMATE_STACKED_UNKNOWN` names gets a line saying the comment cannot
@@ -1224,6 +1225,17 @@ def _held_main(checks, url):
         fh.write(body)
 
 
+def auto_change(cells, raw):
+    """`yes` when a changed cell of `cells` sits in an environment `raw` (detect's `auto_envs`)
+    names, `no` when `raw` is a JSON list of names and none does, empty when `raw` is empty or
+    not that shape. A ready-for-review run that defers to this plan skips its auto apply decision
+    on `no` alone, so no lock filter: `auto-dispatch deferred` filters no locks."""
+    names = ad.auto_set(raw) if raw else None
+    if names is None:
+        return ""
+    return "yes" if ad.changed_auto_envs(cells, names) else "no"
+
+
 def main():
     mode = os.environ.get("SHIPMATE_COMMENT_MODE", "")
     if mode not in ("", "held"):
@@ -1251,8 +1263,9 @@ def main():
     )
     # Reviewer-facing only: anything but doctor's count renders no line.
     warnings = os.environ.get("SHIPMATE_DOCTOR_WARNINGS", "")
+    auto_raw = os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", "")
     auto = env_names(
-        os.environ.get("SHIPMATE_AUTO_ENVS_TABLE", ""),
+        auto_raw,
         "auto-envs",
         "the plan comment says nothing about an auto apply",
     )
@@ -1312,6 +1325,7 @@ def main():
         # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
         missing=json.dumps(missing),
         stacked_hold=stacked_hold([c for c, _ in cells], locks, stacked, default_branch),
+        auto_change=auto_change([c for c, _ in cells], auto_raw),
     )
 
 
