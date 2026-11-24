@@ -851,6 +851,7 @@ def _run_summary(
         "UNMANAGED": unmanaged,
         "LOST": lost,
         "ON_DEMAND": on_demand,
+        "HELD": "",
         "SHIPMATE_HOLD_REASON": "the reason",
         "GITHUB_OUTPUT": str(tmp_path / "github_output"),
         "SHIPMATE_MISSING": "[]",
@@ -912,23 +913,29 @@ _HOLD_STAYS = (
 
 @bash_only
 @pytest.mark.parametrize(
-    ("mode", "cells", "stdout"),
+    ("mode", "held", "stdout"),
     [
-        pytest.param("draft", False, _NO_WRITE, id="draft"),
-        pytest.param("hold", False, _NO_WRITE, id="hold"),
-        pytest.param("hold", True, _HOLD_STAYS, id="hold-with-cells"),
+        pytest.param("draft", "", _NO_WRITE, id="draft"),
+        pytest.param("hold", "", _NO_WRITE, id="hold"),
+        pytest.param("hold", "true", _HOLD_STAYS, id="hold-with-publish-hold"),
     ],
 )
-def test_summary_draft_and_hold_report_a_moved_head(tmp_path, mode, cells, stdout):
+def test_summary_draft_and_hold_report_a_moved_head(tmp_path, mode, held, stdout):
     """`draft` and `hold` call no `upsert-comment --head`, so the step reads the head itself: a
     moved head writes `result=moved`, which skips the apply checks and the gate and runs the
-    live-head step. A `hold` run with cell summaries wrote a publish hold, which stays.
-    Mutations: drop the read in the `draft` branch -- draft red; drop it in the `hold` branch --
-    both hold rows red; one notice for both -- hold-with-cells red."""
-    if cells:
-        (tmp_path / "cells" / "0").mkdir(parents=True)
-        (tmp_path / "cells" / "0" / "cell.json").write_text("{}", encoding="utf-8")
-    proc, calls = _run_summary(tmp_path, mode, head="b" * 40, listing=_head(5, SUMMARY) + "\n")
+    live-head step. A run whose hold step set `held` wrote a publish hold, which stays; every row
+    has a cell summary, so only `held` decides the notice, and the step reads it from the hold
+    step. Mutations: drop the read in the `draft` branch -- draft red; drop it in the `hold`
+    branch -- both hold rows red; one notice for both -- hold-with-publish-hold red; test
+    `cells/` for a cell summary instead of `held` -- draft and hold red; read
+    `steps.hold.outputs.superseded` for `HELD` -- every row red."""
+    env = step_by("summary", name="Write the plan comment")["env"]
+    assert env["HELD"] == "${{ steps.hold.outputs.held }}"
+    (tmp_path / "cells" / "0").mkdir(parents=True)
+    (tmp_path / "cells" / "0" / "cell.json").write_text("{}", encoding="utf-8")
+    proc, calls = _run_summary(
+        tmp_path, mode, head="b" * 40, env={"HELD": held}, listing=_head(5, SUMMARY) + "\n"
+    )
     assert (proc.returncode, proc.stdout, calls) == (0, stdout, [_PULLS]), proc.stderr
     assert (tmp_path / "github_output").read_text(encoding="utf-8") == "result=moved\n"
 
