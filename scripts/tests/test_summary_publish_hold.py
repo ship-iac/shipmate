@@ -601,8 +601,8 @@ def test_a_cancelled_plan_job_with_no_publish_hold_writes_nothing(tmp_path):
 
 @bash_only
 def test_a_failed_end_fails_the_gate_step(tmp_path):
-    """A failed statuses read writes nothing and fails the step; the publish hold stands, which
-    `refresh` refuses. Mutation: `end ... || true` -> the step passes."""
+    """A failed statuses read writes nothing and fails the step, so any publish hold on the head
+    stays for `refresh` to refuse. Mutation: `end ... || true` -> the step passes."""
     codes, calls, _, _ = _run(
         tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled"
     )
