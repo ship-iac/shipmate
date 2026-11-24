@@ -4004,9 +4004,9 @@ leaves that lock in place.
 The held body and a body with no changed cell never carry it. The held body
 above ends with the hint. `doctor` records its decision once, as its `warned`
 output, which the post-or-skip rule reads, and its `warnings` output, the count
-the doctor line shows: both leave out the repository-settings probes' warnings,
-a settings probe that could not run included, and the engine release check's
-warnings, and count any other probe that could not run when its note is a
+the doctor line shows: both leave out the engine release check's warnings and
+the repository-settings probes' warnings, a settings probe that could not run
+included, and count any other probe that could not run when its note is a
 warning. When `doctor` fails, the doctor step
 writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
