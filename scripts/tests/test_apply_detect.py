@@ -1989,6 +1989,17 @@ def test_a_listing_incomplete_until_the_deadline_fails(monkeypatch, tmp_path, co
     assert clock.sleeps == [30] * 16
 
 
+def test_a_listing_incomplete_after_a_live_one_fails_at_the_deadline(monkeypatch, tmp_path):
+    """A complete listing shows run 9, then every listing is incomplete while 9 reads
+    `in_progress` by id: the last listing decides, so the incomplete-listing failure, not the
+    timeout refusal. Mutation: test `live` before `complete` in `_wait_refusal` (the timeout
+    refusal, `refused_by_rule`)."""
+    out, _, _ = _waiting(
+        monkeypatch, tmp_path, [([_LIVE_9], True), ([], "failed")], {9: ["in_progress"]}
+    )
+    assert _refused(out) == f"refusal={_UNLISTED}\n"
+
+
 def test_a_cell_a_waited_run_replanned_refuses(monkeypatch, tmp_path):
     """Run 9 is listed with an int id and the record names it as a str. Mutations: delete the
     `refuse_replanned` call in `main` (the cell applies); compare an int id with the str

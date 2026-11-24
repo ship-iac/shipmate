@@ -91,8 +91,8 @@ _MERGEABLE_READS = 12
 _MERGEABLE_WAIT = 5
 _sleep = time.sleep
 #: The commanded forms' wait for live `shipmate plan` runs: elapsed seconds on `_clock`, and
-#: seconds between polls. 63 dispatched sample plan runs (2026-11-24): median 76 s, p90 141 s,
-#: longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
+#: seconds between polls. 63 dispatched sample plan runs (2026-11-24), all 63: median 76 s,
+#: p90 141 s; longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
 PLAN_WAIT = 480
 PLAN_POLL = 30
 _clock = time.monotonic
