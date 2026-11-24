@@ -96,9 +96,9 @@ jobs:
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
-    # Only a failed `verify-app-key` or `python-yaml` step fails this job; a failed decision or
-    # dispatch warns or replies and ends it `success`. `continue-on-error` keeps the run
-    # `success` even then, which `_deferred_run` needs to read a deferred ready run past.
+    # Only a failed `verify-app-key` or `python-yaml` step fails this job (the latter replies
+    # under `auto` `yes`); a failed decision or dispatch warns or replies and ends it `success`.
+    # `continue-on-error` keeps the run `success`, which `_deferred_run` needs to read past.
     continue-on-error: true
     steps:
       - uses: $/actions/auto-dispatch

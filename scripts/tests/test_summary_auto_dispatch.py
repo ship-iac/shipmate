@@ -245,20 +245,58 @@ def test_the_composite_runs_its_steps_in_order_each_under_its_mode():
 
     Mutations: delete the `python-yaml` step; swap the two mints; drop the deferred `if:` of
     the main mint; dispatch on `steps.decide.outputs.envs != ''` alone (a summary call, which
-    passes `envs`, dispatches nothing)."""
+    passes `envs`, dispatches nothing); move `python-yaml` above the main mint, so a failed
+    install leaves no token for the failure reply."""
     steps = [
         (s.get("name") or s.get("uses"), s.get("id"), s.get("if"))
         for s in action_yaml(AD)["runs"]["steps"]
     ]
     assert steps == [
         ("Verify the App key arrived", None, _DEFERRED),
-        (local_action("python-yaml"), None, _DEFERRED),
         ("Mint App installation token", "maintoken", _DEFERRED),
+        (local_action("python-yaml"), "yaml", _DEFERRED),
         (DECIDE, "decide", _DEFERRED),
+        (YAML_FAILED, None, _YAML_FAILED_IF),
         (MINT, "autotoken", _EITHER),
         (DISPATCH, None, _EITHER),
     ]
     assert step_by(AD, name="Verify the App key arrived")["uses"] == local_action("verify-app-key")
+
+
+YAML_FAILED = "Reply that the deferred decision failed"
+_YAML_FAILED_IF = (
+    "${{ failure() && inputs.deferred-to != '' && steps.yaml.outcome == 'failure' && "
+    "inputs.auto-change == 'yes' }}"
+)
+_FAILED_TEXT = (
+    "auto apply not started: what decides it for this ready-for-review run could not be read; "
+    "comment `shipmate apply`"
+)
+
+
+def test_a_failed_pyyaml_install_replies_once_an_auto_change_is_known():
+    """The failed `python-yaml` step skips the decision, so this step replies in its place, with
+    the main token minted before it and the decision's own `failed` text.
+
+    Mutations: drop `failure()`; drop `inputs.auto-change == 'yes'`; key it on
+    `steps.decide.outcome`; reply with `steps.autotoken.outputs.token`."""
+    assert step_by(AD, name=YAML_FAILED) == {
+        "name": YAML_FAILED,
+        "if": _YAML_FAILED_IF,
+        "shell": "bash",
+        "env": {
+            "GH_TOKEN": "${{ steps.maintoken.outputs.token }}",
+            "PR_NUMBER": "${{ inputs.pr-number }}",
+            "SHIPMATE_REPLY_VERB": "apply",
+            "SHIPMATE_REPLY_LABEL": "plan run",
+            "SHIPMATE_REPLY_OUTCOME": "failed",
+            "SHIPMATE_REPLY_TEXT": _FAILED_TEXT,
+        },
+        "run": (
+            'python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could '
+            'not post the auto apply reply"\n'
+        ),
+    }
 
 
 def test_the_main_mint_reads_and_replies_but_never_dispatches():
@@ -326,9 +364,9 @@ fi
 if [ "$rc" -ne 0 ]; then
   sed 's/^::error::/::warning::/' decide.err >&2
   echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
-  # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
-  # pull request gets the same reply as a failed dispatch.
-  if [ "$rc" -eq 3 ]; then
+  # Exit 3 (UNREAD in scripts/auto-dispatch), or the deferred-to plan published that an auto
+  # apply follows: a change called for one, so the reply matches a failed dispatch.
+  if [ "$rc" -eq 3 ] || [ "$AUTO_CHANGE" = yes ]; then
     reply failed "auto apply not started: what decides it for this ready-for-review run could not be read; comment \\`shipmate apply\\`"
   fi
   exit 0
@@ -354,6 +392,7 @@ def test_the_deferred_decision_is_wired_exactly():
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
         "DEFERRED_TO": "${{ inputs.deferred-to }}",
+        "AUTO_CHANGE": "${{ inputs.auto-change }}",
     }
     assert decide["run"] == _DECIDE_RUN
 
@@ -978,9 +1017,18 @@ def _deferred_answers(**overrides):
     return answers | overrides
 
 
-def _decide_deferred(tmp_path, *, action="ready_for_review", attempt="1", token="x", **answers):  # noqa: S107 - a stub token
+def _decide_deferred(
+    tmp_path,
+    *,
+    action="ready_for_review",
+    attempt="1",
+    token="x",  # noqa: S107 - a stub token
+    auto_change="",
+    **answers,
+):
     """Run the composite's decision for run R deferring to P; return (process, outputs, reply
-    or None). Each keyword in `answers` replaces one read's answer (`_deferred_answers`)."""
+    or None). `auto_change` is the `auto-change` input. Each keyword in `answers` replaces one
+    read's answer (`_deferred_answers`)."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_python3_shim(bin_dir)
@@ -1018,6 +1066,7 @@ def _decide_deferred(tmp_path, *, action="ready_for_review", attempt="1", token=
         "SHIPMATE_GITHUB_VARS": json.dumps({"SBX_REGION": "eu-west-1"}),
         "PR_NUMBER": "42",
         "DEFERRED_TO": str(P),
+        "AUTO_CHANGE": auto_change,
     }
     env.pop("SHIPMATE_GATE_STATE", None)
     proc = run_step(tmp_path, step_by(AD, name=DECIDE)["run"], env)
@@ -1264,16 +1313,58 @@ _DECIDE_FAILED = (
         pytest.param({"table": None}, id="table"),
     ],
 )
-def test_a_failed_read_before_a_change_is_known_warns_and_posts_nothing(tmp_path, answers):
-    """Checks 1, 3 and 4 exit 1: nothing yet says an auto apply was called for, so no reply.
-    The gate row's table holds no `auto` environment either.
+@pytest.mark.parametrize("auto_change", ["", "unread"])
+def test_a_failed_read_before_a_change_is_known_warns_and_posts_nothing(
+    tmp_path, answers, auto_change
+):
+    """Checks 1, 3 and 4 exit 1: neither the decision nor the deferred-to plan says an auto
+    apply was called for, so no reply. The gate row's table holds no `auto` environment either.
 
     Mutation, per row: exit `UNREAD` when that read fails (wrap it in `_listed`) -- a reply is
-    posted, red."""
-    proc, outputs, reply = _decide_deferred(tmp_path, **answers)
+    posted, red. Mutation: reply on any non-zero exit (`if true` in place of the reply's
+    test) -- red."""
+    proc, outputs, reply = _decide_deferred(tmp_path, auto_change=auto_change, **answers)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert (outputs, reply) == ({}, None)
     assert proc.stdout.splitlines() == [_DECIDE_FAILED]
+
+
+_FAILED_REPLY = (
+    f"### shipmate apply\n\n🔴 failed: {_FAILED_TEXT}\n\n"
+    f"[plan run](https://example.invalid/acme/demo/actions/runs/{R}). Comment `shipmate help` "
+    "for the available commands."
+)
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "answers",
+    [
+        pytest.param({"statuses": None, "table": _table(_NO_AUTO_TABLE)}, id="gate"),
+        pytest.param({"checks": None}, id="check-runs"),
+        pytest.param({"table": None}, id="table"),
+    ],
+)
+def test_a_failed_read_after_the_plan_published_an_auto_change_replies(tmp_path, answers):
+    """The deferred-to plan published `yes`, so a read that fails before the decision knows a
+    change still replies as failed. Mutation: drop the `AUTO_CHANGE` test -- no reply, red."""
+    proc, outputs, reply = _decide_deferred(tmp_path, auto_change="yes", **answers)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert outputs == {}
+    assert proc.stdout.splitlines() == [_DECIDE_FAILED]
+    assert reply == _FAILED_REPLY
+
+
+@bash_only
+def test_a_skip_after_the_plan_published_an_auto_change_posts_nothing(tmp_path):
+    """A skip is not a failed decision: the table no longer holds an `auto` environment, exit 0
+    with nothing printed. Mutation: reply when `$out` is empty -- a reply is posted, red."""
+    proc, outputs, reply = _decide_deferred(
+        tmp_path, auto_change="yes", table=_table(_NO_AUTO_TABLE)
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (outputs, reply) == ({"envs": ""}, None)
+    assert proc.stderr.splitlines() == [f"no auto apply dispatched: {_NO_AUTO}"]
 
 
 @bash_only

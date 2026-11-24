@@ -18,6 +18,8 @@ A draft is not refused here: it reaches the job, and gate-state writes its gate 
 reason.
 """
 
+import re
+
 from _loader import (
     ACTIONS,
     ENGINE_ENVIRONMENT,
@@ -176,9 +178,11 @@ def test_the_auto_apply_steps_follow_the_summary_action_exactly():
 
 def test_one_pair_of_words_says_whether_an_auto_apply_follows():
     """`summary-comment` writes `yes` or `no`, the `plan.yml` steps compare them,
-    `gate-status published` prints them from those steps, and `defer-auto` skips on `no`;
-    `plan-defer` passes the word on unchanged (`test_plan_defer`). Mutation: rename `no` in
-    `_auto_state` only."""
+    `gate-status published` prints them from those steps, `defer-auto` skips on `no`, and
+    `actions/auto-dispatch` replies on `yes` in its decision and its failure reply;
+    `plan-defer` passes the word on unchanged (`test_plan_defer`). Mutations: rename `no` in
+    `_auto_state` only; rename `yes` in the decision's `AUTO_CHANGE` test only; rename `yes`
+    in the failure reply's `if:` only."""
     cell = {"environment": "dev-eu", "changed": True}
     written = (sc.auto_change([cell], '["dev-eu"]'), sc.auto_change([cell], "[]"))
     job, doc = _summary_job()
@@ -190,11 +194,15 @@ def test_one_pair_of_words_says_whether_an_auto_apply_follows():
 
     printed = (state(gs.AUTO_STEP_YES), state(gs.AUTO_STEP_NO))
     skipped = doc["jobs"]["defer-auto"]["if"].split("'")[-2]
-    assert (written, compared, printed, skipped) == (
+    decide = step_by("auto-dispatch", id="decide")["run"]
+    reply_if = step_by("auto-dispatch", name="Reply that the deferred decision failed")["if"]
+    replied = (re.findall(r'"\$AUTO_CHANGE" = (\S+) \]', decide), reply_if.split("'")[-2])
+    assert (written, compared, printed, skipped, replied) == (
         ("yes", "no"),
         ("yes", "no"),
         ("yes", "no"),
         "no",
+        (["yes"], "yes"),
     )
 
 

@@ -5,7 +5,8 @@ description: >-
   which apply_mode auto environments call for it. With `deferred-to`, a ready-for-review run
   that deferred to that earlier plan run decides here through scripts/auto-dispatch deferred,
   authorized as this run's actor; a failed or refused decision dispatches nothing, and replies
-  only when a change already called for an auto apply.
+  only when a change already called for an auto apply or the deferred-to plan published that
+  one follows (`auto-change` `yes`).
 inputs:
   envs:
     description: >-
@@ -56,9 +57,6 @@ runs:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
 
-    - uses: $/actions/python-yaml
-      if: ${{ inputs.deferred-to != '' }}
-
     - name: Mint App installation token
       if: ${{ inputs.deferred-to != '' }}
       id: maintoken
@@ -77,6 +75,11 @@ runs:
         permission-statuses: read
         permission-pull-requests: write
 
+    # After the main mint, so a failed install still leaves the failure reply a token.
+    - uses: $/actions/python-yaml
+      if: ${{ inputs.deferred-to != '' }}
+      id: yaml
+
     - name: Decide whether to dispatch an auto apply
       if: ${{ inputs.deferred-to != '' }}
       id: decide
@@ -89,6 +92,7 @@ runs:
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
         PR_NUMBER: ${{ inputs.pr-number }}
         DEFERRED_TO: ${{ inputs.deferred-to }}
+        AUTO_CHANGE: ${{ inputs.auto-change }}
       run: |
         set -euo pipefail
         # Reviewer-facing degrade only: the plan run this one deferred to wrote the gate.
@@ -108,15 +112,30 @@ runs:
         if [ "$rc" -ne 0 ]; then
           sed 's/^::error::/::warning::/' decide.err >&2
           echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
-          # Exit 3 (UNREAD in scripts/auto-dispatch): a change called for an auto apply, so the
-          # pull request gets the same reply as a failed dispatch.
-          if [ "$rc" -eq 3 ]; then
+          # Exit 3 (UNREAD in scripts/auto-dispatch), or the deferred-to plan published that an auto
+          # apply follows: a change called for one, so the reply matches a failed dispatch.
+          if [ "$rc" -eq 3 ] || [ "$AUTO_CHANGE" = yes ]; then
             reply failed "auto apply not started: what decides it for this ready-for-review run could not be read; comment \`shipmate apply\`"
           fi
           exit 0
         fi
         cat decide.err >&2
         echo "envs=$out" >> "$GITHUB_OUTPUT"
+
+    - name: Reply that the deferred decision failed
+      # A failed step skips every later `success()`-gated step, the decision included, so
+      # without `failure()` a failed install would end the job in silence.
+      if: ${{ failure() && inputs.deferred-to != '' && steps.yaml.outcome == 'failure' && inputs.auto-change == 'yes' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.maintoken.outputs.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: apply
+        SHIPMATE_REPLY_LABEL: plan run
+        SHIPMATE_REPLY_OUTCOME: failed
+        SHIPMATE_REPLY_TEXT: "auto apply not started: what decides it for this ready-for-review run could not be read; comment `shipmate apply`"
+      run: |
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || echo "::warning::could not post the auto apply reply"
 
     - name: Mint the auto apply dispatch token
       if: ${{ inputs.envs != '' || steps.decide.outputs.envs != '' }}
