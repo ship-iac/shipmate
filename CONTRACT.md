@@ -4006,8 +4006,8 @@ above ends with the hint. `doctor` records its decision once, as its `warned`
 output, which the post-or-skip rule reads, and its `warnings` output, the count
 the doctor line shows: both leave out the repository-settings probes' warnings,
 a settings probe that could not run included. Both also leave out the engine
-release check's warnings, and count any other probe that could not run when its
-note is a warning. When `doctor` fails, the doctor step
+release check's warnings that a pin differs from the latest release, and count
+any other probe that could not run when its note is a warning. When `doctor` fails, the doctor step
 writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
@@ -4091,7 +4091,8 @@ and `lost` outputs, which the same rule reads.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings and the engine release check in this run: see [the run](<run url>)`,
   under any verdict. `N` leaves out the repository-settings warnings and the
-  engine release check's warnings, which the linked run also shows. When
+  engine release check's warnings that a pin differs from the latest release,
+  which the linked run also shows. When
   the cell lines leave it no room under the 65,536-character cap, it is left
   out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry neither an env/* tag nor
