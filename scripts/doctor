@@ -105,7 +105,8 @@ class _Rendered(str):
 
 class _Uncounted(str):
     """A WARNING finding that annotates the run and lists in the report but stays out of
-    `warnings_and_count`'s `n`."""
+    `warnings_and_count`'s `n`: the engine release check's, which the repository's maintainer
+    acts on by re-pinning, not the pull request's author, so the plan comment does not count it."""
 
 
 GATE = GATE_CONTEXT
