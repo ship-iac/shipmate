@@ -97,7 +97,8 @@ combining fourteen live probes.
   repository, which the probe learns at runtime from `SHIPMATE_ENGINE_REPO`, set
   from `job.workflow_repository` by the engine job that runs it, rather than
   from any hardcoded slug — another org's shared action is not shipmate's to
-  report on.
+  report on. Its engine release check warnings stay out of the plan comment's
+  doctor count and its post-or-skip rule.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
   the commit under examination, feeds nine checks, so an unreadable file
   leaves all nine unverified together. A call counts only when it names the
@@ -2930,13 +2931,13 @@ checks; push a commit to re-plan` is the same hold when the listing failed.
 
 No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
 posted — unless a plan comment is visible, `doctor`
-raised a warning on that run outside the repository-settings probes, the
-pull request changes a stack with no `env/*` tag that is not local, it removes
-one `env/*` tag from a stack that keeps another (the lost pairs line), or a
-`shipmate plan` command started the run, any of which still posts one,
-headlined `⚪ nothing planned` — and the gate goes green over no work, unless an
-earlier plan's apply check is still open on the head (§The gate is pending over
-an earlier plan's apply checks, above).
+raised a warning on that run outside the repository-settings probes and the
+engine release check, the pull request changes a stack with no `env/*` tag
+that is not local, it removes one `env/*` tag from a stack that keeps another
+(the lost pairs line), or a `shipmate plan` command started the run, any
+of which still posts one, headlined `⚪ nothing planned` — and the gate goes
+green over no work, unless an earlier plan's apply check is still open on the
+head (§The gate is pending over an earlier plan's apply checks, above).
 The skipped plan job's one check shows its name expression literally,
 `plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped; GitHub
 renders a skipped matrix job that way.

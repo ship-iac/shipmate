@@ -1001,6 +1001,18 @@ def test_a_share_too_small_for_a_fold_out_fills_in_comment_order():
     assert _kinds(body, cells) == ["truncated"] + ["bare"] * 99
 
 
+def test_pass_2_stops_once_less_than_min_plan_chars_is_left():
+    """Pass 1 leaves `- a` bare, its room under `MIN_PLAN_CHARS`, and the leftover is still under
+    it, so pass 2 grows nothing.
+
+    Mutation: deleting pass 2's `free < MIN_PLAN_CHARS` stop folds `- b` out in full."""
+    entries = [
+        ("- a", {"environment": "e", "changed": True}, "  + a\n" * 200),
+        ("- b", {"environment": "e", "changed": True}, "  + b\n" * 2),
+    ]
+    assert sc._fold_outs(entries, sc.MIN_PLAN_CHARS - 3) == ["- a", "- b"]
+
+
 def test_the_footer_hint_points_at_the_command_list_and_not_at_doctor():
     """The hint is a pointer to the command list, not a report of doctor's output, so no
     comment carrying it gains a coupling to doctor. Mutation: naming `shipmate doctor` in
@@ -1067,8 +1079,8 @@ def test_the_doctor_line_sits_under_the_verdict_above_the_unmanaged_line():
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/x"), None, 2) == (
         HEAD
         + f"⚪ nothing planned {AT}\n\n"
-        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: see [the "
-        "run](https://gh/run/1)\n\n" + _LEAD.format(1) + ": stacks/x",
+        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings and the engine release "
+        "check in this run: see [the run](https://gh/run/1)\n\n" + _LEAD.format(1) + ": stacks/x",
         True,
         False,
     )
@@ -1099,8 +1111,8 @@ def test_main_renders_the_doctor_line_from_the_doctor_warnings_count(
     monkeypatch.setenv("SHIPMATE_DOCTOR_WARNINGS", raw)
     _run_main(tmp_path, monkeypatch, [])
     doctor = (
-        "\n\n⚠️ shipmate doctor found 3 warning(s) beyond repository settings in this run: see "
-        "[the run](https://gh/o/r/actions/runs/1)"
+        "\n\n⚠️ shipmate doctor found 3 warning(s) beyond repository settings and the engine "
+        "release check in this run: see [the run](https://gh/o/r/actions/runs/1)"
     )
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
         HEAD + f"⚪ nothing planned {MAIN_AT}" + (doctor if line else "")
@@ -3307,8 +3319,8 @@ def test_the_superseded_lines_sit_between_the_verdict_and_the_doctor_line():
         + _superseded(1, 7)
         + "\n"
         + _superseded(2, 42)
-        + "\n\n⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: "
-        "see [the run](https://gh/run/1)"
+        + "\n\n⚠️ shipmate doctor found 2 warning(s) beyond repository settings and the engine "
+        "release check in this run: see [the run](https://gh/run/1)"
     )
 
 

@@ -103,6 +103,13 @@ class _Rendered(str):
     needs it and lacks it."""
 
 
+class _Uncounted(str):
+    """A WARNING finding that annotates the run and lists in the report but stays out of
+    `warnings_and_count`'s `n`: the engine release check's, which the repository's maintainer
+    acts on by re-pinning, not the pull request's author, so `warned` and `warnings` leave them
+    out."""
+
+
 GATE = GATE_CONTEXT
 
 MODES = ("annotate", "report", "check-ids")
@@ -1237,7 +1244,7 @@ def _pin_warnings(ctx):
         out.append(
             (
                 WARNING,
-                (
+                _Uncounted(
                     f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
                     f"release {tag} (`{sha[:7]}`). Re-pin to pick up fixes."
                 ),
@@ -2414,10 +2421,10 @@ def _degrade_reason(e):
 
 def warnings_and_count(ctx):
     """`(findings, n)`: every probe's findings, in `PROBES` order, and `n`, the WARNING-level
-    findings of probes not marked `settings`. A probe that raises becomes one degrade line at
-    its `degrade_level` (WARNING by default), counted unless the probe is marked `settings`: a
-    transient failure to read the repository settings must not post a plan comment on every pull
-    request, and the run page still shows the degrade.
+    findings of probes not marked `settings`, less the `_Uncounted` ones. A probe that raises
+    becomes one degrade line at its `degrade_level` (WARNING by default), counted unless the
+    probe is marked `settings`: a transient failure to read the repository settings must not
+    post a plan comment on every pull request, and the run page still shows the degrade.
 
     A runner whose python3 lacks PyYAML gets that refusal once, as a NOTICE, in place of every
     probe marked `parses_yaml`: each would otherwise degrade on its own, or report the
@@ -2435,7 +2442,7 @@ def warnings_and_count(ctx):
             found = probe(ctx)
             out.extend(found)
             if not getattr(probe, "settings", False):
-                n += sum(1 for lvl, _ in found if lvl == WARNING)
+                n += sum(1 for lvl, t in found if lvl == WARNING and not isinstance(t, _Uncounted))
         # noqa: BLE001 - doctor must never fail the run. `_gh_json` raises
         # SystemExit, not a plain Exception, so both are caught -- but never
         # bare BaseException, so KeyboardInterrupt still propagates.
