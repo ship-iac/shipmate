@@ -9,8 +9,9 @@ beside `cancel-in-progress: true`. The `github.run_id` fallback keeps an empty h
 `detect` or `facts`) in a group of its own instead of one every such run shares.
 
 A plan `summary` cancelled while its run was not never publishes its cells, so plan.yml's
-`gate-hold` writes a hold naming the recovery. It runs outside the group: a hold only closes the
-gate.
+`gate-hold` writes a hold naming the recovery. A `summary` that failed may have left this run's
+`pending` publish hold, so `gate-hold` turns it `failure` (`gate-status end`, which writes over
+nothing else). It runs outside the group: either write only closes the gate.
 
 actionlint 1.7.12 rejects the `queue` key, so `.github/actionlint.yaml` ignores that one message.
 The ignore must not hide another unknown `concurrency` key.
@@ -54,36 +55,51 @@ HOLD_DESCRIPTION = (
     "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled "
     "before it published"
 )
-#: The whole job, hand-written.
+END_DESCRIPTION = (
+    "re-plan this pull request (comment shipmate plan or push): its plan summary failed before "
+    "it published"
+)
+_GATE_REFRESH_WITH = {
+    "head-sha": "${{ needs.facts.outputs.head-sha }}",
+    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+}
+#: The whole job, hand-written. No step reads a `summary` output: a lost runner leaves them empty.
 EXPECTED_GATE_HOLD = {
     "needs": ["facts", "summary"],
-    "if": "${{ !cancelled() && needs.summary.result == 'cancelled' }}",
+    "if": (
+        "${{ !cancelled() && (needs.summary.result == 'cancelled' || "
+        "needs.summary.result == 'failure') }}"
+    ),
     "runs-on": "ubuntu-slim",
     "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
     "steps": [
         {
+            "if": "${{ needs.summary.result == 'cancelled' }}",
             "uses": "$/actions/gate-refresh",
-            "with": {
-                "head-sha": "${{ needs.facts.outputs.head-sha }}",
-                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-                "hold-description": HOLD_DESCRIPTION,
-            },
-        }
+            "with": {**_GATE_REFRESH_WITH, "hold-description": HOLD_DESCRIPTION},
+        },
+        {
+            "if": "${{ needs.summary.result == 'failure' }}",
+            "uses": "$/actions/gate-refresh",
+            "with": {**_GATE_REFRESH_WITH, "end-description": END_DESCRIPTION},
+        },
     ],
 }
 
 
-def test_a_cancelled_plan_summary_leaves_a_hold():
-    """Mutations: `if: ${{ always() && ... }}`; drop `!cancelled() &&`; drop `hold-description`
-    (a refresh greens the head instead)."""
+def test_a_cancelled_or_failed_plan_summary_leaves_a_hold():
+    """Mutations: drop `|| needs.summary.result == 'failure'`; `always()` for `!cancelled()`;
+    swap the two steps' inputs; drop step 1's `if:`; drop `hold-description` (a refresh greens
+    the head instead)."""
     assert workflow_jobs("plan.yml")["gate-hold"] == EXPECTED_GATE_HOLD
 
 
-def test_the_hold_fits_the_statuses_api():
-    """The statuses API keeps 140 characters. Mutation: lengthen `HOLD_DESCRIPTION` past 140."""
-    assert len(HOLD_DESCRIPTION) <= 140
+@pytest.mark.parametrize("description", [HOLD_DESCRIPTION, END_DESCRIPTION])
+def test_the_hold_fits_the_statuses_api(description):
+    """The statuses API keeps 140 characters. Mutation: lengthen either description past 140."""
+    assert len(description) <= 140
 
 
 QUEUE_IGNORE = 'unexpected key "queue" for "concurrency" section'

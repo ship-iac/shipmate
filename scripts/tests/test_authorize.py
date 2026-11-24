@@ -21,9 +21,10 @@ RUNS_OK = {"apply / dev-eu / stacks/app": "555"}
 #: sentence a commenter reads on a PR, not an implementation detail.
 NO_PLAN_REASON = (
     "no reviewed plan for the current PR head: no apply check on it names a plan run. If "
-    "`shipmate / gate` is red, its description says why; if it is green, there is nothing to "
-    "apply; otherwise wait for this head's plan run, or start one (comment `shipmate plan` or "
-    "push), then `shipmate apply` again."
+    "`shipmate / gate` is red, or pending with a description naming a plan run that has ended, "
+    "its description says why; if it is green, there is nothing to apply; otherwise wait for "
+    "this head's plan run, or start one (comment `shipmate plan` or push), then `shipmate apply` "
+    "again."
 )
 EXEMPT_DEV = frozenset({"dev-eu"})
 #: The refusal an apply on a draft gets, hand-written: it is the sentence a

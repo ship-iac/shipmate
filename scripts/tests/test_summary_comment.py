@@ -1531,8 +1531,9 @@ def test_the_upsert_quiet_inputs_read_doctor_and_build():
 
 def test_the_upsert_step_maps_exactly_these_env_vars():
     """The held render reads the uncut reason and the cells with no plan summary;
-    the head comparison reads `HEAD_SHA`. Mutations: map `SHIPMATE_HOLD_REASON` to
-    `steps.gate.outputs.description` -- the cut text; drop `HEAD_SHA` -- every write skips."""
+    the head comparison reads `HEAD_SHA`; the moved-head notice reads `HELD`. Mutations: map
+    `SHIPMATE_HOLD_REASON` to `steps.gate.outputs.description` -- the cut text; drop `HEAD_SHA`
+    -- every write skips; drop `HELD` -- the moved-head notice then claims no hold."""
     assert step_by("summary", name="Write the plan comment")["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "PR": "${{ inputs.pr-number }}",
@@ -1542,6 +1543,7 @@ def test_the_upsert_step_maps_exactly_these_env_vars():
         "DOCTOR_WARNED": "${{ steps.doctor.outputs.warned }}",
         "UNMANAGED": "${{ steps.build.outputs.unmanaged }}",
         "LOST": "${{ steps.build.outputs.lost }}",
+        "HELD": "${{ steps.hold.outputs.held }}",
         "SHIPMATE_HOLD_REASON": "${{ steps.gate.outputs.reason }}",
         "SHIPMATE_MISSING": "${{ steps.build.outputs.missing }}",
     }

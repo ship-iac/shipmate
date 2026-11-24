@@ -613,17 +613,18 @@ fi
 #: The `--jq` projections `scripts/gate-status` sends, hand-written so a changed projection is an
 #: unexpected call rather than one the stub follows.
 GATE_CHECKS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
-GATE_STATUSES_JQ = ".[] | {context, state, target_url, id, creator: .creator.id}"
+GATE_STATUSES_JQ = ".[] | {context, state, description, target_url, id, creator: .creator.id}"
 #: The `_GATE_GH` bot user lookup's default answer for `SHIPMATE_APP_SLUG=shipmate-test`; its id
 #: is unlike any fixture's `SHIPMATE_APP_ID`, so an App-id comparison reddens.
 GATE_USER = '{"id": 306306466, "login": "shipmate-test[bot]"}'
 
 
-def gate_line(state, target_url, status_id=1):
+def gate_line(state, target_url, status_id=1, description=""):
     """One `shipmate / gate` status as `GATE_STATUSES_JQ` prints it, created by `GATE_USER`."""
     status = {
         "context": "shipmate / gate",
         "state": state,
+        "description": description,
         "target_url": target_url,
         "id": status_id,
         "creator": 306306466,

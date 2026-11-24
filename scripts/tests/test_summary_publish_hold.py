@@ -1,11 +1,13 @@
 """The summary job publishes no apply check another run owns, and holds the gate before it
 publishes any.
 
-`gate-refresh` greens an absent or `pending` gate once every published apply check is complete,
-and `deploy-detect`'s queue holds only published checks. A summary job that dies between its first
-apply-check POST and `Create/refresh gate` would therefore let an apply of the published cells
-green the gate and merge the unpublished ones. `Hold the gate while apply checks publish` writes a
-`failure` gate first, which `gate-refresh` refuses to green.
+`gate-refresh` greens an absent gate or a final `pending` one once every published apply check is
+complete, and `deploy-detect`'s queue holds only published checks. A summary job that dies between
+its first apply-check POST and `Create/refresh gate` would therefore let an apply of the published
+cells green the gate and merge the unpublished ones. `Hold the gate while apply checks publish`
+writes this run's `pending` publish hold first (`gate-status publishing`), which `gate-refresh`
+refuses to green. When the plan job was cancelled after that hold, `Create/refresh gate` writes no
+final gate and turns the publish hold `failure` (`gate-status end`).
 
 First it reads the pull request (`gate-status moved`): on a head the pull request has left it
 writes nothing and sets `superseded` and `moved`; a failed read warns and publishes as before.
@@ -65,7 +67,7 @@ PUBLISH_HOLD = (
     "Plan run 42 holds this while it publishes; "
     "if that run has ended, re-plan (comment shipmate plan or push)"
 )
-STATUSES_JQ = ".[] | {context, state, target_url, id, creator: .creator.id}"
+STATUSES_JQ = ".[] | {context, state, description, target_url, id, creator: .creator.id}"
 APPLY_CHECKS_JQ = (
     ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}"
 )
@@ -109,7 +111,7 @@ PULL_READ = ["api", "repos/acme/demo/pulls/7"]
 LISTING_FAILED = (
     f"::error::could not list the check runs on {HEAD_SHA}; the step log names the cause"
 )
-PUBLISH_HOLD_POST = _status_post("failure", PUBLISH_HOLD)
+PUBLISH_HOLD_POST = _status_post("pending", PUBLISH_HOLD)
 #: `gate-status refuse-newer`'s whole refusal, the one message of both steps' newer-run check.
 REFUSED = (
     f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
@@ -157,11 +159,12 @@ fi
 """
 
 
-def _gate(state, run):
+def _gate(state, run, description=""):
     return json.dumps(
         {
             "context": "shipmate / gate",
             "state": state,
+            "description": description,
             "target_url": f"https://github.com/acme/demo/actions/runs/{run}",
             "id": 1,
             "creator": 306306466,
@@ -238,6 +241,7 @@ def _run(
     moved=None,
     behind='{"base":"main","tip":"","since":"","commits":{},"cells":[]}',
     gate_behind="0",
+    state="pending",
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
@@ -269,10 +273,11 @@ def _run(
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_APP_SLUG": "shipmate-test",
         "SHIPMATE_PLAN_RESULT": plan_result,
+        "PLAN_RESULT": plan_result,
         "SHIPMATE_PLANNED_CELLS": planned_cells,
         "SHIPMATE_BEHIND": behind,
         "HEAD_SHA": HEAD_SHA,
-        "STATE": "pending",
+        "STATE": state,
         "DESCRIPTION": "waiting",
         "MODE": "post",
         "BEHIND": gate_behind,
@@ -317,17 +322,17 @@ def _run(
 @bash_only
 def test_the_hold_is_written_before_any_apply_check(tmp_path):
     """`APPLY_LIST` pins the hold's whole projection, and `PUBLISH_HOLD_POST` the publish hold's
-    whole POST, `state=failure` included: a `pending` hold is what gate-refresh greens.
-    Mutations: move the hold below the publish loop -> the hold follows the checks; drop the
-    `refuse-newer` read -> the statuses listing is missing; drop `external_id` from the
-    projection -> an unexpected listing call; pass the publish hold `"$ended"`, or drop
-    `$GITHUB_RUN_ID` from its text -> every publish-hold test red; post `pending` from
-    `gate-status hold` -> every hold test red; write `superseded=true` on every path -> an
-    output file appears."""
+    whole POST, `state=pending` included. Mutations: `hold "Plan run $GITHUB_RUN_ID holds this
+    while it publishes; ..."` in place of `publishing` -> `state=failure`; move the hold below
+    the publish loop -> the hold follows the checks; drop the `refuse-newer` read -> the statuses
+    listing is missing; drop `external_id` from the projection -> an unexpected listing call;
+    `hold "$ended"` in place of `publishing` -> every publish-hold test red; post `pending` from
+    `gate-status hold` -> every hold test red; write `superseded=true` on every path, or drop
+    `held=true` -> the output differs."""
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
-    assert not (tmp_path / "github_output").exists()
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "held=true\n"
     assert calls == [
         PULL_READ,
         USER_READ,
@@ -344,8 +349,8 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
 @bash_only
 def test_publish_hold_fits_the_status_description_limit(tmp_path):
     """A 19-digit run id leaves the whole publish hold within `gate-status post`'s 140-character
-    cut, so the remedy survives. Mutation: lengthen the hold text past 140 in both the action and
-    `description` -> the post cuts it and the whole-argv comparison fails."""
+    cut, so the remedy survives. Mutation: lengthen the text past 140 in both `gate-status`'s
+    `PUBLISH_HOLD` and `description` -> the post cuts it and the whole-argv comparison fails."""
     run_id = "1" * 19
     description = (
         f"Plan run {run_id} holds this while it publishes; "
@@ -354,7 +359,7 @@ def test_publish_hold_fits_the_status_description_limit(tmp_path):
     _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(tmp_path, steps=(HOLD,), run_id=run_id)
     assert codes == [0]
-    assert calls[-1] == _status_post("failure", description, run_id)
+    assert calls[-1] == _status_post("pending", description, run_id)
 
 
 @bash_only
@@ -413,10 +418,12 @@ def test_a_post_failing_mid_publish_leaves_a_run_the_apply_refuses(tmp_path):
 
 @bash_only
 def test_no_planned_cell_writes_no_hold(tmp_path):
-    """Mutation: replace the cells test with `true` -> the hold is written."""
+    """No publish hold, so no `held` output either. Mutations: replace the cells test with
+    `true` -> the hold is written; move `echo "held=true"` below the `fi` -> an output file."""
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
     assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST]
+    assert not (tmp_path / "github_output").exists()
 
 
 @bash_only
@@ -537,6 +544,68 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
 def test_a_failed_read_before_the_final_write_writes_nothing(tmp_path):
     """Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST."""
     codes, calls, _, _ = _run(tmp_path, statuses_rc=1, steps=(GATE,))
+    assert (codes, calls) == ([1], [USER_READ, STATUSES_LIST])
+
+
+CANCELLED_END = (
+    "re-plan this pull request (comment shipmate plan or push): "
+    "its plan job was cancelled before it published"
+)
+
+
+@bash_only
+def test_a_cancelled_plan_job_ends_this_runs_publish_hold(tmp_path):
+    """Empty `STATE` (the plan job was cancelled) after the hold step wrote a publish hold:
+    `gate-status end` turns it `failure`. Mutation: drop the `end` call -> no read, no POST."""
+    _write_cells(tmp_path, "a")
+    statuses = _lines(_gate("pending", RUN_ID, PUBLISH_HOLD))
+    codes, calls, _, _ = _run(
+        tmp_path, statuses=statuses, steps=(HOLD, GATE), state="", plan_result="cancelled"
+    )
+    assert (codes, calls) == (
+        [0, 0],
+        [
+            *ONE_CELL_RUN[:5],
+            USER_READ,
+            STATUSES_LIST,
+            _status_post("failure", CANCELLED_END),
+        ],
+    )
+
+
+@bash_only
+def test_a_cancelled_re_run_ends_an_earlier_attempts_publish_hold(tmp_path):
+    """This attempt wrote no publish hold (`held` unset), but an earlier attempt of the run did,
+    and it is the newest gate: `end` turns it `failure`. Mutation: call `end` only when `held`
+    is `true` -> no read, no POST."""
+    statuses = _lines(_gate("pending", RUN_ID, PUBLISH_HOLD))
+    codes, calls, _, _ = _run(
+        tmp_path, statuses=statuses, steps=(GATE,), state="", plan_result="cancelled"
+    )
+    assert (codes, calls) == (
+        [0],
+        [USER_READ, STATUSES_LIST, _status_post("failure", CANCELLED_END)],
+    )
+
+
+@bash_only
+def test_a_cancelled_plan_job_with_no_publish_hold_writes_nothing(tmp_path):
+    """The newest gate is an older run's final `pending`, not this run's publish hold: `end`
+    reads it and writes nothing. Mutation: `post ... failure` in place of `end` -> a POST."""
+    statuses = _lines(_gate("pending", 41, "waiting"))
+    codes, calls, _, _ = _run(
+        tmp_path, statuses=statuses, steps=(GATE,), state="", plan_result="cancelled"
+    )
+    assert (codes, calls) == ([0], [USER_READ, STATUSES_LIST])
+
+
+@bash_only
+def test_a_failed_end_fails_the_gate_step(tmp_path):
+    """A failed statuses read writes nothing and fails the step, so any publish hold on the head
+    stays for `refresh` to refuse. Mutation: `end ... || true` -> the step passes."""
+    codes, calls, _, _ = _run(
+        tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled"
+    )
     assert (codes, calls) == ([1], [USER_READ, STATUSES_LIST])
 
 
@@ -767,7 +836,7 @@ def test_an_unmoved_head_adds_one_read_and_no_write(tmp_path):
     _write_cells(tmp_path, "a")
     codes, calls, _, stdout = _run(tmp_path, steps=(HOLD, CREATE, GATE))
     assert (codes, calls, stdout) == ([0, 0, 0], ONE_CELL_RUN, "")
-    assert not (tmp_path / "github_output").exists()
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "held=true\n"
 
 
 @bash_only
@@ -847,13 +916,14 @@ _ONE_BEHIND = json.dumps(
 def test_a_run_of_only_behind_cells_writes_the_publish_hold(tmp_path):
     """No cell summary, one behind cell: its queued check is in `bodies.jsonl`, so the hold step
     writes the publish hold before `Create apply checks` publishes it, and a job dying between
-    the two leaves a hold rather than an older green. Mutation: restore the `cell.json`-only
-    condition -- no publish hold, red."""
+    the two leaves a hold rather than an older green, and sets `held`. Mutation: restore the
+    `cell.json`-only condition -- no publish hold, red."""
     codes, calls, _, _ = _run(
         tmp_path, steps=(HOLD,), plan_result="skipped", planned_cells="0", behind=_ONE_BEHIND
     )
     assert codes == [0]
     assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "held=true\n"
 
 
 _BEHIND_POST = [

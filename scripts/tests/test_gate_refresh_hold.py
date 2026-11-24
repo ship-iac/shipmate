@@ -50,7 +50,15 @@ def _status_argv(state, description):
 GREEN_ARGV = _status_argv("success", "all applies complete, nothing left to apply")
 
 
-def _run_step(tmp_path, *, gate="", detect_result="", deploy_results="", hold_description=""):
+def _run_step(
+    tmp_path,
+    *,
+    gate="",
+    detect_result="",
+    deploy_results="",
+    hold_description="",
+    end_description="",
+):
     proc, calls = run_with_gate_gh(
         tmp_path,
         step_by("gate-refresh", name="Write the gate")["run"],
@@ -64,6 +72,7 @@ def _run_step(tmp_path, *, gate="", detect_result="", deploy_results="", hold_de
             "DETECT_RESULT": detect_result,
             "DEPLOY_RESULTS": deploy_results,
             "HOLD_DESCRIPTION": hold_description,
+            "END_DESCRIPTION": end_description,
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_SERVER_URL": "https://example.invalid",
             "GITHUB_RUN_ID": "999",
@@ -109,6 +118,58 @@ def test_a_hold_description_writes_a_hold(tmp_path):
     proc, posted = _run_step(tmp_path, hold_description="re-plan this pull request")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert posted == [_status_argv("failure", "re-plan this pull request")]
+
+
+PUBLISH_HOLD = (
+    "Plan run 999 holds this while it publishes; "
+    "if that run has ended, re-plan (comment shipmate plan or push)"
+)
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("gate", "posted_states"),
+    [
+        (gate_line("pending", RUN_URL, description=PUBLISH_HOLD), ["failure"]),
+        (gate_line("pending", RUN_URL, description="waiting"), []),
+    ],
+    ids=["own-publish-hold", "own-final-pending"],
+)
+def test_an_end_description_ends_only_this_runs_publish_hold(tmp_path, gate, posted_states):
+    """`gate-status end` writes over this run's publish hold and leaves its final gate. Mutations:
+    `hold` in place of `end` -> the final `pending` turns `failure`; drop the `end` branch -> a
+    refresh greens."""
+    proc, posted = _run_step(tmp_path, gate=gate, end_description="re-plan this pull request")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert posted == [_status_argv(s, "re-plan this pull request") for s in posted_states]
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "other",
+    [
+        {"hold_description": "re-plan"},
+        {"deploy_results": "success"},
+        {"detect_result": "success"},
+    ],
+    ids=["hold", "deploy", "detect"],
+)
+def test_an_end_description_with_another_mode_is_refused(tmp_path, other):
+    """Mutation: drop the `end-description` exclusivity check -> the end runs, the step passes."""
+    proc, posted = _run_step(
+        tmp_path,
+        gate=gate_line("pending", RUN_URL, description=PUBLISH_HOLD),
+        end_description="re-plan",
+        **other,
+    )
+    assert (proc.returncode, proc.stdout, posted) == (
+        1,
+        (
+            "::error::end-description cannot be set with hold-description, deploy-results or "
+            "detect-result\n"
+        ),
+        [],
+    )
 
 
 @bash_only

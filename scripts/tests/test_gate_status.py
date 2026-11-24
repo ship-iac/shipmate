@@ -38,6 +38,8 @@ ENV = {
     "SHIPMATE_APP_SLUG": "shipmate-test",
 }
 NO_SLUG = {k: v for k, v in ENV.items() if k != "SHIPMATE_APP_SLUG"}
+#: `gate-state`'s final `pending` description, hand-written.
+_FINAL = "one or more stacks are waiting to be applied; merge is blocked until applies complete"
 #: A newer run's hold, which `refresh` refuses on without reading it again.
 NEWER_RUN_URL = "https://example.invalid/acme/demo/actions/runs/1000"
 HELD = (
@@ -82,7 +84,7 @@ STATUSES_ARGV = [
     "--paginate",
     f"repos/acme/demo/commits/{SHA}/statuses?per_page=100",
     "--jq",
-    ".[] | {context, state, target_url, id, creator: .creator.id}",
+    ".[] | {context, state, description, target_url, id, creator: .creator.id}",
 ]
 #: The App bot user lookup, hand-written: `[` and `]` percent-encoded in the path.
 USER_ARGV = ["api", "users/shipmate-test%5Bbot%5D"]
@@ -95,9 +97,17 @@ def _check(cid, status, conclusion=None, name="apply / dev / a"):
     )
 
 
-def _status(context, state, url=RUN_URL, creator=BOT_ID, status_id=1):
-    return json.dumps(
-        {"context": context, "state": state, "target_url": url, "id": status_id, "creator": creator}
+def _status(context, state, url=RUN_URL, creator=BOT_ID, status_id=1, description=""):
+    keys = {"context": context, "state": state, "description": description, "target_url": url}
+    return json.dumps(keys | {"id": status_id, "creator": creator})
+
+
+def _hold_text(run):
+    """The publish hold's description naming `run`, hand-written: a text read back from the
+    script passes whatever the script says."""
+    return (
+        f"Plan run {run} holds this while it publishes; if that run has ended, re-plan (comment "
+        "shipmate plan or push)"
     )
 
 
@@ -267,6 +277,7 @@ def test_newest_prints_the_newest_gate_state_and_run_id(tmp_path, page1, printed
     [
         (("post", SHA, "pending", "waiting"), _status_argv("pending", "waiting")),
         (("hold", SHA, "re-plan"), _status_argv("failure", "re-plan")),
+        (("publishing", SHA), _status_argv("pending", _hold_text(999))),
         (("post", SHA, "success", "x" * 150), _status_argv("success", "x" * 140)),
         (
             ("deploy", SHA, "success", "success,skipped"),
@@ -280,8 +291,9 @@ def test_newest_prints_the_newest_gate_state_and_run_id(tmp_path, page1, printed
 )
 def test_post_and_hold_send_this_whole_argv(tmp_path, args, argv):
     """A write that succeeds first time reads no gate, so it makes no bot user lookup.
-    Mutations: change `GATE_CONTEXT`; drop the `[:140]`; post `pending` in `hold`; call
-    `app_user()` at the `post` command's entry -> a lookup precedes the POST."""
+    Mutations: change `GATE_CONTEXT`; drop the `[:140]`; post `pending` in `hold`; post `failure`
+    in `publishing`; drop `{run}` from `PUBLISH_HOLD`; call `app_user()` at the `post` command's
+    entry -> a lookup precedes the POST."""
     proc, calls = _run(tmp_path, *args)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [argv]
@@ -363,16 +375,51 @@ def _newer(run):
             "",
             None,
         ),
+        # A newer run's final `pending` over its own publish hold: the history still holds.
+        (
+            _lines(
+                _status(
+                    "shipmate / gate",
+                    "pending",
+                    _run_url(1000),
+                    status_id=6,
+                    description="its final gate",
+                ),
+                _status(
+                    "shipmate / gate",
+                    "pending",
+                    _run_url(1000),
+                    status_id=5,
+                    description=_hold_text(1000),
+                ),
+            ),
+            "",
+            1000,
+        ),
+        (
+            _lines(_status("shipmate / gate", "pending", _run_url(1000), description=_FINAL)),
+            "",
+            None,
+        ),
         ("", "", None),
     ],
-    ids=["behind-own-hold", "highest-hold", "integer-compare", "none-newer", "no-statuses"],
+    ids=[
+        "behind-own-hold",
+        "highest-hold",
+        "integer-compare",
+        "none-newer",
+        "newer-publish-hold",
+        "newer-final-pending",
+        "no-statuses",
+    ],
 )
 def test_refuse_newer_names_the_newest_hold_written_after_this_run(tmp_path, page1, page2, newer):
     """A newer hold exits `NEWER` with the whole refusal on stderr; none exits 0 silently.
 
     Mutations: read only the newest gate (`_gates(sha)[:1]`) -> the first case exits 0; compare
     run ids as strings -> the third case exits 0 (`"1000" > "999"` is false); drop the
-    `state == "failure"` filter -> the second case names 5000; `max` -> `min` -> 1001; exit 1
+    `is_hold` filter -> the second case names 5000 and `newer-final-pending` names 1000; count
+    `failure` only -> `newer-publish-hold` exits 0; `max` -> `min` -> 1001; exit 1
     instead of `NEWER` -> the exit code differs; print the refusal to stdout -> stdout and stderr
     differ."""
     proc, calls = _run(tmp_path, "refuse-newer", SHA, page1=page1, page2=page2)
@@ -562,7 +609,7 @@ def test_gates_retries_a_transient_failure(in_process, monkeypatch):
     """Mutation: `_run(args)` without `retried` in `_gates` -> the 502 raises."""
     calls = _flaky_run(monkeypatch, [("failure", "42")])
     assert (gs.newest_gate(SHA), calls, in_process) == (
-        ("failure", "42", 1),
+        ("failure", "42", 1, ""),
         [_USER, _READ, _READ],
         [2],
     )
@@ -600,8 +647,8 @@ def test_refresh_stops_when_a_hold_lands_while_its_write_retries(in_process, mon
 
 def _gate_reads(monkeypatch, gates):
     """`gs._run` answering the bot user lookup and each statuses read with the next of `gates`,
-    each `(state, run id, status id)`; run id `-` gives a `target_url` naming no run. Returns the
-    calls."""
+    each `(state, run id, status id)` or `(state, run id, status id, description)`; run id `-`
+    gives a `target_url` naming no run. Returns the calls."""
     calls = []
 
     def run(args):
@@ -609,9 +656,12 @@ def _gate_reads(monkeypatch, gates):
         if args == _USER:
             return GATE_USER
         assert args == _READ
-        state, run_id, status_id = gates.pop(0)
+        state, run_id, status_id, *rest = gates.pop(0)
         url = "https://example.invalid/acme/demo" if run_id == "-" else _run_url(run_id)
-        return _lines(_status("shipmate / gate", state, url, status_id=status_id))
+        description = rest[0] if rest else ""
+        return _lines(
+            _status("shipmate / gate", state, url, status_id=status_id, description=description)
+        )
 
     monkeypatch.setattr(gs, "_run", run)
     return calls
@@ -628,9 +678,10 @@ def _refuse_held(sha=SHA):
 
 @pytest.mark.parametrize("run_id", ["999", "42"], ids=["own", "older"])
 def test_a_hold_a_lagging_read_returned_is_read_again(in_process, monkeypatch, capsys, run_id):
-    """A statuses read right after this run's `pending` write can return this run's publish hold,
-    or an older run's hold under it. Mutations: no re-read (`HOLD_REREADS = 0`) -> `HELD`; re-read
-    only for this run's id (`==` for `<=` in `_may_lag`) -> the older case is `HELD`."""
+    """A statuses read right after this run's `pending` write can return a `failure` this run
+    wrote before it, or an older run's hold under it. Mutations: no re-read (`HOLD_REREADS = 0`)
+    -> `HELD`; re-read only for this run's id (`==` for `<=` in `_may_lag`) -> the older case
+    is `HELD`."""
     calls = _gate_reads(monkeypatch, [("failure", run_id, 5), ("pending", "999", 6)])
     assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
         None,
@@ -737,6 +788,90 @@ def test_a_missing_run_id_over_a_hold_is_a_configuration_error(in_process, monke
     assert exc.value.code == (
         f"::error::GITHUB_RUN_ID must be a decimal run id (got: {value or ''!r})"
     )
+
+
+@pytest.mark.parametrize("run_id", ["42", "999"], ids=["older", "own"])
+def test_a_publish_hold_on_every_read_refuses_after_three_rereads(
+    in_process, monkeypatch, capsys, run_id
+):
+    """Mutation: `is_hold` counts `failure` only -> None after one read, and `refresh` greens."""
+    calls = _gate_reads(monkeypatch, [("pending", run_id, 5, _hold_text(run_id))] * 4)
+    assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
+        gs.HELD,
+        [_USER, *[_READ] * 4],
+        [2, 2, 2],
+        HELD,
+    )
+
+
+def test_a_duplicate_publish_hold_on_a_reread_does_not_clear_it(in_process, monkeypatch, capsys):
+    """A retried `publishing` POST can land twice: this run's publish hold (id 5), then a copy (id
+    7) on every re-read. Mutation: judge a re-read by `newest[0] == "failure"` while the first
+    read uses `is_hold` -> the copy clears the hold, None after two reads."""
+    hold = _hold_text(999)
+    calls = _gate_reads(
+        monkeypatch, [("pending", "999", 5, hold), *[("pending", "999", 7, hold)] * 3]
+    )
+    assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
+        gs.HELD,
+        [_USER, *[_READ] * 4],
+        [2, 2, 2],
+        HELD,
+    )
+
+
+@pytest.mark.parametrize(
+    "gates",
+    [
+        [("pending", "999", 5, _hold_text(999)), ("pending", "999", 6, _FINAL)],
+        [("pending", "42", 5, _hold_text(42)), ("pending", "500", 6, _FINAL)],
+    ],
+    ids=["own-hold-then-own-final", "older-hold-then-newer-final"],
+)
+def test_a_final_pending_newer_than_a_lagging_publish_hold_clears_it(
+    in_process, monkeypatch, capsys, gates
+):
+    """A lagging read returns a publish hold this run or an older one wrote; the re-read returns a
+    final `pending` with a higher status id. Mutation: `_may_lag` checks `failure` only ->
+    `HELD` after one read."""
+    calls = _gate_reads(monkeypatch, gates)
+    assert (_refuse_held(), calls, in_process, capsys.readouterr().out) == (
+        None,
+        [_USER, _READ, _READ],
+        [2],
+        "",
+    )
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "line",
+    [
+        _status("shipmate / gate", "pending", _run_url(42), description=_FINAL),
+        json.dumps(
+            {
+                "context": "shipmate / gate",
+                "state": "pending",
+                "target_url": _run_url(42),
+                "id": 1,
+                "creator": BOT_ID,
+            }
+        ),
+        _status("shipmate / gate", "pending", _run_url(42), description=None),
+        _status("shipmate / gate", "pending", _run_url(42), description=_hold_text(42) + "."),
+        _status("shipmate / gate", "pending", _run_url(42), description=_hold_text(999)),
+    ],
+    ids=["final", "no-description", "null-description", "longer-text", "other-run-text"],
+)
+def test_refresh_greens_over_a_final_pending_gate_of_an_older_run(tmp_path, line):
+    """A `pending` gate is a publish hold only by its whole description naming its own run.
+    Mutations: `is_hold` treats every `pending` as a hold -> each case is `HELD`; match the
+    description by prefix -> `longer-text` is `HELD`; build the text from `GITHUB_RUN_ID`, not the
+    gate's run -> `other-run-text` is `HELD`; read `status["description"]` -> `no-description`
+    exits 1."""
+    proc, calls = _run(tmp_path, "refresh", SHA, checks=DONE, page1=_lines(line))
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+    assert calls == [CHECKS_ARGV, USER_ARGV, STATUSES_ARGV, GREEN]
 
 
 def test_post_flattens_a_multi_line_description(in_process, monkeypatch):
@@ -1904,6 +2039,7 @@ def test_a_gate_reader_without_the_slug_refuses_before_any_call(tmp_path, env, a
     ("args", "checks", "argv"),
     [
         (("hold", SHA, "re-plan"), "", _status_argv("failure", "re-plan")),
+        (("publishing", SHA), "", _status_argv("pending", _hold_text(999))),
         (
             ("deploy", SHA, "success", "success"),
             "",
@@ -1911,12 +2047,111 @@ def test_a_gate_reader_without_the_slug_refuses_before_any_call(tmp_path, env, a
         ),
         (("checks", SHA, ".check_runs[]"), "{}\n", _checks_argv(".check_runs[]")),
     ],
-    ids=["hold", "deploy", "checks"],
+    ids=["hold", "publishing", "deploy", "checks"],
 )
 def test_a_command_that_reads_no_gate_needs_no_slug(tmp_path, args, checks, argv):
     """Mutation: call `_require_slug()` in `main` for every subcommand -> each exits 1."""
     proc, calls = _run(tmp_path, *args, env=NO_SLUG, checks=checks, checks_jq=".check_runs[]")
     assert (proc.returncode, proc.stderr, calls) == (0, "", [argv])
+
+
+_ENDED = "re-plan this pull request (comment shipmate plan or push): its plan summary failed"
+
+
+def _left(newest):
+    return (
+        f"the newest gate of {SHA} is not plan run 999's publish hold (newest: {newest}); the "
+        "gate is left as it is\n"
+    )
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("page1", "kwargs", "expected", "calls"),
+    [
+        pytest.param(
+            _lines(_status(_GATE, "pending", description=_hold_text(999))),
+            {},
+            (0, "", ""),
+            [USER_ARGV, STATUSES_ARGV, _status_argv("failure", _ENDED)],
+            id="own-publish-hold",
+        ),
+        pytest.param(
+            _lines(_status(_GATE, "pending", description=_FINAL)),
+            {},
+            (0, _left("pending from run 999"), ""),
+            [USER_ARGV, STATUSES_ARGV],
+            id="own-final-pending",
+        ),
+        pytest.param(
+            _lines(_status(_GATE, "success", description="all applies complete")),
+            {},
+            (0, _left("success from run 999"), ""),
+            [USER_ARGV, STATUSES_ARGV],
+            id="own-final-success",
+        ),
+        pytest.param(
+            _lines(_status(_GATE, "failure", description="its plan run ended")),
+            {},
+            (0, _left("failure from run 999"), ""),
+            [USER_ARGV, STATUSES_ARGV],
+            id="own-final-failure",
+        ),
+        pytest.param(
+            _lines(_status(_GATE, "pending", _run_url(1000), description=_hold_text(1000))),
+            {},
+            (0, _left("pending from run 1000"), ""),
+            [USER_ARGV, STATUSES_ARGV],
+            id="newer-publish-hold",
+        ),
+        pytest.param(
+            _lines(_status(_GATE, "pending", _run_url(42), description=_hold_text(42))),
+            {},
+            (0, _left("pending from run 42"), ""),
+            [USER_ARGV, STATUSES_ARGV],
+            id="older-publish-hold",
+        ),
+        pytest.param(
+            _lines(
+                _status(
+                    _GATE,
+                    "pending",
+                    "https://host1.invalid/a/b/pull/7",
+                    description=_hold_text("-"),
+                )
+            ),
+            {},
+            (0, _left("pending from run -"), ""),
+            [USER_ARGV, STATUSES_ARGV],
+            id="no-run",
+        ),
+        pytest.param("", {}, (0, _left("none"), ""), [USER_ARGV, STATUSES_ARGV], id="no-gate"),
+        pytest.param(
+            _lines(_status(_GATE, "pending", description=_hold_text(999))),
+            {"statuses_rc": 1},
+            (1, "", f"::error::command failed (1): gh {' '.join(STATUSES_ARGV)}\n"),
+            [USER_ARGV, STATUSES_ARGV],
+            id="failed-read",
+        ),
+        pytest.param(
+            _lines(_status(_GATE, "pending", description=_hold_text(999))),
+            {"env": {**ENV, "SHIPMATE_APP_SLUG": ""}},
+            (1, "", _SLUG_ERROR),
+            [],
+            id="empty-slug",
+        ),
+    ],
+)
+def test_end_turns_only_this_runs_own_publish_hold_failure(
+    tmp_path, page1, kwargs, expected, calls
+):
+    """`end` writes `failure` over this run's (999) publish hold and over nothing else, printing
+    why. Mutations: compare the run only, not the description -> the `own-final-*` cases POST;
+    drop the run comparison -> `newer-publish-hold` and `older-publish-hold` POST; write when no
+    gate exists -> `no-gate` POSTs; treat a failed read as no gate -> `failed-read` exits 0."""
+    proc, recorded = _run(tmp_path, "end", SHA, _ENDED, page1=page1, **kwargs)
+    assert (proc.returncode, proc.stdout, proc.stderr) == expected
+    assert recorded == calls
 
 
 @pytest.mark.parametrize("cmd", ["moved", "replan"])
@@ -2068,6 +2303,7 @@ _DEPLOYED = [
     *_status_argv("success", "all env-levels applied (deploy env-level applies completed)"),
 ]
 _HOLD = ["gh", *_status_argv("failure", "the reason")]
+_PUBLISHING = ["gh", *_status_argv("pending", _hold_text(999))]
 
 
 @pytest.mark.parametrize(
@@ -2075,15 +2311,16 @@ _HOLD = ["gh", *_status_argv("failure", "the reason")]
     [
         (["post", SHA, "pending", "the reason"], [_POST, _USER, _READ, _POST]),
         (["hold", SHA, "the reason"], [_HOLD, _HOLD]),
+        (["publishing", SHA], [_PUBLISHING, _PUBLISHING]),
         (["deploy", SHA, "success", "success"], [_DEPLOYED, _DEPLOYED]),
     ],
-    ids=["post", "hold", "deploy"],
+    ids=["post", "hold", "publishing", "deploy"],
 )
 def test_a_gate_write_waits_out_a_secondary_rate_limit(in_process, monkeypatch, command, expected):
     """The first write hits the secondary limit; `post` re-runs `refuse-newer` before its retry,
-    `hold` and `deploy` re-check nothing. Mutations, each run: `post` writes through `retried`
-    instead of `write_retried` -> the 403 raises; drop `before_retry=` from `post`'s
-    `write_retried` -> the `post` case loses its reads."""
+    `hold`, `publishing` and `deploy` re-check nothing. Mutations, each run: `post` writes
+    through `retried` instead of `write_retried` -> the 403 raises; drop `before_retry=` from
+    `post`'s `write_retried` -> the `post` case loses its reads."""
     calls = []
 
     def run(args):
@@ -2223,10 +2460,15 @@ def _publish_gh(
     """`gs._run` and `gs.run` answering a head on which every rule holds by default: a `pending`
     gate by run `_E`, `_E` listed completed success with zero-cell jobs (any run's jobs read
     answers `jobs`), `_E`'s plan comment on pull request 7, and this run created at `_BEFORE`.
-    `statuses` and `own` override the statuses and own-run answers, `comments` maps a pull
+    `gate` is `(state, run id)` or `(state, run id, description)`; `statuses` and `own` override
+    the statuses and own-run answers, `comments` maps a pull
     request to its answer; a `SystemExit` answer is raised. Returns the calls."""
     calls = []
-    gates = "" if gate is None else _lines(_status(_GATE, gate[0], _run_url(gate[1])))
+    gates = (
+        ""
+        if gate is None
+        else _lines(_status(_GATE, gate[0], _run_url(gate[1]), BOT_ID, 1, *gate[2:]))
+    )
     answers = {
         json.dumps(_USER): GATE_USER,
         json.dumps(_READ): gates if statuses is None else statuses,
@@ -2275,6 +2517,10 @@ def test_published_prints_the_earlier_run_that_planned_and_published(
     ("fakes", "pr", "reads"),
     [
         pytest.param({"gate": ("failure", _E)}, "7", _GATE_READS, id="c-failure-gate"),
+        pytest.param({"gate": ("error", _E)}, "7", _GATE_READS, id="c-error-gate"),
+        pytest.param(
+            {"gate": ("pending", _E, _hold_text(_E))}, "7", _GATE_READS, id="r-publish-hold"
+        ),
         pytest.param(
             {
                 "gate": ("pending", "999"),
@@ -2345,13 +2591,14 @@ def test_published_prints_nothing_when_a_rule_fails(
 ):
     """Every other read answers as if its rule held, so each mutation prints the run.
 
-    Mutations: drop the state check -- (c) prints 41; drop the own-run check -- (d) prints 999;
-    pick any listed run, not `G`'s -- (e) prints 77; drop the conclusion check -- (f) prints
-    41; drop `_planned` -- (g) prints 41; drop the attempt check -- (i) prints 41; exit 1 on an
-    empty statuses answer -- (j) red; drop rule 5 -- (l) prints 41, (m) still prints nothing,
-    since rule 6 holds (red only by its extra own-run read), and dropping rule 6 too prints 41;
-    keep the first App plan comment, not the newest -- (n) prints 41; match any `[bot]` login --
-    (o) prints 41; drop rule 6 -- (p) and (q) print 41; compare with `>=` -- (q) prints 41."""
+    Mutations: drop the state check -- (c-error) prints 41, and (c) too once the `is_hold` exclusion
+    goes as well; drop the `is_hold` exclusion -- (r) prints 41; drop the own-run check -- (d)
+    prints 999; pick any listed run, not `G`'s -- (e) prints 77; drop the conclusion check -- (f)
+    prints 41; drop `_planned` -- (g) prints 41; drop the attempt check -- (i) prints 41; exit 1 on
+    an empty statuses answer -- (j) red; drop rule 5 -- (l) prints 41, (m) still prints nothing,
+    since rule 6 holds (red only by its extra own-run read), and dropping rule 6 too prints 41; keep
+    the first App plan comment, not the newest -- (n) prints 41; match any `[bot]` login -- (o)
+    prints 41; drop rule 6 -- (p) and (q) print 41; compare with `>=` -- (q) prints 41."""
     calls = _publish_gh(monkeypatch, **fakes)
     assert (_cli("published", SHA, pr), capsys.readouterr(), calls) == (0, ("", ""), reads)
 

@@ -1,11 +1,11 @@
 """Every step that reads the gate statuses hands `scripts/gate-status` the App's slug.
 
-`newest`, `refuse-newer`, `post`, `refresh` and `published` judge only the gate statuses the bot
-user behind `SHIPMATE_APP_SLUG` created, and refuse when it is empty. The slug comes from the
-`app-slug` output of the same `id: token` mint whose token the step reads with: a slug from an
-input or a variable could name another valid bot and hide every real hold. This file asserts the
-slug of every reading step; `test_pending_checks.py` and `test_gate_name_consistency.py` also
-pin the whole env of "Hold the gate while apply checks publish" and "Write the gate".
+`newest`, `refuse-newer`, `post`, `refresh`, `end` and `published` judge only the gate statuses
+the bot user behind `SHIPMATE_APP_SLUG` created, and refuse when it is empty. The slug comes from
+the `app-slug` output of the same `id: token` mint whose token the step reads with: a slug from
+an input or a variable could name another valid bot and hide every real hold. This file asserts
+the slug of every reading step; `test_pending_checks.py` and `test_gate_name_consistency.py`
+also pin the whole env of "Hold the gate while apply checks publish" and "Write the gate".
 """
 
 import shlex
@@ -13,7 +13,7 @@ import shlex
 import pytest
 from _loader import engine_steps, run_lines, step_by
 
-READING_SUBCOMMANDS = {"newest", "refuse-newer", "post", "refresh", "published"}
+READING_SUBCOMMANDS = {"newest", "refuse-newer", "post", "refresh", "end", "published"}
 
 #: (action, step name) of every step invoking a reading subcommand, hand-written.
 READING_STEPS = {
@@ -34,6 +34,8 @@ SUBCOMMANDS = {
     "refuse-newer",
     "post",
     "hold",
+    "publishing",
+    "end",
     "refresh",
     "deploy",
     "checks",

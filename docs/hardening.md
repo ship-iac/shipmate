@@ -1167,7 +1167,7 @@ jobs holding the key check nothing out either. `claim` runs only on a
 `workflow_dispatch` carrying a comment id, which a fork's pull request event never
 is. `defer` carries the same head-repository clause in its own `if:`. `defer-auto` carries it too, and
 runs only on the first attempt of a ready-for-review run that deferred. `gate-hold` runs only when
-`summary` was cancelled and the run was not; a refused `summary` is skipped, not cancelled.
+`summary` was cancelled or failed and the run was not cancelled; a refused `summary` is skipped, not cancelled or failed.
 `outcome` carries `summary`'s head-repository clause in its own `if:`, except
 after a failed `facts` on a commented plan, when no head is known.
 Both the fact and
