@@ -18,6 +18,15 @@ An empty `SHIPMATE_ENV` selects the bare form, `bare_main`: every environment's
 pending cells, bucketed into env-levels by the entries' `needs`, after the
 exclusions its docstring names.
 
+Before reading the head's checks, the bare and targeted forms wait while a `shipmate plan` run of
+the pull request is live (`wait_for_plans`), up to `PLAN_WAIT` seconds of elapsed time, then
+refuse a cell whose record names a run they waited for (`refuse_replanned`): that run's plan is
+one no reviewer has seen. The auto form does not wait. `PLAN_WAIT` rests on the dispatched plan
+runs of `ship-iac/repo-example-stacks` (50, 2026-09-29 to 2026-11-22) and
+`ship-iac/repo-example-stacks-aws` (13, 2026-09-07 to 2026-10-18), `createdAt` to `updatedAt`:
+all 63 median 76 s, p90 141 s, max 369 s (a failure); the 39 successes median 86 s, p90 202 s,
+max 264 s. A large consumer's distribution is unknown.
+
 The bare and targeted forms refuse the whole run when a cell they would apply is behind the
 base (`refuse_behind`). Every form refuses it when another run holds the apply check of a cell
 it would apply `in_progress` and may still apply that cell, or may have (`refuse_held`).
@@ -60,9 +69,11 @@ from _shipmate import (
     gh_json,
     is_run_id,
     listed_jobs,
+    live_plan_runs,
     named,
     one_line,
     run_annotated,
+    sleep,
     status_text,
     validate_head_sha,
     write_outputs,
@@ -79,6 +90,12 @@ cl = _load("cell-lock")
 _MERGEABLE_READS = 12
 _MERGEABLE_WAIT = 5
 _sleep = time.sleep
+#: The commanded forms' wait for live `shipmate plan` runs: elapsed seconds on `_clock`, and
+#: seconds between polls. 63 dispatched sample plan runs (2026-11-24): median 76 s, p90 141 s,
+#: longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
+PLAN_WAIT = 480
+PLAN_POLL = 30
+_clock = time.monotonic
 _AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
 # An auto run has no comment to repeat: its draft and mergeability refusals name the comment.
 _AUTO_RETRY = "comment `shipmate apply`"
@@ -513,6 +530,96 @@ def _check_run_lines(repo, head_sha):
     return check_runs(repo, head_sha, run=_run).splitlines()
 
 
+def wait_for_plans(repo, pr_number):
+    """The ids, as str, of the live `shipmate plan` runs of pull request `pr_number`
+    (`live_plan_runs`, counted) this apply waited for, once a poll settles: its listing is
+    complete and empty and every waited run not listed reads `completed` by id (`_read_run`).
+    Every listed run joins the waited set, from an incomplete listing too, with one notice when
+    first seen; a run that starts during the wait extends it, and the bound is total.
+
+    An unsettled poll sleeps `PLAN_POLL` seconds and polls again until `PLAN_WAIT` seconds of
+    `_clock` have passed since the first, then refuses (`_wait_refusal`). The deadline is checked
+    between polls: a read that stalls is not bounded by it."""
+    deadline = _clock() + PLAN_WAIT
+    waited = set()
+    while True:
+        complete, live, unread = _poll_plans(repo, pr_number, waited)
+        if complete and not live and not unread:
+            return waited
+        if _clock() >= deadline:
+            raise _wait_refusal(pr_number, complete, live, unread)
+        sleep(PLAN_POLL)
+
+
+def _poll_plans(repo, pr_number, waited):
+    """One poll of `wait_for_plans`, adding each listed run to `waited`: `(complete, live,
+    unread)`, `complete` the listing's, `live` each waited run listed or read by id as not
+    `completed`, mapped to its status words, `unread` the waited runs not listed whose by-id read
+    failed, ascending."""
+    runs, complete = live_plan_runs(repo, pr_number, _run, counted=True)
+    live = {}
+    for r in runs:
+        run_id = str(r["id"])
+        live[run_id] = status_text(r.get("status"))
+        if run_id not in waited:
+            waited.add(run_id)
+            print(
+                f"::notice::waiting for shipmate plan run {run_id} of this pull request "
+                f"({command_data(live[run_id])}) before reading the apply checks"
+            )
+    unread = []
+    for run_id in sorted(waited - live.keys(), key=int):
+        read = _read_run(repo, run_id)
+        if read is None:
+            unread.append(run_id)
+        elif read[0] != "completed":
+            live[run_id] = status_text(read[0])
+    return complete, live, unread
+
+
+def _wait_refusal(pr_number, complete, live, unread):
+    """The refusal at `wait_for_plans`' deadline after a poll that did not settle. The last
+    listing decides: incomplete fails; else a run known live refuses by rule naming the lowest;
+    else the lowest unread run fails. A failure is no `Refused`: no run is known live."""
+    minutes = PLAN_WAIT // 60
+    if not complete:
+        return SystemExit(
+            f"::error::apply aborted: the live shipmate plan runs of pull request #{pr_number} "
+            f"could not all be listed for {minutes} minutes, so a plan in flight may change what "
+            "this apply applies; comment `shipmate apply` again"
+        )
+    if live:
+        run_id = min(live, key=int)
+        return Refused(
+            f"::error::apply aborted: shipmate plan run {run_id} of this pull request is still "
+            f"{live[run_id]} after {minutes} minutes; wait for it to finish, review its plan, "
+            "then comment `shipmate apply`"
+        )
+    return SystemExit(
+        f"::error::apply aborted: shipmate plan run {unread[0]} of this pull request could not be "
+        f"read for {minutes} minutes, so it may still change what this apply applies; comment "
+        "`shipmate apply` again"
+    )
+
+
+def refuse_replanned(runnable, waited):
+    """Refuse by rule when a cell of `runnable` records a plan run in `waited` (`wait_for_plans`),
+    naming the lowest such run and its cells: that run rewrote the record while this apply
+    waited, so the plan it records is not the one reviewed. Ids compare as decimal strings."""
+    hits = sorted({str(c["plan_run_id"]) for c in runnable} & waited, key=int)
+    if hits:
+        cells = sorted(
+            f"{c['stack']} / {c['environment']}"
+            for c in runnable
+            if str(c["plan_run_id"]) == hits[0]
+        )
+        raise Refused(
+            f"::error::apply aborted: shipmate plan run {hits[0]} of this pull request planned "
+            f"{named(cells, ag.NAMED)} while this apply waited for it; review its plan, then "
+            "comment `shipmate apply`"
+        )
+
+
 def apply_check_names(check_run_lines, app_id):
     """Every App-authored apply check name on the head, whatever the newest run's
     status — the apply workset's membership authority.
@@ -814,7 +921,10 @@ def bare_main(auto=False):
     adds no cell.
 
     First, an undetermined review decision fails the run before any GitHub or tree read
-    (`refuse_undetermined`).
+    (`refuse_undetermined`). Then, after the run-graph read (a cycle refuses without waiting) and
+    unless `auto`, it waits for the live `shipmate plan` runs of the pull request
+    (`wait_for_plans`) before reading the head's checks, and refuses a runnable cell whose record
+    names a run it waited for (`refuse_replanned`).
 
     After `settle`, it refuses a run cell that runs after a pending cell `needs` puts on a
     later env-level (`waves.refuse_inversions`): a cell of an env `settle` skips is no root. A
@@ -877,6 +987,9 @@ def bare_main(auto=False):
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
+    deps = bm.run_graph_deps()
+    # The auto form refuses a live or newer plan run at once instead (`refuse_provenance`).
+    waited = set() if auto else wait_for_plans(repo, pr_number)
     lines = _check_run_lines(repo, head)
     if auto:
         refuse_actor(
@@ -891,7 +1004,6 @@ def bare_main(auto=False):
 
     pending = filter_pending(cells, ag.app_done_names(lines, app_id))
 
-    deps = bm.run_graph_deps()
     order = bm.ec.env_order(table)
     levels = wv.cell_levels(order, tags_by_stack)
     pending_envs = {c["environment"] for c in pending}
@@ -929,6 +1041,7 @@ def bare_main(auto=False):
     # cell's check stays pending by design for a later apply, and that apply refuses on its own
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
+    refuse_replanned(runnable, waited)
     refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
     auto_outputs, auto_report = {"base_sha": base_sha}, {}
@@ -1028,6 +1141,7 @@ def main():
     deps = bm.run_graph_deps()
 
     app_id = os.environ["SHIPMATE_APP_ID"]
+    waited = wait_for_plans(repo, pr_number)
     # One listing answers all three questions — which cells this run applies,
     # which plan run each applies from, and which are already done — so a check
     # completing mid-run cannot make the three disagree.
@@ -1051,6 +1165,7 @@ def main():
     # Locked and waiting cells drop before `with_plan_runs`: their checks stay pending for a later
     # apply, which refuses on its own over a record-less cell.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
+    refuse_replanned(runnable, waited)
     refuse_held(repo, lines, app_id, runnable)
     bm.refuse_workload_gaps(runnable, table)
 

@@ -16,12 +16,16 @@ from _detect_fixtures import (
     behind_check,
     behind_message,
     check_run,
+    dispatched_plan,
+    fake_clock,
     forbid_shared_runner,
     foreign_message,
     held,
     held_check,
     holder_answers,
     partial_message,
+    plan_listing_urls,
+    plan_polls,
     routed,
     run_graph_capture,
     spy_env_config,
@@ -37,6 +41,14 @@ aad = load_script("apply-detect")
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"
+_LISTING = "repos/o/r/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status="
+PLAN_LISTINGS = [
+    f"{_LISTING}queued&per_page=100&page=1",
+    f"{_LISTING}in_progress&per_page=100&page=1",
+    f"{_LISTING}waiting&per_page=100&page=1",
+    f"{_LISTING}pending&per_page=100&page=1",
+    f"{_LISTING}requested&per_page=100&page=1",
+]
 
 
 def test_cells_are_the_tree_candidates_whose_check_is_on_the_head_in_every_env():
@@ -377,15 +389,20 @@ def test_main_passes_the_whole_tree_workload_map(tmp_path, monkeypatch):
 
 def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monkeypatch):
     """No site keys a bare apply on a plan run's artifacts any more. Whole-list comparison
-    against a hand-written constant, so any added gh api call -- an artifact listing, a
-    workflow-runs lookup, a second read of this same listing -- reddens here. One listing: the
-    workset, the done predicate and the plan runs are all read off a single fetch, so nothing
-    can disagree about a check that changed mid-run; then the pull request and its base tip,
-    for the behind check."""
+    against a hand-written constant, so any added gh api call -- an artifact listing, a run-by-id
+    read, a second read of the check runs -- reddens here. First the live plan-run listings of
+    the wait, then one check-runs listing: the workset, the done predicate and the plan runs are
+    all read off a single fetch, so nothing can disagree about a check that changed mid-run; then
+    the pull request and its base tip, for the behind check."""
     urls = []
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", urls=urls)
     assert len(wave_cells(aad.wv, parsed)) == 1  # Not vacuous: a cell exists.
-    assert urls == [CHECK_RUNS_URL, "repos/o/r/pulls/8", "repos/o/r/git/ref/heads/main"]
+    assert urls == [
+        *PLAN_LISTINGS,
+        CHECK_RUNS_URL,
+        "repos/o/r/pulls/8",
+        "repos/o/r/git/ref/heads/main",
+    ]
 
 
 def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
@@ -1166,7 +1183,10 @@ def test_main_refuses_a_cycle_before_an_inversion(tmp_path, monkeypatch):
     capture; `_run` answers the run-graph argv, so `run_graph_deps` is real.
 
     Mutation: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for `bare_main`'s
-    `bm.run_graph_deps()` -- the inversion message appears instead."""
+    `bm.run_graph_deps()` -- the inversion message appears instead. Mutation: put the
+    `wait_for_plans` call above `run_graph_deps` in `bare_main` -- the plan-run listings are
+    requested before the refusal."""
+    urls = []
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -1178,12 +1198,14 @@ def test_main_refuses_a_cycle_before_an_inversion(tmp_path, monkeypatch):
             order={"dev-us": ["dev-eu"]},
             decision="APPROVED",
             dot=run_graph_capture("cycle-two"),
+            urls=urls,
         )
     assert str(exc_info.value) == (
         "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
         "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
         "loop in the stack configuration."
     )
+    assert urls == []
 
 
 def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
@@ -1644,7 +1666,7 @@ def test_a_bare_apply_with_no_cell_to_apply_reads_no_pull_request(tmp_path, monk
         urls=urls,
         base_calls=base_calls,
     )
-    assert urls == [CHECK_RUNS_URL]
+    assert urls == [*PLAN_LISTINGS, CHECK_RUNS_URL]
     assert base_calls == []
     assert parsed["base_sha"] == ""
 
@@ -1673,3 +1695,91 @@ def test_a_bare_apply_refuses_a_cell_another_run_holds_unless_it_never_applied(
     with pytest.raises(SystemExit) as exc:
         _run_main(tmp_path, monkeypatch, **kw)
     assert str(exc.value) == refusal
+
+
+_LIVE_9 = dispatched_plan(9, PR_NUMBER)
+
+
+def test_the_listing_is_hand_written():
+    """The fixture's listing paths match the hand-written ones, so a status dropped from the
+    fixture cannot drop it from every guard here."""
+    assert plan_listing_urls("o/r") == PLAN_LISTINGS
+
+
+def _waiting_bare(tmp_path, monkeypatch, polls, reads=None, plan_run="123456", **kw):
+    """`_run_main` over one `stacks/app / dev-eu` cell recording `plan_run` and `plan_polls` on
+    a fake clock. Returns `(clock, requested paths, parsed outputs)`."""
+    clock = fake_clock(monkeypatch, aad)
+    urls = []
+    answers = dict(base_answers("o/r")) | plan_polls(clock, "o/r", polls, reads)
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu"],
+        checks=[_apply_check("stacks/app", "dev-eu", plan_run=plan_run, cells=1)],
+        answers=answers,
+        urls=urls,
+        **kw,
+    )
+    return clock, urls, parsed
+
+
+def test_a_bare_apply_waits_for_a_live_plan_run_before_reading_the_checks(tmp_path, monkeypatch):
+    """Mutation: move the `wait_for_plans` call below `_check_run_lines` in `bare_main` (the
+    check-runs read comes first)."""
+    clock, urls, parsed = _waiting_bare(
+        tmp_path,
+        monkeypatch,
+        [([_LIVE_9], True), ([], True)],
+        {9: ["completed"]},
+        decision="APPROVED",
+    )
+    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
+    assert clock.sleeps == [30]
+    assert urls == [
+        *PLAN_LISTINGS,
+        *PLAN_LISTINGS,
+        "repos/o/r/actions/runs/9",
+        CHECK_RUNS_URL,
+        "repos/o/r/pulls/8",
+        "repos/o/r/git/ref/heads/main",
+    ]
+
+
+def test_an_undetermined_bare_apply_fails_without_listing_plan_runs(tmp_path, monkeypatch):
+    """Mutation: move the `wait_for_plans` call above `refuse_undetermined` in `bare_main` (the
+    listing is requested, and the live run times the wait out instead)."""
+    clock = fake_clock(monkeypatch, aad)
+    urls = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu"],
+            answers=dict(base_answers("o/r")) | plan_polls(clock, "o/r", [([_LIVE_9], True)]),
+            urls=urls,
+        )
+    assert str(exc_info.value) == (
+        "::error::not authorized: could not determine the PR's review decision (got ''); the "
+        "apply run's `review` job passed `detect` no decision this engine knows; check the "
+        "pinned engine version, then retry."
+    )
+    assert urls == []
+    assert clock.sleeps == []
+
+
+def test_a_bare_cell_a_waited_run_replanned_refuses(tmp_path, monkeypatch):
+    """Mutation: delete the `refuse_replanned` call in `bare_main` (the cell applies)."""
+    with pytest.raises(aad.Refused) as exc_info:
+        _waiting_bare(
+            tmp_path,
+            monkeypatch,
+            [([_LIVE_9], True), ([], True)],
+            {9: ["completed"]},
+            plan_run="9",
+            decision="APPROVED",
+        )
+    assert str(exc_info.value) == (
+        "::error::apply aborted: shipmate plan run 9 of this pull request planned stacks/app / "
+        "dev-eu while this apply waited for it; review its plan, then comment `shipmate apply`"
+    )
