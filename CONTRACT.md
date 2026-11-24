@@ -3878,7 +3878,9 @@ request. `::notice::` findings do not trigger the exception: they are
 informational, and would put a comment on every quiet run. Nor do warnings from
 the repository-settings probes (the gate ruleset, the review rule and
 `CODEOWNERS`): they hold until an admin changes the settings, so they would put
-a comment on every quiet pull request. `shipmate doctor` and the run page still
+a comment on every quiet pull request. Nor do the engine release check's
+warnings that a pin differs from the latest release: the repository's maintainer
+re-pins, not the pull request's author. `shipmate doctor` and the run page still
 report them. A run whose comment carries the unmanaged line also posts: a pull
 request that changes only stacks with no `env/*` tag plans nothing, and the
 comment is where it says so; one changing only local stacks has no such line.
@@ -4003,8 +4005,9 @@ The held body and a body with no changed cell never carry it. The held body
 above ends with the hint. `doctor` records its decision once, as its `warned`
 output, which the post-or-skip rule reads, and its `warnings` output, the count
 the doctor line shows: both leave out the repository-settings probes' warnings,
-a settings probe that could not run included, and count any other probe that
-could not run when its note is a warning. When `doctor` fails, the doctor step
+a settings probe that could not run included, and the engine release check's
+warnings, and count any other probe that could not run when its note is a
+warning. When `doctor` fails, the doctor step
 writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
@@ -4086,8 +4089,9 @@ and `lost` outputs, which the same rule reads.
   --evict` still works where nothing blocks it. When the cell lines leave them
   no room under the 65,536-character cap, they are left out with a warning.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
-  settings in this run: see [the run](<run url>)`, under any verdict. `N`
-  leaves out the repository-settings warnings the linked run also shows. When
+  settings and the engine release check in this run: see [the run](<run url>)`,
+  under any verdict. `N` leaves out the repository-settings warnings and the
+  engine release check's warnings, which the linked run also shows. When
   the cell lines leave it no room under the 65,536-character cap, it is left
   out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry neither an env/* tag nor

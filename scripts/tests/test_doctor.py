@@ -4995,6 +4995,10 @@ def _failing_other_probe(ctx):
     raise RuntimeError("boom")
 
 
+def _uncounted_probe(ctx):
+    return [(doctor.WARNING, doctor._Uncounted("uncounted"))]
+
+
 @pytest.mark.parametrize(
     ("probes", "outputs"),
     [
@@ -5002,6 +5006,7 @@ def _failing_other_probe(ctx):
         ((_settings_probe, _other_probe), "warned=true\nwarnings=1\n"),
         ((_settings_probe, _failing_settings_probe), "warned=false\nwarnings=0\n"),
         ((_settings_probe, _failing_other_probe), "warned=true\nwarnings=1\n"),
+        ((_settings_probe, _uncounted_probe), "warned=false\nwarnings=0\n"),
     ],
 )
 def test_annotate_mode_counts_warnings_outside_the_settings_probes(
@@ -5012,7 +5017,8 @@ def test_annotate_mode_counts_warnings_outside_the_settings_probes(
 
     Mutation: count settings warnings in N -- red (first two cases).
     Mutation: count every WARNING degrade, whatever the probe -- red (third case).
-    Mutation: count no degrade -- red (fourth case)."""
+    Mutation: count no degrade -- red (fourth case).
+    Mutation: count `_Uncounted` findings -- red (fifth case)."""
     monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
     monkeypatch.setattr(doctor, "PROBES", probes)
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "annotate")
@@ -5020,6 +5026,121 @@ def test_annotate_mode_counts_warnings_outside_the_settings_probes(
     doctor.main()
     capsys.readouterr()
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == outputs
+
+
+def _annotate_pin_probe(monkeypatch, capsys, tmp_path, responses):
+    """(stdout, outputs) of `main()` in `annotate` mode with the real pin probe alone."""
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
+    monkeypatch.setattr(doctor, "PROBES", (doctor._pin_warnings,))
+    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "annotate")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    doctor.main()
+    return capsys.readouterr().out, (tmp_path / "out.txt").read_text(encoding="utf-8")
+
+
+_RELEASE = {
+    f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v1.4.0"},
+    f"repos/{_ENGINE_REPO}/commits/v1.4.0": {"sha": _OTHER_SHA},
+}
+_TAG_PIN_ANNOTATION = (
+    "::warning title=shipmate doctor::`plan.yml` pins `acme/engine@v2` by tag or branch. "
+    "Pin a commit SHA (a moving ref lets the engine change under your deploy credentials).\n"
+)
+_RELEASE_ANNOTATION = (
+    "::warning title=shipmate doctor::`plan.yml` pins `acme/engine@aaaaaaa`, which differs "
+    "from the latest release v1.4.0 (`bbbbbbb`). Re-pin to pick up fixes.\n"
+)
+
+
+def test_the_engine_release_check_annotates_but_stays_out_of_the_count(
+    monkeypatch, capsys, tmp_path
+):
+    """A pin behind the latest release is the maintainer's to fix, not the pull request
+    author's: it stays a WARNING annotation and leaves `warned`/`warnings`.
+
+    Mutation: drop the `_Uncounted` wrap in `_pin_warnings` -- red (outputs).
+    Mutation: emit the release finding at NOTICE -- red (stdout)."""
+    stdout, outputs = _annotate_pin_probe(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        {
+            f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+            f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+                _STEPS + f"      - uses: {_ENGINE_REPO}/actions/setup@{_SHA}\n"
+            ),
+            **_RELEASE,
+        },
+    )
+    assert stdout == _RELEASE_ANNOTATION
+    assert outputs == "warned=false\nwarnings=0\n"
+
+
+def test_a_tag_pin_still_counts(monkeypatch, capsys, tmp_path):
+    """Mutation: wrap the tag/branch text in `_Uncounted` -- red.
+    Mutation: set `_pin_warnings.settings = True` -- red."""
+    stdout, outputs = _annotate_pin_probe(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        {
+            f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+            f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+                _STEPS + f"      - uses: {_ENGINE_REPO}/actions/setup@v2\n"
+            ),
+        },
+    )
+    assert stdout == _TAG_PIN_ANNOTATION
+    assert outputs == "warned=true\nwarnings=1\n"
+
+
+def test_a_tag_pin_beside_a_stale_sha_pin_counts_once(monkeypatch, capsys, tmp_path):
+    """Both findings annotate; only the tag pin counts.
+
+    Mutation: wrap every entry of `out` in `_Uncounted` after the release loop -- red."""
+    stdout, outputs = _annotate_pin_probe(
+        monkeypatch,
+        capsys,
+        tmp_path,
+        {
+            f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+            f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+                _STEPS + f"      - uses: {_ENGINE_REPO}/actions/setup@v2\n"
+                f"      - uses: {_ENGINE_REPO}/actions/summary@{_SHA}\n"
+            ),
+            **_RELEASE,
+        },
+    )
+    assert stdout == _TAG_PIN_ANNOTATION + _RELEASE_ANNOTATION
+    assert outputs == "warned=true\nwarnings=1\n"
+
+
+def test_a_raising_pin_probe_degrade_still_counts(monkeypatch, capsys, tmp_path):
+    """A listing entry without `name` raises outside `_workflow_names`' own `try`.
+
+    Mutation: set `_pin_warnings.settings = True` -- red."""
+    stdout, outputs = _annotate_pin_probe(
+        monkeypatch, capsys, tmp_path, {f"{_WF_DIR}{_REF}": [{"type": "file"}]}
+    )
+    assert stdout == (
+        "::warning title=shipmate doctor::doctor could not verify the pin settings ('name'): "
+        "probe skipped.\n"
+    )
+    assert outputs == "warned=true\nwarnings=1\n"
+
+
+def test_the_release_check_leaves_the_count_by_type_not_text(monkeypatch):
+    """Finding text is author-controlled (file names, refs), so another probe's plain WARNING
+    carrying the release warning's words still counts.
+
+    Mutation: match "differs from the latest release" in place of the `isinstance` check -- red."""
+
+    def lookalike(ctx):
+        return [(doctor.WARNING, _RELEASE_ANNOTATION.split("::")[-1].rstrip("\n"))]
+
+    monkeypatch.setattr(doctor, "PROBES", (lookalike,))
+    assert doctor.warnings_and_count(_ctx())[1] == 1
 
 
 def test_a_failing_drift_probe_degrades_to_a_notice(monkeypatch):

@@ -805,8 +805,9 @@ _SUMMARY_LIST_FAILED = (
     "re-plan this pull request (comment shipmate plan or push)\n"
 )
 _SUMMARY_SKIPPED = (
-    "nothing changed, no visible plan comment, no doctor warning outside the settings "
-    "probes, no unmanaged or lost pairs line, not a shipmate plan command; nothing to post\n"
+    "nothing changed, no visible plan comment, no doctor warning outside the settings probes "
+    "and the engine release check, no unmanaged or lost pairs line, not a shipmate plan "
+    "command; nothing to post\n"
 )
 _SHA = "a" * 40
 #: The pull request head read every writing mode makes after the comment listing.

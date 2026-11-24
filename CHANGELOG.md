@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed
+
+- **The plan comment's doctor line leaves out the engine release check's warnings, and they no longer post a comment on a pull request that changes nothing.** The line reads 'beyond repository settings and the engine release check' (`CONTRACT.md` §Plan comment).
+
 ## [0.58.1] — 2026-11-24
 
 Tags `2644d8f`.

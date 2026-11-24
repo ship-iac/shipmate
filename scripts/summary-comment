@@ -732,8 +732,8 @@ def doctor_line(warnings, run_url):
     if not warnings:
         return ""
     return (
-        f"⚠️ shipmate doctor found {warnings} warning(s) beyond repository settings in this run: "
-        f"see [the run]({run_url})"
+        f"⚠️ shipmate doctor found {warnings} warning(s) beyond repository settings and the engine "
+        f"release check in this run: see [the run]({run_url})"
     )
 
 

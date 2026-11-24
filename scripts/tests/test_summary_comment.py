@@ -1067,8 +1067,8 @@ def test_the_doctor_line_sits_under_the_verdict_above_the_unmanaged_line():
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/x"), None, 2) == (
         HEAD
         + f"⚪ nothing planned {AT}\n\n"
-        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: see [the "
-        "run](https://gh/run/1)\n\n" + _LEAD.format(1) + ": stacks/x",
+        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings and the engine release "
+        "check in this run: see [the run](https://gh/run/1)\n\n" + _LEAD.format(1) + ": stacks/x",
         True,
         False,
     )
@@ -1099,8 +1099,8 @@ def test_main_renders_the_doctor_line_from_the_doctor_warnings_count(
     monkeypatch.setenv("SHIPMATE_DOCTOR_WARNINGS", raw)
     _run_main(tmp_path, monkeypatch, [])
     doctor = (
-        "\n\n⚠️ shipmate doctor found 3 warning(s) beyond repository settings in this run: see "
-        "[the run](https://gh/o/r/actions/runs/1)"
+        "\n\n⚠️ shipmate doctor found 3 warning(s) beyond repository settings and the engine "
+        "release check in this run: see [the run](https://gh/o/r/actions/runs/1)"
     )
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
         HEAD + f"⚪ nothing planned {MAIN_AT}" + (doctor if line else "")
@@ -3307,8 +3307,8 @@ def test_the_superseded_lines_sit_between_the_verdict_and_the_doctor_line():
         + _superseded(1, 7)
         + "\n"
         + _superseded(2, 42)
-        + "\n\n⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: "
-        "see [the run](https://gh/run/1)"
+        + "\n\n⚠️ shipmate doctor found 2 warning(s) beyond repository settings and the engine "
+        "release check in this run: see [the run](https://gh/run/1)"
     )
 
 
