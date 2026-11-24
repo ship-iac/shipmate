@@ -8,7 +8,9 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.58.1] — 2026-11-24
+
+Re-pin with `python <engine>/scripts/repin <consumer> v0.58.1` in a pull request that changes no stack: the published `shipmate.yml` fence is unchanged.
 
 ### Changed
 
