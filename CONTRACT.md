@@ -1970,7 +1970,7 @@ wait precedes the check-runs read, so a bare apply whose environments are all
 held for review, or a targeted apply whose cells are all applied, still waits
 while a plan run is live. An apply commented while the plan run it was meant to
 apply is still finishing waits for that run, then refuses its cells. The wait
-ends in one of four refusals, `<status>` the listed status with `_` as a space
+and the check after it can refuse four ways, `<status>` the run's last read status with `_` as a space
 and `<cells>` the cells that record the run, `<stack> / <env>`, the first 10
 then `, and <k> more`:
 
@@ -3127,7 +3127,7 @@ reads the record once, so a `shipmate plan` run the apply did not wait for (a
 plan comment or a hand dispatch after `detect`'s last listing, or one missing
 from it) binds the cell to its record only when it publishes before the cell's
 check: the cell then refuses with the changed-record text below. One that
-publishes later leaves the cell to apply the plan the apply was asked for. Nor
+publishes later leaves the cell to apply the record `detect` bound. Nor
 is a plan run that ends between the apply comment and `detect`'s first listing
 (through `claim`, `queue`, `review` and the wait for the pull request's earlier
 apply runs, unbounded behind an approval hold) waited for: `detect` binds the
