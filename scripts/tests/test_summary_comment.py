@@ -1001,6 +1001,18 @@ def test_a_share_too_small_for_a_fold_out_fills_in_comment_order():
     assert _kinds(body, cells) == ["truncated"] + ["bare"] * 99
 
 
+def test_pass_2_stops_once_less_than_min_plan_chars_is_left():
+    """Pass 1 leaves `- a` bare, its room under `MIN_PLAN_CHARS`, and the leftover is still under
+    it, so pass 2 grows nothing.
+
+    Mutation: deleting pass 2's `free < MIN_PLAN_CHARS` stop folds `- b` out in full."""
+    entries = [
+        ("- a", {"environment": "e", "changed": True}, "  + a\n" * 200),
+        ("- b", {"environment": "e", "changed": True}, "  + b\n" * 2),
+    ]
+    assert sc._fold_outs(entries, sc.MIN_PLAN_CHARS - 3) == ["- a", "- b"]
+
+
 def test_the_footer_hint_points_at_the_command_list_and_not_at_doctor():
     """The hint is a pointer to the command list, not a report of doctor's output, so no
     comment carrying it gains a coupling to doctor. Mutation: naming `shipmate doctor` in

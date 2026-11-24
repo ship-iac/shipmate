@@ -788,10 +788,7 @@ def _fold_outs(entries, free):
     for i in changed:
         if free < MIN_PLAN_CHARS:
             break
-        # A full fold-out's fence closes right before `</details>`; a truncated one's trailer
-        # sits between them.
-        if not sections[i].endswith("`\n</details>"):
-            free -= grow(i, free)
+        free -= grow(i, free)
     return sections
 
 
