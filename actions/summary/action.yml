@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Read this run's plan cell summaries, which the calling job downloads into cells/ (and its failed cells' errors into cell-errors/), mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the plan comment step leaves any publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and no run of that head planned it or is about to, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push onto a pull request that was not a draft, or by marking it ready (event action opened, synchronize or ready_for_review), whose gate is pending over a changed cell of an apply_mode auto environment, and that is the head's newest autoplan run, dispatches the auto verb to shipmate.yml through actions/auto-dispatch, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a listed shipmate.yml run may be this dispatch's or none can be ruled out (for the plan, an App-dispatched run with this pull request's comment-less plan title created at or after t0, five seconds before the first attempt; for the auto verb, any workflow_dispatch run created at or after t0). After the gate is written, a successful on-demand plan re-runs, through scripts/rerun-autoplan, the failed plan cells of the head's newest autoplan run when that run is done and every condition the script lists holds, logging a notice naming the first that does not, and warning when the decision, the token mint or the re-run request fails.
+description: Read this run's plan cell summaries, which the calling job downloads into cells/ (and its failed cells' errors into cell-errors/), mint a shipmate App installation token and, as the App, hold the gate `pending` while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, post the plan comment as a new comment and minimize this App's earlier ones as outdated (the plan, or why the gate is held; an on-demand plan posts it even when no cell changed), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done. A run that sees its pull request moved past its head before the publish hold writes none of these on it; one that sees the move at the plan comment step leaves any `pending` publish hold it already wrote (whose text says to re-plan) and any mirrored checks, and writes no comment, apply check or final gate. Either run, when the pull request is open, the live head is not a draft, and no run of that head planned it or is about to, dispatches the plan verb to shipmate.yml for that head, warning with the remedy when that fails or may have started a run; the dispatched plan is on demand, so no auto apply follows it. After the gate is written, an autoplan's first attempt, started by a push onto a pull request that was not a draft, or by marking it ready (event action opened, synchronize or ready_for_review), whose gate is pending over a changed cell of an apply_mode auto environment, and that is the head's newest autoplan run, dispatches the auto verb to shipmate.yml through actions/auto-dispatch, replying on the pull request when that dispatch fails or may have started a run. Both dispatches go through scripts/dispatch-body, which retries a transient failure unless a listed shipmate.yml run may be this dispatch's or none can be ruled out (for the plan, an App-dispatched run with this pull request's comment-less plan title created at or after t0, five seconds before the first attempt; for the auto verb, any workflow_dispatch run created at or after t0). After the gate is written, a successful on-demand plan re-runs, through scripts/rerun-autoplan, the failed plan cells of the head's newest autoplan run when that run is done and every condition the script lists holds, logging a notice naming the first that does not, and warning when the decision, the token mint or the re-run request fails.
 inputs:
   pr-number:
     description: Pull request number.
@@ -248,12 +248,12 @@ runs:
           hold "$ended"
           exit 1
         fi
-        # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
-        # mid-publish would merge the unpublished cells. A re-run that publishes nothing still
-        # holds. It stands until `Create/refresh gate`; `Create apply checks` publishes after it.
+        # Fail-closed, never `|| true`: gate-refresh refuses this hold but greens an absent gate or a
+        # final `pending`, so a job dying mid-publish would merge the unpublished cells. A re-run
+        # that publishes nothing still holds, until `Create/refresh gate`; checks publish after it.
         # A run of only behind cells has no cell summary and still publishes their checks.
         if [ -n "$cells" ] || [ -s bodies.jsonl ]; then
-          hold "Plan run $GITHUB_RUN_ID holds this while it publishes; if that run has ended, re-plan (comment shipmate plan or push)"
+          python3 "$gate_status" publishing "$SHIPMATE_HEAD_SHA"
         fi
 
     - name: Mirror this run's per-cell plan checks onto the head
@@ -525,8 +525,9 @@ runs:
         # check. Nothing to publish (held, draft, no cell planned, or every check already published
         # by this run) reads nothing, so it cannot fail before `Create/refresh gate`.
         [ -s bodies.jsonl ] || exit 0
-        # `gate-hold` writes outside this job's concurrency group, after the publish hold's read. A
-        # newer run's hold, or a failed read, publishes nothing, and the publish hold stands.
+        # `gate-hold` writes outside this job's concurrency group, after the publish hold's read,
+        # when a newer run's summary was cancelled or failed. A newer run's hold, or a failed read,
+        # publishes nothing, and the publish hold stands.
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" refuse-newer "$SHIPMATE_HEAD_SHA" || exit 1
         python3 "$GITHUB_ACTION_PATH/../../scripts/create-checks" "$SHIPMATE_HEAD_SHA" < bodies.jsonl
 
@@ -546,14 +547,19 @@ runs:
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
-        # An empty state from gate-state means a cancelled plan job, so nothing is written.
+        # An empty state from gate-state means a cancelled plan job, so no final gate is written.
+        # The hold step's own test: it wrote a publish hold for a cell summary or a body. A failed
+        # `end` fails the step, and the publish hold stands.
         if [ -z "${STATE}" ]; then
-          echo "plan job was ${PLAN_RESULT}; no gate written"
+          echo "plan job was ${PLAN_RESULT}; no final gate written"
+          if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ] || [ -s bodies.jsonl ]; then
+            python3 "$gate_status" end "$HEAD_SHA" "re-plan this pull request (comment shipmate plan or push): its plan job was cancelled before it published"
+          fi
           exit 0
         fi
-        # A draft status never replaces an existing gate: gate-refresh treats only `failure` as
-        # a hold and greens `pending`, so a re-run draft run over a held head would open that
-        # hold (scripts/tests/test_summary_draft_gate.py).
+        # A draft status never replaces an existing gate: gate-refresh greens an absent gate or a
+        # final `pending` and refuses only `failure` and the publish hold, so a re-run draft run
+        # over a held head would open that hold (scripts/tests/test_summary_draft_gate.py).
         if [ "$MODE" = "draft" ]; then
           if ! held=$(python3 "$gate_status" newest "$HEAD_SHA" 2>newest.err); then
             # The step degrades, so the read's `::error::` is logged as a warning.
@@ -567,9 +573,9 @@ runs:
             exit 0
           fi
         fi
-        # A newer same-head run's hold (its summary ended `cancelled` and the run was not cancelled,
-        # for example at a full gate-writer queue for the head) must not be buried by this write. A
-        # failed read writes nothing; the publish hold, if any, stands.
+        # A newer same-head run's hold (its summary was cancelled, for example at a full gate-writer
+        # queue for the head, or failed, and the run was not cancelled) must not be buried by this
+        # write. A failed read writes nothing; the publish hold, if any, stands.
         python3 "$gate_status" refuse-newer "$HEAD_SHA" || exit 1
         python3 "$gate_status" post "$HEAD_SHA" "$STATE" "$DESCRIPTION"
         # Degrades: the `pending` above is the fail-closed write, and the refresh only upgrades it
@@ -585,7 +591,7 @@ runs:
           python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 | sed 's/^::error::/::warning::/' || rc=$?
           # Exit 3 is refresh's hold, which no apply clears.
           if [ "$rc" = 3 ]; then
-            echo "::warning::could not refresh the gate of $HEAD_SHA; it is held and stays failure until a new plan run rewrites it"
+            echo "::warning::could not refresh the gate of $HEAD_SHA; it is held until a new plan run rewrites it"
           elif [ "$rc" != 0 ]; then
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi

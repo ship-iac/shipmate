@@ -1,7 +1,8 @@
 name: shipmate gate-refresh
 description: >-
   Write the shipmate / gate commit status on a head through scripts/gate-status: green it once
-  every apply check is done, write a deploy run's verdict, or write a hold.
+  every apply check is done, write a deploy run's verdict, write a hold, or turn this run's
+  `pending` publish hold `failure`.
 inputs:
   head-sha:
     description: PR head SHA carrying the apply checks and the gate.
@@ -15,8 +16,8 @@ inputs:
   deploy-results:
     description: >-
       A deploy run's comma-separated job results. This or detect-result selects the post-merge
-      verdict instead of a refresh; neither may be set with hold-description. Without
-      detect-result the verdict is always `failure`.
+      verdict instead of a refresh; neither may be set with hold-description or end-description.
+      Without detect-result the verdict is always `failure`.
     required: false
     default: ""
   detect-result:
@@ -30,6 +31,13 @@ inputs:
     description: >-
       Writes a `failure` gate with this description instead of a refresh; leads with the
       recovery, since the statuses API keeps 140 characters.
+    required: false
+    default: ""
+  end-description:
+    description: >-
+      Writes a `failure` gate with this description instead of a refresh, only when the newest
+      gate is this run's `pending` publish hold; otherwise writes nothing. May not be set with
+      any other mode input. Leads with the recovery, as hold-description does.
     required: false
     default: ""
 runs:
@@ -60,11 +68,18 @@ runs:
         DEPLOY_RESULTS: ${{ inputs.deploy-results }}
         DETECT_RESULT: ${{ inputs.detect-result }}
         HOLD_DESCRIPTION: ${{ inputs.hold-description }}
+        END_DESCRIPTION: ${{ inputs.end-description }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
-        if [ -n "$HOLD_DESCRIPTION" ]; then
+        if [ -n "$END_DESCRIPTION" ]; then
+          if [ -n "$HOLD_DESCRIPTION$DEPLOY_RESULTS$DETECT_RESULT" ]; then
+            echo "::error::end-description cannot be set with hold-description, deploy-results or detect-result"
+            exit 1
+          fi
+          python3 "$gate_status" end "$HEAD_SHA" "$END_DESCRIPTION"
+        elif [ -n "$HOLD_DESCRIPTION" ]; then
           if [ -n "$DEPLOY_RESULTS$DETECT_RESULT" ]; then
             echo "::error::hold-description cannot be set with deploy-results or detect-result"
             exit 1

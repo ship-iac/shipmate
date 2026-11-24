@@ -2,11 +2,12 @@
 refreshed in the same step.
 
 gate-state decides a draft autoplan `pending` with comment mode `draft`. `gate-refresh` treats
-only `failure` as a hold and greens `pending` once every apply check is done, so a draft status
-written over a held head -- a re-run of an old draft run, or a draft reopened at the same head --
-would turn the hold into something `gate-refresh` can green. `Create/refresh gate` therefore reads
-the head's gate first with `gate-status newest`, and writes the draft status only when that read
-succeeds and finds none. Every mode then runs `gate-status refuse-newer` before its write.
+`failure` and a plan run's publish hold as holds and greens any other `pending` once every apply
+check is done, so a draft status written over a held head -- a re-run of an old draft run, or a
+draft reopened at the same head -- would turn the hold into something `gate-refresh` can green.
+`Create/refresh gate` therefore reads the head's gate first with `gate-status newest`, and writes
+the draft status only when that read succeeds and finds none. Every mode then runs
+`gate-status refuse-newer` before its write.
 
 A non-draft `pending` write is followed by `gate-status refresh`, unless this run published a
 queued apply check: an apply's refresh serialized before this write would otherwise leave applied
@@ -343,8 +344,8 @@ def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
             f"shipmate / gate is held for {HEAD_SHA}; its status description on the pull request "
             "names the cause. A hold clears only when a new plan run rewrites the gate: comment "
             "shipmate plan, or push.\n"
-            f"::warning::could not refresh the gate of {HEAD_SHA}; it is held and stays failure "
-            "until a new plan run rewrites it\n"
+            f"::warning::could not refresh the gate of {HEAD_SHA}; it is held until a new plan "
+            "run rewrites it\n"
         ),
         "",
     )

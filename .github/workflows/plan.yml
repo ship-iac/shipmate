@@ -280,17 +280,19 @@ jobs:
           behind: ${{ needs.detect.outputs.behind }}
 
   # Holds the gate when `summary` ended `cancelled` and the run was not cancelled, for example at
-  # a full gate-writer queue for the head; it writes outside the group, since a hold only closes
-  # the gate. A `summary` that its fork `if:` refused or `defer` skipped is `skipped`, not
-  # `cancelled`, so this job never holds the App key for a head `summary` refused.
+  # a full gate-writer queue for the head, and turns this run's publish hold `failure` when
+  # `summary` failed; it writes outside the group, since either write only closes the gate. No
+  # step reads a `summary` output: a lost runner leaves them empty. A `summary` that its fork
+  # `if:` refused or `defer` skipped is `skipped`, so this job never holds the App key for it.
   gate-hold:
     needs: [facts, summary]
-    if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
+    if: ${{ !cancelled() && (needs.summary.result == 'cancelled' || needs.summary.result == 'failure') }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
-      - uses: $/actions/gate-refresh
+      - if: ${{ needs.summary.result == 'cancelled' }}
+        uses: $/actions/gate-refresh
         with:
           head-sha: ${{ needs.facts.outputs.head-sha }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
@@ -298,6 +300,15 @@ jobs:
           hold-description: >-
             re-plan this pull request (comment shipmate plan or push): its plan summary was
             cancelled before it published
+      - if: ${{ needs.summary.result == 'failure' }}
+        uses: $/actions/gate-refresh
+        with:
+          head-sha: ${{ needs.facts.outputs.head-sha }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          end-description: >-
+            re-plan this pull request (comment shipmate plan or push): its plan summary failed
+            before it published
 
   # `!cancelled()`, not `always()`: a push's autoplan cancels a dispatched plan and answers it.
   # Holds the App key but checks nothing out. A failed `facts` leaves no number, so an owned run

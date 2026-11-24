@@ -3319,7 +3319,7 @@ cause.
 - `it stays pending until an apply refreshes it`: the refresh failed, for
   example on a failed read. The `pending` gate stands until an apply's refresh
   greens it.
-- `it is held and stays failure until a new plan run rewrites it`: the refresh
+- `it is held until a new plan run rewrites it`: the refresh
   found a hold, before its write or while it waited to retry. No apply clears
   it: re-plan (comment `shipmate plan` or push).
 

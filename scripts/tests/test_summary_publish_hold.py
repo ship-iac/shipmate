@@ -1,11 +1,13 @@
 """The summary job publishes no apply check another run owns, and holds the gate before it
 publishes any.
 
-`gate-refresh` greens an absent or `pending` gate once every published apply check is complete,
-and `deploy-detect`'s queue holds only published checks. A summary job that dies between its first
-apply-check POST and `Create/refresh gate` would therefore let an apply of the published cells
-green the gate and merge the unpublished ones. `Hold the gate while apply checks publish` writes a
-`failure` gate first, which `gate-refresh` refuses to green.
+`gate-refresh` greens an absent gate or a final `pending` one once every published apply check is
+complete, and `deploy-detect`'s queue holds only published checks. A summary job that dies between
+its first apply-check POST and `Create/refresh gate` would therefore let an apply of the published
+cells green the gate and merge the unpublished ones. `Hold the gate while apply checks publish`
+writes this run's `pending` publish hold first (`gate-status publishing`), which `gate-refresh`
+refuses to green. When the plan job was cancelled after that hold, `Create/refresh gate` writes no
+final gate and turns the publish hold `failure` (`gate-status end`).
 
 First it reads the pull request (`gate-status moved`): on a head the pull request has left it
 writes nothing and sets `superseded` and `moved`; a failed read warns and publishes as before.
@@ -109,7 +111,7 @@ PULL_READ = ["api", "repos/acme/demo/pulls/7"]
 LISTING_FAILED = (
     f"::error::could not list the check runs on {HEAD_SHA}; the step log names the cause"
 )
-PUBLISH_HOLD_POST = _status_post("failure", PUBLISH_HOLD)
+PUBLISH_HOLD_POST = _status_post("pending", PUBLISH_HOLD)
 #: `gate-status refuse-newer`'s whole refusal, the one message of both steps' newer-run check.
 REFUSED = (
     f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
@@ -157,11 +159,12 @@ fi
 """
 
 
-def _gate(state, run):
+def _gate(state, run, description=""):
     return json.dumps(
         {
             "context": "shipmate / gate",
             "state": state,
+            "description": description,
             "target_url": f"https://github.com/acme/demo/actions/runs/{run}",
             "id": 1,
             "creator": 306306466,
@@ -238,6 +241,7 @@ def _run(
     moved=None,
     behind='{"base":"main","tip":"","since":"","commits":{},"cells":[]}',
     gate_behind="0",
+    state="pending",
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
@@ -269,10 +273,11 @@ def _run(
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_APP_SLUG": "shipmate-test",
         "SHIPMATE_PLAN_RESULT": plan_result,
+        "PLAN_RESULT": plan_result,
         "SHIPMATE_PLANNED_CELLS": planned_cells,
         "SHIPMATE_BEHIND": behind,
         "HEAD_SHA": HEAD_SHA,
-        "STATE": "pending",
+        "STATE": state,
         "DESCRIPTION": "waiting",
         "MODE": "post",
         "BEHIND": gate_behind,
@@ -317,11 +322,11 @@ def _run(
 @bash_only
 def test_the_hold_is_written_before_any_apply_check(tmp_path):
     """`APPLY_LIST` pins the hold's whole projection, and `PUBLISH_HOLD_POST` the publish hold's
-    whole POST, `state=failure` included: a `pending` hold is what gate-refresh greens.
-    Mutations: move the hold below the publish loop -> the hold follows the checks; drop the
-    `refuse-newer` read -> the statuses listing is missing; drop `external_id` from the
-    projection -> an unexpected listing call; pass the publish hold `"$ended"`, or drop
-    `$GITHUB_RUN_ID` from its text -> every publish-hold test red; post `pending` from
+    whole POST, `state=pending` included. Mutations: `hold "Plan run $GITHUB_RUN_ID holds this
+    while it publishes; ..."` in place of `publishing` -> `state=failure`; move the hold below
+    the publish loop -> the hold follows the checks; drop the `refuse-newer` read -> the statuses
+    listing is missing; drop `external_id` from the projection -> an unexpected listing call;
+    `hold "$ended"` in place of `publishing` -> every publish-hold test red; post `pending` from
     `gate-status hold` -> every hold test red; write `superseded=true` on every path -> an
     output file appears."""
     _write_cells(tmp_path, "a", "b")
@@ -344,8 +349,8 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
 @bash_only
 def test_publish_hold_fits_the_status_description_limit(tmp_path):
     """A 19-digit run id leaves the whole publish hold within `gate-status post`'s 140-character
-    cut, so the remedy survives. Mutation: lengthen the hold text past 140 in both the action and
-    `description` -> the post cuts it and the whole-argv comparison fails."""
+    cut, so the remedy survives. Mutation: lengthen the text past 140 in both `gate-status`'s
+    `PUBLISH_HOLD` and `description` -> the post cuts it and the whole-argv comparison fails."""
     run_id = "1" * 19
     description = (
         f"Plan run {run_id} holds this while it publishes; "
@@ -354,7 +359,7 @@ def test_publish_hold_fits_the_status_description_limit(tmp_path):
     _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(tmp_path, steps=(HOLD,), run_id=run_id)
     assert codes == [0]
-    assert calls[-1] == _status_post("failure", description, run_id)
+    assert calls[-1] == _status_post("pending", description, run_id)
 
 
 @bash_only
@@ -537,6 +542,54 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
 def test_a_failed_read_before_the_final_write_writes_nothing(tmp_path):
     """Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST."""
     codes, calls, _, _ = _run(tmp_path, statuses_rc=1, steps=(GATE,))
+    assert (codes, calls) == ([1], [USER_READ, STATUSES_LIST])
+
+
+CANCELLED_END = (
+    "re-plan this pull request (comment shipmate plan or push): "
+    "its plan job was cancelled before it published"
+)
+
+
+@bash_only
+@pytest.mark.parametrize("published", ["cells", "bodies"])
+def test_a_cancelled_plan_job_ends_this_runs_publish_hold(tmp_path, published):
+    """Empty `STATE` (the plan job was cancelled) after the hold step wrote a publish hold, for a
+    cell summary or for a body: `gate-status end` turns it `failure`. Mutations: drop the `end`
+    call -> no read, no POST; drop the `-s bodies.jsonl` test -> the bodies case writes nothing."""
+    if published == "cells":
+        _write_cells(tmp_path, "a")
+    else:
+        _write_bodies(tmp_path, '{"name": "apply / dev / stacks/a"}\n')
+    statuses = _lines(_gate("pending", RUN_ID, PUBLISH_HOLD))
+    codes, calls, _, _ = _run(
+        tmp_path, statuses=statuses, steps=(GATE,), state="", plan_result="cancelled"
+    )
+    assert (codes, calls) == (
+        [0],
+        [USER_READ, STATUSES_LIST, _status_post("failure", CANCELLED_END)],
+    )
+
+
+@bash_only
+def test_a_cancelled_plan_job_with_no_publish_hold_reads_nothing(tmp_path):
+    """No cell summary and an empty `bodies.jsonl`: the hold step wrote no publish hold, so there
+    is nothing to end. Mutation: call `end` unconditionally -> the statuses read."""
+    _write_bodies(tmp_path, "")
+    codes, calls, _, _ = _run(
+        tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled"
+    )
+    assert (codes, calls) == ([0], [])
+
+
+@bash_only
+def test_a_failed_end_fails_the_gate_step(tmp_path):
+    """A failed statuses read writes nothing and fails the step; the publish hold stands, which
+    `refresh` refuses. Mutation: `end ... || true` -> the step passes."""
+    _write_cells(tmp_path, "a")
+    codes, calls, _, _ = _run(
+        tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled"
+    )
     assert (codes, calls) == ([1], [USER_READ, STATUSES_LIST])
 
 

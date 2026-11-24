@@ -103,6 +103,7 @@ EXPECTED_WRITE_ENV = {
     "DEPLOY_RESULTS": "${{ inputs.deploy-results }}",
     "DETECT_RESULT": "${{ inputs.detect-result }}",
     "HOLD_DESCRIPTION": "${{ inputs.hold-description }}",
+    "END_DESCRIPTION": "${{ inputs.end-description }}",
     "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
 }
 
