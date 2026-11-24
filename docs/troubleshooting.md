@@ -3301,8 +3301,8 @@ command that was refused. A primary-limit `API rate limit exceeded` does not
 wait.
 
 - The writes that wait: completing an apply check, creating one in the plan
-  `summary`, and every gate write (`post`, `hold`, `refresh`, `deploy`). Other
-  API calls do not wait.
+  `summary`, and every gate write (`post`, `hold`, `publishing`, `end`,
+  `refresh`, `deploy`). Other API calls do not wait.
 - Each script process waits at most three times across all its writes. The next
   rate-limited write fails like any failed write, and the gate stays pending or
   held. Re-run the job. The exception is the `summary`'s `refresh` after its

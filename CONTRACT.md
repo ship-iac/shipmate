@@ -4429,7 +4429,8 @@ A run with incomplete evidence publishes no apply check at all, changed or not: 
 plan job whose result is neither `success` nor `skipped`, or `skipped` while cells
 were planned; a planned count that was not reported; or a parsed cell count that
 disagrees with it. The gate holds every such run except one whose plan job was
-cancelled, for which it writes nothing and leaves any earlier hold standing. A
+cancelled, for which it writes no final gate: it turns this run's publish hold
+`failure` and leaves any other hold standing. A
 plan job skipped with no cell planned is the empty matrix and is not held.
 `gate-state` holds the one rule for both decisions. The head read and the
 newer-run refusal above run first, before any cell summary is read. Apply
