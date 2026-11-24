@@ -15,6 +15,10 @@ section below names the SHA the release tags.
 - **The plan comment's doctor line leaves out the engine release check's warnings, and they no longer post a comment on a pull request that changes nothing.** The line reads 'beyond repository settings and the engine release check' (`CONTRACT.md` §Plan comment).
 - **A publishing plan run holds `shipmate / gate` `pending`, not `failure`.** The description is unchanged. No apply greens it. The gate turns `failure` when that run's `summary` fails or its plan job is cancelled before the final write (`plan / gate-hold`, `Create/refresh gate`); a cancelled run leaves the `pending` hold until the next plan (`docs/branch-protection.md`). Switch window: a shipmate run started under v0.58.x, or a re-run of one (any re-run on a SHA-pinned consumer; a failed-jobs or single-job re-run on one that follows a branch), does not recognise the `pending` hold, and can green a head whose plan summary from this release ended without a final gate, until every such run has completed.
 
+### Fixed
+
+- **A bare or targeted apply commented while a `shipmate plan` run of the pull request runs waits for it, up to 8 minutes.** It then applies the records as they stand once no `shipmate plan` run of the pull request is live, refusing a cell a run it waited for planned, or refuses naming the plan run still live at the deadline. A cell refused because its record changed names the plan run it records and says to review it and comment `shipmate apply`; it asks for `shipmate plan` only when the record names no plan run or no plan-text digest (`CONTRACT.md` §Comment-ops, "One apply run per pull request"; §Wave re-check).
+
 ## [0.58.1] — 2026-11-24
 
 Tags `2644d8f`.

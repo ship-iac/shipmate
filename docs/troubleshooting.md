@@ -2311,6 +2311,37 @@ The same step refuses, also before any wave:
   another reason, such as a server error. The outcome reply says the review
   check stopped the run; comment the apply again.
 
+### `apply aborted: shipmate plan run <m> of this pull request is still <status> after 8 minutes`
+
+A bare or targeted apply's `detect` waited 8 minutes for a `shipmate plan` run of
+this pull request, and run `<m>` had still not finished. Nothing applied. Wait
+for it to finish, review its plan, then comment `shipmate apply`
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops, "One apply run per pull
+request").
+
+### `apply aborted: shipmate plan run <m> of this pull request planned <cells> while this apply waited for it`
+
+A `shipmate plan` run of this pull request was live during the apply's `detect`
+wait, and it republished the apply checks of `<cells>` before it ended. Their
+plan is no longer the one reviewed, so nothing applied. This includes an apply
+commented while the plan run it was meant to apply was still finishing. Review
+the plan of run `<m>`, then comment `shipmate apply`.
+
+### `apply aborted: the live shipmate plan runs of pull request #<n> could not all be listed for 8 minutes`
+
+`detect` could not tell whether a `shipmate plan` run of this pull request was
+still live: the last listing before its 8-minute deadline had a failed or
+malformed page, disagreed with its `total_count`, or ran past 10 pages. The
+listing logs a warning naming the cause. Nothing applied. Comment `shipmate
+apply` again.
+
+### `apply aborted: shipmate plan run <m> of this pull request could not be read for 8 minutes`
+
+`detect` waited for run `<m>`, which then left the live listing, but reading the
+run by id failed until the 8-minute deadline, so `detect` could not tell whether
+it had ended. Each failed read logs a warning. Nothing applied. Comment
+`shipmate apply` again.
+
 ### `apply aborted: the plan recorded for ... was not made on pull request #<n>`
 
 The apply detect refused every cell it would apply whose
@@ -2770,9 +2801,15 @@ reason. On every form it refuses when:
   the per-stack check.
 - `the cell's newest apply check no longer records plan run <n> (it records
   <what>)`: a newer plan republished the cell's check while the wave waited.
-  Comment `shipmate plan`, review, then apply. When it records `a behind check`,
-  that plan found the base changed the stack: update the branch from the base
-  and push.
+  The text ends with the remedy for what the record names:
+  - `plan run <m>`, with a plan-text digest: review the plan of run `<m>`, then
+    comment `shipmate apply`.
+  - `plan run <n> with another plan-text digest`: review its plan, then comment
+    `shipmate apply`.
+  - `no plan run`, or a plan run with no digest: comment `shipmate plan`,
+    review, then apply.
+  - `a behind check`: that plan found the base changed the stack. Update the
+    branch from the base and push.
 - `the apply reached the wave without its base tip, plan run and plan-text
   digest`: `detect`'s outputs did not reach the wave. Comment `shipmate apply`.
 - `an apply is never re-run (run attempt '<n>')`: an apply run's failed jobs
