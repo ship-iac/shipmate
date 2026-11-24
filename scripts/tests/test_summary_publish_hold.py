@@ -242,13 +242,15 @@ def _run(
     behind='{"base":"main","tip":"","since":"","commits":{},"cells":[]}',
     gate_behind="0",
     state="pending",
+    held="",
 ):
     """`planned_cells=None` reports as many planned cells as the test wrote cell summaries.
 
     `run_id` is for HOLD-only runs: the CREATE fakes and `FAKE_REFRESH_CHECKS` stay keyed to run
     42, and a `run_id` below 42 beside a run-42 hold (a `failure` gate) in `statuses` makes
     `refuse-newer` supersede the run. `moved=(rc, stderr, stdout)` replaces `gate-status moved`
-    with a stub that prints them and exits `rc`."""
+    with a stub that prints them and exits `rc`. `held` is the hold step's `held` output for a run
+    without that step; a step that writes `held=true` sets it for the steps after it."""
     if planned_cells is None:
         planned_cells = str(len(list((tmp_path / "cells").rglob("cell.json"))))
     bin_dir = tmp_path / "bin"
@@ -274,6 +276,7 @@ def _run(
         "SHIPMATE_APP_SLUG": "shipmate-test",
         "SHIPMATE_PLAN_RESULT": plan_result,
         "PLAN_RESULT": plan_result,
+        "HELD": held,
         "SHIPMATE_PLANNED_CELLS": planned_cells,
         "SHIPMATE_BEHIND": behind,
         "HEAD_SHA": HEAD_SHA,
@@ -316,6 +319,9 @@ def _run(
         stdout += proc.stdout
         if proc.returncode != 0:
             break
+        output = tmp_path / "github_output"
+        if output.exists() and "held=true\n" in output.read_text(encoding="utf-8"):
+            env["HELD"] = "true"
     return codes, read_calls(calls), stderr, stdout
 
 
@@ -327,12 +333,12 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
     the publish loop -> the hold follows the checks; drop the `refuse-newer` read -> the statuses
     listing is missing; drop `external_id` from the projection -> an unexpected listing call;
     `hold "$ended"` in place of `publishing` -> every publish-hold test red; post `pending` from
-    `gate-status hold` -> every hold test red; write `superseded=true` on every path -> an
-    output file appears."""
+    `gate-status hold` -> every hold test red; write `superseded=true` on every path, or drop
+    `held=true` -> the output differs."""
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
-    assert not (tmp_path / "github_output").exists()
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "held=true\n"
     assert calls == [
         PULL_READ,
         USER_READ,
@@ -418,10 +424,12 @@ def test_a_post_failing_mid_publish_leaves_a_run_the_apply_refuses(tmp_path):
 
 @bash_only
 def test_no_planned_cell_writes_no_hold(tmp_path):
-    """Mutation: replace the cells test with `true` -> the hold is written."""
+    """No publish hold, so no `held` output either. Mutations: replace the cells test with
+    `true` -> the hold is written; move `echo "held=true"` below the `fi` -> an output file."""
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
     assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST]
+    assert not (tmp_path / "github_output").exists()
 
 
 @bash_only
@@ -552,30 +560,32 @@ CANCELLED_END = (
 
 
 @bash_only
-@pytest.mark.parametrize("published", ["cells", "bodies"])
-def test_a_cancelled_plan_job_ends_this_runs_publish_hold(tmp_path, published):
-    """Empty `STATE` (the plan job was cancelled) after the hold step wrote a publish hold, for a
-    cell summary or for a body: `gate-status end` turns it `failure`. Mutations: drop the `end`
-    call -> no read, no POST; drop the `-s bodies.jsonl` test -> the bodies case writes nothing."""
-    if published == "cells":
-        _write_cells(tmp_path, "a")
-    else:
-        _write_bodies(tmp_path, '{"name": "apply / dev / stacks/a"}\n')
+def test_a_cancelled_plan_job_ends_this_runs_publish_hold(tmp_path):
+    """Empty `STATE` (the plan job was cancelled) after the hold step wrote a publish hold and set
+    `held`: `gate-status end` turns it `failure`. Mutations: drop the `end` call -> no read, no
+    POST; drop `echo "held=true"` from the hold step -> no read, no POST."""
+    _write_cells(tmp_path, "a")
     statuses = _lines(_gate("pending", RUN_ID, PUBLISH_HOLD))
     codes, calls, _, _ = _run(
-        tmp_path, statuses=statuses, steps=(GATE,), state="", plan_result="cancelled"
+        tmp_path, statuses=statuses, steps=(HOLD, GATE), state="", plan_result="cancelled"
     )
     assert (codes, calls) == (
-        [0],
-        [USER_READ, STATUSES_LIST, _status_post("failure", CANCELLED_END)],
+        [0, 0],
+        [
+            *ONE_CELL_RUN[:5],
+            USER_READ,
+            STATUSES_LIST,
+            _status_post("failure", CANCELLED_END),
+        ],
     )
 
 
 @bash_only
 def test_a_cancelled_plan_job_with_no_publish_hold_reads_nothing(tmp_path):
-    """No cell summary and an empty `bodies.jsonl`: the hold step wrote no publish hold, so there
-    is nothing to end. Mutation: call `end` unconditionally -> the statuses read."""
-    _write_bodies(tmp_path, "")
+    """`held` unset: the hold step wrote no publish hold, so there is nothing to end, whatever
+    `cells/` holds. Mutations: call `end` unconditionally, or on a cell summary as the hold step
+    tests it -> the statuses read."""
+    _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(
         tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled"
     )
@@ -586,9 +596,8 @@ def test_a_cancelled_plan_job_with_no_publish_hold_reads_nothing(tmp_path):
 def test_a_failed_end_fails_the_gate_step(tmp_path):
     """A failed statuses read writes nothing and fails the step; the publish hold stands, which
     `refresh` refuses. Mutation: `end ... || true` -> the step passes."""
-    _write_cells(tmp_path, "a")
     codes, calls, _, _ = _run(
-        tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled"
+        tmp_path, statuses_rc=1, steps=(GATE,), state="", plan_result="cancelled", held="true"
     )
     assert (codes, calls) == ([1], [USER_READ, STATUSES_LIST])
 
@@ -820,7 +829,7 @@ def test_an_unmoved_head_adds_one_read_and_no_write(tmp_path):
     _write_cells(tmp_path, "a")
     codes, calls, _, stdout = _run(tmp_path, steps=(HOLD, CREATE, GATE))
     assert (codes, calls, stdout) == ([0, 0, 0], ONE_CELL_RUN, "")
-    assert not (tmp_path / "github_output").exists()
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "held=true\n"
 
 
 @bash_only
@@ -900,13 +909,14 @@ _ONE_BEHIND = json.dumps(
 def test_a_run_of_only_behind_cells_writes_the_publish_hold(tmp_path):
     """No cell summary, one behind cell: its queued check is in `bodies.jsonl`, so the hold step
     writes the publish hold before `Create apply checks` publishes it, and a job dying between
-    the two leaves a hold rather than an older green. Mutation: restore the `cell.json`-only
-    condition -- no publish hold, red."""
+    the two leaves a hold rather than an older green, and sets `held`. Mutation: restore the
+    `cell.json`-only condition -- no publish hold, red."""
     codes, calls, _, _ = _run(
         tmp_path, steps=(HOLD,), plan_result="skipped", planned_cells="0", behind=_ONE_BEHIND
     )
     assert codes == [0]
     assert calls == [PULL_READ, USER_READ, STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "held=true\n"
 
 
 _BEHIND_POST = [
@@ -983,7 +993,8 @@ def test_the_gate_is_not_refreshed_over_a_behind_cell(tmp_path):
 
 def test_the_gate_step_reads_the_behind_count():
     """The refresh runs only on a `0` count, so a step that stops passing it never greens a
-    head. Mutation: drop the `BEHIND` line -- red."""
+    head. The harness sets `HELD` itself, so this also pins the hold step's `held` wiring.
+    Mutations: drop the `BEHIND` line; read `steps.hold.outputs.superseded` for `HELD` -- red."""
     assert step_by("summary", name=GATE)["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
@@ -992,6 +1003,7 @@ def test_the_gate_step_reads_the_behind_count():
         "MODE": "${{ steps.gate.outputs.comment_mode }}",
         "BEHIND": "${{ steps.gate.outputs.behind }}",
         "PLAN_RESULT": "${{ inputs.plan-result }}",
+        "HELD": "${{ steps.hold.outputs.held }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_APP_SLUG": "${{ steps.token.outputs.app-slug }}",
     }

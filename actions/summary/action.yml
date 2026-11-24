@@ -254,6 +254,7 @@ runs:
         # A run of only behind cells has no cell summary and still publishes their checks.
         if [ -n "$cells" ] || [ -s bodies.jsonl ]; then
           python3 "$gate_status" publishing "$SHIPMATE_HEAD_SHA"
+          echo "held=true" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Mirror this run's per-cell plan checks onto the head
@@ -542,17 +543,17 @@ runs:
         MODE: ${{ steps.gate.outputs.comment_mode }}
         BEHIND: ${{ steps.gate.outputs.behind }}
         PLAN_RESULT: ${{ inputs.plan-result }}
+        HELD: ${{ steps.hold.outputs.held }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_APP_SLUG: ${{ steps.token.outputs.app-slug }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
         # An empty state from gate-state means a cancelled plan job, so no final gate is written.
-        # The hold step's own test: it wrote a publish hold for a cell summary or a body. A failed
-        # `end` fails the step, and the publish hold stands.
+        # A failed `end` fails the step, and the publish hold stands.
         if [ -z "${STATE}" ]; then
           echo "plan job was ${PLAN_RESULT}; no final gate written"
-          if [ -n "$(find cells -name cell.json -print -quit 2>/dev/null || true)" ] || [ -s bodies.jsonl ]; then
+          if [ "$HELD" = "true" ]; then
             python3 "$gate_status" end "$HEAD_SHA" "re-plan this pull request (comment shipmate plan or push): its plan job was cancelled before it published"
           fi
           exit 0

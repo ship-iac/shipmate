@@ -279,11 +279,9 @@ jobs:
           targeted-envs: ${{ needs.detect.outputs.targeted_envs }}
           behind: ${{ needs.detect.outputs.behind }}
 
-  # Holds the gate when `summary` ended `cancelled` and the run was not cancelled, for example at
-  # a full gate-writer queue for the head, and turns this run's publish hold `failure` when
-  # `summary` failed; it writes outside the group, since either write only closes the gate. No
-  # step reads a `summary` output: a lost runner leaves them empty. A `summary` that its fork
-  # `if:` refused or `defer` skipped is `skipped`, so this job never holds the App key for it.
+  # Holds the gate when `summary` was cancelled, or ends this run's publish hold when it failed,
+  # outside the group, since either write only closes the gate. A `summary` its fork `if:`
+  # refused or `defer` skipped is `skipped`, so this job never holds the App key for it.
   gate-hold:
     needs: [facts, summary]
     if: ${{ !cancelled() && (needs.summary.result == 'cancelled' || needs.summary.result == 'failure') }}
