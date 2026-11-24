@@ -55,7 +55,7 @@ DISPATCH_LISTS = [
             f"?event=workflow_dispatch&status={status}&per_page=100&page=1"
         ),
     ]
-    for status in ("queued", "in_progress", "waiting", "pending", "requested")
+    for status in ("requested", "pending", "waiting", "queued", "in_progress")
 ]
 #: Every read of a replan that found nothing blocking: the head, the autoplans, the live plan
 #: runs, three re-lists of the autoplans, the head and the live plan runs again.

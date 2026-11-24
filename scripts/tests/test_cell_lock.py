@@ -957,7 +957,7 @@ def pull(base_ref, state="open", merged_at=None, merge_sha=None):
 
 
 #: `_shipmate.LIVE_RUN_STATUSES`, hand-written.
-STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+STATUSES = ("requested", "pending", "waiting", "queued", "in_progress")
 RUNS = f"repos/{REPO}/actions/workflows/shipmate.yml/runs"
 NO_RUNS = json.dumps({"workflow_runs": []})
 MERGE = "9" * 40

@@ -923,7 +923,7 @@ _DISPATCH_READS = [
             f"?event=workflow_dispatch&status={status}&per_page=100&page=1"
         ),
     ]
-    for status in ("queued", "in_progress", "waiting", "pending", "requested")
+    for status in ("requested", "pending", "waiting", "queued", "in_progress")
 ]
 
 

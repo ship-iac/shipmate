@@ -1835,11 +1835,11 @@ def test_the_held_check_apply_complete_writes_refuses_the_next_apply(monkeypatch
 
 _LISTING = "repos/acme/iac/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status="
 _LISTINGS = [
+    f"{_LISTING}requested&per_page=100&page=1",
+    f"{_LISTING}pending&per_page=100&page=1",
+    f"{_LISTING}waiting&per_page=100&page=1",
     f"{_LISTING}queued&per_page=100&page=1",
     f"{_LISTING}in_progress&per_page=100&page=1",
-    f"{_LISTING}waiting&per_page=100&page=1",
-    f"{_LISTING}pending&per_page=100&page=1",
-    f"{_LISTING}requested&per_page=100&page=1",
 ]
 _LIVE_9 = dispatched_plan(9, PR_NUMBER)
 _LIVE_10 = dispatched_plan(10, PR_NUMBER, status="queued")

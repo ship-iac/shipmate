@@ -94,7 +94,7 @@ def base_answers(repo, base="main", tip=BASE_TIP):
 
 
 #: The statuses apply-detect lists live plan runs under, in its order, hand-written.
-PLAN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+PLAN_STATUSES = ("requested", "pending", "waiting", "queued", "in_progress")
 _PLAN_LISTING = "/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status="
 #: A plan-run status listing with no run, as a counted read accepts it.
 EMPTY_PLAN_LISTING = json.dumps({"total_count": 0, "workflow_runs": []})
@@ -156,11 +156,11 @@ def _listing_answer(clock, polls, poll, status, cost):
             poll[0] += 1
             clock.now += cost
         runs, complete = polls[min(poll[0], len(polls) - 1)]
-        last = status == PLAN_STATUSES[-1]
-        if last and complete == "failed":
+        marked = status == "requested"
+        if marked and complete == "failed":
             raise GH_FAILED
         page = [r for r in runs if r["status"] == status]
-        extra = int(last and complete == "short")
+        extra = int(marked and complete == "short")
         return json.dumps({"total_count": len(page) + extra, "workflow_runs": page})
 
     return answer

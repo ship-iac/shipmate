@@ -37,7 +37,7 @@ DISPATCH = [
             f"?event=workflow_dispatch&status={status}&per_page=100&page=1"
         ),
     ]
-    for status in ("queued", "in_progress", "waiting", "pending", "requested")
+    for status in ("requested", "pending", "waiting", "queued", "in_progress")
 ]
 POST = ["gh", "api", "-X", "POST", f"repos/{REPO}/actions/runs/9/rerun-failed-jobs"]
 NOTICE = "::notice title=rerun::re-ran the failed jobs of autoplan run 9, superseded by this plan\n"
@@ -278,8 +278,8 @@ def test_this_run_listed_alone_blocks_nothing(slept, monkeypatch, capsys):
 _INCOMPLETE = notice(
     "a read failed: the live shipmate plan runs of pull request #7 could not be listed"
 )
-_QUEUED = (
-    "repos/acme/demo/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status=queued"
+_REQUESTED = (
+    "repos/acme/demo/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status=requested"
 )
 
 
@@ -289,7 +289,7 @@ _QUEUED = (
         pytest.param(
             {0: {"total_count": 1, "workflow_runs": []}},
             [],
-            f"::warning::{_QUEUED} advertised [1] entries and returned 0\n",
+            f"::warning::{_REQUESTED} advertised [1] entries and returned 0\n",
             id="short-count",
         ),
         pytest.param(
@@ -616,7 +616,7 @@ def test_post_sends_nothing_when_a_run_appeared_since_decide(slept, monkeypatch,
         pytest.param(
             {0: {"total_count": 1, "workflow_runs": []}},
             [],
-            f"::warning::{_QUEUED} advertised [1] entries and returned 0\n",
+            f"::warning::{_REQUESTED} advertised [1] entries and returned 0\n",
             id="short-count",
         ),
         pytest.param(
