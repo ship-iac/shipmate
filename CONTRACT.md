@@ -4381,9 +4381,10 @@ that fails part way posts a plan comment only if its `Write the plan comment`
 step posted it before the failure. A run with no check to
 publish (held, draft, no cell planned, or every check already published by this
 run) skips the publish step without reading anything. The job's final gate write
-replaces the hold. A run whose plan job was cancelled writes no final gate; when
-it wrote the publish hold (it downloaded any cell summary or had an apply check
-to publish, a behind cell's included), it turns that hold `failure`, reading
+replaces the hold. A run whose plan job was cancelled writes no final gate; it
+turns this run's publish hold `failure`, whichever attempt of the run wrote it
+(an attempt writes one when it downloaded any cell summary or had an apply
+check to publish, a behind cell's included), reading
 "re-plan this pull request (comment shipmate plan or push): its plan job was
 cancelled before it published". A `summary` job that fails after the publish
 hold leaves it to `gate-hold`, which turns it `failure` (§Post-plan topology).

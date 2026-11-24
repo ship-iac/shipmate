@@ -235,8 +235,9 @@ def _publish_hold(gate):
 
 
 def is_hold(gate):
-    """Whether `gate`, a `_gates` tuple, holds the gate: a `failure` or a publish hold. Only a
-    new plan run's write replaces either."""
+    """Whether `gate`, a `_gates` tuple, holds the gate: a `failure` or a publish hold. No
+    refresh clears either; a new plan run replaces both, and `end` turns this run's publish hold
+    `failure`."""
     return gate[0] == "failure" or _publish_hold(gate)
 
 
