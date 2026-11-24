@@ -407,8 +407,7 @@ actual work here:
   which carries `summary`'s fork clause in its own `if:`, `defer-auto`, which
   carries it too and runs only on a ready-for-review run's first attempt after
   `defer` named an earlier plan run, the `summary` job, `gate-hold`, which runs only when `summary` ended
-  `cancelled` and the run was not cancelled, for example at a full gate-writer
-  queue for the head, and `outcome`, which carries `summary`'s fork clause,
+  `cancelled` or `failure` and the run was not cancelled, and `outcome`, which carries `summary`'s fork clause,
   check out nothing, and a consumer
   cannot add a checkout: they call the workflow, they do not own its steps.
   Reaching the key from a pull-request-side trigger is safe only in that shape —

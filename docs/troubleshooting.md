@@ -1924,7 +1924,8 @@ new head SHA: push a commit, and the plan run re-creates only the checks that
 exist now.
 
 **The gate is deliberately held.** A gate whose state is `failure` with a
-description telling you what to do is not "no changes"; it is a hold.
+description telling you what to do, or `pending` reading "Plan run <id> holds
+this while it publishes; ...", is not "no changes"; it is a hold.
 `gate-state` compares the cells `detect` planned against the cell summaries the
 trusted summary job actually read, and the job writes a hold when they disagree in
 either direction, when the plan job failed or was skipped with cells planned,
@@ -1932,11 +1933,15 @@ when `detect` did not succeed, or when the planned count was not reported at
 all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
-never apply. The summary job also holds the gate while it publishes the apply
-checks, reading "Plan run <id> holds this while it publishes; if that run has
-ended, re-plan (comment shipmate plan or push)". That hold stays when the run
-ends before its final gate write (a failed or cancelled summary job, or a
-cancelled plan job after the summary downloaded a cell summary). A plan
+never apply. The summary job also holds the gate `pending` while it publishes
+the apply checks, reading "Plan run <id> holds this while it publishes; if that
+run has ended, re-plan (comment shipmate plan or push)". When the run ends
+before its final gate write, that hold turns `failure`: "its plan job was
+cancelled before it published" for a cancelled plan job, and "its plan summary
+failed before it published" from `gate-hold` for a failed summary job. It
+stays `pending` when the plan run was cancelled, when the pull request moved
+past the head at the plan comment step, or when the write that ends it fails;
+no apply greens it. A plan
 comment that could not be listed or written, or whose pull request head could
 not be read just before the write ("could not read the head of pull request
 #<n>, so no plan comment was written"), fails the summary job
@@ -3139,7 +3144,7 @@ A newer plan run of the same pull request (a first-attempt push, open or reopen
 run) cancelled the autoplan, and the autoplan's checks (`plan / detect`,
 `plan / summary`, the `plan / <env> / <stack>` matrix check) stay red or
 cancelled on its head. `plan / gate-hold` shows skipped: it runs only when
-`summary` was cancelled and the run was not.
+`summary` was cancelled or failed and the run was not cancelled.
 
 While that head is still the pull request's, a `shipmate plan` comment plans it
 again. Its plan comment names an autoplan run under the verdict only when the
@@ -3306,9 +3311,10 @@ wait.
 - Before retrying, the plan `summary`'s apply-check creation and final gate
   write read the gate again and stop without writing when a newer plan run
   holds it; a `refresh` stops when any hold stands.
-- `hold` and `deploy` re-post after a wait with no re-check: a hold can
-  overwrite a newer run's gate (a re-plan clears it), and a deploy verdict can
-  overwrite a hold on the merged head, where the gate no longer gates a merge.
+- `hold`, `publishing`, `end` and `deploy` re-post after a wait with no
+  re-check: a hold can overwrite a newer run's gate (a re-plan clears it), and a
+  deploy verdict can overwrite a hold on the merged head, where the gate no
+  longer gates a merge.
 
 ### `could not refresh the gate of <sha>`
 

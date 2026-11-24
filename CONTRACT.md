@@ -118,9 +118,10 @@ commit-scoped and immune. (The per-unit `plan`/`apply` checks stay check-runs;
 they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
-`summary` action, or held by `plan.yml`'s `gate-hold` when `summary` ended
-`cancelled` and the run was not cancelled, for example at a full gate-writer
-queue for the head, and is completed to success by whichever of these happens first, each through
+`summary` action. When the run was not cancelled, `plan.yml`'s `gate-hold`
+holds it when `summary` ended `cancelled`, for example at a full gate-writer
+queue for the head, and turns this run's publish hold `failure` when `summary`
+ended `failure`. It is completed to success by whichever of these happens first, each through
 `scripts/gate-status` and one at a time per head (§Comment-ops, "The aggregate
 gate"):
 
@@ -2337,19 +2338,24 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `plan.yml`'s `summary` job (the plan run's gate) and by `actions/gate-refresh`
   in `apply-run.yml`'s `summary` job (the pre-merge refresh), `deploy.yml`'s
   `summary` job (the post-merge verdict) and `plan.yml`'s `gate-hold` job (a
-  hold). `scripts/gate-status` counts only the gate statuses the shipmate App's
+  hold, or the end of a publish hold). `scripts/gate-status` counts only the gate statuses the shipmate App's
   bot user created: it compares each status's creator user id with the id of
   `<slug>[bot]`, where `<slug>` is the shipmate App's slug. The gate read takes
   the slug from the `app-slug` output of the calling step's App token mint
   (`SHIPMATE_APP_SLUG`); the `auto` actor check reads it from the App-authored
   check runs instead (§`apply_mode: auto`). The commands that list the gate
-  statuses (`newest`, `refuse-newer`, a `refresh` once every apply check is done,
-  a `post` before a retry) read `users/<slug>[bot]` once per invocation, retried
+  statuses (`newest`, `refuse-newer`, `end`, a `refresh` once every apply check
+  is done, a `post` before a retry) read `users/<slug>[bot]` once per invocation, retried
   on a transient failure, before the first listing. `newest`, `refuse-newer`,
-  `refresh` and `post` refuse with an `::error::` line, before any API call, when
+  `end`, `refresh` and `post` refuse with an `::error::` line, before any API call, when
   `SHIPMATE_APP_SLUG` is empty, and a failed read of the bot user refuses the
-  same way: no status counts without it. `hold` and `deploy` read no status and
-  need no slug. Any token with `statuses: write` can post the context; a status
+  same way: no status counts without it. `hold`, `publishing` and `deploy` read
+  no status and need no slug. A hold is a `failure` gate or a plan run's publish
+  hold: `pending`, with the description "Plan run <id> holds this while it
+  publishes; if that run has ended, re-plan (comment shipmate plan or push)"
+  naming the run its link points to, compared whole. `publishing` writes this
+  run's publish hold, and `end` turns it `failure` only while it is the newest
+  gate. Any token with `statuses: write` can post the context; a status
   from another identity, such as a workflow `GITHUB_TOKEN` or a personal access
   token, neither holds the gate nor hides a hold, and the gate ruleset's
   `integration_id` pin keeps it from satisfying the required check
@@ -2372,7 +2378,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
     `gate-hold` writes outside the group, since a hold only closes the gate,
     and is not ordered against the head's other writers: its hold can land
     after one of them greened the head, a closed gate over applied work that
-    `shipmate plan` reopens;
+    `shipmate plan` reopens. A plan `summary` that failed while its run was
+    not cancelled leaves its publish hold `pending` when it wrote one, and
+    `gate-hold` turns that hold `failure` (`end`), outside the group too;
   - an apply `summary`: the run posts no apply comment, so its results and its
     waiting cells show only in the run itself. The head's gate keeps its last
     write until its next writer: a plan `summary` writes the gate from its plan;
@@ -2404,7 +2412,10 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
   needs a plan `summary` cancelled while its run was not (for example at a full
   gate-writer queue for the head) while another writer of the head is past its
-  status read, and the hold landing inside that round trip. Closing it needs a conditional
+  status read, and the hold landing inside that round trip. A `gate-hold` `end`
+  has the converse window: a write by another writer of the head between its
+  status read and its `failure` write is covered by that `failure`, a closed
+  gate that `shipmate plan` reopens. Closing either needs a conditional
   write, which GitHub commit statuses lack.
 - **The plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
@@ -2755,7 +2766,8 @@ hold:
 - the run is the first attempt of a `pull_request_target` `ready_for_review`
   run of a pull request that is not a draft and not from a fork, and its `defer`
   named the earlier plan run;
-- the head's newest `shipmate / gate` is `pending` and names that plan run;
+- the head's newest `shipmate / gate` is `pending`, names that plan run, and is
+  not that run's publish hold;
 - a queued apply check of that plan run that is no behind record and names the
   event action `opened`, `synchronize` or `ready_for_review` is in an
   `apply_mode: auto` environment of the default branch's table;
@@ -3353,14 +3365,18 @@ The nine jobs:
   listings that walk its base branches to `head-ref` (§Comment-ops); these
   reads only decide what a reviewer sees, and degrade (§Cell locks).
 - **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
-  runs only when `summary` ended `cancelled` and the run was not cancelled, for
-  example at a full gate-writer queue for the head (§Comment-ops, "The
-  aggregate gate"). It
-  calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
-  (comment shipmate plan or push): its plan summary was cancelled before it
-  published". A `summary` refused by its fork `if:`, or skipped after
-  `defer` named an earlier run, is `skipped`, not `cancelled`, so `gate-hold`
-  holds the App key only for a head `summary` admitted. It runs on
+  runs only when `summary` ended `cancelled` or `failure` and the run was not
+  cancelled (§Comment-ops, "The aggregate gate"). It calls
+  `actions/gate-refresh`. When `summary` was cancelled, for example at a full
+  gate-writer queue for the head, it writes a hold reading "re-plan this pull
+  request (comment shipmate plan or push): its plan summary was cancelled before
+  it published". When `summary` failed, it turns this run's publish hold
+  `failure`, reading "re-plan this pull request (comment shipmate plan or push):
+  its plan summary failed before it published", and writes nothing when the
+  newest gate is anything else. A `summary` refused by its fork `if:`, or
+  skipped after `defer` named an earlier run, is `skipped`, not `cancelled` or
+  `failure`, so `gate-hold` holds the App key only for a head `summary`
+  admitted. It runs on
   `ubuntu-slim` whatever `runs_on` the caller passes, as `facts` does.
 - **`outcome`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
   posts the outcome reply when a `shipmate plan` run ends without writing its
@@ -4347,12 +4363,17 @@ included, and finds the cell behind. The drift sweep reports the reverted
 state.
 
 Before it publishes the first apply check, the `summary` job writes the gate
-`failure` with a description telling you to re-plan, so a job that dies with
-only some checks published leaves a hold that `gate-refresh` will not green. The
-same hold is written when the job cannot read the head's gate statuses or the
-shipmate App's bot user their creators are compared with, list the
-head's apply checks or build the ones to publish, whether or not it downloaded a
-cell summary: a failed download leaves none over planned cells. The apply checks
+`pending` with its publish hold, "Plan run <id> holds this while it publishes;
+if that run has ended, re-plan (comment shipmate plan or push)", so a job that
+dies with only some checks published leaves a hold that `gate-refresh` will not
+green. The publish hold is told from a final `pending` gate by its state and
+its whole description, naming the run its link points to. The job writes a
+`failure` hold instead, reading "re-plan this pull request (comment shipmate
+plan or push): its plan run ended before writing a final gate", when it cannot
+read the head's gate statuses or the shipmate App's bot user their creators are
+compared with, list the head's apply checks or build the ones to publish,
+whether or not it downloaded a cell summary: a failed download leaves none over
+planned cells. The apply checks
 publish after the plan comment is written, so a plan comment that could
 not be listed or written ends the job with no apply check published, and a
 pre-merge `shipmate apply` refuses as it does over a partial plan. A summary job
@@ -4360,16 +4381,25 @@ that fails part way posts a plan comment only if its `Write the plan comment`
 step posted it before the failure. A run with no check to
 publish (held, draft, no cell planned, or every check already published by this
 run) skips the publish step without reading anything. The job's final gate write
-replaces the hold. A run whose plan job was cancelled writes no final gate, and
-keeps the hold when it downloaded any cell summary or had an apply check to
-publish, a behind cell's included.
+replaces the hold. A run whose plan job was cancelled writes no final gate; when
+it wrote the publish hold (it downloaded any cell summary or had an apply check
+to publish, a behind cell's included), it turns that hold `failure`, reading
+"re-plan this pull request (comment shipmate plan or push): its plan job was
+cancelled before it published". A `summary` job that fails after the publish
+hold leaves it to `gate-hold`, which turns it `failure` (§Post-plan topology).
+Each turns only this run's publish hold, and only while it is the newest gate.
+
+Two publish holds stay `pending` with no writer to end them: a cancelled plan
+run's, until the next plan run of the head replaces it, and the hold on a head
+the pull request moved past at the plan comment step. Both block the merge, and
+no refresh greens either.
 
 The job publishes only the apply checks its own run has not published yet,
 judged by the run id each App-authored check records. A re-run of the summary
 job therefore leaves alone a check an apply has completed, or is completing,
 since. It refuses before writing anything when a newer plan run of the same
-head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
-this run") or published apply checks there ("plan run <id>, newer than this run
+head holds the gate with a hold or its publish hold ("plan run <id> holds the
+gate of <sha> and is newer than this run") or published apply checks there ("plan run <id>, newer than this run
 (<id>), published apply checks on this head"), so an older run never overwrites
 a newer run's gate or checks. That refusal is a notice, and the `summary` job
 ends green and runs none of its later steps. For a cancelled autoplan,
@@ -4381,8 +4411,9 @@ upload does not overwrite. A re-run waits in `plan-<pr>` for the plan run in
 flight (§Post-plan topology). The `summary` job's apply-check publish and its final gate write
 each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` ended
-`cancelled` and the run was not cancelled, for example at a full gate-writer
-queue for the head, and `gate-hold` writes outside the job's concurrency group); a failed
+`cancelled` or `failure` and the run was not cancelled, for example at a full
+gate-writer queue for the head, and `gate-hold` writes outside the job's
+concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final write that fails
 transiently is retried, and the newer-run check runs again before each retry; a
 first attempt that landed although it reported a failure stays written. An apply-check
@@ -4392,7 +4423,7 @@ by a refresh, unless this run published a queued apply check, which cannot be
 done yet, or found a behind cell, whose gate only a new plan lifts: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh warns and
 leaves the `pending` standing until an apply refreshes it. A refresh refused by a
-hold warns that the gate is held: it stays `failure` until a new plan run rewrites it.
+hold warns that the gate is held: it stays held until a new plan run rewrites it.
 
 A run with incomplete evidence publishes no apply check at all, changed or not: a
 plan job whose result is neither `success` nor `skipped`, or `skipped` while cells
