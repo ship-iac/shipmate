@@ -1735,7 +1735,7 @@ def test_a_bare_apply_waits_for_a_live_plan_run_before_reading_the_checks(tmp_pa
         decision="APPROVED",
     )
     assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
-    assert clock.sleeps == [30]
+    assert clock.sleeps == [30, 5]
     assert urls == [
         *PLAN_LISTINGS,
         *PLAN_LISTINGS,

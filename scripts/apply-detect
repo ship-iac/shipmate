@@ -95,6 +95,9 @@ _sleep = time.sleep
 #: p90 141 s; longest success 264 s; 480 s is 1.8 times that. More in the module docstring.
 PLAN_WAIT = 480
 PLAN_POLL = 30
+#: Seconds a wait that waited on a run sleeps before the checks are read: a check-run listing can
+#: lag its write by about a second, so a check the last waited run created may not list yet.
+PLAN_SETTLE = 5
 _clock = time.monotonic
 _AUTO_REMEDY = "Comment `shipmate apply` on the pull request to apply it."
 # An auto run has no comment to repeat: its draft and mergeability refusals name the comment.
@@ -535,7 +538,8 @@ def wait_for_plans(repo, pr_number):
     (`live_plan_runs`, counted) this apply waited for, once a poll settles: its listing is
     complete and empty and every waited run not listed reads `completed` by id (`_read_run`).
     Every listed run joins the waited set, from an incomplete listing too, with one notice when
-    first seen; a run that starts during the wait extends it, and the bound is total.
+    first seen; a run that starts during the wait extends it, and the bound is total. A settled
+    wait that waited on a run sleeps `PLAN_SETTLE` seconds before it returns.
 
     An unsettled poll sleeps `PLAN_POLL` seconds and polls again until `PLAN_WAIT` seconds of
     `_clock` have passed since the first, then refuses (`_wait_refusal`). The deadline is checked
@@ -545,6 +549,8 @@ def wait_for_plans(repo, pr_number):
     while True:
         complete, live, unread = _poll_plans(repo, pr_number, waited)
         if complete and not live and not unread:
+            if waited:
+                sleep(PLAN_SETTLE)
             return waited
         if _clock() >= deadline:
             raise _wait_refusal(pr_number, complete, live, unread)

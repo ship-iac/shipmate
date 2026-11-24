@@ -1865,18 +1865,24 @@ def _replanned(run_id):
     )
 
 
-def _waiting(monkeypatch, tmp_path, polls, reads=None, cost=0, plan_run="123456", **env):
-    """A targeted apply of one `stacks/app` cell recording `plan_run`, over `plan_polls` on a
-    fake clock. Returns `(GITHUB_OUTPUT path, clock, requested paths)`."""
+def _waiting(
+    monkeypatch, tmp_path, polls, reads=None, cost=0, plan_run="123456", checks=None, **env
+):
+    """A targeted apply of one `stacks/app` cell recording `plan_run` (or of `checks`), over
+    `plan_polls` on a fake clock. Returns `(GITHUB_OUTPUT path, clock, requested paths)`; the
+    paths hold each sleep in order as `sleep <seconds>`."""
     out = _apply_env(monkeypatch, tmp_path, **env)
     clock = fake_clock(monkeypatch, ad)
     answers = dict(base_answers("acme/iac")) | plan_polls(clock, "acme/iac", polls, reads, cost)
+    if checks is None:
+        checks = [_apply_check("stacks/app", plan_run=plan_run, cells=1)]
     urls = _stub_apply(
         monkeypatch,
-        {"stacks/app": set()},
-        [_apply_check("stacks/app", plan_run=plan_run, cells=1)],
+        {"stacks/app": set(), "stacks/dns": set()},
+        checks,
         answers=answers,
     )
+    clock.log = urls
     return out, clock, urls
 
 
@@ -1901,9 +1907,10 @@ def test_a_targeted_apply_waits_for_a_live_plan_run_before_reading_the_checks(
     monkeypatch, tmp_path, capsys
 ):
     """Run 9 is live on two listings, then gone and `completed` by id: two `PLAN_POLL` sleeps,
-    one notice, then the checks are read and the cell applies. Mutations: move the
-    `wait_for_plans` call below `_check_run_lines` in `main` (the check-runs read comes first);
-    return after the first listing (no sleep); notice on every poll (two notices)."""
+    one notice, a `PLAN_SETTLE` sleep, then the checks are read and the cell applies.
+    Mutations: move the `wait_for_plans` call below `_check_run_lines` in `main` (the check-runs
+    read comes first); return after the first listing (no sleep); notice on every poll (two
+    notices); never sleep `PLAN_SETTLE` (no `sleep 5`)."""
     out, clock, urls = _waiting(
         monkeypatch,
         tmp_path,
@@ -1912,7 +1919,7 @@ def test_a_targeted_apply_waits_for_a_live_plan_run_before_reading_the_checks(
     )
     ad.main()
     assert _applied_cells(out) == ["stacks/app"]
-    assert clock.sleeps == [30, 30]
+    assert clock.sleeps == [30, 30, 5]
     notices = [line for line in capsys.readouterr().out.splitlines() if "waiting for" in line]
     assert notices == [
         (
@@ -1922,12 +1929,28 @@ def test_a_targeted_apply_waits_for_a_live_plan_run_before_reading_the_checks(
     ]
     assert urls == [
         *_LISTINGS,
+        "sleep 30",
         *_LISTINGS,
+        "sleep 30",
         *_LISTINGS,
         "repos/acme/iac/actions/runs/9",
+        "sleep 5",
         f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
         "repos/acme/iac/pulls/8",
         "repos/acme/iac/git/ref/heads/main",
+    ]
+
+
+def test_a_wait_on_no_run_reads_the_checks_at_once(monkeypatch, tmp_path):
+    """No plan run is live: no sleep at all. Mutation: sleep `PLAN_SETTLE` whatever was waited
+    (a `sleep 5`)."""
+    out, clock, urls = _waiting(monkeypatch, tmp_path, [([], True)])
+    ad.main()
+    assert _applied_cells(out) == ["stacks/app"]
+    assert clock.sleeps == []
+    assert urls[: len(_LISTINGS) + 1] == [
+        *_LISTINGS,
+        f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
     ]
 
 
@@ -1957,7 +1980,7 @@ def test_the_wait_polls_until_a_waited_run_reads_completed_by_id(monkeypatch, tm
     )
     ad.main()
     assert _applied_cells(out) == ["stacks/app"]
-    assert clock.sleeps == [30, 30]
+    assert clock.sleeps == [30, 30, 5]
 
 
 @pytest.mark.parametrize(("cost", "sleeps"), [(0, 16), (200, 2)])
@@ -1969,6 +1992,13 @@ def test_a_run_live_until_the_deadline_refuses_by_rule(monkeypatch, tmp_path, co
     out, clock, _ = _waiting(monkeypatch, tmp_path, [([_LIVE_9], True)], cost=cost)
     assert _refused(out) == f"refusal={_TIMEOUT_9}\nrefused_by_rule=true\n"
     assert clock.sleeps == [30] * sleeps
+
+
+def test_the_deadline_refusal_names_the_lowest_live_run(monkeypatch, tmp_path):
+    """Runs 9 and 10 are live on every listing; as strings `10` sorts first. Mutation: drop
+    `key=int` from the `min` in `_wait_refusal` (names run 10)."""
+    out, _, _ = _waiting(monkeypatch, tmp_path, [([_LIVE_9, _LIVE_10], True)])
+    assert _refused(out) == f"refusal={_TIMEOUT_9}\nrefused_by_rule=true\n"
 
 
 def test_an_incomplete_listing_polls_again(monkeypatch, tmp_path):
@@ -2010,6 +2040,23 @@ def test_a_cell_a_waited_run_replanned_refuses(monkeypatch, tmp_path):
     assert _refused(out) == f"refusal={_replanned(9)}\nrefused_by_rule=true\n"
 
 
+def test_the_replanned_refusal_names_the_lowest_run(monkeypatch, tmp_path):
+    """Runs 9 and 10 each rewrote a cell's record; as strings `10` sorts first. Mutation: drop
+    `key=int` from the `sorted` in `refuse_replanned` (names run 10 and stacks/dns)."""
+    checks = [
+        _apply_check("stacks/app", plan_run="9", cells=1),
+        _apply_check("stacks/dns", plan_run="10", cells=1),
+    ]
+    out, _, _ = _waiting(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9, _LIVE_10], True), ([], True)],
+        {9: ["completed"], 10: ["completed"]},
+        checks=checks,
+    )
+    assert _refused(out) == f"refusal={_replanned(9)}\nrefused_by_rule=true\n"
+
+
 def test_a_cell_a_waited_run_left_alone_applies(monkeypatch, tmp_path):
     """Mutation: refuse whenever `waited` is non-empty."""
     out, _, _ = _waiting(
@@ -2030,7 +2077,7 @@ def test_a_run_joining_during_the_wait_is_waited_for_and_refuses(monkeypatch, tm
         plan_run="10",
     )
     assert _refused(out) == f"refusal={_replanned(10)}\nrefused_by_rule=true\n"
-    assert clock.sleeps == [30, 30]
+    assert clock.sleeps == [30, 30, 5]
 
 
 def test_a_run_an_incomplete_listing_showed_is_waited_for(monkeypatch, tmp_path):

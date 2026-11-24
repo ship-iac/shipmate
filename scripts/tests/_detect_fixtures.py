@@ -124,17 +124,21 @@ def routed(answers, default):
 
 
 class FakeClock:
-    """A clock for apply-detect's `_clock`, advanced only by `sleep` and by the test."""
+    """A clock for apply-detect's `_clock`, advanced only by `sleep` and by the test. Each sleep
+    is also appended to `log`, when set, as `sleep <seconds>`."""
 
     def __init__(self):
         self.now = 1000.0
         self.sleeps = []
+        self.log = None
 
     def __call__(self):
         return self.now
 
     def sleep(self, seconds):
         self.sleeps.append(seconds)
+        if self.log is not None:
+            self.log.append(f"sleep {seconds}")
         self.now += seconds
 
 
