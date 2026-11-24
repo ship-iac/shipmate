@@ -1463,14 +1463,15 @@ header and the lines that fit and ends `and <n> more line(s); the run log names
 every one`. A run title carries no
 environment, so a holder's live apply run in any environment refuses the
 eviction in every environment. The order is: the locks, the holders' stacked
-reads and walks, one `workflow_dispatch` listing per live status (`queued`,
-`in_progress`, `waiting`, `pending`, `requested`), a fresh read of each
+reads and walks, one `workflow_dispatch` listing per live status (`requested`,
+`pending`, `queued`, `waiting`, `in_progress`), a fresh read of each
 holder's pull request, then the `push` listing of each merged holder's merge
 commit and the jobs of each live run it lists. A listed run whose status is not `completed` counts as live.
 
 The check is a point in time, not a hold. A run dispatched in the last few
 seconds may not be listed yet, a run that changes status between the
-per-status listings can be missed (a re-run reads `queued` again), a run can be
+per-status listings other than forward from `requested` towards `in_progress`
+can be missed (one entering or leaving `waiting` at an environment rule), a run can be
 skipped when another run leaves the listed status between two page reads of
 one listing (the rest shift to an earlier page), a holder
 that merges after its read starts its deploy after the check, and a holder can
@@ -1954,6 +1955,49 @@ answers a run cancelled while it waits (§Outcome reply). The per-cell
 `apply-<env>-<stack>` groups (below) still order applies across pull
 requests and the merge deploy.
 
+In a bare or targeted apply, `detect` first waits while a `shipmate plan` run of
+the pull request is live: a `workflow_dispatch` run of `shipmate.yml` by any
+actor whose title is a `shipmate plan` of this pull request (§Check names),
+listed `requested`, `pending`, `queued`, `waiting` or `in_progress`.
+Autoplans are not listed. It waits after `review` and before it reads the
+head's checks, polling every 30 seconds for up to 8 minutes of elapsed time; a
+run that starts during the wait joins it within the same 8 minutes. An `auto`
+apply does not wait (§`apply_mode: auto`, Newer plan). The apply then applies
+the records as they stand once no `shipmate plan` run of the pull request is
+live, refusing a cell a run it waited for planned. Nothing on the pull request
+says an apply is waiting; the `detect` log carries `waiting for shipmate plan
+run <m> of this pull request (<status>) before reading the apply checks`. The
+wait precedes the check-runs read, so a bare apply whose environments are all
+held for review, or a targeted apply whose cells are all applied, still waits
+while a plan run is live. An apply commented while the plan run it was meant to
+apply is still finishing waits for that run, then refuses its cells. The wait
+and the check after it can refuse four ways, `<status>` the run's last read status with `_` as a space
+and `<cells>` the cells that record the run, `<stack> / <env>`, the first 10
+then `, and <k> more`:
+
+- the last listing before the deadline was complete and a run is still live,
+  listed or read by id, the lowest such id: ``apply aborted: shipmate plan run
+  <m> of this pull request is still <status> after 8 minutes; wait for it to
+  finish, review its plan, then comment the same `shipmate apply` command``;
+- a run the apply waited for rewrote a cell's record, the lowest such id:
+  ``apply aborted: shipmate plan run <m> of this pull request planned <cells>
+  while this apply waited for it; review its plan, then comment the same
+  `shipmate apply` command``;
+- the last listing before the deadline was incomplete (a page failed or was
+  malformed, the listing disagreed with its `total_count`, or it ran past 10
+  pages), whatever runs are known live: ``apply aborted: the live shipmate plan
+  runs of pull request #<n> could not all be listed for 8 minutes, so a plan in
+  flight may change what this apply applies; comment the same `shipmate apply`
+  command again``;
+- the last listing was complete and no run is known live, but a run the apply
+  waited for could not be read by id at the deadline, the lowest such id: ``apply aborted: shipmate plan run <m> of this pull request
+  could not be read for 8 minutes, so it may still change what this apply
+  applies; comment the same `shipmate apply` command again``.
+
+The first two are refusals by rule; the last two are failed reads (§Apply
+result comment). None applies anything: `detect` writes no outputs, so `lock`
+and every wave skip.
+
 An apply run is cancelled by a manual cancel (the Actions UI or `gh run
 cancel`). GitHub cancels the run's call into `apply-run.yml` when the call
 arrives at a full queue (`run` ends `cancelled`; `guard` stays green and
@@ -1969,8 +2013,8 @@ it waits in the queue runs no job of `apply-run.yml`: its apply checks and
 waits behind. It runs after `guard` and `claim` and before `run`, outside the group, binds
 `shipmate-engine` and holds no job-token permission: it writes with an App token
 granting `actions: write` and `pull-requests: write`. It lists the live
-`workflow_dispatch` runs (`queued`, `in_progress`, `waiting`, `pending`,
-`requested`) of `shipmate.yml` whose title (§Check names) is an `apply` or `auto` of this
+`workflow_dispatch` runs (`requested`, `pending`, `queued`, `waiting`,
+`in_progress`) of `shipmate.yml` whose title (§Check names) is an `apply` or `auto` of this
 pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 `actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
 Then `queue` reads the pull request's live head, the jobs of each trusted run's
@@ -3080,8 +3124,17 @@ apply` ``, and a check that cannot rule one out (the causes above) with
 listing is incomplete)``. Known limit: a plan dispatched after a cell's check,
 one missing from a listing read seconds after its dispatch, and a re-run of a
 plan run created before the plan run, at `detect` or at the cell, do not stop
-that cell. The base comparison is whole-branch,
-whatever the stack: a wave cannot run Terramate's change detection before its
+that cell. A bare or targeted cell lists no plan runs, and its pre-apply check
+reads the record once, so a `shipmate plan` run the apply did not wait for (a
+plan comment or a hand dispatch after `detect`'s last listing, or one missing
+from it) binds the cell to its record only when it publishes before the cell's
+check: the cell then refuses with the changed-record text below. One that
+publishes later leaves the cell to apply the record `detect` bound. Nor
+is a plan run that ends between the apply comment and `detect`'s first listing
+(through `claim`, `queue`, `review` and the wait for the pull request's earlier
+apply runs, unbounded behind an approval hold) waited for: `detect` binds the
+cells to its records, which the pre-apply check then finds unchanged. The base
+comparison is whole-branch, whatever the stack: a wave cannot run Terramate's change detection before its
 credentials. It fails closed, so any base merge, whatever stack it changed,
 refuses a wave still waiting on its approval, with ``apply aborted for `<env>` /
 `<stack>`: the base branch moved from <a> to <b> since this apply was detected;
@@ -3092,10 +3145,16 @@ level, and leaves the run half-applied until the branch is updated and applied
 again, whose `detect` runs the per-stack check. A changed record refuses with
 ``apply aborted for `<env>` / `<stack>`: the cell's newest apply check no longer
 records plan run <n> (it records <plan run m, no plan run, or plan run n with
-another plan-text digest>); comment `shipmate plan`, review, then apply``, and a
+another plan-text digest>); <remedy>``, and a
 behind record with ``... (it records a behind check); update the branch from the
-base and push``. An empty base tip, plan run or digest refuses the cell before
-any read.
+base and push``. `<remedy>` is ``review the plan of run <m>, then comment
+the same `shipmate apply` command`` when the record names another plan run and a
+plan-text digest, ``review its plan, then comment the same `shipmate apply`
+command`` when it names plan run <n> with another digest, and ``comment `shipmate
+plan`, review, then apply`` when it names no plan run or no digest. An `auto`
+cell reaches only the cases of its own plan run, another digest or no digest,
+and its review remedy reads ``review its plan, then comment `shipmate apply` ``. An empty base tip, plan run or
+digest refuses the cell before any read.
 
 **Visibility.** An `auto` run posts the apply result comment as a bare apply
 does, under `### shipmate apply`, also when it applies nothing: its verdict and
@@ -4486,6 +4545,8 @@ names an error. A job that failed without an `::error::` renders no fence.
   so its line never carries this token.
   The outcome word: `refused` when the run failed on a refusal by rule: a
   cell behind the base (bare or targeted), a targeted apply's review refusal,
+  a bare or targeted apply's `shipmate plan` run still live after its wait or
+  replanned during it (§Comment-ops, "One apply run per pull request"),
   or a cell another pull request or an unknown holder locks, refused by the
   `lock` job with every lock that job created released again; locks it
   re-entered stay held. Any other refusal, a lock refusal that left a lock it
@@ -5011,7 +5072,9 @@ leaves that cell's newest check on the incomplete run.
 One case leaves no record to read: a newer plan run of the same head that
 published no apply check at all, because its first publish failed or incomplete
 evidence withheld every check. The newest-run test then sees the older complete
-run, and a bare or targeted apply applies that run's cells before the merge;
+run, and a bare or targeted apply applies that run's cells before the merge,
+waiting first while the newer run is live (§Comment-ops, "One apply run per pull
+request"): the newer run's records name no cell, so none refuses;
 the gate holds and names the newer run, but no apply reads the gate. An `auto` apply
 is not exposed to a newer autoplan: it reads the head's newest autoplan from the
 Actions runs listing, not from the records (§`apply_mode: auto`). Nor to a newer

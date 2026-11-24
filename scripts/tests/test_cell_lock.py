@@ -957,7 +957,7 @@ def pull(base_ref, state="open", merged_at=None, merge_sha=None):
 
 
 #: `_shipmate.LIVE_RUN_STATUSES`, hand-written.
-STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 RUNS = f"repos/{REPO}/actions/workflows/shipmate.yml/runs"
 NO_RUNS = json.dumps({"workflow_runs": []})
 MERGE = "9" * 40
@@ -2964,33 +2964,68 @@ def test_verify_passes_a_commanded_cell_with_one_pull_request_read(monkeypatch, 
     assert gh.drained()
 
 
+REPLAN = "comment `shipmate plan`, review, then apply"
+
+
 @pytest.mark.parametrize(
-    ("record", "records"),
+    ("record", "records", "remedy"),
     [
-        pytest.param(_record("4243"), "plan run 4243", id="other-run"),
+        pytest.param(
+            _record("4243"),
+            "plan run 4243",
+            "review the plan of run 4243, then comment the same `shipmate apply` command",
+            id="other-run",
+        ),
         pytest.param(
             _record(RUN, plan_sha256="f" * 64),
             f"plan run {RUN} with another plan-text digest",
+            "review its plan, then comment the same `shipmate apply` command",
             id="other-digest",
         ),
         pytest.param(
             _record(RUN, plan_sha256=None),
             f"plan run {RUN} with another plan-text digest",
+            REPLAN,
             id="no-digest",
         ),
+        pytest.param(
+            _record("4243", plan_sha256=None), "plan run 4243", REPLAN, id="other-run-no-digest"
+        ),
+        pytest.param(_record(None), "no plan run", REPLAN, id="no-run"),
     ],
 )
 def test_verify_refuses_a_commanded_cell_whose_record_changed(
-    monkeypatch, tmp_path, record, records
+    monkeypatch, tmp_path, record, records, remedy
 ):
-    """A newer plan republished the cell's check while the wave waited.
+    """A newer plan republished the cell's check while the wave waited. A record with a run and
+    a digest binds the next `shipmate apply`, so its remedy is a review; without either the next
+    apply's detect refuses, so it keeps `shipmate plan`.
 
     Mutation: compare the plan run only -- other-digest and no-digest pass, red.
-    Mutation: skip the record check on the commanded forms -- every row passes, red."""
+    Mutation: skip the record check on the commanded forms -- every row passes, red.
+    Mutation: swap the other-run and no-run remedies -- other-run and every
+    `shipmate plan` row, red.
+    Mutation: key the split on the run alone -- no-digest and other-run-no-digest, red.
+    Mutation: give the same-run digest row the `shipmate plan` remedy -- other-digest, red.
+    Mutation: key the split on the digest alone -- no-run gets a review remedy, red."""
     gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(RECORD_READ, jsonl(record))
     assert _verify_refusal(monkeypatch, tmp_path, gh) == (
         f"::error::{WHERE} the cell's newest apply check no longer records plan run {RUN} (it "
-        f"records {records}); comment `shipmate plan`, review, then apply"
+        f"records {records}); {remedy}"
+    )
+
+
+def test_verify_auto_refuses_a_cell_whose_digest_changed(monkeypatch, tmp_path):
+    """The auto form reaches only the digest row: same run, another digest.
+
+    Mutations: keep the `shipmate plan` remedy when `newest` is set -- red; name "the same
+    `shipmate apply` command" when `newest` is set (an auto run had no command) -- red."""
+    gh = _held().on(PULL_READ, _pull()).on(TIP_READ, _tip()).on(AUTOPLANS_READ, _autoplans(RUN))
+    gh.on(RECORD_READ, jsonl(_record(RUN, plan_sha256="f" * 64)))
+    assert _verify_refusal(monkeypatch, tmp_path, gh, AUTO) == (
+        f"::error::{WHERE} the cell's newest apply check no longer records plan run {RUN} (it "
+        f"records plan run {RUN} with another plan-text digest); review its plan, then comment "
+        "`shipmate apply`"
     )
 
 

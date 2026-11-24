@@ -93,18 +93,111 @@ def base_answers(repo, base="main", tip=BASE_TIP):
     ]
 
 
+#: The statuses apply-detect lists live plan runs under, in its order, hand-written.
+PLAN_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
+_PLAN_LISTING = "/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status="
+#: A plan-run status listing with no run, as a counted read accepts it.
+EMPTY_PLAN_LISTING = json.dumps({"total_count": 0, "workflow_runs": []})
+#: A listing read failure `gh_json` does not retry.
+GH_FAILED = SystemExit("::error::command failed (1): gh api")
+
+
+def plan_listing_urls(repo):
+    """The five plan-run listing paths apply-detect's wait requests in `repo` per poll."""
+    return [f"repos/{repo}{_PLAN_LISTING}{s}&per_page=100&page=1" for s in PLAN_STATUSES]
+
+
 def routed(answers, default):
     """A `gh api` body source: the body `answers` maps a request's `repos/` path to (raised when
-    it is an exception), else `default()`."""
+    it is an exception, called when it is callable); else `EMPTY_PLAN_LISTING` for a plan-run
+    status listing, else `default()`."""
 
     def body(url):
         if url not in answers:
-            return default()
-        if isinstance(answers[url], BaseException):
-            raise answers[url]
-        return answers[url]
+            return EMPTY_PLAN_LISTING if _PLAN_LISTING in url else default()
+        answer = answers[url]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer() if callable(answer) else answer
 
     return body
+
+
+class FakeClock:
+    """A clock for apply-detect's `_clock`, advanced only by `sleep` and by the test. Each sleep
+    is also appended to `log`, when set, as `sleep <seconds>`."""
+
+    def __init__(self):
+        self.now = 1000.0
+        self.sleeps = []
+        self.log = None
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        if self.log is not None:
+            self.log.append(f"sleep {seconds}")
+        self.now += seconds
+
+
+def fake_clock(monkeypatch, module):
+    """Install a `FakeClock` as apply-detect module `module`'s `_clock` and its `sleep` as
+    `_shipmate._sleep`, so a wait that reads any other clock or sleeps any other way hangs or
+    fails instead of passing."""
+    clock = FakeClock()
+    monkeypatch.setattr(module, "_clock", clock)
+    monkeypatch.setattr(_shipmate, "_sleep", clock.sleep)
+    return clock
+
+
+def _listing_answer(clock, polls, poll, status, cost):
+    """The `plan_polls` answer of the `status` listing; `poll` holds the current poll index."""
+
+    def answer():
+        if status == PLAN_STATUSES[0]:
+            poll[0] += 1
+            clock.now += cost
+        runs, complete = polls[min(poll[0], len(polls) - 1)]
+        marked = status == "requested"
+        if marked and complete == "failed":
+            raise GH_FAILED
+        page = [r for r in runs if r["status"] == status]
+        extra = int(marked and complete == "short")
+        return json.dumps({"total_count": len(page) + extra, "workflow_runs": page})
+
+    return answer
+
+
+def _by_id_answer(run_id, seq):
+    """The `plan_polls` answer of run `run_id`'s by-id read."""
+    left = list(seq)
+
+    def answer():
+        got = left.pop(0) if len(left) > 1 else left[0]
+        if isinstance(got, BaseException):
+            raise got
+        return json.dumps({"id": int(run_id), "status": got, "run_attempt": 1})
+
+    return answer
+
+
+def plan_polls(clock, repo, polls, reads=None, cost=0):
+    """`{path: callable}` answering apply-detect's plan-run listings in `repo`, one `polls` entry
+    per poll, the last repeating. Each entry is `(runs, complete)`: `runs` go to the listing of
+    their `status`; `complete` is True, `"short"` (the `requested` listing counts a run it does
+    not return) or `"failed"` (that listing's read fails). Each poll advances `clock` by `cost`
+    seconds. `reads` maps a run id to its successive by-id read answers, the last repeating: a
+    status, or an exception raised."""
+    poll = [-1]
+    answers = {
+        url: _listing_answer(clock, polls, poll, status, cost)
+        for url, status in zip(plan_listing_urls(repo), PLAN_STATUSES, strict=True)
+    }
+    for run_id, seq in (reads or {}).items():
+        answers[f"repos/{repo}/actions/runs/{run_id}"] = _by_id_answer(run_id, seq)
+    return answers
 
 
 def stub_base_changed(monkeypatch, bm, changed=(), calls=None):

@@ -15,6 +15,7 @@ from _detect_fixtures import (
     deferred_in_progress_jobs,
     deferred_jobs,
     dispatched_plan,
+    fake_clock,
     forbid_shared_runner,
     held,
     held_check,
@@ -1147,6 +1148,20 @@ def test_a_live_newer_shipmate_plan_run_refuses(tmp_path, monkeypatch, plan, sta
     `in progress` (queued differs); ignore unparsed titles that start `shipmate · plan pr=<n> `
     (unparsed-plan-title applies)."""
     assert _refusal(tmp_path, monkeypatch, plans=[plan]) == _live_refusal(status)
+
+
+def test_the_auto_form_refuses_a_live_plan_run_without_waiting(tmp_path, monkeypatch):
+    """The commanded forms' wait is not the auto form's: a live newer plan run refuses at once.
+    Mutation: drop the `auto` guard on `bare_main`'s `wait_for_plans` call (the status listings
+    are read, and the wait times out on the fake clock)."""
+    clock = fake_clock(monkeypatch, aad)
+    calls = []
+    refusal = _refusal(
+        tmp_path, monkeypatch, plans=[dispatched_plan(NEWER, PR_NUMBER)], calls=calls
+    )
+    assert refusal == _live_refusal("in progress")
+    assert [c for c in calls if "&status=" in c] == []
+    assert clock.sleeps == []
 
 
 @pytest.mark.parametrize(

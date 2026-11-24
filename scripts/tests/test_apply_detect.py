@@ -9,6 +9,7 @@ import pytest
 from _detect_fixtures import (
     APP_ID,
     BASE_TIP,
+    GH_FAILED,
     HEAD,
     HELD_CASES,
     HOLDER,
@@ -22,12 +23,16 @@ from _detect_fixtures import (
     behind_check,
     behind_message,
     cell_job,
+    dispatched_plan,
+    fake_clock,
     forbid_shared_runner,
     foreign_message,
     held,
     held_check,
     holder_answers,
     partial_message,
+    plan_listing_urls,
+    plan_polls,
     routed,
     run_graph_capture,
     stub_base_changed,
@@ -382,6 +387,7 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
         len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
     )  # Not vacuous: a cell exists.
     assert urls == [
+        *_LISTINGS,
         f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
         "repos/acme/iac/pulls/8",
         "repos/acme/iac/git/ref/heads/main",
@@ -1586,7 +1592,10 @@ def test_a_targeted_apply_with_nothing_pending_reads_no_pull_request(monkeypatch
     done = _check(name="apply / dev-eu / stacks/app", external_id=_record("1", cells=1))
     urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [done])
     ad.main()
-    assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
+    assert urls == [
+        *_LISTINGS,
+        f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
+    ]
     assert github_outputs(out)["base_sha"] == ""
 
 
@@ -1822,3 +1831,269 @@ def test_the_held_check_apply_complete_writes_refuses_the_next_apply(monkeypatch
         ad.main()
     assert str(exc.value) == HELD_CASES["ended unsaved"][3]
     assert not out.exists()
+
+
+_LISTING = "repos/acme/iac/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status="
+_LISTINGS = [
+    f"{_LISTING}requested&per_page=100&page=1",
+    f"{_LISTING}pending&per_page=100&page=1",
+    f"{_LISTING}queued&per_page=100&page=1",
+    f"{_LISTING}waiting&per_page=100&page=1",
+    f"{_LISTING}in_progress&per_page=100&page=1",
+]
+_LIVE_9 = dispatched_plan(9, PR_NUMBER)
+_LIVE_10 = dispatched_plan(10, PR_NUMBER, status="queued")
+_TIMEOUT_9 = (
+    "apply aborted: shipmate plan run 9 of this pull request is still in progress after 8 "
+    "minutes; wait for it to finish, review its plan, then comment the same `shipmate apply` "
+    "command"
+)
+_UNLISTED = (
+    "apply aborted: the live shipmate plan runs of pull request #8 could not all be listed for 8 "
+    "minutes, so a plan in flight may change what this apply applies; comment the same "
+    "`shipmate apply` command again"
+)
+_UNREAD_9 = (
+    "apply aborted: shipmate plan run 9 of this pull request could not be read for 8 minutes, so "
+    "it may still change what this apply applies; comment the same `shipmate apply` command "
+    "again"
+)
+
+
+def _replanned(run_id):
+    return (
+        f"apply aborted: shipmate plan run {run_id} of this pull request planned stacks/app / "
+        "dev-eu while this apply waited for it; review its plan, then comment the same "
+        "`shipmate apply` command"
+    )
+
+
+def _waiting(
+    monkeypatch, tmp_path, polls, reads=None, cost=0, plan_run="123456", checks=None, **env
+):
+    """A targeted apply of one `stacks/app` cell recording `plan_run` (or of `checks`), over
+    `plan_polls` on a fake clock. Returns `(GITHUB_OUTPUT path, clock, requested paths)`; the
+    paths hold each sleep in order as `sleep <seconds>`."""
+    out = _apply_env(monkeypatch, tmp_path, **env)
+    clock = fake_clock(monkeypatch, ad)
+    answers = dict(base_answers("acme/iac")) | plan_polls(clock, "acme/iac", polls, reads, cost)
+    if checks is None:
+        checks = [_apply_check("stacks/app", plan_run=plan_run, cells=1)]
+    urls = _stub_apply(
+        monkeypatch,
+        {"stacks/app": set(), "stacks/dns": set()},
+        checks,
+        answers=answers,
+    )
+    clock.log = urls
+    return out, clock, urls
+
+
+def _applied_cells(out):
+    return [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]]
+
+
+def _refused(out):
+    with pytest.raises(SystemExit) as exc_info:
+        run_annotated(ad.main, refusal_output=True)
+    assert exc_info.value.code == 1
+    return out.read_text(encoding="utf-8")
+
+
+def test_the_listing_is_hand_written():
+    """The fixture's listing paths match the hand-written ones, so a status dropped from the
+    fixture cannot drop it from every guard below."""
+    assert plan_listing_urls("acme/iac") == _LISTINGS
+
+
+def test_a_targeted_apply_waits_for_a_live_plan_run_before_reading_the_checks(
+    monkeypatch, tmp_path, capsys
+):
+    """Run 9 is live on two listings, then gone and `completed` by id: two `PLAN_POLL` sleeps,
+    one notice, a `PLAN_SETTLE` sleep, then the checks are read and the cell applies.
+    Mutations: move the `wait_for_plans` call below `_check_run_lines` in `main` (the check-runs
+    read comes first); return after the first listing (no sleep); notice on every poll (two
+    notices); never sleep `PLAN_SETTLE` (no `sleep 5`)."""
+    out, clock, urls = _waiting(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], True), ([_LIVE_9], True), ([], True)],
+        {9: ["completed"]},
+    )
+    ad.main()
+    assert _applied_cells(out) == ["stacks/app"]
+    assert clock.sleeps == [30, 30, 5]
+    notices = [line for line in capsys.readouterr().out.splitlines() if "waiting for" in line]
+    assert notices == [
+        (
+            "::notice::waiting for shipmate plan run 9 of this pull request (in progress) before "
+            "reading the apply checks"
+        )
+    ]
+    assert urls == [
+        *_LISTINGS,
+        "sleep 30",
+        *_LISTINGS,
+        "sleep 30",
+        *_LISTINGS,
+        "repos/acme/iac/actions/runs/9",
+        "sleep 5",
+        f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
+        "repos/acme/iac/pulls/8",
+        "repos/acme/iac/git/ref/heads/main",
+    ]
+
+
+def test_a_wait_on_no_run_reads_the_checks_at_once(monkeypatch, tmp_path):
+    """No plan run is live: no sleep at all. Mutation: sleep `PLAN_SETTLE` whatever was waited
+    (a `sleep 5`)."""
+    out, clock, urls = _waiting(monkeypatch, tmp_path, [([], True)])
+    ad.main()
+    assert _applied_cells(out) == ["stacks/app"]
+    assert clock.sleeps == []
+    assert urls[: len(_LISTINGS) + 1] == [
+        *_LISTINGS,
+        f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100",
+    ]
+
+
+def test_an_unreviewed_targeted_apply_refuses_without_listing_plan_runs(monkeypatch, tmp_path):
+    """Mutation: move the `wait_for_plans` call above `refuse_unreviewed` in `main` (the
+    listing is requested, and the live run times the wait out instead)."""
+    out, clock, urls = _waiting(
+        monkeypatch, tmp_path, [([_LIVE_9], True)], SHIPMATE_REVIEW_DECISION="CHANGES_REQUESTED"
+    )
+    assert _refused(out) == (
+        "refusal=not authorized: changes were requested on this PR; resolve them and get a "
+        "fresh approval (or dismiss the review), then re-run `shipmate apply`.\n"
+        "refused_by_rule=true\n"
+    )
+    assert urls == []
+    assert clock.sleeps == []
+
+
+def test_the_wait_polls_until_a_waited_run_reads_completed_by_id(monkeypatch, tmp_path):
+    """Run 9 drops off the listing while its by-id read is still `in_progress`: one more poll.
+    Mutation: skip the by-id read (one sleep)."""
+    out, clock, _ = _waiting(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], True), ([], True)],
+        {9: ["in_progress", "completed"]},
+    )
+    ad.main()
+    assert _applied_cells(out) == ["stacks/app"]
+    assert clock.sleeps == [30, 30, 5]
+
+
+@pytest.mark.parametrize(("cost", "sleeps"), [(0, 16), (200, 2)])
+def test_a_run_live_until_the_deadline_refuses_by_rule(monkeypatch, tmp_path, cost, sleeps):
+    """Run 9 is live on every listing; each listing costs `cost` seconds of the 480. The refusal
+    names it and writes no wave output. Mutations: count sleeps instead of elapsed time (cost 200
+    sleeps 16 times); return instead of raise at the deadline (the cell applies); raise
+    `SystemExit` instead of `Refused` (no `refused_by_rule`)."""
+    out, clock, _ = _waiting(monkeypatch, tmp_path, [([_LIVE_9], True)], cost=cost)
+    assert _refused(out) == f"refusal={_TIMEOUT_9}\nrefused_by_rule=true\n"
+    assert clock.sleeps == [30] * sleeps
+
+
+def test_the_deadline_refusal_names_the_lowest_live_run(monkeypatch, tmp_path):
+    """Runs 9 and 10 are live on every listing; as strings `10` sorts first. Mutation: drop
+    `key=int` from the `min` in `_wait_refusal` (names run 10)."""
+    out, _, _ = _waiting(monkeypatch, tmp_path, [([_LIVE_9, _LIVE_10], True)])
+    assert _refused(out) == f"refusal={_TIMEOUT_9}\nrefused_by_rule=true\n"
+
+
+def test_an_incomplete_listing_polls_again(monkeypatch, tmp_path):
+    """Mutation: refuse on the first incomplete listing."""
+    out, clock, _ = _waiting(monkeypatch, tmp_path, [([], "failed"), ([], True)])
+    ad.main()
+    assert _applied_cells(out) == ["stacks/app"]
+    assert clock.sleeps == [30]
+
+
+@pytest.mark.parametrize("complete", ["failed", "short"])
+def test_a_listing_incomplete_until_the_deadline_fails(monkeypatch, tmp_path, complete):
+    """A failed read, or a page whose `total_count` exceeds its runs, on every poll. Mutations:
+    treat `complete` false as an empty listing (the cell applies); pass `counted=False` (short
+    applies)."""
+    out, clock, _ = _waiting(monkeypatch, tmp_path, [([], complete)])
+    assert _refused(out) == f"refusal={_UNLISTED}\n"
+    assert clock.sleeps == [30] * 16
+
+
+def test_a_listing_incomplete_after_a_live_one_fails_at_the_deadline(monkeypatch, tmp_path):
+    """A complete listing shows run 9, then every listing is incomplete while 9 reads
+    `in_progress` by id: the last listing decides, so the incomplete-listing failure, not the
+    timeout refusal. Mutation: test `live` before `complete` in `_wait_refusal` (the timeout
+    refusal, `refused_by_rule`)."""
+    out, _, _ = _waiting(
+        monkeypatch, tmp_path, [([_LIVE_9], True), ([], "failed")], {9: ["in_progress"]}
+    )
+    assert _refused(out) == f"refusal={_UNLISTED}\n"
+
+
+def test_a_cell_a_waited_run_replanned_refuses(monkeypatch, tmp_path):
+    """Run 9 is listed with an int id and the record names it as a str. Mutations: delete the
+    `refuse_replanned` call in `main` (the cell applies); compare an int id with the str
+    `plan_run_id` (the cell applies)."""
+    out, _, _ = _waiting(
+        monkeypatch, tmp_path, [([_LIVE_9], True), ([], True)], {9: ["completed"]}, plan_run="9"
+    )
+    assert _refused(out) == f"refusal={_replanned(9)}\nrefused_by_rule=true\n"
+
+
+def test_the_replanned_refusal_names_the_lowest_run(monkeypatch, tmp_path):
+    """Runs 9 and 10 each rewrote a cell's record; as strings `10` sorts first. Mutation: drop
+    `key=int` from the `sorted` in `refuse_replanned` (names run 10 and stacks/dns)."""
+    checks = [
+        _apply_check("stacks/app", plan_run="9", cells=1),
+        _apply_check("stacks/dns", plan_run="10", cells=1),
+    ]
+    out, _, _ = _waiting(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9, _LIVE_10], True), ([], True)],
+        {9: ["completed"], 10: ["completed"]},
+        checks=checks,
+    )
+    assert _refused(out) == f"refusal={_replanned(9)}\nrefused_by_rule=true\n"
+
+
+def test_a_cell_a_waited_run_left_alone_applies(monkeypatch, tmp_path):
+    """Mutation: refuse whenever `waited` is non-empty."""
+    out, _, _ = _waiting(
+        monkeypatch, tmp_path, [([_LIVE_9], True), ([], True)], {9: ["completed"]}, plan_run="7"
+    )
+    ad.main()
+    assert _applied_cells(out) == ["stacks/app"]
+
+
+def test_a_run_joining_during_the_wait_is_waited_for_and_refuses(monkeypatch, tmp_path):
+    """Run 10 queues on the second listing as run 9 ends, and its record lands. Mutation: keep
+    only the first listing's ids (the cell applies)."""
+    out, clock, _ = _waiting(
+        monkeypatch,
+        tmp_path,
+        [([_LIVE_9], True), ([_LIVE_10], True), ([], True)],
+        {9: ["completed"], 10: ["completed"]},
+        plan_run="10",
+    )
+    assert _refused(out) == f"refusal={_replanned(10)}\nrefused_by_rule=true\n"
+    assert clock.sleeps == [30, 30, 5]
+
+
+def test_a_run_an_incomplete_listing_showed_is_waited_for(monkeypatch, tmp_path):
+    """Run 9 is listed once on an incomplete poll, then reads `in_progress` by id under complete
+    empty listings. Mutation: keep ids only from complete listings (the cell applies)."""
+    out, _, _ = _waiting(
+        monkeypatch, tmp_path, [([_LIVE_9], "failed"), ([], True)], {9: ["in_progress"]}
+    )
+    assert _refused(out) == f"refusal={_TIMEOUT_9}\nrefused_by_rule=true\n"
+
+
+def test_a_waited_run_unreadable_until_the_deadline_fails(monkeypatch, tmp_path):
+    """Run 9 drops off complete listings and every by-id read fails. Mutation: treat a failed
+    by-id read as `completed` (the cell applies)."""
+    out, _, _ = _waiting(monkeypatch, tmp_path, [([_LIVE_9], True), ([], True)], {9: [GH_FAILED]})
+    assert _refused(out) == f"refusal={_UNREAD_9}\n"

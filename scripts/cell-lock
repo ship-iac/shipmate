@@ -1049,7 +1049,10 @@ def _verify_plan_record(
     """Refuse unless the newest App-authored check `name` on `head` records plan run `plan_run`
     with digest `digest`, the wave row's, and is no behind record. `newest` and `authorizer`,
     the auto form's `apply-gate.auto_source` answer, also run `apply-gate.provenance_reason`
-    over the record, with its own refusals, before the run and digest comparison."""
+    over the record, with its own refusals, before the run and digest comparison. `newest` is
+    non-None exactly in the auto form: its one caller, `_verify_auto`, refuses an unlisted
+    autoplan (`provenance_reason`'s `unlisted`) first, and the commanded caller passes none.
+    So it also picks the remedy's command."""
     recorded, recorded_digest, action, behind, draft = _confirm(
         where,
         f"the cell's newest plan record names plan run {plan_run}",
@@ -1073,10 +1076,17 @@ def _verify_plan_record(
         records = f"plan run {recorded} with another plan-text digest"
     else:
         records = f"plan run {recorded}"
-    raise SystemExit(
-        f"::error::{lead} {plan_run} (it records {records}); comment `shipmate plan`, review, "
-        "then apply"
-    )
+    # A record without a digest makes the next apply's detect refuse, so only a run and a
+    # digest together earn the review remedy; the next apply binds the cell to that record.
+    # An auto run had no command to repeat; a commanded one names its environment or none.
+    command = "`shipmate apply`" if newest is not None else "the same `shipmate apply` command"
+    if recorded is None or recorded_digest is None:
+        remedy = "comment `shipmate plan`, review, then apply"
+    elif recorded == plan_run:
+        remedy = f"review its plan, then comment {command}"
+    else:
+        remedy = f"review the plan of run {recorded}, then comment {command}"
+    raise SystemExit(f"::error::{lead} {plan_run} (it records {records}); {remedy}")
 
 
 def _verify_auto(repo, head, provenance, digest, env, stack, where, run, pr):

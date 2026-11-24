@@ -661,8 +661,10 @@ SHIPMATE_WORKFLOW = "shipmate.yml"
 READ_ERRORS = (SystemExit, LookupError, TypeError, ValueError, AttributeError)
 
 
-#: The run statuses of a run that has not ended.
-LIVE_RUN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+#: The run statuses of a run that has not ended, in the order a new run first moves through them,
+#: so a run moving forward between two per-status listings is in the later one. Any other move
+#: between listings (into or out of `waiting` at an environment rule) can miss the run.
+LIVE_RUN_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 #: GitHub's page size cap; a listing longer than `_MAX_PAGES` pages counts as incomplete.
 _PAGE = 100
 _MAX_PAGES = 10
@@ -724,9 +726,10 @@ def _live_dispatch_runs(repo, workflow_file, run=None, *, counted=False):
     `workflow_file` per `LIVE_RUN_STATUSES` value returns, every page, each as listed, once per
     id, ascending. `complete` is false when a page fails or is malformed, a listing is short of
     its `total_count` with `counted`, or a run fails `_listed_run` with `display_title` and
-    `event` (that run is left out). A run that changes
-    status between listings can be missed, and so can one skipped by a page shift: another run
-    leaving the listed status between two page reads moves it to an earlier page."""
+    `event` (that run is left out). A run whose status changes between listings other than
+    forward along that order (into or out of `waiting` at an environment rule) can be missed,
+    and so can one skipped by a page shift: another run leaving the
+    listed status between two page reads moves it to an earlier page."""
     runs, complete = {}, True
     for status in LIVE_RUN_STATUSES:
         page = _pages(
