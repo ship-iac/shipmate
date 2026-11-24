@@ -37,7 +37,7 @@ DISPATCH = [
             f"?event=workflow_dispatch&status={status}&per_page=100&page=1"
         ),
     ]
-    for status in ("requested", "pending", "waiting", "queued", "in_progress")
+    for status in ("requested", "pending", "queued", "waiting", "in_progress")
 ]
 POST = ["gh", "api", "-X", "POST", f"repos/{REPO}/actions/runs/9/rerun-failed-jobs"]
 NOTICE = "::notice title=rerun::re-ran the failed jobs of autoplan run 9, superseded by this plan\n"

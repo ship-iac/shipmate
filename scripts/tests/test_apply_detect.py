@@ -1837,8 +1837,8 @@ _LISTING = "repos/acme/iac/actions/workflows/shipmate.yml/runs?event=workflow_di
 _LISTINGS = [
     f"{_LISTING}requested&per_page=100&page=1",
     f"{_LISTING}pending&per_page=100&page=1",
-    f"{_LISTING}waiting&per_page=100&page=1",
     f"{_LISTING}queued&per_page=100&page=1",
+    f"{_LISTING}waiting&per_page=100&page=1",
     f"{_LISTING}in_progress&per_page=100&page=1",
 ]
 _LIVE_9 = dispatched_plan(9, PR_NUMBER)
@@ -1850,12 +1850,13 @@ _TIMEOUT_9 = (
 )
 _UNLISTED = (
     "apply aborted: the live shipmate plan runs of pull request #8 could not all be listed for 8 "
-    "minutes, so a plan in flight may change what this apply applies; comment `shipmate apply` "
-    "again"
+    "minutes, so a plan in flight may change what this apply applies; comment the same "
+    "`shipmate apply` command again"
 )
 _UNREAD_9 = (
     "apply aborted: shipmate plan run 9 of this pull request could not be read for 8 minutes, so "
-    "it may still change what this apply applies; comment `shipmate apply` again"
+    "it may still change what this apply applies; comment the same `shipmate apply` command "
+    "again"
 )
 
 

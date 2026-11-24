@@ -45,8 +45,8 @@ _LISTING = "repos/o/r/actions/workflows/shipmate.yml/runs?event=workflow_dispatc
 PLAN_LISTINGS = [
     f"{_LISTING}requested&per_page=100&page=1",
     f"{_LISTING}pending&per_page=100&page=1",
-    f"{_LISTING}waiting&per_page=100&page=1",
     f"{_LISTING}queued&per_page=100&page=1",
+    f"{_LISTING}waiting&per_page=100&page=1",
     f"{_LISTING}in_progress&per_page=100&page=1",
 ]
 

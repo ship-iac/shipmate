@@ -662,8 +662,9 @@ READ_ERRORS = (SystemExit, LookupError, TypeError, ValueError, AttributeError)
 
 
 #: The run statuses of a run that has not ended, in the order a run moves through them, so a run
-#: moving forward between two per-status listings is in the later one.
-LIVE_RUN_STATUSES = ("requested", "pending", "waiting", "queued", "in_progress")
+#: moving forward between two per-status listings is in the later one. The backward moves, from
+#: `in_progress` to `waiting` and a re-run back to `queued`, can be missed.
+LIVE_RUN_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 #: GitHub's page size cap; a listing longer than `_MAX_PAGES` pages counts as incomplete.
 _PAGE = 100
 _MAX_PAGES = 10
@@ -726,9 +727,9 @@ def _live_dispatch_runs(repo, workflow_file, run=None, *, counted=False):
     id, ascending. `complete` is false when a page fails or is malformed, a listing is short of
     its `total_count` with `counted`, or a run fails `_listed_run` with `display_title` and
     `event` (that run is left out). A run whose status moves backward between listings (from
-    `in_progress` to `waiting` when a later job waits for an environment, say) can be missed,
-    and so can one skipped by a page shift: another run leaving the listed status between two
-    page reads moves it to an earlier page."""
+    `in_progress` to `waiting` when a later job waits for an environment, or a re-run back to
+    `queued`) can be missed, and so can one skipped by a page shift: another run leaving the
+    listed status between two page reads moves it to an earlier page."""
     runs, complete = {}, True
     for status in LIVE_RUN_STATUSES:
         page = _pages(

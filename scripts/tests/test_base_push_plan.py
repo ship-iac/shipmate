@@ -30,7 +30,7 @@ PULLS = [
     "--jq",
     ".[] | {number, draft, sha: .head.sha} | tojson",
 ]
-STATUSES = ("requested", "pending", "waiting", "queued", "in_progress")
+STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 LIVE_LISTS = [
     [
         "gh",

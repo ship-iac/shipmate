@@ -1049,7 +1049,10 @@ def _verify_plan_record(
     """Refuse unless the newest App-authored check `name` on `head` records plan run `plan_run`
     with digest `digest`, the wave row's, and is no behind record. `newest` and `authorizer`,
     the auto form's `apply-gate.auto_source` answer, also run `apply-gate.provenance_reason`
-    over the record, with its own refusals, before the run and digest comparison."""
+    over the record, with its own refusals, before the run and digest comparison. `newest` is
+    non-None exactly in the auto form: its one caller, `_verify_auto`, refuses an unlisted
+    autoplan (`provenance_reason`'s `unlisted`) first, and the commanded caller passes none.
+    So it also picks the remedy's command."""
     recorded, recorded_digest, action, behind, draft = _confirm(
         where,
         f"the cell's newest plan record names plan run {plan_run}",

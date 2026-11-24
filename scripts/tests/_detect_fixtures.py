@@ -94,7 +94,7 @@ def base_answers(repo, base="main", tip=BASE_TIP):
 
 
 #: The statuses apply-detect lists live plan runs under, in its order, hand-written.
-PLAN_STATUSES = ("requested", "pending", "waiting", "queued", "in_progress")
+PLAN_STATUSES = ("requested", "pending", "queued", "waiting", "in_progress")
 _PLAN_LISTING = "/actions/workflows/shipmate.yml/runs?event=workflow_dispatch&status="
 #: A plan-run status listing with no run, as a counted read accepts it.
 EMPTY_PLAN_LISTING = json.dumps({"total_count": 0, "workflow_runs": []})

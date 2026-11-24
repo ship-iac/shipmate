@@ -2332,15 +2332,15 @@ the plan of run `<m>`, then comment the same `shipmate apply` command.
 `detect` could not tell whether a `shipmate plan` run of this pull request was
 still live: the last listing before its 8-minute deadline had a failed or
 malformed page, disagreed with its `total_count`, or ran past 10 pages. The
-listing logs a warning naming the cause. Nothing applied. Comment `shipmate
-apply` again.
+listing logs a warning naming the cause. Nothing applied. Comment the same
+`shipmate apply` command again.
 
 ### `apply aborted: shipmate plan run <m> of this pull request could not be read for 8 minutes`
 
 `detect` waited for run `<m>`, which then left the live listing, but reading the
 run by id failed until the 8-minute deadline, so `detect` could not tell whether
-it had ended. Each failed read logs a warning. Nothing applied. Comment
-`shipmate apply` again.
+it had ended. Each failed read logs a warning. Nothing applied. Comment the
+same `shipmate apply` command again.
 
 ### `apply aborted: the plan recorded for ... was not made on pull request #<n>`
 
@@ -2805,9 +2805,13 @@ reason. On every form it refuses when:
   - `plan run <m>`, with a plan-text digest: review the plan of run `<m>`, then
     comment the same `shipmate apply` command.
   - `plan run <n> with another plan-text digest`: review its plan, then comment
-    the same `shipmate apply` command (`shipmate apply` for an `auto` cell).
+    the same `shipmate apply` command.
   - `no plan run`, or a plan run with no digest: comment `shipmate plan`,
     review, then apply.
+
+  An `auto` cell reaches only the cases of its own plan run, another digest or
+  no digest; its review remedy reads `review its plan, then comment `shipmate
+  apply``.
   - `a behind check`: that plan found the base changed the stack. Update the
     branch from the base and push.
 - `the apply reached the wave without its base tip, plan run and plan-text

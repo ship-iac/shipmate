@@ -1464,13 +1464,14 @@ every one`. A run title carries no
 environment, so a holder's live apply run in any environment refuses the
 eviction in every environment. The order is: the locks, the holders' stacked
 reads and walks, one `workflow_dispatch` listing per live status (`requested`,
-`pending`, `waiting`, `queued`, `in_progress`), a fresh read of each
+`pending`, `queued`, `waiting`, `in_progress`), a fresh read of each
 holder's pull request, then the `push` listing of each merged holder's merge
 commit and the jobs of each live run it lists. A listed run whose status is not `completed` counts as live.
 
 The check is a point in time, not a hold. A run dispatched in the last few
 seconds may not be listed yet, a run that changes status between the
-per-status listings can be missed (one moving back from `in_progress` to `waiting`), a run can be
+per-status listings can be missed (one moving back, from `in_progress` to
+`waiting` or by a re-run to `queued`), a run can be
 skipped when another run leaves the listed status between two page reads of
 one listing (the rest shift to an earlier page), a holder
 that merges after its read starts its deploy after the check, and a holder can
@@ -1957,7 +1958,7 @@ requests and the merge deploy.
 In a bare or targeted apply, `detect` first waits while a `shipmate plan` run of
 the pull request is live: a `workflow_dispatch` run of `shipmate.yml` by any
 actor whose title is a `shipmate plan` of this pull request (§Check names),
-listed `requested`, `pending`, `waiting`, `queued` or `in_progress`.
+listed `requested`, `pending`, `queued`, `waiting` or `in_progress`.
 Autoplans are not listed. It waits after `review` and before it reads the
 head's checks, polling every 30 seconds for up to 8 minutes of elapsed time; a
 run that starts during the wait joins it within the same 8 minutes. An `auto`
@@ -1986,11 +1987,12 @@ then `, and <k> more`:
   malformed, the listing disagreed with its `total_count`, or it ran past 10
   pages), whatever runs are known live: ``apply aborted: the live shipmate plan
   runs of pull request #<n> could not all be listed for 8 minutes, so a plan in
-  flight may change what this apply applies; comment `shipmate apply` again``;
+  flight may change what this apply applies; comment the same `shipmate apply`
+  command again``;
 - the last listing was complete and no run is known live, but a run the apply
   waited for could not be read by id at the deadline, the lowest such id: ``apply aborted: shipmate plan run <m> of this pull request
   could not be read for 8 minutes, so it may still change what this apply
-  applies; comment `shipmate apply` again``.
+  applies; comment the same `shipmate apply` command again``.
 
 The first two are refusals by rule; the last two are failed reads (§Apply
 result comment). None applies anything: `detect` writes no outputs, so `lock`
@@ -2011,7 +2013,7 @@ it waits in the queue runs no job of `apply-run.yml`: its apply checks and
 waits behind. It runs after `guard` and `claim` and before `run`, outside the group, binds
 `shipmate-engine` and holds no job-token permission: it writes with an App token
 granting `actions: write` and `pull-requests: write`. It lists the live
-`workflow_dispatch` runs (`requested`, `pending`, `waiting`, `queued`,
+`workflow_dispatch` runs (`requested`, `pending`, `queued`, `waiting`,
 `in_progress`) of `shipmate.yml` whose title (§Check names) is an `apply` or `auto` of this
 pull request. A listed run is trusted when it is a `workflow_dispatch` whose
 `actor` is the App's `<slug>[bot]`; any other run's title is unauthenticated.
@@ -3148,9 +3150,10 @@ behind record with ``... (it records a behind check); update the branch from the
 base and push``. `<remedy>` is ``review the plan of run <m>, then comment
 the same `shipmate apply` command`` when the record names another plan run and a
 plan-text digest, ``review its plan, then comment the same `shipmate apply`
-command`` when it names plan run <n> with another digest (an `auto` cell, which
-reaches only this case, reads ``comment `shipmate apply` ``), and ``comment `shipmate plan`, review, then
-apply`` when it names no plan run or no digest. An empty base tip, plan run or
+command`` when it names plan run <n> with another digest, and ``comment `shipmate
+plan`, review, then apply`` when it names no plan run or no digest. An `auto`
+cell reaches only the cases of its own plan run, another digest or no digest,
+and its review remedy reads ``review its plan, then comment `shipmate apply` ``. An empty base tip, plan run or
 digest refuses the cell before any read.
 
 **Visibility.** An `auto` run posts the apply result comment as a bare apply

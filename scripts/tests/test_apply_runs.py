@@ -72,8 +72,8 @@ def test_every_page_of_every_live_status_is_read():
         _listing("requested"),
         _listing("pending"),
         _listing("pending", 2),
-        _listing("waiting"),
         _listing("queued"),
+        _listing("waiting"),
         _listing("in_progress"),
     ]
 
@@ -199,12 +199,12 @@ def test_the_live_statuses_are_pinned_whole():
     """`apply_runs` and `holder_dispatch_runs` both list these, in the order a run moves through
     them, so a run moving forward between two listings is in the later one. Mutations: drop
     `requested` -- red; restore the order queued, in_progress, waiting, pending, requested --
-    red."""
+    red; swap `queued` and `waiting` -- red."""
     assert _shipmate.LIVE_RUN_STATUSES == (
         "requested",
         "pending",
-        "waiting",
         "queued",
+        "waiting",
         "in_progress",
     )
 
