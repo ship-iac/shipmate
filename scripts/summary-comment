@@ -43,13 +43,19 @@ only when the gate is held.
 With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
 that is not a draft ends with the `commands` section, when the body has room for it under
 SIZE_BUDGET; it never shrinks a cell. The section walks the changed environments in apply order:
-each `apply_mode: targeted` one names `shipmate apply <env>`, and the first other one names
-`shipmate apply` once (`to apply the other environments` when a targeted line renders), then
+each one `auto_follows` names gets its `auto_follows_line`, each `apply_mode: targeted` one names
+`shipmate apply <env>`, and the first other one names `shipmate apply` once (`to apply the other
+environments` when a targeted or auto line renders), then
 `shipmate unlock <env> --evict` for each environment holding a changed cell it marks locked,
 unless one of that environment's holders is in `SHIPMATE_BLOCKING`, where evict refuses, and
 `shipmate help`. An empty or unreadable
 `targeted-envs` names no targeted environment, so the section degrades to the bare
 `shipmate apply` even when every changed environment is targeted; the unreadable one warns.
+
+An autoplan that dispatches an `auto` apply (`auto_follows`) ends the comment with its
+`auto_follows_line`s whatever `command_hints` is: without the full section, a section holding
+only those lines. Their room is reserved before the fold-outs are sized, so a large plan shrinks
+a fold-out rather than drop them; past HARD_CAP they yield with a warning.
 
 An autoplan of a pull request that is not a draft, started by neither a push nor the
 ready-for-review click, that changed a cell of an `apply_mode: auto` environment no other pull
@@ -492,24 +498,37 @@ def _evict_line(env, holders):
     return f"{when} `shipmate unlock {env} --evict` to {release}.\n\n"
 
 
-def commands(locked, targeted=(), changed=(), blocked=(), behind=()):
+def auto_follows_line(env):
+    """The line saying `apply_mode: auto` environment `env` applies on its own, with its
+    remedy, as the command section renders it."""
+    return (
+        f"{_md_name(env)} applies on its own (`apply_mode: auto`); if no apply starts, comment "
+        "`shipmate apply`.\n\n"
+    )
+
+
+def commands(locked, targeted=(), changed=(), blocked=(), behind=(), autos=()):
     """The folded command section: per environment of `changed` (the changed cells'
-    environments in apply order), its `shipmate apply <env>` when it is in `targeted`, and at the
-    first one that is not, `shipmate apply` once, worded `to apply the other environments` when
-    a targeted line renders, else `to apply this plan`; with `changed` empty, only the bare
+    environments in apply order), its `auto_follows_line` when it is in `autos`, its
+    `shipmate apply <env>` when it is in `targeted`, and at the first one in neither,
+    `shipmate apply` once, worded `to apply the other environments` when a targeted or
+    `auto_follows_line` renders, else `to apply this plan`; with `changed` empty, only the bare
     line. `behind` names the environments holding a behind cell, which every apply of them
     refuses: such a targeted environment gets no line, and one that is not targeted drops the
     bare line. Then per environment of `locked` (environment to the holders of its changed
     locked cells), sorted, its `_evict_line`, unless it is in `blocked` (`blocked_envs`: a holder
-    there is one `cell-lock` decides evict refuses on); then `shipmate help`. No line starts
-    with `shipmate`, so the section is not itself a command."""
+    there is one `cell-lock` decides evict refuses on); then `shipmate help`. Only an
+    `auto_follows_line` of an environment named `shipmate` starts with `shipmate`; it stays inert
+    because `comment-ops` skips a `[bot]` commenter and `applies` is no verb."""
     offered = set(targeted) - set(behind)
     bare_ok = set(behind) <= set(targeted)
-    what = "the other environments" if set(changed) & offered else "this plan"
+    what = "the other environments" if set(changed) & (offered | set(autos)) else "this plan"
     bare = f"Comment `shipmate apply` to apply {what}.\n\n"
     lines = [] if changed or not bare_ok else [bare]
     for e in changed:
-        if e in targeted:
+        if e in autos:
+            lines.append(auto_follows_line(e))
+        elif e in targeted:
             if e in offered:
                 lines.append(f"Comment `shipmate apply {e}` to apply {_md_name(e)}.\n\n")
         elif bare_ok and bare not in lines:
@@ -521,6 +540,26 @@ def commands(locked, targeted=(), changed=(), blocked=(), behind=()):
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
     )
+
+
+def auto_follows(cells, auto, locks, *, event, action, attempt, is_draft):
+    """The sorted environments in `auto` holding a changed cell of `cells` no other pull request
+    locks (`locks`), when this run's autoplan dispatches an `auto` apply by `skip_reason`, read
+    as a ready pull request's run over a pending gate and a complete plan; else empty. A push run
+    whose payload says draft names what the ready run names. The newest-autoplan check and the
+    dispatch result are not known here; the line's remedy covers both."""
+    reason = ad.skip_reason(
+        event=event,
+        action=action,
+        attempt=attempt,
+        payload_draft=False,
+        is_draft=is_draft,
+        state="pending",
+        mode="post",
+    )
+    if reason:
+        return []
+    return ad.changed_auto_envs([c for c in cells if not _lock_key(c, locks)], auto)
 
 
 AUTO_REMEDY = "push a commit, or comment `shipmate apply`."
@@ -793,6 +832,31 @@ def _fold_outs(entries, free):
     return sections
 
 
+def _auto_section(changed, autos, head, bares):
+    """The command section holding only the `auto_follows_line` of each environment of
+    `changed` in `autos`, and no help line; empty when there is none, or, with a warning, when
+    `head` and the bare lines `bares` leave it no room under HARD_CAP."""
+    lines = "".join(auto_follows_line(e) for e in changed if e in autos)
+    if not lines:
+        return ""
+    section = f"<details><summary>shipmate commands</summary>\n\n{lines}</details>"
+    if len("\n\n".join(p for p in (head, _join(bares), section) if p)) > HARD_CAP:
+        print(
+            "::warning::the plan comment's cell lines leave no room under the 65,536-char comment "
+            "cap for the auto apply lines; they were left out"
+        )
+        return ""
+    return section
+
+
+def _section(body, full, minimal, hints):
+    """`body` ending with the full command section `full` when `hints` and it fits within
+    SIZE_BUDGET, else with the `auto_follows_line` section `minimal` when there is one."""
+    if hints and len(body) + 2 + len(full) <= SIZE_BUDGET:
+        return f"{body}\n\n{full}"
+    return f"{body}\n\n{minimal}" if minimal else body
+
+
 def build_comment(
     cells,
     checks,
@@ -812,6 +876,7 @@ def build_comment(
     unknown=_NONE,
     blocking=(),
     behind=None,
+    autos=(),
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `superseded_lines`
     `superseded` as one block, the `auto_line` `auto`, the `stacked_lines` as one block, one
@@ -821,8 +886,11 @@ def build_comment(
     `env_heading` (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell
     with plan text, else its bare line, which names no environment). No footer: the verdict links
     the run, and neither plan verdict asks anything. With `hints`, a body with a changed cell ends
-    with `commands` when the whole body stays within SIZE_BUDGET, and leaves it out silently
-    otherwise, after every cell is sized, so it never shrinks one. `locks` (`lock_marks`) marks the
+    with `commands` when the whole body stays within SIZE_BUDGET, after every cell is sized, so it
+    never shrinks one; otherwise, and without `hints`, it ends with `_auto_section` of the
+    changed environments in `autos` (`auto_follows`), when there is one. That section's room is
+    counted in the head before any fold-out is sized, and it yields with a warning like the six
+    blocks below. `locks` (`lock_marks`) marks the
     changed cells another pull request holds, and `commands` names their environments, and the
     changed environments of `targeted` in `order`; `stacked` and `default_branch` go to `_plan_line`
     and `stacked_lines`, `unknown` to `stacked_lines`, and `blocking` to `blocked_envs`, which
@@ -866,19 +934,20 @@ def build_comment(
         if line:
             head = f"{head}\n\n{line}"
         named[what] = bool(line)
-    used = len(head) + 4
+    envs = {c["environment"] for c in meta if c["changed"]}
+    changed = [e for e in dict.fromkeys(order) if e in envs] + sorted(envs - set(order))
+    minimal = _auto_section(changed, autos, head, bares)
+    used = len(head) + 4 + (len(minimal) + 2 if minimal else 0)
     reserve = sum(len(b) + 2 for b in bares)
     sections = _fold_outs(entries, SIZE_BUDGET - used - reserve)
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
-    envs = {c["environment"] for c in meta if c["changed"]}
-    changed = [e for e in dict.fromkeys(order) if e in envs] + sorted(envs - set(order))
     locked = {}
     for c in meta:
         if key := _lock_key(c, locks):
             locked.setdefault(c["environment"], []).append(locks[key])
-    section = commands(locked, targeted, changed, blocked, {r["environment"] for r in rows})
-    if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(section) <= SIZE_BUDGET:
-        body = f"{body}\n\n{section}"
+    behind_envs = {r["environment"] for r in rows}
+    full = commands(locked, targeted, changed, blocked, behind_envs, autos)
+    body = _section(body, full, minimal, hints and bool(changed))
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
@@ -1312,6 +1381,15 @@ def main():
         unknown=unknown,
         blocking=blocking,
         behind=behind,
+        autos=auto_follows(
+            [c for c, _ in cells],
+            auto,
+            locks,
+            event=os.environ.get("GITHUB_EVENT_NAME", ""),
+            action=event_action(),
+            attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+            is_draft=os.environ.get("SHIPMATE_IS_DRAFT", ""),
+        ),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
