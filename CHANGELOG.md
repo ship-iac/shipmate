@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.58.1] — 2026-11-24
 
+Tags `2644d8f`.
+
 Re-pin with `python <engine>/scripts/repin <consumer> v0.58.1` in a pull request that changes no stack: the published `shipmate.yml` fence is unchanged.
 
 ### Changed
