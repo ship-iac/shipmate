@@ -808,7 +808,7 @@ def test_a_cell_whose_stack_the_base_changed_is_held_and_stops_its_needs_success
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
         "excluded_targeted=[] skipped_after_targeted=['prod'] review_held=[] waiting=0 locked=0 "
-        "overlap=2 applied_exempt=[] review_decision='NONE'"
+        "overlap=2 attempted=0 applied_exempt=[] review_decision='NONE'"
     ) in capsys.readouterr().out.splitlines()
 
 
@@ -1563,12 +1563,13 @@ def test_an_auto_run_holds_a_retitled_cell_and_its_dependent_waits(tmp_path, mon
 
 
 def test_a_duplicate_auto_run_after_an_ended_one_applies_neither_attempted_cell(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, capsys
 ):
     """No earlier run is live: the first run's completion wrote `stacks/app` `Failed: x` and
     its successor `stacks/dns` `Not run`. The duplicate holds both.
 
-    Mutation: return `[]` from `attempted_cells` -- both apply, red."""
+    Mutation: return `[]` from `attempted_cells` -- both apply, red.
+    Mutation: drop `attempted=` from the apply-all-detect notice -- red."""
     parsed = _run_auto(
         tmp_path,
         monkeypatch,
@@ -1586,6 +1587,11 @@ def test_a_duplicate_auto_run_after_an_ended_one_applies_neither_attempted_cell(
         attempted_cell("stacks/dns", "dev-eu"),
     ]
     assert detect_report()["waiting_cells"] == []
+    assert (
+        f"::notice title=apply-all-detect::head={HEAD} cells=2 pending=2 envlevels=[0, 0, 0, 0] "
+        "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 locked=0 "
+        "overlap=0 attempted=2 applied_exempt=[] review_decision='NONE'"
+    ) in capsys.readouterr().out.splitlines()
 
 
 def test_a_cell_an_ended_run_released_and_never_applied_is_held_and_its_dependent_waits(
