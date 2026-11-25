@@ -283,10 +283,12 @@ def _held(cause, ident, cells):
     if cause == "own-unreadable":
         return (
             f"{names}: this deploy, run {ident}, could not read its own jobs completely. Re-run "
-            "this deploy; if it keeps failing, complete by hand the apply checks of cells whose "
-            "change is applied and state saved, as in docs/troubleshooting.md section Return an "
-            "in-progress apply check by hand, and apply the rest through a new pull request "
-            "touching their stacks."
+            "this deploy; if it keeps failing, read its earlier attempts' cell apply and save job "
+            "logs, follow docs/troubleshooting.md section The apply step ran and its state was not "
+            "saved for a cell whose apply ran without saving its state, complete by hand the apply "
+            "checks of cells whose change is applied and state saved, as in "
+            "docs/troubleshooting.md section Return an in-progress apply check by hand, and apply "
+            "the rest through a new pull request touching their stacks."
         )
     return ad.held_text(cause, ident, names, "re-run this deploy")
 

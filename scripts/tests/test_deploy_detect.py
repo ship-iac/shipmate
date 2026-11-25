@@ -2400,9 +2400,12 @@ def test_a_deploy_rerun_that_cannot_list_its_own_jobs_refuses(tmp_path, monkeypa
         )
     assert str(exc.value) == (
         "::error::deploy refused: stacks/app / dev-eu, stacks/web / dev-eu: this deploy, run 900, "
-        "could not read its own jobs completely. Re-run this deploy; if it keeps failing, "
-        "complete by hand the apply checks of cells whose change is applied and state saved, as "
-        f"in {_BY_HAND}, and apply the rest through a new pull request touching their stacks."
+        "could not read its own jobs completely. Re-run this deploy; if it keeps failing, read its "
+        "earlier attempts' cell apply and save job logs, follow docs/troubleshooting.md section "
+        "The apply step ran and its state was not saved for a cell whose apply ran without saving "
+        "its state, complete by hand the apply checks of cells whose change is applied and state "
+        f"saved, as in {_BY_HAND}, and apply the rest through a new pull request touching their "
+        "stacks."
     )
 
 
