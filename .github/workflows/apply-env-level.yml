@@ -292,7 +292,9 @@ jobs:
   # after ~2 minutes of retries, and `complete` lists the level again.
   wave0-complete:
     needs: [snapshot, wave0]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') }}
+    # The next-wave clause skips the last populated wave: waves are compacted from wave0, so its
+    # successor is empty, and `complete` writes its checks right after it.
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave0.result == 'success' || needs.wave0.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
     runs-on: ubuntu-slim
     # Never fails the level: `complete` writes every snapshot check after all waves, so
     # failing here would skip successor env-levels over a check `complete` then writes.
@@ -314,7 +316,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
   wave1-complete:
     needs: [snapshot, wave1]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave1.result == 'success' || needs.wave1.result == 'failure') }}
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave1.result == 'success' || needs.wave1.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -324,7 +326,7 @@ jobs:
     steps: *complete-steps
   wave2-complete:
     needs: [snapshot, wave2]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave2.result == 'success' || needs.wave2.result == 'failure') }}
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave2.result == 'success' || needs.wave2.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -334,7 +336,7 @@ jobs:
     steps: *complete-steps
   wave3-complete:
     needs: [snapshot, wave3]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave3.result == 'success' || needs.wave3.result == 'failure') }}
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave3.result == 'success' || needs.wave3.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -344,7 +346,7 @@ jobs:
     steps: *complete-steps
   wave4-complete:
     needs: [snapshot, wave4]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave4.result == 'success' || needs.wave4.result == 'failure') }}
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave4.result == 'success' || needs.wave4.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -354,7 +356,7 @@ jobs:
     steps: *complete-steps
   wave5-complete:
     needs: [snapshot, wave5]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave5.result == 'success' || needs.wave5.result == 'failure') }}
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave5.result == 'success' || needs.wave5.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -364,7 +366,7 @@ jobs:
     steps: *complete-steps
   wave6-complete:
     needs: [snapshot, wave6]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave6.result == 'success' || needs.wave6.result == 'failure') }}
+    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave6.result == 'success' || needs.wave6.result == 'failure') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' }}
     runs-on: ubuntu-slim
     continue-on-error: true
     permissions: *complete-permissions
@@ -372,22 +374,12 @@ jobs:
     env:
       WAVE_RESULTS: '{"wave6": "${{ needs.wave6.result }}"}'
     steps: *complete-steps
-  wave7-complete:
-    needs: [snapshot, wave7]
-    if: ${{ always() && needs.snapshot.result == 'success' && (needs.wave7.result == 'success' || needs.wave7.result == 'failure') }}
-    runs-on: ubuntu-slim
-    continue-on-error: true
-    permissions: *complete-permissions
-    environment: *complete-environment
-    env:
-      WAVE_RESULTS: '{"wave7": "${{ needs.wave7.result }}"}'
-    steps: *complete-steps
 
-  # Rewrites every snapshot check like the completion jobs, and is the only writer on a
-  # cancelled run. It needs every release, wave and completion, so no flip lands after it and
-  # gate-refresh and apply-summary never read a check while a write is in flight.
+  # Rewrites every check; the only writer on a cancelled run and of the last populated wave.
+  # It needs every release, wave and completion, so no flip lands after it and gate-refresh and
+  # apply-summary never read a check while a write is in flight.
   complete:
-    needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7, wave0-complete, wave1-complete, wave2-complete, wave3-complete, wave4-complete, wave5-complete, wave6-complete, wave7-complete]
+    needs: [snapshot, wave0-release, wave1-release, wave2-release, wave3-release, wave4-release, wave5-release, wave6-release, wave7-release, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7, wave0-complete, wave1-complete, wave2-complete, wave3-complete, wave4-complete, wave5-complete, wave6-complete]
     if: ${{ always() && needs.snapshot.result == 'success' }}
     runs-on: ubuntu-slim
     permissions: *complete-permissions

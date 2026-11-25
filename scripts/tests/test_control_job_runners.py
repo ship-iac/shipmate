@@ -26,14 +26,13 @@ INPUT = "${{ inputs.runs_on }}"
 
 EXPECTED = {
     ("apply-env-level.yml", "snapshot"): SLIM,
-    **{("apply-env-level.yml", f"wave{n}-complete"): SLIM for n in range(8)},
+    **{("apply-env-level.yml", f"wave{n}-complete"): SLIM for n in range(7)},
     **{("apply-env-level.yml", f"wave{n}-release"): SLIM for n in range(8)},
     ("apply-env-level.yml", "complete"): SLIM,
     ("cell.yml", "apply"): INPUT,
     ("cell.yml", "save"): INPUT,
     ("apply.yml", "guard"): SLIM,
-    ("apply.yml", "claim"): SLIM,
-    ("apply.yml", "queue"): SLIM,
+    ("apply.yml", "admit"): SLIM,
     ("apply-run.yml", "review"): SLIM,
     ("apply-run.yml", "detect"): INPUT,
     ("apply-run.yml", "lock"): INPUT,

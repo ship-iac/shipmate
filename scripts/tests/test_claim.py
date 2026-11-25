@@ -334,7 +334,7 @@ def test_an_apply_claim_never_reads_earlier_attempts(env, monkeypatch):
     from the read condition (an empty owner then never matches, but the read happens)."""
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     env.answer = _TAKEN
-    env.pages = {_page(1): [{"name": "apply / queue", "conclusion": "success"}]}
+    env.pages = {_page(1): [{"name": "apply / admit", "conclusion": "success"}]}
     assert env.go() == 0
     assert env.reads == []
     assert env.outputs() == "state=taken\n"

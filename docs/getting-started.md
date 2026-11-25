@@ -83,10 +83,10 @@ your ordering lives in the outgoing tool's configuration, it must be ported into
 indistinguishable from a stack that is genuinely independent. Treat the outgoing
 tool's config as a *lower bound* on the real graph, not as the graph: one
 migration that audited the OpenTofu code instead of porting the config went from
-6 declared edges to 105, and from 2 wave levels to 6.
+6 declared edges to 105, and from 2 dependency levels to 6.
 
 Four detect jobs report the shape as a `::notice::` line — stack count, `after`
-edge count, wave levels, and how many stacks would apply concurrently. A reader
+edge count, dependency levels, and how many stacks would apply concurrently. A reader
 who knows the repository can judge that last number immediately; nobody else
 can. Exactly four print it: the detect jobs of a dispatched `shipmate apply <env>`,
 of a bare `shipmate apply`, of the `auto` apply, and of the post-merge deploy, so
@@ -494,7 +494,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Every job below passes a `runs_on:` input, which sets the runner of every
-engine job except thirty-three that run neither `terramate` nor `tofu` and stay on
+engine job except thirty-one that run neither `terramate` nor `tofu` and stay on
 `ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
 `ubuntu-26.04-arm` by default, and the other six repeat it with `*runner`.
 The drift fence writes the label itself, because an anchor cannot cross

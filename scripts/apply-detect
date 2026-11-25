@@ -694,7 +694,7 @@ def dag_shape_notice(deps):
     lv = wv.stack_levels(deps)
     return (
         f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
-        f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
+        f"{len(lv)} dependency levels; {max((len(x) for x in lv), default=0)} stacks would apply "
         "concurrently"
     )
 

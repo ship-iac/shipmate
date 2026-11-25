@@ -36,7 +36,7 @@ def test_a_root_stack_cell_gets_a_wave():
     cell = {"stack": ".", "environment": "dev-eu", "workload": ""}
     empty = {f"wave{i}": [] for i in range(8)}
     assert w.env_level_waves([cell], {}, w.parse_dot(ROOT_FIXTURE)) == [
-        {**empty, "wave1": [cell]},
+        {**empty, "wave0": [cell]},
         empty,
         empty,
         empty,
@@ -120,12 +120,45 @@ def test_pad_waves_allows_exactly_max_waves():
     w.pad_waves(waves)  # must not raise
 
 
-def test_pad_waves_raises_when_ninth_wave_populated():
-    # A populated wave at index MAX_WAVES, the 9th, has no pre-declared wave{MAX_WAVES} job, so
-    # it must fail loud.
-    waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)] + [["cell8"]]
-    with pytest.raises(SystemExit):
-        w.pad_waves(waves)
+def test_pad_waves_starts_the_populated_waves_at_wave0():
+    """Mutation: delete the compaction comprehension from `pad_waves` -- `a` stays in `wave3`."""
+    a = {"stack": "stacks/a", "environment": "dev-eu"}
+    assert w.pad_waves([[], [], [], [a]]) == {**_EMPTY, "wave0": [a]}
+
+
+def test_pad_waves_keeps_the_level_order():
+    """Mutation: sort the compacted waves by stack name in `pad_waves` -- `a` moves to `wave0`."""
+    a = {"stack": "stacks/a", "environment": "dev-eu"}
+    b = {"stack": "stacks/b", "environment": "dev-eu"}
+    assert w.pad_waves([[b], [], [a]]) == {**_EMPTY, "wave0": [b], "wave1": [a]}
+
+
+def test_pad_waves_caps_the_populated_levels():
+    """Nine populated levels refuse; populated levels 0 and 9 apply in two waves.
+
+    Mutation: run the cap check before the compaction in `pad_waves` -- levels 0 and 9 refuse."""
+    with pytest.raises(SystemExit) as exc:
+        w.pad_waves([[f"cell{i}"] for i in range(w.MAX_WAVES + 1)])
+    assert str(exc.value) == (
+        "::error::change spans 9 populated dependency levels (> 8); split the PR."
+    )
+    assert w.pad_waves([["cell0"]] + [[] for _ in range(8)] + [["cell9"]]) == {
+        **_EMPTY,
+        "wave0": ["cell0"],
+        "wave1": ["cell9"],
+    }
+
+
+def test_env_level_waves_keeps_transitive_order_through_an_unchanged_stack():
+    """Only `a` and `c` of a -> b -> c are pending: `c` still applies a wave after `a`.
+
+    Mutation: compute the levels in `env_level_waves` over the pending cells' graph only
+    (`{s: deps[s] & pending_stacks}`) -- `c` lands in `wave0` beside `a`."""
+    a = {"stack": "stacks/a", "environment": "dev-eu"}
+    c = {"stack": "stacks/c", "environment": "dev-eu"}
+    deps = {"stacks/a": set(), "stacks/b": {"stacks/a"}, "stacks/c": {"stacks/b"}}
+    out = w.env_level_waves([a, c], {}, deps)
+    assert out[0] == {**_EMPTY, "wave0": [a], "wave1": [c]}
 
 
 def test_pad_waves_ignores_empty_trailing_levels():
@@ -148,15 +181,16 @@ def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
     """The guard fires through a real caller, rather than dropping the level-8 cells into a
     silent no-op apply.
 
-    Mutation: delete the `if over:` refusal from `pad_waves`."""
+    Mutation: delete the populated-level cap refusal from `pad_waves`."""
     deps = w.parse_dot(_linear_chain_dot(w.MAX_WAVES + 1))
-    deep = f"stacks/s{w.MAX_WAVES + 1}"
-    pending = [{"stack": deep, "environment": "dev-eu"}]
+    pending = [{"stack": f"stacks/s{i}", "environment": "dev-eu"} for i in range(1, 10)]
 
     with pytest.raises(SystemExit) as exc:
         w.env_level_waves(pending, {}, deps)
 
-    assert "dependency levels" in str(exc.value)
+    assert str(exc.value) == (
+        "::error::change spans 9 populated dependency levels (> 8); split the PR."
+    )
 
 
 def test_stack_levels_refuses_a_cycle_naming_it():

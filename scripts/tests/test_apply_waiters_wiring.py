@@ -1,12 +1,11 @@
-"""Guards `actions/apply-waiters` and its two steps in `apply-run.yml`, the last of `review` and
-the last of `summary`.
+"""Guards `actions/apply-waiters` and its one step in `apply-run.yml`, the last of `review`.
 
-Both steps only tell waiting runs which run they wait behind, so neither may fail its job: a red
-`review` stops every apply, and `summary` has already written the gate and the apply comment.
-Threat model is accidental regression -- `continue-on-error` or `timeout-minutes` dropped, a step
-moved ahead of the work its job exists for, the display mint widened to `actions: write`, or a
-job's own token widened to carry the reply -- not a hostile edit to a SHA-pinned engine file.
-Each value is compared whole against a hand-written constant.
+The step only tells waiting runs which run they wait behind, so it may not fail its job: a red
+`review` stops every apply. Threat model is accidental regression -- `continue-on-error` or
+`timeout-minutes` dropped, the step moved ahead of the run check, a second waiters step added,
+the display mint widened to `actions: write`, or a job's own token widened to carry the reply --
+not a hostile edit to a SHA-pinned engine file. Each value is compared whole against a
+hand-written constant.
 """
 
 from _loader import action_yaml, workflow_jobs
@@ -21,16 +20,6 @@ _WITH = {
 #: nothing.
 REVIEW_STEP = {
     "name": "Tell the apply runs waiting behind this one",
-    "uses": "$/actions/apply-waiters",
-    "continue-on-error": True,
-    "timeout-minutes": 1,
-    "with": _WITH,
-}
-
-#: `summary`'s last step, whole: after the apply comment, and run after a failed gate refresh.
-SUMMARY_STEP = {
-    "name": "Tell the apply runs waiting behind this one",
-    "if": "${{ !cancelled() }}",
     "uses": "$/actions/apply-waiters",
     "continue-on-error": True,
     "timeout-minutes": 1,
@@ -81,12 +70,15 @@ def test_review_ends_with_the_waiters_step_after_the_run_check():
     assert steps[-2]["uses"] == "$/actions/apply-run-check"
 
 
-def test_summary_ends_with_the_waiters_step_after_the_run_check():
-    """Mutations: drop `continue-on-error` -- red; drop `timeout-minutes` -- red; move the step
-    before the run check -- red."""
-    steps = _steps("summary")
-    assert steps[-1] == SUMMARY_STEP
-    assert steps[-2]["uses"] == "$/actions/apply-run-check"
+def test_review_holds_the_only_waiters_step():
+    """Mutation: re-add the waiters step to `summary` -- red."""
+    found = [
+        (name, step)
+        for name, job in workflow_jobs("apply-run.yml").items()
+        for step in job.get("steps", [])
+        if "apply-waiters" in str(step.get("uses") or "")
+    ]
+    assert found == [("review", REVIEW_STEP)]
 
 
 def test_review_and_summary_job_tokens_stay_as_they_were():

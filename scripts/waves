@@ -3,7 +3,8 @@
 
 Stack-waves are topological levels of the run-graph. Ordering is over the FULL
 graph, then filtered to the work set, so transitive order through unchanged
-stacks is preserved and empty middle waves are normal.
+stacks is preserved; the empty levels are dropped before padding, so the first
+populated level is `wave0`.
 
 Env-levels come from each environment's `needs` in `.github/shipmate-config.yml`:
 the envs that must fully apply before it, collected by `env-config.env_order`
@@ -111,18 +112,18 @@ def assign_waves(levels_, cells):
 
 
 def pad_waves(waves):
-    """`waves` as a {wave0..wave{MAX_WAVES-1}: cells} dict, short lists padded.
+    """The populated `waves`, in order, as a {wave0..wave{MAX_WAVES-1}: cells} dict, padded.
 
-    Refuses a populated wave beyond the pre-declared wave0..wave7 jobs before
-    truncating. A deep FULL graph with only low-level cells in the work set is
-    fine -- empty trailing levels do not count.
+    Empty levels are dropped first, so only populated levels count against the
+    pre-declared wave0..wave7 jobs; more than MAX_WAVES of them refuse.
 
     Every key is always present -- apply-env-level.yml indexes
     `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
-    over = [i for i, w in enumerate(waves) if w and i >= MAX_WAVES]
-    if over:
+    waves = [w for w in waves if w]
+    if len(waves) > MAX_WAVES:
         raise SystemExit(
-            f"::error::change spans {over[-1] + 1} dependency levels (> {MAX_WAVES}); split the PR."
+            f"::error::change spans {len(waves)} populated dependency levels (> {MAX_WAVES}); "
+            "split the PR."
         )
     return {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
 

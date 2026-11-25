@@ -952,7 +952,7 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
         deps={"stacks/a": set(), "stacks/b": {"stacks/a"}},
     )
     assert (
-        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        "::notice::2 stacks, 1 after edges, 2 dependency levels; 1 stacks would apply concurrently"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -963,10 +963,11 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
     """The notice is the line that explains a run too deep for the pre-declared wave jobs, so it
     prints before `env_level_waves` refuses.
 
-    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
+    Mutations: print the DAG-shape notice after `env_level_waves` -- the notice is missing; drop
+    "populated " from `pad_waves`' refusal -- the match fails.
     """
     stacks = [f"stacks/s{i}" for i in range(aad.wv.MAX_WAVES + 1)]
-    with pytest.raises(SystemExit, match="dependency levels"):
+    with pytest.raises(SystemExit, match="spans 9 populated dependency levels"):
         _run_main(
             tmp_path,
             monkeypatch,
@@ -978,7 +979,7 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
             deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
         )
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
+        "::notice::9 stacks, 8 after edges, 9 dependency levels; 1 stacks would apply concurrently"
     ]
 
 

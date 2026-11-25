@@ -3112,8 +3112,9 @@ the run stopped (`CONTRACT.md` §Comment-ops, "Reactions and the comment
 claim"):
 
 - 👀 and no 🚀: no run claimed the command. An apply run's `guard` refused it,
-  the run failed at startup, its `claim` job failed at the App key check or
-  token mint (no reply is possible there), or every job was skipped
+  the run failed at startup, its `claim` job (`admit` in an apply run) failed
+  at the App key check or token mint (no reply is possible there), or every job
+  was skipped
   (§A dispatched verb produced a run in which every job was skipped).
 - 👀 and 🚀: a run owns the command, and its `outcome` job shows why it did not
   answer: skipped (`CONTRACT.md` §Outcome reply lists when), failed at its key
@@ -3121,16 +3122,18 @@ claim"):
   warning. An apply run that has not ended may still wait behind an earlier
   apply run of the same pull request: the API reports its status as `pending`
   while it waits, and it answers once it runs (`CONTRACT.md` §Comment-ops, "One
-  apply run per pull request").
+  apply run per pull request"). A commented apply whose `admit` runner was lost
+  after the 🚀 shows `apply / admit` failed and skips `run` and `outcome`:
+  comment `shipmate apply` again.
 
-A run whose `claim` job summary says another run of this comment owns it did no
-work by design; the run that owns the comment answers. "Re-run all jobs" of the
+A run whose `claim` job (`admit` in an apply run) summary says another run of
+this comment owns it did no work by design; the run that owns the comment answers. "Re-run all jobs" of the
 plan run that owns the comment plans again, because GitHub deleted that run's
 plan artifacts; of a run that lost the claim it does nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
-`guard` names its refusal in an `apply refused:` annotation; a failed `claim`,
+`guard` names its refusal in an `apply refused:` annotation; a failed `claim`, `admit`,
 `facts` or `review` names it in its job log. A startup failure shows on the run
 page with no jobs started, with GitHub's error for the workflow file.
 
@@ -3138,7 +3141,7 @@ page with no jobs started, with GitHub's error for the workflow file.
 
 The pull request carries ``🔴 failed: could not claim this command for its run,
 so the command was not started. Comment it again.``. The dispatched run's `claim`
-job could not add the App's 🚀 to the command comment: GitHub answered other
+job (`admit` in an apply run) could not add the App's 🚀 to the command comment: GitHub answered other
 than 201 or 200, or the request failed. On a "Re-run all jobs" of a plan run, the
 claim also fails when it cannot list an earlier attempt's jobs. The run did nothing; the job log names
 the answer. Comment the command again. Re-running a `shipmate plan` run
@@ -3158,7 +3161,7 @@ this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 
 The run holding this pull request's apply queue posted this comment on the
 pull request. It links the waiting run, the apply command comment that started
-it, and the holding run. It comes from the holding run's `review` or `summary` job, so
+it, and the holding run. It comes from the holding run's `review` job, so
 it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
@@ -3187,7 +3190,7 @@ the current head's, which carries its own apply checks.
 The list of this pull request's apply runs failed or came back malformed, or a
 run the shipmate App dispatched carries a title outside the grammar in
 `CONTRACT.md` §Check names, so this run cancelled nothing and cannot say what it
-waits behind; the `queue` job's log has the warning. When it happens on every
+waits behind; the `admit` job's log has the warning. When it happens on every
 apply, `shipmate.yml`'s `run-name` is not the published one: re-pin it with
 `python <engine>/scripts/repin <consumer> <tag> --write-fence`, after reading the
 diff it prints. The run still starts once the apply queue frees.
@@ -3297,10 +3300,10 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-All thirty-five jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
-`claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `claim`, `queue` and `outcome`,
+All thirty-three jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome`, `comment-ops.yml` `ops`, `apply.yml` `admit` and `outcome`,
 `apply-run.yml` `review`, `lock` and `summary`, `apply-env-level.yml` `snapshot`, `wave0-release` … `wave7-release`,
-`wave0-complete` … `wave7-complete` and `complete`, `deploy.yml` `summary` and `replan`,
+`wave0-complete` … `wave6-complete` and `complete`, `deploy.yml` `summary` and `replan`,
 `drift.yml` `issues` and `release.yml` `release`. No `shipmate / gate` status,
 plan, doctor or apply comment, or comment reply is written, and no cell lock is released.
 
@@ -3350,8 +3353,11 @@ A successful apply of the cell completes the check `success` and restores its
 plan title; a check created before shipmate recorded that title keeps `Failed: ...`
 after the success. A check that stays `in_progress` after its run ended was left by a
 run that died, or by a completion whose jobs listing never showed the cell's
-job (`the retries were exhausted and these apply checks are left pending`); the
-next `shipmate apply` writes it again.
+job (`the retries were exhausted and these apply checks are left pending`). The
+next `shipmate apply` applies the cell again only when that run never applied
+it, and refuses otherwise: return the check by hand (§Return an in-progress
+apply check by hand), first following §`The apply step ran and its state was
+not saved` when the run may have applied the cell without saving its state.
 
 ### An apply check never completes after a successful apply
 

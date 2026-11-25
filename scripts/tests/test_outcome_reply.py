@@ -309,22 +309,23 @@ def test_the_apply_outcome_job_is_wired_exactly():
     'skipped'` (a skipped call reads as ended); drop its `review_result == ''` clause (a call
     that ended `cancelled` after `review` succeeded, with `run_cancelled` false, reads as
     cancelled instead of summary cancelled or ended); drop its `run_cancelled == 'true' ||`
-    clause (a mid-run cancel reads as ended). The claim clause: a run cancelled after its claim
-    was `owned` still replies, because `always()` stays; a `taken` run (another run of the
-    comment owns it) and a failed claim, which replied itself, do not; an `auto` run, whose
-    `claim` skips, does. Mutations: drop the claim clause; drop `claim` from `needs`; compare
-    `state` with `!= 'taken'` (a failed claim's empty output would reply twice); drop
-    `|| github.event.inputs.comment_id == ''` (an `auto` run would never reply); bypass on
-    `needs.claim.result == 'skipped'` instead. The constant pins
-    each: the expression is never evaluated here."""
+    clause (a mid-run cancel reads as ended). The admission clause: a run cancelled after `admit`
+    wrote `admitted` still replies, because `always()` stays, even when its queue step was
+    cancelled; a `taken` run (another run of the comment owns it) and a failed claim, which
+    replied itself, do not; an `auto` run does, by its empty `comment_id` even when a lost
+    `admit` runner left `admitted` empty. Mutations: drop the admission clause; drop `admit`
+    from `needs`; compare `admitted` with `!= 'false'` (an empty output would reply); drop
+    `|| github.event.inputs.comment_id == ''` (an `auto` run depends on `admit`'s outputs);
+    key it on `needs.admit.result == 'success'` (a failed queue step would skip the reply). The
+    constant pins each: the expression is never evaluated here."""
     assert workflow_jobs("apply.yml")["outcome"] == {
-        "needs": ["guard", "claim", "run"],
+        "needs": ["guard", "admit", "run"],
         "if": (
             "${{ always() && needs.guard.result == 'success' && "
             "needs.run.outputs.posted != 'true' && "
             "(needs.run.outputs.review_result != 'failure' || "
             "(needs.run.outputs.unbound != 'true' && !inputs.auto)) && "
-            "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '') }}"
+            "(needs.admit.outputs.admitted == 'true' || github.event.inputs.comment_id == '') }}"
         ),
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,

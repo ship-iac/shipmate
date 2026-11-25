@@ -340,9 +340,9 @@ jobs:
     # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
     environment: { name: shipmate-engine, deployment: false }
-    # gate-refresh, apply-summary and apply-waiters mint their own App tokens for their scans and
-    # writes; the one GITHUB_TOKEN scope needed is actions:read, for the cell-summary download and
-    # apply-summary's run-jobs listing.
+    # gate-refresh and apply-summary mint their own App tokens for their scans and writes; the one
+    # GITHUB_TOKEN scope needed is actions:read, for the cell-summary download and apply-summary's
+    # run-jobs listing.
     permissions: { actions: read }
     outputs:
       posted: ${{ steps.result.outputs.posted }}
@@ -412,16 +412,5 @@ jobs:
         with:
           mode: finish
           head-sha: ${{ inputs.ref }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      # Display only: a failure or a hung API call here must not fail summary, whose gate write
-      # and apply comment are done.
-      - name: Tell the apply runs waiting behind this one
-        if: ${{ !cancelled() }}
-        uses: $/actions/apply-waiters
-        continue-on-error: true
-        timeout-minutes: 1
-        with:
-          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
