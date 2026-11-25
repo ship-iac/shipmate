@@ -188,12 +188,12 @@ completed the same checks. A merge deploy's re-run is allowed, unless an
 earlier attempt of the deploy may have applied a cell without saving its
 state. Then the deploy refuses:
 ``deploy refused: <cells> may have been applied by an earlier attempt of this deploy, run <id>, without saving their state. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.``,
-and when the deploy's own jobs cannot be listed completely, a re-run refuses
-every pending cell with
-``<cells>: run <this run id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.``;
 and a cell re-run on its own refuses before it applies:
 ``apply aborted for `<env>` / `<stack>`: run attempt <n> of this deploy may have applied this cell without saving its state; follow docs/troubleshooting.md section The apply step ran and its state was not saved``
-(`run attempts <n>, <m>` for more than one). A re-run of a merge deploy starts
+(`run attempts <n>, <m>` for more than one). On any re-run, when the deploy's
+own jobs cannot be listed completely, it refuses every pending cell with
+``<cells>: run <this run id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.``
+A re-run of a merge deploy starts
 from the checks that are still open. A cell's state is saved only by the
 attempt that applied it: when an earlier attempt may have applied the cell
 without saving, a re-run's `save` job looks that attempt's state up, never
@@ -228,11 +228,13 @@ A merge deploy whose own `complete` fails this way leaves the checks
 `in_progress` under that deploy run:
 
 - Never applied: re-run the deploy.
-- Saved any state its apply left: find out whether the change was applied,
-  and complete the check by the hand procedure above first when it was; a re-run applies its reviewed plan a second time, or is refused as
-  stale.
-- May have applied without saving its state: every re-run refuses while
-  those cells' apply checks are pending, and skips them once completed. Follow
+- Saved any state its apply left: find out whether the change was applied.
+  When it was, complete the check by the hand procedure above; a re-run would
+  apply its reviewed plan a second time, or be refused as stale. When it was
+  not, re-run the deploy, which applies it once.
+- May have applied without saving its state: a re-run of all the deploy's
+  jobs refuses while those cells' apply checks are pending, and skips them once
+  completed; a cell re-run on its own refuses whatever its check shows. Follow
   §`The apply step ran and its state was not saved`, then apply the stack
   through a new pull request touching it.
 

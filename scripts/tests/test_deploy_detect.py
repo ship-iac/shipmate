@@ -2170,7 +2170,7 @@ _SAVED = {
 
 
 @pytest.mark.parametrize("jobs", _SAVED.values(), ids=_SAVED.keys())
-def test_an_ended_run_that_applied_and_saved_the_cell_refuses_naming_the_by_hand_return(
+def test_an_ended_run_that_saved_any_state_of_the_cell_refuses_naming_the_by_hand_return(
     tmp_path, monkeypatch, jobs
 ):
     """Run 77 ended after an attempt applied the cell, or may have, and that attempt's `save` or
