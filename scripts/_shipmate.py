@@ -406,8 +406,9 @@ def gh_json(path, run=None, *, retry=True):
 
 def write_outputs(**pairs):
     """Append each `name=value` pair to the calling step's `GITHUB_OUTPUT`, a bool as
-    `true`/`false`. A value holding CR or LF would end its line early."""
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+    `true`/`false`. A value holding CR or LF would end its line early. Lines end in LF on every
+    platform."""
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
         for name, value in pairs.items():
             if isinstance(value, bool):
                 value = "true" if value else "false"
