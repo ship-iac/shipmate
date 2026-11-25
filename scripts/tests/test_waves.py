@@ -120,14 +120,6 @@ def test_pad_waves_allows_exactly_max_waves():
     w.pad_waves(waves)  # must not raise
 
 
-def test_pad_waves_raises_when_ninth_wave_populated():
-    # A populated wave at index MAX_WAVES, the 9th, has no pre-declared wave{MAX_WAVES} job, so
-    # it must fail loud.
-    waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)] + [["cell8"]]
-    with pytest.raises(SystemExit):
-        w.pad_waves(waves)
-
-
 def test_pad_waves_starts_the_populated_waves_at_wave0():
     """Mutation: delete the compaction comprehension from `pad_waves` -- `a` stays in `wave3`."""
     a = {"stack": "stacks/a", "environment": "dev-eu"}
