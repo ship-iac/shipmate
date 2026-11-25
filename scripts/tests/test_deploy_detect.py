@@ -2383,10 +2383,12 @@ def test_a_deploy_rerun_refuses_a_cell_its_earlier_attempt_left_unsaved(
 )
 def test_a_deploy_rerun_that_cannot_list_its_own_jobs_refuses(tmp_path, monkeypatch, runs):
     """A failed, empty or malformed listing of this run's own jobs on attempt 2 refuses every
-    pending cell as unreadable: this run always lists its own `detect`.
+    pending cell naming this deploy's own jobs: this run always lists its own `detect`, and the
+    by-hand return alone cannot clear the refusal.
 
     Mutation: read a listing that is not None as readable (no `newest_attempt` check) -- the
-    empty and null-attempt cases deploy, red."""
+    empty and null-attempt cases deploy, red.
+    Mutation: key the cells `unreadable` in `_own_unsaved` -- the other-run text, red."""
     monkeypatch.setattr(_shipmate, "_sleep", lambda s: None)
     with pytest.raises(SystemExit) as exc:
         _two_cells(
@@ -2397,8 +2399,10 @@ def test_a_deploy_rerun_that_cannot_list_its_own_jobs_refuses(tmp_path, monkeypa
             attempt="2",
         )
     assert str(exc.value) == (
-        "::error::deploy refused: stacks/app / dev-eu, stacks/web / dev-eu: run 900 could not be "
-        f"read completely; re-run this deploy. If it fails the same way, follow {_BY_HAND}."
+        "::error::deploy refused: stacks/app / dev-eu, stacks/web / dev-eu: this deploy, run 900, "
+        "could not read its own jobs completely. Re-run this deploy; if it keeps failing, "
+        "complete by hand the apply checks of cells whose change is applied and state saved, as "
+        f"in {_BY_HAND}, and apply the rest through a new pull request touching their stacks."
     )
 
 

@@ -233,8 +233,8 @@ def refuse_in_flight(repo, lines, app_id, pending):
 def _own_unsaved(repo, pending, held):
     """On a re-run (`GITHUB_RUN_ATTEMPT` above 1), which runs `detect` again, add to `held` each
     `pending` cell an earlier attempt of this run applied, or may have, without saving its state
-    (`ag.unsaved`) as `own`; or every pending cell as `unreadable` when this run's jobs cannot
-    be listed completely, since this run always lists its own `detect`."""
+    (`ag.unsaved`) as `own`; or every pending cell as `own-unreadable` when this run's jobs
+    cannot be listed completely, since this run always lists its own `detect`."""
     attempt = int(os.environ["GITHUB_RUN_ATTEMPT"])
     if attempt < 2 or not pending:
         return
@@ -243,7 +243,7 @@ def _own_unsaved(repo, pending, held):
     readable = jobs is not None and ad.newest_attempt(own, jobs) is not None
     for c in pending:
         if not readable:
-            key = ("unreadable", own)
+            key = ("own-unreadable", own)
         elif ad.ag.unsaved(jobs, c["stack"], c["environment"], before=attempt):
             key = ("own", own)
         else:
@@ -279,6 +279,14 @@ def _held(cause, ident, cells):
         return (
             f"{names} may have been applied by an earlier attempt of this deploy, run {ident}, "
             f"without saving their state. {lost}"
+        )
+    if cause == "own-unreadable":
+        return (
+            f"{names}: this deploy, run {ident}, could not read its own jobs completely. Re-run "
+            "this deploy; if it keeps failing, complete by hand the apply checks of cells whose "
+            "change is applied and state saved, as in docs/troubleshooting.md section Return an "
+            "in-progress apply check by hand, and apply the rest through a new pull request "
+            "touching their stacks."
         )
     return ad.held_text(cause, ident, names, "re-run this deploy")
 

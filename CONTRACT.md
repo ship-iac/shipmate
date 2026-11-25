@@ -192,7 +192,7 @@ and a cell re-run on its own refuses before it applies:
 ``apply aborted for `<env>` / `<stack>`: run attempt <n> of this deploy may have applied this cell without saving its state; follow docs/troubleshooting.md section The apply step ran and its state was not saved``
 (`run attempts <n>, <m>` for more than one). On a re-run that runs `detect` again, when
 the deploy's own jobs cannot be listed completely, it refuses every pending cell with
-``<cells>: run <this run id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.``
+``<cells>: this deploy, run <this run id>, could not read its own jobs completely. Re-run this deploy; if it keeps failing, complete by hand the apply checks of cells whose change is applied and state saved, as in docs/troubleshooting.md section Return an in-progress apply check by hand, and apply the rest through a new pull request touching their stacks.``
 A re-run of a merge deploy starts
 from the checks that are still open. A cell's state is saved only by the
 attempt that applied it: when an earlier attempt may have applied the cell
