@@ -3355,8 +3355,8 @@ after the success. A check that stays `in_progress` after its run ended was left
 run that died, or by a completion whose jobs listing never showed the cell's
 job (`the retries were exhausted and these apply checks are left pending`). The
 next apply reads that run: a bare or targeted `shipmate apply` applies the cell
-when the run never applied it, and an `auto` run holds it
-(§`⚪ held, an earlier apply run did not apply these cells`). Otherwise the
+when the run never applied it, and an `auto` run holds it as attempted unless
+it waits or is held for another cause (§`⚪ held, an earlier apply run did not apply these cells`). Otherwise the
 apply refuses with one of the sentences in §An apply refused an apply check
 another run holds in progress; follow the remedy that sentence names.
 
@@ -3544,7 +3544,7 @@ in progress, ending ``re-run `shipmate apply` `` where the deploy's end
 `re-run this deploy`. Two differ: a live run ends
 ``Wait for it to end, then re-run `shipmate apply`.``, and an ended run that may
 have applied the cell without saving its state reads
-``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then return or complete the check as in docs/troubleshooting.md section Return an in-progress apply check by hand.``
+``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then return or complete each check as in docs/troubleshooting.md section Return an in-progress apply check by hand.``
 Follow the same table, with `shipmate apply` in place of a deploy re-run. A
 cell whose holding run ended without applying it applies on a bare or targeted
 `shipmate apply`; an `auto` run holds it instead

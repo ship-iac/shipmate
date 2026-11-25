@@ -200,8 +200,8 @@ saves it, and fails unless it finds it.
 runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
 The next apply or deploy of the cell reads the run that holds the check. When
 that run never applied the cell, a bare or targeted `shipmate apply` applies
-it, a merge deploy queues it, and an `auto` run holds it (§`apply_mode:
-auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
+it, a merge deploy queues it, and an `auto` run holds it as attempted unless
+it waits or is held for another cause (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
 **Last wave.** A level's last populated wave runs no `waveN-complete` job:
 `complete`, which runs right after it, alone writes its checks. A `complete`
@@ -210,8 +210,9 @@ minutes of retries, leaves them `in_progress`, linked to the run, and the next
 apply or deploy of the cell reads that run as the holder (table below):
 
 - Never applied: a bare or targeted `shipmate apply` applies the cell and a
-  merge deploy queues it; an `auto` run holds it as attempted (§`apply_mode:
-  auto`, Attempted cells), so comment `shipmate apply`.
+  merge deploy queues it; an `auto` run holds it as attempted unless it waits
+  or is held for another cause (§`apply_mode: auto`, Attempted cells), so
+  comment `shipmate apply`.
 - Applied and its state saved: refused. Complete the check, or return it to
   `queued` to apply again, by
   [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress
@@ -222,8 +223,7 @@ apply or deploy of the cell reads that run as the holder (table below):
   the check by the same hand procedure.
 
 A merge deploy whose own `complete` fails this way leaves the checks
-`in_progress` under that deploy run, and a re-run of the deploy queues them
-again:
+`in_progress` under that deploy run:
 
 - Never applied: re-run the deploy.
 - Applied and its state saved: complete the check by the hand procedure above
@@ -248,7 +248,7 @@ held it refuses through its earlier attempt (§Re-runs above).
 | --- | --- | --- |
 | still running, or a job of the cell has not completed | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand | refuses: ``<cells> are held in progress by run <id>, which is still running. Wait for it to end, then re-run `shipmate apply`.`` |
 | ended, never applied the cell | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it`` | a bare or targeted apply applies the cell; an `auto` run holds it as attempted |
-| ended, may have applied the cell without saving its state, or lists no job of the cell | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` | refuses: ``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then return or complete the check as in docs/troubleshooting.md section Return an in-progress apply check by hand.`` |
+| ended, may have applied the cell without saving its state, or lists no job of the cell | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` | refuses: ``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then return or complete each check as in docs/troubleshooting.md section Return an in-progress apply check by hand.`` |
 | ended, applied the cell and saved its state | refuses: ``<cells> were left in progress by run <id>, which applied them and saved their state. Follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
 | the run or its jobs listing could not be read completely | refuses: ``<cells>: run <id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.`` | refuses with the same text, ``re-run `shipmate apply` `` in place of `re-run this deploy` |
 | the link names no run of this repository | refuses: ``<cells>: apply check <check id> is in progress with no run named; follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |

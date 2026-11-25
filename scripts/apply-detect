@@ -547,7 +547,7 @@ def _held_text(cause, ident, cells):
         return (
             f"{names} may have been applied by run {ident} without saving their state; follow "
             "docs/troubleshooting.md section The apply step ran and its state was not saved, "
-            f"then return or complete the check as in docs/troubleshooting.md section {BY_HAND}."
+            f"then return or complete each check as in docs/troubleshooting.md section {BY_HAND}."
         )
     return held_text(cause, ident, names, "re-run `shipmate apply`")
 
