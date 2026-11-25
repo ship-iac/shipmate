@@ -1422,47 +1422,47 @@ def _rows():
     live, live_runs, live_refusal = _holding("live", id=1)
     deploy, deploy_runs, _ = _holding("ended never applied", id=1)
     rows = {
-        "2 fresh": ([_titled()], (), "apply"),
-        "2b stale": (
+        "fresh": ([_titled()], (), "apply"),
+        "stale": (
             [{**_titled(), "status": "completed", "conclusion": "stale"}],
             (),
             "attempted",
         ),
-        "2b stale retitled": (
+        "stale retitled": (
             [{**_titled(shown="Failed: x"), "status": "completed", "conclusion": "stale"}],
             (),
             "attempted",
         ),
-        "3 retitled": ([_titled(shown="Failed: x")], (), "attempted"),
-        "3 completed cancelled": (
+        "retitled": ([_titled(shown="Failed: x")], (), "attempted"),
+        "completed cancelled": (
             [{**_titled(shown="Failed: x"), "status": "completed", "conclusion": "cancelled"}],
             (),
             "attempted",
         ),
-        "4 behind": ([behind_check("stacks/app", plan_run=RUN, cells=1, app=APP)], (), "overlap"),
-        "5 no title": ([_titled(shown="Failed: x", record_title=None)], (), "apply"),
-        "5 empty title": ([_titled(shown="Failed: x", record_title="")], (), "apply"),
-        "5 title not a str": ([_titled(shown="Failed: x", record_title=5)], (), "apply"),
-        "6 no record": ([{**_titled(), "external_id": None}], (), _NO_RUN),
-        "6 undecodable": ([{**_titled(), "external_id": "not json"}], (), _NO_RUN),
-        "7 own run": (
+        "behind": ([behind_check("stacks/app", plan_run=RUN, cells=1, app=APP)], (), "overlap"),
+        "no record title": ([_titled(shown="Failed: x", record_title=None)], (), "apply"),
+        "empty record title": ([_titled(shown="Failed: x", record_title="")], (), "apply"),
+        "record title not a str": ([_titled(shown="Failed: x", record_title=5)], (), "apply"),
+        "no record": ([{**_titled(), "external_id": None}], (), _NO_RUN),
+        "undecodable record": ([{**_titled(), "external_id": "not json"}], (), _NO_RUN),
+        "own run": (
             [{**_titled(), "status": "in_progress", "details_url": OWN_PAGE}],
             (),
             "apply",
         ),
-        "13 deploy": ([deploy], deploy_runs, "attempted"),
-        "14 held over live": (
+        "ended never applied": ([deploy], deploy_runs, "attempted"),
+        "retitled over live": (
             [live, _titled(shown="Failed: x", id=2)],
             live_runs,
             live_refusal,
         ),
-        "15a autoplan re-plan": (
+        "autoplan re-plan": (
             [_titled(shown="Failed: x", plan_run="111", id=1), _titled(id=2)],
             (),
             "apply",
         ),
-        "15a autoplan re-plan over deploy": ([deploy, _titled(id=2)], deploy_runs, "apply"),
-        "15b dispatched re-plan": (
+        "autoplan re-plan over never applied": ([deploy, _titled(id=2)], deploy_runs, "apply"),
+        "dispatched re-plan": (
             [_titled(shown="Failed: x", id=1), _titled(plan_run="555", id=2)],
             (),
             (
@@ -1470,17 +1470,11 @@ def _rows():
                 f"(run {RUN} is). {REMEDY}"
             ),
         ),
-        "16 fresh over live": ([live, _titled(id=2)], live_runs, live_refusal),
+        "fresh over live": ([live, _titled(id=2)], live_runs, live_refusal),
     }
-    for row, case in (
-        ("8 live", "live"),
-        ("9 unreadable", "unreadable"),
-        ("10 unknown", "no run named"),
-        ("11 ended", "ended unsaved"),
-        ("12 saved", "ended saved"),
-    ):
+    for case in ("live", "unreadable", "no run named", "ended unsaved", "ended saved"):
         check, runs, refusal = _holding(case)
-        rows[row] = ([check], runs, refusal)
+        rows[case] = ([check], runs, refusal)
     return rows
 
 
@@ -1491,17 +1485,19 @@ _ROWS = _rows()
 def test_every_state_of_a_candidates_newest_check_applies_holds_or_refuses(
     tmp_path, monkeypatch, checks, runs, outcome
 ):
-    """Each row of the state table an auto run reads, with its whole outcome.
+    """Each state of a candidate's newest App apply check an auto run reads, with its whole
+    outcome.
 
-    Mutation: hold every candidate whose check is not `in_progress` -- `2 fresh`, red.
-    Mutation: hold on a missing record title -- the `5` rows, red.
-    Mutation: drop R-c (the `stale` test) -- `2b stale`, red.
-    Mutation: key R-a on `status == "queued"` -- `3 completed cancelled`, red.
-    Mutation: drop `attempted` from `holds` -- `3 retitled` applies, red.
-    Mutation: read the oldest check per name -- `15a autoplan re-plan` holds, red.
-    Mutation: hold a cell whenever any check of it is retitled -- `15a autoplan re-plan`, red.
-    Mutation: call `refuse_held` over `runnable` only -- `14 held over live` holds, red.
-    Mutation: delete `refuse_provenance`'s `provenance_reason` raise -- `15b` applies, red."""
+    Mutation: hold every candidate whose check is not `in_progress` -- `fresh`, red.
+    Mutation: hold on a missing record title -- the record title rows, red.
+    Mutation: drop the `stale` hold -- `stale`, red.
+    Mutation: key the retitle hold on `status == "queued"` -- `completed cancelled`, red.
+    Mutation: drop `attempted` from `holds` -- `retitled` applies, red.
+    Mutation: read the oldest check per name -- `autoplan re-plan` holds, red.
+    Mutation: hold a cell whenever any check of it is retitled -- `autoplan re-plan`, red.
+    Mutation: call `refuse_held` over `runnable` only -- `retitled over live` holds, red.
+    Mutation: delete `refuse_provenance`'s `provenance_reason` raise -- `dispatched re-plan`
+    applies, red."""
     kw = {"checks": checks, "runs": runs}
     if outcome not in ("apply", "attempted", "overlap"):
         with pytest.raises(SystemExit) as exc:
@@ -1676,3 +1672,35 @@ def test_the_attempted_hold_and_the_holder_refusal_decide_on_one_holder_read(tmp
         _run_auto(tmp_path, monkeypatch, checks=[check], runs=runs)
     assert str(exc.value) == HELD_CASES["unreadable"][3]
     assert reads == [HOLDER]
+
+
+def test_an_attempted_cell_that_waits_keeps_its_wait_and_the_rest_applies(tmp_path, monkeypatch):
+    """`stacks/app` is locked, so `stacks/dns`, which runs after it, waits; dns's newest check is
+    retitled over an older check a live run holds. A waiting cell never reaches `refuse_held`, so
+    dns waits as any waiting cell does and the unrelated `stacks/web` applies.
+
+    Mutation: pass `attempted_cells` every candidate neither locked nor overlap -- dns is held
+    `attempted` and the live holder refuses the run, red."""
+    live, runs, _ = _holding("live", stack="stacks/dns", cells=3, id=2)
+    parsed = _run_auto(
+        tmp_path,
+        monkeypatch,
+        stacks=("stacks/app", "stacks/dns", "stacks/web"),
+        checks=[
+            _titled(cells=3, id=1),
+            live,
+            _titled("stacks/dns", shown="Failed: x", cells=3, id=3),
+            _titled("stacks/web", cells=3, id=4),
+        ],
+        runs=runs,
+        locks=held(aad.cl, "stacks/app", "dev-eu", 7),
+        deps={**_DNS_AFTER_APP, "stacks/web": set()},
+        tags={**_DEV_EU_TAGS, "stacks/web": ["env/dev-eu"]},
+    )
+    assert _applied(parsed) == [("stacks/web", "dev-eu")]
+    assert detect_report()["held_cells"] == [
+        {"stack": "stacks/app", "environment": "dev-eu", "cause": "locked", "holder": 7}
+    ]
+    assert detect_report()["waiting_cells"] == [
+        waiting_cell("stacks/dns", "dev-eu", "stacks/app", "dev-eu")
+    ]

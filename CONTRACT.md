@@ -2854,7 +2854,7 @@ apply queue, and the second never applies a cell the first attempted
 (Attempted cells, below): it applies none after a full apply, holds the cells
 the first left failed, cancelled or not run, or refuses as the first did.
 A read that fails before a change of an `auto` environment is known warns, and
-replies when the deferred-to plan published that an `auto` apply follows
+replies when the deferred-to plan published that an `auto` environment changed
 (`yes`, §Post-plan topology, `summary`); it warns with no reply only when that
 plan published neither. A failed autoplan listing, or a clicker's permission
 that could not be read, warns and posts the reply whatever the plan published.
@@ -3084,8 +3084,8 @@ dispatches again. A cell whose newest apply check is a behind record (its plan
 found that the base changed its stack after the branch left it) is held the same
 way and named on the same line.
 
-**Attempted cells.** A cell `detect` would apply, neither locked nor an overlap
-cell, is held when its newest App apply check shows that an earlier apply run
+**Attempted cells.** A cell `detect` would apply, neither locked, an overlap
+cell, nor waiting on a cell that does not apply, is held when its newest App apply check shows that an earlier apply run
 attempted it and did not apply it: the check is not `in_progress` and its
 title differs from the one its plan record holds (a completion retitled it
 `Failed: <error>`, `Cancelled`, `Not run` or `Not applied (<conclusion>)`);
@@ -3361,7 +3361,7 @@ The nine jobs:
   `shipmate-engine`, `permissions: {}`) — when the pull request's push run
   planned and published this head while the ready click waited, this run plans
   nothing and posts no plan comment: `plan / defer` succeeds with the notice "plan run
-  <id> planned and published <sha> (auto apply follows: <state>); this
+  <id> planned and published <sha> (auto environment changed: <state>); this
   ready-for-review run plans nothing", and `detect`, `plan`, `summary`,
   `gate-hold` and `outcome` are skipped. `<state>` is what that run's
   `summary` published: `yes` or `no` when exactly one of its two steps
@@ -3415,10 +3415,10 @@ The nine jobs:
   head and the `⚪ nothing planned` comment when no cell was planned. It
   outputs what its comment write did (`upsert`) and whether the run was
   superseded (`superseded`), which `outcome` reads. Two steps after it, shown
-  on the run page, publish whether an `auto` apply follows the plan by which
-  one succeeds: `Auto apply follows` when a changed cell is in an
-  `apply_mode: auto` environment of the default branch's table, `No auto apply
-  follows` when none is. Both skip when `detect` gave no readable list of that
+  on the run page, publish whether the plan changed an `auto` environment by which
+  one succeeds: `An auto environment changed` when a changed cell is in an
+  `apply_mode: auto` environment of the default branch's table, `No auto environment
+  changed` when none is. Both skip when `detect` gave no readable list of that
   table's `auto` environments, or the run was superseded before it built its comment. `defer` reads them. A run that
   sees its pull request moved past its head before the publish hold writes none
   of these on it; one that sees the move at the plan comment step leaves any

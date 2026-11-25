@@ -1,6 +1,6 @@
 """`actions/plan-defer`: a ready-for-review run asks `gate-status published` whether an earlier
-autoplan run planned and published its head, and outputs that run's id and whether an auto apply
-follows its plan, or nothing.
+autoplan run planned and published its head, and outputs that run's id and whether its plan
+changed an auto environment, or nothing.
 
 Every failure plans: the action decides only whether to repeat a plan, so a failed verify, mint
 or read leaves `run` empty and the step passes. The bash step runs for real with a `python3`
@@ -16,8 +16,8 @@ VERIFY = "Verify the App key arrived"
 MINT = "Mint App installation token"
 STEP = "Read the earlier plan run"
 NOTICE = (
-    f"::notice::plan run 12345 planned and published {HEAD_SHA} (auto apply follows: unread); "
-    "this ready-for-review run plans nothing\n"
+    f"::notice::plan run 12345 planned and published {HEAD_SHA} (auto environment changed: "
+    "unread); this ready-for-review run plans nothing\n"
 )
 CAUSE = "jobs listing of run 7 is incomplete"
 READ_WARNING = (
@@ -112,7 +112,7 @@ def test_the_second_word_is_the_auto_output(tmp_path):
     proc, output, _ = _run(tmp_path, out="42 no\n")
     assert (proc.returncode, proc.stderr) == (0, "")
     assert proc.stdout == (
-        f"::notice::plan run 42 planned and published {HEAD_SHA} (auto apply follows: no); "
+        f"::notice::plan run 42 planned and published {HEAD_SHA} (auto environment changed: no); "
         "this ready-for-review run plans nothing\n"
     )
     assert output == "run=42\nauto=no\n"

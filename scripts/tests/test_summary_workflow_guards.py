@@ -56,12 +56,12 @@ EXPECTED_STEPS = [
 #: hand-written.
 EXPECTED_AUTO_STEPS = [
     {
-        "name": "Auto apply follows",
+        "name": "An auto environment changed",
         "if": "${{ steps.summary.outputs.auto-change == 'yes' }}",
         "run": "true",
     },
     {
-        "name": "No auto apply follows",
+        "name": "No auto environment changed",
         "if": "${{ steps.summary.outputs.auto-change == 'no' }}",
         "run": "true",
     },
@@ -173,7 +173,10 @@ def test_the_auto_apply_steps_follow_the_summary_action_exactly():
     two `if:` values."""
     job, _ = _summary_job()
     assert job["steps"][-2:] == EXPECTED_AUTO_STEPS
-    assert (gs.AUTO_STEP_YES, gs.AUTO_STEP_NO) == ("Auto apply follows", "No auto apply follows")
+    assert (gs.AUTO_STEP_YES, gs.AUTO_STEP_NO) == (
+        "An auto environment changed",
+        "No auto environment changed",
+    )
 
 
 def test_one_pair_of_words_says_whether_an_auto_apply_follows():
@@ -338,8 +341,8 @@ EXPECTED_ACTION_OUTPUTS = {
             "`yes` when a changed cell sits in an environment `auto-envs` names, `no` when "
             "`auto-envs` is a list of names and none does, empty when it is empty or not such a "
             "list, or when the run was superseded before it built the comment. The `plan.yml` "
-            "steps `Auto apply follows` and `No auto apply follows` publish it as their "
-            "conclusions."
+            "steps `An auto environment changed` and `No auto environment changed` publish it as "
+            "their conclusions."
         ),
         "value": "${{ steps.build.outputs.auto_change }}",
     },

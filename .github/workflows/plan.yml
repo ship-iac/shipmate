@@ -283,10 +283,10 @@ jobs:
           behind: ${{ needs.detect.outputs.behind }}
       # `gate-status published` reads these two steps' conclusions by name (`AUTO_STEP_YES`,
       # `AUTO_STEP_NO`); a ready-for-review run deferring to this one skips `defer-auto` on `no`.
-      - name: Auto apply follows
+      - name: An auto environment changed
         if: ${{ steps.summary.outputs.auto-change == 'yes' }}
         run: "true"
-      - name: No auto apply follows
+      - name: No auto environment changed
         if: ${{ steps.summary.outputs.auto-change == 'no' }}
         run: "true"
 

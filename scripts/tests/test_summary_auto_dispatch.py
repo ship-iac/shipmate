@@ -365,7 +365,7 @@ if [ "$rc" -ne 0 ]; then
   sed 's/^::error::/::warning::/' decide.err >&2
   echo "::warning::could not decide whether to dispatch an auto apply; no auto apply started"
   # Exit 3 (UNREAD in scripts/auto-dispatch), or the deferred-to plan published that an auto
-  # apply follows: a change called for one, so the reply matches a failed dispatch.
+  # environment changed: a change called for one, so the reply matches a failed dispatch.
   if [ "$rc" -eq 3 ] || [ "$AUTO_CHANGE" = yes ]; then
     reply failed "auto apply not started: what decides it for this ready-for-review run could not be read; comment \\`shipmate apply\\`"
   fi

@@ -2524,50 +2524,70 @@ _SUMMARY_STEP = _step("Run ship-iac/shipmate/actions/summary@abc", "success")
     ("steps", "state"),
     [
         pytest.param(
-            [_step("Auto apply follows", "success"), _step("No auto apply follows", "skipped")],
+            [
+                _step("An auto environment changed", "success"),
+                _step("No auto environment changed", "skipped"),
+            ],
             "yes",
             id="yes",
         ),
         pytest.param(
-            [_step("Auto apply follows", "skipped"), _step("No auto apply follows", "success")],
+            [
+                _step("An auto environment changed", "skipped"),
+                _step("No auto environment changed", "success"),
+            ],
             "no",
             id="no",
         ),
         pytest.param([], "unread", id="neither"),
         pytest.param(
-            [_step("Auto apply follows", "success"), _step("No auto apply follows", "success")],
+            [
+                _step("An auto environment changed", "success"),
+                _step("No auto environment changed", "success"),
+            ],
             "unread",
             id="both-success",
         ),
         pytest.param(
-            [_step("Auto apply follows", "skipped"), _step("No auto apply follows", "skipped")],
+            [
+                _step("An auto environment changed", "skipped"),
+                _step("No auto environment changed", "skipped"),
+            ],
             "unread",
             id="both-skipped",
         ),
-        pytest.param([_step("Auto apply follows", "skipped")], "unread", id="yes-skipped-alone"),
         pytest.param(
-            [_step("Auto apply follows", "failure"), _step("No auto apply follows", "skipped")],
+            [_step("An auto environment changed", "skipped")], "unread", id="yes-skipped-alone"
+        ),
+        pytest.param(
+            [
+                _step("An auto environment changed", "failure"),
+                _step("No auto environment changed", "skipped"),
+            ],
             "unread",
             id="yes-failed",
         ),
         pytest.param(
-            [_step("Auto apply follows", "success"), _step("Auto apply follows", "success")],
+            [
+                _step("An auto environment changed", "success"),
+                _step("An auto environment changed", "success"),
+            ],
             "unread",
             id="yes-listed-twice",
         ),
         pytest.param(
             [
-                _step("Auto apply follows", "skipped"),
-                _step("No auto apply follows", "success"),
-                _step("No auto apply follows", "success"),
+                _step("An auto environment changed", "skipped"),
+                _step("No auto environment changed", "success"),
+                _step("No auto environment changed", "success"),
             ],
             "unread",
             id="no-listed-twice",
         ),
         pytest.param(
             [
-                _step("Auto apply follows (old)", "success"),
-                _step("No auto apply follows", "skipped"),
+                _step("An auto environment changed (old)", "success"),
+                _step("No auto environment changed", "skipped"),
             ],
             "unread",
             id="old-step",

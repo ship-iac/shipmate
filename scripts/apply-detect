@@ -523,10 +523,11 @@ def held_by_others(repo, lines, app_id, cells, runs=None):
 
 def refuse_held(repo, lines, app_id, cells, runs=None):
     """Refuse the whole apply when another run holds a check of one of `cells` and that run may
-    still apply the cell, may have applied it, or cannot be read (`held_by_others`); a cell an
-    ended run never applied applies. Only this head's checks are read, holder runs through the
-    cache `runs` (`held_by_others`). A plain `SystemExit`, not `Refused`: infrastructure and its
-    saved state may disagree, which no rule explains."""
+    still apply the cell, may have applied it, or cannot be read (`held_by_others`). It lets
+    through a cell whose holder ended without applying it (`deploy`): the bare and targeted forms
+    apply it, and the auto form has already held it (`attempted_cells`). Only this head's checks
+    are read, holder runs through the cache `runs` (`held_by_others`). A plain `SystemExit`, not
+    `Refused`: infrastructure and its saved state may disagree, which no rule explains."""
     found = held_by_others(repo, lines, app_id, cells, runs)
     held = {k: v for k, v in found.items() if k[0] != "deploy"}
     if held:
@@ -1017,11 +1018,11 @@ def bare_main(auto=False):
     (`build-matrix.base_changed_stacks`), or whose apply check records that its plan found the
     base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
     it stays pending and stops its environment's `needs` successors, as a locked cell does. A
-    candidate neither locked nor overlap whose newest App apply check shows an earlier apply run
-    attempted it and did not apply it (`attempted_cells`) is held the same way with cause
-    `attempted`; `refuse_held` reads it beside the runnable cells, so a refusal over another check
-    of it wins. With a cell to apply, its records must name one plan run that
-    `apply-gate.provenance_reason` admits against `apply-gate.auto_source`'s plan and
+    cell `settle` would run (neither locked, overlap nor waiting) whose newest App apply check
+    shows an earlier apply run attempted it and did not apply it (`attempted_cells`) is held the
+    same way with cause `attempted`; `refuse_held` reads it beside the runnable cells, so a
+    refusal over another check of it wins. With a cell to apply, its records must name one plan
+    run that `apply-gate.provenance_reason` admits against `apply-gate.auto_source`'s plan and
     authorizer, no newer `shipmate plan` run of the pull request may be live or have planned
     (`refuse_provenance`), and the authorizer's actor must have write access (`refuse_pusher`).
     Writes the bare outputs plus `provenance_run`, empty when no cell applies; its report also
@@ -1079,10 +1080,12 @@ def bare_main(auto=False):
     locked = locked_cells(repo, candidates, pr_number)
     # One cause per held cell: a locked or overlap cell is never also named attempted.
     taken = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
-    rest = [c for c in candidates if (c["stack"], c["environment"]) not in taken]
     # One holder read per run: a second read could turn an unreadable holder into `deploy`.
-    runs = {}
-    attempted = attempted_cells(repo, rest, lines, app_id, runs) if auto else []
+    runs, attempted = {}, []
+    if auto:
+        # Only a cell `settle` would run can be attempted: a waiting cell keeps its wait cause.
+        _, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, taken)
+        attempted = attempted_cells(repo, drop_waiting(run, waiting), lines, app_id, runs)
     holds = taken | {(c["stack"], c["environment"]) for c in attempted}
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)
     # A skipped env names the predecessors not fully applying for a cause of their own, each with

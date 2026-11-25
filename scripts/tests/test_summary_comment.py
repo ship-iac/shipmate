@@ -1023,7 +1023,7 @@ def test_the_footer_hint_points_at_the_command_list_and_not_at_doctor():
 def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     """The comment ships on every plan run. A line matching the command grammar would make it a
     shipmate command; the `[bot]` loop guard would ignore it, but relying on that alone is one
-    deletion away from a retrigger loop. Only the Q3 line of an environment named `shipmate`
+    deletion away from a retrigger loop. Only the auto line of an environment named `shipmate`
     starts with `shipmate`; its own test pins it.
 
     Mutations: start a line of `commands` with `shipmate apply`, its evict line with
@@ -3690,17 +3690,17 @@ def test_main_renders_the_behind_rows(tmp_path, monkeypatch):
     assert _ROW_CONFLICT in (tmp_path / "comment.md").read_text(encoding="utf-8").splitlines()
 
 
-#: The Q3 line for `dev-eu`, and the two sections that carry it, hand-written.
-_Q3 = (
+#: The auto line for `dev-eu`, and the two sections that carry it, hand-written.
+_AUTO_LINE = (
     "dev-eu applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`."
 )
-_Q3_HELP = (
+_AUTO_HELP = (
     "<details><summary>shipmate commands</summary>\n\n"
-    f"{_Q3}\n\n"
+    f"{_AUTO_LINE}\n\n"
     "Comment `shipmate help` for every command.\n\n"
     "</details>"
 )
-_Q3_ONLY = f"<details><summary>shipmate commands</summary>\n\n{_Q3}\n\n</details>"
+_AUTO_ONLY = f"<details><summary>shipmate commands</summary>\n\n{_AUTO_LINE}\n\n</details>"
 _REOPEN_LINE = (
     "⚪ auto apply not started: this plan was started by reopening the pull request, not by a "
     f"push or the ready-for-review click; {_REMEDY}"
@@ -3708,7 +3708,7 @@ _REOPEN_LINE = (
 _DEV_HEADING = "#### dev-eu: 1 cell, 1 changed"
 
 
-def _q3_main(tmp_path, monkeypatch, cells, facts):
+def _auto_main(tmp_path, monkeypatch, cells, facts):
     """`main`'s comment for `cells` with `dev-eu` `apply_mode: auto` under the run facts
     `facts` (`action`, `payload_draft` and environment overrides) of a push autoplan."""
     facts = dict(facts)
@@ -3737,19 +3737,19 @@ def _q3_main(tmp_path, monkeypatch, cells, facts):
 def test_an_autoplan_that_dispatches_says_the_auto_environment_applies_on_its_own(
     tmp_path, monkeypatch, action
 ):
-    """The ready click (#117) and a push of a ready pull request. Mutations: remove the `autos`
+    """The ready click and a push of a ready pull request. Mutations: remove the `autos`
     branch from `commands` -- the bare line renders, red; `main` never calls `auto_follows`
     -- red."""
-    body = _q3_main(tmp_path, monkeypatch, [_cell()], {"action": action})
-    assert body == _MAIN_BODY + "\n\n" + _Q3_HELP
+    body = _auto_main(tmp_path, monkeypatch, [_cell()], {"action": action})
+    assert body == _MAIN_BODY + "\n\n" + _AUTO_HELP
 
 
 def test_a_push_run_that_landed_on_a_draft_says_what_the_ready_run_says(tmp_path, monkeypatch):
-    """#118: the push run's payload says draft, the pull request reads ready. Mutation: pass
+    """The push run's payload says draft, the pull request reads ready. Mutation: pass
     `event_draft()` to `skip_reason` as `payload_draft` in `auto_follows` -- the bare line
     renders, red."""
-    body = _q3_main(tmp_path, monkeypatch, [_cell()], {"payload_draft": True})
-    assert body == _MAIN_BODY + "\n\n" + _Q3_HELP
+    body = _auto_main(tmp_path, monkeypatch, [_cell()], {"payload_draft": True})
+    assert body == _MAIN_BODY + "\n\n" + _AUTO_HELP
 
 
 _STG_PROD_ORDER = '["dev-eu", "stg", "prod"]'
@@ -3759,23 +3759,29 @@ _BEHIND_DEV = {**_BEHIND_REPORT, "cells": _BEHIND_REPORT["cells"][:1]}
 @pytest.mark.parametrize(
     ("cells", "facts", "section", "under"),
     [
-        pytest.param([_cell()], {}, _Q3_HELP, _DEV_HEADING, id="117-hints-on"),
+        pytest.param([_cell()], {}, _AUTO_HELP, _DEV_HEADING, id="ready-hints-on"),
         pytest.param(
-            [_cell()], {"SHIPMATE_COMMAND_HINTS": ""}, _Q3_ONLY, _DEV_HEADING, id="117-hints-off"
+            [_cell()],
+            {"SHIPMATE_COMMAND_HINTS": ""},
+            _AUTO_ONLY,
+            _DEV_HEADING,
+            id="ready-hints-off",
         ),
-        pytest.param([_cell()], {"payload_draft": True}, _Q3_HELP, _DEV_HEADING, id="118-on"),
+        pytest.param(
+            [_cell()], {"payload_draft": True}, _AUTO_HELP, _DEV_HEADING, id="push-payload-draft"
+        ),
         pytest.param(
             [_cell()],
             {"payload_draft": True, "SHIPMATE_COMMAND_HINTS": ""},
-            _Q3_ONLY,
+            _AUTO_ONLY,
             _DEV_HEADING,
-            id="118-off",
+            id="push-payload-draft-hints-off",
         ),
         pytest.param(
             [_cell(), _cell(environment="stg")],
             {"SHIPMATE_ENV_ORDER": _STG_PROD_ORDER},
             "<details><summary>shipmate commands</summary>\n\n"
-            f"{_Q3}\n\n"
+            f"{_AUTO_LINE}\n\n"
             "Comment `shipmate apply` to apply the other environments.\n\n"
             "Comment `shipmate help` for every command.\n\n"
             "</details>",
@@ -3786,7 +3792,7 @@ _BEHIND_DEV = {**_BEHIND_REPORT, "cells": _BEHIND_REPORT["cells"][:1]}
             [_cell(environment="prod"), _cell()],
             {"SHIPMATE_ENV_ORDER": _STG_PROD_ORDER, "SHIPMATE_TARGETED_ENVS": '["prod"]'},
             "<details><summary>shipmate commands</summary>\n\n"
-            f"{_Q3}\n\n"
+            f"{_AUTO_LINE}\n\n"
             "Comment `shipmate apply prod` to apply prod.\n\n"
             "Comment `shipmate help` for every command.\n\n"
             "</details>",
@@ -3820,46 +3826,46 @@ _BEHIND_DEV = {**_BEHIND_REPORT, "cells": _BEHIND_REPORT["cells"][:1]}
         pytest.param(
             [_cell()],
             {"SHIPMATE_BEHIND": json.dumps(_BEHIND_DEV)},
-            _Q3_HELP,
+            _AUTO_HELP,
             _ROW_COMMITS,
             id="behind",
         ),
     ],
 )
-def test_the_q3_line_row_table(tmp_path, monkeypatch, cells, facts, section, under):
+def test_the_auto_line_row_table(tmp_path, monkeypatch, cells, facts, section, under):
     """`dev-eu` `apply_mode: auto`, `prod` targeted, `stg` bare: the command section (None
     for no section) and the block under the verdict, per run.
 
     Mutations: compute `what` from the targeted lines only -- (mix-bare) red; drop the
     `skip_reason` gate from `auto_follows` -- (reopen-on, reopen-off, re-run, on-demand,
     draft) red; drop the lock filter from `auto_follows` -- (all-locked) red; `main` passing
-    `"1"` for the attempt -- (re-run) red; gate the Q3-only section on `hints` -- (117-hints-off,
-    118-off) red."""
-    body = _q3_main(tmp_path, monkeypatch, cells, facts)
+    `"1"` for the attempt -- (re-run) red; gate the auto-only section on `hints` --
+    (ready-hints-off, push-payload-draft-hints-off) red."""
+    body = _auto_main(tmp_path, monkeypatch, cells, facts)
     start = body.find("<details><summary>shipmate commands</summary>")
     assert (body[start:] if start >= 0 else None) == section
     assert body.split("\n\n")[2] == under
     assert body.count("applies on its own") == (section or "").count("applies on its own")
 
 
-def test_the_q3_section_shows_without_hints():
-    """Mutation: gate the Q3-only section on `hints` -- no section, red."""
+def test_the_auto_section_shows_without_hints():
+    """Mutation: gate the auto-only section on `hints` -- no section, red."""
     assert sc.build_comment(_ONE_CHANGED, CHECKS, RUN_URL, SHA, autos=["dev-eu"])[0] == (
-        _ONE_CHANGED_BODY + "\n\n" + _Q3_ONLY
+        _ONE_CHANGED_BODY + "\n\n" + _AUTO_ONLY
     )
 
 
-def test_the_q3_section_with_hints_carries_the_help_line():
-    """Mutation: append the Q3-only section with `hints` too -- no help line, red."""
+def test_the_auto_section_with_hints_carries_the_help_line():
+    """Mutation: append the auto-only section with `hints` too -- no help line, red."""
     got = sc.build_comment(_ONE_CHANGED, CHECKS, RUN_URL, SHA, hints=True, autos=["dev-eu"])
-    assert got == (_ONE_CHANGED_BODY + "\n\n" + _Q3_HELP, False, False)
+    assert got == (_ONE_CHANGED_BODY + "\n\n" + _AUTO_HELP, False, False)
 
 
 def test_an_auto_environment_and_a_bare_one_name_the_other_environments():
     """Mutation: compute `what` from the targeted lines only -- `to apply this plan`, red."""
     assert sc.commands({}, (), ["dev-eu", "stg"], autos=["dev-eu"]) == (
         "<details><summary>shipmate commands</summary>\n\n"
-        f"{_Q3}\n\n"
+        f"{_AUTO_LINE}\n\n"
         "Comment `shipmate apply` to apply the other environments.\n\n"
         "Comment `shipmate help` for every command.\n\n"
         "</details>"
@@ -3868,7 +3874,7 @@ def test_an_auto_environment_and_a_bare_one_name_the_other_environments():
 
 def test_an_auto_environment_named_shipmate_starts_its_line_with_the_name():
     """The line starts with `shipmate`; `comment-ops` skips a `[bot]` commenter and `applies`
-    is no verb, so it stays inert. Mutation: skip a Q3 line that would start with `shipmate`
+    is no verb, so it stays inert. Mutation: skip a auto line that would start with `shipmate`
     -- red."""
     assert sc.commands({}, (), ["shipmate"], autos=["shipmate"]) == (
         "<details><summary>shipmate commands</summary>\n\n"
@@ -3880,7 +3886,7 @@ def test_an_auto_environment_named_shipmate_starts_its_line_with_the_name():
 
 
 def test_an_auto_environment_name_renders_through_md_name():
-    """Mutation: render `{e}` instead of `{_md_name(e)}` in the Q3 line -- the `@` mentions,
+    """Mutation: render `{e}` instead of `{_md_name(e)}` in the auto line -- the `@` mentions,
     red."""
     assert sc.commands({}, (), ["dev@eu"], autos=["dev@eu"]) == (
         "<details><summary>shipmate commands</summary>\n\n"
@@ -3891,13 +3897,13 @@ def test_an_auto_environment_name_renders_through_md_name():
     )
 
 
-#: Eight `auto` environments: their Q3 lines outweigh MIN_PLAN_CHARS, so pass 2's slack
+#: Eight `auto` environments: their auto lines outweigh MIN_PLAN_CHARS, so pass 2's slack
 #: cannot hide a missing reserve.
 _AUTO_EIGHT = [f"auto{i}" for i in range(8)]
 
 
-def test_a_plan_over_the_size_budget_keeps_every_q3_line():
-    """Fold-outs shrink to make room for the Q3 lines. Mutation: drop the reserve from `used`
+def test_a_plan_over_the_size_budget_keeps_every_auto_line():
+    """Fold-outs shrink to make room for the auto lines. Mutation: drop the reserve from `used`
     -- the body passes SIZE_BUDGET, red."""
     giant = "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)
     cells = [(_cell(environment=e), giant) for e in _AUTO_EIGHT]
@@ -3917,9 +3923,9 @@ def test_a_plan_over_the_size_budget_keeps_every_q3_line():
     assert len(body) <= sc.SIZE_BUDGET
 
 
-def test_the_q3_section_yields_to_cell_lines_near_the_hard_cap(capsys):
+def test_the_auto_section_yields_to_cell_lines_near_the_hard_cap(capsys):
     """Cell lines 10 characters under HARD_CAP leave no room for the section: the body posts
-    without it and warns. Mutation: append the Q3-only section unconditionally -- the refusal
+    without it and warns. Mutation: append the auto-only section unconditionally -- the refusal
     raises, red."""
     cells = [(_cell(), None)]
     cells += [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]

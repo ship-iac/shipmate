@@ -1,8 +1,8 @@
 name: shipmate plan-defer
 description: >-
   On a ready-for-review autoplan, output the earlier autoplan run that planned and published the
-  same head (scripts/gate-status published), so this run plans nothing, and whether an auto
-  apply follows that plan. Every failure, a missing App key or a failed read included, warns and
+  same head (scripts/gate-status published), so this run plans nothing, and whether that plan
+  changed an auto environment. Every failure, a missing App key or a failed read included, warns and
   leaves `run` empty: the run plans.
 inputs:
   head-sha:
@@ -23,7 +23,7 @@ outputs:
     value: ${{ steps.published.outputs.run }}
   auto:
     description: >-
-      Whether an auto apply follows the earlier run's plan, as its `plan / summary` steps
+      Whether the earlier run's plan changed an auto environment, as its `plan / summary` steps
       published it: `yes`, `no` or `unread`. Empty when `run` is.
     value: ${{ steps.published.outputs.auto }}
 runs:
@@ -76,5 +76,5 @@ runs:
         read -r run auto <<< "$out"
         if [ -n "$run" ]; then
           { echo "run=$run"; echo "auto=$auto"; } >> "$GITHUB_OUTPUT"
-          echo "::notice::plan run $run planned and published $HEAD_SHA (auto apply follows: $auto); this ready-for-review run plans nothing"
+          echo "::notice::plan run $run planned and published $HEAD_SHA (auto environment changed: $auto); this ready-for-review run plans nothing"
         fi

@@ -411,8 +411,9 @@ whose stack the merge of the base into the branch changes, or whose apply check
 records that its plan found the base changed it ([`../CONTRACT.md`](../CONTRACT.md)
 §`apply_mode: auto`, Overlap), and one holding a cell an earlier apply run
 attempted and did not apply (§`apply_mode: auto`, Attempted cells), which
-`shipmate apply` retries. A bare or targeted apply refuses the whole run over
-such a cell instead (§`apply_mode: auto`, Behind the base, bare and targeted).
+`shipmate apply` retries. A bare or targeted apply refuses the whole run over a
+cell whose stack the base changed or whose apply check is a behind record
+(§`apply_mode: auto`, Behind the base, bare and targeted), and retries an attempted cell.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,
 §Env model for `split`, §Env apply order for `needs` and the waiting cells, §Fan-out for
@@ -921,7 +922,7 @@ omitted key read as the empty string.
 No comment lands on the `auto` job. A plan run's `summary` dispatches
 `verb: auto` after an autoplan that changes a cell of an `apply_mode: auto`
 environment, or its `defer-auto` job after a ready-for-review run that deferred
-to such a plan, skipped when that plan published that no `auto` apply follows,
+to such a plan, skipped when that plan published that no `auto` environment changed,
 and the job calls `apply.yml` with `auto: true`
 (§Applying an environment after a push or ready click).
 

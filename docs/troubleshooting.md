@@ -2387,11 +2387,11 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    itself unless its `defer` job later skips, is cancelled or fails (no reply then,
    `CONTRACT.md` §`apply_mode: auto`); an empty listing replies ``auto apply not started: no autoplan run of
    <head> is listed yet; comment `shipmate apply` ``. `defer-auto` is skipped
-   when this run's plan published that no `auto` apply follows (its
-   `plan / summary` step `No auto apply follows` succeeded). A read that fails
+   when this run's plan published that no `auto` environment changed (its
+   `plan / summary` step `No auto environment changed` succeeded). A read that fails
    in its decision, or a failed `python-yaml` step, replies ``auto apply not
    started: what decides it for this ready-for-review run could not be read;
-   comment `shipmate apply` `` when the plan published `Auto apply follows`, and
+   comment `shipmate apply` `` when the plan published `An auto environment changed`, and
    only warns when it published neither. A failed `defer-auto`
    leaves that run green. A listing that lags this run replies with the
    mismatch in `defer-auto`; only the push run's `summary` path dispatches on
@@ -3197,9 +3197,9 @@ or `shipmate · auto` (`CONTRACT.md` §Check names) to see the others.
 ### A ready-for-review run planned nothing
 
 The plan run started by marking the pull request ready for review shows
-`plan / facts` and `plan / defer` green, `plan / defer-auto` run unless an
-`auto` apply does not follow, and every other plan job skipped. The `plan / defer`
-notice reads "plan run <id> planned and published <sha> (auto apply follows:
+`plan / facts` and `plan / defer` green, `plan / defer-auto` run unless that
+plan changed no `auto` environment, and every other plan job skipped. The `plan / defer`
+notice reads "plan run <id> planned and published <sha> (auto environment changed:
 <state>); this ready-for-review run plans nothing": the push run of that head
 was planning when the pull request was marked ready, and its plan comment,
 apply checks and `shipmate / gate` stand. `<state>` is `yes`, `no` or

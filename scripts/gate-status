@@ -14,7 +14,7 @@
     gate-status moved <sha> <pr>                 print `<pr>`'s live head when it is not `<sha>`
     gate-status replan <sha> <pr>                print that live head when it needs a plan
     gate-status published <sha> <pr>             print the earlier run that published it on `<pr>`
-                                                 and whether an auto apply follows it
+                                                 and whether its plan changed an auto environment
 
 The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
@@ -75,8 +75,8 @@ jobs listing and a `plan / detect` job `planned` cannot judge exit 1 with one un
 stderr line, after any retry notices and warnings: an unreadable answer dispatches nothing.
 
 `published` prints `<run> <state>`, the earlier autoplan run of `<sha>` that planned and
-published it on `<pr>` by the rules in `_published` and whether an auto apply follows it
-(`_auto_state`), or nothing. Its `<pr>` and `<sha>` are refused as `replan`'s, and
+published it on `<pr>` by the rules in `_published` and whether its plan changed an auto
+environment (`_auto_state`), or nothing. Its `<pr>` and `<sha>` are refused as `replan`'s, and
 every failed or malformed read exits 1 with one unannotated stderr line: the caller plans.
 """
 
@@ -611,10 +611,10 @@ def _names(lines, sha, run_id):
     return len(lines) > 3 and re.search(tail, lines[3]) is not None
 
 
-#: The `plan / summary` job steps of `plan.yml` whose conclusions publish whether an auto
-#: apply follows the plan.
-AUTO_STEP_YES = "Auto apply follows"
-AUTO_STEP_NO = "No auto apply follows"
+#: The `plan / summary` job steps of `plan.yml` whose conclusions publish whether the plan
+#: changed an auto environment.
+AUTO_STEP_YES = "An auto environment changed"
+AUTO_STEP_NO = "No auto environment changed"
 
 
 def _auto_state(jobs):
