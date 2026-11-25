@@ -361,14 +361,13 @@ def test_a_tofu_200_verifies_extracts_checks_the_binary_and_adds_the_directory_t
 
 @bash_only
 @_EACH_TOOL
-@pytest.mark.parametrize("machine", ("aarch64", "arm64"))
-def test_an_arm64_runner_installs_the_arm64_asset(tmp_path, tool, machine):
+def test_an_aarch64_runner_installs_the_arm64_asset(tmp_path, tool):
     """Mutations: map `aarch64|arm64` to the x86 arch in either step's `case` (digest mismatch);
-    drop `aarch64|` or `|arm64` from either `case` (no sha256 for the unmapped asset, curl
-    never runs).
+    drop `aarch64|` from either `case` (no sha256 for the unmapped asset, curl never runs).
+    Dropping `|arm64` cannot fail: the `*)` arm yields `arm64` from `uname -m` as well.
     """
     t = _TOOLS[tool]
-    r, runner_temp, logs = t["install"](tmp_path, "200", 0, digest="b" * 64, machine=machine)
+    r, runner_temp, logs = t["install"](tmp_path, "200", 0, digest="b" * 64, machine="aarch64")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/{t['release']}/{t['arm64_asset']}"
     assert argv_log(logs, "curl") == setup_curl_argv(t["arm64_url"], archive)
