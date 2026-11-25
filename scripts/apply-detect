@@ -558,8 +558,9 @@ def held_text(cause, ident, names, rerun):
     the remedy's last step."""
     if cause == "saved":
         return (
-            f"{names} were left in progress by run {ident}, which applied them and saved their "
-            f"state. Follow docs/troubleshooting.md section {BY_HAND}, then {rerun}."
+            f"{names} were left in progress by run {ident}, which may have applied them and saved "
+            f"any state their apply left. Follow docs/troubleshooting.md section {BY_HAND}, then "
+            f"{rerun}."
         )
     if cause == "unknown":
         return (

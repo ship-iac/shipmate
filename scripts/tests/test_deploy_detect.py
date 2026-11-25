@@ -2183,7 +2183,8 @@ def test_an_ended_run_that_applied_and_saved_the_cell_refuses_naming_the_by_hand
         _two_cells(tmp_path, monkeypatch, _holder("completed", jobs, attempt=_newest(jobs)))
     assert str(exc.value) == (
         "::error::deploy refused: stacks/app / dev-eu were left in progress by run 77, which "
-        f"applied them and saved their state. Follow {_BY_HAND}, then re-run this deploy." + _OTHERS
+        "may have applied them and saved any state their apply left. Follow "
+        f"{_BY_HAND}, then re-run this deploy." + _OTHERS
     )
 
 
