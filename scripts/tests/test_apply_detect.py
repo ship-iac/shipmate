@@ -33,6 +33,7 @@ from _detect_fixtures import (
     partial_message,
     plan_listing_urls,
     plan_polls,
+    retitled_check,
     routed,
     run_graph_capture,
     stub_base_changed,
@@ -2097,3 +2098,29 @@ def test_a_waited_run_unreadable_until_the_deadline_fails(monkeypatch, tmp_path)
     by-id read as `completed` (the cell applies)."""
     out, _, _ = _waiting(monkeypatch, tmp_path, [([_LIVE_9], True), ([], True)], {9: [GH_FAILED]})
     assert _refused(out) == f"refusal={_UNREAD_9}\n"
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        retitled_check("stacks/app", cells=1),
+        {
+            **retitled_check("stacks/app", shown="+1 ~0 -0", cells=1),
+            "status": "completed",
+            "conclusion": "stale",
+        },
+    ],
+    ids=["retitled", "stale"],
+)
+def test_a_targeted_apply_retries_a_cell_an_earlier_apply_run_attempted(
+    monkeypatch, tmp_path, check
+):
+    """Only the auto form holds an attempted cell; `shipmate apply dev-eu` retries it.
+
+    Mutation: add `attempted_cells(repo, pending, lines, app_id)` to `main`'s `locked` --
+    both cases hold, red."""
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [check])
+    ad.main()
+    assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
+    assert detect_report()["held_cells"] == []

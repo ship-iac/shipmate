@@ -26,6 +26,7 @@ from _detect_fixtures import (
     partial_message,
     plan_listing_urls,
     plan_polls,
+    retitled_check,
     routed,
     run_graph_capture,
     spy_env_config,
@@ -1784,3 +1785,24 @@ def test_a_bare_cell_a_waited_run_replanned_refuses(tmp_path, monkeypatch):
         "dev-eu while this apply waited for it; review its plan, then comment the same "
         "`shipmate apply` command"
     )
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        retitled_check("stacks/app", cells=1),
+        {
+            **retitled_check("stacks/app", shown="+1 ~0 -0", cells=1),
+            "status": "completed",
+            "conclusion": "stale",
+        },
+    ],
+    ids=["retitled", "stale"],
+)
+def test_a_bare_apply_retries_a_cell_an_earlier_apply_run_attempted(tmp_path, monkeypatch, check):
+    """Only the auto form holds an attempted cell; a writer's `shipmate apply` retries it.
+
+    Mutation: compute `attempted_cells` in every form of `bare_main` -- both cases hold, red."""
+    parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", checks=[check])
+    assert _wave_envs(parsed) == ["dev-eu"]
+    assert detect_report()["held_cells"] == []

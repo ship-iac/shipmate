@@ -6,10 +6,10 @@ keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
 the expected-cell set (per-env-level waves JSON), the head SHA, apply-detect's report file (the
 excluded/skipped/held envs and the predecessors each skipped env waits on (bare and auto forms),
-the waiting cells and the held cells, locked (both forms) or overlap (auto form only), the envs
-left for a bare apply and the pusher (auto form only), the env order, the review-exempt and
-no-review envs, and, when detect refused cells behind the base, those cells and the base
-branch), and the detect or lock job's refusal, and writes a
+the waiting cells and the held cells, locked (both forms), overlap or attempted (auto form
+only), the envs left for a bare apply and the pusher (auto form only), the env order, the
+review-exempt and no-review envs, and, when detect refused cells behind the base, those cells
+and the base branch), and the detect or lock job's refusal, and writes a
 fresh comment.md -- this comment carries no marker, so nothing edits or minimizes it. The
 review-exempt and no-review envs go to stdout, the step log, as `notices` annotations, not
 into the comment.
@@ -494,21 +494,32 @@ def _of_cause(held_cells, cause):
     return [c for c in held_cells if c["cause"] == cause]
 
 
+def _held_cells_sentence(held_cells):
+    """The empty verdict's sentence for the causes in `held_cells`, or "" for none."""
+    locked, overlap, attempted = (
+        _of_cause(held_cells, k) for k in ("locked", "overlap", "attempted")
+    )
+    if attempted and (locked or overlap):
+        return "nothing applied, pending cells are held; the lines below say why"
+    if locked and overlap:
+        return "nothing applied, pending cells are locked or the base also changed their stacks"
+    if locked:
+        return "nothing applied, pending cells are locked"
+    if overlap:
+        return "nothing applied, the base also changed the pending cells' stacks"
+    if attempted:
+        return "nothing applied, an earlier apply run did not apply the pending cells"
+    return ""
+
+
 def _empty_verdict(outcome, held, waiting, held_cells, left=()):
     if outcome:
         return "🔴", outcome
     if held:
         # Work WAS pending and the engine refused it.
         return "⚪", "nothing applied, environments are held for review"
-    locked = _of_cause(held_cells, "locked")
-    if locked and _of_cause(held_cells, "overlap"):
-        return "⚪", (
-            "nothing applied, pending cells are locked or the base also changed their stacks"
-        )
-    if locked:
-        return "⚪", "nothing applied, pending cells are locked"
-    if _of_cause(held_cells, "overlap"):
-        return "⚪", "nothing applied, the base also changed the pending cells' stacks"
+    if sentence := _held_cells_sentence(held_cells):
+        return "⚪", sentence
     if waiting:
         return "⚪", "nothing applied, cells wait on pending cells they run after"
     if left:
@@ -524,6 +535,7 @@ def _tally_tokens(n):
 def _white_tokens(waiting, held_cells, held, left, unknown):
     """`_verdict`'s tokens after the row counts, each of which adds ⚪ to the circles."""
     locked, overlap = _of_cause(held_cells, "locked"), _of_cause(held_cells, "overlap")
+    attempted = _of_cause(held_cells, "attempted")
     keys = {(c["stack"], c["environment"]) for c in locked}
     based = [c for c in overlap if (c["stack"], c["environment"]) not in keys]
     pending = len({*held, *left})
@@ -531,6 +543,7 @@ def _white_tokens(waiting, held_cells, held, left, unknown):
         f"{len(waiting)} waiting" if waiting else "",
         f"{len(locked)} locked" if locked else "",
         f"{len(based)} held (base changed)" if based else "",
+        f"{len(attempted)} held (not applied earlier)" if attempted else "",
         f"{pending} environment{'s' if pending > 1 else ''} pending" if pending else "",
         "result unknown" if unknown else "",
     )
@@ -545,12 +558,12 @@ def _verdict(
     `_STATUS` order, zero counts omitted, led by the outcome word (`failed` only when no failed
     or blocked row shows it), then `N waiting` when cells wait, `N locked` for the locked
     `held_cells`, `N held (base changed)` for the overlap ones not also locked, so a cell under
-    both causes counts once, and `N environments pending` for the distinct environments of
-    `held` and `left`; the circle is the worst of the rows' and, when any of those four or
+    both causes counts once, `N held (not applied earlier)` for the attempted ones, and
+    `N environments pending` for the distinct environments of `held` and `left`; the circle is
+    the worst of the rows' and, when any of those five or
     `result unknown` is present, ⚪, or 🔴 for any outcome. Without rows: `🔴 <outcome>`,
-    the held sentence, the locked-or-overlap sentence when `held_cells` holds both causes, the
-    locked sentence, the overlap sentence, the waiting sentence, the left sentence when `left`
-    names an environment (left for a bare apply, `targeted` or skipped), or
+    the held sentence, `_held_cells_sentence` for `held_cells`, the waiting sentence, the left
+    sentence when `left` names an environment (left for a bare apply, `targeted` or skipped), or
     `🟢 no pending applies`. Then
     `provenance`. The circle is returned with the line so the footer decision reads it, never
     the rendered text. `unknown` (apply-detect's report was unread, so every set above is empty)
@@ -642,11 +655,14 @@ def _lock_remedy(holder, env):
 _OVERLAP_REMEDY = "update the branch from the base and push"
 
 
-def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, overlap=False):
+def _waiting_remedy(
+    env, held, skipped, excluded, locked=False, holder=None, overlap=False, attempted=False
+):
     """What clears a waiting cell's blocker in `env`. A `locked` blocker needs its lock gone
     first, whatever else holds its environment; an `overlap` blocker, which the base also
     changed, needs the branch updated; a blocker under both causes names both remedies as
-    separate sentences, the lock's first. A targeted apply ignores `needs`, so a
+    separate sentences, the lock's first. An `attempted` blocker, which an earlier apply run did
+    not apply, needs a writer's `shipmate apply`. A targeted apply ignores `needs`, so a
     blocker in a `needs`-skipped environment never gets its `shipmate apply` command; a
     predecessor it waits on may itself be held, so that remedy names both causes. A held
     targeted blocker needs the approval and then its command. The targeted form passes
@@ -660,6 +676,8 @@ def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, ove
         return lock
     if overlap:
         return base
+    if attempted:
+        return "an earlier apply run did not apply it; comment `shipmate apply` to retry"
     if env in held and env in excluded:
         return f"it is held until the pull request is approved, then comment `shipmate apply {env}`"
     if env in held:
@@ -674,8 +692,9 @@ def _waiting_remedy(env, held, skipped, excluded, locked=False, holder=None, ove
 
 def _predecessor_remedy(env, held, excluded, cell_envs):
     """What lets a skipped environment's predecessor `env` apply, by its kind: a cell of it that
-    does not apply this run (`cell_envs`: locked, overlap or waiting) has its own line; a held or
-    targeted one gets `_waiting_remedy`'s; any other, an auto run's non-auto env, a bare apply."""
+    does not apply this run (`cell_envs`: locked, overlap, attempted or waiting) has its own
+    line; a held or targeted one gets `_waiting_remedy`'s; any other, an auto run's non-auto env,
+    a bare apply."""
     if env in cell_envs:
         return "a cell of it does not apply this run; see its line below"
     if env in held or env in excluded:
@@ -713,6 +732,20 @@ def _overlap_lines(overlap):
     return [line]
 
 
+def _attempted_lines(attempted):
+    """One line naming every attempted cell as `<stack> / <env>` and the remedy; none for none."""
+    if not attempted:
+        return []
+    cells = ", ".join(
+        f"{sc._md_name(c['stack'])} / {sc._md_escape(c['environment'])}" for c in attempted
+    )
+    line = (
+        f"⚪ held, an earlier apply run did not apply these cells: {cells}. Comment "
+        "`shipmate apply` to retry."
+    )
+    return [line]
+
+
 def _behind_line(behind, base):
     """The line naming every cell `behind` (detect's behind refusal) as `<stack> / <env>` and
     the update remedy for base branch `base`; empty for none."""
@@ -732,16 +765,19 @@ def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_af
     `waiting` and `held_cells` come from both forms: each waiting cell becomes an escaped
     `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`, its remedy
     the lock's when its blocker is a `locked` cell, the branch update when it is an `overlap`
-    cell, and both as separate sentences, the lock's first, when it is both; the locked cells become
-    their rendered lines, and the overlap cells, only the auto form's, their line. A held env
+    cell, and both as separate sentences, the lock's first, when it is both, the retry when it is
+    an `attempted` cell; the locked cells become their rendered lines, and the overlap and the
+    attempted cells, only the auto form's, one line each. A held env
     that is also targeted is listed under `held` only, and under `held_targeted` for its
     command. Each skipped env becomes `(env, waits)`, `waits` naming every predecessor
     `skipped_after` gives it with `_predecessor_remedy`, or empty when it gives none. `bare`
     is the auto form's envs left for a bare apply."""
     locked, overlap = _of_cause(held_cells, "locked"), _of_cause(held_cells, "overlap")
+    attempted = _of_cause(held_cells, "attempted")
     holders = {(c["stack"], c["environment"]): _lock_holder(c.get("holder")) for c in locked}
     based = {(c["stack"], c["environment"]) for c in overlap}
-    cell_envs = {sc._md_escape(c["environment"]) for c in [*locked, *overlap, *waiting]}
+    tried = {(c["stack"], c["environment"]) for c in attempted}
+    cell_envs = {sc._md_escape(c["environment"]) for c in [*locked, *overlap, *attempted, *waiting]}
     after = {sc._md_escape(e): _esc(preds) for e, preds in (skipped_after or {}).items()}
     excluded, skipped, held = _esc(excluded), _esc(skipped), _esc(held)
     cells = []
@@ -749,7 +785,14 @@ def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_af
         blocker = (w["after_stack"], w["after_environment"])
         env = sc._md_escape(w["after_environment"])
         remedy = _waiting_remedy(
-            env, held, skipped, excluded, blocker in holders, holders.get(blocker), blocker in based
+            env,
+            held,
+            skipped,
+            excluded,
+            blocker in holders,
+            holders.get(blocker),
+            blocker in based,
+            blocker in tried,
         )
         cells.append(
             (
@@ -777,6 +820,7 @@ def _dispositions(excluded, skipped, held, waiting=(), held_cells=(), skipped_af
         "held_targeted": [e for e in held if e in excluded],
         "locked": _locked_lines(locked),
         "overlap": _overlap_lines(overlap),
+        "attempted": _attempted_lines(attempted),
         "waiting": cells,
     }
 
@@ -802,7 +846,7 @@ def _per_env_lines(d):
     lines += [_held_line(e, e in d["held_targeted"]) for e in d["held"]]
     if d["held"]:
         lines.append(_HELD_REMEDY)
-    lines += d["locked"] + d["overlap"]
+    lines += d["locked"] + d["overlap"] + d["attempted"]
     return lines + [
         f"⚪ {s} / {e}: waits on {a_s} / {a_e}, not applied yet; {remedy}"
         for s, e, a_s, a_e, remedy in d["waiting"]
@@ -844,7 +888,7 @@ def _grouped_lines(d):
                 f"; once the hold clears, comment `shipmate apply <env>` for {g['held_targeted']}"
             )
         lines += [line, _HELD_REMEDY]
-    return lines + d["locked"] + d["overlap"] + _grouped_waiting(d["waiting"])
+    return lines + d["locked"] + d["overlap"] + d["attempted"] + _grouped_waiting(d["waiting"])
 
 
 def _footer_parts(
@@ -861,8 +905,8 @@ def _footer_parts(
     produced (targeted left pending, left for a bare apply, skipped naming the predecessors
     `skipped_after` gives it, held for review) and a `held:` remedy line when any is held, then
     one `🔒` line per lock holder and environment naming its locked cells and the remedy, then
-    one line naming the overlap cells and the remedy, then one line per waiting cell naming its
-    blocker and the blocker's remedy.
+    one line naming the overlap cells and the remedy, then one naming the attempted cells and the
+    remedy, then one line per waiting cell naming its blocker and the blocker's remedy.
     Only `waiting` and the locked `held_cells` come from both forms; apply-run.yml reads the other
     sets from the bare-apply detector only. Stack and env names are author-controlled, so
     `_md_escape`d, a stack through `_md_name`. `compact` renders each disposition as one line
@@ -1088,10 +1132,10 @@ def _cells(value, keys):
 
 
 def _held(cell):
-    """Whether held cell `cell` (string `cause` checked) is `overlap`, or `locked` with a `holder`
-    that is a pull request number, null or absent (an unknown holder)."""
+    """Whether held cell `cell` (string `cause` checked) is `overlap` or `attempted`, or `locked`
+    with a `holder` that is a pull request number, null or absent (an unknown holder)."""
     holder = cell.get("holder")
-    return cell["cause"] == "overlap" or (
+    return cell["cause"] in ("overlap", "attempted") or (
         cell["cause"] == "locked" and (holder is None or type(holder) is int)
     )
 
