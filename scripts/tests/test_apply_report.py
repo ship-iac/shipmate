@@ -5,7 +5,7 @@ import json
 import pathlib
 
 import pytest
-from _detect_fixtures import locked_cell, overlap_cell, waiting_cell
+from _detect_fixtures import attempted_cell, locked_cell, overlap_cell, waiting_cell
 from _loader import load_script
 
 ac = load_script("apply-comment")
@@ -389,3 +389,14 @@ def test_an_incomplete_report_of_a_detect_that_failed_without_a_refusal_is_unrea
     env = {"SHIPMATE_DETECT_RESULT": "failure", "SHIPMATE_DETECT_REFUSAL": ""}
     body, _ = _render(monkeypatch, tmp_path, "detect-refused", env, "{}")
     assert _UNREAD in body
+
+
+def test_an_attempted_cell_reads_as_readable(monkeypatch, tmp_path):
+    """Mutation: drop `attempted` from `_held` -- the report reads as unread, red."""
+    report = _complete(held_cells=[attempted_cell("stacks/a", "dev")])
+    body, _ = _render(monkeypatch, tmp_path, "detect-refused", _NO_REFUSAL, report)
+    assert _UNREAD not in body
+    assert (
+        "⚪ held, an earlier apply run did not apply these cells: stacks/a / dev. Comment "
+        "`shipmate apply` to retry."
+    ) in body

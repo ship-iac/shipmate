@@ -272,6 +272,14 @@ def _apply_check(
     )
 
 
+def retitled_check(stack, env="dev-eu", shown="Failed: x", *, cells, **kw):
+    """`_apply_check` whose record holds the title `+1 ~0 -0` and whose output title is
+    `shown`, as an earlier apply run's completion retitles a cell it did not apply."""
+    check = _apply_check(stack, env, cells=cells, **kw)
+    record = {**json.loads(check["external_id"]), "title": "+1 ~0 -0"}
+    return {**check, "external_id": json.dumps(record), "output": {"title": shown, "summary": "-"}}
+
+
 def behind_check(stack, env="dev-eu", plan_run="123457", *, cells, **kw):
     """A queued App-authored apply check carrying a behind record, as pending-checks writes it
     for a cell whose stack the base changed after the branch left it: no digest, `behind`
@@ -637,3 +645,8 @@ def locked_cell(stack, env, holder):
 def overlap_cell(stack, env):
     """A `held_cells` entry whose base changed after the branch left it."""
     return {"stack": stack, "environment": env, "cause": "overlap"}
+
+
+def attempted_cell(stack, env):
+    """A `held_cells` entry an earlier apply run attempted and did not apply."""
+    return {"stack": stack, "environment": env, "cause": "attempted"}

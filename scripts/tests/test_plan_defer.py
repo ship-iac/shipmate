@@ -1,5 +1,6 @@
 """`actions/plan-defer`: a ready-for-review run asks `gate-status published` whether an earlier
-autoplan run planned and published its head, and outputs that run's id or nothing.
+autoplan run planned and published its head, and outputs that run's id and whether its plan
+changed an auto environment, or nothing.
 
 Every failure plans: the action decides only whether to repeat a plan, so a failed verify, mint
 or read leaves `run` empty and the step passes. The bash step runs for real with a `python3`
@@ -8,15 +9,15 @@ stub standing in for `gate-status`; stdout and `GITHUB_OUTPUT` are asserted sepa
 
 import os
 
-from _loader import ACTIONS, action_steps, bash_only, run_step, step_by, write_stub
+from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, step_by, write_stub
 
 HEAD_SHA = "a" * 40
 VERIFY = "Verify the App key arrived"
 MINT = "Mint App installation token"
 STEP = "Read the earlier plan run"
 NOTICE = (
-    f"::notice::plan run 12345 planned and published {HEAD_SHA}; this ready-for-review run "
-    "plans nothing\n"
+    f"::notice::plan run 12345 planned and published {HEAD_SHA} (auto environment changed: "
+    "unread); this ready-for-review run plans nothing\n"
 )
 CAUSE = "jobs listing of run 7 is incomplete"
 READ_WARNING = (
@@ -98,10 +99,31 @@ def test_a_published_head_outputs_the_earlier_run(tmp_path):
     """The retry notice on stderr stays in the log and out of `run`. Mutation: write `run` from
     stderr (`2>&1` on the call) -> `run` carries the notice."""
     notice = "::notice::command failed (1): gh api x%0Agh: Bad Gateway (HTTP 502)\n"
-    proc, output, calls = _run(tmp_path, out="12345\n", err=notice)
+    proc, output, calls = _run(tmp_path, out="12345 unread\n", err=notice)
     assert (proc.returncode, proc.stdout, proc.stderr) == (0, NOTICE, notice)
-    assert output == "run=12345\n"
+    assert output == "run=12345\nauto=unread\n"
     assert calls == [GATE_STATUS, "published", HEAD_SHA, "42"]
+
+
+@bash_only
+def test_the_second_word_is_the_auto_output(tmp_path):
+    """`plan.yml` skips `defer-auto` on `auto=no` alone. Mutation: swap the read order
+    (`read -r auto run`) -- `run=no`, `auto=42`."""
+    proc, output, _ = _run(tmp_path, out="42 no\n")
+    assert (proc.returncode, proc.stderr) == (0, "")
+    assert proc.stdout == (
+        f"::notice::plan run 42 planned and published {HEAD_SHA} (auto environment changed: no); "
+        "this ready-for-review run plans nothing\n"
+    )
+    assert output == "run=42\nauto=no\n"
+
+
+def test_the_action_outputs_exactly_run_and_auto():
+    """Mutation: map `auto` to `steps.published.outputs.run`."""
+    assert {k: v["value"] for k, v in action_yaml("plan-defer")["outputs"].items()} == {
+        "run": "${{ steps.published.outputs.run }}",
+        "auto": "${{ steps.published.outputs.auto }}",
+    }
 
 
 @bash_only

@@ -46,7 +46,8 @@ the run refuses.
 `apply_mode: auto` environments alone, dispatched by the App after an autoplan, which also
 refuses unless the actor, the plan's provenance, the autoplan actor's permission and the pull
 request's mergeability hold, and holds a cell whose stack the merge of the base into the
-branch changes or whose apply check records that its plan found the base changed it.
+branch changes or whose apply check records that its plan found the base changed it, and a cell
+an earlier apply run attempted and did not apply: an auto run never retries a cell unattended.
 """
 
 import json
@@ -64,6 +65,7 @@ from _shipmate import (
     check_runs,
     command_data,
     current_run_url,
+    decoded,
     env_pr_number,
     exit_text,
     gh_json,
@@ -336,11 +338,17 @@ def locked_cells(repo, pending, pr_number):
     return cl.foreign(locks, pending, int(pr_number))
 
 
-def held_cells(locked, overlap=()):
-    """`locked` and `overlap` as one list, each cell tagged with its `cause`, `"locked"` or
-    `"overlap"`; a locked cell keeps its `holder`. A cell in both is listed once per cause, so
-    the comment's footer names both remedies: evicting the lock does not clear the overlap."""
-    return [{**c, "cause": "locked"} for c in locked] + [{**c, "cause": "overlap"} for c in overlap]
+def held_cells(locked, overlap=(), attempted=()):
+    """`locked`, `overlap` and `attempted` as one list, each cell tagged with its `cause`,
+    `"locked"`, `"overlap"` or `"attempted"`; a locked cell keeps its `holder`. A cell both
+    locked and overlap is listed once per cause, so the comment's footer names both remedies:
+    evicting the lock does not clear the overlap. An attempted cell is never also locked or overlap
+    (`bare_main`)."""
+    return (
+        [{**c, "cause": "locked"} for c in locked]
+        + [{**c, "cause": "overlap"} for c in overlap]
+        + [{**c, "cause": "attempted"} for c in attempted]
+    )
 
 
 def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
@@ -348,10 +356,10 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
     skips and waiting cells.
 
     An env with a waiting cell, or a cell in `locked` ((stack, env) pairs another pull
-    request holds, or the auto form's overlap cells), is not fully applying, so it stops its
-    `needs` successors like a stopped env, and each new skip can make more cells wait. A locked
-    cell never runs; the env's ready cells still do: it joins `unavailable`, never `skipped`.
-    `unavailable` only grows over a finite set, so the loop ends."""
+    request holds, or the auto form's overlap and attempted cells), is not fully applying, so it
+    stops its `needs` successors like a stopped env, and each new skip can make more cells wait.
+    A locked cell never runs; the env's ready cells still do: it joins `unavailable`, never
+    `skipped`. `unavailable` only grows over a finite set, so the loop ends."""
     envs = {c["environment"] for c in pending} - stopped
     present = {(c["stack"], c["environment"]) for c in pending}
     lock_envs = {e for _, e in locked}
@@ -459,19 +467,52 @@ def holder_state(repo, cell, check, runs):
     return ("deploy" if all(v["applied"] is False for v in verdicts) else "saved"), run_id
 
 
+def attempted_cells(repo, candidates, lines, app_id, runs):
+    """`{stack, environment}` of each cell in `candidates` whose newest App apply check in
+    check-run `lines` shows an earlier apply run attempted it and did not apply it (`_attempted`).
+    Only the auto form holds them: a writer's `shipmate apply` retries the cell. `runs` is the
+    holder-run cache `holder_state` fills, shared with `refuse_held` so both decide on one read."""
+    latest, own = ag.latest_by_name(ag.app_runs(lines, app_id)), current_run_url()
+    return [
+        {"stack": c["stack"], "environment": c["environment"]}
+        for c in candidates
+        if _attempted(repo, c, latest[ag.check_name(c["stack"], c["environment"])], own, runs)
+    ]
+
+
+def _attempted(repo, cell, check, own, runs):
+    """Whether `check`, `cell`'s newest App apply check, was attempted and not applied:
+    `in_progress` under another run that ended without applying the cell (`holder_state`
+    `deploy`, an apply run that released it and wrote no completion); `completed` `stale`, since
+    GitHub ends an incomplete check so after 14 days and a released check keeps the record title;
+    otherwise retitled, its output title differing from the non-empty title its record holds,
+    which only a successful apply restores. Any other `in_progress` holder is `refuse_held`'s."""
+    if check["status"] == "in_progress":
+        if check.get("details_url") == own:
+            return False
+        return holder_state(repo, cell, check, runs)[0] == "deploy"
+    if check["status"] == "completed" and check.get("conclusion") == "stale":
+        return True
+    title = (decoded(check) or {}).get("title")
+    return (
+        isinstance(title, str) and title != "" and (check.get("output") or {}).get("title") != title
+    )
+
+
 #: The troubleshooting section that returns an in-progress apply check to `queued` by hand.
 BY_HAND = "Return an in-progress apply check by hand"
 
 
-def held_by_others(repo, lines, app_id, cells):
+def held_by_others(repo, lines, app_id, cells, runs=None):
     """`{(cause, id): [cell]}` for each of `cells` with an App apply check in `lines`, any of
     them and not only the newest, `in_progress` under a run other than this one, keyed by that
-    check's `holder_state`. A same-head re-plan queues a newer check over a held one."""
+    check's `holder_state`, read through the holder-run cache `runs` (a fresh one when None). A
+    same-head re-plan queues a newer check over a held one."""
     own, flipped = current_run_url(), {}
     for check in ag.app_runs(lines, app_id):
         if check["status"] == "in_progress" and check.get("details_url") != own:
             flipped.setdefault(check["name"], []).append(check)
-    runs, held = {}, {}
+    runs, held = {} if runs is None else runs, {}
     for c in cells:
         for check in flipped.get(ag.check_name(c["stack"], c["environment"]), []):
             listed = held.setdefault(holder_state(repo, c, check, runs), [])
@@ -480,12 +521,15 @@ def held_by_others(repo, lines, app_id, cells):
     return held
 
 
-def refuse_held(repo, lines, app_id, cells):
+def refuse_held(repo, lines, app_id, cells, runs=None):
     """Refuse the whole apply when another run holds a check of one of `cells` and that run may
-    still apply the cell, may have applied it, or cannot be read (`held_by_others`); a cell an
-    ended run never applied applies. Only this head's checks are read. A plain `SystemExit`,
-    not `Refused`: infrastructure and its saved state may disagree, which no rule explains."""
-    held = {k: v for k, v in held_by_others(repo, lines, app_id, cells).items() if k[0] != "deploy"}
+    still apply the cell, may have applied it, or cannot be read (`held_by_others`). It lets
+    through a cell whose holder ended without applying it (`deploy`): the bare and targeted forms
+    apply it, and the auto form has already held it (`attempted_cells`). Only this head's checks
+    are read, holder runs through the cache `runs` (`held_by_others`). A plain `SystemExit`, not
+    `Refused`: infrastructure and its saved state may disagree, which no rule explains."""
+    found = held_by_others(repo, lines, app_id, cells, runs)
+    held = {k: v for k, v in found.items() if k[0] != "deploy"}
     if held:
         sentences = [_held_text(cause, ident, c) for (cause, ident), c in sorted(held.items())]
         raise SystemExit(f"::error::apply refused: {' '.join(sentences)}")
@@ -973,9 +1017,12 @@ def bare_main(auto=False):
     base into the branch changes, directly or through a module it sources, or removes files it owns
     (`build-matrix.base_changed_stacks`), or whose apply check records that its plan found the
     base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
-    it stays pending and stops its environment's `needs` successors, as a locked cell does.
-    With a cell to apply, its records must name one plan run that
-    `apply-gate.provenance_reason` admits against `apply-gate.auto_source`'s plan and
+    it stays pending and stops its environment's `needs` successors, as a locked cell does. A
+    cell `settle` would run (neither locked, overlap nor waiting on one) whose newest App apply
+    check shows an earlier apply run attempted it and did not apply it (`attempted_cells`) is held
+    the same way with cause `attempted`; `refuse_held` reads it beside the runnable cells, so a
+    refusal over another check of it wins. With a cell to apply, its records must name one plan
+    run that `apply-gate.provenance_reason` admits against `apply-gate.auto_source`'s plan and
     authorizer, no newer `shipmate plan` run of the pull request may be live or have planned
     (`refuse_provenance`), and the authorizer's actor must have write access (`refuse_pusher`).
     Writes the bare outputs plus `provenance_run`, empty when no cell applies; its report also
@@ -1031,7 +1078,15 @@ def bare_main(auto=False):
     elif not auto:
         base_sha = refuse_behind(repo, pr_number, candidates, lines, app_id, tags_by_stack)
     locked = locked_cells(repo, candidates, pr_number)
-    holds = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
+    # One cause per held cell: a locked or overlap cell is never also named attempted.
+    taken = {(c["stack"], c["environment"]) for c in [*locked, *overlap]}
+    # One holder read per run: a second read could turn an unreadable holder into `deploy`.
+    runs, attempted = {}, []
+    if auto:
+        # Only a cell `settle` would run can be attempted: a waiting cell keeps its wait cause.
+        _, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, taken)
+        attempted = attempted_cells(repo, drop_waiting(run, waiting), lines, app_id, runs)
+    holds = taken | {(c["stack"], c["environment"]) for c in attempted}
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels, holds)
     # A skipped env names the predecessors not fully applying for a cause of their own, each with
     # a remedy of its kind; one skipped for nothing but its own predecessors is passed through.
@@ -1048,7 +1103,8 @@ def bare_main(auto=False):
     # over a record-less cell, so refusing here would strand the cells that CAN apply.
     runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     refuse_replanned(runnable, waited)
-    refuse_held(repo, lines, app_id, runnable)
+    # A refusal over another check of an attempted cell wins over holding it.
+    refuse_held(repo, lines, app_id, [*runnable, *attempted], runs)
     bm.refuse_workload_gaps(runnable, table)
     auto_outputs, auto_report = {"base_sha": base_sha}, {}
     if auto:
@@ -1089,7 +1145,7 @@ def bare_main(auto=False):
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_targeted={excluded} skipped_after_targeted={skipped} "
         f"review_held={held} waiting={len(waiting)} locked={len(locked)} overlap={len(overlap)} "
-        f"applied_exempt={applied_exempt} "
+        f"attempted={len(attempted)} applied_exempt={applied_exempt} "
         # The hold cause: an everything-held run is otherwise indistinguishable
         # from a CHANGES_REQUESTED one.
         f"review_decision={decision!r}"
@@ -1103,7 +1159,7 @@ def bare_main(auto=False):
             "applied_exempt_envs": applied_exempt,
             "review_not_required_envs": no_review_required,
             "waiting_cells": waiting,
-            "held_cells": held_cells(locked, overlap),
+            "held_cells": held_cells(locked, overlap, attempted),
             # Over `cells`, not `runnable`: the comment lists excluded, held, waiting and
             # locked cells.
             "env_order": wv.env_sequence(order, {c["environment"] for c in cells}),

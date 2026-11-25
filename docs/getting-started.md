@@ -379,7 +379,10 @@ changed cell and `shipmate apply` once, at the first changed environment that is
 not targeted, then `shipmate unlock <env> --evict` for an environment holding a
 locked changed cell, unless a holder there is stacked on the pull request or
 its walk ran out of pages, and
-`shipmate help`; it is off when absent. `tools` names the Terramate and
+`shipmate help`; it is off when absent. An autoplan that dispatches an `auto`
+apply names each changed `apply_mode: auto` environment in that section,
+``<env> applies on its own (`apply_mode: auto`); if no apply starts, comment
+`shipmate apply`.``, with or without `command_hints`. `tools` names the Terramate and
 OpenTofu versions every job installs, each the pinned engine's default when
 absent.
 
@@ -403,11 +406,14 @@ On a bare apply, an environment held for review, left out as `targeted`, holding
 waiting cell, or holding a cell another pull request locks skips the environments
 ordered after it by `needs`, a review-exempt one included, and its cells that do not apply in the run make the cells ordered `after` them
 wait, which can skip more; §Env apply order computes the whole set. An `auto`
-apply adds two causes: an environment that is not `auto`, and one holding a cell
+apply adds three causes: an environment that is not `auto`, one holding a cell
 whose stack the merge of the base into the branch changes, or whose apply check
 records that its plan found the base changed it ([`../CONTRACT.md`](../CONTRACT.md)
-§`apply_mode: auto`, Overlap). A bare or targeted apply refuses the whole run over
-such a cell instead (§`apply_mode: auto`, Behind the base, bare and targeted).
+§`apply_mode: auto`, Overlap), and one holding a cell an earlier apply run
+attempted and did not apply (§`apply_mode: auto`, Attempted cells), which
+`shipmate apply` retries. A bare or targeted apply refuses the whole run over a
+cell whose stack the base changed or whose apply check is a behind record
+(§`apply_mode: auto`, Behind the base, bare and targeted), and retries an attempted cell.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `review` and `apply_mode`,
 §Env model for `split`, §Env apply order for `needs` and the waiting cells, §Fan-out for
@@ -916,7 +922,8 @@ omitted key read as the empty string.
 No comment lands on the `auto` job. A plan run's `summary` dispatches
 `verb: auto` after an autoplan that changes a cell of an `apply_mode: auto`
 environment, or its `defer-auto` job after a ready-for-review run that deferred
-to such a plan, and the job calls `apply.yml` with `auto: true`
+to such a plan, skipped when that plan published that no `auto` environment changed,
+and the job calls `apply.yml` with `auto: true`
 (§Applying an environment after a push or ready click).
 
 The apply runs of one pull request run one at a time: a later `shipmate apply`

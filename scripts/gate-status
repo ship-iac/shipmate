@@ -14,6 +14,7 @@
     gate-status moved <sha> <pr>                 print `<pr>`'s live head when it is not `<sha>`
     gate-status replan <sha> <pr>                print that live head when it needs a plan
     gate-status published <sha> <pr>             print the earlier run that published it on `<pr>`
+                                                 and whether its plan changed an auto environment
 
 The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
@@ -73,8 +74,9 @@ str `status` (and a str `conclusion` once `completed`) or an int `run_attempt`, 
 jobs listing and a `plan / detect` job `planned` cannot judge exit 1 with one unannotated
 stderr line, after any retry notices and warnings: an unreadable answer dispatches nothing.
 
-`published` prints the earlier autoplan run of `<sha>` that planned and published it on `<pr>`
-by the rules in `_published`, or nothing. Its `<pr>` and `<sha>` are refused as `replan`'s, and
+`published` prints `<run> <state>`, the earlier autoplan run of `<sha>` that planned and
+published it on `<pr>` by the rules in `_published` and whether its plan changed an auto
+environment (`_auto_state`), or nothing. Its `<pr>` and `<sha>` are refused as `replan`'s, and
 every failed or malformed read exits 1 with one unannotated stderr line: the caller plans.
 """
 
@@ -609,8 +611,34 @@ def _names(lines, sha, run_id):
     return len(lines) > 3 and re.search(tail, lines[3]) is not None
 
 
+#: The `plan / summary` job steps of `plan.yml` whose conclusions publish whether the plan
+#: changed an auto environment.
+AUTO_STEP_YES = "An auto environment changed"
+AUTO_STEP_NO = "No auto environment changed"
+
+
+def _auto_state(jobs):
+    """`yes` when the one `plan / summary` job of `jobs` lists `AUTO_STEP_YES` once with
+    conclusion `success` and `AUTO_STEP_NO` at most once and not `success`, `no` the other way
+    round, else `unread`. Only `no` skips the deferred auto apply decision, so every other
+    shape (neither step, both `success`, `steps` missing, a name listed twice) reads `unread`."""
+    summary = next(j for j in jobs if j.get("name") == ag.CALLER_PREFIX + "summary")
+    steps = summary.get("steps")
+    if not isinstance(steps, list):
+        return "unread"
+    yes, no = (
+        [s.get("conclusion") for s in steps if isinstance(s, dict) and s.get("name") == name]
+        for name in (AUTO_STEP_YES, AUTO_STEP_NO)
+    )
+    if len(yes) > 1 or len(no) > 1 or yes == no == ["success"]:
+        return "unread"
+    if yes == ["success"]:
+        return "yes"
+    return "no" if no == ["success"] else "unread"
+
+
 def _published(sha, pr):
-    """Print run `G` when every rule holds, else nothing:
+    """Print run `G` and `_auto_state` of its jobs when every rule holds, else nothing:
 
     1. The newest App gate on `sha` (`newest_gate`) is `pending` or `success` and names
        run `G`, and is no hold (`is_hold`). A hold is a publish in progress or a plan that ended
@@ -652,7 +680,7 @@ def _published(sha, pr):
     if lines is None or not _names(lines, sha, g):
         return
     if done > _created_at(own):
-        print(g)
+        print(f"{g} {_auto_state(jobs)}")
 
 
 #: command -> (argument count after the sha, handler)

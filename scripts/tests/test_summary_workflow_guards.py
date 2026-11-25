@@ -18,18 +18,23 @@ A draft is not refused here: it reaches the job, and gate-state writes its gate 
 reason.
 """
 
+import re
+
 from _loader import (
     ACTIONS,
     ENGINE_ENVIRONMENT,
     WORKFLOWS,
     action_steps,
     action_yaml,
+    load_script,
     local_action,
     step_by,
     workflow_yaml,
 )
 
 WF = WORKFLOWS / "plan.yml"
+gs = load_script("gate-status")
+sc = load_script("summary-comment")
 
 #: Hand-written, never derived from the workflow. A constant lifted out of the file it checks
 #: passes whatever the file says.
@@ -37,13 +42,29 @@ EXPECTED_IF = (
     "${{ !cancelled() && needs.facts.outputs.head-repo != '' && "
     "needs.facts.outputs.head-repo == github.repository && needs.defer.outputs.run == '' }}"
 )
-#: The whole job, as an ordered list of what each step runs. A checkout step, a `run:`
-#: step, or any extra step at all changes this list, where a substring scan would miss every one
-#: of those.
-EXPECTED_STEP_USES = [
+#: The whole job, as an ordered list of what each step runs: the action it uses, or its
+#: `run:` script. A checkout step, another `run:` step, or any extra step at all changes this
+#: list, where a substring scan would miss every one of those.
+EXPECTED_STEPS = [
     "actions/download-artifact",
     "actions/download-artifact",
     local_action("summary"),
+    "true",
+    "true",
+]
+#: The two steps after the summary action whose conclusions `gate-status published` reads,
+#: hand-written.
+EXPECTED_AUTO_STEPS = [
+    {
+        "name": "An auto environment changed",
+        "if": "${{ steps.summary.outputs.auto-change == 'yes' }}",
+        "run": "true",
+    },
+    {
+        "name": "No auto environment changed",
+        "if": "${{ steps.summary.outputs.auto-change == 'no' }}",
+        "run": "true",
+    },
 ]
 EXPECTED_SUMMARY_WITH = {
     "pr-number": "${{ needs.facts.outputs.pr-number }}",
@@ -141,7 +162,51 @@ def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
     any checkout step at all reddens it. Mutation: add an `actions/checkout` step ahead of the
     action."""
     job, _ = _summary_job()
-    assert [str(s["uses"]).split("@")[0] for s in job["steps"]] == EXPECTED_STEP_USES
+    assert [str(s["uses"]).split("@")[0] if "uses" in s else s["run"] for s in job["steps"]] == (
+        EXPECTED_STEPS
+    )
+
+
+def test_the_auto_environment_steps_follow_the_summary_action_exactly():
+    """`gate-status published` reads each step's conclusion by name, so the names must equal
+    `AUTO_STEP_YES` and `AUTO_STEP_NO`. Mutations: rename a step in `plan.yml` only; swap the
+    two `if:` values."""
+    job, _ = _summary_job()
+    assert job["steps"][-2:] == EXPECTED_AUTO_STEPS
+    assert (gs.AUTO_STEP_YES, gs.AUTO_STEP_NO) == (
+        "An auto environment changed",
+        "No auto environment changed",
+    )
+
+
+def test_one_pair_of_words_says_whether_an_auto_environment_changed():
+    """`summary-comment` writes `yes` or `no`, the `plan.yml` steps compare them,
+    `gate-status published` prints them from those steps, `defer-auto` skips on `no`, and
+    `actions/auto-dispatch` replies on `yes` in its decision and its failure reply;
+    `plan-defer` passes the word on unchanged (`test_plan_defer`). Mutations: rename `no` in
+    `_auto_state` only; rename `yes` in the decision's `AUTO_CHANGE` test only; rename `yes`
+    in the failure reply's `if:` only."""
+    cell = {"environment": "dev-eu", "changed": True}
+    written = (sc.auto_change([cell], '["dev-eu"]'), sc.auto_change([cell], "[]"))
+    job, doc = _summary_job()
+    compared = tuple(s["if"].split("'")[1] for s in job["steps"][-2:])
+
+    def state(name):
+        jobs = [{"name": "plan / summary", "steps": [{"name": name, "conclusion": "success"}]}]
+        return gs._auto_state(jobs)
+
+    printed = (state(gs.AUTO_STEP_YES), state(gs.AUTO_STEP_NO))
+    skipped = doc["jobs"]["defer-auto"]["if"].split("'")[-2]
+    decide = step_by("auto-dispatch", id="decide")["run"]
+    reply_if = step_by("auto-dispatch", name="Reply that the deferred decision failed")["if"]
+    replied = (re.findall(r'"\$AUTO_CHANGE" = (\S+) \]', decide), reply_if.split("'")[-2])
+    assert (written, compared, printed, skipped, replied) == (
+        ("yes", "no"),
+        ("yes", "no"),
+        ("yes", "no"),
+        "no",
+        (["yes"], "yes"),
+    )
 
 
 def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
@@ -271,6 +336,16 @@ EXPECTED_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.hold.outputs.superseded }}",
     },
+    "auto-change": {
+        "description": (
+            "`yes` when a changed cell sits in an environment `auto-envs` names, `no` when "
+            "`auto-envs` is a list of names and none does, empty when it is empty or not such a "
+            "list, or when the run was superseded before it built the comment. The `plan.yml` "
+            "steps `An auto environment changed` and `No auto environment changed` publish it as "
+            "their conclusions."
+        ),
+        "value": "${{ steps.build.outputs.auto_change }}",
+    },
 }
 
 
@@ -280,10 +355,11 @@ def test_the_summary_action_exposes_the_comment_write_and_the_supersede():
 
 
 def test_the_summary_job_passes_the_action_outputs_on():
-    """The plan `outcome` job reads both. Mutations: drop `superseded`; drop the step's `id`."""
+    """The plan `outcome` job reads both. Mutations: drop `superseded`; drop the step's `id`;
+    move the summary action below the two auto environment steps."""
     job, _ = _summary_job()
     assert job["outputs"] == {
         "upsert": "${{ steps.summary.outputs.upsert }}",
         "superseded": "${{ steps.summary.outputs.superseded }}",
     }
-    assert job["steps"][-1]["id"] == "summary"
+    assert [s.get("id") for s in job["steps"]] == [None, None, "summary", None, None]

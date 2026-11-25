@@ -62,7 +62,10 @@ a changed cell on a pull request that is not a draft shows them too, in a folded
 `shipmate commands` section: in apply order, `shipmate apply <env>` for each
 changed `apply_mode: targeted` environment, and the bare `shipmate apply` once,
 at the first changed environment that is not targeted, each left out when it
-would apply a cell the base changed since the branch left it.
+would apply a cell the base changed since the branch left it. An autoplan that
+dispatches an `auto` apply names each changed `apply_mode: auto` environment
+with ``<env> applies on its own (`apply_mode: auto`); if no apply starts,
+comment `shipmate apply`.``, in that section, whatever `command_hints` is.
 
 ## Dynamic environments
 
@@ -103,7 +106,8 @@ fourth, `claim`, holds it to add the App's 🚀 to a `shipmate plan` comment, so
 that one run of that comment does the work. A fifth, `defer`, holds it to read
 whether a ready-for-review run's head was already planned and published, so
 that run plans nothing. A sixth, `defer-auto`, holds it when that run deferred,
-to dispatch the `auto` apply of the plan it deferred to. Fork pull requests are refused before any plan cell starts
+to dispatch the `auto` apply of the plan it deferred to, unless that plan
+published that no `auto` environment changed. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check, and

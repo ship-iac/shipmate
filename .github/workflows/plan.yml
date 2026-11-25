@@ -75,6 +75,7 @@ jobs:
     permissions: {}
     outputs:
       run: ${{ steps.defer.outputs.run }}
+      auto: ${{ steps.defer.outputs.auto }}
     steps:
       - id: defer
         uses: $/actions/plan-defer
@@ -85,18 +86,19 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   # Dispatches the auto apply of the plan `defer` named, authorized as this run's actor, the
-  # ready-for-review clicker. Holds the App key but checks nothing out.
+  # ready-for-review clicker. Holds the App key but checks nothing out. It skips only on a
+  # published `no`: an empty or `unread` answer starts it, and `auto-dispatch deferred` decides.
   defer-auto:
     # `detect` resolves before this job starts, so the jobs listing that the auto run's
     # `deferred` reads shows it `skipped`, not pending.
     needs: [facts, defer, detect]
-    if: ${{ !cancelled() && github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review' && github.run_attempt == '1' && needs.facts.result == 'success' && needs.facts.outputs.is-draft == 'false' && needs.facts.outputs.head-repo == github.repository && needs.defer.result == 'success' && needs.defer.outputs.run != '' }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request_target' && github.event.action == 'ready_for_review' && github.run_attempt == '1' && needs.facts.result == 'success' && needs.facts.outputs.is-draft == 'false' && needs.facts.outputs.head-repo == github.repository && needs.defer.result == 'success' && needs.defer.outputs.run != '' && needs.defer.outputs.auto != 'no' }}
     runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: {}
-    # Only a failed `verify-app-key` or `python-yaml` step fails this job; a failed decision or
-    # dispatch warns or replies and ends it `success`. `continue-on-error` keeps the run
-    # `success` even then, which `_deferred_run` needs to read a deferred ready run past.
+    # Only a failed `verify-app-key` or `python-yaml` step fails this job (the latter replies
+    # under `auto` `yes`); a failed decision or dispatch warns or replies and ends it `success`.
+    # `continue-on-error` keeps the run `success`, which `_deferred_run` needs to read past.
     continue-on-error: true
     steps:
       - uses: $/actions/auto-dispatch
@@ -107,6 +109,7 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           github-vars: ${{ toJSON(vars) }}
+          auto-change: ${{ needs.defer.outputs.auto }}
 
   detect:
     needs: [facts, defer]
@@ -278,6 +281,14 @@ jobs:
           auto-envs: ${{ needs.detect.outputs.auto_envs }}
           targeted-envs: ${{ needs.detect.outputs.targeted_envs }}
           behind: ${{ needs.detect.outputs.behind }}
+      # `gate-status published` reads these two steps' conclusions by name (`AUTO_STEP_YES`,
+      # `AUTO_STEP_NO`); a ready-for-review run deferring to this one skips `defer-auto` on `no`.
+      - name: An auto environment changed
+        if: ${{ steps.summary.outputs.auto-change == 'yes' }}
+        run: "true"
+      - name: No auto environment changed
+        if: ${{ steps.summary.outputs.auto-change == 'no' }}
+        run: "true"
 
   # Holds the gate when `summary` was cancelled, or ends this run's publish hold when it failed,
   # outside the group, since either write only closes the gate. A `summary` its fork `if:`

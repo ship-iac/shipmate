@@ -633,13 +633,16 @@ on the same entry.
 `true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
 a plan comment with a changed cell on a pull request that is not a draft ends
 with a folded `shipmate commands` section naming, in apply order,
-`shipmate apply <env>` for each `apply_mode: targeted` environment holding a
-changed cell and `shipmate apply` once, at the first changed environment that is
-not targeted, each left out when it would apply a behind cell, then `shipmate unlock <env>
+``<env> applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`.`` for each `apply_mode: auto` environment an autoplan
+dispatches an `auto` apply for and no other pull request locks, `shipmate apply <env>` for each
+`apply_mode: targeted` environment holding a changed cell and `shipmate apply`
+once, at the first changed environment neither targeted nor named by such a
+line, each left out when it would apply a behind cell, then `shipmate unlock <env>
 --evict` for each environment holding a changed cell another pull request holds,
 unless one of those holders is stacked on this pull request or its walk ran out of
 pages (§Comment-ops), and `shipmate help`
-(§Plan comment). It changes no plan or apply.
+(§Plan comment). The `auto` lines show whatever `command_hints` is. It changes
+no plan or apply.
 
 **`tools` chooses the Terramate and OpenTofu versions every job installs.** It
 maps `terramate`, `tofu` or both to a release version written `X.Y.Z` in ASCII
@@ -1639,14 +1642,17 @@ at the first page holding a run created before `t0`, so under that skew its run
 is missed too when a page before it holds a run created before `t0`.
 
 A double-started `plan` or `apply` of one comment does no harm: the second run
-reads the claim as taken and does nothing. A double-started `auto` run waits:
-the second run waits in `shipmate-apply-<pr_number>` until the first ends
-("One apply run per pull request"), and its `detect` then finds the checks the
-first run applied completed, so it applies none of them. A cell the first run
-left pending (failed, cancelled or not run) is pending for the second run too,
-which takes it up as a later `shipmate apply` would. The exception is a cell
-the first run may have applied without saving its state: its apply check is
-held, and the second run refuses (§Apply check lifecycle, In-progress checks);
+reads the claim as taken and does nothing. A double-started `auto` run still
+starts, waits in `shipmate-apply-<pr_number>` until the first ends ("One apply
+run per pull request") and posts its own result comment. Its `detect` finds
+the checks the first run applied completed, so it applies none of them, and it
+never applies a cell whose apply check an earlier apply run wrote as not
+applied, or released and never applied: it holds the cell
+(§`apply_mode: auto`, Attempted cells), and `shipmate apply` retries it. A
+cell whose newest apply check a dispatched plan wrote refuses the `auto` run
+(§`apply_mode: auto`, Provenance). A cell the first run may have applied
+without saving its state refuses it too: its apply check is held
+(§Apply check lifecycle, In-progress checks);
 `docs/troubleshooting.md` §`The apply step ran and its state was not saved` is
 the recovery. A double replan costs one extra
 plan run and one minimized comment, and a double `unlock` finds no lock and
@@ -2808,8 +2814,9 @@ same body for that plan (`scripts/auto-dispatch deferred`) when all of these
 hold:
 
 - the run is the first attempt of a `pull_request_target` `ready_for_review`
-  run of a pull request that is not a draft and not from a fork, and its `defer`
-  named the earlier plan run;
+  run of a pull request that is not a draft and not from a fork, its `defer`
+  named the earlier plan run, and that plan's `summary` did not record that no
+  `auto` cell changed (§Post-plan topology, `summary`);
 - the head's newest `shipmate / gate` is `pending`, names that plan run, and is
   not that run's publish hold;
 - a queued apply check of that plan run that is no behind record and names the
@@ -2841,14 +2848,22 @@ When the clicker's check refuses on a permission it read, a change already calle
 for an auto apply, so it also posts one reply, ``🔴 refused: auto apply not
 started: <reason>``, the autoplan actor check's reason as worded below. The `auto` run applies the push run's plan, authorized as the clicker.
 Accepted: a ready click on a pull request that was not a draft, landing while
-the push run publishes, can make both runs dispatch; the second `auto` run waits
-in the pull request's apply queue, then applies the cells the first left pending
-(none after a full apply) or refuses as the first did.
-A read that fails before a change of an `auto` environment is known warns and
-posts no reply; a failed autoplan listing, or a clicker's permission that could
-not be read, after it warns and posts one reply,
+the push run publishes, can make both runs dispatch. Both `auto` runs start and
+post a result comment, the second after the first ends in the pull request's
+apply queue, and the second never applies a cell the first attempted
+(Attempted cells, below): it applies none after a full apply, holds the cells
+the first left failed, cancelled or not run, or refuses as the first did.
+A read that fails before a change of an `auto` environment is known warns, and
+replies when the deferred-to plan published that an `auto` environment changed
+(`yes`, §Post-plan topology, `summary`); it warns with no reply only when that
+plan published neither. A failed autoplan listing, or a clicker's permission
+that could not be read, warns and posts the reply whatever the plan published.
+The reply reads
 ``🔴 failed: auto apply not started: what decides it for this ready-for-review
-run could not be read; comment `shipmate apply` ``. A failed dispatch replies as
+run could not be read; comment `shipmate apply` ``. A failed `python-yaml`
+step posts the same reply under `yes`. Further limits without a reply: a
+failed `verify-app-key` step, which runs before any token exists, and a failed
+mint of the token the decision reads with, which leaves the reply none. A failed dispatch replies as
 below. Only a failed `verify-app-key` or `python-yaml` step ends `defer-auto`
 `failure`, and the run still ends `success`; a failed decision or dispatch warns
 or replies and ends `defer-auto` `success`.
@@ -2885,6 +2900,12 @@ cannot tell whether an `auto` apply of the head is running. Known limit: an
 autoplan started by closing and reopening the pull request on the same head
 while an earlier `auto` apply of it runs shows the line although that apply is
 running.
+
+An autoplan that dispatches the `auto` apply, a push or the ready-for-review
+click on its first attempt, of a pull request that is not a draft, says so in
+its command section instead, whatever `command_hints` is: ``<env> applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`.``,
+one per changed `auto` environment no other pull request locks
+(§Plan comment).
 
 **What an `auto` run applies.** It passes `apply.yml`'s `guard`, waits in its
 pull request's apply queue and passes `apply-run.yml`'s `review` as any apply
@@ -3063,6 +3084,21 @@ dispatches again. A cell whose newest apply check is a behind record (its plan
 found that the base changed its stack after the branch left it) is held the same
 way and named on the same line.
 
+**Attempted cells.** A cell `detect` would apply, neither locked, an overlap
+cell, nor waiting on a locked or overlap cell, is held when its newest App
+apply check shows that an earlier apply run attempted it and did not apply it: the check is not `in_progress` and its
+title differs from the one its plan record holds (a completion retitled it
+`Failed: <error>`, `Cancelled`, `Not run` or `Not applied (<conclusion>)`);
+it is `completed` `stale`, which GitHub sets on a check left incomplete for 14
+days; or it is `in_progress` under another apply run that ended without
+applying it. An `auto` run never retries a cell unattended. A held cell is not
+applied: its apply check and the gate stay pending, it stops its environment's
+`needs` successors as a locked cell does, a cell that runs after it waits, and
+the result comment names it with ``⚪ held, an earlier apply run did not apply
+these cells: <cells>. Comment `shipmate apply` to retry.`` A refusal over
+another check of the cell (§Apply check lifecycle, In-progress checks) still
+refuses the run. A bare or targeted `shipmate apply` retries the cell.
+
 **Behind the base, bare and targeted.** A bare or targeted `shipmate apply`
 selects the cells it would apply: a bare apply's pending cells in environments
 neither held for review nor `targeted`, a targeted apply's pending cells of its
@@ -3091,8 +3127,8 @@ not fully apply this run is skipped, its checks pending, and the result comment
 names the predecessor with its remedy by kind: `` `shipmate apply <pred>` `` for a
 `targeted` one, an approving review for a held one, followed by
 `` `shipmate apply <pred>` `` when it is also `targeted`, `a cell of it does not
-apply this run; see its line below` for one holding a locked, overlap or waiting
-cell, and `shipmate apply` otherwise (§Apply result comment).
+apply this run; see its line below` for one holding a locked, overlap, attempted
+or waiting cell, and `shipmate apply` otherwise (§Apply result comment).
 
 **Wave re-check.** Every pre-merge wave cell's pre-apply check (§Cell locks)
 refuses unless the run attempt is `1`, the base tip, read from the branch ref,
@@ -3325,16 +3361,19 @@ The nine jobs:
   `shipmate-engine`, `permissions: {}`) — when the pull request's push run
   planned and published this head while the ready click waited, this run plans
   nothing and posts no plan comment: `plan / defer` succeeds with the notice "plan run
-  <id> planned and published <sha>; this ready-for-review run plans nothing",
-  and `detect`, `plan`, `summary`, `gate-hold` and `outcome` are skipped. That
-  run's plan comment, apply checks and gate stand, and `defer-auto` decides its
-  `auto` apply. A re-run of this run defers
+  <id> planned and published <sha> (auto environment changed: <state>); this
+  ready-for-review run plans nothing", and `detect`, `plan`, `summary`,
+  `gate-hold` and `outcome` are skipped. `<state>` is what that run's
+  `summary` published: `yes` or `no` when exactly one of its two steps
+  succeeded, `unread` for any other shape, an older engine's plan run included.
+  That run's plan comment, apply checks and gate stand, and `defer-auto` decides
+  its `auto` apply unless `<state>` is `no`. A re-run of this run defers
   again, so the earlier plan stays; a push plans the new head. When it cannot
   tell, a missing App key or a failed read included, it warns and the run
   plans. It checks nothing out and runs on `ubuntu-slim` whatever `runs_on` the
   caller passes.
 - **`defer-auto`** (engine, the first attempt of a `ready_for_review` run whose
-  `defer` named an earlier plan run, bound to `shipmate-engine`,
+  `defer` named an earlier plan run and did not read `no`, bound to `shipmate-engine`,
   `permissions: {}`, `continue-on-error: true`) — decides through
   `actions/auto-dispatch` whether that plan's `apply_mode: auto` environments get
   an `auto` apply, and dispatches it (§`apply_mode: auto`, "Deferred
@@ -3375,7 +3414,12 @@ The nine jobs:
   mirror of this run's completed `plan / ` checks onto the pull request's
   head and the `⚪ nothing planned` comment when no cell was planned. It
   outputs what its comment write did (`upsert`) and whether the run was
-  superseded (`superseded`), which `outcome` reads. A run that
+  superseded (`superseded`), which `outcome` reads. Two steps after it, shown
+  on the run page, publish whether the plan changed an `auto` environment by which
+  one succeeds: `An auto environment changed` when a changed cell is in an
+  `apply_mode: auto` environment of the default branch's table, `No auto environment
+  changed` when none is. Both skip when `detect` gave no readable list of that
+  table's `auto` environments, or the run was superseded before it built its comment. `defer` reads them. A run that
   sees its pull request moved past its head before the publish hold writes none
   of these on it; one that sees the move at the plan comment step leaves any
   publish hold it already wrote (whose text says to re-plan) and any mirrored
@@ -4009,7 +4053,8 @@ above the unchanged lines. The plan body has no
 footer and no help hint, whether or not `doctor` warned: both verdicts are
 normal results and the verdict links the run. The one exception is the command
 section, which shows only when the table's `command_hints` is `true`, a cell
-changed and the pull request is not a draft (`shipmate apply` refuses a draft):
+changed and the pull request is not a draft (`shipmate apply` refuses a draft),
+except its `auto` paragraphs (below), which show whatever `command_hints` is:
 
 ```
 <details><summary>shipmate commands</summary>
@@ -4042,6 +4087,52 @@ Comment `shipmate help` for every command.
 
 </details>
 ```
+
+An autoplan that dispatches an `auto` apply (§`apply_mode: auto`: a push or
+the ready-for-review click, on its first attempt) gives each changed
+`apply_mode: auto` environment no other pull request locks the paragraph
+``<env> applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`.`` at its position. The bare paragraph then
+shows at the first environment neither targeted nor such, and reads `to apply
+the other environments` when either kind renders. A reopen, a re-run, a
+`shipmate plan` run, and an `auto` environment whose changed cells other pull
+requests lock keep the bare paragraph. A plan that changed `auto` `dev-eu` reads:
+
+```
+<details><summary>shipmate commands</summary>
+
+dev-eu applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`.
+
+Comment `shipmate help` for every command.
+
+</details>
+```
+
+and one that also changed an untargeted `stg`:
+
+```
+<details><summary>shipmate commands</summary>
+
+dev-eu applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`.
+
+Comment `shipmate apply` to apply the other environments.
+
+Comment `shipmate help` for every command.
+
+</details>
+```
+
+Without `command_hints`, or when the full section does not fit the size budget,
+the section holds only the `auto` paragraphs, with no `shipmate help`
+paragraph. Their room is reserved before any fold-out is sized, so a large plan
+shrinks a fold-out rather than drop them. When the cell lines leave them no room
+under the 65,536-character cap, they are left out with the warning "the plan
+comment's cell lines leave no room under the 65,536-char comment cap for the
+auto apply lines; they were left out". Known limit: the paragraph is written
+before the `auto` run reads its cells, so it can name an `auto` environment
+that run then skips behind a pending targeted or bare `needs` predecessor, or
+holds as overlap or attempted; the remedy covers it. Neither the newest-autoplan check nor
+the dispatch result is known then either: a newer push posts a newer comment,
+and a failed dispatch replies.
 
 An environment holding a behind cell loses its paragraph when it is targeted
 and, when it is not, removes the bare paragraph, since every apply that would
@@ -4252,7 +4343,9 @@ fold-out before any shows a second, unless a share is too small to hold a
 truncated plan; then the cells fill in comment order. The command section is
 left out before any of these steps: it is added after every cell is sized,
 only when the whole body with it stays within the budget, and never shrinks a
-cell; leaving it out warns nothing. If even the bare lines alone cannot fit
+cell; leaving it out warns nothing. Its `auto` paragraphs are the exception:
+their room is reserved with the head, and only the 65,536-character cap drops
+them, with a warning. If even the bare lines alone cannot fit
 the cap, the summary fails loud rather than posting a truncated comment. Plan
 text is emitted only inside a backtick fence computed to be longer than any
 backtick run in the text — author-controlled plan output cannot escape the
@@ -4538,7 +4631,9 @@ names an error. A job that failed without an `::error::` renders no fence.
   the waiting line below), `N locked` when another pull request locks
   pending cells (see the locked line below) and `N held (base changed)` for an
   `auto` apply's overlap cells that are not also locked, so a cell under both
-  causes counts once, under `N locked` (see the overlap line below), then
+  causes counts once, under `N locked` (see the overlap line below), and
+  `N held (not applied earlier)` for an `auto` apply's attempted cells (see
+  the attempted line below), then
   `N environments pending` (`1 environment pending`) for the distinct
   environments the run did not apply: held for review, left to a bare apply,
   `targeted` or skipped. A targeted run's report names no other environment,
@@ -4563,15 +4658,18 @@ names an error. A job that failed without an `::error::` renders no fence.
   not-recorded row does not suppress it: it describes one cell in one
   environment and says nothing about a different environment whose job died
   before reporting. The circle is 🔴 for any outcome word, else the worst of
-  the rows' circles and, when cells wait, are locked or are overlap cells, or
+  the rows' circles and, when cells wait, are locked or are overlap or attempted cells, or
   an environment is pending, ⚪ (🔴, 🟠, 🟡, ⚪, 🟢 in that order), so such a
   run is never 🟢. With no rows, the first that holds: `🔴 refused`,
   `🔴 failed`, `🔴 cancelled`,
   `⚪ nothing applied, environments are held for review`,
+  `⚪ nothing applied, pending cells are held; the lines below say why` (an
+  attempted cell beside a locked or overlap cell),
   `⚪ nothing applied, pending cells are locked or the base also changed their
   stacks` (a locked cell and an overlap cell, the same cell or not),
   `⚪ nothing applied, pending cells are locked`,
   `⚪ nothing applied, the base also changed the pending cells' stacks`,
+  `⚪ nothing applied, an earlier apply run did not apply the pending cells`,
   `⚪ nothing applied, cells wait on pending cells they run after`,
   `⚪ nothing applied, the pending environments wait on the lines below` (a run
   that left a pending environment to a bare apply, a `targeted` one or a skipped
@@ -4595,7 +4693,7 @@ names an error. A job that failed without an `::error::` renders no fence.
   or `detect` never ran), or the file is unreadable, not a JSON object, incomplete with an empty detect
   `refusal` (a crash, or a failed checkout that named no error), or not the shape the comment reads: a field of another type, a list of
   environment names holding something else, a waiting or held cell without its string keys, a
-  held cell neither `locked` (with a numeric, null or absent holder) nor `overlap`, or a
+  held cell neither `locked` (with a numeric, null or absent holder), `overlap` nor `attempted`, or a
   `skipped_after` value that is not a list of names. Every field then reads empty, which alone
   would read `🟢 no pending applies` over pending cells, so the verdict is never 🟢: a run with an
   outcome word reads it (`🔴 refused`, `🔴 failed` or `🔴 cancelled`), any other `⚪ result unknown`, or with rows its counts followed by
@@ -4641,7 +4739,7 @@ names an error. A job that failed without an `::error::` renders no fence.
   pointer to the lost-save section.
 - **Footer lines**, one per line: the bare and `auto` forms' environment
   dispositions, then, in every form, one line per lock holder and environment,
-  then, in the `auto` form, the overlap line, then one line per waiting cell. The comment
+  then, in the `auto` form, the overlap line and the attempted line, then one line per waiting cell. The comment
   states no gate line: the `shipmate / gate` status shows the gate's state.
 
 There is no separate "nothing pending" input: the expected cell set is the
@@ -4668,7 +4766,7 @@ actionable warning cannot be lost on either path. In the order they render:
   a `targeted` one, `it is held until the pull request is approved` for a held
   one (`` , then comment `shipmate apply <pred>` `` when also `targeted`), `a cell of
   it does not apply this run; see its line below` for one holding a locked,
-  overlap or waiting cell, and otherwise, an `auto` apply's environment that is
+  overlap, attempted or waiting cell, and otherwise, an `auto` apply's environment that is
   not `auto`, `` comment `shipmate apply`, which applies them in order ``. A detect
   report whose `skipped_after` names nothing for it renders the cause-agnostic `⚪ <env>: skipped,
   ordered after an environment not fully applying this run`.
@@ -4697,6 +4795,12 @@ actionable warning cannot be lost on either path. In the order they render:
   of an `auto` apply's overlap cells (the report's `held_cells` with `cause`
   `overlap`, §`apply_mode: auto`: a stack the base changed, or a behind record)
   as `<stack> / <env>` comma-separated. Only the `auto` form renders it.
+- **attempted** — ``⚪ held, an earlier apply run did not apply these cells:
+  <cells>. Comment `shipmate apply` to retry.``, one line naming each of an
+  `auto` apply's attempted cells (the report's `held_cells` with `cause`
+  `attempted`, §`apply_mode: auto`, Attempted cells) as `<stack> / <env>`
+  comma-separated. A cell is never both attempted and locked or overlap. Only
+  the `auto` form renders it.
 - **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
   yet; <remedy>`, one per cell left pending because a cell it runs after
   (§Fan-out) is pending and not applying this run; the second pair is that
@@ -4712,6 +4816,8 @@ actionable warning cannot be lost on either path. In the order they render:
   the branch from the base and push` when the blocker is also an overlap cell,
   else `the base also changed it; update the branch from the base and push`
   when the blocker is an overlap cell, else
+  `` an earlier apply run did not apply it; comment `shipmate apply` to retry ``
+  when the blocker is an attempted cell, else
   `` it is held until the pull request is approved, then comment
   `shipmate apply <env>` `` when the blocker's environment is held and
   `targeted`, `it is held until the pull request is approved` when it is held,
@@ -4840,7 +4946,7 @@ when a row is blocked, one note follows the row lines:
 In the compact form each environment disposition is one line naming its
 environments comma-separated (`<envs>`), in the per-environment order, and the
 waiting cells are one line per blocker, keeping every blocker and its remedy;
-the `held:` remedy line, the locked lines and the overlap line are unchanged:
+the `held:` remedy line, the locked lines, the overlap line and the attempted line are unchanged:
 
 - `` 🟡 left pending (targeted): <envs>; comment `shipmate apply <env>` for each ``
 - ``🟡 left pending (not `apply_mode: auto`): <envs>; comment `shipmate apply` ``
@@ -5573,7 +5679,7 @@ One `- ` line per inverted pair. Four paths refuse, each over its own cells:
 | --- | --- | --- |
 | plan (not a drift sweep) | the plan matrix | the plan matrix |
 | bare `shipmate apply` | pending cells of every environment neither held, `targeted` nor skipped by `needs`, the skips a waiting or locked cell causes included; waiting cells count | every pending cell, held and `targeted` ones included |
-| `auto` apply | pending cells of every `apply_mode: auto` environment neither held nor skipped by `needs`, the skips a waiting, locked or overlap cell causes included; waiting cells count | every pending cell, of every environment |
+| `auto` apply | pending cells of every `apply_mode: auto` environment neither held nor skipped by `needs`, the skips a waiting, locked, overlap or attempted cell causes included; waiting cells count | every pending cell, of every environment |
 | merge deploy | every pending cell | every pending cell |
 
 A plan refusal holds the gate, and the gate description carries its first error,
@@ -5622,12 +5728,14 @@ titled `State not saved`: a re-comment refuses it until it is recovered
 §`The apply step ran and its state was not saved`).
 
 An `auto` apply is the bare form over the `apply_mode: auto` environments
-(§`apply_mode: auto`), with two more causes of not fully applying: every pending
-environment that is not `auto`, and an `auto` environment holding a cell the
-base also changed, or whose apply check is a behind record (an overlap cell). Both skip the environments ordered after
-them, and a cell that runs after an overlap cell, or after a pending cell of an
+(§`apply_mode: auto`), with three more causes of not fully applying: every pending
+environment that is not `auto`, an `auto` environment holding a cell the
+base also changed, or whose apply check is a behind record (an overlap cell),
+and one holding a cell an earlier apply run attempted and did not apply (an
+attempted cell). Each skips the environments ordered after
+them, and a cell that runs after an overlap or attempted cell, or after a pending cell of an
 environment that is not `auto`, waits. The apply-all-detect notice counts the
-overlap cells as `overlap=<n>` and names every skipped environment
+overlap cells as `overlap=<n>` and the attempted cells as `attempted=<n>`, and names every skipped environment
 `skipped_after_targeted`, as on the bare form.
 
 The engine ships this as a reusable, parameterized workflow

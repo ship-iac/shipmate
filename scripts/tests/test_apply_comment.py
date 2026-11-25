@@ -4,7 +4,7 @@ import pathlib
 import re
 
 import pytest
-from _detect_fixtures import locked_cell, overlap_cell, waiting_cell
+from _detect_fixtures import attempted_cell, locked_cell, overlap_cell, waiting_cell
 from _loader import ENGINE as _ENGINE
 from _loader import load_script, workflow_yaml
 
@@ -3144,3 +3144,128 @@ def test_stale_note_names_five_and_counts_the_rest(tmp_path):
     ]
     named = ", ".join(f"**s{n} (dev-eu)**" for n in range(5))
     assert ac._stale_note(rows) == f"stale plan: {named}, and 6 more. {_STALE_REMEDY}"
+
+
+#: The attempted-cell line for `stacks/app` and `stacks/db` in `dev-eu`, hand-written.
+_ATTEMPTED_LINE = (
+    "⚪ held, an earlier apply run did not apply these cells: stacks/app / dev-eu, stacks/db / "
+    "dev-eu. Comment `shipmate apply` to retry."
+)
+_ATTEMPTED = [attempted_cell("stacks/app", "dev-eu"), attempted_cell("stacks/db", "dev-eu")]
+
+
+@pytest.mark.parametrize("compact", [False, True])
+def test_the_attempted_cells_get_one_line_naming_them_and_the_remedy_in_both_forms(compact):
+    """Mutation: drop `d["attempted"]` from `_per_env_lines` -- the per-environment case, red.
+    Mutation: drop `d["attempted"]` from `_grouped_lines` -- the compact case, red."""
+    assert ac._footer_parts([], [], held_cells=_ATTEMPTED, compact=compact) == [_ATTEMPTED_LINE]
+
+
+def test_the_attempted_line_escapes_every_name():
+    """Mutation: drop `_md_name` from the attempted cell's stack -- the team mention, red."""
+    assert ac._footer_parts([], [], held_cells=[attempted_cell("s@org/team<1", "e<2")]) == [
+        (
+            "⚪ held, an earlier apply run did not apply these cells: s@<!-- -->org/team&lt;1 / "
+            "e&lt;2. Comment `shipmate apply` to retry."
+        )
+    ]
+
+
+def test_main_renders_the_attempted_cells_from_the_render_step_env(monkeypatch, tmp_path):
+    """The report's `attempted` cause passes the shape check and renders its line.
+
+    Mutation: drop `attempted` from `_held` -- `⚪ result unknown` and the red line, red.
+    Mutation: return `[]` from `_attempted_lines` -- no line, red.
+    Mutation: drop the attempted-alone branch of the held-cell sentence -- 🟢, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    _set_report(monkeypatch, tmp_path, {"held_cells": _ATTEMPTED})
+    assert _main_body(tmp_path) == (
+        "### shipmate apply dev-eu\n\n⚪ nothing applied, an earlier apply run did not apply the "
+        f"pending cells {_MAIN_AT}\n\n{_ATTEMPTED_LINE}\n\n" + HINT
+    )
+
+
+@pytest.mark.parametrize(
+    ("other", "line"),
+    [
+        (
+            locked_cell("stacks/app", "dev-eu", 12),
+            (
+                "🔒 locked by #12: stacks/app / dev-eu. Wait for #12 to merge or close, then "
+                "re-plan. If #12 has already merged or closed, comment `shipmate unlock dev-eu "
+                "--evict` once #12's apply, auto and deploy runs have ended."
+            ),
+        ),
+        (
+            overlap_cell("stacks/app", "dev-eu"),
+            (
+                "⚪ held, the base changed these stacks after this branch left it: stacks/app / "
+                "dev-eu. Update the branch from the base and push."
+            ),
+        ),
+    ],
+    ids=["locked", "overlap"],
+)
+def test_a_run_with_an_attempted_cell_and_another_held_cell_says_the_lines_say_why(other, line):
+    """Mutation: test the mixed sentence after the locked-and-overlap, locked and overlap ones
+    -- the locked or the overlap sentence, red.
+    Mutation: test `attempted and locked` alone for the mixed sentence -- `overlap`, red."""
+    held_cells = [other, attempted_cell("stacks/db", "dev-eu")]
+    assert _comment([], env="", held_cells=held_cells) == (
+        "### shipmate apply\n\n⚪ nothing applied, pending cells are held; the lines below say "
+        f"why {AT}\n\n{line}\n⚪ held, an earlier apply run did not apply these cells: "
+        "stacks/db / dev-eu. Comment `shipmate apply` to retry.\n\n" + HINT
+    )
+
+
+def test_a_partly_applied_run_counts_its_attempted_cells():
+    """Mutation: drop the attempted token from `_white_tokens` -- `⚪ 1 applied`, red."""
+    held_cells = [attempted_cell("stacks/db", "dev-eu")]
+    assert ac._verdict([_row()], "", (), SHA, RUN_URL, (), held_cells) == (
+        "⚪",
+        f"⚪ 1 applied, 1 held (not applied earlier) {AT}",
+    )
+
+
+def test_a_cell_waiting_on_an_attempted_cell_names_shipmate_apply():
+    """The blocker's environment is held and targeted, and only the cell was attempted: the
+    retry wins over the review and targeted remedies, keyed on the blocker cell.
+
+    Mutation: drop the `attempted` branch from `_waiting_remedy` -- the held-and-targeted
+    remedy, red.
+    Mutation: key the blocker's attempt on its environment alone -- `stacks/b` names the retry,
+    red."""
+    waiting = [
+        waiting_cell("stacks/a", "qa", "stacks/dns", "ops"),
+        waiting_cell("stacks/b", "qa", "stacks/vault", "ops"),
+    ]
+    parts = ac._footer_parts(
+        ["ops"], [], ["ops"], waiting, held_cells=[attempted_cell("stacks/dns", "ops")]
+    )
+    assert parts[-2:] == [
+        (
+            "⚪ stacks/a / qa: waits on stacks/dns / ops, not applied yet; an earlier apply run "
+            "did not apply it; comment `shipmate apply` to retry"
+        ),
+        (
+            "⚪ stacks/b / qa: waits on stacks/vault / ops, not applied yet; it is held until the "
+            "pull request is approved, then comment `shipmate apply ops`"
+        ),
+    ]
+
+
+def test_a_skipped_environment_after_an_attempted_cell_points_at_its_line():
+    """Mutation: leave the attempted cells out of `_dispositions`' `cell_envs` -- the bare
+    apply remedy, red."""
+    parts = ac._footer_parts(
+        [],
+        ["prod"],
+        held_cells=[attempted_cell("stacks/app", "dev-eu")],
+        skipped_after={"prod": ["dev-eu"]},
+    )
+    assert parts[0] == (
+        "⚪ prod: skipped, waits on dev-eu (a cell of it does not apply this run; see its line "
+        "below)"
+    )

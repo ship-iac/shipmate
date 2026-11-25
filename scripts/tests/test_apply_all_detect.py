@@ -26,6 +26,7 @@ from _detect_fixtures import (
     partial_message,
     plan_listing_urls,
     plan_polls,
+    retitled_check,
     routed,
     run_graph_capture,
     spy_env_config,
@@ -997,7 +998,7 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
             f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, "
             "0] "
             "excluded_targeted=[] skipped_after_targeted=[] review_held=[] waiting=0 locked=0 "
-            "overlap=0 applied_exempt=[] "
+            "overlap=0 attempted=0 applied_exempt=[] "
             "review_decision='APPROVED'"
         )
     ]
@@ -1327,7 +1328,7 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 envlevels=[0, 0, 0, 0] "
         "excluded_targeted=['ex'] skipped_after_targeted=[] review_held=[] waiting=2 locked=0 "
-        "overlap=0 applied_exempt=[] review_decision='APPROVED'"
+        "overlap=0 attempted=0 applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
 
 
@@ -1383,7 +1384,7 @@ def test_main_leaves_a_locked_cell_pending_and_skips_its_envs_needs_successor(
     assert (
         f"::notice title=apply-all-detect::head={HEAD} cells=4 pending=4 envlevels=[1, 0, 0, 0] "
         "excluded_targeted=[] skipped_after_targeted=['prod-eu'] review_held=[] waiting=1 "
-        "locked=1 overlap=0 applied_exempt=[] review_decision='APPROVED'"
+        "locked=1 overlap=0 attempted=0 applied_exempt=[] review_decision='APPROVED'"
     ) in capsys.readouterr().out.splitlines()
 
 
@@ -1784,3 +1785,24 @@ def test_a_bare_cell_a_waited_run_replanned_refuses(tmp_path, monkeypatch):
         "dev-eu while this apply waited for it; review its plan, then comment the same "
         "`shipmate apply` command"
     )
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        retitled_check("stacks/app", cells=1),
+        {
+            **retitled_check("stacks/app", shown="+1 ~0 -0", cells=1),
+            "status": "completed",
+            "conclusion": "stale",
+        },
+    ],
+    ids=["retitled", "stale"],
+)
+def test_a_bare_apply_retries_a_cell_an_earlier_apply_run_attempted(tmp_path, monkeypatch, check):
+    """Only the auto form holds an attempted cell; a writer's `shipmate apply` retries it.
+
+    Mutation: compute `attempted_cells` in every form of `bare_main` -- both cases hold, red."""
+    parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", checks=[check])
+    assert _wave_envs(parsed) == ["dev-eu"]
+    assert detect_report()["held_cells"] == []

@@ -106,14 +106,18 @@ inputs:
       changed cell another pull request holds, unless `cell-lock marks`' `blocking` output names
       a holder there (stacked on this pull request, or its walk ran out of pages: the holders
       the eviction refuses on), and `shipmate help`, when a cell changed and the
-      pull request is not a draft. Anything else (empty when detect is skipped) leaves it out.
+      pull request is not a draft. Anything else (empty when detect is skipped) leaves it out,
+      except the lines naming each changed `auto-envs` environment that applies on its own,
+      which an autoplan dispatching an auto apply shows in a section of their own whatever this
+      input holds.
     required: false
     default: ""
   auto-envs:
     description: >-
       build-matrix's `auto_envs` output: JSON [env, ...], the default branch table's
       `apply_mode: auto` environments. The auto apply decision reads it, and the plan comment
-      says why no auto apply follows an autoplan that changed a cell of one. Empty (detect
+      says why no auto apply follows an autoplan that changed a cell of one, or, under an
+      autoplan that dispatches one, that the environment applies on its own. Empty (detect
       skipped or refused) renders no line; the dispatch decision then stops at an earlier
       condition, and warns only when it reaches the value. A value that is not a list of
       names renders none and warns.
@@ -151,6 +155,13 @@ outputs:
       plan run holding its gate, and this run wrote nothing on the head. Empty otherwise. A head
       that moves after that read reports through `upsert` as `moved`.
     value: ${{ steps.hold.outputs.superseded }}
+  auto-change:
+    description: >-
+      `yes` when a changed cell sits in an environment `auto-envs` names, `no` when
+      `auto-envs` is a list of names and none does, empty when it is empty or not such a list,
+      or when the run was superseded before it built the comment. The `plan.yml` steps
+      `An auto environment changed` and `No auto environment changed` publish it as their conclusions.
+    value: ${{ steps.build.outputs.auto_change }}
 runs:
   using: composite
   steps:
