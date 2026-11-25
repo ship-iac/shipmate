@@ -1641,7 +1641,7 @@ def test_only_an_ended_run_that_never_applied_the_cell_holds_it(monkeypatch, cas
     check, runs, _ = _holding(case)
     monkeypatch.setattr(aad, "_run", _github([], (), "write", [], [], [], runs=runs))
     cell = {"stack": "stacks/app", "environment": "dev-eu"}
-    assert aad.attempted_cells("o/r", [cell], [json.dumps(check)], APP_ID) == held
+    assert aad.attempted_cells("o/r", [cell], [json.dumps(check)], APP_ID, {}) == held
 
 
 def test_a_retitled_cell_the_base_also_changed_is_held_once_as_overlap(tmp_path, monkeypatch):
@@ -1655,3 +1655,24 @@ def test_a_retitled_cell_the_base_also_changed_is_held_once_as_overlap(tmp_path,
     assert detect_report()["held_cells"] == [
         {"stack": "stacks/app", "environment": "dev-eu", "cause": "overlap"}
     ]
+
+
+def test_the_attempted_hold_and_the_holder_refusal_decide_on_one_holder_read(tmp_path, monkeypatch):
+    """Run 77's first read fails and a later one reads it ended without applying the cell: both
+    `attempted_cells` and `refuse_held` take the first answer, so the run refuses as unreadable
+    instead of applying a cell the hold never saw as `deploy`.
+
+    Mutation: give `refuse_held` its own holder-run cache in `bare_main` (drop its `runs`) --
+    the second read says `deploy` and the cell applies, red."""
+    check, runs, _ = _holding("ended never applied")
+    real, reads = aad._holding_run, []
+
+    def flaky(repo, run_id):
+        reads.append(run_id)
+        return ("unreadable", None) if len(reads) == 1 else real(repo, run_id)
+
+    monkeypatch.setattr(aad, "_holding_run", flaky)
+    with pytest.raises(SystemExit) as exc:
+        _run_auto(tmp_path, monkeypatch, checks=[check], runs=runs)
+    assert str(exc.value) == HELD_CASES["unreadable"][3]
+    assert reads == [HOLDER]
