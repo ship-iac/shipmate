@@ -22,7 +22,7 @@ its own.
 import json
 import os
 
-from _shipmate import _load, run_annotated
+from _shipmate import _load, run_annotated, write_outputs
 
 ec = _load("env-config")
 
@@ -64,8 +64,7 @@ def main():
         for tool in ec.TOOLS:
             print(f"{tool} {versions[tool]} from the detect job")
     tools = json.dumps({tool: versions[tool] for tool in ec.TOOLS}, separators=(",", ":"))
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8", newline="\n") as fh:
-        fh.write(f"terramate={versions['terramate']}\ntofu={versions['tofu']}\ntools={tools}\n")
+    write_outputs(terramate=versions["terramate"], tofu=versions["tofu"], tools=tools)
 
 
 if __name__ == "__main__":

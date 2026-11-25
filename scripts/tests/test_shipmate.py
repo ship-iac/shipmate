@@ -39,6 +39,7 @@ from _shipmate import (
     status_text,
     utf8_output,
     validate_head_sha,
+    write_outputs,
     write_retried,
 )
 
@@ -818,14 +819,13 @@ def test_run_annotated_refuses_any_argument_when_given_a_usage(
 
 def _refusal_output(monkeypatch, tmp_path, main, **switch):
     """(exit code, `GITHUB_OUTPUT` bytes) of `run_annotated(main, **switch)`. Bytes, because a
-    text read would turn a CR into a line end and hide one written into the value; only the
-    platform's own line end (`write_outputs` writes in text mode) is read back as LF."""
+    text read would turn a CR into a line end and hide one written into the value."""
     out = tmp_path / "out.txt"
     out.write_bytes(b"")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     with pytest.raises(SystemExit) as exc:
         run_annotated(main, **switch)
-    return exc.value.code, out.read_bytes().replace(os.linesep.encode(), b"\n")
+    return exc.value.code, out.read_bytes()
 
 
 def test_run_annotated_writes_the_whole_first_error_as_the_refusal_output(monkeypatch, tmp_path):
@@ -924,6 +924,21 @@ def test_run_annotated_writes_no_refusal_output_without_the_switch(monkeypatch, 
     """Mutation: write the output whatever `refusal_output` says -- red."""
     main = _raising("::error::first")
     assert _refusal_output(monkeypatch, tmp_path, main) == (1, b"")
+
+
+def test_write_outputs_opens_the_file_for_lf_lines(monkeypatch, tmp_path):
+    """Text mode would end each line in CRLF on Windows. Mutation: drop `newline="\n"` -- red."""
+    path = str(tmp_path / "out.txt")
+    monkeypatch.setenv("GITHUB_OUTPUT", path)
+    calls = []
+
+    def recorder(*args, **kwargs):
+        calls.append((args, kwargs))
+        return io.StringIO()
+
+    monkeypatch.setattr("_shipmate.open", recorder, raising=False)
+    write_outputs(a="1")
+    assert calls == [((path, "a"), {"encoding": "utf-8", "newline": "\n"})]
 
 
 def test_print_annotated_prints_each_error_escaped_and_returns_its_lines(capsys):

@@ -464,13 +464,12 @@ def test_the_script_writes_its_first_refusal_as_the_refusal_output(monkeypatch, 
     """
     table = _TABLE + "tools:\n  tofu: v8.8.8\n  terramate: 1.0.0\n"
     code, out, _, _, _ = _resolve(monkeypatch, capsys, tmp_path, table=table, entry=True)
-    # Parsed, because `write_outputs` writes in text mode: CRLF on Windows.
-    assert (code, _outputs(out)) == (
+    assert (code, out) == (
         1,
-        {
-            "refusal": "tools.tofu is 'v8.8.8'; a version is written X.Y.Z in ASCII digits, "
-            "such as 1.13.2, with no v, pre-release or range."
-        },
+        (
+            "refusal=tools.tofu is 'v8.8.8'; a version is written X.Y.Z in ASCII digits, "
+            "such as 1.13.2, with no v, pre-release or range.\n"
+        ),
     )
 
 
@@ -492,6 +491,21 @@ def test_a_cell_installs_the_given_versions_and_reads_nothing(monkeypatch, capsy
         'terramate=1.2.3\ntofu=4.5.6\ntools={"terramate":"1.2.3","tofu":"4.5.6"}\n',
         [],
     )
+
+
+def test_tool_versions_writes_through_write_outputs(monkeypatch, tmp_path):
+    """Its outputs share `write_outputs`' line ends. Mutation: write them with the script's own
+    `open` -- no call recorded."""
+    tv = load_script("tool-versions")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.delenv("SHIPMATE_RESOLVE", raising=False)
+    monkeypatch.setenv("SHIPMATE_VERSIONS", '{"terramate": "1.2.3", "tofu": "4.5.6"}')
+    calls = []
+    monkeypatch.setattr(tv, "write_outputs", lambda **kw: calls.append(kw), raising=False)
+    tv.main()
+    assert calls == [
+        {"terramate": "1.2.3", "tofu": "4.5.6", "tools": '{"terramate":"1.2.3","tofu":"4.5.6"}'}
+    ]
 
 
 _NEITHER = (
