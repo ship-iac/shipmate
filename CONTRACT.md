@@ -190,8 +190,8 @@ state. Then the deploy refuses:
 ``deploy refused: <cells> may have been applied by an earlier attempt of this deploy, run <id>, without saving their state. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.``,
 and a cell re-run on its own refuses before it applies:
 ``apply aborted for `<env>` / `<stack>`: run attempt <n> of this deploy may have applied this cell without saving its state; follow docs/troubleshooting.md section The apply step ran and its state was not saved``
-(`run attempts <n>, <m>` for more than one). On any re-run, when the deploy's
-own jobs cannot be listed completely, it refuses every pending cell with
+(`run attempts <n>, <m>` for more than one). On a re-run of all its jobs, when the
+deploy's own jobs cannot be listed completely, it refuses every pending cell with
 ``<cells>: run <this run id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.``
 A re-run of a merge deploy starts
 from the checks that are still open. A cell's state is saved only by the
