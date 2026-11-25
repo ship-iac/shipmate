@@ -3874,7 +3874,7 @@ def test_an_auto_environment_and_a_bare_one_name_the_other_environments():
 
 def test_an_auto_environment_named_shipmate_starts_its_line_with_the_name():
     """The line starts with `shipmate`; `comment-ops` skips a `[bot]` commenter and `applies`
-    is no verb, so it stays inert. Mutation: skip a auto line that would start with `shipmate`
+    is no verb, so it stays inert. Mutation: skip an auto line that would start with `shipmate`
     -- red."""
     assert sc.commands({}, (), ["shipmate"], autos=["shipmate"]) == (
         "<details><summary>shipmate commands</summary>\n\n"

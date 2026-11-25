@@ -2596,7 +2596,7 @@ _SUMMARY_STEP = _step("Run ship-iac/shipmate/actions/summary@abc", "success")
         pytest.param("steps", "unread", id="steps-not-a-list"),
     ],
 )
-def test_published_prints_whether_an_auto_apply_follows(
+def test_published_prints_whether_an_auto_environment_changed(
     in_process, monkeypatch, capsys, steps, state
 ):
     """The second word is read from the conclusions of the `plan / summary` job's two steps,

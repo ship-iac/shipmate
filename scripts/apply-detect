@@ -1018,9 +1018,9 @@ def bare_main(auto=False):
     (`build-matrix.base_changed_stacks`), or whose apply check records that its plan found the
     base changed it (`apply-gate.behind_names`), is named in `held_cells` with cause `overlap`:
     it stays pending and stops its environment's `needs` successors, as a locked cell does. A
-    cell `settle` would run (neither locked, overlap nor waiting) whose newest App apply check
-    shows an earlier apply run attempted it and did not apply it (`attempted_cells`) is held the
-    same way with cause `attempted`; `refuse_held` reads it beside the runnable cells, so a
+    cell `settle` would run (neither locked, overlap nor waiting on one) whose newest App apply
+    check shows an earlier apply run attempted it and did not apply it (`attempted_cells`) is held
+    the same way with cause `attempted`; `refuse_held` reads it beside the runnable cells, so a
     refusal over another check of it wins. With a cell to apply, its records must name one plan
     run that `apply-gate.provenance_reason` admits against `apply-gate.auto_source`'s plan and
     authorizer, no newer `shipmate plan` run of the pull request may be live or have planned

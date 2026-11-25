@@ -3085,8 +3085,8 @@ found that the base changed its stack after the branch left it) is held the same
 way and named on the same line.
 
 **Attempted cells.** A cell `detect` would apply, neither locked, an overlap
-cell, nor waiting on a cell that does not apply, is held when its newest App apply check shows that an earlier apply run
-attempted it and did not apply it: the check is not `in_progress` and its
+cell, nor waiting on a locked or overlap cell, is held when its newest App
+apply check shows that an earlier apply run attempted it and did not apply it: the check is not `in_progress` and its
 title differs from the one its plan record holds (a completion retitled it
 `Failed: <error>`, `Cancelled`, `Not run` or `Not applied (<conclusion>)`);
 it is `completed` `stale`, which GitHub sets on a check left incomplete for 14

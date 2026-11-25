@@ -167,7 +167,7 @@ def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
     )
 
 
-def test_the_auto_apply_steps_follow_the_summary_action_exactly():
+def test_the_auto_environment_steps_follow_the_summary_action_exactly():
     """`gate-status published` reads each step's conclusion by name, so the names must equal
     `AUTO_STEP_YES` and `AUTO_STEP_NO`. Mutations: rename a step in `plan.yml` only; swap the
     two `if:` values."""
@@ -179,7 +179,7 @@ def test_the_auto_apply_steps_follow_the_summary_action_exactly():
     )
 
 
-def test_one_pair_of_words_says_whether_an_auto_apply_follows():
+def test_one_pair_of_words_says_whether_an_auto_environment_changed():
     """`summary-comment` writes `yes` or `no`, the `plan.yml` steps compare them,
     `gate-status published` prints them from those steps, `defer-auto` skips on `no`, and
     `actions/auto-dispatch` replies on `yes` in its decision and its failure reply;
@@ -356,7 +356,7 @@ def test_the_summary_action_exposes_the_comment_write_and_the_supersede():
 
 def test_the_summary_job_passes_the_action_outputs_on():
     """The plan `outcome` job reads both. Mutations: drop `superseded`; drop the step's `id`;
-    move the summary action below the two auto apply steps."""
+    move the summary action below the two auto environment steps."""
     job, _ = _summary_job()
     assert job["outputs"] == {
         "upsert": "${{ steps.summary.outputs.upsert }}",
