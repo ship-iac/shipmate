@@ -83,7 +83,7 @@ your ordering lives in the outgoing tool's configuration, it must be ported into
 indistinguishable from a stack that is genuinely independent. Treat the outgoing
 tool's config as a *lower bound* on the real graph, not as the graph: one
 migration that audited the OpenTofu code instead of porting the config went from
-6 declared edges to 105, and from 2 wave levels to 6.
+6 declared edges to 105, and from 2 dependency levels to 6.
 
 Four detect jobs report the shape as a `::notice::` line — stack count, `after`
 edge count, dependency levels, and how many stacks would apply concurrently. A reader

@@ -203,8 +203,9 @@ cell again only when that run never applied it, and refuses otherwise.
 
 **Last wave.** A level's last populated wave runs no `waveN-complete` job:
 `complete`, which runs right after it, alone writes its checks. A `complete`
-that fails after its retries leaves them `in_progress`, linked to the run, and
-the next apply or deploy of the cell reads that run as the holder (table below):
+that fails, including one whose jobs listing still lags after its about 2
+minutes of retries, leaves them `in_progress`, linked to the run, and the next
+apply or deploy of the cell reads that run as the holder (table below):
 
 - Never applied: a bare or targeted `shipmate apply` applies the cell and a
   merge deploy queues it; an `auto` run holds it as attempted (§`apply_mode:
@@ -216,6 +217,18 @@ the next apply or deploy of the cell reads that run as the holder (table below):
 - May have applied without saving its state: refused. Follow
   [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran
   and its state was not saved`, then the same hand procedure.
+
+A merge deploy whose own `complete` fails this way leaves the checks
+`in_progress` under that deploy run. "Re-run failed jobs" does not re-run its
+`detect`, which succeeded, and runs `complete` again. That `complete` writes
+only from cell jobs listed under its own run attempt; whether GitHub lists
+there the cell jobs the attempt did not re-run is not verified. "Re-run all
+jobs" runs `detect` again, which skips this run's own checks and holds back
+only a cell an earlier attempt may have applied without saving its state
+(§Re-runs above). It queues an applied cell whose state was saved again, so
+its reviewed plan applies a second time; when that apply changed the state,
+OpenTofu refuses the plan as stale (inference: a saved plan records the state
+it was planned against).
 
 **In-progress checks.** A pre-merge apply and a merge deploy read every App
 apply check of a pending cell that is `in_progress` under another run, whether
@@ -1559,13 +1572,18 @@ owned the comment or was skipped, so a failed claim gates the run closed. In
 `outcome` read; an `auto` run starts them by its empty `comment_id` alone. A
 commented apply whose `admit` runner is lost after the claim reacted starts
 neither: the comment keeps its 🚀 and `apply / admit` shows failed. Comment
-`shipmate apply` again.
+`shipmate apply` again. A cancel that lands after the claim step and before
+the step that records `admitted` leaves the comment claimed with no
+`admitted`, so `outcome` posts no cancelled reply; comment again.
 
 Re-runs follow from the claim's recorded result and its one POST. For a plan
 run, "Re-run failed jobs" keeps a finished claim's result: an owned run stays
 owned and a taken one stays taken. For an apply run, it re-runs a failed
 `admit` whole: after a claim that reacted, as when the queue step failed, the
-claim reads 200 and the run does nothing. "Re-run all
+claim reads 200, `admitted` stays unset, and `run` and `outcome` skip, so no
+reply is posted and the comment shows only its 🚀. When `admit` succeeded and a
+later job failed, `admit` is not re-run and keeps `admitted`, so `run` runs
+again and its cells refuse as a run attempt above 1. "Re-run all
 jobs" posts again and reads 200, and GitHub deletes the earlier attempts'
 artifacts. For a plan run, the claim then reads each earlier
 attempt's jobs: when `facts` ran in one (`success`, `failure` or `timed_out`),
