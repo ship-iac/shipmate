@@ -221,7 +221,8 @@ apply or deploy of the cell reads that run as the holder (table below):
 A merge deploy whose own `complete` fails this way leaves the checks
 `in_progress` under that deploy run. Recover them by the hand procedure above,
 not by re-running the deploy: a re-run of all its jobs queues an applied cell
-again, and its reviewed plan cannot apply twice.
+again, and its reviewed plan applies a second time, or is refused as stale
+when the first apply changed the state.
 
 **In-progress checks.** A pre-merge apply and a merge deploy read every App
 apply check of a pending cell that is `in_progress` under another run, whether
