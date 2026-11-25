@@ -109,15 +109,14 @@ def _install_terramate(
     cached_digest=None,
     key=None,
     machine="x86_64",
+    system="Linux",
 ):
     """Run the step's body against `_stubbed` and a tar stub. The tar stub appends its name to
     the shared `order` log and exits `tar_rc` when non-zero; otherwise it writes a `terramate`
     stub where the real extract would, and that stub records its argv, prints `binary_version`
     and exits `terramate_rc` when run.
     """
-    bin_dir, logs = _stubbed(
-        tmp_path, curl_output, curl_rc, digest, cached_digest, machine, "Linux"
-    )
+    bin_dir, logs = _stubbed(tmp_path, curl_output, curl_rc, digest, cached_digest, machine, system)
     log = logs.as_posix()
     write_stub(
         bin_dir,
@@ -315,15 +314,16 @@ def test_the_tofu_install_step_is_fail_closed():
 
 
 @bash_only
+@pytest.mark.parametrize("machine", ("x86_64", "x64"))
 def test_a_terramate_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_path(
-    tmp_path,
+    tmp_path, machine
 ):
     """Mutations: drop `--retry-all-errors`, `-L` or `--speed-time`, or add `--fail` (curl
     argv); drop the `terramate --version` line (terramate argv); move the sha256 comparison
-    after `tar` (order).
+    after `tar` (order); drop `|x64` from the step's `case` (the `x64` id).
     """
     t = _TOOLS["terramate"]
-    r, runner_temp, logs = _install_terramate(tmp_path, "200", 0)
+    r, runner_temp, logs = _install_terramate(tmp_path, "200", 0, machine=machine)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     tarball = f"{runner_temp}/terramate-release/terramate_0.17.1_linux_x86_64.tar.gz"
     assert argv_log(logs, "curl") == setup_curl_argv(t["url"], tarball)
@@ -336,13 +336,16 @@ def test_a_terramate_200_verifies_extracts_checks_the_binary_and_adds_the_direct
 
 
 @bash_only
-def test_a_tofu_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_path(tmp_path):
+@pytest.mark.parametrize("machine", ("x86_64", "x64"))
+def test_a_tofu_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_path(
+    tmp_path, machine
+):
     """Mutations: drop `--retry-max-time 120` (curl argv); move the sha256 comparison after the
     extract (order); drop the `chmod` (order); append to `$GITHUB_PATH` before `tofu version`
-    (the path the binary saw).
+    (the path the binary saw); drop `|x64` from the step's `case` (the `x64` id).
     """
     t = _TOOLS["tofu"]
-    r, runner_temp, logs = _install_tofu(tmp_path, "200", 0)
+    r, runner_temp, logs = _install_tofu(tmp_path, "200", 0, machine=machine)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     zip_path = f"{runner_temp}/tofu-release/tofu_1.13.2_linux_amd64.zip"
     assert argv_log(logs, "curl") == setup_curl_argv(t["url"], zip_path)
@@ -358,12 +361,14 @@ def test_a_tofu_200_verifies_extracts_checks_the_binary_and_adds_the_directory_t
 
 @bash_only
 @_EACH_TOOL
-def test_an_aarch64_runner_installs_the_arm64_asset(tmp_path, tool):
+@pytest.mark.parametrize("machine", ("aarch64", "arm64"))
+def test_an_arm64_runner_installs_the_arm64_asset(tmp_path, tool, machine):
     """Mutations: map `aarch64|arm64` to the x86 arch in either step's `case` (digest mismatch);
-    drop `aarch64|` from either `case` (no sha256 for the `aarch64` asset, curl never runs).
+    drop `aarch64|` or `|arm64` from either `case` (no sha256 for the unmapped asset, curl
+    never runs).
     """
     t = _TOOLS[tool]
-    r, runner_temp, logs = t["install"](tmp_path, "200", 0, digest="b" * 64, machine="aarch64")
+    r, runner_temp, logs = t["install"](tmp_path, "200", 0, digest="b" * 64, machine=machine)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     archive = f"{runner_temp}/{t['release']}/{t['arm64_asset']}"
     assert argv_log(logs, "curl") == setup_curl_argv(t["arm64_url"], archive)
@@ -514,10 +519,11 @@ def test_a_digest_mismatch_fails_the_step_before_the_extract(tmp_path, tool):
         # Mutation: drop the `|| fail` after the digest lookup.
         ("terramate", {"machine": "riscv64"}, "terramate_0.17.1_linux_riscv64.tar.gz"),
         ("tofu", {"machine": "riscv64"}, "tofu_1.13.2_linux_riscv64.zip"),
-        # Mutation: hard-code `linux` in place of `uname -s`.
+        # Mutation: hard-code `linux` in place of `uname -s` in either step.
+        ("terramate", {"system": "Darwin"}, "terramate_0.17.1_darwin_x86_64.tar.gz"),
         ("tofu", {"system": "Darwin"}, "tofu_1.13.2_darwin_amd64.zip"),
     ],
-    ids=["terramate-riscv64", "tofu-riscv64", "tofu-darwin"],
+    ids=["terramate-riscv64", "tofu-riscv64", "terramate-darwin", "tofu-darwin"],
 )
 @bash_only
 def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path, tool, platform, asset):
