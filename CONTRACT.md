@@ -201,6 +201,22 @@ runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
 The next apply of the cell reads the run that holds the check: it applies the
 cell again only when that run never applied it, and refuses otherwise.
 
+**Last wave.** A level's last populated wave runs no `waveN-complete` job:
+`complete`, which runs right after it, alone writes its checks. A `complete`
+that fails after its retries leaves them `in_progress`, linked to the run, and
+the next apply or deploy of the cell reads that run as the holder (table below):
+
+- Never applied: a bare or targeted `shipmate apply` applies the cell and a
+  merge deploy queues it; an `auto` run holds it as attempted (§`apply_mode:
+  auto`, Attempted cells), so comment `shipmate apply`.
+- Applied and its state saved: refused. Complete the check, or return it to
+  `queued` to apply again, by
+  [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress
+  apply check by hand.
+- May have applied without saving its state: refused. Follow
+  [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran
+  and its state was not saved`, then the same hand procedure.
+
 **In-progress checks.** A pre-merge apply and a merge deploy read every App
 apply check of a pending cell that is `in_progress` under another run, whether
 that check is the cell's newest or an older one under a newer re-plan check; a
@@ -470,7 +486,7 @@ off the pull request's checks list.
   `claim`, `defer`, `defer-auto`, `summary`, `gate-hold` and `outcome` jobs, `comment-ops.yml`'s `ops` job, `drift.yml`'s
   `issues` job, `release.yml`'s `release` job, and the apply path (`apply.yml`'s
   `admit` and `outcome` (`guard` holds none), `apply-run.yml`'s `review`, `lock` and `summary`, `apply-env-level.yml`'s `snapshot`,
-  `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and `complete`,
+  `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and `complete`,
   `deploy.yml`'s `summary` and `replan`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1517,8 +1533,8 @@ the run is a `workflow_dispatch` with a non-empty `comment_id`. An autoplan, a
 comment-less plan (the plan `summary`'s replan, the merge deploy's re-plan of
 open pull requests) and an `auto` run carry none: the claim is skipped and the run
 proceeds. `apply.yml`'s `guard` refuses a `verb: apply`
-dispatch without one. The claim binds `shipmate-engine`, checks nothing out,
-mints an App token granting `pull-requests: write` and `actions: read`, and posts the App's
+dispatch without one. `claim` and `admit` bind `shipmate-engine` and check
+nothing out; the claim mints an App token granting `pull-requests: write` and `actions: read`, and posts the App's
 🚀 on the comment once, never retried. GitHub answers the first creation of a
 reaction 201 and every later one 200, so one run of a comment does the work:
 
@@ -2111,7 +2127,8 @@ A cancelled stale run writes, by where it waited:
   apply checks and `shipmate / gate` stay as they were, and `outcome` posts the
   cancelled reply.
 - On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
-  so its `waveN-complete`, which runs on `success` or `failure` only, is skipped,
+  so its `waveN-complete`, which runs on `success` or `failure` only and never for
+  the level's last populated wave, is skipped,
   and the level's `complete` returns the wave's flipped checks to `queued` titled
   `Cancelled` and every later wave's to `Not run` (§Apply check lifecycle), so
   they stay pending. `summary` runs after a
@@ -2386,7 +2403,8 @@ check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <env> / <stack>`) — created pending by
   `actions/summary`, completed by `actions/apply-complete` in
-  `apply-env-level.yml`'s `waveN-complete` jobs and its `complete` job (all
+  `apply-env-level.yml`'s `waveN-complete` jobs (none runs for a level's last
+  populated wave) and its `complete` job (all
   bound to `shipmate-engine`) — both mint an App installation token, so completion works across the create/complete
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
@@ -3681,14 +3699,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   `comment-ops.yml` and `release.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` passes it to `apply-run.yml`, and `apply-run.yml` and `deploy.yml`
   pass it to `apply-env-level.yml`, where it is required. It sets the runner of
-  every engine job but thirty-two, which run on
+  every engine job but thirty-one, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `claim`, `facts`, `defer`,
   `defer-auto`, `gate-hold` and `outcome`, `apply.yml`'s `guard`, `admit` and `outcome`, `apply-run.yml`'s `review` and `summary`, `deploy.yml`'s `summary`,
-  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave7-complete` and
+  `apply-env-level.yml`'s `snapshot`, `wave0-release` … `wave7-release`, `wave0-complete` … `wave6-complete` and
   `complete`, and `unlock.yml`'s
   `guard` and `result`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-two
+  for a runner. An account that cannot use `ubuntu-slim` leaves the thirty-one
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the

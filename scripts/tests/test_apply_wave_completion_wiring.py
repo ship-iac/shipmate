@@ -5,7 +5,10 @@ Each `waveN-release` job flips its wave's checks to `in_progress` right before t
 when every earlier wave and release succeeded or was skipped. Each `waveN-complete` job writes
 its own wave's checks right after that wave. It runs only when its wave reached a result: a
 skipped wave's listing row carries the literal matrix template, so a completion over it matches
-no cell and fails after the action's retry. It never fails the level (job-level
+no cell and fails after the action's retry. It runs only when the next wave is populated: the
+producer compacts the populated waves from `wave0`, so the last populated wave is the one whose
+successor is empty, and `complete`, which runs right after it, writes its checks. `wave7` has
+no completion job. It never fails the level (job-level
 `continue-on-error`); `complete` waits for every release, wave and completion, rewrites every
 check and still fails the level on a check it cannot write. No wave waits for a completion, so a
 completion never delays an apply, and no completion runs before its wave.
@@ -14,10 +17,13 @@ Threat model: an accidental edit to the workflow (a dropped clause, a wrong slic
 `needs:` entry). Whole parsed values against hand-written constants cover it.
 """
 
+import re
+
 import pytest
 from _loader import workflow_jobs
 
 WAVES = [f"wave{n}" for n in range(8)]
+COMPLETIONS = [f"wave{n}-complete" for n in range(7)]
 
 _WITH_KEY = {
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -47,7 +53,8 @@ def _completion(n):
         "needs": ["snapshot", f"wave{n}"],
         "if": (
             "${{ always() && needs.snapshot.result == 'success' && "
-            f"(needs.wave{n}.result == 'success' || needs.wave{n}.result == 'failure') }}}}"
+            f"(needs.wave{n}.result == 'success' || needs.wave{n}.result == 'failure') "
+            f"&& toJSON(fromJSON(inputs.waves_json).wave{n + 1}) != '[]' }}}}"
         ),
         "runs-on": "ubuntu-slim",
         "continue-on-error": True,
@@ -63,7 +70,8 @@ WAVE3_COMPLETE = {
     "needs": ["snapshot", "wave3"],
     "if": (
         "${{ always() && needs.snapshot.result == 'success' && "
-        "(needs.wave3.result == 'success' || needs.wave3.result == 'failure') }}"
+        "(needs.wave3.result == 'success' || needs.wave3.result == 'failure') "
+        "&& toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}"
     ),
     "runs-on": "ubuntu-slim",
     "continue-on-error": True,
@@ -112,7 +120,6 @@ COMPLETE = {
         "wave4-complete",
         "wave5-complete",
         "wave6-complete",
-        "wave7-complete",
     ],
     "if": "${{ always() && needs.snapshot.result == 'success' }}",
     "runs-on": "ubuntu-slim",
@@ -134,9 +141,7 @@ COMPLETE = {
 }
 
 JOB_IDS = sorted(
-    ["complete", "snapshot", *WAVES]
-    + [f"wave{n}-complete" for n in range(8)]
-    + [f"wave{n}-release" for n in range(8)]
+    ["complete", "snapshot", *WAVES] + COMPLETIONS + [f"wave{n}-release" for n in range(8)]
 )
 
 WAVE_NEEDS = {
@@ -251,16 +256,19 @@ WAVE2_RELEASE = {
 }
 
 
-@pytest.mark.parametrize("n", range(8))
+@pytest.mark.parametrize("n", range(7))
 def test_each_wave_completion_job_is_exactly(n):
-    """Mutations: drop the `result` clause from `wave2-complete`'s `if:`; `.wave1` in
-    `wave2-complete`'s `env`; `needs: [snapshot]` on `wave5-complete`; add `checks: write`
-    to `wave5-complete`'s permissions; drop `continue-on-error` from `wave3-complete`."""
+    """Mutations: drop the `result` clause from `wave2-complete`'s `if:`; drop the next-wave
+    clause from `wave3-complete`'s `if:`; `.wave5` for `.wave6` in `wave5-complete`'s next-wave
+    clause; `.wave1` in `wave2-complete`'s `env`; `needs: [snapshot]` on `wave5-complete`; add
+    `checks: write` to `wave5-complete`'s permissions; drop `continue-on-error` from
+    `wave3-complete`."""
     assert workflow_jobs("apply-env-level.yml")[f"wave{n}-complete"] == _completion(n)
 
 
 def test_wave3_completion_job_is_written_out():
-    """Mutation: drop `continue-on-error` from `wave3-complete`."""
+    """Mutations: drop `continue-on-error` from `wave3-complete`; drop the next-wave clause
+    from its `if:`."""
     assert workflow_jobs("apply-env-level.yml")["wave3-complete"] == WAVE3_COMPLETE
 
 
@@ -268,13 +276,13 @@ def test_complete_waits_for_every_release_wave_and_completion():
     """`complete` still fails the level, so it carries no `continue-on-error`, and no flip may
     land after it starts.
 
-    Mutations: drop `wave7-complete` from `complete.needs`; add `continue-on-error: true` to
+    Mutations: drop `wave6-complete` from `complete.needs`; add `continue-on-error: true` to
     `complete`; drop `wave4-release` from `complete.needs`; `wave5` under `"wave6"` in its
     `env`."""
     assert workflow_jobs("apply-env-level.yml")["complete"] == COMPLETE
 
 
-@pytest.mark.parametrize("job", [*(f"wave{n}-complete" for n in range(8)), "complete"])
+@pytest.mark.parametrize("job", [*COMPLETIONS, "complete"])
 def test_every_completion_runs_the_one_shared_step_list(job):
     """Mutations: `${{ env.WAVE_RESULT }}` in the anchored `with:`; `complete`'s steps written
     out with a different `job-id`."""
@@ -318,5 +326,39 @@ def test_snapshot_publishes_only_the_per_wave_map():
 
 
 def test_the_job_set_is_exactly():
-    """Mutation: rename `wave4-complete`; delete `wave6-release`."""
+    """Mutations: rename `wave4-complete`; delete `wave6-release`; re-add `wave7-complete`."""
     assert sorted(workflow_jobs("apply-env-level.yml")) == JOB_IDS
+
+
+def _runs(expr, populated, results):
+    """The value of a job's `if:` for the forms the completion jobs write: `always()`,
+    `needs.<job>.result`, the `waves_json` emptiness test, `==`, `||`, `&&`, parentheses
+    and quoted strings; anything else fails the test."""
+    py = expr.removeprefix("${{").removesuffix("}}").strip()
+    py = re.sub(
+        r"toJSON\(fromJSON\(inputs\.waves_json\)\.(wave\d)\) != '\[\]'",
+        lambda m: str(m[1] in populated),
+        py,
+    )
+    py = re.sub(r"needs\.([\w-]+)\.result", lambda m: repr(results[m[1]]), py)
+    py = py.replace("always()", "True").replace("&&", " and ").replace("||", " or ")
+    assert re.fullmatch(r"(?:\s|True|False|and|or|==|[()]|'[a-z]*')*", py), py
+    # The fullmatch above admits only literals and operators.
+    return eval(py, {"__builtins__": {}})  # noqa: S307
+
+
+def test_two_populated_waves_complete_the_first_and_leave_the_last_to_complete():
+    """With `wave0` and `wave1` populated and applied, `wave0-complete` runs (a later wave
+    exists), `wave1-complete` and every later completion skip, and `complete` runs and writes
+    wave 1.
+
+    Mutation: drop the next-wave clause from `wave1-complete`'s `if:` -- it runs."""
+    jobs = workflow_jobs("apply-env-level.yml")
+    results = {"snapshot": "success", "wave0": "success", "wave1": "success"}
+    results |= {w: "skipped" for w in WAVES[2:]}
+    ran = {
+        job
+        for job in [*COMPLETIONS, "complete"]
+        if _runs(jobs[job]["if"], {"wave0", "wave1"}, results)
+    }
+    assert ran == {"wave0-complete", "complete"}

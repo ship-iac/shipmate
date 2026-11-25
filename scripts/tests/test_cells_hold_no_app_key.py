@@ -89,7 +89,7 @@ def test_only_snapshot_and_completion_jobs_read_the_app_key():
     assert reading == {
         "snapshot",
         "complete",
-        *(f"wave{n}-complete" for n in range(8)),
+        *(f"wave{n}-complete" for n in range(7)),
         *(f"wave{n}-release" for n in range(8)),
     }
 
@@ -164,7 +164,7 @@ def test_snapshot_and_completion_jobs_are_the_only_jobs_naming_the_engine_enviro
     assert named == {
         "snapshot",
         "complete",
-        *(f"wave{n}-complete" for n in range(8)),
+        *(f"wave{n}-complete" for n in range(7)),
         *(f"wave{n}-release" for n in range(8)),
     }
 
@@ -172,7 +172,7 @@ def test_snapshot_and_completion_jobs_are_the_only_jobs_naming_the_engine_enviro
 #: Every (workflow, job) binding `shipmate-engine`, hand-written. Each holds the App key.
 ENGINE_BOUND_JOBS = {
     ("apply-env-level.yml", "snapshot"),
-    *(("apply-env-level.yml", f"wave{n}-complete") for n in range(8)),
+    *(("apply-env-level.yml", f"wave{n}-complete") for n in range(7)),
     *(("apply-env-level.yml", f"wave{n}-release") for n in range(8)),
     ("apply-env-level.yml", "complete"),
     ("apply-run.yml", "review"),

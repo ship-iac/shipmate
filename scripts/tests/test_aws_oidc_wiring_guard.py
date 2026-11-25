@@ -70,7 +70,7 @@ def test_snapshot_and_completion_jobs_get_exactly_their_declared_permissions():
     expected = {
         "snapshot": {"checks": "read", "actions": "read"},
         **{f"wave{n}-release": {"actions": "read"} for n in range(8)},
-        **{f"wave{n}-complete": {"actions": "read", "checks": "read"} for n in range(8)},
+        **{f"wave{n}-complete": {"actions": "read", "checks": "read"} for n in range(7)},
         "complete": {"actions": "read", "checks": "read"},
     }
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
