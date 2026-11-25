@@ -86,7 +86,7 @@ migration that audited the OpenTofu code instead of porting the config went from
 6 declared edges to 105, and from 2 wave levels to 6.
 
 Four detect jobs report the shape as a `::notice::` line — stack count, `after`
-edge count, wave levels, and how many stacks would apply concurrently. A reader
+edge count, dependency levels, and how many stacks would apply concurrently. A reader
 who knows the repository can judge that last number immediately; nobody else
 can. Exactly four print it: the detect jobs of a dispatched `shipmate apply <env>`,
 of a bare `shipmate apply`, of the `auto` apply, and of the post-merge deploy, so

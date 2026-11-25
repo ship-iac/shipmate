@@ -228,7 +228,7 @@ def test_dag_shape_notice_reports_a_flat_graph():
     # repository notices.
     deps = {"stacks/a": set(), "stacks/b": set(), "stacks/c": set()}
     assert ad.dag_shape_notice(deps) == (
-        "::notice::3 stacks, 0 after edges, 1 wave levels; 3 stacks would apply concurrently"
+        "::notice::3 stacks, 0 after edges, 1 dependency levels; 3 stacks would apply concurrently"
     )
 
 
@@ -243,7 +243,7 @@ def test_dag_shape_notice_reports_a_layered_graph():
         "stacks/d": {"stacks/b", "stacks/c"},
     }
     assert ad.dag_shape_notice(deps) == (
-        "::notice::4 stacks, 4 after edges, 3 wave levels; 2 stacks would apply concurrently"
+        "::notice::4 stacks, 4 after edges, 3 dependency levels; 2 stacks would apply concurrently"
     )
 
 
@@ -481,7 +481,7 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     )
     ad.main()
     assert (
-        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        "::notice::2 stacks, 1 after edges, 2 dependency levels; 1 stacks would apply concurrently"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -554,7 +554,7 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
     assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
+        "::notice::9 stacks, 8 after edges, 9 dependency levels; 1 stacks would apply concurrently"
     ]
 
 
