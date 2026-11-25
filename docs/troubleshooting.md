@@ -3161,7 +3161,7 @@ this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 
 The run holding this pull request's apply queue posted this comment on the
 pull request. It links the waiting run, the apply command comment that started
-it, and the holding run. It comes from the holding run's `review` or `summary` job, so
+it, and the holding run. It comes from the holding run's `review` job, so
 it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
@@ -3353,8 +3353,11 @@ A successful apply of the cell completes the check `success` and restores its
 plan title; a check created before shipmate recorded that title keeps `Failed: ...`
 after the success. A check that stays `in_progress` after its run ended was left by a
 run that died, or by a completion whose jobs listing never showed the cell's
-job (`the retries were exhausted and these apply checks are left pending`); the
-next `shipmate apply` writes it again.
+job (`the retries were exhausted and these apply checks are left pending`). The
+next `shipmate apply` applies the cell again only when that run never applied
+it, and refuses otherwise: return the check by hand (§Return an in-progress
+apply check by hand), first following §`The apply step ran and its state was
+not saved` when the run may have applied the cell without saving its state.
 
 ### An apply check never completes after a successful apply
 

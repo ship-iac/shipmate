@@ -167,7 +167,7 @@ refuses the run before any cell applies.
 | not run: its wave did not run | `queued`, titled `Not run` |
 | any other conclusion (`timed_out`, `action_required`, `neutral`, `stale`, an unknown value) | `queued`, titled `Not applied (<conclusion>)` |
 | held: in some attempt of the run, the apply may have run and its state is not known saved | `in_progress`, titled `State not saved`, linked to the run page. The apply result comment names the cell under `state not saved:`, links its `save` job's log and names [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran and its state was not saved` |
-| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply run writes it |
+| unresolved: the run cannot read the cell's outcome | none: the check is left as it was and the run fails; the next apply of the cell reads a check left `in_progress` as **Dead runs** and **Last wave** describe |
 
 A write other than `success` leaves alone a check another writer, such as a
 merge deploy, has completed. The first error line is the message of the failed
@@ -2100,8 +2100,9 @@ The run holding the group tells each waiting run too: a run's queue step can end
 before the run it then waits behind holds the group, and so names no holder, as
 when two commands arrive together. `apply-run.yml`'s `review`, as its last
 step, runs `actions/apply-waiters` (`scripts/apply-queue waiters`). It lists
-the same runs, then reads the jobs of each App-dispatched run other than its own whose title carries a comment; a run
-whose `<caller> / run / review` is `pending` waits for this one. Only when one
+the same runs, then reads the jobs of each App-dispatched run other than its
+own whose title carries a comment; a run whose `<caller> / run / review` is
+`pending` waits for this one. Only when one
 waits does it list the pull request's comments, once. Each waiting run not yet
 told gets one ⚪ reply:
 
@@ -2147,7 +2148,7 @@ These limits are accepted:
   still waits then.
 - The reply is display only: a waiting run that the queue step did not tell stays
   untold when the holder's waits step does not tell it: a failed or refused
-  `review` skips the step, and a failure inside the step tells no one.
+  `review` skips the step, and a failure inside the step can leave some runs untold.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
 - A waiting run can be told more than once, by the queue step and `review`,
