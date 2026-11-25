@@ -67,8 +67,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: read
         permission-checks: read
         permission-contents: read
@@ -147,8 +145,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: write
 
     - name: Dispatch an auto apply

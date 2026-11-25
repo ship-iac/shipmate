@@ -120,8 +120,6 @@ LOCK_RELEASE_STEPS = [
         "with": {
             "client-id": "${{ inputs.app-id }}",
             "private-key": "${{ inputs.private-key }}",
-            "owner": "${{ github.repository_owner }}",
-            "repositories": "${{ github.event.repository.name }}",
             "permission-contents": "write",
             "permission-checks": "read",
             "permission-pull-requests": "read",

@@ -176,8 +176,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-checks: write
         permission-statuses: write
         permission-pull-requests: write
@@ -640,8 +638,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: write
 
     - name: Re-run the superseded autoplan's failed jobs
@@ -694,8 +690,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: write
 
     - name: Dispatch a plan of the live head

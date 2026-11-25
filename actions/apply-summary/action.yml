@@ -77,8 +77,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         # From the App installation, so no consumer's calling job has to grant it: a called
         # workflow's job permissions cannot exceed its caller's, so taking this off GITHUB_TOKEN
         # would break every consumer wrapper.

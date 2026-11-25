@@ -31,8 +31,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: write
         permission-pull-requests: write
     # A called workflow's `github` context is its caller's, so these name the dispatch itself.

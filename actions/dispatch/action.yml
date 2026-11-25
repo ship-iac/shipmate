@@ -37,8 +37,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: write
     - name: workflow_dispatch apply
       shell: bash

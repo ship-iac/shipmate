@@ -31,8 +31,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-checks: write
         # Only a pre-merge flip reads its pull request; the action requests no permission
         # whose input is empty.

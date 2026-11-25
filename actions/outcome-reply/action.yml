@@ -45,8 +45,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-pull-requests: write
     # Reads inputs only, never a status function: see `run-cancelled`.
     - name: Reply that the run posted no result

@@ -227,8 +227,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-checks: read
         permission-contents: read
         # `pull-requests`, not `issues`: a pull request comment posted to `/issues/{pr}/comments`
@@ -264,8 +262,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-actions: write
         permission-pull-requests: write
         permission-contents: write
@@ -346,8 +342,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         # Deletes lock refs, reads the head's apply checks, lists the holders' live runs, and
         # posts on the holders' pull requests (`pull-requests`, not `issues`, as the doctor mint
         # explains). `actions: read` is a subset of the manifest's `actions: write`.
@@ -449,8 +443,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         # The reviewed-plan lookup reads check runs, which needs `checks: read` (within the
         # manifest's `checks: write`). Unlock mints too, so an App missing from the repository
         # is reported before any lookup runs.

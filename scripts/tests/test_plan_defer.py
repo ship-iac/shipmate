@@ -46,8 +46,6 @@ def test_the_mint_requests_exactly_these_permissions():
     assert step_by("plan-defer", name=MINT)["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "read",
         "permission-statuses": "read",
         "permission-pull-requests": "read",

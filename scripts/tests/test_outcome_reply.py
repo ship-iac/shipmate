@@ -273,8 +273,6 @@ def test_the_composite_mints_only_a_pull_request_write_token():
     assert mint["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-pull-requests": "write",
     }
     assert step_by(ACTION, name=REPLY)["env"] == {

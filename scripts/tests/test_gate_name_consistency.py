@@ -88,8 +88,6 @@ def test_credentialed_actions_exist_or_are_pending():
 EXPECTED_GATE_MINT = {
     "client-id": "${{ inputs.app-id }}",
     "private-key": "${{ inputs.private-key }}",
-    "owner": "${{ github.repository_owner }}",
-    "repositories": "${{ github.event.repository.name }}",
     "permission-checks": "read",
     "permission-statuses": "write",
 }

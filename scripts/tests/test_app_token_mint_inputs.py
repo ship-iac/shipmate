@@ -34,6 +34,12 @@ silent. These tests cannot catch that -- they read the engine's YAML, not the pi
 code, and the deprecation warning that used to be the early signal is gone because of this
 change. On any bump, re-read the new version's input resolution and confirm the value still
 reaches the JWT `iss` claim unvalidated before merging.
+
+The same bump can change what each token may do and where it applies, which these tests cannot see
+either. Re-read upstream `lib/get-permissions-from-inputs.js` (an empty `permission-*` value is
+skipped, and a mint naming none is granted every installation permission) and `lib/main.js`
+`resolveInstallationTarget` (no `owner` and no `repositories` mints for the running repository;
+`owner` alone mints for every repository the installation covers).
 """
 
 from _loader import ACTIONS as _ACTIONS
@@ -169,3 +175,93 @@ def test_no_step_reads_the_full_permission_probe_token():
         if "steps.fullmint.outputs" in value
     ]
     assert readers == []
+
+
+def _composite(**permissions):
+    """A composite action's whole mint `with`: its own identity inputs plus `permissions`."""
+    return {
+        "client-id": "${{ inputs.app-id }}",
+        "private-key": "${{ inputs.private-key }}",
+        **{f"permission-{name.replace('_', '-')}": level for name, level in permissions.items()},
+    }
+
+
+#: Every mint's whole `with` mapping, by `(file[:job], step id)`. No entry names `owner` or
+#: `repositories`: upstream then mints for the running repository, while `owner` alone mints for
+#: every repository the installation covers.
+_MINT_INPUTS = {
+    (".github/workflows/apply-run.yml:review", "token"): {
+        "client-id": "${{ vars.SHIPMATE_APP_ID }}",
+        "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+        "permission-pull-requests": "read",
+    },
+    ("actions/apply-complete/action.yml", "token"): _composite(
+        checks="write", pull_requests="read"
+    ),
+    ("actions/apply-queue/action.yml", "token"): _composite(actions="write", pull_requests="write"),
+    ("actions/apply-release/action.yml", "token"): _composite(
+        checks="write", pull_requests="${{ inputs.deploy != 'true' && 'read' || '' }}"
+    ),
+    ("actions/apply-run-check/action.yml", "token"): _composite(checks="write", actions="read"),
+    ("actions/apply-snapshot/action.yml", "token"): _composite(checks="write"),
+    ("actions/apply-summary/action.yml", "token"): _composite(checks="read", pull_requests="write"),
+    ("actions/apply-waiters/action.yml", "token"): _composite(
+        actions="read", pull_requests="write"
+    ),
+    ("actions/auto-dispatch/action.yml", "maintoken"): _composite(
+        actions="read", checks="read", contents="read", statuses="read", pull_requests="write"
+    ),
+    ("actions/auto-dispatch/action.yml", "autotoken"): _composite(actions="write"),
+    ("actions/base-push-plan/action.yml", "token"): _composite(
+        actions="write", pull_requests="read", checks="read"
+    ),
+    ("actions/claim/action.yml", "token"): _composite(pull_requests="write", actions="read"),
+    ("actions/comment-ops/action.yml", "doctortoken"): _composite(
+        checks="read", contents="read", pull_requests="write", actions="read", environments="read"
+    ),
+    ("actions/comment-ops/action.yml", "fullmint"): _composite(
+        actions="write",
+        pull_requests="write",
+        contents="write",
+        checks="write",
+        statuses="write",
+        issues="write",
+        environments="read",
+    ),
+    ("actions/comment-ops/action.yml", "evicttoken"): _composite(
+        contents="write", checks="read", pull_requests="write", actions="read"
+    ),
+    ("actions/comment-ops/action.yml", "apptoken"): _composite(checks="read"),
+    ("actions/dispatch/action.yml", "token"): _composite(actions="write"),
+    ("actions/drift-issues/action.yml", "token"): _composite(issues="write"),
+    ("actions/gate-refresh/action.yml", "token"): _composite(checks="read", statuses="write"),
+    ("actions/lock-acquire/action.yml", "token"): _composite(
+        contents="write", pull_requests="read"
+    ),
+    ("actions/lock-release/action.yml", "token"): _composite(
+        contents="write", checks="read", pull_requests="read"
+    ),
+    ("actions/outcome-reply/action.yml", "token"): _composite(pull_requests="write"),
+    ("actions/plan-defer/action.yml", "token"): _composite(
+        actions="read", statuses="read", pull_requests="read"
+    ),
+    ("actions/summary/action.yml", "token"): _composite(
+        checks="write",
+        statuses="write",
+        pull_requests="write",
+        contents="read",
+        actions="read",
+        environments="read",
+    ),
+    ("actions/summary/action.yml", "reruntoken"): _composite(actions="write"),
+    ("actions/summary/action.yml", "plantoken"): _composite(actions="write"),
+}
+
+
+def test_every_mint_requests_exactly_its_permissions_for_this_repository():
+    """Mutations: delete `permission-actions: write` from `actions/dispatch`; change
+    `lock-acquire`'s `pull-requests` to `write`; put `owner: ${{ github.repository_owner }}` back
+    on `base-push-plan`; add `owner:` alone to `gate-refresh`; add `enterprise: x` to `claim`'s
+    mint; add `.github/workflows/x.yaml` holding a raw mint with no `permission-*`."""
+    found = {(label, step.get("id")): dict(step.get("with") or {}) for label, step in _mint_steps()}
+    assert found == _MINT_INPUTS

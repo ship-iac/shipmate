@@ -33,9 +33,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        # owner/repositories omitted on purpose: with both empty, create-github-app-token scopes
-        # the token to the current repository whatever the trigger type, so this needs nothing out
-        # of the `schedule` event payload.
         permission-issues: write
 
     - name: Upsert / close drift issues

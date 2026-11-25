@@ -54,8 +54,6 @@ STEPS = [
         "with": {
             "client-id": "${{ inputs.app-id }}",
             "private-key": "${{ inputs.private-key }}",
-            "owner": "${{ github.repository_owner }}",
-            "repositories": "${{ github.event.repository.name }}",
             "permission-checks": "write",
             "permission-actions": "read",
         },

@@ -42,8 +42,6 @@ runs:
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
-        owner: ${{ github.repository_owner }}
-        repositories: ${{ github.event.repository.name }}
         permission-pull-requests: write
         # Lists earlier attempts' jobs; a subset of the manifest's `actions: write`.
         permission-actions: read
