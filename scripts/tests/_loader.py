@@ -11,11 +11,8 @@ Loading a helper script
 modules use; its docstring states why the loader is shaped as it is. The helpers carry no
 ``.py`` suffix and cannot be imported by name.
 
-Importable from every test module because ``scripts/tests`` is on the pytest ``pythonpath``
-(``pyproject.toml``). Prepend import mode would put this directory on ``sys.path`` anyway, there
-being no ``__init__.py`` here, but that is pytest's default behaviour rather than a declared
-invariant, and 20 modules failing collection is a poor way to discover someone changed the import
-mode.
+Importable from every test module because pytest's default ``prepend`` import mode puts
+``scripts/tests`` on ``sys.path``, the directory having no ``__init__.py``.
 """
 
 import copy

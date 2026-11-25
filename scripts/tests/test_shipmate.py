@@ -927,7 +927,7 @@ def test_run_annotated_writes_no_refusal_output_without_the_switch(monkeypatch, 
 
 
 def test_write_outputs_opens_the_file_for_lf_lines(monkeypatch, tmp_path):
-    """Text mode would end each line in CRLF on Windows. Mutation: drop `newline="\n"` -- red."""
+    """Text mode would end each line in CRLF on Windows. Mutation: drop `newline="\\n"` -- red."""
     path = str(tmp_path / "out.txt")
     monkeypatch.setenv("GITHUB_OUTPUT", path)
     calls = []
