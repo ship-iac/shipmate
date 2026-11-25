@@ -200,7 +200,7 @@ saves it, and fails unless it finds it.
 runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
 The next apply or deploy of the cell reads the run that holds the check. When
 that run never applied the cell, a bare or targeted `shipmate apply` applies
-it, a merge deploy queues it, and an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells) (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
+it, a merge deploy queues it, and an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
 **Last wave.** A level's last populated wave runs no `waveN-complete` job:
 `complete`, which runs right after it, alone writes its checks. A `complete`
@@ -209,7 +209,7 @@ minutes of retries, leaves them `in_progress`, linked to the run, and the next
 apply or deploy of the cell reads that run as the holder (table below):
 
 - Never applied: a bare or targeted `shipmate apply` applies the cell and a
-  merge deploy queues it; an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells) (§`apply_mode: auto`, Attempted cells), so
+  merge deploy queues it; an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells), so
   comment `shipmate apply`.
 - Applied and its state saved: refused. Complete the check, or return it to
   `queued` to apply again, by

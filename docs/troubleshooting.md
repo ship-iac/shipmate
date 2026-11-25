@@ -3355,7 +3355,7 @@ after the success. A check that stays `in_progress` after its run ended was left
 run that died, or by a completion whose jobs listing never showed the cell's
 job (`the retries were exhausted and these apply checks are left pending`). The
 next apply reads that run: a bare or targeted `shipmate apply` applies the cell
-when the run never applied it, and an `auto` run holds it as attempted when it would otherwise apply it (CONTRACT.md §`apply_mode: auto`, Attempted cells) (§`⚪ held, an earlier apply run did not apply these cells`). Otherwise the
+when the run never applied it, and an `auto` run holds it as attempted when it would otherwise apply it (CONTRACT.md §`apply_mode: auto`, Attempted cells; §`⚪ held, an earlier apply run did not apply these cells`). Otherwise the
 apply refuses with one of the sentences in §An apply refused an apply check
 another run holds in progress; follow the remedy that sentence names.
 
@@ -3547,7 +3547,7 @@ have applied the cell without saving its state reads
 Follow the same table, with `shipmate apply` in place of a deploy re-run. A
 cell whose holding run ended without applying it applies on a bare or targeted
 `shipmate apply`; an `auto` run holds it instead when it would otherwise apply
-it (§`⚪ held, an earlier apply run did not apply these cells`). An `auto` run
+it (CONTRACT.md §`apply_mode: auto`, Attempted cells; §`⚪ held, an earlier apply run did not apply these cells`). An `auto` run
 refuses the same way, over its attempted cells too; comment `shipmate apply`
 once the remedy is done.
 
