@@ -2723,7 +2723,8 @@ base's change. The held cells stay pending, a cell that runs after one waits
 with the remedy `the base also changed it; update the branch from the base and
 push` (after a locked cell's remedy, the sentence `The base also changed it;
 update the branch from the base and push`), and the environments ordered after
-their environment by `needs` are skipped (next entry). The rest applied.
+their environment by `needs` are skipped (§A bare or `auto` apply skipped an
+environment, or left one pending). The rest applied.
 
 Update the branch from the base and push: the push re-plans on the new tree, and
 its autoplan dispatches again. Commenting `shipmate apply` instead refuses over

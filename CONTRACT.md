@@ -634,7 +634,7 @@ on the same entry.
 a plan comment with a changed cell on a pull request that is not a draft ends
 with a folded `shipmate commands` section naming, in apply order,
 ``<env> applies on its own (`apply_mode: auto`); if no apply starts, comment `shipmate apply`.`` for each `apply_mode: auto` environment an autoplan
-dispatches an `auto` apply for, `shipmate apply <env>` for each
+dispatches an `auto` apply for and no other pull request locks, `shipmate apply <env>` for each
 `apply_mode: targeted` environment holding a changed cell and `shipmate apply`
 once, at the first changed environment neither targeted nor named by such a
 line, each left out when it would apply a behind cell, then `shipmate unlock <env>
@@ -4130,7 +4130,7 @@ comment's cell lines leave no room under the 65,536-char comment cap for the
 auto apply lines; they were left out". Known limit: the paragraph is written
 before the `auto` run reads its cells, so it can name an `auto` environment
 that run then skips behind a pending targeted or bare `needs` predecessor, or
-holds as overlap; the remedy covers it. Neither the newest-autoplan check nor
+holds as overlap or attempted; the remedy covers it. Neither the newest-autoplan check nor
 the dispatch result is known then either: a newer push posts a newer comment,
 and a failed dispatch replies.
 
