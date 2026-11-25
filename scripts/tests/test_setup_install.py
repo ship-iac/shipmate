@@ -35,27 +35,13 @@ def _pinned(t):
     return f"{_DIGEST}  {t['asset']}\n{'b' * 64}  {t['arm64_asset']}"
 
 
-def _install_terramate(
-    tmp_path,
-    curl_output,
-    curl_rc,
-    binary_version="0.17.1",
-    tar_rc=0,
-    terramate_rc=0,
-    digest=_DIGEST,
-    cached_digest=None,
-    key=None,
-    machine="x86_64",
-):
-    """Run the step's body with a curl that prints `curl_output` and exits `curl_rc`, and a
-    `uname -m` that prints `machine`. `key`, when given, is the `SHIPMATE_CACHE_KEY`.
+def _stubbed(tmp_path, curl_output, curl_rc, digest, cached_digest, machine, system):
+    """Write the stubs both steps share; return (bin dir, logs dir).
 
-    The sha256sum stub prints `digest` once curl has run, else `cached_digest` (default
-    `digest`), so a restored archive and a fresh one hash apart; it and the tar stub append their
-    names to the shared `order` log. The tar stub exits `tar_rc` when non-zero; otherwise it
-    writes a `terramate` stub where the real extract would, and that stub records its argv,
-    prints `binary_version` and exits `terramate_rc` when run. Return (result, runner_temp, the logs
-    dir holding each stub's argv).
+    The curl stub records its argv, prints `curl_output` and exits `curl_rc`. The sha256sum
+    stub prints `digest` once curl has run, else `cached_digest` (default `digest`), so a
+    restored archive and a fresh one hash apart, and appends its name to the shared `order` log.
+    `uname` prints `system` for `-s` and `machine` for `-m`.
     """
     bin_dir = tmp_path / "bin"
     logs = tmp_path / "logs"
@@ -73,15 +59,6 @@ def _install_terramate(
     )
     write_stub(
         bin_dir,
-        "tar",
-        f"echo tar >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/tar'\n"
-        f"[ {tar_rc} = 0 ] || exit {tar_rc}\n"
-        f'printf \'#!/usr/bin/env bash\\nprintf "%%s\\\\n" "$@" > {log}/terramate\\n'
-        f'echo "$STUB_TERRAMATE_VERSION"\\nexit {terramate_rc}\\n\''
-        ' > "$4/terramate"\nchmod +x "$4/terramate"',
-    )
-    write_stub(
-        bin_dir,
         "sha256sum",
         f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" >> '{log}/sha256sum'\n"
         f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={restored}; fi\n"
@@ -90,14 +67,22 @@ def _install_terramate(
     write_stub(
         bin_dir,
         "uname",
-        f'if [ "$1" = -s ]; then echo Linux; elif [ "$1" = -m ]; then echo {machine}; fi',
+        f'if [ "$1" = -s ]; then echo {system}; elif [ "$1" = -m ]; then echo {machine}; fi',
     )
+    return bin_dir, logs
+
+
+def _run(tmp_path, step, bin_dir, logs, env, key):
+    """Run `step`'s body with the stubs first on PATH, `env` added, and `key`, when given, as
+    the `SHIPMATE_CACHE_KEY`. Return (result, runner_temp, the logs dir).
+    """
+    runner_temp = tmp_path / "runner-temp"
     github_path = tmp_path / "github_path"
     github_path.write_text("", encoding="utf-8")
     (tmp_path / "github_output").write_text("", encoding="utf-8")
     r = run_step(
         tmp_path,
-        step_by(_ACTION, name=_TOOLS["terramate"]["step"])["run"],
+        step_by(_ACTION, name=step)["run"],
         {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
@@ -105,14 +90,51 @@ def _install_terramate(
             "GITHUB_PATH": str(github_path),
             "GITHUB_OUTPUT": str(tmp_path / "github_output"),
             "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
-            "SHIPMATE_TERRAMATE_VERSION": _TOOLS["terramate"]["version"],
-            "SHIPMATE_TERRAMATE_SHA256": _pinned(_TOOLS["terramate"]),
-            "STUB_TERRAMATE_VERSION": binary_version,
+            **env,
             "GITHUB_REPOSITORY": "o/r",
             **({} if key is None else {"SHIPMATE_CACHE_KEY": key}),
         },
     )
     return r, runner_temp.as_posix(), logs
+
+
+def _install_terramate(
+    tmp_path,
+    curl_output,
+    curl_rc,
+    binary_version="0.17.1",
+    tar_rc=0,
+    terramate_rc=0,
+    digest=_DIGEST,
+    cached_digest=None,
+    key=None,
+    machine="x86_64",
+):
+    """Run the step's body against `_stubbed` and a tar stub. The tar stub appends its name to
+    the shared `order` log and exits `tar_rc` when non-zero; otherwise it writes a `terramate`
+    stub where the real extract would, and that stub records its argv, prints `binary_version`
+    and exits `terramate_rc` when run.
+    """
+    bin_dir, logs = _stubbed(
+        tmp_path, curl_output, curl_rc, digest, cached_digest, machine, "Linux"
+    )
+    log = logs.as_posix()
+    write_stub(
+        bin_dir,
+        "tar",
+        f"echo tar >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/tar'\n"
+        f"[ {tar_rc} = 0 ] || exit {tar_rc}\n"
+        f'printf \'#!/usr/bin/env bash\\nprintf "%%s\\\\n" "$@" > {log}/terramate\\n'
+        f'echo "$STUB_TERRAMATE_VERSION"\\nexit {terramate_rc}\\n\''
+        ' > "$4/terramate"\nchmod +x "$4/terramate"',
+    )
+    t = _TOOLS["terramate"]
+    env = {
+        "SHIPMATE_TERRAMATE_VERSION": t["version"],
+        "SHIPMATE_TERRAMATE_SHA256": _pinned(t),
+        "STUB_TERRAMATE_VERSION": binary_version,
+    }
+    return _run(tmp_path, t["step"], bin_dir, logs, env, key)
 
 
 def _install_tofu(
@@ -129,32 +151,16 @@ def _install_tofu(
     machine="x86_64",
     system="Linux",
 ):
-    """Run the step's body with a curl that prints `curl_output` and exits `curl_rc`, and a
-    `uname` that prints `system` for `-s` and `machine` for `-m`. `key`, when given, is the
-    `SHIPMATE_CACHE_KEY`. The sha256sum stub prints `digest` once curl has run, else
-    `cached_digest` (default `digest`), so a restored archive and a fresh one hash apart.
+    """Run the step's body against `_stubbed` and python3, chmod and tofu stubs.
 
-    The sha256sum, python3 and chmod stubs append their names to the shared `order` log. The
-    python3 stub exits `python_rc` when non-zero; otherwise it writes a `tofu` stub, without the
-    exec bit, where `python3 -m zipfile -e` would. The chmod stub exits `chmod_rc` when
-    non-zero; otherwise it runs the real chmod. The tofu
-    stub records its argv and the `$GITHUB_PATH` text it sees, prints `binary_version` and a
-    platform line, and exits `tofu_rc`. Return (result, runner_temp, the logs dir).
+    The python3 and chmod stubs append their names to the shared `order` log. The python3 stub
+    exits `python_rc` when non-zero; otherwise it writes a `tofu` stub, without the exec bit,
+    where `python3 -m zipfile -e` would. The chmod stub exits `chmod_rc` when non-zero;
+    otherwise it runs the real chmod. The tofu stub records its argv and the `$GITHUB_PATH` text
+    it sees, prints `binary_version` and a platform line, and exits `tofu_rc`.
     """
-    bin_dir = tmp_path / "bin"
-    logs = tmp_path / "logs"
-    runner_temp = tmp_path / "runner-temp"
-    for d in (bin_dir, logs, runner_temp):
-        d.mkdir(exist_ok=True)
+    bin_dir, logs = _stubbed(tmp_path, curl_output, curl_rc, digest, cached_digest, machine, system)
     log = logs.as_posix()
-    restored = digest if cached_digest is None else cached_digest
-    write_stub(
-        bin_dir,
-        "curl",
-        f"printf '%s\\n' \"$@\" >> '{log}/curl'\ntouch '{log}/downloaded'\n"
-        'prev=""; for a in "$@"; do if [ "$prev" = -o ]; then : > "$a"; fi; prev="$a"; done\n'
-        f"printf '{curl_output} %s' \"${{!#}}\"\nexit {curl_rc}",
-    )
     write_stub(
         bin_dir,
         "python3",
@@ -173,39 +179,13 @@ def _install_tofu(
         f"[ {chmod_rc} = 0 ] || exit {chmod_rc}\n"
         'exec /usr/bin/chmod "$@"',
     )
-    write_stub(
-        bin_dir,
-        "sha256sum",
-        f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" >> '{log}/sha256sum'\n"
-        f"if [ -f '{log}/downloaded' ]; then d={digest}; else d={restored}; fi\n"
-        'if [ -n "$d" ]; then echo "$d  $1"; fi',
-    )
-    write_stub(
-        bin_dir,
-        "uname",
-        f'if [ "$1" = -s ]; then echo {system}; elif [ "$1" = -m ]; then echo {machine}; fi',
-    )
-    github_path = tmp_path / "github_path"
-    github_path.write_text("", encoding="utf-8")
-    (tmp_path / "github_output").write_text("", encoding="utf-8")
-    r = run_step(
-        tmp_path,
-        step_by(_ACTION, name=_TOOLS["tofu"]["step"])["run"],
-        {
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-            "RUNNER_TEMP": runner_temp.as_posix(),
-            "GITHUB_PATH": str(github_path),
-            "GITHUB_OUTPUT": str(tmp_path / "github_output"),
-            "GITHUB_ACTION_PATH": (ENGINE / "actions" / "setup").as_posix(),
-            "SHIPMATE_TOFU_VERSION": _TOOLS["tofu"]["version"],
-            "SHIPMATE_TOFU_SHA256": _pinned(_TOOLS["tofu"]),
-            "STUB_TOFU_VERSION": binary_version,
-            "GITHUB_REPOSITORY": "o/r",
-            **({} if key is None else {"SHIPMATE_CACHE_KEY": key}),
-        },
-    )
-    return r, runner_temp.as_posix(), logs
+    t = _TOOLS["tofu"]
+    env = {
+        "SHIPMATE_TOFU_VERSION": t["version"],
+        "SHIPMATE_TOFU_SHA256": _pinned(t),
+        "STUB_TOFU_VERSION": binary_version,
+    }
+    return _run(tmp_path, t["step"], bin_dir, logs, env, key)
 
 
 _TOOLS = {
@@ -537,6 +517,7 @@ def test_a_digest_mismatch_fails_the_step_before_the_extract(tmp_path, tool):
         # Mutation: hard-code `linux` in place of `uname -s`.
         ("tofu", {"system": "Darwin"}, "tofu_1.13.2_darwin_amd64.zip"),
     ],
+    ids=["terramate-riscv64", "tofu-riscv64", "tofu-darwin"],
 )
 @bash_only
 def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path, tool, platform, asset):
