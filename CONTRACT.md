@@ -238,10 +238,11 @@ A merge deploy whose own `complete` fails this way leaves the checks
   §`The apply step ran and its state was not saved`, then apply the stack
   through a new pull request touching it.
 
-**In-progress checks.** A pre-merge apply and a merge deploy read every App
-apply check of a pending cell that is `in_progress` under another run, whether
-that check is the cell's newest or an older one under a newer re-plan check; a
-pre-merge apply reads only its pull request's head. The check's details link
+**In-progress checks.** A merge deploy reads every App apply check of a pending
+cell that is `in_progress` under another run, and a pre-merge apply those of
+the cells it would apply (an `auto` run also those it holds as attempted), whether that check is the cell's newest or an older
+one under a newer re-plan check; a pre-merge apply reads only its pull
+request's head. The check's details link
 names the holding run only when it is exactly
 `<server>/<owner>/<repo>/actions/runs/<id>` of this repository. A link to the
 run's own page passes, so a merge deploy's re-run proceeds over its own flips.
