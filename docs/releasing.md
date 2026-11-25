@@ -299,7 +299,7 @@ the release commit, from `repo-example-stacks-aws`:
    started run's id. `<id>` is the id of any comment on pull request `<n>`,
    such as one you post for the smoke. Nothing claims it: the dispatch runs as
    your login, not the shipmate App, so `apply.yml`'s `guard` refuses it at its
-   bot-actor check before `claim` starts, which is this dispatch's expected end
+   bot-actor check before `admit` starts, which is this dispatch's expected end
    (below). Sending it is what checks that the scratch branch's `shipmate.yml`
    declares the input: a file without it answers HTTP 422.
 

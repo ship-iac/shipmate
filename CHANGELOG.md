@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed — BREAKING
+
+- **`apply.yml`'s `claim` and `queue` jobs are one job, `admit`, so an apply run starts one job fewer before its call.** Its steps claim the comment, record the `admitted` output that `run` and `outcome` read, and run the queue. The job checks `apply / claim` and `apply / queue` become `apply / admit`: rename any ruleset, alert or dashboard that names them. A commented apply whose `admit` runner is lost after the 🚀 skips `run` and `outcome`, as a lost `claim` runner did, and that window now includes the queue step; comment `shipmate apply` again. An `auto` run does not depend on `admit`'s outputs (`CONTRACT.md` §Comment-ops, "Reactions and the comment claim", "One apply run per pull request").
+
 ### Changed
 
 - **The plan comment's doctor line leaves out the engine release check's warnings, and they no longer post a comment on a pull request that changes nothing.** The line reads 'beyond repository settings and the engine release check' (`CONTRACT.md` §Plan comment).

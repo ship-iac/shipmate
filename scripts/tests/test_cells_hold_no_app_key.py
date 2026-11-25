@@ -47,6 +47,9 @@ PLAN_WF = WORKFLOWS / "plan.yml"
 UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 #: Every job in plan.yml that references the App key, hand-written.
 PLAN_KEY_HOLDERS = ("claim", "defer", "defer-auto", "summary", "gate-hold", "outcome")
+#: Every job with steps in apply.yml that references the App key, hand-written. `run` passes it
+#: to `apply-run.yml` and runs no step of its own.
+APPLY_KEY_HOLDERS = ("admit", "outcome")
 
 
 @pytest.mark.parametrize("action", CELLS)
@@ -123,6 +126,17 @@ def test_plan_workflow_key_holders_are_exactly_these_and_check_out_nothing():
     assert {n: checkouts(jobs[n]["steps"]) for n in holders} == dict.fromkeys(holders, [])
 
 
+def test_apply_workflow_key_holders_are_exactly_these_and_check_out_nothing():
+    """A key holder that checks out runs the dispatched ref's content beside the key. Mutations:
+    add an `actions/checkout` step to `admit`; pass the key to `guard`."""
+    jobs = workflow_jobs(WORKFLOWS / "apply.yml")
+    holders = tuple(
+        n for n, j in jobs.items() if "steps" in j and any(APP_KEY_ENV in s for s in strings(j))
+    )
+    assert holders == APPLY_KEY_HOLDERS
+    assert {n: checkouts(jobs[n]["steps"]) for n in holders} == dict.fromkeys(holders, [])
+
+
 @pytest.mark.parametrize("job_id", UNTRUSTED_PLAN_JOBS)
 def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
     """`shipmate-engine` alone, not every credentialed environment: the `plan` job binds a shared
@@ -164,8 +178,7 @@ ENGINE_BOUND_JOBS = {
     ("apply-run.yml", "review"),
     ("apply-run.yml", "lock"),
     ("apply-run.yml", "summary"),
-    ("apply.yml", "claim"),
-    ("apply.yml", "queue"),
+    ("apply.yml", "admit"),
     ("apply.yml", "outcome"),
     ("comment-ops.yml", "ops"),
     ("deploy.yml", "summary"),

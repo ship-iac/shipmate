@@ -2,7 +2,7 @@
 """Claim a commented run's command with the App's `rocket` reaction, so that one run of a
 comment does its work.
 
-Runs in the `claim` job of `plan.yml` and `apply.yml`. Reads `GITHUB_REPOSITORY`,
+Runs in `plan.yml`'s `claim` job and `apply.yml`'s `admit`. Reads `GITHUB_REPOSITORY`,
 `GITHUB_ACTOR`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `COMMENT_ID`, `PR_NUMBER`,
 `SHIPMATE_APP_SLUG`, `SHIPMATE_OWNER_JOB`, `SHIPMATE_REPLY_VERB`, `SHIPMATE_REPLY_ENV` and
 `GH_TOKEN` (an App token with `pull-requests: write` and `actions: read`).

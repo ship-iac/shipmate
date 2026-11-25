@@ -10,7 +10,7 @@ outputs then read empty), a grant widened, the claim moved after work or onto an
 from _loader import action_yaml, workflow_jobs
 
 #: Admits a run whose claim answered 201, and one that carries no `comment_id` (an autoplan,
-#: whose `github.event.inputs` is null and compares equal to '', the replan, an `auto` apply).
+#: whose `github.event.inputs` is null and compares equal to '', or the replan).
 #: The bypass reads the trigger's input, never the claim's result. A failed claim (`state`
 #: empty) and a `taken` one gate closed.
 CLAIMED = "(needs.claim.outputs.state == 'owned' || github.event.inputs.comment_id == '')"
@@ -18,8 +18,8 @@ CLAIM_IF = "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.
 ENGINE_ENVIRONMENT = {"name": "shipmate-engine", "deployment": False}
 
 
-def _claim_job(with_, needs=None):
-    job = {
+def _claim_job(with_):
+    return {
         "if": CLAIM_IF,
         "runs-on": "ubuntu-slim",
         "environment": ENGINE_ENVIRONMENT,
@@ -27,7 +27,6 @@ def _claim_job(with_, needs=None):
         "outputs": {"state": "${{ steps.claim.outputs.state }}"},
         "steps": [{"id": "claim", "uses": "$/actions/claim", "with": with_}],
     }
-    return {"needs": needs, **job} if needs else job
 
 
 def test_the_plan_claim_job_is_this_whole_job():
@@ -58,25 +57,6 @@ def test_plan_facts_runs_only_for_an_owned_or_skipped_claim():
     of the trigger's empty `comment_id`."""
     facts = workflow_jobs("plan.yml")["facts"]
     assert (facts["needs"], facts["if"]) == (["claim"], f"${{{{ !cancelled() && {CLAIMED} }}}}")
-
-
-def test_the_apply_claim_job_is_this_whole_job():
-    """After `guard`, whose refusal (a non-bot actor, an `apply` with no `comment_id`) skips it,
-    so a refused dispatch writes no reaction. An `auto` dispatch carries no `comment_id` and
-    skips it. Mutations: drop `needs: [guard]` (a refused dispatch claims); drop the
-    `comment_id` clause; pass `github.event.inputs.pr_number` (unvalidated) as `pr-number`;
-    drop `environment` from `with:`."""
-    assert workflow_jobs("apply.yml")["claim"] == _claim_job(
-        {
-            "verb": "apply",
-            "environment": "${{ inputs.environment }}",
-            "pr-number": "${{ inputs.pr_number }}",
-            "comment-id": "${{ github.event.inputs.comment_id }}",
-            "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-            "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-        },
-        needs=["guard"],
-    )
 
 
 def test_the_claim_action_mints_exactly_these_permissions_and_runs_the_script():

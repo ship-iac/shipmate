@@ -171,10 +171,9 @@ DISPATCH_PATHS = ("apply.yml", "unlock.yml")
 #: The whole `needs:` of each job in `apply.yml`: `guard` gates the call into `apply-run.yml`.
 APPLY_NEEDS = {
     "guard": [],
-    "claim": ["guard"],
-    "queue": ["guard", "claim"],
-    "run": ["guard", "claim", "queue"],
-    "outcome": ["guard", "claim", "run"],
+    "admit": ["guard"],
+    "run": ["guard", "admit"],
+    "outcome": ["guard", "admit", "run"],
 }
 
 

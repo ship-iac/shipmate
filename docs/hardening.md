@@ -28,7 +28,7 @@ slot in that queue once `guard` passes, before `review` runs, so a flood of 101
 such dispatches into an idle group (one runs, 100 wait), or 100 behind a run
 already holding it, makes a real `shipmate apply` arrive at a full queue and be
 cancelled. Both the flood and the single held run need write access to the
-repository. `apply.yml`'s `queue` job never cancels such a run: it cancels only
+repository. `apply.yml`'s `admit` job never cancels such a run: it cancels only
 runs whose `actor` is the shipmate App's bot login, and it writes nothing, no
 cancel and no reply, unless its own run's `actor` and `triggering_actor` are both
 that login; its reply names such a run as one shipmate did not dispatch.

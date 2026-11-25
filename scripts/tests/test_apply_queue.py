@@ -62,7 +62,7 @@ def _save(cell, status, steps=()):
 
 
 _GUARD = {"name": "apply / guard", "status": "in_progress"}
-_QUEUE = {"name": "apply / queue", "status": "completed"}
+_ADMIT = {"name": "apply / admit", "status": "completed"}
 
 
 def _marked(comments, marker):
@@ -109,7 +109,7 @@ def gh(monkeypatch):
 
     def run_jobs(repo, run_id):
         rec.job_reads.append(run_id)
-        own = ([_QUEUE, *_j("in_progress")], True)
+        own = ([_ADMIT, *_j("in_progress")], True)
         return rec.jobs.get(run_id, own if run_id == 50 else ([], False))
 
     def pr_head(repo, pr):
@@ -349,12 +349,12 @@ def test_this_run_is_neither_named_nor_cancelled(gh):
 
 def test_a_job_outside_the_run_call_neither_holds_the_group_nor_keeps_a_stale_run(gh):
     """A newer run still in its `guard` holds nothing, so it is not named; a stale run whose
-    `queue` is listed `completed` beside its waiting call is cancelled.
+    `admit` is listed `completed` beside its waiting call is cancelled.
 
     Mutations: `in_call` returns every job -- red (60 named as the holder); `_IN_CALL` as
     `" / guard"` -- red (40 kept)."""
     gh.runs = [_r(40), _r(60, ref=_HEAD)]
-    gh.jobs = {40: ([_QUEUE, *_j("waiting")], True), 60: ([_GUARD], True)}
+    gh.jobs = {40: ([_ADMIT, *_j("waiting")], True), 60: ([_GUARD], True)}
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
@@ -441,7 +441,7 @@ def test_a_wave_pending_on_its_cell_group_after_an_earlier_wave_applied_is_kept(
 
 def test_a_run_whose_call_waits_for_the_group_is_cancelled(gh):
     """Mutation: drop the `_in_group_wait` branch of `idle` -- red (kept)."""
-    gh.runs, gh.jobs = _stale([_QUEUE, _rv("pending")])
+    gh.runs, gh.jobs = _stale([_ADMIT, _rv("pending")])
     gh.go()
     assert gh.cancels == [_cancel(40)]
     assert gh.posts == _reply(_CANCELLED.format(40))
@@ -649,7 +649,7 @@ def _told(waiter, comment="11"):
 
 def _waiting(*ids):
     """Runs `ids`, each App-dispatched at the live head with its call waiting for the group."""
-    return [_r(i, ref=_HEAD) for i in ids], {i: ([_QUEUE, _rv("pending")], True) for i in ids}
+    return [_r(i, ref=_HEAD) for i in ids], {i: ([_ADMIT, _rv("pending")], True) for i in ids}
 
 
 def _warnings(capsys):
@@ -664,7 +664,7 @@ def test_a_waiting_run_is_told_once_which_run_it_waits_behind(gh, monkeypatch):
     red; this run's id in the marker -- red; `SHIPMATE_ENV` in the header -- red."""
     monkeypatch.setenv("SHIPMATE_ENV", "dev-eu")
     gh.runs = [_r(40, ref=_HEAD, comment="6902658567")]
-    gh.jobs = {40: ([_QUEUE, _rv("pending")], True)}
+    gh.jobs = {40: ([_ADMIT, _rv("pending")], True)}
     gh.waiters()
     assert gh.posts == [_told(40, "6902658567")]
     assert gh.marker_reads == [("o/r", "7", "<!-- shipmate:waits-")]
