@@ -240,7 +240,7 @@ A merge deploy whose own `complete` fails this way leaves the checks
 
 **In-progress checks.** A merge deploy reads every App apply check of a pending
 cell that is `in_progress` under another run, and a pre-merge apply those of
-the cells it would apply, whether that check is the cell's newest or an older
+the cells it would apply (an `auto` run also those it holds as attempted), whether that check is the cell's newest or an older
 one under a newer re-plan check; a pre-merge apply reads only its pull
 request's head. The check's details link
 names the holding run only when it is exactly

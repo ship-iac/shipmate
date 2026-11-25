@@ -3518,7 +3518,7 @@ lifecycle, In-progress checks).
 | The annotation says | Do |
 | --- | --- |
 | `are held in progress by run <id>, which is still running` | Once run `<id>` ends, re-run this deploy. A cell whose check that run left in progress deploys if the run never applied it and is refused otherwise, with the row's text for how the run ended (may not be saved, saved, or could not be read). If the run's page shows it ended and the deploy still refuses with this text, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
-| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | Run `<id>` lists no job of the cell under the names this engine reads, or an `apply` job of the cell in it does not show that it never applied (no steps as `cancelled`, `skipped` or `failure`, `Apply the cell` `skipped`, or a failed `Pre-apply check`), and no `save` job of the cell saved its state, so it may have changed infrastructure that no saved state records. A held check (`State not saved`) reads this way too. Read that run's cell `apply` and `save` job logs. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact: return each of those checks to `queued`, or complete each when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). When the apply ran without saving its state on a merged head, leave that head's check alone and apply the stack through a new pull request touching it, as that section's step 1 says; never return the check and re-run the deploy. |
+| `were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved` | Run `<id>` lists no job of the cell under the names this engine reads, or an `apply` job of the cell in it does not show that it never applied (no steps as `cancelled`, `skipped` or `failure`, `Apply the cell` `skipped`, or a failed `Pre-apply check`), and no `save` job of the cell saved its state, so it may have changed infrastructure that no saved state records. A held check (`State not saved`) reads this way too. Read that run's cell `apply` and `save` job logs. When the apply ran and its state was not saved, follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) before applying the stack again. When the cell refused before applying, the state is intact: return each of those checks to `queued`, or complete each when the change is applied and its state saved, as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). When the apply ran without saving its state on a merged head, leave that head's check alone and apply the stack through a new pull request touching it, as [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved) steps 1 and 4 say; never return the check and re-run the deploy. |
 | `were left in progress by run <id>, which may have applied them and saved any state their apply left` | Run `<id>` ended without completing the check; its `save` job saved any state the apply left, and it may have applied the cell. Find out whether the change was applied. When it was, complete each such check; otherwise return it to `queued`; both as in [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand), then re-run this deploy. |
 | `may have been applied by an earlier attempt of this deploy, run <id>, without saving their state` | An earlier attempt of this deploy may have applied the cell, and its state is not known saved. A cell re-run on its own refuses whatever its check shows, with ``run attempt <n> of this deploy may have applied this cell without saving its state``. A re-run that runs `detect` again refuses the same way while those cells' apply checks are pending, and skips them once completed. Follow [The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved), and apply the stack through a new pull request touching it. |
 | `run <id> could not be read completely` | The run or its jobs listing could not be read completely; a warning above the annotation names the cause. Re-run this deploy. If it fails the same way, follow [Return an in-progress apply check by hand](#return-an-in-progress-apply-check-by-hand). |
@@ -3539,8 +3539,9 @@ cannot tell whether the cell applied.
 
 ### An apply refused an apply check another run holds in progress
 
-A `shipmate apply` reads the App apply checks of the cells it would apply the
-same way a merge deploy reads those of every pending cell, and refuses the whole run with `apply refused:`
+A `shipmate apply` reads the App apply checks of the cells it would apply (an
+`auto` run also those it holds as attempted) the same way a merge deploy reads
+those of every pending cell, and refuses the whole run with `apply refused:`
 and the sentences of §A merge deploy refused an apply check another run holds
 in progress, ending ``re-run `shipmate apply` `` where the deploy's end
 `re-run this deploy`. Two differ: a live run ends
@@ -3556,6 +3557,11 @@ refuses the same way, over its attempted cells too; comment `shipmate apply`
 once the remedy is done.
 
 ### Return an in-progress apply check by hand
+
+Not for a cell whose apply ran without saving its state on a merged head:
+leave that check alone and follow
+[The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved)
+instead.
 
 1. Wait until no shipmate run of the repository is unfinished, whatever its
    title: a plan or comment run can still dispatch an apply. This lists every
@@ -3603,7 +3609,7 @@ once the remedy is done.
 5. Start the apply again: re-run the deploy that refused, or, before the merge,
    comment `shipmate apply`. After an apply that ran without saving its state
    on a merged head, do neither: apply the stack through a new pull request
-   ([The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved), step 1). A deploy that refused because an earlier attempt
+   ([The apply step ran and its state was not saved](#the-apply-step-ran-and-its-state-was-not-saved), steps 1 and 4). A deploy that refused because an earlier attempt
    of its own run may have applied unsaved refuses on every re-run that runs `detect`
    while those cells' apply checks are pending, and a cell re-run on its own
    refuses whatever its check shows; apply that stack through a new pull
