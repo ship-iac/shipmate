@@ -190,7 +190,10 @@ state. Then the deploy refuses:
 ``deploy refused: <cells> may have been applied by an earlier attempt of this deploy, run <id>, without saving their state. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.``,
 and a cell re-run on its own refuses before it applies:
 ``apply aborted for `<env>` / `<stack>`: run attempt <n> of this deploy may have applied this cell without saving its state; follow docs/troubleshooting.md section The apply step ran and its state was not saved``
-(`run attempts <n>, <m>` for more than one). A re-run of a merge deploy starts
+(`run attempts <n>, <m>` for more than one). On a re-run that runs `detect` again, when
+the deploy's own jobs cannot be listed completely, it refuses every pending cell with
+``<cells>: this deploy, run <this run id>, could not read its own jobs completely. Re-run this deploy; if it keeps failing, read its earlier attempts' cell apply and save job logs, follow docs/troubleshooting.md section The apply step ran and its state was not saved for a cell whose apply ran without saving its state, complete by hand the apply checks of cells whose change is applied and state saved, as in docs/troubleshooting.md section Return an in-progress apply check by hand, and apply the rest through a new pull request touching their stacks.``
+A re-run of a merge deploy starts
 from the checks that are still open. A cell's state is saved only by the
 attempt that applied it: when an earlier attempt may have applied the cell
 without saving, a re-run's `save` job looks that attempt's state up, never
@@ -200,7 +203,7 @@ saves it, and fails unless it finds it.
 runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
 The next apply or deploy of the cell reads the run that holds the check. When
 that run never applied the cell, a bare or targeted `shipmate apply` applies
-it, a merge deploy queues it, and an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
+it, a merge deploy queues it, and an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
 **Last wave.** A level's last populated wave runs no `waveN-complete` job:
 `complete`, which runs right after it, alone writes its checks. A `complete`
@@ -209,9 +212,10 @@ minutes of retries, leaves them `in_progress`, linked to the run, and the next
 apply or deploy of the cell reads that run as the holder (table below):
 
 - Never applied: a bare or targeted `shipmate apply` applies the cell and a
-  merge deploy queues it; an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells), so
-  comment `shipmate apply`.
-- Applied and its state saved: refused. Complete the check, or return it to
+  merge deploy queues it; an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells); comment
+  `shipmate apply` for a held cell.
+- Saved any state its apply left, which may mean it applied: refused. Find
+  out whether the change was applied, then complete the check, or return it to
   `queued` to apply again, by
   [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress
   apply check by hand.
@@ -224,10 +228,13 @@ A merge deploy whose own `complete` fails this way leaves the checks
 `in_progress` under that deploy run:
 
 - Never applied: re-run the deploy.
-- Applied and its state saved: complete the check by the hand procedure above
-  first; a re-run applies its reviewed plan a second time, or is refused as
-  stale.
-- May have applied without saving its state: every re-run refuses. Follow
+- Saved any state its apply left: find out whether the change was applied.
+  When it was, complete the check by the hand procedure above; a re-run would
+  apply its reviewed plan a second time, or be refused as stale. When it was
+  not, re-run the deploy, which applies it once.
+- May have applied without saving its state: a re-run of all the deploy's
+  jobs refuses while those cells' apply checks are pending, and skips them once
+  completed; a cell re-run on its own refuses whatever its check shows. Follow
   §`The apply step ran and its state was not saved`, then apply the stack
   through a new pull request touching it.
 
@@ -245,9 +252,9 @@ held it refuses through its earlier attempt (§Re-runs above).
 | Holding run | Merge deploy | Pre-merge apply |
 | --- | --- | --- |
 | still running, or a job of the cell has not completed | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand | refuses: ``<cells> are held in progress by run <id>, which is still running. Wait for it to end, then re-run `shipmate apply`.`` |
-| ended, never applied the cell | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it`` | a bare or targeted apply applies the cell; an `auto` run holds it as attempted when it would otherwise apply it (§`apply_mode: auto`, Attempted cells) |
+| ended, never applied the cell | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it`` | a bare or targeted apply applies the cell; an `auto` run holds it as attempted when that check is the cell's newest and the run would otherwise apply it, and under a newer autoplan re-plan check applies it like a bare apply (§`apply_mode: auto`, Attempted cells) |
 | ended, may have applied the cell without saving its state, or lists no job of the cell | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` | refuses: ``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then return or complete each check as in docs/troubleshooting.md section Return an in-progress apply check by hand.`` |
-| ended, applied the cell and saved its state | refuses: ``<cells> were left in progress by run <id>, which applied them and saved their state. Follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
+| ended; its save job saved any state the apply left, and it may have applied the cell | refuses: ``<cells> were left in progress by run <id>, which may have applied them and saved any state their apply left. Follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
 | the run or its jobs listing could not be read completely | refuses: ``<cells>: run <id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.`` | refuses with the same text, ``re-run `shipmate apply` `` in place of `re-run this deploy` |
 | the link names no run of this repository | refuses: ``<cells>: apply check <check id> is in progress with no run named; follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
 

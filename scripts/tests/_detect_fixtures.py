@@ -584,7 +584,8 @@ HELD_CASES = {
         [cell_job("apply"), cell_job("save", steps=())],
         (
             "::error::apply refused: stacks/app / dev-eu were left in progress by run 77, which "
-            f"applied them and saved their state. Follow {_BY_HAND}, then re-run `shipmate apply`."
+            "may have applied them and saved any state their apply left. Follow "
+            f"{_BY_HAND}, then re-run `shipmate apply`."
         ),
     ),
     "old job shape": (

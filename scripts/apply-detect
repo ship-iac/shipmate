@@ -446,8 +446,8 @@ def holder_state(repo, cell, check, runs):
     in `runs`: `live` or `unreadable` as it reads, or, once it ended, `live` while a job of
     the cell it lists is not `completed`; `ended` when `ag.unsaved` names an attempt or the
     run lists no job of the cell, so a job name it does not read never reads as never applied;
-    `saved` when an attempt applied and every applying attempt's state is saved; `deploy`
-    when no attempt applied."""
+    `saved` when no attempt is unsaved and not every attempt is known not to have applied;
+    `deploy` when every attempt is known not to have applied."""
     url, page = check.get("details_url") or "", current_run_url("")
     run_id = url.removeprefix(page) if url.startswith(page) else ""
     if not is_run_id(run_id):
@@ -558,8 +558,9 @@ def held_text(cause, ident, names, rerun):
     the remedy's last step."""
     if cause == "saved":
         return (
-            f"{names} were left in progress by run {ident}, which applied them and saved their "
-            f"state. Follow docs/troubleshooting.md section {BY_HAND}, then {rerun}."
+            f"{names} were left in progress by run {ident}, which may have applied them and saved "
+            f"any state their apply left. Follow docs/troubleshooting.md section {BY_HAND}, then "
+            f"{rerun}."
         )
     if cause == "unknown":
         return (
