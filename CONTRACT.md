@@ -198,8 +198,10 @@ saves it, and fails unless it finds it.
 
 **Dead runs.** A run that ends after a flip without writing its checks (a lost
 runner, a second cancel) leaves them `in_progress`, and the gate stays pending.
-The next apply of the cell reads the run that holds the check: it applies the
-cell again only when that run never applied it, and refuses otherwise.
+The next apply or deploy of the cell reads the run that holds the check. When
+that run never applied the cell, a bare or targeted `shipmate apply` applies
+it, a merge deploy queues it, and an `auto` run holds it (§`apply_mode:
+auto`, Attempted cells). Otherwise each refuses (In-progress checks, below).
 
 **Last wave.** A level's last populated wave runs no `waveN-complete` job:
 `complete`, which runs right after it, alone writes its checks. A `complete`
@@ -214,15 +216,22 @@ apply or deploy of the cell reads that run as the holder (table below):
   `queued` to apply again, by
   [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress
   apply check by hand.
-- May have applied without saving its state: refused. Follow
-  [`docs/troubleshooting.md`](docs/troubleshooting.md) §`The apply step ran
-  and its state was not saved`, then the same hand procedure.
+- May have applied without saving its state, or the run lists no job of the
+  cell: refused. Follow [`docs/troubleshooting.md`](docs/troubleshooting.md)
+  §`The apply step ran and its state was not saved`, then return or complete
+  the check by the same hand procedure.
 
 A merge deploy whose own `complete` fails this way leaves the checks
-`in_progress` under that deploy run. Recover them by the hand procedure above,
-not by re-running the deploy: a re-run of all its jobs queues an applied cell
-again, and its reviewed plan applies a second time, or is refused as stale
-when the first apply changed the state.
+`in_progress` under that deploy run, and a re-run of the deploy queues them
+again:
+
+- Never applied: re-run the deploy.
+- Applied and its state saved: complete the check by the hand procedure above
+  first; a re-run applies its reviewed plan a second time, or is refused as
+  stale.
+- May have applied without saving its state: every re-run refuses. Follow
+  §`The apply step ran and its state was not saved`, then apply the stack
+  through a new pull request touching it.
 
 **In-progress checks.** A pre-merge apply and a merge deploy read every App
 apply check of a pending cell that is `in_progress` under another run, whether
@@ -238,8 +247,8 @@ held it refuses through its earlier attempt (§Re-runs above).
 | Holding run | Merge deploy | Pre-merge apply |
 | --- | --- | --- |
 | still running, or a job of the cell has not completed | refuses: ``<cells> are held in progress by run <id>, which is still running. Once it ends, re-run this deploy: a cell whose check that run left in progress deploys if the run never applied it and is refused otherwise.`` If the run's page shows it ended and the deploy still refuses with this text, follow [`docs/troubleshooting.md`](docs/troubleshooting.md) §Return an in-progress apply check by hand | refuses: ``<cells> are held in progress by run <id>, which is still running. Wait for it to end, then re-run `shipmate apply`.`` |
-| ended, never applied the cell | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it`` | applies the cell |
-| ended, may have applied the cell without saving its state, or lists no job of the cell | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` | refuses: ``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then re-plan.`` |
+| ended, never applied the cell | queues the cell, with ``::warning::<stack> / <env>: run <id> ended before applying this cell and left its apply check in progress; this deploy queues it`` | a bare or targeted apply applies the cell; an `auto` run holds it as attempted |
+| ended, may have applied the cell without saving its state, or lists no job of the cell | refuses: ``<cells> were left in progress by run <id>, which ended after their apply may have started, so their state may not be saved. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying them again.`` | refuses: ``<cells> may have been applied by run <id> without saving their state; follow docs/troubleshooting.md section The apply step ran and its state was not saved, then return or complete the check as in docs/troubleshooting.md section Return an in-progress apply check by hand.`` |
 | ended, applied the cell and saved its state | refuses: ``<cells> were left in progress by run <id>, which applied them and saved their state. Follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
 | the run or its jobs listing could not be read completely | refuses: ``<cells>: run <id> could not be read completely; re-run this deploy. If it fails the same way, follow docs/troubleshooting.md section Return an in-progress apply check by hand.`` | refuses with the same text, ``re-run `shipmate apply` `` in place of `re-run this deploy` |
 | the link names no run of this repository | refuses: ``<cells>: apply check <check id> is in progress with no run named; follow docs/troubleshooting.md section Return an in-progress apply check by hand, then re-run this deploy.`` | refuses with the same text, ending ``then re-run `shipmate apply`.`` |
@@ -3124,8 +3133,8 @@ dispatches again. A cell whose newest apply check is a behind record (its plan
 found that the base changed its stack after the branch left it) is held the same
 way and named on the same line.
 
-**Attempted cells.** A cell `detect` would apply, neither locked, an overlap
-cell, nor waiting on a locked or overlap cell, is held when its newest App
+**Attempted cells.** A cell `detect` would apply, neither locked nor an
+overlap cell, and not waiting (§Env apply order), is held when its newest App
 apply check shows that an earlier apply run attempted it and did not apply it: the check is not `in_progress` and its
 title differs from the one its plan record holds (a completion retitled it
 `Failed: <error>`, `Cancelled`, `Not run` or `Not applied (<conclusion>)`);
@@ -3405,7 +3414,7 @@ The nine jobs:
   ready-for-review run plans nothing", and `detect`, `plan`, `summary`,
   `gate-hold` and `outcome` are skipped. `<state>` is what that run's
   `summary` published: `yes` or `no` when exactly one of its two steps
-  succeeded, `unread` for any other shape, an older engine's plan run included.
+  succeeded, `unread` for any other shape.
   That run's plan comment, apply checks and gate stand, and `defer-auto` decides
   its `auto` apply unless `<state>` is `no`. A re-run of this run defers
   again, so the earlier plan stays; a push plans the new head. When it cannot
