@@ -1798,7 +1798,8 @@ def test_a_held_cell_refusal_is_a_failure_and_not_a_rule(monkeypatch, tmp_path):
     assert out.read_text(encoding="utf-8") == (
         "refusal=apply refused: stacks/app / dev-eu may have been applied by run 77 without "
         "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
-        "state was not saved, then re-plan.\n"
+        "state was not saved, then return or complete each check as in docs/troubleshooting.md "
+        "section Return an in-progress apply check by hand.\n"
     )
 
 

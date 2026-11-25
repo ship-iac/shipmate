@@ -574,7 +574,8 @@ HELD_CASES = {
         (
             "::error::apply refused: stacks/app / dev-eu may have been applied by run 77 without "
             "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
-            "state was not saved, then re-plan."
+            "state was not saved, then return or complete each check as in docs/troubleshooting.md "
+            "section Return an in-progress apply check by hand."
         ),
     ),
     "ended saved": (
@@ -593,7 +594,8 @@ HELD_CASES = {
         (
             "::error::apply refused: stacks/app / dev-eu may have been applied by run 77 without "
             "saving their state; follow docs/troubleshooting.md section The apply step ran and its "
-            "state was not saved, then re-plan."
+            "state was not saved, then return or complete each check as in docs/troubleshooting.md "
+            "section Return an in-progress apply check by hand."
         ),
     ),
     "ended never applied": (
