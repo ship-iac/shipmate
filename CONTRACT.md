@@ -98,8 +98,8 @@ inputs, so it identifies a run only when the App dispatched it: anyone who can
 dispatch the workflow chooses the inputs. The engine reads a title only for a
 `workflow_dispatch` run whose `actor` is the App's `<slug>[bot]`: `apply.yml`'s
 `admit` lists a pull request's apply runs by it to cancel the stale ones and
-name the one a run waits behind, and `apply-run.yml`'s `review` and `summary`
-list them to tell the runs waiting behind theirs (§Comment-ops, "One apply run
+name the one a run waits behind, and `apply-run.yml`'s `review` lists them to
+tell the runs waiting behind its run (§Comment-ops, "One apply run
 per pull request"), and `scripts/dispatch-body` looks for a comment's run by it before
 it retries a dispatch (§Comment-ops). `shipmate doctor` reports a `run-name`
 that differs from the published one outside its quoted literals. A run of any
@@ -2099,9 +2099,8 @@ A reply holding the first sentence starts with the line
 The run holding the group tells each waiting run too: a run's queue step can end
 before the run it then waits behind holds the group, and so names no holder, as
 when two commands arrive together. `apply-run.yml`'s `review`, as its last
-step, and its `summary`, after the apply comment, run `actions/apply-waiters`
-(`scripts/apply-queue waiters`). It lists the same runs, then reads the jobs of
-each App-dispatched run other than its own whose title carries a comment; a run
+step, runs `actions/apply-waiters` (`scripts/apply-queue waiters`). It lists
+the same runs, then reads the jobs of each App-dispatched run other than its own whose title carries a comment; a run
 whose `<caller> / run / review` is `pending` waits for this one. Only when one
 waits does it list the pull request's comments, once. Each waiting run not yet
 told gets one ⚪ reply:
@@ -2113,13 +2112,13 @@ told gets one ⚪ reply:
 The reply's first line is ``<!-- shipmate:waits-<run id> -->``, `<run id>` the
 waiting run's. A waiting run counts as told when a comment by `<slug>[bot]`
 starts with that whole line, so the queue step's holder reply and the holder's
-`review` and `summary` replies count as one. The step writes under the queue step's
+`review` reply count as one. The step writes under the queue step's
 `actor` rule, so a holder the App did not dispatch, or that a person re-ran,
 posts nothing; an `auto` holder replies. An `auto` waiting run has no comment and
 a run the App did not dispatch is not trusted; neither is told. The step is
 display only: a failed listing or POST warns and the step exits 0, and it holds
 `continue-on-error: true` and `timeout-minutes: 1`, so neither it nor a hung
-call fails `review` or `summary`.
+call fails `review`.
 
 A cancelled stale run writes, by where it waited:
 
@@ -2143,16 +2142,16 @@ These limits are accepted:
 - A run that changes status between two of the per-status listings, or within
   one listing between its page reads, can be missed, and is then neither
   cancelled nor named.
-- A waiting run whose call joins the group after the holder's `summary` listed
-  the runs is not told by that holder.
+- A waiting run whose call joins the group after the holder's `review` listed
+  the runs is not told by that holder; the next holder's `review` tells it if it
+  still waits then.
 - The reply is display only: a waiting run that the queue step did not tell stays
-  untold when neither of the holder's two waits steps tells it. A failed or
-  refused `review` skips both; a cancelled `summary` or run skips the later
-  one; either can fail inside its step.
+  untold when the holder's waits step does not tell it: a failed or refused
+  `review` skips the step, and a failure inside the step tells no one.
 - A waiting run is told once, naming the run that held the group when it was
   seen; it is not told again when it then waits behind another run.
-- A waiting run can be told more than once, by the queue step, `review` and
-  `summary`, when the comments listing does not yet show an earlier reply.
+- A waiting run can be told more than once, by the queue step and `review`,
+  when the comments listing does not yet show an earlier reply.
 
 `review: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -2524,7 +2523,7 @@ check/status/comment/issue that crosses a workflow-run boundary:
   job, bound to `shipmate-engine` (§Comment-ops, "One apply run per pull
   request").
 - **The waits reply** — posted by `actions/apply-waiters` in `apply-run.yml`'s
-  `review` and `summary` jobs, both bound to `shipmate-engine`, as a pull
+  `review` job, bound to `shipmate-engine`, as a pull
   request comment for each App-dispatched apply run with a command comment
   waiting behind the run that holds the queue. Its
   `<!-- shipmate:waits-<run id> -->` first line is read only to skip a waiting

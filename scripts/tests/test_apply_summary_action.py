@@ -192,7 +192,6 @@ _SUMMARY_JOB_STEPS = [
     "Warn on apply cell summaries download failure",
     "Post apply result comment",
     "End the running apply check",
-    "Tell the apply runs waiting behind this one",
 ]
 
 

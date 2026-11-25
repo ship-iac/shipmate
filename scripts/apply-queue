@@ -3,8 +3,8 @@
 `waiters`, tell the runs waiting behind this one.
 
 Without an argument it runs in `apply.yml`'s `admit` job, before this run's call joins
-`shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `review` and `summary`, while
-this run holds the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
+`shipmate-apply-<pr_number>`; `waiters` runs in `apply-run.yml`'s `review`, while this run holds
+the group. Any other argument exits 1. Lists the runs of `shipmate.yml`.
 Reads `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `PR_NUMBER`, `SHIPMATE_ENV` (the queue reply
 header's environment), `SHIPMATE_AUTO` (`true` posts no queue reply), `SHIPMATE_APP_SLUG`,
 `SHIPMATE_ACTOR`, `SHIPMATE_TRIGGERING_ACTOR` and `GH_TOKEN` (an App token with
@@ -21,7 +21,7 @@ a run at the live head; a run missing from its own listing cancels nothing. An u
 never cancelled. A queue reply naming the holder starts with this run's `waits_marker`.
 
 `waiters` tells each App-dispatched run with a command comment whose call waits for the group,
-once per run across `admit`'s queue step, `review` and `summary`: a run whose `waits_marker`
+once per run across `admit`'s queue step and `review`: a run whose `waits_marker`
 starts a comment of `<slug>[bot]` is skipped.
 
 Writes, a cancel or a reply, happen only when this run's `actor` and `triggering_actor` are
