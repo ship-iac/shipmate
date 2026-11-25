@@ -356,10 +356,10 @@ def settle(order, stopped, pending, deps, tags, level, locked=frozenset()):
     skips and waiting cells.
 
     An env with a waiting cell, or a cell in `locked` ((stack, env) pairs another pull
-    request holds, or the auto form's overlap cells), is not fully applying, so it stops its
-    `needs` successors like a stopped env, and each new skip can make more cells wait. A locked
-    cell never runs; the env's ready cells still do: it joins `unavailable`, never `skipped`.
-    `unavailable` only grows over a finite set, so the loop ends."""
+    request holds, or the auto form's overlap and attempted cells), is not fully applying, so it
+    stops its `needs` successors like a stopped env, and each new skip can make more cells wait.
+    A locked cell never runs; the env's ready cells still do: it joins `unavailable`, never
+    `skipped`. `unavailable` only grows over a finite set, so the loop ends."""
     envs = {c["environment"] for c in pending} - stopped
     present = {(c["stack"], c["environment"]) for c in pending}
     lock_envs = {e for _, e in locked}

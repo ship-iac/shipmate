@@ -2386,7 +2386,13 @@ bare or targeted `shipmate apply` also applies it. Look in this order:
    unless a newer run that took over the decision authorizes, which decides
    itself unless its `defer` job later skips, is cancelled or fails (no reply then,
    `CONTRACT.md` §`apply_mode: auto`); an empty listing replies ``auto apply not started: no autoplan run of
-   <head> is listed yet; comment `shipmate apply` ``. A failed `defer-auto`
+   <head> is listed yet; comment `shipmate apply` ``. `defer-auto` is skipped
+   when this run's plan published that no `auto` apply follows (its
+   `plan / summary` step `No auto apply follows` succeeded). A read that fails
+   in its decision, or a failed `python-yaml` step, replies ``auto apply not
+   started: what decides it for this ready-for-review run could not be read;
+   comment `shipmate apply` `` when the plan published `Auto apply follows`, and
+   only warns when it published neither. A failed `defer-auto`
    leaves that run green. A listing that lags this run replies with the
    mismatch in `defer-auto`; only the push run's `summary` path dispatches on
    a lagging listing, warning `autoplan run <id> of <head> is not listed yet;
@@ -2702,7 +2708,9 @@ push.`` Its verdict counts them as
 pending cells' stacks` when the run has no cell result rows at all.
 A cell another pull request also locks counts under `N locked` instead, and a
 run with no cell result rows that holds a locked cell reads `⚪ nothing applied,
-pending cells are locked or the base also changed their stacks`.
+pending cells are locked or the base also changed their stacks`. Beside a cell
+an earlier apply run did not apply, it reads `⚪ nothing applied, pending cells
+are held; the lines below say why`.
 
 The merge of the base into the branch changes those stacks, directly or
 through a module they source, or removes files they own, or a cell's apply check
@@ -2721,6 +2729,28 @@ Update the branch from the base and push: the push re-plans on the new tree, and
 its autoplan dispatches again. Commenting `shipmate apply` instead refuses over
 the same cells (§`apply refused: <n> cell(s) behind <base>`).
 
+### `⚪ held, an earlier apply run did not apply these cells`
+
+The `auto` apply result comment carries ``⚪ held, an earlier apply run did not
+apply these cells: <cells>. Comment `shipmate apply` to retry.`` Its verdict
+counts them as `N held (not applied earlier)`, or, when the run has no cell
+result rows, reads `⚪ nothing applied, an earlier apply run did not apply the
+pending cells`, or `⚪ nothing applied, pending cells are held; the lines below
+say why` beside a locked or overlap cell.
+
+An earlier apply run of the same plan attempted each cell and did not apply it:
+it left the cell's apply check titled `Failed: <error>`, `Cancelled`, `Not run`
+or `Not applied (<conclusion>)`, GitHub marked the check `stale` after 14 days,
+or the run that set it `in_progress` ended without applying it. A later `auto`
+run of the same plan, such as the second one a ready click can start, never
+retries such a cell. The held cells stay pending, a cell that runs after one
+waits with the remedy ``an earlier apply run did not apply it; comment
+`shipmate apply` to retry``, and the environments ordered after their
+environment by `needs` are skipped (next entry). The rest applied.
+
+Read the earlier run's result comment for why each cell did not apply, fix the
+cause, then comment `shipmate apply`: a bare or targeted apply retries the cell.
+
 ### A bare or `auto` apply skipped an environment, or left one pending
 
 The result comment of a bare `shipmate apply` or an `auto` apply carries one of:
@@ -2738,7 +2768,8 @@ The result comment of a bare `shipmate apply` or an `auto` apply carries one of:
   approved` for a held one, `` it is held until the pull request is approved,
   then comment `shipmate apply <pred>` `` for one both held and `targeted`, `a
   cell of it does not apply this run; see its line
-  below` for one holding a locked, overlap (`auto` only) or waiting cell, and
+  below` for one holding a locked or waiting cell, or an overlap or attempted
+  cell (`auto` only), and
   `` comment `shipmate apply`, which applies them in order `` for an environment
   an `auto` run leaves for a bare apply. The run log's apply-all-detect notice lists these
   environments as `skipped_after_targeted`.
@@ -3165,13 +3196,15 @@ or `shipmate · auto` (`CONTRACT.md` §Check names) to see the others.
 ### A ready-for-review run planned nothing
 
 The plan run started by marking the pull request ready for review shows
-`plan / facts` and `plan / defer` green and every other plan job skipped. The `plan / defer`
-notice reads "plan run <id> planned and published <sha>; this ready-for-review
-run plans nothing": the push run of that head was planning when the pull
-request was marked ready, and its plan comment, apply checks and
-`shipmate / gate` stand. That push run usually started no auto apply, so
-comment `shipmate apply` for an environment that applies automatically; its
-`summary` log says whether it dispatched one. To plan the
+`plan / facts` and `plan / defer` green, `plan / defer-auto` run unless an
+`auto` apply does not follow, and every other plan job skipped. The `plan / defer`
+notice reads "plan run <id> planned and published <sha> (auto apply follows:
+<state>); this ready-for-review run plans nothing": the push run of that head
+was planning when the pull request was marked ready, and its plan comment,
+apply checks and `shipmate / gate` stand. `<state>` is `yes`, `no` or
+`unread` (`CONTRACT.md` §Post-plan topology, `defer`); unless it is `no`,
+`plan / defer-auto` decides the `auto` apply of that plan (§An
+`apply_mode: auto` environment did not apply after its autoplan). To plan the
 head again, comment `shipmate plan`. A re-run of the ready-for-review run defers
 again, and the earlier plan stays; a push plans the new head.
 

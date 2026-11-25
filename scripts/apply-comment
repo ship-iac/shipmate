@@ -1013,7 +1013,7 @@ def build_comment(
     fence. An `auto_dispatched` run puts `_auto_line(pusher)` directly under the verdict,
     above any fence. `held_cells` is detect's: the verdict counts each cause, a cell under both once
     under `locked`, the footer lines name each locked cell's holder, and a footer line names
-    the auto form's overlap cells. `skipped_after`
+    the auto form's overlap cells and another its attempted cells. `skipped_after`
     and `bare` are detect's: the skipped lines name each predecessor, and a line names each
     environment left for a bare apply. A run that applied nothing and left a `bare`, `targeted`
     or skipped environment is never 🟢. A `report_unread` run (`read_report`) is never 🟢: its
