@@ -549,7 +549,7 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
     out.touch()  # The runner creates GITHUB_OUTPUT before the step runs.
     _stub_apply(monkeypatch, deps, [_apply_check(s, cells=9) for s in stacks])
 
-    with pytest.raises(SystemExit, match="dependency levels"):
+    with pytest.raises(SystemExit, match="spans 9 populated dependency levels"):
         ad.main()
 
     assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")

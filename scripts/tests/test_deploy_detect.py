@@ -886,7 +886,7 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
     Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
     """
     stacks = [f"stacks/s{i}" for i in range(dd.ad.wv.MAX_WAVES + 1)]
-    with pytest.raises(SystemExit, match="dependency levels"):
+    with pytest.raises(SystemExit, match="spans 9 populated dependency levels"):
         _run_main(
             tmp_path,
             monkeypatch,

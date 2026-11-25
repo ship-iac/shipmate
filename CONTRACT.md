@@ -3816,6 +3816,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   it reads the run-graph, before any other ordering check and before any cell
   runs, and the deploy's refusal also lists the merge's pending cells. The read
   covers the whole tree, so a cycle anywhere refuses every pull request's plan.
+- The waves of an env-level are its populated levels only, renumbered from
+  `wave0`: a level with no cell in the run takes no wave job, and the order
+  between levels is kept. An env-level holds at most eight populated levels,
+  one per pre-declared `wave0` … `wave7` job; more refuse at detect, before
+  any cell runs, with
+  `::error::change spans <n> populated dependency levels (> 8); split the PR.`,
+  where `<n>` counts the populated levels.
 - A cell `(stack, env)` runs after these cells of each stack its stack is
   `after`, directly or transitively. "The same environment" below is the
   environment of the cell each step walks from, not only the starting cell's:
