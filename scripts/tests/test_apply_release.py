@@ -139,8 +139,6 @@ def test_the_action_verifies_mints_then_flips():
     assert steps[1]["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-checks": "write",
         "permission-pull-requests": "${{ inputs.deploy != 'true' && 'read' || '' }}",
     }

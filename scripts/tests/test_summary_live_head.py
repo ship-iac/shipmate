@@ -104,8 +104,6 @@ def test_the_live_head_steps_are_wired_exactly():
     assert mint["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "write",
     }
     dispatch = step_by("summary", name=DISPATCH)

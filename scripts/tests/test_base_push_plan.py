@@ -512,8 +512,6 @@ def test_the_mint_is_display_only_with_its_permissions_whole():
     assert mint["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "write",
         "permission-pull-requests": "read",
         "permission-checks": "read",

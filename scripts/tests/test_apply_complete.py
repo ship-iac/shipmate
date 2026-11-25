@@ -1235,8 +1235,6 @@ def test_the_write_token_can_read_the_pull_request_and_nothing_more():
     assert _step("Mint App installation token")["with"] == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-checks": "write",
         "permission-pull-requests": "read",
     }

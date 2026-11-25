@@ -59,8 +59,6 @@ def test_only_a_decided_run_mints_an_actions_write_token_and_re_runs():
         {
             "client-id": "${{ inputs.app-id }}",
             "private-key": "${{ inputs.private-key }}",
-            "owner": "${{ github.repository_owner }}",
-            "repositories": "${{ github.event.repository.name }}",
             "permission-actions": "write",
         },
     )

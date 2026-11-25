@@ -29,8 +29,6 @@ REVIEW_STEP = {
 MINT_WITH = {
     "client-id": "${{ inputs.app-id }}",
     "private-key": "${{ inputs.private-key }}",
-    "owner": "${{ github.repository_owner }}",
-    "repositories": "${{ github.event.repository.name }}",
     "permission-actions": "read",
     "permission-pull-requests": "write",
 }
@@ -49,7 +47,7 @@ def _steps(job):
 
 
 def test_the_action_mints_actions_read_and_pull_requests_write():
-    """Mutations: `permission-actions: write` -- red; drop `repositories:` -- red."""
+    """Mutations: `permission-actions: write` -- red; add `repositories:` -- red."""
     steps = action_yaml("apply-waiters")["runs"]["steps"]
     assert steps[1]["uses"].startswith("actions/create-github-app-token@")
     assert steps[1]["with"] == MINT_WITH

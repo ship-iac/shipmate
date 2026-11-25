@@ -594,8 +594,6 @@ def test_the_authorization_mint_requests_only_checks_read_on_this_repository():
     assert _mint_with("comment-ops", "apptoken") == {
         "client-id": "${{ inputs.app-id }}",
         "private-key": "${{ inputs.private-key }}",
-        "owner": "${{ github.repository_owner }}",
-        "repositories": "${{ github.event.repository.name }}",
         "permission-checks": "read",
     }
 

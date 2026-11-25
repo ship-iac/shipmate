@@ -234,8 +234,6 @@ _MINT = "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc4551
 _APP = {
     "client-id": "${{ inputs.app-id }}",
     "private-key": "${{ inputs.private-key }}",
-    "owner": "${{ github.repository_owner }}",
-    "repositories": "${{ github.event.repository.name }}",
 }
 
 
