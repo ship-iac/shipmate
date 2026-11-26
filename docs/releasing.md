@@ -298,8 +298,8 @@ the release commit, from `repo-example-stacks-aws`:
    `return_run_details`, which only decides whether the API answers with the
    started run's id. `<id>` is the id of any comment on pull request `<n>`,
    such as one you post for the smoke. Nothing claims it: the dispatch runs as
-   your login, not the shipmate App, so `apply.yml`'s `guard` refuses it at its
-   bot-actor check before `admit` starts, which is this dispatch's expected end
+   your login, not the shipmate App, so `apply.yml` skips `admit` and its `guard`
+   refuses it at its bot-actor check, which is this dispatch's expected end
    (below). Sending it is what checks that the scratch branch's `shipmate.yml`
    declares the input: a file without it answers HTTP 422.
 
@@ -326,9 +326,9 @@ parses the engine reusable workflow at the new SHA, because that happens when th
 run graph is built.
 
 It cannot reach a composite action's manifest. The job holding the engine's `$/`
-action refs never starts: `detect` runs only behind `guard`, and `guard`
-rejects any actor not ending in `[bot]` — correctly, since a direct human
-dispatch is what it exists to refuse. A skipped job sets nothing up, so nothing
+action refs never starts: `detect` runs only behind an admitted dispatch, and `admit`
+is skipped for any actor not ending in `[bot]` — correctly, since a direct human
+dispatch is what `guard` exists to refuse. A skipped job sets nothing up, so nothing
 fetches or parses its actions. `v0.16.0`'s unparseable `apply-detect/action.yml`
 survives this exercise. Catching that class is engine CI's job, not a sample's:
 `## Manifest load` above does it on every push to `main`, one commit before a

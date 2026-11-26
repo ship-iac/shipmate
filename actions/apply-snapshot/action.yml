@@ -54,7 +54,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl"
 
     # An authenticated preflight whose token no step uses: a present but revoked or wrong key
-    # fails snapshot here, before any wave applies.
+    # fails the calling job here, before any check is flipped or written.
     - name: Mint App installation token
       id: token
       uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0

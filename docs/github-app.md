@@ -282,7 +282,8 @@ as above, and step 5 runs in every consumer repository.
 - The App mints a fresh installation token per job and authors every
   `apply / <env> / <stack>` check (create pending, completed after the wave
   that applied its cell, or in the final `complete` job when that wave was
-  cancelled), the
+  cancelled, or in `apply-run.yml`'s `unflip` job when the first level never
+  started), the
   `shipmate / apply run` check that shows an apply run is running, the
   aggregate `shipmate / gate` commit status, the plan comment (a new one per
   plan), the `shipmate doctor` report, the apply result comments, the outcome

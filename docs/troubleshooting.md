@@ -477,7 +477,7 @@ gate greening over an unapplied stack.
 
 **A retry is not a re-plan, and the pending check makes the retry look
 available.** A failed apply leaves its `apply / <env> / <stack>` check *pending*
-rather than failed, so `snapshot` accepts a fresh `shipmate apply <env>` for that
+rather than failed, so the next apply's check snapshot accepts a fresh `shipmate apply <env>` for that
 cell — the right recovery when nothing moved (a credentials failure, a rate limit,
 a cancelled run). If the apply partially succeeded, the state serial advanced
 and the stored plan no longer matches it, so that retry is refused here instead.
@@ -497,7 +497,7 @@ error normally means the state moved rather than that the wrong plan was chosen.
 The dispatched apply workflow refuses in its `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply refused: the
 dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request
-instead of running a direct workflow_dispatch` — its `review` job refuses a
+instead of running a direct workflow_dispatch` — its `review` and `detect` jobs each refuse a
 `ref` that is not the open pull request's current head, and
 comment-ops reads the plan run each `apply / <env> / <stack>` check on the pull
 request's current head records, refusing the command when that head names none.
@@ -695,10 +695,12 @@ stack.
 
 ### `this apply would bind GitHub Environment(s) that do not exist`
 
-The apply run stopped in its `snapshot` job, before any wave, and the error names
+The apply run stopped in its pre-flight, before any wave: `lock` for an apply
+run's first populated env-level, `snapshot` for a later level or a merge
+deploy. The error names
 every environment the applies would have bound that the repository does not have.
 
-Why `snapshot` refuses instead of warning: GitHub creates a missing environment
+Why the pre-flight refuses instead of warning: GitHub creates a missing environment
 on demand, with no reviewers, no wait timer and no deployment branch policy, and
 the apply then runs inside it. An existing environment with no branch policy is
 open the same way: a workflow on any branch can bind it. Nothing else catches
@@ -2051,8 +2053,8 @@ Which review decision refuses a targeted apply, and which environments a bare
 apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
 §Comment-ops (the `review: false` rules).
 
-**The apply failed with `could not determine the PR's review decision`.** The
-decision did not reach `detect`, or is a value the engine does not know. Every
+**The apply failed with `could not determine the PR's review decision`.**
+GitHub returned a review decision the engine does not know. Every
 apply form fails before it reads a check and applies nothing. Check the pinned
 engine version, then comment the same `shipmate apply` command again; for an
 `auto` apply, push again or comment `shipmate apply`.
@@ -2516,7 +2518,7 @@ drift sweep reports that state.
 
 ### `apply refused: pr_number is not a pull request number (1 to 10 digits, no leading zero)`
 
-The `guard` job of `apply.yml` refused the dispatch before the run joined any
+`apply.yml` skipped `admit`, and its `guard` job refused the dispatch before the run joined any
 apply queue, and nothing applied. The dispatch's `pr_number` is not 1 to 10
 digits without a leading zero. shipmate's comment-ops and autoplan never send
 such a number, and a hand-made dispatch is refused earlier by the bot-actor
@@ -2526,7 +2528,7 @@ App. Find that workflow or App and stop it dispatching `shipmate.yml`; comment
 
 ### `apply refused: this run was dispatched with verb 'auto', but the calling job does not pass 'auto: true'`
 
-The `guard` job of `apply.yml` refused the autoplan's dispatch because the
+`apply.yml` skipped `admit`, and its `guard` job refused the autoplan's dispatch because the
 `auto` job in `shipmate.yml` does not pass `auto: true`. Without it the run
 would be a bare apply with none of the `auto` checks. Nothing applied. Give the
 `auto` job the published `with:` block (`auto: true`, `ref`, `pr_number`,
@@ -3133,7 +3135,7 @@ plan artifacts; of a run that lost the claim it does nothing.
 
 Open the Actions tab and filter the runs whose title starts `shipmate · <verb>`
 (`CONTRACT.md` §Check names). A failed
-`guard` names its refusal in an `apply refused:` annotation; a failed `claim`, `admit`,
+`guard`, or an `admit` whose check step refused, names its refusal in an `apply refused:` annotation; a failed `claim`, `admit`,
 `facts` or `review` names it in its job log. A startup failure shows on the run
 page with no jobs started, with GitHub's error for the workflow file.
 

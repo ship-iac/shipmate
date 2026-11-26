@@ -29,7 +29,8 @@ Pinned on the unlock side:
 - `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
   unlock into a missing environment would retire the reviewer gate for every later apply of
-  that env. The apply path gets this refusal from apply-env-level's `snapshot` job.
+  that env. The apply path gets this refusal from apply-run's `lock` job for the first populated
+  env-level and from apply-env-level's `snapshot` job for the others.
 - `detect`'s and `unlock`'s `permissions`, whole, keyed by job id. The consumer's `unlock` job
   grants `pull-requests: write`, and these blocks keep it from reaching `unlock`, which runs the
   pull request's HCL.

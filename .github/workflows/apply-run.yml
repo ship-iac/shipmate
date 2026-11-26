@@ -35,7 +35,7 @@ on:
       run_cancelled:
         value: ${{ jobs.review.result == 'cancelled' || jobs.detect.result == 'cancelled' || jobs.lock.result == 'cancelled' || jobs.envlevel0.result == 'cancelled' || jobs.envlevel1.result == 'cancelled' || jobs.envlevel2.result == 'cancelled' || jobs.envlevel3.result == 'cancelled' }}
 # One apply run per pull request at a time; a later one waits rather than cancels. `apply.yml`'s
-# `guard` refuses a `pr_number` that is not canonical before it keys this group, and its
+# `admit` refuses a `pr_number` that is not canonical before it keys this group, and its
 # `outcome` stays outside the group so it still answers a run cancelled while it waits here.
 concurrency:
   group: shipmate-apply-${{ inputs.pr_number }}
