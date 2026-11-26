@@ -2293,8 +2293,9 @@ apply comment and leaves the gate as it was. It posts a `🔴` reply on the pull
 request instead, which links the run: `its review check stopped the apply run
 before any cell applied` for a refusal, `the apply run was cancelled before it
 posted a result` for a cancel. A run cancelled while it waited in the pull
-request's apply queue, or in `review` before its claim was recorded, posts
-nothing at all; comment `shipmate apply` again (`CONTRACT.md` §Outcome reply).
+request's apply queue, or in `review` before its claim was recorded, posts no
+reply of its own after the cancel; its `queue` job may already have posted a
+waits reply. Comment `shipmate apply` again (`CONTRACT.md` §Outcome reply).
 
 An apply run whose `summary` job was cancelled before it posted, for example
 at a full gate-writer queue for the head, also posts no apply comment. It
@@ -3169,8 +3170,10 @@ approval: approve or reject it there, or cancel it from its run page, to let
 this run start (`CONTRACT.md` §Comment-ops, "One apply run per pull request").
 A run that will not own its command, such as a second run of the same comment,
 can get this reply before it reads the claim taken; it then applies nothing and
-writes nothing more on the pull request, and ends red when its `detect` refuses,
-for example after a "Re-run all jobs" once the pull request merged.
+posts no result or outcome reply, and ends red when its `detect` refuses, for
+example after a "Re-run all jobs" once the pull request merged. Its `queue` job
+can still cancel stale runs and post a waits reply, and while it holds the queue
+its `waiters` job can tell the runs waiting behind it.
 
 ### `waits for the apply run of this pull request to finish`
 
@@ -3181,8 +3184,9 @@ it can arrive after the command's own run has started waiting. The remedy is the
 one above: the waiting run starts once the holding run ends, and an
 `<env>-apply` approval the holding run waits on is approved, rejected or
 cancelled from that run's page. A waiting run that will not own its command
-gets this reply too; once it starts it applies nothing, and it ends red when its
-`detect` refuses.
+gets this reply too; once it starts it applies nothing and posts no result or
+outcome reply, though its own `waiters` job can tell the runs waiting behind it,
+and it ends red when its `detect` refuses.
 
 ### `may wait for an apply run of this pull request that shipmate did not dispatch`
 

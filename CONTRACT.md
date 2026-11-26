@@ -1622,8 +1622,8 @@ run, "Re-run failed jobs" keeps a finished claim's result: an owned run stays
 owned and a taken one stays taken. For an apply run, it keeps a successful
 `review` and its claim's result, so any cell job it re-runs refuses as a run
 attempt above 1. It re-runs a failed `review` whole: after a claim that reacted,
-the claim reads 200, so the run applies nothing, posts no reply, and the comment
-shows only its 🚀. "Re-run all
+the claim reads taken (200), so the attempt applies nothing, ends without a
+reply, and the comment shows only its 🚀; comment `shipmate apply` again. "Re-run all
 jobs" posts again and reads 200, and GitHub deletes the earlier attempts'
 artifacts. For a plan run, the claim then reads each earlier
 attempt's jobs: when `facts` ran in one (`success`, `failure` or `timed_out`),
@@ -2056,8 +2056,10 @@ before the number keys the group, so two spellings of one pull request cannot
 reach two groups. Every dispatch that passes `run`'s condition takes a place in
 the group, whether or not it will own its comment: a second run of a comment,
 or a `[bot]` dispatch the claim refuses, waits its turn, then holds the group
-while `detect` runs, read-only, and ends having applied and written nothing on
-the pull request. Its `detect` still refuses as any run's does, so such a run can
+while `detect` runs, read-only, and ends having applied nothing. It posts no
+result or outcome reply, but its `queue` job can still cancel stale runs and post
+a waits reply, and while it holds the group its `waiters` job can tell the runs
+waiting behind it. Its `detect` still refuses as any run's does, so such a run can
 end red, for example when "Re-run all jobs" re-runs it after the pull request merged. No bound on that hold is claimed: it covers `detect`'s runner
 pickup, checkout, setup and wait for plan runs, and a lost `detect` runner holds
 it until GitHub ends the job. A run cancelled while it waits never reached its
@@ -2123,8 +2125,9 @@ of its cell's concurrency group, a job timeout, or a `summary` at a full gate-wr
 (§Outcome reply says which text each selects). A run cancelled while
 it waits in the queue, by hand, at a full queue or as a stale run, runs
 no job of `apply-run.yml`: its apply checks and `shipmate / gate` stay as they
-were, and nothing is posted; the command comment shows 👀 alone. Comment the
-command again.
+were, and it posts no reply of its own after the cancel; its `queue` job may
+already have posted a waits reply. The command comment shows 👀 alone. Comment
+the command again.
 
 `apply.yml`'s `queue` job cancels this pull request's stale apply runs and says which run this one
 waits behind. It runs beside `run`, outside the group, binds
@@ -2173,11 +2176,12 @@ built from run ids; an `auto` run posts none:
   It names the trusted run holding the group (an unfinished job of its `run`
   call and a `review` that is not `pending`), else the oldest kept trusted run
   older than this one with an unfinished job of its call, else nothing. A run
-  left only in `outcome` is not named. It names one only while this run's own
-  call waits for the group: `queue` reads its own run's jobs, again up to three
-  times 3 seconds apart while the call's `review` is not listed, and names no
-  run when that listing is incomplete, never lists the `review`, or lists it
-  not `pending` because this run already holds the group or its call ended.
+  left only in `outcome` is not named. It is left out only when this run's own
+  call's `review` is listed running or done, because this run already holds the
+  group or its call ended: `queue` reads its own run's jobs, again up to three
+  times 3 seconds apart while that listing is incomplete or shows the `review`
+  neither `pending`, running nor done. When the listings cannot tell, it names
+  the run as above and the `queue` job warns.
 - ``[the apply run](<url>) may wait for [an apply run](<url>) of this pull request that shipmate did not dispatch.``
   It names the untrusted run with the lowest run id.
 - ``[the apply run](<url>) cancelled [an apply run](<url>) of this pull request waiting at an older head (<short sha>).``
@@ -2217,8 +2221,9 @@ call fails `waiters`.
 A cancelled stale run writes, by where it waited:
 
 - In the group, before its call started (a): no job of `apply-run.yml` ran, so its
-  apply checks and `shipmate / gate` stay as they were, and nothing is posted:
-  it never claimed its comment.
+  apply checks and `shipmate / gate` stay as they were, and it posts no reply of
+  its own after the cancel: it never claimed its comment. Its `queue` job may
+  already have posted a waits reply.
 - On an `<env>-apply` environment's approval (b): the waiting wave ends `cancelled`,
   so its `waveN-complete`, which runs on `success` or `failure` only and never for
   the level's last populated wave, is skipped,
