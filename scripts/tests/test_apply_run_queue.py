@@ -69,15 +69,16 @@ APPLY_RUN_IGNORES = [
     r'property "result" is not defined in object type \{outputs: ',
     'unexpected key "cache-mode" for "job" section',
 ]
-#: actionlint 1.7.12's message for `jobs.review.result` in a `workflow_call` output, and for a
-#: misspelt property in the same place, copied from runs of the release binary.
+#: Copied from the actionlint 1.7.12 release binary, `-no-color -oneline`, empty config, piped:
+#: its message for `jobs.review.result` in a `workflow_call` output, and for that property
+#: misspelt `reslt` in a scratch copy of `apply-run.yml`.
 ACTIONLINT_RESULT_MESSAGE = (
-    'property "result" is not defined in object type {outputs: {decision: string; '
-    "unbound: string}} [expression]"
+    'property "result" is not defined in object type {outputs: {admitted: string; '
+    "decision: string; unbound: string}} [expression]"
 )
 ACTIONLINT_TYPO_MESSAGE = (
-    'property "reslt" is not defined in object type {outputs: {decision: string; '
-    "unbound: string}} [expression]"
+    'property "reslt" is not defined in object type {outputs: {admitted: string; '
+    "decision: string; unbound: string}} [expression]"
 )
 
 
@@ -87,8 +88,8 @@ def test_apply_run_queues_one_run_per_pull_request():
 
 
 def test_no_apply_yml_job_sits_in_a_concurrency_group():
-    """`guard` must refuse, `queue` cancel stale runs and `outcome` answer while a run waits in
-    the queue, so none joins a group; a group on `run` would queue the call a second time.
+    """`guard` must refuse and `queue` cancel stale runs while a run waits in the queue, so
+    neither joins a group; a group on `run` would queue the call a second time.
 
     Mutation: give `run` the group `shipmate-apply-${{ inputs.pr_number }}` -- red."""
     grouped = {j for j, job in workflow_jobs("apply.yml").items() if "concurrency" in job}
